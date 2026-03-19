@@ -34,7 +34,7 @@ impl<'ctx> Compiler<'ctx> {
                     false,
                 )
                 .into(),
-            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) => {
+            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
             Type::Param(_) => self.ctx.i64_type().into(),

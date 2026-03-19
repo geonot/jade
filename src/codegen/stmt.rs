@@ -105,6 +105,15 @@ impl<'ctx> Compiler<'ctx> {
                 if self.hints.elide_drops.contains(def_id) {
                     return Ok(None);
                 }
+                // Perceus reuse: if this variable is a reuse candidate,
+                // skip the free — the allocation will be reused in-place.
+                if self.hints.reuse_candidates.contains_key(def_id) {
+                    return Ok(None);
+                }
+                // Perceus borrow→move: promoted borrows don't need drops.
+                if self.hints.borrow_to_move.contains(def_id) {
+                    return Ok(None);
+                }
                 match ty {
                     Type::Struct(_) | Type::Enum(_) | Type::String | Type::Array(_, _) => {
                         if let Some((ptr, _)) = self.find_var(name).cloned() {
@@ -120,6 +129,16 @@ impl<'ctx> Compiler<'ctx> {
                                 "rc.ptr"
                             ));
                             self.rc_release(loaded, inner)?;
+                        }
+                    }
+                    Type::Weak(inner) => {
+                        if let Some((ptr, _)) = self.find_var(name).cloned() {
+                            let loaded = b!(self.bld.build_load(
+                                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                                ptr,
+                                "weak.ptr"
+                            ));
+                            self.weak_release(loaded, inner)?;
                         }
                     }
                     _ => {}
@@ -537,10 +556,23 @@ impl<'ctx> Compiler<'ctx> {
         if has_wild {
             return Ok(());
         }
+
+        // For enum types: check all variants are covered
         let enum_name = match subject_ty {
             Type::Enum(n) | Type::Struct(n) if self.enums.contains_key(n) => n,
+            // For integer matches without wildcard: warn about non-exhaustive
+            _ if !m.arms.is_empty() => {
+                use crate::diagnostic::{Diagnostic, ErrorCode};
+                let diag = Diagnostic::warning("match on non-enum type without wildcard pattern")
+                    .with_code(ErrorCode::E500)
+                    .at(m.span)
+                    .suggestion("add a wildcard arm: _ ? ...");
+                eprintln!("{}", diag.render("input", &self.source));
+                return Ok(());
+            }
             _ => return Ok(()),
         };
+
         let variants = &self.enums[enum_name];
         let covered: Vec<&str> = m
             .arms
@@ -556,11 +588,46 @@ impl<'ctx> Compiler<'ctx> {
             .map(|(n, _)| n.as_str())
             .collect();
         if !missing.is_empty() {
-            return Err(format!(
-                "non-exhaustive match on {enum_name}: missing {}",
-                missing.join(", ")
+            use crate::diagnostic::{Diagnostic, ErrorCode};
+            let missing_str = missing.join(", ");
+            let diag = Diagnostic::error(format!(
+                "non-exhaustive match on `{enum_name}`: missing {missing_str}"
+            ))
+            .with_code(ErrorCode::E500)
+            .at(m.span)
+            .note(format!(
+                "{enum_name} has {} variants, {} covered in match",
+                variants.len(),
+                covered.len()
+            ))
+            .suggestion(format!(
+                "add arms for: {}",
+                missing
+                    .iter()
+                    .map(|v| format!("{v} ? ..."))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
+            return Err(diag.render("input", &self.source));
         }
+
+        // Check for duplicate/unreachable patterns
+        let mut seen: Vec<&str> = Vec::new();
+        for arm in &m.arms {
+            if let hir::Pat::Ctor(n, _, _, _) = &arm.pat {
+                if seen.contains(&n.as_str()) {
+                    use crate::diagnostic::{Diagnostic, ErrorCode};
+                    let diag = Diagnostic::warning(format!(
+                        "unreachable pattern: `{n}` already matched above"
+                    ))
+                    .with_code(ErrorCode::E501)
+                    .at(arm.span);
+                    eprintln!("{}", diag.render("input", &self.source));
+                }
+                seen.push(n.as_str());
+            }
+        }
+
         Ok(())
     }
 

@@ -128,12 +128,20 @@ impl<'ctx> Compiler<'ctx> {
         fv: FunctionValue<'ctx>,
     ) -> Result<Vec<BasicMetadataValueEnum<'ctx>>, String> {
         let ptypes = fv.get_type().get_param_types();
+        let st = self.string_type();
         args.iter()
             .enumerate()
             .map(|(i, e)| {
                 let v = self.compile_expr(e)?;
                 let v = if let Some(pt) = ptypes.get(i) {
-                    self.coerce_val(v, (*pt).try_into().unwrap_or(v.get_type()))
+                    let target: inkwell::types::BasicTypeEnum =
+                        (*pt).try_into().unwrap_or(v.get_type());
+                    if v.get_type() == st.into() && target.is_pointer_type() {
+                        // String → ptr coercion for extern C calls
+                        self.string_data(v)?
+                    } else {
+                        self.coerce_val(v, target)
+                    }
                 } else {
                     v
                 };

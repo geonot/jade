@@ -555,7 +555,15 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_struct_type(name)
             .ok_or_else(|| format!("no LLVM struct: {name}"))?;
-        let ptr = self.entry_alloca(st.into(), name);
+        let align = self
+            .struct_layouts
+            .get(name)
+            .and_then(|l| l.align);
+        let ptr = if let Some(a) = align {
+            self.entry_alloca_aligned(st.into(), name, a)
+        } else {
+            self.entry_alloca(st.into(), name)
+        };
         for (i, (fname, fty)) in fields.iter().enumerate() {
             let val = inits
                 .iter()
@@ -742,14 +750,42 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn compile_str_literal(&mut self, s: &str) -> Result<BasicValueEnum<'ctx>, String> {
-        let gstr = b!(self.bld.build_global_string_ptr(s, "str"));
-        let i64t = self.ctx.i64_type();
-        self.build_string(
-            gstr.as_pointer_value(),
-            i64t.const_int(s.len() as u64, false),
-            i64t.const_int(0, false),
-            "slit",
-        )
+        if s.len() <= 23 {
+            // SSO: store bytes inline in the 24-byte struct
+            let st = self.string_type();
+            let i8t = self.ctx.i8_type();
+            let i64t = self.ctx.i64_type();
+            let out = self.entry_alloca(st.into(), "slit");
+            b!(self.bld.build_store(out, st.const_zero()));
+            for (i, byte) in s.bytes().enumerate() {
+                let bp = unsafe {
+                    b!(self
+                        .bld
+                        .build_gep(i8t, out, &[i64t.const_int(i as u64, false)], "sso.b"))
+                };
+                b!(self
+                    .bld
+                    .build_store(bp, i8t.const_int(byte as u64, false)));
+            }
+            let tag_ptr = unsafe {
+                b!(self
+                    .bld
+                    .build_gep(i8t, out, &[i64t.const_int(23, false)], "sso.tag"))
+            };
+            b!(self
+                .bld
+                .build_store(tag_ptr, i8t.const_int(0x80 | s.len() as u64, false)));
+            Ok(b!(self.bld.build_load(st, out, "slit")))
+        } else {
+            let gstr = b!(self.bld.build_global_string_ptr(s, "str"));
+            let i64t = self.ctx.i64_type();
+            self.build_string(
+                gstr.as_pointer_value(),
+                i64t.const_int(s.len() as u64, false),
+                i64t.const_int(0, false),
+                "slit",
+            )
+        }
     }
 
     fn compile_ref(&mut self, inner: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
@@ -767,6 +803,9 @@ impl<'ctx> Compiler<'ctx> {
         if let Type::Rc(ref elem_ty) = inner.ty {
             let rv = self.compile_expr(inner)?;
             return self.rc_deref(rv, elem_ty);
+        }
+        if let Type::Weak(_) = inner.ty {
+            return Err("cannot deref a weak reference directly — use weak_upgrade() first".into());
         }
         let ptr_val = self.compile_expr(inner)?;
         Ok(b!(self.bld.build_load(

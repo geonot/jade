@@ -14,6 +14,7 @@ pub enum Ownership {
     Borrowed,
     BorrowMut,
     Rc,
+    Weak,
     Raw,
 }
 
@@ -30,6 +31,7 @@ impl std::fmt::Display for Ownership {
             Ownership::Borrowed => f.write_str("&"),
             Ownership::BorrowMut => f.write_str("&mut"),
             Ownership::Rc => f.write_str("rc"),
+            Ownership::Weak => f.write_str("weak"),
             Ownership::Raw => f.write_str("*raw"),
         }
     }
@@ -70,6 +72,7 @@ pub struct TypeDef {
     pub name: String,
     pub fields: Vec<Field>,
     pub methods: Vec<Fn>,
+    pub layout: crate::ast::LayoutAttrs,
     pub span: Span,
 }
 
@@ -220,6 +223,23 @@ pub enum BuiltinFn {
     RcAlloc,
     RcRetain,
     RcRelease,
+    WeakAlloc,
+    WeakUpgrade,
+    WeakDowngrade,
+    VolatileLoad,
+    VolatileStore,
+    WrappingAdd,
+    WrappingSub,
+    WrappingMul,
+    SaturatingAdd,
+    SaturatingSub,
+    SaturatingMul,
+    CheckedAdd,
+    CheckedSub,
+    CheckedMul,
+    SignalHandle,
+    SignalRaise,
+    SignalIgnore,
     Popcount,
     Clz,
     Ctz,

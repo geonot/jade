@@ -1,3 +1,17 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverflowMode {
+    Trap,       // default: UB on overflow (nsw/nuw)
+    Wrapping,   // two's complement wrap
+    Saturating, // clamp to min/max
+    Checked,    // returns Option (None on overflow)
+}
+
+impl Default for OverflowMode {
+    fn default() -> Self {
+        Self::Trap
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     I8,
@@ -21,6 +35,7 @@ pub enum Type {
     Param(String),
     Ptr(Box<Type>),
     Rc(Box<Type>),
+    Weak(Box<Type>),
     Inferred,
 }
 
@@ -58,6 +73,14 @@ impl Type {
         }
     }
 
+    pub fn is_rc(&self) -> bool {
+        matches!(self, Self::Rc(_))
+    }
+
+    pub fn is_weak(&self) -> bool {
+        matches!(self, Self::Weak(_))
+    }
+
     pub fn is_trivially_droppable(&self) -> bool {
         match self {
             Self::I8
@@ -83,6 +106,7 @@ impl Type {
     pub fn default_ownership(&self) -> crate::hir::Ownership {
         match self {
             Self::Rc(_) => crate::hir::Ownership::Rc,
+            Self::Weak(_) => crate::hir::Ownership::Weak,
             Self::Ptr(_) => crate::hir::Ownership::Raw,
             _ => crate::hir::Ownership::Owned,
         }
@@ -121,6 +145,7 @@ impl std::fmt::Display for Type {
             Self::Param(n) => f.write_str(n),
             Self::Ptr(inner) => write!(f, "&{inner}"),
             Self::Rc(inner) => write!(f, "rc {inner}"),
+            Self::Weak(inner) => write!(f, "weak {inner}"),
             Self::Fn(ps, r) => {
                 f.write_str("(")?;
                 for (i, p) in ps.iter().enumerate() {

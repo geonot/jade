@@ -1,9 +1,9 @@
-*apply(f: (i64) -> i64, x: i64) -> i64
+*apply(f: (i64) -> i64, x: i64)
     f(x)
 
-*main() -> i32
+*main()
     base is 100
-    adder is *fn(x: i64) -> i64 base + x
+    adder is *fn(x: i64) base + x
     total is 0
     i is 0
     while i < 10000000

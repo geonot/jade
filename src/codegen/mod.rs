@@ -18,10 +18,12 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{AddressSpace, OptimizationLevel};
 
 use inkwell::attributes::{Attribute, AttributeLoc};
+
+use inkwell::debug_info::{AsDIScope, DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
 
 use crate::hir;
 use crate::perceus::PerceusHints;
@@ -46,11 +48,18 @@ pub struct Compiler<'ctx> {
     pub(crate) vars: Vec<HashMap<String, (PointerValue<'ctx>, Type)>>,
     pub(crate) fns: HashMap<String, (FunctionValue<'ctx>, Vec<Type>, Type)>,
     pub(crate) structs: HashMap<String, Vec<(String, Type)>>,
+    pub(crate) struct_layouts: HashMap<String, crate::ast::LayoutAttrs>,
     pub(crate) enums: HashMap<String, Vec<(String, Vec<Type>)>>,
     pub(crate) variant_tags: HashMap<String, (String, u32)>,
     pub(crate) loop_stack: Vec<LoopCtx<'ctx>>,
     pub(crate) source: String,
     pub(crate) hints: PerceusHints,
+    pub(crate) lib_mode: bool,
+    pub(crate) debug: bool,
+    pub(crate) di_builder: Option<DebugInfoBuilder<'ctx>>,
+    pub(crate) di_compile_unit: Option<DICompileUnit<'ctx>>,
+    pub(crate) di_scope_stack: Vec<DIScope<'ctx>>,
+    pub(crate) filename: String,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
@@ -72,16 +81,51 @@ impl<'ctx> Compiler<'ctx> {
             vars: vec![HashMap::new()],
             fns: HashMap::new(),
             structs: HashMap::new(),
+            struct_layouts: HashMap::new(),
             enums: HashMap::new(),
             variant_tags: HashMap::new(),
             loop_stack: Vec::new(),
             source: String::new(),
             hints: PerceusHints::default(),
+            lib_mode: false,
+            debug: false,
+            di_builder: None,
+            di_compile_unit: None,
+            di_scope_stack: Vec::new(),
+            filename: name.to_string(),
         }
     }
 
     pub fn set_source(&mut self, src: &str) {
         self.source = src.to_string();
+    }
+
+    pub fn set_lib_mode(&mut self) {
+        self.lib_mode = true;
+    }
+
+    pub fn enable_debug(&mut self, filename: &str) {
+        self.debug = true;
+        self.filename = filename.to_string();
+        let (di_builder, di_cu) = self.module.create_debug_info_builder(
+            true, // allow_unresolved
+            DWARFSourceLanguage::C, // closest match for Jade's ABI
+            filename,
+            ".",
+            "jadec",
+            false, // is_optimized (set at emit time)
+            "",
+            0,
+            "",
+            DWARFEmissionKind::Full,
+            0,
+            false,
+            false,
+            "",
+            "",
+        );
+        self.di_builder = Some(di_builder);
+        self.di_compile_unit = Some(di_cu);
     }
 
     pub fn emit_ir(&self) -> String {
@@ -158,7 +202,75 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        self.finalize_debug();
         self.module.verify().map_err(|e| e.to_string())
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DWARF debug info
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+impl<'ctx> Compiler<'ctx> {
+    fn finalize_debug(&self) {
+        if let Some(ref di) = self.di_builder {
+            di.finalize();
+        }
+    }
+
+    /// Create a debug info subprogram for a function and set it.
+    pub(crate) fn create_debug_function(
+        &mut self,
+        fv: FunctionValue<'ctx>,
+        name: &str,
+        line: u32,
+    ) {
+        if !self.debug {
+            return;
+        }
+        let di = self.di_builder.as_ref().unwrap();
+        let cu = self.di_compile_unit.as_ref().unwrap();
+        let file = cu.get_file();
+        let di_type = di.create_subroutine_type(
+            file,
+            None, // return type
+            &[],  // parameter types
+            DIFlags::PUBLIC,
+        );
+        let subprogram = di.create_function(
+            file.as_debug_info_scope(),
+            name,
+            None,
+            file,
+            line,
+            di_type,
+            true,   // is_local_to_unit
+            true,   // is_definition
+            line,   // scope_line
+            DIFlags::PUBLIC,
+            false,  // is_optimized
+        );
+        fv.set_subprogram(subprogram);
+        self.di_scope_stack.push(subprogram.as_debug_info_scope());
+    }
+
+    /// Pop the debug scope (call at end of function compilation).
+    pub(crate) fn pop_debug_scope(&mut self) {
+        if self.debug {
+            self.di_scope_stack.pop();
+        }
+    }
+
+    /// Emit a debug location for the current instruction position.
+    pub(crate) fn set_debug_location(&self, line: u32, col: u32) {
+        if !self.debug {
+            return;
+        }
+        if let Some(scope) = self.di_scope_stack.last() {
+            let di = self.di_builder.as_ref().unwrap();
+            let loc = di.create_debug_location(self.ctx, line, col, *scope, None);
+            self.bld.set_current_debug_location(loc);
+        }
     }
 }
 
@@ -242,6 +354,20 @@ impl<'ctx> Compiler<'ctx> {
             None => tmp.position_at_end(entry),
         }
         tmp.build_alloca(ty, name).unwrap()
+    }
+
+    pub(crate) fn entry_alloca_aligned(
+        &self,
+        ty: BasicTypeEnum<'ctx>,
+        name: &str,
+        align: u32,
+    ) -> PointerValue<'ctx> {
+        let ptr = self.entry_alloca(ty, name);
+        ptr.as_instruction_value()
+            .unwrap()
+            .set_alignment(align)
+            .unwrap();
+        ptr
     }
 
     pub(crate) fn no_term(&self) -> bool {

@@ -23,10 +23,22 @@ struct Cli {
     output: PathBuf,
     #[arg(long)]
     emit_ir: bool,
+    /// Emit object file without linking
+    #[arg(long)]
+    emit_obj: bool,
     #[arg(long, default_value = "3")]
     opt: u8,
     #[arg(long)]
     lto: bool,
+    /// Compile as library (external linkage, no main required)
+    #[arg(long)]
+    lib: bool,
+    /// Extra object files or libraries to link with
+    #[arg(long)]
+    link: Vec<PathBuf>,
+    /// Emit DWARF debug info (-g)
+    #[arg(short = 'g', long)]
+    debug: bool,
 }
 
 fn die(msg: &str) -> ! {
@@ -142,6 +154,7 @@ fn main() {
                 jadec::ownership::DiagKind::MoveOfBorrowed => "error",
                 jadec::ownership::DiagKind::InvalidRcDeref => "error",
                 jadec::ownership::DiagKind::ReturnOfBorrowed => "error",
+                jadec::ownership::DiagKind::WeakUpgradeWithoutCheck => "warning",
                 jadec::ownership::DiagKind::Warning => "warning",
             },
             d.span.line,
@@ -157,6 +170,13 @@ fn main() {
         .unwrap_or_else(|| "main".into());
     let mut comp = Compiler::new(&ctx, &name);
     comp.set_source(&src);
+    if cli.lib {
+        comp.set_lib_mode();
+    }
+    if cli.debug {
+        let filename = cli.input.to_string_lossy().to_string();
+        comp.enable_debug(&filename);
+    }
     if let Err(e) = comp.compile_program(&hir_prog, hints) {
         die(&format!("codegen: {e}"));
     }
@@ -173,6 +193,19 @@ fn main() {
         3 => OptimizationLevel::Aggressive,
         _ => die("opt must be 0-3"),
     };
+
+    if cli.emit_obj {
+        let obj = if cli.output.extension().is_some() {
+            cli.output.clone()
+        } else {
+            cli.output.with_extension("o")
+        };
+        if let Err(e) = comp.emit_object(&obj, opt) {
+            die(&format!("emit: {e}"));
+        }
+        return;
+    }
+
     let obj = cli.output.with_extension("o");
     if let Err(e) = comp.emit_object(&obj, opt) {
         die(&format!("emit: {e}"));
@@ -180,8 +213,14 @@ fn main() {
 
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(&cli.output).arg("-lm");
+    for extra in &cli.link {
+        cc.arg(extra);
+    }
     if cli.lto {
         cc.arg("-flto");
+    }
+    if cli.debug {
+        cc.arg("-g");
     }
     let status = cc.status();
     let _ = fs::remove_file(&obj);

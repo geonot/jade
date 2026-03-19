@@ -190,12 +190,20 @@ pub struct Param {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct LayoutAttrs {
+    pub packed: bool,
+    pub strict: bool,
+    pub align: Option<u32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: String,
     pub type_params: Vec<String>,
     pub fields: Vec<Field>,
     pub methods: Vec<Fn>,
+    pub layout: LayoutAttrs,
     pub span: Span,
 }
 

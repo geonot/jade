@@ -44,7 +44,7 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             self.tag_fn(fv);
         }
-        if f.name != "main" {
+        if f.name != "main" && !self.lib_mode {
             fv.set_linkage(Linkage::Internal);
         }
         for (i, p) in f.params.iter().enumerate() {
@@ -154,8 +154,9 @@ impl<'ctx> Compiler<'ctx> {
             .collect();
         let ltys: Vec<BasicTypeEnum<'ctx>> = fields.iter().map(|(_, t)| self.llvm_ty(t)).collect();
         let st = self.ctx.opaque_struct_type(&td.name);
-        st.set_body(&ltys, false);
+        st.set_body(&ltys, td.layout.packed);
         self.structs.insert(td.name.clone(), fields);
+        self.struct_layouts.insert(td.name.clone(), td.layout.clone());
         Ok(())
     }
 
@@ -175,7 +176,16 @@ impl<'ctx> Compiler<'ctx> {
         let ptys: Vec<BasicMetadataTypeEnum<'ctx>> = ef
             .params
             .iter()
-            .map(|(_, t)| self.llvm_ty(t).into())
+            .map(|(_, t)| {
+                if matches!(t, Type::String) {
+                    // Extern C functions receive a char* for String args
+                    self.ctx
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .into()
+                } else {
+                    self.llvm_ty(t).into()
+                }
+            })
             .collect();
         let ret = &ef.ret;
         let ft = self.mk_fn_type(ret, &ptys, ef.variadic);

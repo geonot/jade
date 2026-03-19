@@ -1027,6 +1027,7 @@ impl Typer {
             name: td.name.clone(),
             fields,
             methods: hir_methods,
+            layout: td.layout.clone(),
             span: td.span,
         })
     }
@@ -1899,6 +1900,129 @@ impl Typer {
                         .collect::<Result<_, _>>()?;
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Builtin(hir::BuiltinFn::RcRelease, hargs),
+                        ty: Type::Void,
+                        span,
+                    });
+                }
+                "weak" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let harg = self.lower_expr(&args[0])?;
+                    // weak() takes an rc value and creates a weak reference
+                    let inner_ty = match &harg.ty {
+                        Type::Rc(inner) => inner.as_ref().clone(),
+                        _ => return Err(format!("weak() requires an rc value, got {}", harg.ty)),
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::WeakDowngrade, vec![harg]),
+                        ty: Type::Weak(Box::new(inner_ty)),
+                        span,
+                    });
+                }
+                "weak_upgrade" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let harg = self.lower_expr(&args[0])?;
+                    let inner_ty = match &harg.ty {
+                        Type::Weak(inner) => inner.as_ref().clone(),
+                        _ => return Err(format!("weak_upgrade() requires a weak value, got {}", harg.ty)),
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::WeakUpgrade, vec![harg]),
+                        ty: Type::Rc(Box::new(inner_ty)),
+                        span,
+                    });
+                }
+                "volatile_load" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let harg = self.lower_expr(&args[0])?;
+                    let inner_ty = match &harg.ty {
+                        Type::Ptr(inner) => inner.as_ref().clone(),
+                        _ => return Err(format!("volatile_load() requires a pointer, got {}", harg.ty)),
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::VolatileLoad, vec![harg]),
+                        ty: inner_ty,
+                        span,
+                    });
+                }
+                "volatile_store" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let hptr = self.lower_expr(&args[0])?;
+                    let hval = self.lower_expr(&args[1])?;
+                    if !matches!(hptr.ty, Type::Ptr(_)) {
+                        return Err(format!("volatile_store() first arg must be a pointer, got {}", hptr.ty));
+                    }
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::VolatileStore, vec![hptr, hval]),
+                        ty: Type::Void,
+                        span,
+                    });
+                }
+                "wrapping_add" | "wrapping_sub" | "wrapping_mul" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let lhs = self.lower_expr(&args[0])?;
+                    let rhs = self.lower_expr(&args[1])?;
+                    let ty = lhs.ty.clone();
+                    let builtin = match name.as_str() {
+                        "wrapping_add" => hir::BuiltinFn::WrappingAdd,
+                        "wrapping_sub" => hir::BuiltinFn::WrappingSub,
+                        "wrapping_mul" => hir::BuiltinFn::WrappingMul,
+                        _ => unreachable!(),
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
+                        ty,
+                        span,
+                    });
+                }
+                "saturating_add" | "saturating_sub" | "saturating_mul" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let lhs = self.lower_expr(&args[0])?;
+                    let rhs = self.lower_expr(&args[1])?;
+                    let ty = lhs.ty.clone();
+                    let builtin = match name.as_str() {
+                        "saturating_add" => hir::BuiltinFn::SaturatingAdd,
+                        "saturating_sub" => hir::BuiltinFn::SaturatingSub,
+                        "saturating_mul" => hir::BuiltinFn::SaturatingMul,
+                        _ => unreachable!(),
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
+                        ty,
+                        span,
+                    });
+                }
+                "checked_add" | "checked_sub" | "checked_mul" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let lhs = self.lower_expr(&args[0])?;
+                    let rhs = self.lower_expr(&args[1])?;
+                    let ty = lhs.ty.clone();
+                    let builtin = match name.as_str() {
+                        "checked_add" => hir::BuiltinFn::CheckedAdd,
+                        "checked_sub" => hir::BuiltinFn::CheckedSub,
+                        "checked_mul" => hir::BuiltinFn::CheckedMul,
+                        _ => unreachable!(),
+                    };
+                    // checked ops return a tuple (result, overflowed)
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
+                        ty: Type::Tuple(vec![ty, Type::Bool]),
+                        span,
+                    });
+                }
+                "signal_handle" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let hsig = self.lower_expr(&args[0])?;
+                    let hhandler = self.lower_expr(&args[1])?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::SignalHandle, vec![hsig, hhandler]),
+                        ty: Type::Void,
+                        span,
+                    });
+                }
+                "signal_raise" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hsig = self.lower_expr(&args[0])?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::SignalRaise, vec![hsig]),
+                        ty: Type::I32,
+                        span,
+                    });
+                }
+                "signal_ignore" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hsig = self.lower_expr(&args[0])?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::SignalIgnore, vec![hsig]),
                         ty: Type::Void,
                         span,
                     });

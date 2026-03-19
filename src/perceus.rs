@@ -686,7 +686,7 @@ impl PerceusPass {
             Type::I16 | Type::U16 => 2,
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::Ptr(_) | Type::Rc(_) => 8,
+            Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => 8,
             Type::String => 24, // ptr + len + cap (typical)
             Type::Void => 0,
             Type::Array(inner, len) => Self::type_layout_size(inner) * (*len as u64),

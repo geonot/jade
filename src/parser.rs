@@ -187,6 +187,7 @@ impl Parser {
         self.expect(Token::Type)?;
         let name = self.ident()?;
         let type_params = self.parse_type_params();
+        let layout = self.parse_layout_attrs()?;
         self.expect(Token::Newline)?;
         let (mut fields, mut methods) = (Vec::new(), Vec::new());
         if self.check(Token::Indent) {
@@ -212,8 +213,39 @@ impl Parser {
             type_params,
             fields,
             methods,
+            layout,
             span: sp,
         })
+    }
+
+    fn parse_layout_attrs(&mut self) -> Result<crate::ast::LayoutAttrs, ParseError> {
+        let mut layout = crate::ast::LayoutAttrs::default();
+        while self.check(Token::At) {
+            self.advance();
+            let attr = self.ident()?;
+            match attr.as_str() {
+                "packed" => layout.packed = true,
+                "strict" => layout.strict = true,
+                "align" => {
+                    self.expect(Token::LParen)?;
+                    let n = match self.peek() {
+                        Token::Int(n) => {
+                            let v = n as u32;
+                            self.advance();
+                            v
+                        }
+                        _ => return Err(self.error("expected alignment value")),
+                    };
+                    self.expect(Token::RParen)?;
+                    if !n.is_power_of_two() {
+                        return Err(self.error("alignment must be a power of 2"));
+                    }
+                    layout.align = Some(n);
+                }
+                _ => return Err(self.error(&format!("unknown layout attribute: @{attr}"))),
+            }
+        }
+        Ok(layout)
     }
 
     fn parse_field(&mut self) -> Result<Field, ParseError> {

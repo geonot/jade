@@ -68,7 +68,7 @@ nums is [1, 2, 3, 4, 5]
 ### Generics — the `of` keyword
 
 ```jade
-*max of T(a: T, b: T) -> T
+*max of T(a: T, b: T)
     a > b ? a ! b
 
 type Pair of A, B
@@ -124,7 +124,7 @@ p is Vec3(x is 1, y is 2, z is 3)
 *add(a, b)
     a + b
 
-*greet(name: String) -> String
+*greet(name: String)
     'hello {name}'
 
 # With defaults
@@ -137,11 +137,11 @@ Parameters infer types from usage. Return type inferred from body. Explicit anno
 ### Higher-Order Functions
 
 ```jade
-*apply(f: (i64) -> i64, x: i64) -> i64
+*apply(f: (i64) -> i64, x: i64)
     f(x)
 
 *main()
-    double is *fn(x: i64) -> i64 x * 2
+    double is *fn(x: i64) x * 2
     log(apply(double, 21))
 ```
 
@@ -149,7 +149,7 @@ Parameters infer types from usage. Return type inferred from body. Explicit anno
 
 ```jade
 # Inline
-square is *fn(x: i64) -> i64 x * x
+square is *fn(x: i64) x * x
 
 # Placeholder shorthand
 doubled is items ~ *fn(x) x * 2
@@ -298,10 +298,10 @@ type Vec3
     y: i64
     z: i64
 
-    *length(self) -> f64
+    *length(self)
         ((self.x * self.x + self.y * self.y + self.z * self.z) as f64) ** 0.5
 
-    *dot(self, other: Vec3) -> i64
+    *dot(self, other: Vec3)
         self.x * other.x + self.y * other.y + self.z * other.z
 ```
 
@@ -318,7 +318,7 @@ enum Color
     Blue
     Custom(u8, u8, u8)
 
-*describe(c: Color) -> i64
+*describe(c: Color)
     match c
         Red ? 1
         Green ? 2
@@ -339,7 +339,7 @@ err FileError
     NotFound
     PermissionDenied(String)
 
-*read_file(path: String) -> i64
+*read_file(path: String)
     if path equals ''
         ! NotFound
     42
@@ -412,10 +412,67 @@ asm
 ### Raw Pointers
 
 ```jade
-unsafe
-    ptr is &value
-    val is @ptr        # dereference
+ptr is &value
+val is @ptr        # dereference
 ```
+
+### Volatile Memory Operations
+
+Hardware-observable reads and writes. No compiler reordering, no elision.
+
+```jade
+extern *mmio_base() -> &i32
+
+*poll_device()
+    reg is mmio_base()
+    status is volatile_load(reg)       # Always reads from memory
+    volatile_store(reg, status | 1)    # Always writes to memory
+```
+
+### Weak References
+
+Explicit cycle-breaking for reference-counted values. The compiler warns when weak refs are used without upgrading.
+
+```jade
+type Node
+    value: i64
+    parent: weak rc Node     # weak reference breaks the cycle
+
+*main()
+    root is rc(Node { value: 1, parent: none })
+    child_parent is weak(root)            # downgrade to weak
+    strong is weak_upgrade(child_parent)  # upgrade: returns rc or none
+```
+
+### Signal Handling
+
+POSIX signal infrastructure.
+
+```jade
+*handler(sig: i32)
+    log(sig)
+
+*main()
+    signal_handle(2, handler)     # SIGINT → handler
+    signal_ignore(13)             # SIGPIPE → ignore
+    signal_raise(2)               # raise SIGINT
+```
+
+### Integer Overflow Control
+
+Default: trap on overflow. Explicit control via builtins:
+
+```jade
+*main()
+    a is 9223372036854775807       # i64 max
+    w is wrapping_add(a, 1)        # wraps to i64 min
+    s is saturating_add(a, 1)      # stays at i64 max
+    result, overflowed is checked_add(a, 1)
+    if overflowed
+        log('overflow detected')
+```
+
+Available for `add`, `sub`, `mul` — each in `wrapping_`, `saturating_`, `checked_` variants.
 
 ---
 
@@ -424,20 +481,21 @@ unsafe
 ### Pipeline
 
 ```
-Source → Lexer → Parser → LLVM IR Codegen → Native Binary
+Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership → Codegen → LLVM IR → Native Binary
 ```
 
-Implemented in Rust with inkwell (LLVM 21). Single-pass compilation: parse, then codegen directly to LLVM IR. No intermediate representation between AST and LLVM.
+Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST, type-check and lower to HIR, run Perceus optimization pass, verify ownership, then codegen to LLVM IR.
 
 ### CLI
 
 ```
-jadec <INPUT> [-o OUTPUT] [--emit-ir] [--opt 0-3] [--lto]
+jadec <INPUT> [-o OUTPUT] [--emit-ir] [--opt 0-3] [--lto] [-g/--debug]
 ```
 
 - `--emit-ir` — print LLVM IR instead of compiling
 - `--opt` — optimization level (default: 3)
 - `--lto` — link-time optimization
+- `-g` / `--debug` — emit DWARF debug info (for lldb/gdb)
 
 ### Codegen Optimizations
 
@@ -628,24 +686,26 @@ type Example
     c: u8
 
 # C-compatible — declaration order preserved
-type CStruct
-    @layout is STRICT
+type CStruct @strict
     magic: u32
     version: u16
     flags: u16
     data: u64
 
 # Packed — no padding
-type Pixel
-    @layout is PACKED
+type Pixel @packed
     r: u8
     g: u8
     b: u8
 
 # Cache-aligned
-type CacheAligned
-    @align is 64
-    data is array of 64 as u8
+type CacheAligned @align(64)
+    data: [u8; 64]
+
+# Combinable
+type NetPacket @packed @strict @align(4)
+    header: u32
+    payload: [u8; 1024]
 ```
 
 ### Memory Safety Guarantees
@@ -659,8 +719,8 @@ No use-after-free. No double-free. No dangling references. No data races. No nul
 ### Pipeline
 
 ```
-Source → Lexer → Parser → LLVM IR Codegen → LLVM Optimization → Native Binary
-         (indent)  (LL,RD)   (typed ABIs)      (O0–O3, LTO)       (ELF/Mach-O)
+Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership → Codegen → LLVM Opt → Native Binary
+         (indent)  (LL,RD)        (bidir)       (9 passes) (verify)    (DWARF)   (O0–O3)    (ELF/Mach-O)
 ```
 
 ### Key Decisions
@@ -710,7 +770,11 @@ error[E301]: use of moved value 'data'
 | E100–E199 | Name resolution |
 | E200–E299 | Type errors |
 | E300–E399 | Ownership & borrow |
-| E400–E499 | Unsafe/FFI |
+| E400–E499 | Safety (volatile, FFI, signals) |
+| E500–E599 | Pattern matching |
+| E600–E699 | Memory (layout, allocation) |
+| E700–E799 | Integer overflow |
+| W001+ | Warnings |
 
 ---
 
@@ -719,18 +783,42 @@ error[E301]: use of moved value 'data'
 ### Integer
 
 ```jade
-x.count_ones()          # popcount
-x.count_zeros()
-x.leading_zeros()
-x.trailing_zeros()
-x.rotate_left(n)
-x.rotate_right(n)
-x.reverse_bits()
-x.swap_bytes()          # endianness
-x.wrapping_add(y)       # wrapping arithmetic
-x.saturating_add(y)     # saturating arithmetic
-x.checked_add(y)        # returns Option
-x.pow(n)                # square-and-multiply
+popcount(x)             # count set bits
+clz(x)                  # count leading zeros
+ctz(x)                  # count trailing zeros
+rotate_left(x, n)       # bit rotation
+rotate_right(x, n)
+bswap(x)                # byte swap (endianness)
+wrapping_add(x, y)      # wrapping arithmetic
+wrapping_sub(x, y)
+wrapping_mul(x, y)
+saturating_add(x, y)    # saturating arithmetic
+saturating_sub(x, y)
+saturating_mul(x, y)
+checked_add(x, y)       # returns (result, overflowed)
+checked_sub(x, y)
+checked_mul(x, y)
+x ** n                  # square-and-multiply exponentiation
+```
+
+### Volatile / Hardware
+
+```jade
+volatile_load(ptr)      # volatile read (never elided/reordered)
+volatile_store(ptr, v)  # volatile write
+signal_handle(sig, fn)  # register signal handler
+signal_raise(sig)       # raise signal → i32
+signal_ignore(sig)      # ignore signal (SIG_IGN)
+```
+
+### Reference Counting
+
+```jade
+rc(value)               # allocate RC-wrapped value
+rc_retain(rv)           # increment refcount
+rc_release(rv)          # decrement refcount (frees at 0)
+weak(rc_val)            # downgrade RC → weak reference
+weak_upgrade(w)         # upgrade weak → RC (or none)
 ```
 
 ### Float
@@ -783,6 +871,15 @@ assert(cond)
 panic(msg)
 size_of of T()          # compile-time size
 align_of of T()         # compile-time alignment
+```
+
+### Debug
+
+Compile with `-g` / `--debug` to emit DWARF debug info. Use with lldb or gdb:
+
+```bash
+jadec main.jade -o main -g
+lldb ./main
 ```
 
 ---

@@ -17,6 +17,7 @@ pub enum DiagKind {
     MoveOfBorrowed,
     InvalidRcDeref,
     ReturnOfBorrowed,
+    WeakUpgradeWithoutCheck,
     Warning,
 }
 
@@ -481,6 +482,17 @@ impl OwnershipVerifier {
                     ),
                 });
             }
+            // Warn when weak refs are used directly (should upgrade first)
+            if state.ownership == Ownership::Weak {
+                self.diagnostics.push(OwnershipDiag {
+                    kind: DiagKind::WeakUpgradeWithoutCheck,
+                    span,
+                    message: format!(
+                        "weak reference `{name}` used directly — \
+                         call weak_upgrade() and check for none before use"
+                    ),
+                });
+            }
         }
     }
 
@@ -536,7 +548,10 @@ impl OwnershipVerifier {
             return;
         }
         if let Some(state) = self.lookup(id).cloned() {
-            if state.ownership == Ownership::Owned && !state.ty.is_trivially_droppable() {
+            // Weak and Rc values are shared — they don't move.
+            if (state.ownership == Ownership::Owned || state.ownership == Ownership::BorrowMut)
+                && !state.ty.is_trivially_droppable()
+            {
                 if let Some(s) = self.lookup_mut(id) {
                     s.moved = true;
                     s.move_span = Some(span);
