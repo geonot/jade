@@ -1541,3 +1541,165 @@ fn recursive_enum_reversed_field_order() {
         "36",
     );
 }
+
+// ── Edge cases ──────────────────────────────────────────────────────
+
+#[test]
+fn closure_capture_mutation() {
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    base is 100\n    add_base is *fn(x: i64) -> i64 base + x\n    log(apply(add_base, 5))\n    0\n",
+        "105",
+    );
+}
+
+#[test]
+fn generic_pipeline_combo() {
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    r is 5 ~ double ~ double\n    log(r)\n    0\n",
+        "20",
+    );
+}
+
+#[test]
+fn struct_method_chain() {
+    expect(
+        "type Counter\n    val: i64\n\n    *inc() -> i64\n        self.val + 1\n\n    *double() -> i64\n        self.val * 2\n\n*main() -> i32\n    c is Counter(val is 10)\n    log(c.inc())\n    log(c.double())\n    0\n",
+        "11\n20",
+    );
+}
+
+#[test]
+fn deeply_nested_if_expr() {
+    expect(
+        "*classify(n: i64) -> i64\n    if n > 100\n        return 3\n    elif n > 50\n        return 2\n    elif n > 0\n        return 1\n    else\n        return 0\n\n*main() -> i32\n    log(classify(200))\n    log(classify(75))\n    log(classify(25))\n    log(classify(-5))\n    0\n",
+        "3\n2\n1\n0",
+    );
+}
+
+#[test]
+fn match_as_expression() {
+    expect(
+        "enum Dir\n    Up\n    Down\n    Left\n    Right\n\n*delta(d: Dir) -> i64\n    match d\n        Up() ? 1\n        Down() ? -1\n        Left() ? -10\n        Right() ? 10\n\n*main() -> i32\n    log(delta(Up()))\n    log(delta(Down()))\n    log(delta(Right()))\n    0\n",
+        "1\n-1\n10",
+    );
+}
+
+#[test]
+fn array_mutation_and_read() {
+    expect(
+        "*main() -> i32\n    a is [1, 2, 3, 4, 5]\n    a[0] is 10\n    a[4] is 50\n    log(a[0])\n    log(a[2])\n    log(a[4])\n    0\n",
+        "10\n3\n50",
+    );
+}
+
+#[test]
+fn enum_multiple_matches() {
+    expect(
+        "enum AB\n    A(i64)\n    B(i64)\n\n*main() -> i32\n    x is A(10)\n    y is B(20)\n    match x\n        A(v) ? log(v)\n        B(v) ? log(v + 100)\n    match y\n        A(v) ? log(v + 200)\n        B(v) ? log(v)\n    0\n",
+        "10\n20",
+    );
+}
+
+#[test]
+fn for_step_by_three() {
+    expect(
+        "*main() -> i32\n    s is 0\n    for i in 0 to 10 by 3\n        s is s + i\n    log(s)\n    0\n",
+        "18",
+    );
+}
+
+#[test]
+fn nested_function_calls() {
+    expect(
+        "*a(x: i64) -> i64\n    return x + 1\n\n*b(x: i64) -> i64\n    return a(a(x))\n\n*c(x: i64) -> i64\n    return b(b(x))\n\n*main() -> i32\n    log(c(0))\n    0\n",
+        "4",
+    );
+}
+
+#[test]
+fn tuple_destructuring() {
+    expect(
+        "*main() -> i32\n    x, y is (20, 10)\n    log(x)\n    log(y)\n    0\n",
+        "20\n10",
+    );
+}
+
+#[test]
+fn enum_unit_and_data_mixed() {
+    expect(
+        "enum Token\n    Eof\n    Num(i64)\n    Plus\n\n*describe(t: Token) -> i64\n    match t\n        Eof() ? 0\n        Num(n) ? n\n        Plus() ? -1\n\n*main() -> i32\n    log(describe(Eof()))\n    log(describe(Num(42)))\n    log(describe(Plus()))\n    0\n",
+        "0\n42\n-1",
+    );
+}
+
+#[test]
+fn recursive_fibonacci_match() {
+    expect(
+        "*fib(n: i64) -> i64\n    match n\n        0 ? 0\n        1 ? 1\n        _ ? fib(n - 1) + fib(n - 2)\n\n*main() -> i32\n    log(fib(10))\n    0\n",
+        "55",
+    );
+}
+
+#[test]
+fn loop_accumulator() {
+    expect(
+        "*main() -> i32\n    s is 0\n    i is 1\n    loop\n        if i > 100\n            break\n        s is s + i\n        i is i + 1\n    log(s)\n    0\n",
+        "5050",
+    );
+}
+
+#[test]
+fn string_length_method() {
+    expect(
+        "*main() -> i32\n    s is \"hello world\"\n    log(s.length)\n    0\n",
+        "11",
+    );
+}
+
+#[test]
+fn bool_logic_complex() {
+    expect(
+        "*main() -> i32\n    a is true\n    b is false\n    c is true\n    if a and c\n        log(1)\n    if a or b\n        log(2)\n    if not b\n        log(3)\n    0\n",
+        "1\n2\n3",
+    );
+}
+
+#[test]
+fn cast_chain() {
+    expect(
+        "*main() -> i32\n    x is 42\n    y is x as f64\n    z is y as i64\n    log(z)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn struct_field_update() {
+    expect(
+        "type Pair\n    a: i64\n    b: i64\n\n*main() -> i32\n    p is Pair(a is 1, b is 2)\n    p.a is 99\n    log(p.a)\n    log(p.b)\n    0\n",
+        "99\n2",
+    );
+}
+
+#[test]
+fn multi_return_paths() {
+    expect(
+        "*abs(x: i64) -> i64\n    if x < 0\n        return -x\n    return x\n\n*main() -> i32\n    log(abs(5))\n    log(abs(-5))\n    log(abs(0))\n    0\n",
+        "5\n5\n0",
+    );
+}
+
+#[test]
+fn pipeline_multi_arg() {
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*mul(a: i64, b: i64) -> i64\n    a * b\n\n*main() -> i32\n    r is 10 ~ add(5)\n    log(r)\n    0\n",
+        "15",
+    );
+}
+
+#[test]
+fn nested_array_access() {
+    expect(
+        "*main() -> i32\n    a is [10, 20, 30]\n    i is 2\n    log(a[i])\n    log(a[0] + a[i])\n    0\n",
+        "30\n40",
+    );
+}

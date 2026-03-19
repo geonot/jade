@@ -144,11 +144,15 @@ impl Typer {
             Type::Array(inner, sz) => {
                 Type::Array(Box::new(Self::substitute_type(inner, type_map)), *sz)
             }
-            Type::Tuple(tys) => {
-                Type::Tuple(tys.iter().map(|t| Self::substitute_type(t, type_map)).collect())
-            }
+            Type::Tuple(tys) => Type::Tuple(
+                tys.iter()
+                    .map(|t| Self::substitute_type(t, type_map))
+                    .collect(),
+            ),
             Type::Fn(ptys, ret) => Type::Fn(
-                ptys.iter().map(|t| Self::substitute_type(t, type_map)).collect(),
+                ptys.iter()
+                    .map(|t| Self::substitute_type(t, type_map))
+                    .collect(),
                 Box::new(Self::substitute_type(ret, type_map)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(Self::substitute_type(inner, type_map))),
@@ -157,7 +161,11 @@ impl Typer {
         }
     }
 
-    fn mangle_generic(base: &str, type_map: &HashMap<String, Type>, type_params: &[String]) -> String {
+    fn mangle_generic(
+        base: &str,
+        type_map: &HashMap<String, Type>,
+        type_params: &[String],
+    ) -> String {
         let mut name = base.to_string();
         for tp in type_params {
             if let Some(ty) = type_map.get(tp) {
@@ -252,8 +260,14 @@ impl Typer {
                 }
             }
             ast::Expr::BinOp(l, op, r, _) => match op {
-                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt
-                | BinOp::Le | BinOp::Ge | BinOp::And | BinOp::Or => Type::Bool,
+                BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::Le
+                | BinOp::Ge
+                | BinOp::And
+                | BinOp::Or => Type::Bool,
                 _ => {
                     let lt = self.expr_ty_ast(l);
                     let rt = self.expr_ty_ast(r);
@@ -324,7 +338,10 @@ impl Typer {
                 Type::I64
             }
             ast::Expr::Array(elems, _) => {
-                let et = elems.first().map(|e| self.expr_ty_ast(e)).unwrap_or(Type::I64);
+                let et = elems
+                    .first()
+                    .map(|e| self.expr_ty_ast(e))
+                    .unwrap_or(Type::I64);
                 Type::Array(Box::new(et), elems.len())
             }
             ast::Expr::Tuple(elems, _) => {
@@ -356,9 +373,7 @@ impl Typer {
                 Type::Ptr(inner_ty) | Type::Rc(inner_ty) => *inner_ty,
                 _ => Type::I64,
             },
-            ast::Expr::ListComp(body, _, _, _, _, _) => {
-                Type::Ptr(Box::new(self.expr_ty_ast(body)))
-            }
+            ast::Expr::ListComp(body, _, _, _, _, _) => Type::Ptr(Box::new(self.expr_ty_ast(body))),
             ast::Expr::Syscall(_, _) => Type::I64,
             ast::Expr::Method(obj, m, _, _) => {
                 let obj_ty = self.expr_ty_ast(obj);
@@ -437,11 +452,7 @@ impl Typer {
         }
     }
 
-    fn coerce_binop_operands(
-        &self,
-        lhs: hir::Expr,
-        rhs: hir::Expr,
-    ) -> (hir::Expr, hir::Expr) {
+    fn coerce_binop_operands(&self, lhs: hir::Expr, rhs: hir::Expr) -> (hir::Expr, hir::Expr) {
         let lt = lhs.ty.clone();
         let rt = rhs.ty.clone();
         // Float promotion: int op float → float op float
@@ -451,7 +462,9 @@ impl Typer {
                 hir::Expr {
                     kind: hir::ExprKind::Coerce(
                         Box::new(lhs),
-                        CoercionKind::IntToFloat { signed: lt.is_signed() },
+                        CoercionKind::IntToFloat {
+                            signed: lt.is_signed(),
+                        },
                     ),
                     ty: rt,
                     span,
@@ -466,7 +479,9 @@ impl Typer {
                 hir::Expr {
                     kind: hir::ExprKind::Coerce(
                         Box::new(rhs),
-                        CoercionKind::IntToFloat { signed: rt.is_signed() },
+                        CoercionKind::IntToFloat {
+                            signed: rt.is_signed(),
+                        },
                     ),
                     ty: lt,
                     span,
@@ -736,8 +751,7 @@ impl Typer {
     fn declare_extern_sig(&mut self, ef: &ast::ExternFn) {
         let ptys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
         let id = self.fresh_id();
-        self.fns
-            .insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
+        self.fns.insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
     }
 
     fn declare_err_def_sig(&mut self, ed: &ast::ErrDef) {
@@ -981,10 +995,7 @@ impl Typer {
             .fields
             .iter()
             .map(|f| {
-                let ty = f
-                    .ty
-                    .clone()
-                    .unwrap_or_else(|| self.infer_field_ty(f));
+                let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
                 let default = f.default.as_ref().map(|e| {
                     // Lower default expression (best-effort, no scope needed)
                     self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
@@ -1114,9 +1125,11 @@ impl Typer {
     }
 
     fn lower_extern(&self, ef: &ast::ExternFn) -> hir::ExternFn {
-        let (id, _, _) = self.fns.get(&ef.name).cloned().unwrap_or_else(|| {
-            (DefId::BUILTIN, vec![], Type::Void)
-        });
+        let (id, _, _) = self
+            .fns
+            .get(&ef.name)
+            .cloned()
+            .unwrap_or_else(|| (DefId::BUILTIN, vec![], Type::Void));
         hir::ExternFn {
             def_id: id,
             name: ef.name.clone(),
@@ -1150,11 +1163,7 @@ impl Typer {
 
     // ── Block lowering ───────────────────────────────────────────
 
-    fn lower_block(
-        &mut self,
-        block: &ast::Block,
-        ret_ty: &Type,
-    ) -> Result<hir::Block, String> {
+    fn lower_block(&mut self, block: &ast::Block, ret_ty: &Type) -> Result<hir::Block, String> {
         self.push_scope();
         let mut stmts = Vec::new();
         for s in block {
@@ -1167,11 +1176,7 @@ impl Typer {
 
     // ── Statement lowering ───────────────────────────────────────
 
-    fn lower_stmt(
-        &mut self,
-        stmt: &ast::Stmt,
-        ret_ty: &Type,
-    ) -> Result<hir::Stmt, String> {
+    fn lower_stmt(&mut self, stmt: &ast::Stmt, ret_ty: &Type) -> Result<hir::Stmt, String> {
         match stmt {
             ast::Stmt::Bind(b) => {
                 let value = self.lower_expr(&b.value)?;
@@ -1315,10 +1320,7 @@ impl Typer {
 
             ast::Stmt::Loop(l) => {
                 let body = self.lower_block(&l.body, ret_ty)?;
-                Ok(hir::Stmt::Loop(hir::Loop {
-                    body,
-                    span: l.span,
-                }))
+                Ok(hir::Stmt::Loop(hir::Loop { body, span: l.span }))
             }
 
             ast::Stmt::Ret(val, span) => {
@@ -1375,11 +1377,7 @@ impl Typer {
 
     // ── If lowering ──────────────────────────────────────────────
 
-    fn lower_if(
-        &mut self,
-        i: &ast::If,
-        ret_ty: &Type,
-    ) -> Result<hir::If, String> {
+    fn lower_if(&mut self, i: &ast::If, ret_ty: &Type) -> Result<hir::If, String> {
         let cond = self.lower_expr(&i.cond)?;
         let then = self.lower_block(&i.then, ret_ty)?;
         let mut elifs = Vec::new();
@@ -1404,11 +1402,7 @@ impl Typer {
 
     // ── Match lowering ───────────────────────────────────────────
 
-    fn lower_match(
-        &mut self,
-        m: &ast::Match,
-        ret_ty: &Type,
-    ) -> Result<hir::Match, String> {
+    fn lower_match(&mut self, m: &ast::Match, ret_ty: &Type) -> Result<hir::Match, String> {
         let subject = self.lower_expr(&m.subject)?;
         let subj_ty = subject.ty.clone();
         let mut arms = Vec::new();
@@ -1435,6 +1429,10 @@ impl Typer {
         match pat {
             ast::Pat::Wild(span) => Ok(hir::Pat::Wild(*span)),
             ast::Pat::Ident(name, span) => {
+                // Check if this identifier is a known variant (unit constructor)
+                if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
+                    return Ok(hir::Pat::Ctor(name.clone(), tag, vec![], *span));
+                }
                 let id = self.fresh_id();
                 let ty = expected_ty.clone();
                 self.define_var(
@@ -1452,17 +1450,10 @@ impl Typer {
                 Ok(hir::Pat::Lit(he))
             }
             ast::Pat::Ctor(name, sub_pats, span) => {
-                let tag = self
-                    .variant_tags
-                    .get(name)
-                    .map(|(_, t)| *t)
-                    .unwrap_or(0);
+                let tag = self.variant_tags.get(name).map(|(_, t)| *t).unwrap_or(0);
 
                 // Find the variant field types for sub-pattern typing
-                let enum_name = self
-                    .variant_tags
-                    .get(name)
-                    .map(|(en, _)| en.clone());
+                let enum_name = self.variant_tags.get(name).map(|(en, _)| en.clone());
                 let field_tys: Vec<Type> = if let Some(ref en) = enum_name {
                     if let Some(variants) = self.enums.get(en) {
                         variants
@@ -1546,10 +1537,23 @@ impl Typer {
                     }
                     // Non-unit variant used as an ident — try generic monomorphization
                     if let Ok(Some(_mangled)) = self.try_monomorphize_generic_variant_bare(name) {
-                        let (en2, tag2) = self.variant_tags.get(name).cloned().unwrap_or((enum_name.clone(), tag));
+                        let (en2, tag2) = self
+                            .variant_tags
+                            .get(name)
+                            .cloned()
+                            .unwrap_or((enum_name.clone(), tag));
                         return Ok(hir::Expr {
                             kind: hir::ExprKind::VariantRef(en2.clone(), name.clone(), tag2),
                             ty: Type::Enum(en2),
+                            span: *span,
+                        });
+                    }
+                } else if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant_bare(name) {
+                    // Variant from a generic enum (e.g. Nothing from Option<T>)
+                    if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::VariantRef(mangled.clone(), name.clone(), tag),
+                            ty: Type::Enum(mangled),
                             span: *span,
                         });
                     }
@@ -1584,8 +1588,14 @@ impl Typer {
                 // Insert width/promotion coercions
                 let (hl, hr) = self.coerce_binop_operands(hl, hr);
                 let result_ty = match op {
-                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt
-                    | BinOp::Le | BinOp::Ge | BinOp::And | BinOp::Or => Type::Bool,
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+                    | BinOp::And
+                    | BinOp::Or => Type::Bool,
                     _ => hl.ty.clone(),
                 };
                 Ok(hir::Expr {
@@ -1608,9 +1618,7 @@ impl Typer {
                 })
             }
 
-            ast::Expr::Call(callee, args, span) => {
-                self.lower_call(callee, args, *span)
-            }
+            ast::Expr::Call(callee, args, span) => self.lower_call(callee, args, *span),
 
             ast::Expr::Method(obj, method, args, span) => {
                 self.lower_method_call(obj, method, args, *span)
@@ -1620,7 +1628,9 @@ impl Typer {
                 let hobj = self.lower_expr(obj)?;
                 let (ty, idx) = if let Type::Struct(ref name) = hobj.ty {
                     if let Some(fields) = self.structs.get(name) {
-                        if let Some((i, (_, fty))) = fields.iter().enumerate().find(|(_, (n, _))| n == field) {
+                        if let Some((i, (_, fty))) =
+                            fields.iter().enumerate().find(|(_, (n, _))| n == field)
+                        {
                             (fty.clone(), i)
                         } else {
                             (Type::I64, 0)
@@ -1748,13 +1758,11 @@ impl Typer {
                 self.lower_lambda(params, ret, body, *span)
             }
 
-            ast::Expr::Placeholder(span) => {
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::Void,
-                    ty: Type::I64,
-                    span: *span,
-                })
-            }
+            ast::Expr::Placeholder(span) => Ok(hir::Expr {
+                kind: hir::ExprKind::Void,
+                ty: Type::I64,
+                span: *span,
+            }),
 
             ast::Expr::Ref(inner, span) => {
                 let hi = self.lower_expr(inner)?;
@@ -2095,12 +2103,7 @@ impl Typer {
                 })
                 .collect::<Result<_, String>>()?;
             return Ok(hir::Expr {
-                kind: hir::ExprKind::VariantCtor(
-                    enum_name.clone(),
-                    name.to_string(),
-                    tag,
-                    hinits,
-                ),
+                kind: hir::ExprKind::VariantCtor(enum_name.clone(), name.to_string(), tag, hinits),
                 ty: Type::Enum(enum_name),
                 span,
             });
@@ -2108,7 +2111,11 @@ impl Typer {
 
         // Try generic enum variant monomorphization
         if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, inits) {
-            let (_, tag) = self.variant_tags.get(name).cloned().unwrap_or((mangled.clone(), 0));
+            let (_, tag) = self
+                .variant_tags
+                .get(name)
+                .cloned()
+                .unwrap_or((mangled.clone(), 0));
             let hinits: Vec<hir::FieldInit> = inits
                 .iter()
                 .map(|fi| {
@@ -2119,12 +2126,7 @@ impl Typer {
                 })
                 .collect::<Result<_, String>>()?;
             return Ok(hir::Expr {
-                kind: hir::ExprKind::VariantCtor(
-                    mangled.clone(),
-                    name.to_string(),
-                    tag,
-                    hinits,
-                ),
+                kind: hir::ExprKind::VariantCtor(mangled.clone(), name.to_string(), tag, hinits),
                 ty: Type::Enum(mangled),
                 span,
             });
@@ -2189,7 +2191,12 @@ impl Typer {
                     all_args.push(self.lower_expr(a)?);
                 }
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::Pipe(Box::new(all_args.remove(0)), id, name.clone(), all_args),
+                    kind: hir::ExprKind::Pipe(
+                        Box::new(all_args.remove(0)),
+                        id,
+                        name.clone(),
+                        all_args,
+                    ),
                     ty: ret,
                     span,
                 });
@@ -2211,7 +2218,63 @@ impl Typer {
             });
         }
 
-        // Non-ident right side
+        // Non-ident right side — check for Call with function name
+        if let ast::Expr::Call(callee, call_args, _) = right {
+            if let ast::Expr::Ident(name, _) = callee.as_ref() {
+                let has_placeholder = call_args
+                    .iter()
+                    .any(|a| matches!(a, ast::Expr::Placeholder(_)));
+                let mut all_args = Vec::new();
+                if has_placeholder {
+                    for a in call_args {
+                        if matches!(a, ast::Expr::Placeholder(_)) {
+                            all_args.push(hleft.clone());
+                        } else {
+                            all_args.push(self.lower_expr(a)?);
+                        }
+                    }
+                } else {
+                    all_args.push(hleft.clone());
+                    for a in call_args {
+                        all_args.push(self.lower_expr(a)?);
+                    }
+                }
+                // Check if generic
+                if let Some(gf) = self.generic_fns.get(name).cloned() {
+                    let left_ty = all_args[0].ty.clone();
+                    let mut type_map = HashMap::new();
+                    if let Some(p) = gf.params.first() {
+                        if let Some(Type::Param(tp)) = &p.ty {
+                            type_map.insert(tp.clone(), left_ty);
+                        }
+                    }
+                    for tp in &gf.type_params {
+                        type_map.entry(tp.clone()).or_insert(Type::I64);
+                    }
+                    let mangled = self.monomorphize_fn(name, &type_map)?;
+                    let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap();
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Call(id, mangled, all_args),
+                        ty: ret,
+                        span,
+                    });
+                }
+                if let Some((id, _, ret)) = self.fns.get(name).cloned() {
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Pipe(
+                            Box::new(all_args.remove(0)),
+                            id,
+                            name.clone(),
+                            all_args,
+                        ),
+                        ty: ret,
+                        span,
+                    });
+                }
+            }
+        }
+
+        // Fallback: non-ident right side
         let hright = self.lower_expr(right)?;
         let ret = match &hright.ty {
             Type::Fn(_, r) => *r.clone(),
@@ -2310,7 +2373,9 @@ impl Typer {
             return hir::Expr {
                 kind: hir::ExprKind::Coerce(
                     Box::new(expr),
-                    CoercionKind::FloatToInt { signed: target.is_signed() },
+                    CoercionKind::FloatToInt {
+                        signed: target.is_signed(),
+                    },
                 ),
                 ty: target.clone(),
                 span,
@@ -2334,10 +2399,7 @@ impl Typer {
         if expr.ty == Type::Bool && target.is_int() {
             let span = expr.span;
             return hir::Expr {
-                kind: hir::ExprKind::Coerce(
-                    Box::new(expr),
-                    CoercionKind::BoolToInt,
-                ),
+                kind: hir::ExprKind::Coerce(Box::new(expr), CoercionKind::BoolToInt),
                 ty: target.clone(),
                 span,
             };
@@ -2442,14 +2504,17 @@ mod tests {
 
     #[test]
     fn test_function_call_typed() {
-        let hir = type_check("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+        let hir =
+            type_check("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
         let add_fn = hir.fns.iter().find(|f| f.name == "add").unwrap();
         assert_eq!(add_fn.ret, Type::I64);
     }
 
     #[test]
     fn test_struct_typed() {
-        let hir = type_check("type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 1, y is 2)\n    log(p.x)\n    0\n");
+        let hir = type_check(
+            "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 1, y is 2)\n    log(p.x)\n    0\n",
+        );
         assert!(!hir.types.is_empty());
         let point = &hir.types[0];
         assert_eq!(point.name, "Point");
@@ -2458,7 +2523,9 @@ mod tests {
 
     #[test]
     fn test_enum_typed() {
-        let hir = type_check("enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n");
+        let hir = type_check(
+            "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
+        );
         assert!(!hir.enums.is_empty());
         let color = &hir.enums[0];
         assert_eq!(color.name, "Color");
@@ -2469,14 +2536,19 @@ mod tests {
     fn test_generic_fn_monomorphized() {
         let hir = type_check("*identity(x)\n    x\n*main()\n    log(identity(42))\n");
         // Should have main + monomorphized identity_i64
-        assert!(hir.fns.len() >= 2, "expected at least 2 fns, got {}", hir.fns.len());
+        assert!(
+            hir.fns.len() >= 2,
+            "expected at least 2 fns, got {}",
+            hir.fns.len()
+        );
         let mono = hir.fns.iter().find(|f| f.generic_origin.is_some());
         assert!(mono.is_some(), "expected monomorphized fn");
     }
 
     #[test]
     fn test_lambda_typed() {
-        let hir = type_check("*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(5))\n    0\n");
+        let hir =
+            type_check("*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(5))\n    0\n");
         let main = &hir.fns[0];
         if let hir::Stmt::Bind(b) = &main.body[0] {
             assert!(matches!(b.ty, Type::Fn(_, _)));

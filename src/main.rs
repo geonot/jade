@@ -102,56 +102,51 @@ fn main() {
     resolve_modules(&mut prog, base_dir, &mut loaded);
 
     // ── HIR: type check → Perceus optimization → ownership verification ──
-    // Runs alongside existing codegen; does not block compilation.
-    {
-        let mut typer = Typer::new();
-        match typer.lower_program(&prog) {
-            Ok(hir_prog) => {
-                // Phase C: Perceus optimizations
-                let mut perceus = PerceusPass::new();
-                let hints = perceus.optimize(&hir_prog);
-                if hints.stats.drops_elided > 0
-                    || hints.stats.reuse_sites > 0
-                    || hints.stats.borrows_promoted > 0
-                    || hints.stats.fbip_sites > 0
-                    || hints.stats.tail_reuse_sites > 0
-                    || hints.stats.speculative_reuse_sites > 0
-                {
-                    eprintln!(
-                        "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative ({} bindings)",
-                        hints.stats.drops_elided,
-                        hints.stats.reuse_sites,
-                        hints.stats.borrows_promoted,
-                        hints.stats.fbip_sites,
-                        hints.stats.tail_reuse_sites,
-                        hints.stats.speculative_reuse_sites,
-                        hints.stats.total_bindings_analyzed,
-                    );
-                }
+    let mut typer = Typer::new();
+    let hir_prog = match typer.lower_program(&prog) {
+        Ok(hir_prog) => hir_prog,
+        Err(e) => die(&format!("hir: {e}")),
+    };
 
-                // Ownership verification
-                let mut verifier = OwnershipVerifier::new();
-                let diags = verifier.verify(&hir_prog);
-                for d in &diags {
-                    eprintln!(
-                        "ownership: {} (line {}): {}",
-                        match d.kind {
-                            jadec::ownership::DiagKind::UseAfterMove => "error",
-                            jadec::ownership::DiagKind::DoubleMutableBorrow => "error",
-                            jadec::ownership::DiagKind::MoveOfBorrowed => "error",
-                            jadec::ownership::DiagKind::InvalidRcDeref => "error",
-                            jadec::ownership::DiagKind::ReturnOfBorrowed => "error",
-                            jadec::ownership::DiagKind::Warning => "warning",
-                        },
-                        d.span.line,
-                        d.message
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("hir: {e}");
-            }
-        }
+    // Perceus optimizations
+    let mut perceus = PerceusPass::new();
+    let hints = perceus.optimize(&hir_prog);
+    if hints.stats.drops_elided > 0
+        || hints.stats.reuse_sites > 0
+        || hints.stats.borrows_promoted > 0
+        || hints.stats.fbip_sites > 0
+        || hints.stats.tail_reuse_sites > 0
+        || hints.stats.speculative_reuse_sites > 0
+    {
+        eprintln!(
+            "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative ({} bindings)",
+            hints.stats.drops_elided,
+            hints.stats.reuse_sites,
+            hints.stats.borrows_promoted,
+            hints.stats.fbip_sites,
+            hints.stats.tail_reuse_sites,
+            hints.stats.speculative_reuse_sites,
+            hints.stats.total_bindings_analyzed,
+        );
+    }
+
+    // Ownership verification
+    let mut verifier = OwnershipVerifier::new();
+    let diags = verifier.verify(&hir_prog);
+    for d in &diags {
+        eprintln!(
+            "ownership: {} (line {}): {}",
+            match d.kind {
+                jadec::ownership::DiagKind::UseAfterMove => "error",
+                jadec::ownership::DiagKind::DoubleMutableBorrow => "error",
+                jadec::ownership::DiagKind::MoveOfBorrowed => "error",
+                jadec::ownership::DiagKind::InvalidRcDeref => "error",
+                jadec::ownership::DiagKind::ReturnOfBorrowed => "error",
+                jadec::ownership::DiagKind::Warning => "warning",
+            },
+            d.span.line,
+            d.message
+        );
     }
 
     let ctx = Context::create();
@@ -162,7 +157,7 @@ fn main() {
         .unwrap_or_else(|| "main".into());
     let mut comp = Compiler::new(&ctx, &name);
     comp.set_source(&src);
-    if let Err(e) = comp.compile_program(&prog) {
+    if let Err(e) = comp.compile_program(&hir_prog, hints) {
         die(&format!("codegen: {e}"));
     }
 

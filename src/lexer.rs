@@ -342,8 +342,13 @@ impl<'s> Lexer<'s> {
         let mut out = Vec::new();
         while self.pos < self.src.len() {
             let ch = self.src[self.pos];
-            if ch == b' ' { self.advance(); continue; }
-            if ch == b'\n' || ch == b'\r' { break; }
+            if ch == b' ' {
+                self.advance();
+                continue;
+            }
+            if ch == b'\n' || ch == b'\r' {
+                break;
+            }
             out.push(self.lex_token()?);
         }
         Ok(out)
@@ -603,11 +608,20 @@ impl<'s> Lexer<'s> {
                 // Push the string part accumulated so far
                 let sp = Span::new(start, self.pos, self.line, sc);
                 if !val.is_empty() || self.pending.is_empty() || !has_interp {
-                    self.pending.push(Spanned { token: Token::Str(std::mem::take(&mut val)), span: sp });
+                    self.pending.push(Spanned {
+                        token: Token::Str(std::mem::take(&mut val)),
+                        span: sp,
+                    });
                 } else if val.is_empty() {
-                    self.pending.push(Spanned { token: Token::Str(String::new()), span: sp });
+                    self.pending.push(Spanned {
+                        token: Token::Str(String::new()),
+                        span: sp,
+                    });
                 }
-                self.pending.push(Spanned { token: Token::InterpStart, span: sp });
+                self.pending.push(Spanned {
+                    token: Token::InterpStart,
+                    span: sp,
+                });
                 self.advance(); // skip '{'
                 // Tokenize the expression inside {}
                 let mut depth = 1u32;
@@ -637,7 +651,10 @@ impl<'s> Lexer<'s> {
                     }
                 }
                 let isp = Span::new(self.pos, self.pos + 1, self.line, self.col);
-                self.pending.push(Spanned { token: Token::InterpEnd, span: isp });
+                self.pending.push(Spanned {
+                    token: Token::InterpEnd,
+                    span: isp,
+                });
                 self.advance(); // skip '}'
                 continue;
             }
@@ -668,7 +685,10 @@ impl<'s> Lexer<'s> {
         self.advance(); // skip closing '
         if has_interp {
             let sp = Span::new(start, self.pos, self.line, sc);
-            self.pending.push(Spanned { token: Token::Str(val), span: sp });
+            self.pending.push(Spanned {
+                token: Token::Str(val),
+                span: sp,
+            });
             // Return the first pending token
             return Ok(self.pending.remove(0));
         }

@@ -1,21 +1,8 @@
-//! Ownership verifier pass over the HIR.
-//!
-//! This pass walks the typed HIR and validates ownership invariants:
-//! - Use-after-move detection
-//! - Mutable borrow exclusivity
-//! - Drop placement correctness
-//! - Rc reference validity
-//!
-//! Currently conservative: it flags obvious violations without
-//! performing deep alias analysis. The intent is to incrementally
-//! strengthen this pass as the ownership model matures.
-
 use std::collections::HashMap;
 
 use crate::hir::*;
 use crate::types::Type;
 
-/// Diagnostic produced by the ownership verifier.
 #[derive(Debug, Clone)]
 pub struct OwnershipDiag {
     pub kind: DiagKind,
@@ -33,7 +20,6 @@ pub enum DiagKind {
     Warning,
 }
 
-/// Per-variable tracking state.
 #[derive(Debug, Clone)]
 struct VarState {
     ownership: Ownership,
@@ -46,11 +32,8 @@ struct VarState {
 }
 
 pub struct OwnershipVerifier {
-    /// Scoped variable state stack.
     scopes: Vec<HashMap<DefId, VarState>>,
-    /// Collected diagnostics.
     pub diagnostics: Vec<OwnershipDiag>,
-    /// Known function return types.
     fn_ret_types: HashMap<String, Type>,
 }
 
@@ -63,19 +46,15 @@ impl OwnershipVerifier {
         }
     }
 
-    /// Run the verifier over an entire HIR program.
     pub fn verify(&mut self, prog: &Program) -> Vec<OwnershipDiag> {
-        // Register function return types
         for f in &prog.fns {
             self.fn_ret_types.insert(f.name.clone(), f.ret.clone());
         }
 
-        // Verify each function body
         for f in &prog.fns {
             self.verify_fn(f);
         }
 
-        // Verify method bodies within type defs
         for td in &prog.types {
             for m in &td.methods {
                 self.verify_fn(m);
@@ -88,7 +67,6 @@ impl OwnershipVerifier {
     fn verify_fn(&mut self, f: &Fn) {
         self.push_scope();
 
-        // Register parameters
         for p in &f.params {
             self.define(
                 p.def_id,
@@ -112,7 +90,6 @@ impl OwnershipVerifier {
         for stmt in block {
             self.verify_stmt(stmt);
         }
-        // At scope end, check for owned values that should be dropped
         self.check_scope_drops();
         self.pop_scope();
     }
@@ -142,11 +119,10 @@ impl OwnershipVerifier {
             Stmt::TupleBind(bindings, value, _) => {
                 self.verify_expr(value);
                 for (def_id, _, ty) in bindings {
-                    let ownership = ownership_for_type(ty);
                     self.define(
                         *def_id,
                         VarState {
-                            ownership,
+                            ownership: ty.default_ownership(),
                             ty: ty.clone(),
                             moved: false,
                             borrow_count: 0,
@@ -230,8 +206,7 @@ impl OwnershipVerifier {
                     self.verify_expr(e);
                 }
             }
-            Stmt::Drop(def_id, _, span) => {
-                // Verify the variable exists and isn't already moved
+            Stmt::Drop(def_id, _, _, span) => {
                 if let Some(state) = self.lookup(*def_id) {
                     if state.moved {
                         self.diagnostics.push(OwnershipDiag {
@@ -276,7 +251,6 @@ impl OwnershipVerifier {
 
             ExprKind::Call(_, _, args) => {
                 for a in args {
-                    // Owned arguments are moved into the call
                     if let ExprKind::Var(def_id, name) = &a.kind {
                         self.check_use(*def_id, name, a.span);
                         self.record_move(*def_id, a.span);
@@ -381,7 +355,7 @@ impl OwnershipVerifier {
                     self.define(
                         p.def_id,
                         VarState {
-                            ownership: ownership_for_type(&p.ty),
+                            ownership: p.ty.default_ownership(),
                             ty: p.ty.clone(),
                             moved: false,
                             borrow_count: 0,
@@ -396,7 +370,6 @@ impl OwnershipVerifier {
 
             ExprKind::Ref(inner) => {
                 self.verify_expr(inner);
-                // Track borrow
                 if let ExprKind::Var(def_id, _) = &inner.kind {
                     self.record_borrow(*def_id, false, expr.span);
                 }
@@ -434,7 +407,7 @@ impl OwnershipVerifier {
                 self.define(
                     *def_id,
                     VarState {
-                        ownership: ownership_for_type(ty),
+                        ownership: ty.default_ownership(),
                         ty: ty.clone(),
                         moved: false,
                         borrow_count: 0,
@@ -462,9 +435,6 @@ impl OwnershipVerifier {
             }
         }
     }
-
-    // ── Scope management ─────────────────────────────────────────
-
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -496,9 +466,6 @@ impl OwnershipVerifier {
         }
         None
     }
-
-    // ── Ownership checks ─────────────────────────────────────────
-
     fn check_use(&mut self, id: DefId, name: &str, span: crate::ast::Span) {
         if id == DefId::BUILTIN {
             return;
@@ -518,7 +485,6 @@ impl OwnershipVerifier {
     }
 
     fn record_borrow(&mut self, id: DefId, mutable: bool, span: crate::ast::Span) {
-        // Read state first to avoid aliased &mut self
         let state_snapshot = self.lookup(id).cloned();
         let Some(state) = state_snapshot else { return };
 
@@ -546,8 +512,7 @@ impl OwnershipVerifier {
                 self.diagnostics.push(OwnershipDiag {
                     kind: DiagKind::DoubleMutableBorrow,
                     span,
-                    message: "cannot immutably borrow: already mutably borrowed"
-                        .into(),
+                    message: "cannot immutably borrow: already mutably borrowed".into(),
                 });
             }
             if let Some(s) = self.lookup_mut(id) {
@@ -559,43 +524,19 @@ impl OwnershipVerifier {
     fn check_scope_drops(&self) {
         if let Some(scope) = self.scopes.last() {
             for (_, state) in scope {
-                // Owned values that weren't moved should be dropped.
-                // This is a verification pass: if ownership semantics
-                // require an explicit Drop node and none was inserted,
-                // emit a warning. For now, this validates the invariant
-                // that owned, non-moved, non-trivial values have a
-                // matching Drop or are consumed.
                 if state.ownership == Ownership::Owned
                     && !state.moved
-                    && !Self::is_trivially_droppable(&state.ty)
-                {
-                    // This is where drop elaboration will insert Stmt::Drop.
-                    // For now we track the state for future use.
-                }
+                    && !state.ty.is_trivially_droppable()
+                {}
             }
         }
     }
-
-    fn is_trivially_droppable(ty: &Type) -> bool {
-        match ty {
-            Type::I8 | Type::I16 | Type::I32 | Type::I64
-            | Type::U8 | Type::U16 | Type::U32 | Type::U64
-            | Type::F32 | Type::F64 | Type::Bool | Type::Void => true,
-            Type::Array(inner, _) => Self::is_trivially_droppable(inner),
-            Type::Tuple(tys) => tys.iter().all(|t| Self::is_trivially_droppable(t)),
-            Type::Ptr(_) => true,
-            _ => false,
-        }
-    }
-
-    /// Record that a value has been moved (ownership transferred).
-    /// Only applies to Owned values — Rc uses refcounting, borrows don't move.
     fn record_move(&mut self, id: DefId, span: crate::ast::Span) {
         if id == DefId::BUILTIN {
             return;
         }
         if let Some(state) = self.lookup(id).cloned() {
-            if state.ownership == Ownership::Owned && !Self::is_trivially_droppable(&state.ty) {
+            if state.ownership == Ownership::Owned && !state.ty.is_trivially_droppable() {
                 if let Some(s) = self.lookup_mut(id) {
                     s.moved = true;
                     s.move_span = Some(span);
@@ -604,12 +545,9 @@ impl OwnershipVerifier {
         }
     }
 
-    /// Check if a return expression borrows a local value (dangling reference).
     fn check_return_borrows(&mut self, expr: &Expr, span: crate::ast::Span) {
         if let ExprKind::Ref(inner) = &expr.kind {
             if let ExprKind::Var(def_id, name) = &inner.kind {
-                // If the variable is defined in the current function scope,
-                // returning a reference to it creates a dangling pointer.
                 if let Some(state) = self.lookup(*def_id) {
                     if state.ownership == Ownership::Owned {
                         self.diagnostics.push(OwnershipDiag {
@@ -626,15 +564,6 @@ impl OwnershipVerifier {
         }
     }
 }
-
-fn ownership_for_type(ty: &Type) -> Ownership {
-    match ty {
-        Type::Rc(_) => Ownership::Rc,
-        Type::Ptr(_) => Ownership::Raw,
-        _ => Ownership::Owned,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,7 +587,11 @@ mod tests {
     #[test]
     fn test_simple_program_no_errors() {
         let diags = verify("*main()\n    x is 42\n    log(x)\n");
-        assert!(diags.is_empty(), "expected no ownership errors, got: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "expected no ownership errors, got: {:?}",
+            diags
+        );
     }
 
     #[test]

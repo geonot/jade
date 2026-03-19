@@ -451,16 +451,46 @@ impl Parser {
 
     fn aug_op(&mut self) -> Option<BinOp> {
         match self.peek() {
-            Token::PlusEq => { self.advance(); Some(BinOp::Add) }
-            Token::MinusEq => { self.advance(); Some(BinOp::Sub) }
-            Token::StarEq => { self.advance(); Some(BinOp::Mul) }
-            Token::SlashEq => { self.advance(); Some(BinOp::Div) }
-            Token::PercentEq => { self.advance(); Some(BinOp::Mod) }
-            Token::AmpEq => { self.advance(); Some(BinOp::BitAnd) }
-            Token::PipeEq => { self.advance(); Some(BinOp::BitOr) }
-            Token::CaretEq => { self.advance(); Some(BinOp::BitXor) }
-            Token::ShlEq => { self.advance(); Some(BinOp::Shl) }
-            Token::ShrEq => { self.advance(); Some(BinOp::Shr) }
+            Token::PlusEq => {
+                self.advance();
+                Some(BinOp::Add)
+            }
+            Token::MinusEq => {
+                self.advance();
+                Some(BinOp::Sub)
+            }
+            Token::StarEq => {
+                self.advance();
+                Some(BinOp::Mul)
+            }
+            Token::SlashEq => {
+                self.advance();
+                Some(BinOp::Div)
+            }
+            Token::PercentEq => {
+                self.advance();
+                Some(BinOp::Mod)
+            }
+            Token::AmpEq => {
+                self.advance();
+                Some(BinOp::BitAnd)
+            }
+            Token::PipeEq => {
+                self.advance();
+                Some(BinOp::BitOr)
+            }
+            Token::CaretEq => {
+                self.advance();
+                Some(BinOp::BitXor)
+            }
+            Token::ShlEq => {
+                self.advance();
+                Some(BinOp::Shl)
+            }
+            Token::ShrEq => {
+                self.advance();
+                Some(BinOp::Shr)
+            }
             _ => None,
         }
     }
@@ -473,12 +503,7 @@ impl Parser {
             let rsp = rhs.span();
             return Ok(Stmt::Bind(Bind {
                 name: name.clone(),
-                value: Expr::BinOp(
-                    Box::new(Expr::Ident(name, sp)),
-                    op,
-                    Box::new(rhs),
-                    rsp,
-                ),
+                value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
                 ty: None,
                 span: sp,
             }));

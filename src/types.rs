@@ -57,6 +57,36 @@ impl Type {
             _ => 64,
         }
     }
+
+    pub fn is_trivially_droppable(&self) -> bool {
+        match self {
+            Self::I8
+            | Self::I16
+            | Self::I32
+            | Self::I64
+            | Self::U8
+            | Self::U16
+            | Self::U32
+            | Self::U64
+            | Self::F32
+            | Self::F64
+            | Self::Bool
+            | Self::Void
+            | Self::Inferred
+            | Self::Ptr(_) => true,
+            Self::Array(inner, _) => inner.is_trivially_droppable(),
+            Self::Tuple(tys) => tys.iter().all(|t| t.is_trivially_droppable()),
+            _ => false,
+        }
+    }
+
+    pub fn default_ownership(&self) -> crate::hir::Ownership {
+        match self {
+            Self::Rc(_) => crate::hir::Ownership::Rc,
+            Self::Ptr(_) => crate::hir::Ownership::Raw,
+            _ => crate::hir::Ownership::Owned,
+        }
+    }
 }
 
 impl std::fmt::Display for Type {

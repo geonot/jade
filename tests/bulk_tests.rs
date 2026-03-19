@@ -2294,7 +2294,10 @@ fn b_for_in_nested_if() {
 
 #[test]
 fn b_interp_str_var() {
-    expect("*main()\n    name is 'world'\n    log('hello {name}')\n", "hello world");
+    expect(
+        "*main()\n    name is 'world'\n    log('hello {name}')\n",
+        "hello world",
+    );
 }
 #[test]
 fn b_interp_int_var() {
@@ -2310,7 +2313,10 @@ fn b_interp_expr() {
 }
 #[test]
 fn b_interp_multi() {
-    expect("*main()\n    a is 'x'\n    b is 1\n    log('{a}={b}')\n", "x=1");
+    expect(
+        "*main()\n    a is 'x'\n    b is 1\n    log('{a}={b}')\n",
+        "x=1",
+    );
 }
 #[test]
 fn b_interp_start() {
@@ -2334,7 +2340,10 @@ fn b_interp_bool() {
 }
 #[test]
 fn b_interp_complex_expr() {
-    expect("*main()\n    x is 10\n    log('result={x * 2 + 1}')\n", "result=21");
+    expect(
+        "*main()\n    x is 10\n    log('result={x * 2 + 1}')\n",
+        "result=21",
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2383,7 +2392,10 @@ fn b_aug_shr() {
 }
 #[test]
 fn b_aug_chain() {
-    expect("*main()\n    x is 1\n    x += 9\n    x *= 3\n    x -= 6\n    log(x)\n", "24");
+    expect(
+        "*main()\n    x is 1\n    x += 9\n    x *= 3\n    x -= 6\n    log(x)\n",
+        "24",
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2404,11 +2416,17 @@ fn b_str_contains_empty() {
 }
 #[test]
 fn b_str_starts_with_yes() {
-    expect("*main()\n    log('hello world'.starts_with('hello'))\n", "1");
+    expect(
+        "*main()\n    log('hello world'.starts_with('hello'))\n",
+        "1",
+    );
 }
 #[test]
 fn b_str_starts_with_no() {
-    expect("*main()\n    log('hello world'.starts_with('world'))\n", "0");
+    expect(
+        "*main()\n    log('hello world'.starts_with('world'))\n",
+        "0",
+    );
 }
 #[test]
 fn b_str_ends_with_yes() {
@@ -2436,58 +2454,88 @@ fn b_str_slice_mid() {
 }
 #[test]
 fn b_str_slice_len() {
-    expect("*main()\n    s is 'abcdef'.slice(2, 5)\n    log(s.length)\n", "3");
+    expect(
+        "*main()\n    s is 'abcdef'.slice(2, 5)\n    log(s.length)\n",
+        "3",
+    );
 }
 
 // --- Array element assignment ---
 
 #[test]
 fn b_arr_assign_basic() {
-    expect("*main()\n    arr is [10, 20, 30]\n    arr[1] is 99\n    log(arr[1])\n", "99");
+    expect(
+        "*main()\n    arr is [10, 20, 30]\n    arr[1] is 99\n    log(arr[1])\n",
+        "99",
+    );
 }
 
 #[test]
 fn b_arr_assign_first() {
-    expect("*main()\n    arr is [1, 2, 3]\n    arr[0] is 42\n    log(arr[0])\n", "42");
+    expect(
+        "*main()\n    arr is [1, 2, 3]\n    arr[0] is 42\n    log(arr[0])\n",
+        "42",
+    );
 }
 
 #[test]
 fn b_arr_assign_last() {
-    expect("*main()\n    arr is [1, 2, 3]\n    arr[2] is 77\n    log(arr[2])\n", "77");
+    expect(
+        "*main()\n    arr is [1, 2, 3]\n    arr[2] is 77\n    log(arr[2])\n",
+        "77",
+    );
 }
 
 #[test]
 fn b_arr_assign_expr() {
-    expect("*main()\n    arr is [10, 20, 30]\n    arr[1] is arr[0] + arr[2]\n    log(arr[1])\n", "40");
+    expect(
+        "*main()\n    arr is [10, 20, 30]\n    arr[1] is arr[0] + arr[2]\n    log(arr[1])\n",
+        "40",
+    );
 }
 
 #[test]
 fn b_arr_assign_neg() {
-    expect("*main()\n    arr is [1, 2, 3, 4, 5]\n    arr[-1] is 99\n    log(arr[4])\n", "99");
+    expect(
+        "*main()\n    arr is [1, 2, 3, 4, 5]\n    arr[-1] is 99\n    log(arr[4])\n",
+        "99",
+    );
 }
 
 // --- Struct field assignment ---
 
 #[test]
 fn b_field_assign_basic() {
-    expect("type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    p.x is 42\n    log(p.x)\n", "42");
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    p.x is 42\n    log(p.x)\n",
+        "42",
+    );
 }
 
 #[test]
 fn b_field_assign_both() {
-    expect("type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 1, y is 2)\n    p.x is 10\n    p.y is 20\n    log(p.x + p.y)\n", "30");
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 1, y is 2)\n    p.x is 10\n    p.y is 20\n    log(p.x + p.y)\n",
+        "30",
+    );
 }
 
 // --- Negative array indexing ---
 
 #[test]
 fn b_neg_idx_last() {
-    expect("*main()\n    arr is [10, 20, 30, 40, 50]\n    log(arr[-1])\n", "50");
+    expect(
+        "*main()\n    arr is [10, 20, 30, 40, 50]\n    log(arr[-1])\n",
+        "50",
+    );
 }
 
 #[test]
 fn b_neg_idx_second_last() {
-    expect("*main()\n    arr is [10, 20, 30, 40, 50]\n    log(arr[-2])\n", "40");
+    expect(
+        "*main()\n    arr is [10, 20, 30, 40, 50]\n    log(arr[-2])\n",
+        "40",
+    );
 }
 
 #[test]
@@ -2528,25 +2576,40 @@ fn b_str_len_empty() {
 
 #[test]
 fn b_tuple_bind_basic() {
-    expect("*main()\n    x, y is (10, 20)\n    log(x)\n    log(y)\n", "10\n20");
+    expect(
+        "*main()\n    x, y is (10, 20)\n    log(x)\n    log(y)\n",
+        "10\n20",
+    );
 }
 
 #[test]
 fn b_tuple_bind_triple() {
-    expect("*main()\n    a, b, c is (1, 2, 3)\n    log(a + b + c)\n", "6");
+    expect(
+        "*main()\n    a, b, c is (1, 2, 3)\n    log(a + b + c)\n",
+        "6",
+    );
 }
 
 #[test]
 fn b_tuple_bind_fn_nullary() {
-    expect("*pair()\n    (10, 20)\n\n*main()\n    x, y is pair()\n    log(x)\n    log(y)\n", "10\n20");
+    expect(
+        "*pair()\n    (10, 20)\n\n*main()\n    x, y is pair()\n    log(x)\n    log(y)\n",
+        "10\n20",
+    );
 }
 
 #[test]
 fn b_tuple_bind_fn_args() {
-    expect("*divmod(a, b)\n    (a / b, a % b)\n\n*main()\n    q, r is divmod(17, 5)\n    log(q)\n    log(r)\n", "3\n2");
+    expect(
+        "*divmod(a, b)\n    (a / b, a % b)\n\n*main()\n    q, r is divmod(17, 5)\n    log(q)\n    log(r)\n",
+        "3\n2",
+    );
 }
 
 #[test]
 fn b_tuple_bind_expr() {
-    expect("*main()\n    x, y is (3 + 4, 10 * 2)\n    log(x)\n    log(y)\n", "7\n20");
+    expect(
+        "*main()\n    x, y is (3 + 4, 10 * 2)\n    log(x)\n    log(y)\n",
+        "7\n20",
+    );
 }
