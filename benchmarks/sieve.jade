@@ -1,0 +1,18 @@
+*is_prime(n)
+    if n < 2
+        return 0
+    i is 2
+    while i * i <= n
+        if n % i equals 0
+            return 0
+        i is i + 1
+    return 1
+
+*main()
+    count is 0
+    n is 2
+    while n < 1000000
+        if is_prime(n)
+            count is count + 1
+        n is n + 1
+    log(count)

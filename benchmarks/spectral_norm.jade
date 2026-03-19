@@ -1,0 +1,20 @@
+*a_elem(i: i64, j: i64) -> i64
+    ((i + j) * (i + j + 1)) / 2 + i + 1
+
+*main() -> i32
+    n is 1000
+    sum is 0
+    iter is 0
+    while iter < 500
+        i is 0
+        while i < n
+            j is 0
+            acc is 0
+            while j < n
+                acc is acc + a_elem(i, j) * (j + 1)
+                j is j + 1
+            sum is sum + acc % 1000000
+            i is i + 1
+        iter is iter + 1
+    log(sum)
+    0

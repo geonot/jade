@@ -1,0 +1,21 @@
+enum Op
+    Add(i64, i64)
+    Mul(i64, i64)
+    Neg(i64)
+
+*eval(op: Op) -> i64
+    match op
+        Add(a, b) ? a + b
+        Mul(a, b) ? a * b
+        Neg(a) ? 0 - a
+
+*main() -> i32
+    total is 0
+    i is 0
+    while i < 5000000
+        total is total + eval(Add(i, i + 1))
+        total is total + eval(Mul(i, 2))
+        total is total + eval(Neg(i))
+        i is i + 1
+    log(total)
+    0

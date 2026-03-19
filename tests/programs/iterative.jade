@@ -1,0 +1,22 @@
+*fib(n)
+    a is 0
+    b is 1
+    i is 0
+    while i < n
+        t is a + b
+        a is b
+        b is t
+        i is i + 1
+    return a
+
+*sum_to(n)
+    total is 0
+    for i in n
+        total is total + i
+    return total
+
+*main()
+    log(fib(10))
+    log(fib(20))
+    log(sum_to(100))
+    log(sum_to(1000))

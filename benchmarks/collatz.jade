@@ -1,0 +1,22 @@
+*collatz_steps(n)
+    steps is 0
+    while n isnt 1
+        if n % 2 equals 0
+            n is n / 2
+        else
+            n is 3 * n + 1
+        steps is steps + 1
+    return steps
+
+*main()
+    max_steps is 0
+    max_n is 0
+    n is 1
+    while n < 1000000
+        s is collatz_steps(n)
+        if s > max_steps
+            max_steps is s
+            max_n is n
+        n is n + 1
+    log(max_n)
+    log(max_steps)

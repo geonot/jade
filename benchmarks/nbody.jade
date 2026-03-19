@@ -1,0 +1,75 @@
+*dist_sq(ax: i64, ay: i64, az: i64, bx: i64, py: i64, bz: i64) -> i64
+    dx is ax - bx
+    dy is ay - py
+    dz is az - bz
+    dx * dx + dy * dy + dz * dz
+
+*main() -> i32
+    x0 is 0
+    y0 is 0
+    z0 is 0
+    vx0 is 0
+    vy0 is 0
+    vz0 is 100
+    m0 is 1000
+    x1 is 1000
+    y1 is 0
+    z1 is 0
+    vx1 is 0
+    vy1 is 50
+    vz1 is 0
+    m1 is 10
+    x2 is 0
+    y2 is 1000
+    z2 is 0
+    vx2 is -50
+    vy2 is 0
+    vz2 is 0
+    m2 is 10
+    x3 is 500
+    y3 is 500
+    z3 is 500
+    vx3 is -20
+    vy3 is 20
+    vz3 is -20
+    m3 is 5
+    x4 is -500
+    y4 is -500
+    z4 is -500
+    vx4 is 30
+    vy4 is -10
+    vz4 is 30
+    m4 is 5
+
+    steps is 10000000
+
+    step is 0
+    while step < steps
+        d is dist_sq(x0, y0, z0, x1, y1, z1) + 1
+        vx1 is vx1 + (x0 - x1) * m0 / d
+        vy1 is vy1 + (y0 - y1) * m0 / d
+
+        d is dist_sq(x0, y0, z0, x2, y2, z2) + 1
+        vx2 is vx2 + (x0 - x2) * m0 / d
+        vy2 is vy2 + (y0 - y2) * m0 / d
+
+        x0 is x0 + vx0
+        y0 is y0 + vy0
+        z0 is z0 + vz0
+        x1 is x1 + vx1
+        y1 is y1 + vy1
+        z1 is z1 + vz1
+        x2 is x2 + vx2
+        y2 is y2 + vy2
+        z2 is z2 + vz2
+        x3 is x3 + vx3
+        y3 is y3 + vy3
+        z3 is z3 + vz3
+        x4 is x4 + vx4
+        y4 is y4 + vy4
+        z4 is z4 + vz4
+
+        step is step + 1
+
+    log(x0 + x1 + x2 + x3 + x4)
+    0

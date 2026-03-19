@@ -1,0 +1,151 @@
+================================================================================
+Hello world
+================================================================================
+
+*main()
+    log('hello')
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    name: (identifier)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (log_expression
+            value: (string
+              (string_content))))))))
+
+================================================================================
+Binding
+================================================================================
+
+*main()
+    x is 42
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    name: (identifier)
+    body: (block
+      (binding
+        name: (identifier)
+        value: (integer)))))
+
+================================================================================
+If elif else
+================================================================================
+
+*main()
+    if x > 0
+        log(1)
+    elif x < 0
+        log(2)
+    else
+        log(0)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    name: (identifier)
+    body: (block
+      (if_statement
+        condition: (binary_expression
+          left: (identifier)
+          operator: (operator)
+          right: (integer))
+        body: (block
+          (expression_statement
+            (call_expression
+              function: (log_expression
+                value: (integer)))))
+        (elif_clause
+          condition: (binary_expression
+            left: (identifier)
+            operator: (operator)
+            right: (integer))
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (log_expression
+                  value: (integer))))))
+        (else_clause
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (log_expression
+                  value: (integer))))))))))
+
+================================================================================
+For loop
+================================================================================
+
+*main()
+    for i in 10
+        log(i)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    name: (identifier)
+    body: (block
+      (for_statement
+        variable: (identifier)
+        iterable: (integer)
+        body: (block
+          (expression_statement
+            (call_expression
+              function: (log_expression
+                value: (identifier)))))))))
+
+================================================================================
+Type definition
+================================================================================
+
+type Point
+    x: i64
+    y: i64
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_definition
+    name: (identifier)
+    body: (type_body
+      (field_definition
+        name: (identifier)
+        type: (type_annotation
+          (identifier)))
+      (field_definition
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))))
+
+================================================================================
+Enum definition
+================================================================================
+
+enum Direction
+    North
+    South
+    East
+    West
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_definition
+    name: (identifier)
+    body: (enum_body
+      (variant_definition
+        name: (identifier))
+      (variant_definition
+        name: (identifier))
+      (variant_definition
+        name: (identifier))
+      (variant_definition
+        name: (identifier)))))

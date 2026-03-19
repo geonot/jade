@@ -1,0 +1,10 @@
+*ack(m: i32, n: i32) -> i32
+    if m equals 0
+        return n + 1
+    if n equals 0
+        return ack(m - 1, 1)
+    return ack(m - 1, ack(m, n - 1))
+
+*main() -> i32
+    log(ack(3, 10))
+    return 0

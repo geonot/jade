@@ -1,0 +1,27 @@
+{
+  "grammars": [
+    {
+      "name": "jade",
+      "camelcase": "Jade",
+      "scope": "source.jade",
+      "path": ".",
+      "file-types": ["jade"],
+      "highlights": "queries/highlights.scm",
+      "injection-regex": "^jade$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for the Jade programming language",
+    "authors": [{ "name": "Jade Contributors" }]
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}

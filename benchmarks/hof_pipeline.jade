@@ -1,0 +1,18 @@
+*double(x: i64) -> i64
+    x * 2
+
+*add_one(x: i64) -> i64
+    x + 1
+
+*apply(f: (i64) -> i64, x: i64) -> i64
+    f(x)
+
+*main() -> i32
+    total is 0
+    i is 0
+    while i < 10000000
+        total is total + apply(double, i)
+        total is total + (i ~ double ~ add_one)
+        i is i + 1
+    log(total)
+    0

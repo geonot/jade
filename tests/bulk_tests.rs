@@ -1,0 +1,2552 @@
+use std::path::PathBuf;
+use std::process::Command;
+
+fn jadec() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
+}
+
+fn compile_and_run(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let status = Command::new(jadec())
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "binary exited with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn expect(src: &str, expected: &str) {
+    let out = compile_and_run(src).trim_end().to_string();
+    assert_eq!(out, expected, "\nsource:\n{src}");
+}
+
+fn expect_compile_fail(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let output = Command::new(jadec())
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("jadec failed to start");
+    assert!(
+        !output.status.success(),
+        "expected compilation to fail for:\n{src}"
+    );
+    String::from_utf8(output.stderr).unwrap()
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 1: Integer arithmetic
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_add_neg_pos() {
+    expect("*main()\n    log(-3 + 10)\n", "7");
+}
+#[test]
+fn b_sub_to_neg() {
+    expect("*main()\n    log(3 - 10)\n", "-7");
+}
+#[test]
+fn b_mul_neg_neg() {
+    expect("*main()\n    log(-3 * -4)\n", "12");
+}
+#[test]
+fn b_nested_parens() {
+    expect("*main()\n    log((2 + 3) * (4 - 1))\n", "15");
+}
+#[test]
+fn b_triple_add() {
+    expect("*main()\n    log(1 + 2 + 3 + 4 + 5)\n", "15");
+}
+#[test]
+fn b_triple_mul() {
+    expect("*main()\n    log(2 * 3 * 4)\n", "24");
+}
+#[test]
+fn b_precedence_1() {
+    expect("*main()\n    log(2 + 3 * 4)\n", "14");
+}
+#[test]
+fn b_precedence_2() {
+    expect("*main()\n    log(10 - 8 / 2)\n", "6");
+}
+#[test]
+fn b_big_mul() {
+    expect("*main()\n    log(100000 * 100000)\n", "10000000000");
+}
+#[test]
+fn b_left_assoc_sub() {
+    expect("*main()\n    log(10 - 3 - 2)\n", "5");
+}
+#[test]
+fn b_zero_add() {
+    expect("*main()\n    log(0 + 0)\n", "0");
+}
+#[test]
+fn b_one_mul() {
+    expect("*main()\n    log(42 * 1)\n", "42");
+}
+#[test]
+fn b_identity_sub() {
+    expect("*main()\n    log(99 - 0)\n", "99");
+}
+#[test]
+fn b_div_exact() {
+    expect("*main()\n    log(100 / 25)\n", "4");
+}
+#[test]
+fn b_mod_zero_num() {
+    expect("*main()\n    log(0 % 7)\n", "0");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 2: Floating point
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_f64_add() {
+    expect("*main()\n    log(1.5 + 2.5)\n", "4.000000");
+}
+#[test]
+fn b_f64_mul() {
+    expect("*main()\n    log(3.0 * 2.0)\n", "6.000000");
+}
+#[test]
+fn b_f64_div() {
+    expect("*main()\n    log(10.0 / 4.0)\n", "2.500000");
+}
+#[test]
+fn b_f64_sub() {
+    expect("*main()\n    log(5.5 - 2.25)\n", "3.250000");
+}
+#[test]
+fn b_f64_var() {
+    expect(
+        "*main()\n    x is 1.5\n    y is 2.5\n    log(x + y)\n",
+        "4.000000",
+    );
+}
+#[test]
+fn b_f64_neg() {
+    expect("*main()\n    log(-3.5 + 10.0)\n", "6.500000");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 3: Boolean ops
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_bool_true() {
+    expect("*main()\n    log(true)\n", "1");
+}
+#[test]
+fn b_bool_false() {
+    expect("*main()\n    log(false)\n", "0");
+}
+#[test]
+fn b_and_tt() {
+    expect("*main()\n    log(true and true)\n", "1");
+}
+#[test]
+fn b_and_tf() {
+    expect("*main()\n    log(true and false)\n", "0");
+}
+#[test]
+fn b_and_ff() {
+    expect("*main()\n    log(false and false)\n", "0");
+}
+#[test]
+fn b_or_tf() {
+    expect("*main()\n    log(true or false)\n", "1");
+}
+#[test]
+fn b_or_ft() {
+    expect("*main()\n    log(false or true)\n", "1");
+}
+#[test]
+fn b_or_ff() {
+    expect("*main()\n    log(false or false)\n", "0");
+}
+#[test]
+fn b_not_true() {
+    expect("*main()\n    log(not true)\n", "0");
+}
+#[test]
+fn b_not_false() {
+    expect("*main()\n    log(not false)\n", "1");
+}
+#[test]
+fn b_and_or_chain() {
+    expect("*main()\n    log(true and true or false)\n", "1");
+}
+#[test]
+fn b_not_and() {
+    expect("*main()\n    log(not false and true)\n", "1");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 4: Comparisons (equals / isnt)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_eq_true() {
+    expect("*main()\n    log(5 equals 5)\n", "1");
+}
+#[test]
+fn b_eq_false() {
+    expect("*main()\n    log(5 equals 6)\n", "0");
+}
+#[test]
+fn b_ne_true() {
+    expect("*main()\n    log(5 isnt 6)\n", "1");
+}
+#[test]
+fn b_ne_false() {
+    expect("*main()\n    log(5 isnt 5)\n", "0");
+}
+#[test]
+fn b_lt_true() {
+    expect("*main()\n    log(3 < 5)\n", "1");
+}
+#[test]
+fn b_lt_false() {
+    expect("*main()\n    log(5 < 3)\n", "0");
+}
+#[test]
+fn b_gt_true() {
+    expect("*main()\n    log(5 > 3)\n", "1");
+}
+#[test]
+fn b_gt_false() {
+    expect("*main()\n    log(3 > 5)\n", "0");
+}
+#[test]
+fn b_le_eq() {
+    expect("*main()\n    log(3 <= 3)\n", "1");
+}
+#[test]
+fn b_le_less() {
+    expect("*main()\n    log(2 <= 3)\n", "1");
+}
+#[test]
+fn b_le_greater() {
+    expect("*main()\n    log(4 <= 3)\n", "0");
+}
+#[test]
+fn b_ge_eq() {
+    expect("*main()\n    log(3 >= 3)\n", "1");
+}
+#[test]
+fn b_ge_greater() {
+    expect("*main()\n    log(4 >= 3)\n", "1");
+}
+#[test]
+fn b_ge_less() {
+    expect("*main()\n    log(2 >= 3)\n", "0");
+}
+#[test]
+fn b_equals_kw() {
+    expect("*main()\n    log(7 equals 7)\n", "1");
+}
+#[test]
+fn b_isnt_kw() {
+    expect("*main()\n    log(7 isnt 8)\n", "1");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 5: Bitwise
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_bit_and() {
+    expect("*main()\n    log(0xFF & 0x0F)\n", "15");
+}
+#[test]
+fn b_bit_or() {
+    expect("*main()\n    log(0xF0 | 0x0F)\n", "255");
+}
+#[test]
+fn b_bit_xor() {
+    expect("*main()\n    log(0xFF ^ 0x0F)\n", "240");
+}
+#[test]
+fn b_shl() {
+    expect("*main()\n    log(1 << 8)\n", "256");
+}
+#[test]
+fn b_shr() {
+    expect("*main()\n    log(256 >> 4)\n", "16");
+}
+#[test]
+fn b_shl_1() {
+    expect("*main()\n    log(1 << 0)\n", "1");
+}
+#[test]
+fn b_shr_1() {
+    expect("*main()\n    log(8 >> 3)\n", "1");
+}
+#[test]
+fn b_and_mask() {
+    expect("*main()\n    log(0b11001100 & 0b10101010)\n", "136");
+}
+#[test]
+fn b_or_combine() {
+    expect("*main()\n    log(0b1100 | 0b0011)\n", "15");
+}
+#[test]
+fn b_xor_toggle() {
+    expect("*main()\n    log(0b1111 ^ 0b1010)\n", "5");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 6: Variables and bindings
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_bind_simple() {
+    expect("*main()\n    x is 42\n    log(x)\n", "42");
+}
+#[test]
+fn b_bind_expr() {
+    expect("*main()\n    x is 2 + 3\n    log(x)\n", "5");
+}
+#[test]
+fn b_reassign() {
+    expect("*main()\n    x is 10\n    x is 20\n    log(x)\n", "20");
+}
+#[test]
+fn b_reassign_arith() {
+    expect("*main()\n    x is 5\n    x is x + 10\n    log(x)\n", "15");
+}
+#[test]
+fn b_multi_bind() {
+    expect(
+        "*main()\n    a is 1\n    b is 2\n    c is a + b\n    log(c)\n",
+        "3",
+    );
+}
+#[test]
+fn b_bind_chain() {
+    expect(
+        "*main()\n    a is 1\n    b is a + 1\n    c is b + 1\n    d is c + 1\n    log(d)\n",
+        "4",
+    );
+}
+#[test]
+fn b_swap() {
+    expect(
+        "*main()\n    a is 1\n    b is 2\n    t is a\n    a is b\n    b is t\n    log(a)\n    log(b)\n",
+        "2\n1",
+    );
+}
+#[test]
+fn b_incr_loop() {
+    expect(
+        "*main()\n    x is 0\n    x is x + 1\n    x is x + 1\n    x is x + 1\n    log(x)\n",
+        "3",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 7: If/elif/else
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_if_true() {
+    expect("*main()\n    if true\n        log(1)\n", "1");
+}
+#[test]
+fn b_if_else() {
+    expect(
+        "*main()\n    if false\n        log(1)\n    else\n        log(0)\n",
+        "0",
+    );
+}
+#[test]
+fn b_elif_1() {
+    expect(
+        "*main()\n    x is 1\n    if x equals 1\n        log(10)\n    elif x equals 2\n        log(20)\n    else\n        log(30)\n",
+        "10",
+    );
+}
+#[test]
+fn b_elif_2() {
+    expect(
+        "*main()\n    x is 2\n    if x equals 1\n        log(10)\n    elif x equals 2\n        log(20)\n    else\n        log(30)\n",
+        "20",
+    );
+}
+#[test]
+fn b_elif_else() {
+    expect(
+        "*main()\n    x is 5\n    if x equals 1\n        log(10)\n    elif x equals 2\n        log(20)\n    else\n        log(30)\n",
+        "30",
+    );
+}
+#[test]
+fn b_nested_if() {
+    expect(
+        "*main()\n    x is 5\n    if x > 0\n        if x > 3\n            log(1)\n        else\n            log(0)\n",
+        "1",
+    );
+}
+#[test]
+fn b_if_cmp_expr() {
+    expect(
+        "*main()\n    a is 10\n    b is 20\n    if a < b\n        log(a)\n    else\n        log(b)\n",
+        "10",
+    );
+}
+#[test]
+fn b_if_and() {
+    expect(
+        "*main()\n    x is 5\n    if x > 0 and x < 10\n        log(1)\n    else\n        log(0)\n",
+        "1",
+    );
+}
+#[test]
+fn b_if_or() {
+    expect(
+        "*main()\n    x is 15\n    if x < 0 or x > 10\n        log(1)\n    else\n        log(0)\n",
+        "1",
+    );
+}
+#[test]
+fn b_if_multi_elif() {
+    expect(
+        "*main()\n    x is 4\n    if x equals 1\n        log(1)\n    elif x equals 2\n        log(2)\n    elif x equals 3\n        log(3)\n    elif x equals 4\n        log(4)\n    else\n        log(0)\n",
+        "4",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 8: While loops
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_while_count() {
+    expect(
+        "*main()\n    i is 0\n    while i < 5\n        i is i + 1\n    log(i)\n",
+        "5",
+    );
+}
+#[test]
+fn b_while_sum() {
+    expect(
+        "*main()\n    sum is 0\n    i is 1\n    while i <= 10\n        sum is sum + i\n        i is i + 1\n    log(sum)\n",
+        "55",
+    );
+}
+#[test]
+fn b_while_no_iter() {
+    expect(
+        "*main()\n    i is 10\n    while i < 0\n        i is i - 1\n    log(i)\n",
+        "10",
+    );
+}
+#[test]
+fn b_while_break() {
+    expect(
+        "*main()\n    i is 0\n    while true\n        i is i + 1\n        if i equals 7\n            break\n    log(i)\n",
+        "7",
+    );
+}
+#[test]
+fn b_while_continue() {
+    expect(
+        "*main()\n    sum is 0\n    i is 0\n    while i < 10\n        i is i + 1\n        if i % 2 equals 0\n            continue\n        sum is sum + i\n    log(sum)\n",
+        "25",
+    );
+}
+#[test]
+fn b_while_nested() {
+    expect(
+        "*main()\n    sum is 0\n    i is 0\n    while i < 3\n        j is 0\n        while j < 4\n            sum is sum + 1\n            j is j + 1\n        i is i + 1\n    log(sum)\n",
+        "12",
+    );
+}
+#[test]
+fn b_while_countdown() {
+    expect(
+        "*main()\n    i is 5\n    while i > 0\n        i is i - 1\n    log(i)\n",
+        "0",
+    );
+}
+#[test]
+fn b_while_mul_acc() {
+    expect(
+        "*main()\n    prod is 1\n    i is 1\n    while i <= 5\n        prod is prod * i\n        i is i + 1\n    log(prod)\n",
+        "120",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 9: For loops
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_for_basic() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 5\n        sum is sum + i\n    log(sum)\n",
+        "10",
+    );
+}
+#[test]
+fn b_for_range() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 6\n        sum is sum + i\n    log(sum)\n",
+        "15",
+    );
+}
+#[test]
+fn b_for_step() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 0 to 10 by 2\n        sum is sum + i\n    log(sum)\n",
+        "20",
+    );
+}
+#[test]
+fn b_for_nested() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 3\n        for j in 4\n            sum is sum + 1\n    log(sum)\n",
+        "12",
+    );
+}
+#[test]
+fn b_for_zero() {
+    expect(
+        "*main()\n    for i in 0\n        log(i)\n    log(99)\n",
+        "99",
+    );
+}
+#[test]
+fn b_for_one() {
+    expect("*main()\n    for i in 1\n        log(i)\n", "0");
+}
+#[test]
+fn b_for_range_one() {
+    expect("*main()\n    for i in 5 to 6\n        log(i)\n", "5");
+}
+#[test]
+fn b_for_range_empty() {
+    expect(
+        "*main()\n    for i in 5 to 5\n        log(i)\n    log(99)\n",
+        "99",
+    );
+}
+#[test]
+fn b_for_step_3() {
+    expect(
+        "*main()\n    for i in 0 to 12 by 3\n        log(i)\n",
+        "0\n3\n6\n9",
+    );
+}
+#[test]
+fn b_for_triple_nest() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 2\n        for j in 2\n            for k in 2\n                sum is sum + 1\n    log(sum)\n",
+        "8",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 10: Loop/break
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_loop_break() {
+    expect(
+        "*main()\n    i is 0\n    loop\n        i is i + 1\n        if i equals 10\n            break\n    log(i)\n",
+        "10",
+    );
+}
+#[test]
+fn b_loop_break_early() {
+    expect(
+        "*main()\n    i is 0\n    loop\n        if i equals 0\n            break\n        i is i + 1\n    log(i)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 11: Functions
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_fn_basic() {
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "7",
+    );
+}
+#[test]
+fn b_fn_void() {
+    expect("*greet()\n    log(99)\n\n*main()\n    greet()\n", "99");
+}
+#[test]
+fn b_fn_recursive() {
+    expect(
+        "*fact(n: i64) -> i64\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main()\n    log(fact(5))\n",
+        "120",
+    );
+}
+#[test]
+fn b_fn_nested_call() {
+    expect(
+        "*f(x: i64) -> i64\n    x + 1\n\n*g(x: i64) -> i64\n    f(x) * 2\n\n*main()\n    log(g(5))\n",
+        "12",
+    );
+}
+#[test]
+fn b_fn_early_return() {
+    expect(
+        "*check(x: i64) -> i64\n    if x > 0\n        return 1\n    0\n\n*main()\n    log(check(5))\n    log(check(-1))\n",
+        "1\n0",
+    );
+}
+#[test]
+fn b_fn_chain() {
+    expect(
+        "*a(x: i64) -> i64\n    x + 1\n\n*b(x: i64) -> i64\n    x * 2\n\n*c(x: i64) -> i64\n    x - 3\n\n*main()\n    log(c(b(a(5))))\n",
+        "9",
+    );
+}
+#[test]
+fn b_fn_multi_return() {
+    expect(
+        "*abs_val(x: i64) -> i64\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs_val(-5))\n    log(abs_val(3))\n",
+        "5\n3",
+    );
+}
+#[test]
+fn b_mutual_recursion() {
+    expect(
+        "*is_even(n: i64) -> i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n: i64) -> i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(10))\n",
+        "1\n0",
+    );
+}
+#[test]
+fn b_fn_ten_params() {
+    expect(
+        "*sum5(a: i64, b: i64, c: i64, d: i64, e: i64) -> i64\n    a + b + c + d + e\n\n*main()\n    log(sum5(1, 2, 3, 4, 5))\n",
+        "15",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 12: Closures
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_lambda_inline() {
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(*fn(x: i64) -> i64 x * 3, 14))\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_lambda_var() {
+    expect(
+        "*main() -> i32\n    g is *fn(x: i64) -> i64 x + 100\n    log(g(42))\n    0\n",
+        "142",
+    );
+}
+#[test]
+fn b_closure_single() {
+    expect(
+        "*main() -> i32\n    x is 10\n    f is *fn(y: i64) -> i64 x + y\n    log(f(5))\n    0\n",
+        "15",
+    );
+}
+#[test]
+fn b_closure_multi() {
+    expect(
+        "*main() -> i32\n    a is 10\n    b is 20\n    f is *fn(x: i64) -> i64 a + b + x\n    log(f(5))\n    0\n",
+        "35",
+    );
+}
+#[test]
+fn b_closure_hof() {
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    base is 100\n    f is *fn(x: i64) -> i64 base + x\n    log(apply(f, 42))\n    0\n",
+        "142",
+    );
+}
+#[test]
+fn b_do_end_lambda() {
+    expect(
+        "*main() -> i32\n    g is *fn(x: i64) -> i64 do\n        y is x * 2\n        y + 1\n    end\n    log(g(20))\n    0\n",
+        "41",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 13: Ternary (uses ? ! syntax)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_ternary_t() {
+    expect("*main()\n    log(true ? 1 ! 0)\n", "1");
+}
+#[test]
+fn b_ternary_f() {
+    expect("*main()\n    log(false ? 1 ! 0)\n", "0");
+}
+#[test]
+fn b_ternary_cmp() {
+    expect("*main()\n    x is 5\n    log(x > 3 ? 10 ! 20)\n", "10");
+}
+#[test]
+fn b_ternary_nested() {
+    expect(
+        "*main()\n    x is 2\n    log(x equals 1 ? 10 ! x equals 2 ? 20 ! 30)\n",
+        "20",
+    );
+}
+#[test]
+fn b_ternary_arith() {
+    expect("*main()\n    log((3 > 2 ? 10 ! 5) + 1)\n", "11");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 14: Structs
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_struct_basic() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 3, y is 4)\n    log(p.x)\n    log(p.y)\n    0\n",
+        "3\n4",
+    );
+}
+#[test]
+fn b_struct_arith() {
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\n*main() -> i32\n    v is Vec2(x is 3, y is 4)\n    log(v.x * v.x + v.y * v.y)\n    0\n",
+        "25",
+    );
+}
+#[test]
+fn b_struct_positional() {
+    expect(
+        "type Pair\n    a: i64\n    b: i64\n\n*main() -> i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
+        "20",
+    );
+}
+#[test]
+fn b_struct_fn_arg() {
+    expect(
+        "type Pt\n    x: i64\n    y: i64\n\n*sum(p: Pt) -> i64\n    p.x + p.y\n\n*main() -> i32\n    log(sum(Pt(x is 4, y is 6)))\n    0\n",
+        "10",
+    );
+}
+#[test]
+fn b_struct_method() {
+    expect(
+        "type Counter\n    val: i64\n\n    *get() -> i64\n        self.val\n\n*main() -> i32\n    c is Counter(val is 42)\n    log(c.get())\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_struct_method_add() {
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\n    *sum() -> i64\n        self.x + self.y\n\n*main() -> i32\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n    0\n",
+        "10",
+    );
+}
+#[test]
+fn b_struct_3field() {
+    expect(
+        "type V3\n    x: i64\n    y: i64\n    z: i64\n\n*main() -> i32\n    v is V3(x is 1, y is 2, z is 3)\n    log(v.x + v.y + v.z)\n    0\n",
+        "6",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 15: Enums & match
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_enum_2() {
+    expect(
+        "enum Dir\n    Up\n    Down\n\n*main() -> i32\n    d is Up\n    match d\n        Up ? log(1)\n        Down ? log(2)\n    0\n",
+        "1",
+    );
+}
+#[test]
+fn b_enum_3() {
+    expect(
+        "enum Light\n    Red\n    Yellow\n    Green\n\n*main() -> i32\n    l is Yellow\n    match l\n        Red ? log(0)\n        Yellow ? log(1)\n        Green ? log(2)\n    0\n",
+        "1",
+    );
+}
+#[test]
+fn b_enum_data() {
+    expect(
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main() -> i32\n    s is Circle(5)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w + h)\n    0\n",
+        "5",
+    );
+}
+#[test]
+fn b_enum_data_rect() {
+    expect(
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main() -> i32\n    s is Rect(3, 4)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w * h)\n    0\n",
+        "12",
+    );
+}
+#[test]
+fn b_enum_wildcard() {
+    expect(
+        "enum Op\n    Add\n    Sub\n    Mul\n\n*main() -> i32\n    o is Mul\n    match o\n        Add ? log(1)\n        _ ? log(99)\n    0\n",
+        "99",
+    );
+}
+#[test]
+fn b_enum_fn_arg() {
+    expect(
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s: Shape) -> i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main() -> i32\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n    0\n",
+        "25\n21",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 16: Match expressions
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_match_int_1() {
+    expect(
+        "*main()\n    x is 3\n    match x\n        1 ? log(10)\n        2 ? log(20)\n        3 ? log(30)\n        _ ? log(0)\n",
+        "30",
+    );
+}
+#[test]
+fn b_match_int_default() {
+    expect(
+        "*main()\n    x is 99\n    match x\n        1 ? log(10)\n        _ ? log(0)\n",
+        "0",
+    );
+}
+#[test]
+fn b_match_expr_fn() {
+    expect(
+        "*choose(x: i64) -> i64\n    match x\n        1 ? 10\n        2 ? 20\n        _ ? 99\n\n*main() -> i32\n    log(choose(1))\n    log(choose(2))\n    log(choose(7))\n    0\n",
+        "10\n20\n99",
+    );
+}
+#[test]
+fn b_match_enum_expr() {
+    expect(
+        "enum Op\n    Add(i64, i64)\n    Neg(i64)\n\n*eval(op: Op) -> i64\n    match op\n        Add(a, b) ? a + b\n        Neg(a) ? 0 - a\n\n*main() -> i32\n    log(eval(Add(3, 4)))\n    log(eval(Neg(10)))\n    0\n",
+        "7\n-10",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 17: Arrays
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_arr_index() {
+    expect(
+        "*main() -> i32\n    a is [10, 20, 30]\n    log(a[0])\n    log(a[1])\n    log(a[2])\n    0\n",
+        "10\n20\n30",
+    );
+}
+#[test]
+fn b_arr_sum_loop() {
+    expect(
+        "*main() -> i32\n    a is [1, 2, 3, 4, 5]\n    total is 0\n    i is 0\n    while i < 5\n        total is total + a[i]\n        i is i + 1\n    log(total)\n    0\n",
+        "15",
+    );
+}
+#[test]
+fn b_arr_4elem() {
+    expect(
+        "*main() -> i32\n    a is [10, 20, 30, 40]\n    log(a[0] + a[3])\n    0\n",
+        "50",
+    );
+}
+#[test]
+fn b_arr_5elem() {
+    expect(
+        "*main() -> i32\n    a is [1, 1, 1, 1, 1]\n    sum is 0\n    for i in 5\n        sum is sum + a[i]\n    log(sum)\n    0\n",
+        "5",
+    );
+}
+#[test]
+fn b_arr_for_in() {
+    expect(
+        "*main()\n    arr is [10, 20, 30]\n    for x in arr\n        log(x)\n",
+        "10\n20\n30",
+    );
+}
+#[test]
+fn b_arr_for_in_sum() {
+    expect(
+        "*main()\n    arr is [1, 2, 3, 4, 5]\n    sum is 0\n    for x in arr\n        sum is sum + x\n    log(sum)\n",
+        "15",
+    );
+}
+#[test]
+fn b_arr_for_product() {
+    expect(
+        "*main()\n    arr is [2, 3, 5, 7]\n    prod is 1\n    for x in arr\n        prod is prod * x\n    log(prod)\n",
+        "210",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 18: Tuples
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_tuple_2() {
+    expect(
+        "*main() -> i32\n    t is (10, 20)\n    log(t[0])\n    log(t[1])\n    0\n",
+        "10\n20",
+    );
+}
+#[test]
+fn b_tuple_3() {
+    expect(
+        "*main() -> i32\n    t is (100, 200, 300)\n    log(t[0] + t[1] + t[2])\n    0\n",
+        "600",
+    );
+}
+#[test]
+fn b_tuple_arith() {
+    expect(
+        "*main() -> i32\n    t is (7, 3)\n    log(t[0] * t[1])\n    0\n",
+        "21",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 19: Casts
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_cast_to_i32() {
+    expect("*main()\n    x is 42 as i32\n    log(x)\n", "42");
+}
+#[test]
+fn b_cast_to_f64() {
+    expect("*main()\n    x is 5 as f64\n    log(x)\n", "5.000000");
+}
+#[test]
+fn b_cast_f64_int() {
+    expect("*main()\n    x is 3.14 as i64\n    log(x)\n", "3");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 20: Strings
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_str_lit() {
+    expect("*main()\n    log('hello')\n", "hello");
+}
+#[test]
+fn b_str_empty() {
+    expect("*main()\n    s is ''\n    log(s.length)\n", "0");
+}
+#[test]
+fn b_str_concat() {
+    expect("*main()\n    log('foo' + 'bar')\n", "foobar");
+}
+#[test]
+fn b_str_length() {
+    expect("*main()\n    log('hello'.length)\n", "5");
+}
+#[test]
+fn b_str_concat_3() {
+    expect(
+        "*main()\n    a is 'a'\n    b is 'b'\n    c is 'c'\n    log(a + b + c)\n",
+        "abc",
+    );
+}
+#[test]
+fn b_str_escape_n() {
+    expect("*main()\n    log('a\\nb')\n", "a\nb");
+}
+#[test]
+fn b_str_escape_t() {
+    expect("*main()\n    log('a\\tb')\n", "a\tb");
+}
+#[test]
+fn b_str_concat_len() {
+    expect(
+        "*main()\n    a is 'foo'\n    b is 'bar'\n    c is a + b\n    log(c.length)\n",
+        "6",
+    );
+}
+#[test]
+fn b_str_single_char() {
+    expect("*main()\n    s is 'x'\n    log(s.length)\n", "1");
+}
+#[test]
+fn b_str_long() {
+    expect(
+        "*main()\n    s is 'abcdefghijklmnopqrstuvwxyz'\n    log(s.length)\n",
+        "26",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 21: Pipeline
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_pipe_single() {
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    result is 10 ~ double\n    log(result)\n    0\n",
+        "20",
+    );
+}
+#[test]
+fn b_pipe_chain() {
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*add_one(x: i64) -> i64\n    x + 1\n\n*main() -> i32\n    result is 10 ~ double ~ add_one\n    log(result)\n    0\n",
+        "21",
+    );
+}
+#[test]
+fn b_pipe_placeholder() {
+    expect(
+        "*mul(a: i64, b: i64) -> i64\n    a * b\n\n*main() -> i32\n    result is 10 ~ mul($, 3)\n    log(result)\n    0\n",
+        "30",
+    );
+}
+#[test]
+fn b_pipe_lambda() {
+    expect(
+        "*main() -> i32\n    result is 5 ~ *fn(x: i64) -> i64 x * x\n    log(result)\n    0\n",
+        "25",
+    );
+}
+#[test]
+fn b_pipe_with_args() {
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main() -> i32\n    result is 10 ~ add(5)\n    log(result)\n    0\n",
+        "15",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 22: Generics
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_gen_id() {
+    expect(
+        "*id of T(x: T) -> T\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_gen_add() {
+    expect(
+        "*add of T(a: T, b: T) -> T\n    a + b\n\n*main() -> i32\n    log(add(3, 4))\n    0\n",
+        "7",
+    );
+}
+#[test]
+fn b_gen_max() {
+    expect(
+        "*max of T(a: T, b: T) -> T\n    if a > b\n        return a\n    b\n\n*main() -> i32\n    log(max(10, 20))\n    0\n",
+        "20",
+    );
+}
+#[test]
+fn b_gen_min() {
+    expect(
+        "*min of T(a: T, b: T) -> T\n    if a < b\n        return a\n    b\n\n*main() -> i32\n    log(min(10, 20))\n    0\n",
+        "10",
+    );
+}
+#[test]
+fn b_inferred_gen() {
+    expect(
+        "*identity(x: T) -> T\n    x\n\n*main() -> i32\n    log(identity(99))\n    0\n",
+        "99",
+    );
+}
+#[test]
+fn b_inferred_gen_add() {
+    expect(
+        "*add(a: T, b: T) -> T\n    a + b\n\n*main() -> i32\n    log(add(10, 20))\n    0\n",
+        "30",
+    );
+}
+#[test]
+fn b_untyped_gen() {
+    expect(
+        "*double(x)\n    x * 2\n\n*main() -> i32\n    log(double(21))\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_untyped_rec() {
+    expect(
+        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main() -> i32\n    log(fact(10))\n    0\n",
+        "3628800",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 23: HOF
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_hof_pass() {
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(double, 21))\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_hof_var() {
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    f is double\n    log(f(21))\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_hof_chain() {
+    expect(
+        "*add_one(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(add_one, apply(double, 10)))\n    0\n",
+        "21",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 24: Option / Result
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_option_some() {
+    expect(
+        "*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n",
+        "42",
+    );
+}
+#[test]
+fn b_option_nothing() {
+    expect(
+        "*main()\n    x is Nothing\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n",
+        "0",
+    );
+}
+#[test]
+fn b_option_arith() {
+    expect(
+        "*main()\n    x is Some(10)\n    match x\n        Some(v) ? log(v + 5)\n        Nothing ? log(0)\n",
+        "15",
+    );
+}
+#[test]
+fn b_result_ok_v() {
+    expect(
+        "*main()\n    x is Ok(10)\n    match x\n        Ok(v) ? log(v)\n        Err(e) ? log(e)\n",
+        "10",
+    );
+}
+#[test]
+fn b_result_err_v() {
+    expect(
+        "*main()\n    x is Err(99)\n    match x\n        Ok(v) ? log(v)\n        Err(e) ? log(e)\n",
+        "99",
+    );
+}
+#[test]
+fn b_result_ok_arith() {
+    expect(
+        "*main()\n    x is Ok(7)\n    match x\n        Ok(v) ? log(v * 3)\n        Err(e) ? log(e)\n",
+        "21",
+    );
+}
+#[test]
+fn b_option_local() {
+    expect(
+        "enum Option\n    Some(i64)\n    None\n\n*safe_div(a: i64, b: i64) -> Option\n    if b equals 0\n        return None\n    Some(a / b)\n\n*main() -> i32\n    match safe_div(10, 2)\n        Some(v) ? log(v)\n        None ? log(-1)\n    match safe_div(10, 0)\n        Some(v) ? log(v)\n        None ? log(-1)\n    0\n",
+        "5\n-1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 25: RC
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_rc_create() {
+    expect("*main()\n    x is rc(42)\n    log(@x)\n", "42");
+}
+#[test]
+fn b_rc_retain_rel() {
+    expect(
+        "*main()\n    x is rc(100)\n    rc_retain(x)\n    rc_release(x)\n    log(@x)\n",
+        "100",
+    );
+}
+#[test]
+fn b_rc_deref_arith() {
+    expect("*main()\n    x is rc(21)\n    log(@x * 2)\n", "42");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 26: Pointers
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_ptr_ref_deref() {
+    expect(
+        "*main() -> i32\n    x is 42\n    p is %x\n    log(@p)\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_ptr_arith() {
+    expect(
+        "*main() -> i32\n    a is 10\n    b is 20\n    pa is %a\n    pb is %b\n    log(@pa + @pb)\n    0\n",
+        "30",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 27: List comprehension
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_listcomp_squares() {
+    expect(
+        "*main() -> i32\n    arr is [x * x for x in 0 to 5]\n    log(arr[0])\n    log(arr[1])\n    log(arr[4])\n    0\n",
+        "0\n1\n16",
+    );
+}
+#[test]
+fn b_listcomp_filter() {
+    expect(
+        "*main() -> i32\n    arr is [x for x in 0 to 10 if x > 5]\n    log(arr[0])\n    log(arr[1])\n    0\n",
+        "6\n7",
+    );
+}
+#[test]
+fn b_listcomp_add() {
+    expect(
+        "*main() -> i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    0\n",
+        "10\n11\n12",
+    );
+}
+#[test]
+fn b_listcomp_double() {
+    expect(
+        "*main() -> i32\n    arr is [i * 2 for i in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    log(arr[3])\n    0\n",
+        "0\n2\n4\n6",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 28: Exponentiation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_exp_2_10() {
+    expect("*main()\n    log(2 ** 10)\n", "1024");
+}
+#[test]
+fn b_exp_3_3() {
+    expect("*main()\n    log(3 ** 3)\n", "27");
+}
+#[test]
+fn b_exp_5_0() {
+    expect("*main()\n    log(5 ** 0)\n", "1");
+}
+#[test]
+fn b_exp_7_1() {
+    expect("*main()\n    log(7 ** 1)\n", "7");
+}
+#[test]
+fn b_exp_2_20() {
+    expect("*main()\n    log(2 ** 20)\n", "1048576");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 29: Literals
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_hex_lit() {
+    expect("*main()\n    log(0xFF)\n", "255");
+}
+#[test]
+fn b_bin_lit() {
+    expect("*main()\n    log(0b1010)\n", "10");
+}
+#[test]
+fn b_oct_lit() {
+    expect("*main()\n    log(0o77)\n", "63");
+}
+#[test]
+fn b_underscore_lit() {
+    expect("*main()\n    log(1_000_000)\n", "1000000");
+}
+#[test]
+fn b_neg_lit() {
+    expect("*main()\n    log(-42)\n", "-42");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 30: Err defs and bang return
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_err_def() {
+    expect(
+        "err IoError\n    NotFound\n    Permission\n\n*main() -> i32\n    log(99)\n    0\n",
+        "99",
+    );
+}
+#[test]
+fn b_bang_return() {
+    expect(
+        "*check(x: i64) -> i64\n    if x < 0\n        ! -1\n    x * 2\n\n*main() -> i32\n    log(check(5))\n    log(check(-3))\n    0\n",
+        "10\n-1",
+    );
+}
+#[test]
+fn b_err_safe_div() {
+    expect(
+        "err MathError\n    DivZero\n    Overflow\n\n*safe_div(a: i64, b: i64) -> i64\n    if b equals 0\n        ! 0\n    a / b\n\n*main()\n    log(safe_div(10, 2))\n",
+        "5",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 31: Bit intrinsics
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_popcount() {
+    expect(
+        "*main() -> i32\n    log(popcount(7))\n    log(popcount(255))\n    0\n",
+        "3\n8",
+    );
+}
+#[test]
+fn b_ctz_8() {
+    expect("*main() -> i32\n    log(ctz(8))\n    0\n", "3");
+}
+#[test]
+fn b_popcount_0() {
+    expect("*main() -> i32\n    log(popcount(0))\n    0\n", "0");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 32: ASM
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_asm_nop() {
+    expect(
+        "*main() -> i32\n    asm\n        nop\n    log(42)\n    0\n",
+        "42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 33: Compile-fail tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_fail_no_main() {
+    expect_compile_fail("*foo()\n    log(1)\n");
+}
+#[test]
+fn b_fail_undef_var() {
+    expect_compile_fail("*main()\n    log(xyz)\n");
+}
+#[test]
+fn b_fail_non_exhaustive() {
+    let err = expect_compile_fail(
+        "enum AB\n    A\n    B\n\n*main() -> i32\n    x is A\n    match x\n        A ? log(1)\n    0\n",
+    );
+    assert!(err.contains("non-exhaustive") || err.contains("missing"));
+}
+#[test]
+fn b_fail_tab_indent() {
+    expect_compile_fail("*main()\n\tlog(1)\n");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 34: Complex algorithms
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_fibonacci() {
+    expect(
+        "*fib(n: i64) -> i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "55",
+    );
+}
+#[test]
+fn b_gcd() {
+    expect(
+        "*gcd(a: i64, b: i64) -> i64\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main()\n    log(gcd(48, 18))\n",
+        "6",
+    );
+}
+#[test]
+fn b_power() {
+    expect(
+        "*power(base: i64, exp: i64) -> i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
+        "1024",
+    );
+}
+#[test]
+fn b_sum_to_n() {
+    expect(
+        "*sum_to(n: i64) -> i64\n    total is 0\n    for i in 1 to n + 1\n        total is total + i\n    total\n\n*main()\n    log(sum_to(100))\n",
+        "5050",
+    );
+}
+#[test]
+fn b_deep_rec() {
+    expect(
+        "*countdown(n: i64) -> i64\n    if n equals 0\n        return 0\n    countdown(n - 1)\n\n*main()\n    log(countdown(10000))\n",
+        "0",
+    );
+}
+#[test]
+fn b_count_evens() {
+    expect(
+        "*main()\n    arr is [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n    count is 0\n    for x in arr\n        if x % 2 equals 0\n            count is count + 1\n    log(count)\n",
+        "5",
+    );
+}
+#[test]
+fn b_arr_max() {
+    expect(
+        "*main()\n    arr is [3, 7, 1, 9, 2]\n    mx is arr[0]\n    for i in 1 to 5\n        if arr[i] > mx\n            mx is arr[i]\n    log(mx)\n",
+        "9",
+    );
+}
+#[test]
+fn b_arr_min() {
+    expect(
+        "*main()\n    arr is [3, 7, 1, 9, 2]\n    mn is arr[0]\n    for i in 1 to 5\n        if arr[i] < mn\n            mn is arr[i]\n    log(mn)\n",
+        "1",
+    );
+}
+#[test]
+fn b_collatz() {
+    expect(
+        "*collatz(n: i64) -> i64\n    steps is 0\n    x is n\n    while x isnt 1\n        if x % 2 equals 0\n            x is x / 2\n        else\n            x is 3 * x + 1\n        steps is steps + 1\n    steps\n\n*main()\n    log(collatz(27))\n",
+        "111",
+    );
+}
+#[test]
+fn b_sum_digits() {
+    expect(
+        "*sum_digits(n: i64) -> i64\n    sum is 0\n    x is n\n    while x > 0\n        sum is sum + x % 10\n        x is x / 10\n    sum\n\n*main()\n    log(sum_digits(12345))\n",
+        "15",
+    );
+}
+#[test]
+fn b_reverse_num() {
+    expect(
+        "*reverse(n: i64) -> i64\n    result is 0\n    x is n\n    while x > 0\n        result is result * 10 + x % 10\n        x is x / 10\n    result\n\n*main()\n    log(reverse(12345))\n",
+        "54321",
+    );
+}
+#[test]
+fn b_is_prime() {
+    expect(
+        "*is_prime(n: i64) -> i64\n    if n < 2\n        return 0\n    i is 2\n    while i * i <= n\n        if n % i equals 0\n            return 0\n        i is i + 1\n    1\n\n*main()\n    log(is_prime(7))\n    log(is_prime(10))\n    log(is_prime(97))\n",
+        "1\n0\n1",
+    );
+}
+#[test]
+fn b_lcm() {
+    expect(
+        "*gcd(a: i64, b: i64) -> i64\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*lcm(a: i64, b: i64) -> i64\n    a / gcd(a, b) * b\n\n*main()\n    log(lcm(12, 18))\n",
+        "36",
+    );
+}
+#[test]
+fn b_count_primes() {
+    expect(
+        "*is_prime(n: i64) -> i64\n    if n < 2\n        return 0\n    i is 2\n    while i * i <= n\n        if n % i equals 0\n            return 0\n        i is i + 1\n    1\n\n*main()\n    count is 0\n    for i in 2 to 30\n        count is count + is_prime(i)\n    log(count)\n",
+        "10",
+    );
+}
+#[test]
+fn b_triangle_num() {
+    expect(
+        "*tri(n: i64) -> i64\n    n * (n + 1) / 2\n\n*main()\n    log(tri(10))\n    log(tri(100))\n",
+        "55\n5050",
+    );
+}
+#[test]
+fn b_dot_product() {
+    expect(
+        "*main()\n    a is [1, 2, 3, 4, 5]\n    b is [5, 4, 3, 2, 1]\n    dot is 0\n    for i in 5\n        dot is dot + a[i] * b[i]\n    log(dot)\n",
+        "35",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 35: Edge cases
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_zero_div() {
+    expect("*main()\n    log(0 / 1)\n", "0");
+}
+#[test]
+fn b_identity_add() {
+    expect("*main()\n    log(42 + 0)\n", "42");
+}
+#[test]
+fn b_identity_mul() {
+    expect("*main()\n    log(42 * 1)\n", "42");
+}
+#[test]
+fn b_neg_zero() {
+    expect("*main()\n    log(-0)\n", "0");
+}
+#[test]
+fn b_multi_log() {
+    expect(
+        "*main()\n    log(1)\n    log(2)\n    log(3)\n    log(4)\n    log(5)\n",
+        "1\n2\n3\n4\n5",
+    );
+}
+#[test]
+fn b_chain_ops() {
+    expect(
+        "*main()\n    x is 2\n    x is x + 3\n    x is x * 2\n    x is x - 1\n    log(x)\n",
+        "9",
+    );
+}
+#[test]
+fn b_complex_expr() {
+    expect("*main()\n    log((1 + 2) * (3 + 4) - (5 + 6))\n", "10");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 36: Short-circuit eval
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_sc_and_skip() {
+    expect(
+        "*main()\n    x is 0\n    if false and true\n        x is 1\n    log(x)\n",
+        "0",
+    );
+}
+#[test]
+fn b_sc_or_take() {
+    expect(
+        "*main()\n    x is 0\n    if true or false\n        x is 1\n    log(x)\n",
+        "1",
+    );
+}
+#[test]
+fn b_sc_and_both() {
+    expect(
+        "*main()\n    x is 0\n    if true and true\n        x is 1\n    log(x)\n",
+        "1",
+    );
+}
+#[test]
+fn b_sc_or_neither() {
+    expect(
+        "*main()\n    x is 0\n    if false or false\n        x is 1\n    log(x)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 37: Extern
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_extern_puts() {
+    expect(
+        "extern *puts(s: String) -> i32\n\n*main() -> i32\n    puts(\"hello extern\")\n    0\n",
+        "hello extern",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 38: Module system
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_module_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let helper = dir.path().join("helper.jade");
+    let main = dir.path().join("main.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&helper, "*double(x: i64) -> i64\n    x + x\n").unwrap();
+    std::fs::write(
+        &main,
+        "use helper\n\n*main() -> i32\n    log(double(21))\n    0\n",
+    )
+    .unwrap();
+    let status = Command::new(jadec())
+        .arg(&main)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "module import: compilation failed");
+    let output = Command::new(&out).output().expect("binary failed to start");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.trim(), "42");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 39: Exhaustive match
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_exhaust_all() {
+    expect(
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
+        "1",
+    );
+}
+#[test]
+fn b_exhaust_wildcard() {
+    expect(
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Green\n    match c\n        Red ? log(1)\n        _ ? log(99)\n    0\n",
+        "99",
+    );
+}
+#[test]
+fn b_exhaust_fail() {
+    let err = expect_compile_fail(
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n    0\n",
+    );
+    assert!(err.contains("non-exhaustive") || err.contains("missing"));
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 40: Complex algorithm patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_iterative_fib() {
+    expect(
+        "*fib(n: i64) -> i64\n    a is 0\n    b is 1\n    for i in n\n        t is a\n        a is b\n        b is t + b\n    a\n\n*main()\n    log(fib(10))\n    log(fib(20))\n",
+        "55\n6765",
+    );
+}
+#[test]
+fn b_sum_squares() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 11\n        sum is sum + i * i\n    log(sum)\n",
+        "385",
+    );
+}
+#[test]
+fn b_sum_cubes() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 11\n        sum is sum + i * i * i\n    log(sum)\n",
+        "3025",
+    );
+}
+#[test]
+fn b_geometric() {
+    expect(
+        "*main()\n    val is 1\n    for i in 10\n        val is val * 2\n    log(val)\n",
+        "1024",
+    );
+}
+#[test]
+fn b_nested_fn_call() {
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*mul(a: i64, b: i64) -> i64\n    a * b\n\n*main()\n    log(add(mul(2, 3), mul(4, 5)))\n",
+        "26",
+    );
+}
+#[test]
+fn b_apply_n_times() {
+    expect(
+        "*apply_n(f: (i64) -> i64, x: i64, n: i64) -> i64\n    result is x\n    for i in n\n        result is f(result)\n    result\n\n*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    log(apply_n(double, 1, 10))\n    0\n",
+        "1024",
+    );
+}
+#[test]
+fn b_fn_returns_fn_val() {
+    expect(
+        "*square(x: i64) -> i64\n    x * x\n\n*cube(x: i64) -> i64\n    x * x * x\n\n*pick_fn(n: i64) -> (i64) -> i64\n    if n equals 2\n        return square\n    cube\n\n*main() -> i32\n    f is pick_fn(2)\n    log(f(5))\n    g is pick_fn(3)\n    log(g(3))\n    0\n",
+        "25\n27",
+    );
+}
+#[test]
+fn b_enum_4variant() {
+    expect(
+        "enum Op\n    Add(i64, i64)\n    Sub(i64, i64)\n    Mul(i64, i64)\n    Neg(i64)\n\n*eval(op: Op) -> i64\n    match op\n        Add(a, b) ? a + b\n        Sub(a, b) ? a - b\n        Mul(a, b) ? a * b\n        Neg(a) ? 0 - a\n\n*main() -> i32\n    log(eval(Add(10, 20)))\n    log(eval(Sub(50, 8)))\n    log(eval(Mul(6, 7)))\n    log(eval(Neg(42)))\n    0\n",
+        "30\n42\n42\n-42",
+    );
+}
+#[test]
+fn b_enum_recursive_sum() {
+    expect(
+        "enum List\n    Cons(i64, i64)\n    Nil\n\n*main() -> i32\n    a is Cons(10, 0)\n    match a\n        Cons(v, _) ? log(v)\n        Nil ? log(0)\n    0\n",
+        "10",
+    );
+}
+#[test]
+fn b_struct_multi_methods() {
+    expect(
+        "type Rect\n    w: i64\n    h: i64\n\n    *area() -> i64\n        self.w * self.h\n\n    *perimeter() -> i64\n        2 * (self.w + self.h)\n\n*main() -> i32\n    r is Rect(w is 5, h is 3)\n    log(r.area())\n    log(r.perimeter())\n    0\n",
+        "15\n16",
+    );
+}
+#[test]
+fn b_pipeline_complex() {
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*sub_one(x: i64) -> i64\n    x - 1\n\n*square(x: i64) -> i64\n    x * x\n\n*main() -> i32\n    result is 3 ~ double ~ sub_one ~ square\n    log(result)\n    0\n",
+        "25",
+    );
+}
+#[test]
+fn b_listcomp_sum() {
+    expect(
+        "*main() -> i32\n    arr is [i * i for i in 1 to 6]\n    log(arr[0] + arr[1] + arr[2] + arr[3] + arr[4])\n    0\n",
+        "55",
+    );
+}
+#[test]
+fn b_closure_counter() {
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    base is 10\n    f is *fn(x: i64) -> i64 base + x\n    log(apply(f, 5))\n    base is 20\n    g is *fn(x: i64) -> i64 base + x\n    log(apply(g, 5))\n    0\n",
+        "15\n25",
+    );
+}
+#[test]
+fn b_enum_as_return() {
+    expect(
+        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*checked_add(a: i64, b: i64) -> Result\n    sum is a + b\n    if sum > 100\n        return Err(sum)\n    Ok(sum)\n\n*main() -> i32\n    match checked_add(30, 40)\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - e)\n    match checked_add(60, 50)\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - e)\n    0\n",
+        "70\n-110",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 41: Additional for-in array tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_arr_count_gt() {
+    expect(
+        "*main()\n    arr is [1, 5, 3, 8, 2, 7]\n    count is 0\n    for x in arr\n        if x > 4\n            count is count + 1\n    log(count)\n",
+        "3",
+    );
+}
+#[test]
+fn b_arr_sum_even() {
+    expect(
+        "*main()\n    arr is [1, 2, 3, 4, 5, 6]\n    sum is 0\n    for x in arr\n        if x % 2 equals 0\n            sum is sum + x\n    log(sum)\n",
+        "12",
+    );
+}
+#[test]
+fn b_arr_all_positive() {
+    expect(
+        "*main()\n    arr is [3, 7, 1, 9, 2]\n    all_pos is 1\n    for x in arr\n        if x <= 0\n            all_pos is 0\n    log(all_pos)\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 42: Additional patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_match_5() {
+    expect(
+        "*classify(x: i64) -> i64\n    match x\n        0 ? 0\n        1 ? 1\n        2 ? 4\n        3 ? 9\n        _ ? -1\n\n*main()\n    log(classify(0))\n    log(classify(2))\n    log(classify(99))\n",
+        "0\n4\n-1",
+    );
+}
+#[test]
+fn b_match_large_wildcard() {
+    expect(
+        "*main()\n    x is 42\n    match x\n        _ ? log(x)\n",
+        "42",
+    );
+}
+#[test]
+fn b_enum_5() {
+    expect(
+        "enum Weekday\n    Mon\n    Tue\n    Wed\n    Thu\n    Fri\n\n*is_mid(d: Weekday) -> i64\n    match d\n        Wed ? 1\n        _ ? 0\n\n*main() -> i32\n    log(is_mid(Wed))\n    log(is_mid(Mon))\n    0\n",
+        "1\n0",
+    );
+}
+#[test]
+fn b_struct_pass_return() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*translate(p: Point, dx: i64, dy: i64) -> Point\n    Point(x is p.x + dx, y is p.y + dy)\n\n*main() -> i32\n    p is Point(x is 1, y is 2)\n    q is translate(p, 10, 20)\n    log(q.x)\n    log(q.y)\n    0\n",
+        "11\n22",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 43: Math utility functions
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_abs_fn() {
+    expect(
+        "*abs(x: i64) -> i64\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs(5))\n    log(abs(-5))\n    log(abs(0))\n",
+        "5\n5\n0",
+    );
+}
+#[test]
+fn b_max_fn() {
+    expect(
+        "*max(a: i64, b: i64) -> i64\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n    log(max(9, 2))\n    log(max(5, 5))\n",
+        "7\n9\n5",
+    );
+}
+#[test]
+fn b_min_fn() {
+    expect(
+        "*min(a: i64, b: i64) -> i64\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(3, 7))\n    log(min(9, 2))\n    log(min(5, 5))\n",
+        "3\n2\n5",
+    );
+}
+#[test]
+fn b_clamp() {
+    expect(
+        "*clamp(x: i64, lo: i64, hi: i64) -> i64\n    if x < lo\n        return lo\n    if x > hi\n        return hi\n    x\n\n*main()\n    log(clamp(5, 0, 10))\n    log(clamp(-5, 0, 10))\n    log(clamp(15, 0, 10))\n",
+        "5\n0\n10",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 44: Additional closures
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_closure_in_pipe() {
+    expect(
+        "*main() -> i32\n    c is 3\n    result is 7 ~ *fn(x: i64) -> i64 x * c\n    log(result)\n    0\n",
+        "21",
+    );
+}
+#[test]
+fn b_do_end_if() {
+    expect(
+        "*main() -> i32\n    abs is *fn(x: i64) -> i64 do\n        result is x\n        if x < 0\n            result is 0 - x\n        result\n    end\n    log(abs(5))\n    log(abs(-3))\n    0\n",
+        "5\n3",
+    );
+}
+#[test]
+fn b_lambda_chain_pipe() {
+    expect(
+        "*add_one(x: i64) -> i64\n    x + 1\n\n*main() -> i32\n    result is 5 ~ *fn(x: i64) -> i64 x * x ~ add_one\n    log(result)\n    0\n",
+        "26",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 45: Additional number theory
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_is_palindrome() {
+    expect(
+        "*reverse(n: i64) -> i64\n    result is 0\n    x is n\n    while x > 0\n        result is result * 10 + x % 10\n        x is x / 10\n    result\n\n*is_palindrome(n: i64) -> i64\n    if n equals reverse(n)\n        return 1\n    0\n\n*main()\n    log(is_palindrome(121))\n    log(is_palindrome(123))\n    log(is_palindrome(12321))\n",
+        "1\n0\n1",
+    );
+}
+#[test]
+fn b_digit_count() {
+    expect(
+        "*digits(n: i64) -> i64\n    if n equals 0\n        return 1\n    count is 0\n    x is n\n    while x > 0\n        count is count + 1\n        x is x / 10\n    count\n\n*main()\n    log(digits(0))\n    log(digits(9))\n    log(digits(99))\n    log(digits(12345))\n",
+        "1\n1\n2\n5",
+    );
+}
+#[test]
+fn b_pow_mod() {
+    expect(
+        "*powmod(base: i64, exp: i64, m: i64) -> i64\n    result is 1\n    b is base % m\n    e is exp\n    while e > 0\n        if e % 2 equals 1\n            result is result * b % m\n        e is e / 2\n        b is b * b % m\n    result\n\n*main()\n    log(powmod(2, 10, 1000))\n",
+        "24",
+    );
+}
+#[test]
+fn b_harmonic_int() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 11\n        sum is sum + 100 / i\n    log(sum)\n",
+        "291",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 46: More struct patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_struct_default() {
+    expect(
+        "type Config\n    width: i64\n    height: i64\n    depth: i64\n\n*volume(c: Config) -> i64\n    c.width * c.height * c.depth\n\n*main() -> i32\n    c is Config(width is 2, height is 3, depth is 4)\n    log(volume(c))\n    0\n",
+        "24",
+    );
+}
+#[test]
+fn b_struct_nested_access() {
+    expect(
+        "type Pair\n    a: i64\n    b: i64\n\n*main() -> i32\n    p1 is Pair(a is 10, b is 20)\n    p2 is Pair(a is p1.a + 1, b is p1.b + 1)\n    log(p2.a)\n    log(p2.b)\n    0\n",
+        "11\n21",
+    );
+}
+#[test]
+fn b_struct_cmp() {
+    expect(
+        "type Box\n    val: i64\n\n*bigger(a: Box, b: Box) -> i64\n    if a.val > b.val\n        return a.val\n    b.val\n\n*main() -> i32\n    log(bigger(Box(val is 10), Box(val is 20)))\n    0\n",
+        "20",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 47: More loop patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_for_sum_odd() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 20 by 2\n        sum is sum + i\n    log(sum)\n",
+        "100",
+    );
+}
+#[test]
+fn b_while_gcd() {
+    expect(
+        "*main()\n    a is 252\n    b is 105\n    while b isnt 0\n        t is b\n        b is a % b\n        a is t\n    log(a)\n",
+        "21",
+    );
+}
+#[test]
+fn b_for_powers() {
+    expect(
+        "*main()\n    val is 1\n    for i in 16\n        val is val * 3\n    log(val)\n",
+        "43046721",
+    );
+}
+#[test]
+fn b_nested_for_mult_table() {
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 4\n        for j in 1 to 4\n            sum is sum + i * j\n    log(sum)\n",
+        "36",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 48: Generics + closures combined
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_gen_apply() {
+    expect(
+        "*apply of T(f: (T) -> T, x: T) -> T\n    f(x)\n\n*main() -> i32\n    log(apply(*fn(x: i64) -> i64 x + 1, 41))\n    0\n",
+        "42",
+    );
+}
+#[test]
+fn b_gen_compose() {
+    expect(
+        "*compose(f: (i64) -> i64, g: (i64) -> i64, x: i64) -> i64\n    f(g(x))\n\n*dbl(x: i64) -> i64\n    x * 2\n\n*inc(x: i64) -> i64\n    x + 1\n\n*main() -> i32\n    log(compose(dbl, inc, 5))\n    log(compose(inc, dbl, 5))\n    0\n",
+        "12\n11",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 49: String operations
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_str_multi_concat() {
+    expect(
+        "*main()\n    s is 'a' + 'b' + 'c' + 'd'\n    log(s)\n    log(s.length)\n",
+        "abcd\n4",
+    );
+}
+#[test]
+fn b_str_var_concat() {
+    expect(
+        "*main()\n    greeting is 'hello'\n    name is 'world'\n    log(greeting + ' ' + name)\n",
+        "hello world",
+    );
+}
+#[test]
+fn b_str_escape_backslash() {
+    expect("*main()\n    log('a\\\\b')\n", "a\\b");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 50: More complex algorithms
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_binary_search_manual() {
+    // Binary search via explicit while loop (no array mutation needed)
+    expect(
+        "*main()\n    arr is [2, 5, 8, 12, 16, 23, 38, 56, 72, 91]\n    target is 23\n    lo is 0\n    hi is 9\n    found is -1\n    while lo <= hi\n        mid is (lo + hi) / 2\n        if arr[mid] equals target\n            found is mid\n            lo is hi + 1\n        elif arr[mid] < target\n            lo is mid + 1\n        else\n            hi is mid - 1\n    log(found)\n",
+        "5",
+    );
+}
+#[test]
+fn b_fibonacci_loop() {
+    expect(
+        "*main()\n    a is 0\n    b is 1\n    i is 0\n    while i < 30\n        t is a\n        a is b\n        b is t + b\n        i is i + 1\n    log(a)\n",
+        "832040",
+    );
+}
+#[test]
+fn b_euler_sum_div() {
+    // Sum of numbers 1..999 divisible by 3 or 5
+    expect(
+        "*main()\n    sum is 0\n    for i in 1 to 1000\n        if i % 3 equals 0 or i % 5 equals 0\n            sum is sum + i\n    log(sum)\n",
+        "233168",
+    );
+}
+#[test]
+fn b_perfect_number() {
+    expect(
+        "*is_perfect(n: i64) -> i64\n    sum is 0\n    i is 1\n    while i < n\n        if n % i equals 0\n            sum is sum + i\n        i is i + 1\n    if sum equals n\n        return 1\n    0\n\n*main()\n    log(is_perfect(6))\n    log(is_perfect(28))\n    log(is_perfect(12))\n",
+        "1\n1\n0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 51: Pipeline advanced
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_pipe_4_chain() {
+    expect(
+        "*a(x: i64) -> i64\n    x + 1\n\n*b(x: i64) -> i64\n    x * 2\n\n*c(x: i64) -> i64\n    x - 3\n\n*d(x: i64) -> i64\n    x * x\n\n*main() -> i32\n    result is 5 ~ a ~ b ~ c ~ d\n    log(result)\n    0\n",
+        "81",
+    );
+}
+#[test]
+fn b_pipe_placeholder_2() {
+    expect(
+        "*sub(a: i64, b: i64) -> i64\n    a - b\n\n*main() -> i32\n    result is 10 ~ sub($, 3)\n    log(result)\n    0\n",
+        "7",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 52: Array advanced
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_arr_nested_access() {
+    expect(
+        "*main() -> i32\n    a is [10, 20, 30, 40, 50]\n    log(a[a[0] / 10])\n    0\n",
+        "20",
+    );
+}
+#[test]
+fn b_arr_expr_index() {
+    expect(
+        "*main() -> i32\n    a is [100, 200, 300]\n    i is 1\n    log(a[i])\n    log(a[i + 1])\n    0\n",
+        "200\n300",
+    );
+}
+#[test]
+fn b_listcomp_chain() {
+    expect(
+        "*main() -> i32\n    arr is [x * 2 + 1 for x in 0 to 5]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    log(arr[3])\n    log(arr[4])\n    0\n",
+        "1\n3\n5\n7\n9",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 53: More function patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_fn_no_return_type() {
+    expect(
+        "*say_hi()\n    log(42)\n\n*main()\n    say_hi()\n    say_hi()\n",
+        "42\n42",
+    );
+}
+#[test]
+fn b_fn_single_arg() {
+    expect(
+        "*negate(x: i64) -> i64\n    0 - x\n\n*main()\n    log(negate(42))\n    log(negate(-7))\n",
+        "-42\n7",
+    );
+}
+#[test]
+fn b_fn_implicit_return() {
+    expect(
+        "*square(x: i64) -> i64\n    x * x\n\n*main()\n    log(square(9))\n",
+        "81",
+    );
+}
+#[test]
+fn b_fn_arg_expr() {
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(2 + 3, 4 * 5))\n",
+        "25",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 54: Modular arithmetic
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_mod_basic() {
+    expect("*main()\n    log(10 % 3)\n", "1");
+}
+#[test]
+fn b_mod_even_check() {
+    expect("*main()\n    log(14 % 2)\n    log(15 % 2)\n", "0\n1");
+}
+#[test]
+fn b_mod_large() {
+    expect("*main()\n    log(1000000007 % 1000)\n", "7");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 55: More enum patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_enum_data_3_variants() {
+    expect(
+        "enum Expr\n    Lit(i64)\n    Add(i64, i64)\n    Mul(i64, i64)\n\n*eval(e: Expr) -> i64\n    match e\n        Lit(x) ? x\n        Add(a, b) ? a + b\n        Mul(a, b) ? a * b\n\n*main() -> i32\n    log(eval(Lit(5)))\n    log(eval(Add(3, 4)))\n    log(eval(Mul(6, 7)))\n    0\n",
+        "5\n7\n42",
+    );
+}
+#[test]
+fn b_enum_unit_all() {
+    expect(
+        "enum Season\n    Spring\n    Summer\n    Autumn\n    Winter\n\n*name(s: Season) -> i64\n    match s\n        Spring ? 1\n        Summer ? 2\n        Autumn ? 3\n        Winter ? 4\n\n*main() -> i32\n    log(name(Spring))\n    log(name(Summer))\n    log(name(Autumn))\n    log(name(Winter))\n    0\n",
+        "1\n2\n3\n4",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 56: Cast combinations
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_cast_chain() {
+    expect("*main()\n    x is 42 as i32 as i64\n    log(x)\n", "42");
+}
+#[test]
+fn b_cast_i8() {
+    expect("*main()\n    x is 127 as i8\n    log(x)\n", "127");
+}
+#[test]
+fn b_cast_u8() {
+    expect("*main()\n    x is 200 as u8\n    log(x)\n", "200");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 57: While with complex conditions
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_while_compound() {
+    expect(
+        "*main()\n    x is 0\n    y is 100\n    while x < 50 and y > 50\n        x is x + 1\n        y is y - 1\n    log(x)\n    log(y)\n",
+        "50\n50",
+    );
+}
+#[test]
+fn b_while_or_cond() {
+    expect(
+        "*main()\n    x is 0\n    while x < 3 or x equals 3\n        x is x + 1\n    log(x)\n",
+        "4",
+    );
+}
+#[test]
+fn b_while_not_cond() {
+    expect(
+        "*main()\n    done is false\n    i is 0\n    while not done\n        i is i + 1\n        if i equals 5\n            done is true\n    log(i)\n",
+        "5",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 58: Additional Option/Result patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_option_fn() {
+    expect(
+        "*main() -> i32\n    arr is [3, 7, 1, 9, 2]\n    found is -1\n    for x in arr\n        if x > 5 and found equals -1\n            found is x\n    log(found)\n    0\n",
+        "7",
+    );
+}
+#[test]
+fn b_result_chain() {
+    expect(
+        "enum MaybeI64\n    Val(i64)\n    None\n\n*try_div(a: i64, b: i64) -> MaybeI64\n    if b equals 0\n        return None\n    Val(a / b)\n\n*main() -> i32\n    match try_div(100, 5)\n        Val(v) ? log(v)\n        None ? log(-1)\n    match try_div(100, 0)\n        Val(v) ? log(v)\n        None ? log(-1)\n    0\n",
+        "20\n-1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 59: More RC patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_rc_multi() {
+    expect(
+        "*main()\n    a is rc(10)\n    b is rc(20)\n    log(@a + @b)\n",
+        "30",
+    );
+}
+#[test]
+fn b_rc_nested_arith() {
+    expect("*main()\n    x is rc(7)\n    log(@x * @x + 1)\n", "50");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 60: Expression edge cases
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_double_neg() {
+    expect("*main()\n    x is 5\n    log(0 - (0 - x))\n", "5");
+}
+#[test]
+fn b_assoc_add() {
+    expect("*main()\n    log((1 + 2) + (3 + 4))\n", "10");
+}
+#[test]
+fn b_mixed_ops() {
+    expect("*main()\n    log(2 * 3 + 4 * 5 - 6)\n", "20");
+}
+#[test]
+fn b_deeply_nested() {
+    expect("*main()\n    log(((((1 + 2) * 3) + 4) * 5) - 6)\n", "59");
+}
+#[test]
+fn b_unary_neg() {
+    expect(
+        "*main()\n    x is -10\n    y is -20\n    log(x + y)\n",
+        "-30",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH 61: For-in with computations
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_for_in_max_arr() {
+    expect(
+        "*main()\n    arr is [5, 12, 3, 8, 15, 7]\n    best is 0\n    for x in arr\n        if x > best\n            best is x\n    log(best)\n",
+        "15",
+    );
+}
+#[test]
+fn b_for_in_count() {
+    expect(
+        "*main()\n    arr is [1, 2, 3, 4, 5]\n    count is 0\n    for x in arr\n        count is count + 1\n    log(count)\n",
+        "5",
+    );
+}
+#[test]
+fn b_for_in_nested_if() {
+    expect(
+        "*main()\n    arr is [10, 25, 30, 45, 50]\n    count is 0\n    for x in arr\n        if x > 20 and x < 50\n            count is count + 1\n    log(count)\n",
+        "3",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: String Interpolation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_interp_str_var() {
+    expect("*main()\n    name is 'world'\n    log('hello {name}')\n", "hello world");
+}
+#[test]
+fn b_interp_int_var() {
+    expect("*main()\n    x is 42\n    log('x={x}')\n", "x=42");
+}
+#[test]
+fn b_interp_float_var() {
+    expect("*main()\n    pi is 3.14\n    log('pi={pi}')\n", "pi=3.14");
+}
+#[test]
+fn b_interp_expr() {
+    expect("*main()\n    log('sum={2 + 3}')\n", "sum=5");
+}
+#[test]
+fn b_interp_multi() {
+    expect("*main()\n    a is 'x'\n    b is 1\n    log('{a}={b}')\n", "x=1");
+}
+#[test]
+fn b_interp_start() {
+    expect("*main()\n    x is 42\n    log('{x} done')\n", "42 done");
+}
+#[test]
+fn b_interp_only() {
+    expect("*main()\n    x is 'hello'\n    log('{x}')\n", "hello");
+}
+#[test]
+fn b_interp_no_interp() {
+    expect("*main()\n    log('plain string')\n", "plain string");
+}
+#[test]
+fn b_interp_adjacent() {
+    expect("*main()\n    a is 1\n    b is 2\n    log('{a}{b}')\n", "12");
+}
+#[test]
+fn b_interp_bool() {
+    expect("*main()\n    log('{true}')\n", "true");
+}
+#[test]
+fn b_interp_complex_expr() {
+    expect("*main()\n    x is 10\n    log('result={x * 2 + 1}')\n", "result=21");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Augmented Assignment
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_aug_plus() {
+    expect("*main()\n    x is 10\n    x += 5\n    log(x)\n", "15");
+}
+#[test]
+fn b_aug_minus() {
+    expect("*main()\n    x is 10\n    x -= 3\n    log(x)\n", "7");
+}
+#[test]
+fn b_aug_mul() {
+    expect("*main()\n    x is 6\n    x *= 7\n    log(x)\n", "42");
+}
+#[test]
+fn b_aug_div() {
+    expect("*main()\n    x is 100\n    x /= 4\n    log(x)\n", "25");
+}
+#[test]
+fn b_aug_mod() {
+    expect("*main()\n    x is 17\n    x %= 5\n    log(x)\n", "2");
+}
+#[test]
+fn b_aug_bitand() {
+    expect("*main()\n    x is 0xFF\n    x &= 0x0F\n    log(x)\n", "15");
+}
+#[test]
+fn b_aug_bitor() {
+    expect("*main()\n    x is 0xF0\n    x |= 0x0F\n    log(x)\n", "255");
+}
+#[test]
+fn b_aug_xor() {
+    expect("*main()\n    x is 0xFF\n    x ^= 0x0F\n    log(x)\n", "240");
+}
+#[test]
+fn b_aug_shl() {
+    expect("*main()\n    x is 1\n    x <<= 10\n    log(x)\n", "1024");
+}
+#[test]
+fn b_aug_shr() {
+    expect("*main()\n    x is 1024\n    x >>= 5\n    log(x)\n", "32");
+}
+#[test]
+fn b_aug_chain() {
+    expect("*main()\n    x is 1\n    x += 9\n    x *= 3\n    x -= 6\n    log(x)\n", "24");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: String Methods
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_str_contains_yes() {
+    expect("*main()\n    log('hello world'.contains('world'))\n", "1");
+}
+#[test]
+fn b_str_contains_no() {
+    expect("*main()\n    log('hello world'.contains('xyz'))\n", "0");
+}
+#[test]
+fn b_str_contains_empty() {
+    expect("*main()\n    log('hello'.contains(''))\n", "1");
+}
+#[test]
+fn b_str_starts_with_yes() {
+    expect("*main()\n    log('hello world'.starts_with('hello'))\n", "1");
+}
+#[test]
+fn b_str_starts_with_no() {
+    expect("*main()\n    log('hello world'.starts_with('world'))\n", "0");
+}
+#[test]
+fn b_str_ends_with_yes() {
+    expect("*main()\n    log('hello world'.ends_with('world'))\n", "1");
+}
+#[test]
+fn b_str_ends_with_no() {
+    expect("*main()\n    log('hello world'.ends_with('hello'))\n", "0");
+}
+#[test]
+fn b_str_char_at() {
+    expect("*main()\n    log('abc'.char_at(0))\n", "97");
+}
+#[test]
+fn b_str_char_at_mid() {
+    expect("*main()\n    log('abc'.char_at(1))\n", "98");
+}
+#[test]
+fn b_str_slice() {
+    expect("*main()\n    log('hello world'.slice(0, 5))\n", "hello");
+}
+#[test]
+fn b_str_slice_mid() {
+    expect("*main()\n    log('hello world'.slice(6, 11))\n", "world");
+}
+#[test]
+fn b_str_slice_len() {
+    expect("*main()\n    s is 'abcdef'.slice(2, 5)\n    log(s.length)\n", "3");
+}
+
+// --- Array element assignment ---
+
+#[test]
+fn b_arr_assign_basic() {
+    expect("*main()\n    arr is [10, 20, 30]\n    arr[1] is 99\n    log(arr[1])\n", "99");
+}
+
+#[test]
+fn b_arr_assign_first() {
+    expect("*main()\n    arr is [1, 2, 3]\n    arr[0] is 42\n    log(arr[0])\n", "42");
+}
+
+#[test]
+fn b_arr_assign_last() {
+    expect("*main()\n    arr is [1, 2, 3]\n    arr[2] is 77\n    log(arr[2])\n", "77");
+}
+
+#[test]
+fn b_arr_assign_expr() {
+    expect("*main()\n    arr is [10, 20, 30]\n    arr[1] is arr[0] + arr[2]\n    log(arr[1])\n", "40");
+}
+
+#[test]
+fn b_arr_assign_neg() {
+    expect("*main()\n    arr is [1, 2, 3, 4, 5]\n    arr[-1] is 99\n    log(arr[4])\n", "99");
+}
+
+// --- Struct field assignment ---
+
+#[test]
+fn b_field_assign_basic() {
+    expect("type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    p.x is 42\n    log(p.x)\n", "42");
+}
+
+#[test]
+fn b_field_assign_both() {
+    expect("type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 1, y is 2)\n    p.x is 10\n    p.y is 20\n    log(p.x + p.y)\n", "30");
+}
+
+// --- Negative array indexing ---
+
+#[test]
+fn b_neg_idx_last() {
+    expect("*main()\n    arr is [10, 20, 30, 40, 50]\n    log(arr[-1])\n", "50");
+}
+
+#[test]
+fn b_neg_idx_second_last() {
+    expect("*main()\n    arr is [10, 20, 30, 40, 50]\n    log(arr[-2])\n", "40");
+}
+
+#[test]
+fn b_neg_idx_first() {
+    expect("*main()\n    arr is [10, 20, 30]\n    log(arr[-3])\n", "10");
+}
+
+// --- Bitwise NOT ---
+
+#[test]
+fn b_bitnot_zero() {
+    expect("*main()\n    log(~0)\n", "-1");
+}
+
+#[test]
+fn b_bitnot_val() {
+    expect("*main()\n    log(~255)\n", "-256");
+}
+
+#[test]
+fn b_bitnot_double() {
+    expect("*main()\n    x is 42\n    log(~~x)\n", "42");
+}
+
+// --- String length method ---
+
+#[test]
+fn b_str_len_method() {
+    expect("*main()\n    s is 'hello'\n    log(s.len())\n", "5");
+}
+
+#[test]
+fn b_str_len_empty() {
+    expect("*main()\n    s is ''\n    log(s.length)\n", "0");
+}
+
+// --- Tuple destructuring ---
+
+#[test]
+fn b_tuple_bind_basic() {
+    expect("*main()\n    x, y is (10, 20)\n    log(x)\n    log(y)\n", "10\n20");
+}
+
+#[test]
+fn b_tuple_bind_triple() {
+    expect("*main()\n    a, b, c is (1, 2, 3)\n    log(a + b + c)\n", "6");
+}
+
+#[test]
+fn b_tuple_bind_fn_nullary() {
+    expect("*pair()\n    (10, 20)\n\n*main()\n    x, y is pair()\n    log(x)\n    log(y)\n", "10\n20");
+}
+
+#[test]
+fn b_tuple_bind_fn_args() {
+    expect("*divmod(a, b)\n    (a / b, a % b)\n\n*main()\n    q, r is divmod(17, 5)\n    log(q)\n    log(r)\n", "3\n2");
+}
+
+#[test]
+fn b_tuple_bind_expr() {
+    expect("*main()\n    x, y is (3 + 4, 10 * 2)\n    log(x)\n    log(y)\n", "7\n20");
+}

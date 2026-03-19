@@ -1,0 +1,18 @@
+type Vec3
+    x: i64
+    y: i64
+    z: i64
+
+*dot(a: Vec3, b: Vec3) -> i64
+    a.x * b.x + a.y * b.y + a.z * b.z
+
+*main() -> i32
+    total is 0
+    i is 0
+    while i < 10000000
+        a is Vec3(x is i, y is i + 1, z is i + 2)
+        b is Vec3(x is i + 3, y is i + 4, z is i + 5)
+        total is total + dot(a, b)
+        i is i + 1
+    log(total)
+    0
