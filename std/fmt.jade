@@ -1,0 +1,53 @@
+# std.fmt — String formatting
+
+*float_to_string(x: f64, decimals: i64) -> String
+    __fmt_float(x, decimals)
+
+*hex(n: i64) -> String
+    __fmt_hex(n)
+
+*oct(n: i64) -> String
+    __fmt_oct(n)
+
+*bin(n: i64) -> String
+    __fmt_bin(n)
+
+*pad_left(s: String, width: i64, ch: i64) -> String
+    if s.length >= width
+        return s
+    padding is width - s.length
+    result is ""
+    i is 0
+    while i < padding
+        result is result + char(ch)
+        i is i + 1
+    result + s
+
+*pad_right(s: String, width: i64, ch: i64) -> String
+    if s.length >= width
+        return s
+    padding is width - s.length
+    result is s
+    i is 0
+    while i < padding
+        result is result + char(ch)
+        i is i + 1
+    result
+
+*join(items: Vec of String, sep: String) -> String
+    if items.length equals 0
+        return ""
+    result is items.get(0)
+    i is 1
+    while i < items.length
+        result is result + sep + items.get(i)
+        i is i + 1
+    result
+
+*repeat(s: String, n: i64) -> String
+    result is ""
+    i is 0
+    while i < n
+        result is result + s
+        i is i + 1
+    result

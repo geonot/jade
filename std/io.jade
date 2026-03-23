@@ -1,0 +1,70 @@
+# std.io — File I/O
+
+extern *fopen(path: %i8, mode: %i8) -> %i8
+extern *fclose(fp: %i8) -> i32
+extern *fread(buf: %i8, size: i64, count: i64, fp: %i8) -> i64
+extern *fwrite(buf: %i8, size: i64, count: i64, fp: %i8) -> i64
+extern *fseek(fp: %i8, offset: i64, whence: i32) -> i32
+extern *ftell(fp: %i8) -> i64
+extern *fgets(buf: %i8, size: i32, fp: %i8) -> %i8
+extern *feof(fp: %i8) -> i32
+extern *remove(path: %i8) -> i32
+extern *rename(old: %i8, new_name: %i8) -> i32
+extern *malloc(size: i64) -> %i8
+extern *free(ptr: %i8)
+extern *memcpy(dst: %i8, src: %i8, n: i64) -> %i8
+extern *strlen(s: %i8) -> i64
+
+type File
+    handle: %i8
+    path: String
+    mode: String
+
+*read_file(path: String) -> String
+    fp is fopen(&path, "r")
+    if fp as i64 equals 0
+        return ""
+    fseek(fp, 0, 2)
+    size is ftell(fp)
+    fseek(fp, 0, 0)
+    buf is malloc(size + 1)
+    fread(buf, 1, size, fp)
+    fclose(fp)
+    __string_from_raw(buf, size, size + 1)
+
+*write_file(path: String, content: String) -> bool
+    fp is fopen(&path, "w")
+    if fp as i64 equals 0
+        return false
+    fwrite(&content, 1, content.length, fp)
+    fclose(fp)
+    true
+
+*append_file(path: String, content: String) -> bool
+    fp is fopen(&path, "a")
+    if fp as i64 equals 0
+        return false
+    fwrite(&content, 1, content.length, fp)
+    fclose(fp)
+    true
+
+*open(path: String, mode: String) -> File
+    fp is fopen(&path, &mode)
+    File(fp, path, mode)
+
+*File.read(self, size: i64) -> String
+    buf is malloc(size)
+    n is fread(buf, 1, size, self.handle)
+    __string_from_raw(buf, n, size)
+
+*File.write(self, data: String)
+    fwrite(&data, 1, data.length, self.handle)
+
+*File.close(self)
+    fclose(self.handle)
+
+*File.eof(self) -> bool
+    feof(self.handle) isnt 0
+
+*file_exists(path: String) -> bool
+    __file_exists(path)

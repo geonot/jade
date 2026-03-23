@@ -1,0 +1,36 @@
+# std.os — Operating system interface
+
+extern *getenv(name: %i8) -> %i8
+extern *setenv(name: %i8, value: %i8, overwrite: i32) -> i32
+extern *getcwd(buf: %i8, size: i64) -> %i8
+extern *chdir(path: %i8) -> i32
+extern *exit(code: i32)
+extern *getpid() -> i32
+extern *system(cmd: %i8) -> i32
+extern *malloc(size: i64) -> %i8
+extern *free(ptr: %i8)
+extern *strlen(s: %i8) -> i64
+
+*env(name: String) -> String
+    ptr is getenv(&name)
+    if ptr as i64 equals 0
+        return ""
+    __string_from_ptr(ptr)
+
+*set_env(name: String, value: String)
+    setenv(&name, &value, 1)
+
+*cwd() -> String
+    buf is malloc(4096)
+    result is getcwd(buf, 4096)
+    if result as i64 equals 0
+        free(buf)
+        return ""
+    len is strlen(buf)
+    __string_from_raw(buf, len, 4096)
+
+*args() -> Vec of String
+    __get_args()
+
+*pid() -> i32
+    getpid()
