@@ -1,0 +1,82 @@
+# std.sort — Introsort: quicksort + heapsort fallback + insertion sort
+
+*sort(arr: Vec of i64)
+    n is arr.length
+    if n <= 1
+        return
+    depth is 0
+    tmp is n
+    while tmp > 1
+        tmp is tmp / 2
+        depth is depth + 1
+    __introsort(arr, 0, n - 1, depth * 2)
+
+*__introsort(arr: Vec of i64, lo: i64, hi: i64, depth_limit: i64)
+    if hi - lo < 16
+        __insertion_sort(arr, lo, hi)
+        return
+    if depth_limit equals 0
+        __heapsort(arr, lo, hi)
+        return
+    pivot is __partition(arr, lo, hi)
+    __introsort(arr, lo, pivot - 1, depth_limit - 1)
+    __introsort(arr, pivot + 1, hi, depth_limit - 1)
+
+*__partition(arr: Vec of i64, lo: i64, hi: i64) -> i64
+    mid is (lo + hi) / 2
+    if arr.get(mid) < arr.get(lo)
+        __swap(arr, lo, mid)
+    if arr.get(hi) < arr.get(lo)
+        __swap(arr, lo, hi)
+    if arr.get(mid) < arr.get(hi)
+        __swap(arr, mid, hi)
+    pivot is arr.get(hi)
+    i is lo - 1
+    j is lo
+    while j < hi
+        if arr.get(j) <= pivot
+            i is i + 1
+            __swap(arr, i, j)
+        j is j + 1
+    __swap(arr, i + 1, hi)
+    i + 1
+
+*__insertion_sort(arr: Vec of i64, lo: i64, hi: i64)
+    i is lo + 1
+    while i <= hi
+        key is arr.get(i)
+        j is i - 1
+        while j >= lo and arr.get(j) > key
+            arr.set(j + 1, arr.get(j))
+            j is j - 1
+        arr.set(j + 1, key)
+        i is i + 1
+
+*__heapsort(arr: Vec of i64, lo: i64, hi: i64)
+    n is hi - lo + 1
+    i is n / 2 - 1
+    while i >= 0
+        __sift_down(arr, lo, i, n)
+        i is i - 1
+    i is n - 1
+    while i > 0
+        __swap(arr, lo, lo + i)
+        __sift_down(arr, lo, 0, i)
+        i is i - 1
+
+*__sift_down(arr: Vec of i64, lo: i64, root: i64, n: i64)
+    r is root
+    while 2 * r + 1 < n
+        child is 2 * r + 1
+        if child + 1 < n and arr.get(lo + child + 1) > arr.get(lo + child)
+            child is child + 1
+        if arr.get(lo + r) < arr.get(lo + child)
+            __swap(arr, lo + r, lo + child)
+            r is child
+        else
+            return
+
+*__swap(arr: Vec of i64, a: i64, b: i64)
+    tmp is arr.get(a)
+    arr.set(a, arr.get(b))
+    arr.set(b, tmp)

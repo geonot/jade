@@ -130,6 +130,18 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::IterNext(iter_var, type_name, method_name) => {
                 self.compile_iter_next_by_name(iter_var, type_name, method_name)
             }
+            hir::ExprKind::ChannelCreate(elem_ty, cap_expr) => {
+                self.compile_channel_create(elem_ty, cap_expr)
+            }
+            hir::ExprKind::ChannelSend(ch_expr, val_expr) => {
+                self.compile_channel_send(ch_expr, val_expr)
+            }
+            hir::ExprKind::ChannelRecv(ch_expr) => {
+                self.compile_channel_recv(ch_expr, &expr.ty)
+            }
+            hir::ExprKind::Select(arms, default_body) => {
+                self.compile_select(arms, default_body.as_ref())
+            }
         }
     }
 

@@ -158,26 +158,24 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 self.compile_assert(&args[0])
             }
-            hir::BuiltinFn::StringFromRaw
-            | hir::BuiltinFn::StringFromPtr
-            | hir::BuiltinFn::GetArgs
-            | hir::BuiltinFn::Ln
-            | hir::BuiltinFn::Log2
-            | hir::BuiltinFn::Log10
-            | hir::BuiltinFn::Exp
-            | hir::BuiltinFn::Exp2
-            | hir::BuiltinFn::PowF
-            | hir::BuiltinFn::Copysign
-            | hir::BuiltinFn::Fma
-            | hir::BuiltinFn::FmtFloat
-            | hir::BuiltinFn::FmtHex
-            | hir::BuiltinFn::FmtOct
-            | hir::BuiltinFn::FmtBin
-            | hir::BuiltinFn::TimeMonotonic
-            | hir::BuiltinFn::SleepMs
-            | hir::BuiltinFn::FileExists => {
-                Err(format!("{builtin:?} builtin not yet implemented"))
-            }
+            hir::BuiltinFn::Ln => self.compile_f64_intrinsic("llvm.log.f64", args),
+            hir::BuiltinFn::Log2 => self.compile_f64_intrinsic("llvm.log2.f64", args),
+            hir::BuiltinFn::Log10 => self.compile_f64_intrinsic("llvm.log10.f64", args),
+            hir::BuiltinFn::Exp => self.compile_f64_intrinsic("llvm.exp.f64", args),
+            hir::BuiltinFn::Exp2 => self.compile_f64_intrinsic("llvm.exp2.f64", args),
+            hir::BuiltinFn::PowF => self.compile_f64_intrinsic2("llvm.pow.f64", args),
+            hir::BuiltinFn::Copysign => self.compile_f64_intrinsic2("llvm.copysign.f64", args),
+            hir::BuiltinFn::Fma => self.compile_f64_intrinsic3("llvm.fma.f64", args),
+            hir::BuiltinFn::StringFromRaw => self.compile_string_from_raw(args),
+            hir::BuiltinFn::StringFromPtr => self.compile_string_from_ptr(args),
+            hir::BuiltinFn::GetArgs => self.compile_get_args(),
+            hir::BuiltinFn::FmtFloat => self.compile_fmt_float(args),
+            hir::BuiltinFn::FmtHex => self.compile_fmt_snprintf("%lx", args),
+            hir::BuiltinFn::FmtOct => self.compile_fmt_snprintf("%lo", args),
+            hir::BuiltinFn::FmtBin => self.compile_fmt_bin(args),
+            hir::BuiltinFn::TimeMonotonic => self.compile_time_monotonic(),
+            hir::BuiltinFn::SleepMs => self.compile_sleep_ms(args),
+            hir::BuiltinFn::FileExists => self.compile_file_exists(args),
         }
     }
 
@@ -939,5 +937,374 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(pass_bb);
         Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    // ── LLVM f64 intrinsics (1-arg, 2-arg, 3-arg) ──────────────────
+
+    fn compile_f64_intrinsic(
+        &mut self,
+        name: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let f64t = self.ctx.f64_type();
+        let f = self.module.get_function(name).unwrap_or_else(|| {
+            self.module.add_function(name, f64t.fn_type(&[f64t.into()], false), None)
+        });
+        let v = self.compile_expr(&args[0])?.into_float_value();
+        Ok(b!(self.bld.build_call(f, &[v.into()], "")).try_as_basic_value().basic().unwrap())
+    }
+
+    fn compile_f64_intrinsic2(
+        &mut self,
+        name: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let f64t = self.ctx.f64_type();
+        let f = self.module.get_function(name).unwrap_or_else(|| {
+            self.module.add_function(name, f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+        });
+        let a = self.compile_expr(&args[0])?.into_float_value();
+        let b_val = self.compile_expr(&args[1])?.into_float_value();
+        Ok(b!(self.bld.build_call(f, &[a.into(), b_val.into()], "")).try_as_basic_value().basic().unwrap())
+    }
+
+    fn compile_f64_intrinsic3(
+        &mut self,
+        name: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let f64t = self.ctx.f64_type();
+        let f = self.module.get_function(name).unwrap_or_else(|| {
+            self.module.add_function(name, f64t.fn_type(&[f64t.into(), f64t.into(), f64t.into()], false), None)
+        });
+        let a = self.compile_expr(&args[0])?.into_float_value();
+        let b_val = self.compile_expr(&args[1])?.into_float_value();
+        let c = self.compile_expr(&args[2])?.into_float_value();
+        Ok(b!(self.bld.build_call(f, &[a.into(), b_val.into(), c.into()], "")).try_as_basic_value().basic().unwrap())
+    }
+
+    // ── String from raw/ptr ─────────────────────────────────────────
+
+    fn compile_string_from_raw(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // __string_from_raw(ptr, len, cap) — takes ownership of ptr
+        let ptr = self.compile_expr(&args[0])?;
+        let len = self.compile_expr(&args[1])?;
+        let cap = if args.len() > 2 {
+            self.compile_expr(&args[2])?
+        } else {
+            len
+        };
+        self.build_string(ptr, len, cap, "sfr")
+    }
+
+    fn compile_string_from_ptr(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // __string_from_ptr(ptr) — copies strlen(ptr) bytes into new String
+        let ptr = self.compile_expr(&args[0])?;
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let strlen = self.module.get_function("strlen").unwrap_or_else(|| {
+            self.module.add_function("strlen", i64t.fn_type(&[ptr_ty.into()], false), Some(Linkage::External))
+        });
+        let len = b!(self.bld.build_call(strlen, &[ptr.into()], "sfp.len"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        let size = b!(self.bld.build_int_nsw_add(len, i64t.const_int(1, false), "sfp.sz"));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self.bld.build_call(malloc, &[size.into()], "sfp.buf"))
+            .try_as_basic_value().basic().unwrap();
+        let memcpy = self.ensure_memcpy();
+        b!(self.bld.build_call(memcpy, &[buf.into(), ptr.into(), size.into()], ""));
+        self.build_string(buf, len, size, "sfp")
+    }
+
+    // ── GetArgs ─────────────────────────────────────────────────────
+
+    fn compile_get_args(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+
+        let argc_g = self.module.get_global("__jade_argc")
+            .ok_or("__jade_argc global not found")?;
+        let argv_g = self.module.get_global("__jade_argv")
+            .ok_or("__jade_argv global not found")?;
+        let argc = b!(self.bld.build_load(i32t, argc_g.as_pointer_value(), "argc")).into_int_value();
+        let argc64 = b!(self.bld.build_int_s_extend(argc, i64t, "argc64"));
+        let argv = b!(self.bld.build_load(ptr_ty, argv_g.as_pointer_value(), "argv")).into_pointer_value();
+
+        // Create empty Vec<String> using existing infrastructure
+        let header_ptr = self.compile_vec_new(&[])?.into_pointer_value();
+        let header_ty = self.vec_header_type();
+        let st = self.string_type();
+        let str_size: u64 = 24; // {ptr, len, cap}
+
+        // Loop: for i in 0..argc
+        let fv = self.cur_fn.unwrap();
+        let loop_bb = self.ctx.append_basic_block(fv, "args.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "args.body");
+        let done_bb = self.ctx.append_basic_block(fv, "args.done");
+        let i_ptr = self.entry_alloca(i64t.into(), "args.i");
+        b!(self.bld.build_store(i_ptr, i64t.const_int(0, false)));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let i = b!(self.bld.build_load(i64t, i_ptr, "i")).into_int_value();
+        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, i, argc64, "args.cond"));
+        b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let arg_pp = unsafe { b!(self.bld.build_gep(ptr_ty, argv, &[i], "arg.pp")) };
+        let arg_p = b!(self.bld.build_load(ptr_ty, arg_pp, "arg.p")).into_pointer_value();
+        // Convert C string to Jade String via strlen + memcpy
+        let strlen = self.module.get_function("strlen").unwrap_or_else(|| {
+            self.module.add_function("strlen", i64t.fn_type(&[ptr_ty.into()], false), Some(Linkage::External))
+        });
+        let slen = b!(self.bld.build_call(strlen, &[arg_p.into()], "arg.len"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        let size = b!(self.bld.build_int_nsw_add(slen, i64t.const_int(1, false), "arg.sz"));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self.bld.build_call(malloc, &[size.into()], "arg.buf"))
+            .try_as_basic_value().basic().unwrap();
+        let memcpy = self.ensure_memcpy();
+        b!(self.bld.build_call(memcpy, &[buf.into(), arg_p.into(), size.into()], ""));
+        let s = self.build_string(buf, slen, size, "arg.s")?;
+
+        // Inline push: load len/cap, grow if needed, store
+        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "ga.lenp"));
+        let len = b!(self.bld.build_load(i64t, len_gep, "ga.len")).into_int_value();
+        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "ga.capp"));
+        let cap = b!(self.bld.build_load(i64t, cap_gep, "ga.cap")).into_int_value();
+        let needs_grow = b!(self.bld.build_int_compare(IntPredicate::SGE, len, cap, "ga.full"));
+        let grow_bb = self.ctx.append_basic_block(fv, "ga.grow");
+        let store_bb = self.ctx.append_basic_block(fv, "ga.store");
+        b!(self.bld.build_conditional_branch(needs_grow, grow_bb, store_bb));
+
+        self.bld.position_at_end(grow_bb);
+        let doubled = b!(self.bld.build_int_nsw_mul(cap, i64t.const_int(2, false), "ga.dbl"));
+        let new_cap_cmp = b!(self.bld.build_int_compare(IntPredicate::SGT, doubled, i64t.const_int(4, false), "ga.cmp"));
+        let new_cap = b!(self.bld.build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "ga.nc")).into_int_value();
+        let new_size = b!(self.bld.build_int_nsw_mul(new_cap, i64t.const_int(str_size, false), "ga.ns"));
+        let realloc = self.ensure_realloc();
+        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "ga.datap"));
+        let old_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "ga.optr"));
+        let new_ptr = b!(self.bld.build_call(realloc, &[old_ptr.into(), new_size.into()], "ga.nptr"))
+            .try_as_basic_value().basic().unwrap();
+        b!(self.bld.build_store(data_gep, new_ptr));
+        b!(self.bld.build_store(cap_gep, new_cap));
+        b!(self.bld.build_unconditional_branch(store_bb));
+
+        self.bld.position_at_end(store_bb);
+        let data_gep2 = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "ga.dp2"));
+        let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep2, "ga.dp")).into_pointer_value();
+        let elem_gep = unsafe { b!(self.bld.build_gep(st, data_ptr, &[len], "ga.ep")) };
+        b!(self.bld.build_store(elem_gep, s));
+        let new_len = b!(self.bld.build_int_nsw_add(len, i64t.const_int(1, false), "ga.nl"));
+        b!(self.bld.build_store(len_gep, new_len));
+
+        let next = b!(self.bld.build_int_nsw_add(i, i64t.const_int(1, false), "args.next"));
+        b!(self.bld.build_store(i_ptr, next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(header_ptr.into())
+    }
+
+    // ── Formatting builtins ─────────────────────────────────────────
+
+    fn compile_fmt_float(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // __fmt_float(x: f64, decimals: i64) -> String
+        let x = self.compile_expr(&args[0])?.into_float_value();
+        let decimals = self.compile_expr(&args[1])?.into_int_value();
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let snprintf = self.ensure_snprintf();
+
+        // Build format string "%.*f" — precision from arg
+        let fmt = b!(self.bld.build_global_string_ptr("%.*f", "ff.fmt"));
+        // snprintf(NULL, 0, "%.*f", decimals, x) → len
+        let null = ptr_ty.const_null();
+        let dec_i32 = b!(self.bld.build_int_truncate(decimals, self.ctx.i32_type(), "dec32"));
+        let len = b!(self.bld.build_call(snprintf, &[null.into(), i64t.const_int(0, false).into(), fmt.as_pointer_value().into(), dec_i32.into(), x.into()], "ff.len"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        let len64 = b!(self.bld.build_int_s_extend(len, i64t, "ff.len64"));
+        let size = b!(self.bld.build_int_nsw_add(len64, i64t.const_int(1, false), "ff.sz"));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self.bld.build_call(malloc, &[size.into()], "ff.buf"))
+            .try_as_basic_value().basic().unwrap();
+        b!(self.bld.build_call(snprintf, &[buf.into(), size.into(), fmt.as_pointer_value().into(), dec_i32.into(), x.into()], ""));
+        self.build_string(buf, len64, size, "ff.s")
+    }
+
+    fn compile_fmt_snprintf(
+        &mut self,
+        fmt_str: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let val = self.compile_expr(&args[0])?.into_int_value();
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let snprintf = self.ensure_snprintf();
+        let fmt = b!(self.bld.build_global_string_ptr(fmt_str, "fh.fmt"));
+        let null = ptr_ty.const_null();
+        let wide = if val.get_type().get_bit_width() < 64 {
+            b!(self.bld.build_int_s_extend(val, i64t, "fw")).into()
+        } else {
+            val.into()
+        };
+        let len = b!(self.bld.build_call(snprintf, &[null.into(), i64t.const_int(0, false).into(), fmt.as_pointer_value().into(), wide], "fh.len"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        let len64 = b!(self.bld.build_int_s_extend(len, i64t, "fh.len64"));
+        let size = b!(self.bld.build_int_nsw_add(len64, i64t.const_int(1, false), "fh.sz"));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self.bld.build_call(malloc, &[size.into()], "fh.buf"))
+            .try_as_basic_value().basic().unwrap();
+        b!(self.bld.build_call(snprintf, &[buf.into(), size.into(), fmt.as_pointer_value().into(), wide], ""));
+        self.build_string(buf, len64, size, "fh.s")
+    }
+
+    fn compile_fmt_bin(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // Convert integer to binary string via bit extraction loop
+        let val = self.compile_expr(&args[0])?.into_int_value();
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let malloc = self.ensure_malloc();
+        // Max 64 binary digits + null
+        let buf = b!(self.bld.build_call(malloc, &[i64t.const_int(65, false).into()], "fb.buf"))
+            .try_as_basic_value().basic().unwrap();
+        let buf_ptr = buf.into_pointer_value();
+
+        let fv = self.cur_fn.unwrap();
+        let loop_bb = self.ctx.append_basic_block(fv, "fb.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "fb.body");
+        let done_bb = self.ctx.append_basic_block(fv, "fb.done");
+
+        let wide = if val.get_type().get_bit_width() < 64 {
+            b!(self.bld.build_int_z_extend(val, i64t, "fb.w"))
+        } else { val };
+
+        // Find MSB position using CLZ
+        let clz_name = "llvm.ctlz.i64";
+        let clz = self.module.get_function(clz_name).unwrap_or_else(|| {
+            let ft = i64t.fn_type(&[i64t.into(), self.ctx.bool_type().into()], false);
+            self.module.add_function(clz_name, ft, None)
+        });
+        let lz = b!(self.bld.build_call(clz, &[wide.into(), self.ctx.bool_type().const_int(1, false).into()], "fb.lz"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        // nbits = max(64 - lz, 1) — at least "0"
+        let raw_bits = b!(self.bld.build_int_nsw_sub(i64t.const_int(64, false), lz, "fb.nb"));
+        let is_zero = b!(self.bld.build_int_compare(IntPredicate::EQ, wide, i64t.const_int(0, false), "fb.z"));
+        let nbits = b!(self.bld.build_select(is_zero, i64t.const_int(1, false), raw_bits, "fb.bits")).into_int_value();
+
+        let idx_ptr = self.entry_alloca(i64t.into(), "fb.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let bit_ptr = self.entry_alloca(i64t.into(), "fb.bit");
+        b!(self.bld.build_store(bit_ptr, b!(self.bld.build_int_nsw_sub(nbits, i64t.const_int(1, false), "fb.start"))));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "fb.i")).into_int_value();
+        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, nbits, "fb.cond"));
+        b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let bit = b!(self.bld.build_load(i64t, bit_ptr, "fb.b")).into_int_value();
+        let shifted = b!(self.bld.build_right_shift(wide, bit, false, "fb.sh"));
+        let masked = b!(self.bld.build_and(shifted, i64t.const_int(1, false), "fb.m"));
+        let ch = b!(self.bld.build_int_nsw_add(b!(self.bld.build_int_truncate(masked, i8t, "fb.trunc")), i8t.const_int(b'0' as u64, false), "fb.ch"));
+        let dest = unsafe { b!(self.bld.build_gep(i8t, buf_ptr, &[idx], "fb.p")) };
+        b!(self.bld.build_store(dest, ch));
+        let next_idx = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "fb.ni"));
+        b!(self.bld.build_store(idx_ptr, next_idx));
+        let next_bit = b!(self.bld.build_int_nsw_sub(bit, i64t.const_int(1, false), "fb.nb"));
+        b!(self.bld.build_store(bit_ptr, next_bit));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        // Null-terminate
+        let end = unsafe { b!(self.bld.build_gep(i8t, buf_ptr, &[nbits], "fb.end")) };
+        b!(self.bld.build_store(end, i8t.const_int(0, false)));
+        self.build_string(buf, nbits, b!(self.bld.build_int_nsw_add(nbits, i64t.const_int(1, false), "fb.cap")), "fb.s")
+    }
+
+    // ── Time builtins ───────────────────────────────────────────────
+
+    fn compile_time_monotonic(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let f64t = self.ctx.f64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+
+        let clock_gettime = self.module.get_function("clock_gettime").unwrap_or_else(|| {
+            self.module.add_function("clock_gettime", i32t.fn_type(&[i32t.into(), ptr_ty.into()], false), Some(Linkage::External))
+        });
+
+        // struct timespec { i64 tv_sec, i64 tv_nsec }
+        let ts_ty = self.ctx.struct_type(&[i64t.into(), i64t.into()], false);
+        let ts = self.entry_alloca(ts_ty.into(), "ts");
+        // CLOCK_MONOTONIC = 1
+        b!(self.bld.build_call(clock_gettime, &[i32t.const_int(1, false).into(), ts.into()], ""));
+        let sec = b!(self.bld.build_load(i64t, b!(self.bld.build_struct_gep(ts_ty, ts, 0, "ts.sec")), "sec")).into_int_value();
+        let nsec = b!(self.bld.build_load(i64t, b!(self.bld.build_struct_gep(ts_ty, ts, 1, "ts.nsec")), "nsec")).into_int_value();
+        let sec_f = b!(self.bld.build_signed_int_to_float(sec, f64t, "secf"));
+        let nsec_f = b!(self.bld.build_signed_int_to_float(nsec, f64t, "nsecf"));
+        let billion = f64t.const_float(1_000_000_000.0);
+        let ns_part = b!(self.bld.build_float_div(nsec_f, billion, "ns"));
+        Ok(b!(self.bld.build_float_add(sec_f, ns_part, "mono")).into())
+    }
+
+    fn compile_sleep_ms(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ms = self.compile_expr(&args[0])?.into_int_value();
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+
+        // nanosleep(&timespec, NULL)
+        let nanosleep = self.module.get_function("nanosleep").unwrap_or_else(|| {
+            self.module.add_function("nanosleep", i32t.fn_type(&[ptr_ty.into(), ptr_ty.into()], false), Some(Linkage::External))
+        });
+        let ts_ty = self.ctx.struct_type(&[i64t.into(), i64t.into()], false);
+        let ts = self.entry_alloca(ts_ty.into(), "sl.ts");
+        // sec = ms / 1000, nsec = (ms % 1000) * 1_000_000
+        let sec = b!(self.bld.build_int_signed_div(ms, i64t.const_int(1000, false), "sl.sec"));
+        let rem = b!(self.bld.build_int_signed_rem(ms, i64t.const_int(1000, false), "sl.rem"));
+        let nsec = b!(self.bld.build_int_nsw_mul(rem, i64t.const_int(1_000_000, false), "sl.nsec"));
+        let sec_p = b!(self.bld.build_struct_gep(ts_ty, ts, 0, "sl.secp"));
+        b!(self.bld.build_store(sec_p, sec));
+        let nsec_p = b!(self.bld.build_struct_gep(ts_ty, ts, 1, "sl.nsecp"));
+        b!(self.bld.build_store(nsec_p, nsec));
+        b!(self.bld.build_call(nanosleep, &[ts.into(), ptr_ty.const_null().into()], ""));
+        Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    fn compile_file_exists(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let s = self.compile_expr(&args[0])?;
+        let data = self.string_data(s)?;
+        let i32t = self.ctx.i32_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let access = self.module.get_function("access").unwrap_or_else(|| {
+            self.module.add_function("access", i32t.fn_type(&[ptr_ty.into(), i32t.into()], false), Some(Linkage::External))
+        });
+        // F_OK = 0
+        let result = b!(self.bld.build_call(access, &[data.into(), i32t.const_int(0, false).into()], "fex"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        let is_ok = b!(self.bld.build_int_compare(IntPredicate::EQ, result, i32t.const_int(0, false), "fex.ok"));
+        Ok(is_ok.into())
     }
 }

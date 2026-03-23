@@ -26,6 +26,7 @@ pub enum Type {
     Weak(Box<Type>),
     ActorRef(String),
     Coroutine(Box<Type>),
+    Channel(Box<Type>),
     DynTrait(String),
     Inferred,
 }
@@ -88,7 +89,8 @@ impl Type {
             | Self::Void
             | Self::Inferred
             | Self::Ptr(_)
-            | Self::ActorRef(_) => true,
+            | Self::ActorRef(_)
+            | Self::Channel(_) => true,
             Self::Array(inner, _) => inner.is_trivially_droppable(),
             Self::Vec(_) | Self::Map(_, _) => false,
             Self::Tuple(tys) => tys.iter().all(|t| t.is_trivially_droppable()),
@@ -143,6 +145,7 @@ impl std::fmt::Display for Type {
             Self::Weak(inner) => write!(f, "weak {inner}"),
             Self::ActorRef(name) => write!(f, "ActorRef<{name}>"),
             Self::Coroutine(inner) => write!(f, "Coroutine of {inner}"),
+            Self::Channel(inner) => write!(f, "Channel of {inner}"),
             Self::DynTrait(name) => write!(f, "dyn {name}"),
             Self::Fn(ps, r) => {
                 f.write_str("(")?;

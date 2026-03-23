@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -8,11 +8,14 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use jadec::ast::{Decl, Program};
+use jadec::cache::{Cache, build_package_map};
 use jadec::codegen::Compiler;
 use jadec::lexer::Lexer;
+use jadec::lock::Lockfile;
 use jadec::ownership::OwnershipVerifier;
 use jadec::parser::Parser;
 use jadec::perceus::PerceusPass;
+use jadec::pkg::Package;
 use jadec::typer::Typer;
 
 #[derive(ClapParser)]
@@ -56,7 +59,12 @@ fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
-fn resolve_modules(prog: &mut Program, base_dir: &std::path::Path, loaded: &mut HashSet<String>) {
+fn resolve_modules(
+    prog: &mut Program,
+    base_dir: &std::path::Path,
+    loaded: &mut HashSet<String>,
+    packages: &HashMap<String, PathBuf>,
+) {
     let uses: Vec<Vec<String>> = prog
         .decls
         .iter()
@@ -75,11 +83,46 @@ fn resolve_modules(prog: &mut Program, base_dir: &std::path::Path, loaded: &mut 
         }
         loaded.insert(key.clone());
         let file_path = path.join("/");
-        let mut candidate = base_dir.join(format!("{file_path}.jade"));
+        let name = path.last().unwrap();
+        // Check if first segment matches a package name
+        let mut candidate = if let Some(pkg_path) = packages.get(&path[0]) {
+            if path.len() > 1 {
+                let rest = path[1..].join("/");
+                pkg_path.join("src").join(format!("{rest}.jade"))
+            } else {
+                pkg_path.join("src").join(format!("{}.jade", path[0]))
+            }
+        } else {
+            base_dir.join(format!("{file_path}.jade"))
+        };
+        if !candidate.exists() {
+            candidate = base_dir.join(format!("{file_path}.jade"));
+        }
         if !candidate.exists() {
             candidate = base_dir
                 .join("std")
-                .join(format!("{}.jade", path.last().unwrap()));
+                .join(format!("{name}.jade"));
+        }
+        // Fallback: std/ next to the compiler binary
+        if !candidate.exists() {
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(exe_dir) = exe.parent() {
+                    let c = exe_dir.join("std").join(format!("{name}.jade"));
+                    if c.exists() {
+                        candidate = c;
+                    }
+                }
+            }
+        }
+        // Fallback: std/ relative to the project root (for development)
+        if !candidate.exists() {
+            let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+            if !manifest.is_empty() {
+                let c = PathBuf::from(&manifest).join("std").join(format!("{name}.jade"));
+                if c.exists() {
+                    candidate = c;
+                }
+            }
         }
         if !candidate.exists() {
             die(&format!("module not found: {key}"));
@@ -96,6 +139,7 @@ fn resolve_modules(prog: &mut Program, base_dir: &std::path::Path, loaded: &mut 
             &mut mod_prog,
             candidate.parent().unwrap_or(base_dir),
             loaded,
+            packages,
         );
         for d in mod_prog.decls {
             if !matches!(d, Decl::Use(_)) {
@@ -121,14 +165,40 @@ fn main() {
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
     let mut loaded = HashSet::new();
-    resolve_modules(&mut prog, base_dir, &mut loaded);
+
+    // Load package manifest if present
+    let pkg_file = base_dir.join("jade.pkg");
+    let packages = if pkg_file.exists() {
+        let pkg = Package::from_file(&pkg_file).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
+        let lock_file = base_dir.join("jade.lock");
+        let existing_lock = if lock_file.exists() {
+            Some(Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
+        } else {
+            None
+        };
+        if pkg.requires.is_empty() {
+            HashMap::new()
+        } else {
+            let cache = Cache::new();
+            let resolved = cache.resolve(&pkg, existing_lock.as_ref())
+                .unwrap_or_else(|e| die(&format!("resolve: {e}")));
+            let lock_content = resolved.write();
+            fs::write(&lock_file, &lock_content)
+                .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+            build_package_map(&cache, &resolved)
+        }
+    } else {
+        HashMap::new()
+    };
+
+    resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
 
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
     if cli.test {
         typer.set_test_mode(true);
     }
-    let hir_prog = match typer.lower_program(&prog) {
+    let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,
         Err(e) => die(&format!("hir: {e}")),
     };
@@ -145,6 +215,8 @@ fn main() {
     if !hir_errors.is_empty() {
         die("compilation aborted due to HIR validation errors");
     }
+
+    jadec::comptime::fold_program(&mut hir_prog);
 
     let mut perceus = PerceusPass::new();
     let hints = perceus.optimize(&hir_prog);
@@ -250,6 +322,10 @@ fn main() {
 
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(&cli.output).arg("-lm");
+    if comp.needs_runtime {
+        let rt_dir = env!("JADE_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljade_rt").arg("-lpthread");
+    }
     for extra in &cli.link {
         cc.arg(extra);
     }

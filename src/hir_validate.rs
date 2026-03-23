@@ -181,6 +181,8 @@ impl HirValidator {
                 }
             }
             hir::Stmt::Transaction(block, _) => self.validate_block(block),
+            hir::Stmt::ChannelClose(e, _) => self.validate_expr(e),
+            hir::Stmt::Stop(e, _) => self.validate_expr(e),
         }
     }
 
@@ -343,6 +345,24 @@ impl HirValidator {
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_)
             | hir::ExprKind::IterNext(_, _, _) => {}
+            hir::ExprKind::ChannelCreate(_, cap) => self.validate_expr(cap),
+            hir::ExprKind::ChannelSend(ch, val) => {
+                self.validate_expr(ch);
+                self.validate_expr(val);
+            }
+            hir::ExprKind::ChannelRecv(ch) => self.validate_expr(ch),
+            hir::ExprKind::Select(arms, default_body) => {
+                for arm in arms {
+                    self.validate_expr(&arm.chan);
+                    if let Some(val) = &arm.value {
+                        self.validate_expr(val);
+                    }
+                    self.validate_block(&arm.body);
+                }
+                if let Some(body) = default_body {
+                    self.validate_block(body);
+                }
+            }
         }
     }
 
@@ -395,5 +415,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::StoreDelete(_, _, s) => *s,
         hir::Stmt::StoreSet(_, _, _, s) => *s,
         hir::Stmt::Transaction(_, s) => *s,
+        hir::Stmt::ChannelClose(_, s) => *s,
+        hir::Stmt::Stop(_, s) => *s,
     }
 }
