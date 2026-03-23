@@ -341,7 +341,8 @@ impl HirValidator {
             | hir::ExprKind::MapNew
             | hir::ExprKind::Spawn(_)
             | hir::ExprKind::StoreCount(_)
-            | hir::ExprKind::StoreAll(_) => {}
+            | hir::ExprKind::StoreAll(_)
+            | hir::ExprKind::IterNext(_, _, _) => {}
         }
     }
 

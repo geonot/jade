@@ -465,7 +465,7 @@ fn emit_ir_flag() {
         .expect("jadec failed");
     assert!(output.status.success());
     let ir = String::from_utf8(output.stdout).unwrap();
-    assert!(ir.contains("define i32 @main()"));
+    assert!(ir.contains("define i32 @main(i32") || ir.contains("define i32 @main()"));
     assert!(ir.contains("@printf"));
 }
 

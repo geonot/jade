@@ -2370,6 +2370,76 @@ impl Typer {
                         span,
                     });
                 }
+                "__string_from_raw" if args.len() == 3 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::StringFromRaw, hargs), ty: Type::String, span });
+                }
+                "__string_from_ptr" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::StringFromPtr, hargs), ty: Type::String, span });
+                }
+                "__get_args" if args.is_empty() && !self.fns.contains_key(name) => {
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::GetArgs, vec![]), ty: Type::Vec(Box::new(Type::String)), span });
+                }
+                "__ln" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Ln, hargs), ty: Type::F64, span });
+                }
+                "__log2" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Log2, hargs), ty: Type::F64, span });
+                }
+                "__log10" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Log10, hargs), ty: Type::F64, span });
+                }
+                "__exp" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Exp, hargs), ty: Type::F64, span });
+                }
+                "__exp2" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Exp2, hargs), ty: Type::F64, span });
+                }
+                "__powf" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::PowF, hargs), ty: Type::F64, span });
+                }
+                "__copysign" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Copysign, hargs), ty: Type::F64, span });
+                }
+                "__fma" if args.len() == 3 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::Fma, hargs), ty: Type::F64, span });
+                }
+                "__fmt_float" if args.len() == 2 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::FmtFloat, hargs), ty: Type::String, span });
+                }
+                "__fmt_hex" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::FmtHex, hargs), ty: Type::String, span });
+                }
+                "__fmt_oct" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::FmtOct, hargs), ty: Type::String, span });
+                }
+                "__fmt_bin" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::FmtBin, hargs), ty: Type::String, span });
+                }
+                "__time_monotonic" if args.is_empty() && !self.fns.contains_key(name) => {
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::TimeMonotonic, vec![]), ty: Type::F64, span });
+                }
+                "__sleep_ms" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::SleepMs, hargs), ty: Type::Void, span });
+                }
+                "__file_exists" if args.len() == 1 && !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args.iter().map(|e| self.lower_expr(e)).collect::<Result<_, _>>()?;
+                    return Ok(hir::Expr { kind: hir::ExprKind::Builtin(hir::BuiltinFn::FileExists, hargs), ty: Type::Bool, span });
+                }
                 "vec" if !self.fns.contains_key(name) => {
                     let hargs: Vec<hir::Expr> = args
                         .iter()

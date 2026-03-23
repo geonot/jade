@@ -37,6 +37,70 @@ impl<'ctx> Compiler<'ctx> {
         };
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
             ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
+
+        // For main: create a C-level main(i32, ptr)->i32 wrapper that stores
+        // argc/argv into globals, then calls the user-defined main.
+        if f.name == "main" && !self.lib_mode {
+            let ft = self.mk_fn_type(&ret, &lp, false);
+            let user_fv = self.module.add_function("__jade_user_main", ft, None);
+            if self.fn_may_recurse(f) {
+                self.tag_fn_noreturn_ok(user_fv);
+            } else {
+                self.tag_fn(user_fv);
+            }
+            user_fv.set_linkage(Linkage::Internal);
+            self.fns.insert(f.name.clone(), (user_fv, ptys, ret));
+
+            // Create C-level main(i32, ptr) -> i32 wrapper
+            let i32t = self.ctx.i32_type();
+            let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+            let main_ft = i32t.fn_type(&[i32t.into(), ptr_ty.into()], false);
+            let main_fv = self.module.add_function("main", main_ft, None);
+
+            // Declare globals for argc/argv
+            let argc_global = self.module.add_global(i32t, None, "__jade_argc");
+            argc_global.set_initializer(&i32t.const_int(0, false));
+            let argv_global = self.module.add_global(ptr_ty, None, "__jade_argv");
+            argv_global.set_initializer(&ptr_ty.const_null());
+
+            let entry = self.ctx.append_basic_block(main_fv, "entry");
+            self.bld.position_at_end(entry);
+            let argc_param = main_fv.get_nth_param(0).unwrap();
+            let argv_param = main_fv.get_nth_param(1).unwrap();
+            b!(self.bld.build_store(argc_global.as_pointer_value(), argc_param));
+            b!(self.bld.build_store(argv_global.as_pointer_value(), argv_param));
+
+            // Initialize scheduler if runtime is declared
+            if let Some(sched_init) = self.module.get_function("jade_sched_init") {
+                b!(self.bld.build_call(sched_init, &[i32t.const_int(0, false).into()], ""));
+            }
+
+            // Call user's main
+            let call_result = b!(self.bld.build_call(user_fv, &[], "user_main"));
+
+            // Run scheduler to completion (waits for all coroutines/actors)
+            if let Some(sched_run) = self.module.get_function("jade_sched_run") {
+                b!(self.bld.build_call(sched_run, &[], ""));
+            }
+            if let Some(rv) = call_result.try_as_basic_value().basic() {
+                let ret_i32 = if rv.is_int_value() {
+                    let iv = rv.into_int_value();
+                    if iv.get_type().get_bit_width() != 32 {
+                        b!(self.bld.build_int_truncate(iv, i32t, "ret32"))
+                    } else {
+                        iv
+                    }
+                } else {
+                    i32t.const_int(0, false)
+                };
+                b!(self.bld.build_return(Some(&ret_i32)));
+            } else {
+                b!(self.bld.build_return(Some(&i32t.const_int(0, false))));
+            }
+
+            return Ok(());
+        }
+
         let ft = self.mk_fn_type(&ret, &lp, false);
         let fv = self.module.add_function(&f.name, ft, None);
         if self.fn_may_recurse(f) {
@@ -44,7 +108,7 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             self.tag_fn(fv);
         }
-        if f.name != "main" && !self.lib_mode {
+        if !self.lib_mode {
             fv.set_linkage(Linkage::Internal);
         }
         for (i, p) in f.params.iter().enumerate() {

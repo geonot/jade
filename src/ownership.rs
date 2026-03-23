@@ -450,6 +450,7 @@ impl OwnershipVerifier {
                 self.verify_expr(obj);
                 for a in args { self.verify_expr(a); }
             }
+            ExprKind::IterNext(_, _, _) => {}
         }
     }
 

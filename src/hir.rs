@@ -287,6 +287,7 @@ pub enum ExprKind {
     StoreQuery(String, Box<StoreFilter>),
     StoreCount(String),
     StoreAll(String),
+    IterNext(String, String, String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -322,6 +323,24 @@ pub enum BuiltinFn {
     Assert,
     ActorSpawn,
     ActorSend,
+    StringFromRaw,
+    StringFromPtr,
+    GetArgs,
+    Ln,
+    Log2,
+    Log10,
+    Exp,
+    Exp2,
+    PowF,
+    Copysign,
+    Fma,
+    FmtFloat,
+    FmtHex,
+    FmtOct,
+    FmtBin,
+    TimeMonotonic,
+    SleepMs,
+    FileExists,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -770,6 +789,9 @@ impl PrettyPrinter {
             }
             ExprKind::DynCoerce(e, _ty, trait_name) => {
                 format!("dyn {trait_name}({})", self.expr_str(e))
+            }
+            ExprKind::IterNext(var, ty, method) => {
+                format!("{var}.{ty}_{method}()")
             }
         }
     }

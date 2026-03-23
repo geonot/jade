@@ -158,6 +158,26 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 self.compile_assert(&args[0])
             }
+            hir::BuiltinFn::StringFromRaw
+            | hir::BuiltinFn::StringFromPtr
+            | hir::BuiltinFn::GetArgs
+            | hir::BuiltinFn::Ln
+            | hir::BuiltinFn::Log2
+            | hir::BuiltinFn::Log10
+            | hir::BuiltinFn::Exp
+            | hir::BuiltinFn::Exp2
+            | hir::BuiltinFn::PowF
+            | hir::BuiltinFn::Copysign
+            | hir::BuiltinFn::Fma
+            | hir::BuiltinFn::FmtFloat
+            | hir::BuiltinFn::FmtHex
+            | hir::BuiltinFn::FmtOct
+            | hir::BuiltinFn::FmtBin
+            | hir::BuiltinFn::TimeMonotonic
+            | hir::BuiltinFn::SleepMs
+            | hir::BuiltinFn::FileExists => {
+                Err(format!("{builtin:?} builtin not yet implemented"))
+            }
         }
     }
 

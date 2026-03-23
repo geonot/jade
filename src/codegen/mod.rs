@@ -597,4 +597,60 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("memcpy", ft, Some(Linkage::External))
         })
     }
+
+    /// Declare all C runtime functions from jade_rt.h.
+    pub(crate) fn declare_jade_runtime(&mut self) {
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let void = self.ctx.void_type();
+        let bool_t = self.ctx.bool_type();
+
+        macro_rules! decl {
+            ($name:expr, $ft:expr) => {
+                if self.module.get_function($name).is_none() {
+                    self.module.add_function($name, $ft, Some(Linkage::External));
+                }
+            };
+        }
+
+        // Coroutine
+        decl!("jade_coro_create", ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false));
+        decl!("jade_coro_destroy", void.fn_type(&[ptr.into()], false));
+
+        // Scheduler
+        decl!("jade_sched_init", void.fn_type(&[i32t.into()], false));
+        decl!("jade_sched_run", void.fn_type(&[], false));
+        decl!("jade_sched_shutdown", void.fn_type(&[], false));
+        decl!("jade_sched_enqueue", void.fn_type(&[ptr.into()], false));
+        decl!("jade_sched_yield", void.fn_type(&[], false));
+        decl!("jade_sched_park", void.fn_type(&[], false));
+        decl!("jade_sched_unpark", void.fn_type(&[ptr.into()], false));
+
+        // Channel
+        decl!("jade_chan_create", ptr.fn_type(&[i64t.into(), i64t.into()], false));
+        decl!("jade_chan_destroy", void.fn_type(&[ptr.into()], false));
+        decl!("jade_chan_send", bool_t.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!("jade_chan_recv", bool_t.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!("jade_chan_close", void.fn_type(&[ptr.into()], false));
+
+        // Actor
+        decl!("jade_actor_create", ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false));
+        decl!("jade_actor_destroy", void.fn_type(&[ptr.into()], false));
+        decl!("jade_actor_send", void.fn_type(&[ptr.into(), i32t.into(), ptr.into(), i64t.into()], false));
+        decl!("jade_actor_recv", ptr.fn_type(&[ptr.into()], false));
+        decl!("jade_actor_stop", void.fn_type(&[ptr.into()], false));
+
+        // Select
+        decl!("jade_select", i32t.fn_type(&[ptr.into(), i32t.into(), bool_t.into()], false));
+
+        // Timer
+        decl!("jade_timer_set", void.fn_type(&[ptr.into(), i64t.into()], false));
+        decl!("jade_timer_check", void.fn_type(&[], false));
+
+        // Ensure basic C functions
+        self.ensure_malloc();
+        self.ensure_free();
+        self.ensure_memcpy();
+    }
 }

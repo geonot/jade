@@ -634,6 +634,7 @@ impl PerceusPass {
                 }
             }
             ExprKind::MapNew => {}
+            ExprKind::IterNext(_, _, _) => {}
             ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
                 self.count_uses_expr(obj, uses);
                 for a in args {

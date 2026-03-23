@@ -127,6 +127,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::DynCoerce(inner, type_name, trait_name) => {
                 self.compile_dyn_coerce(inner, type_name, trait_name)
             }
+            hir::ExprKind::IterNext(iter_var, type_name, method_name) => {
+                self.compile_iter_next_by_name(iter_var, type_name, method_name)
+            }
         }
     }
 
@@ -1490,5 +1493,38 @@ impl<'ctx> Compiler<'ctx> {
         let fn_ty = ret_ty.fn_type(&param_tys, false);
         let result = b!(self.bld.build_indirect_call(fn_ty, fn_ptr, &call_args, "dyn.call"));
         Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
+    }
+
+    pub(crate) fn compile_iter_next(
+        &mut self,
+        iter_var: &hir::Expr,
+        type_name: &str,
+        method_name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // Get the alloca pointer for the iterator variable
+        let var_name = match &iter_var.kind {
+            hir::ExprKind::Var(_, name) => name.clone(),
+            _ => return Err("IterNext requires a variable".into()),
+        };
+        self.compile_iter_next_by_name(&var_name, type_name, method_name)
+    }
+
+    fn compile_iter_next_by_name(
+        &mut self,
+        var_name: &str,
+        type_name: &str,
+        method_name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = self.find_var(var_name)
+            .ok_or_else(|| format!("undefined iter variable: {var_name}"))?
+            .0;
+
+        // Call TypeName_method(ptr)
+        let fn_name = format!("{type_name}_{method_name}");
+        let fv = self.module.get_function(&fn_name)
+            .ok_or_else(|| format!("no function {fn_name}"))?;
+        let result = b!(self.bld.build_call(fv, &[ptr.into()], "iter.next"));
+        Ok(result.try_as_basic_value().basic()
+            .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
     }
 }

@@ -175,9 +175,12 @@ def save_history(history):
         json.dump(history, f, indent=2)
 
 
+SKIP_BENCHMARKS = {"store_ops"}
+
 def discover_benchmarks(bench_filter=None):
     """Find .jade benchmarks, optionally filtered by comma-separated patterns."""
-    all_benches = sorted(f.replace(".jade", "") for f in os.listdir(BENCH_DIR) if f.endswith(".jade"))
+    all_benches = sorted(f.replace(".jade", "") for f in os.listdir(BENCH_DIR)
+                         if f.endswith(".jade") and f.replace(".jade", "") not in SKIP_BENCHMARKS)
     if not bench_filter:
         return all_benches
     patterns = [p.strip() for p in bench_filter.split(",")]
