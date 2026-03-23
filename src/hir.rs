@@ -52,6 +52,7 @@ pub struct Program {
 #[derive(Debug, Clone)]
 pub struct TraitImpl {
     pub trait_name: Option<String>,
+    pub trait_type_args: Vec<Type>,
     pub type_name: String,
     pub methods: Vec<Fn>,
     pub span: Span,

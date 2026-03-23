@@ -3572,3 +3572,120 @@ fn b_dispatch_keyword_parses() {
         "",
     );
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: String iteration (for ch in string)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_string_iter_ascii_sum() {
+    // 'hello' = 104+101+108+108+111 = 532
+    expect(
+        "*main()\n    total is 0\n    for ch in 'hello'\n        total is total + ch\n    log(total)\n",
+        "532",
+    );
+}
+
+#[test]
+fn b_string_iter_empty() {
+    expect(
+        "*main()\n    count is 0\n    for ch in ''\n        count is count + 1\n    log(count)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_string_iter_abc() {
+    // A=65, B=66, C=67
+    expect(
+        "*main()\n    for ch in 'ABC'\n        log(ch)\n",
+        "65\n66\n67",
+    );
+}
+
+#[test]
+fn b_string_iter_var() {
+    // Iterate string held in a variable
+    expect(
+        "*main()\n    s is 'xyz'\n    total is 0\n    for ch in s\n        total is total + ch\n    log(total)\n",
+        "363",
+    );
+}
+
+#[test]
+fn b_string_iter_break() {
+    // Break after 2 chars
+    expect(
+        "*main()\n    count is 0\n    for ch in 'abcde'\n        count is count + 1\n        if count equals 2\n            break\n    log(count)\n",
+        "2",
+    );
+}
+
+#[test]
+fn b_string_iter_single_char() {
+    expect(
+        "*main()\n    for ch in 'X'\n        log(ch)\n",
+        "88",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Trait bounds on generics
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_trait_bound_basic() {
+    // Basic bounded generic
+    expect(
+        "*max of T: Ord(a: T, b: T) -> T\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_trait_bound_violation() {
+    // Type without Ord impl should fail
+    let err = expect_compile_fail(
+        "type Blob\n    data: i64\n\n*bad of T: Ord(x: T) -> T\n    x\n\n*main()\n    log(bad(Blob(data is 1)))\n",
+    );
+    assert!(
+        err.contains("does not satisfy trait bound") || err.contains("Ord"),
+        "expected trait bound error, got: {err}"
+    );
+}
+
+#[test]
+fn b_trait_bound_i64_satisfies() {
+    // i64 satisfies Ord, Add, etc.
+    expect(
+        "*min of T: Ord(a: T, b: T) -> T\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(10, 3))\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_trait_bound_no_bound_still_works() {
+    // Unbounded generics continue to work
+    expect(
+        "*id of T(x: T) -> T\n    x\n\n*main()\n    log(id(42))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_trait_bound_multiple_uses() {
+    // Use bounded generic with multiple types
+    expect(
+        "*bigger of T: Ord(a: T, b: T) -> T\n    if a > b\n        return a\n    b\n\n*main()\n    log(bigger(10, 20))\n    log(bigger(100, 50))\n",
+        "20\n100",
+    );
+}
+
+#[test]
+fn b_trait_bound_with_impl() {
+    // Bound satisfied via explicit impl
+    expect(
+        "type Score\n    val: i64\n\ntrait Rankable\n    *rank() -> i64\n\nimpl Rankable for Score\n    *rank() -> i64\n        self.val\n\n*get_rank of T: Rankable(x: T) -> i64\n    x.rank()\n\n*main()\n    s is Score(val is 42)\n    log(get_rank(s))\n",
+        "42",
+    );
+}

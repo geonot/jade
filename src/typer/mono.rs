@@ -133,6 +133,23 @@ impl Typer {
             .get(name)
             .ok_or_else(|| format!("no generic fn: {name}"))?
             .clone();
+        // Check trait bounds on type parameters
+        if let Some(bounds) = self.generic_bounds.get(name).cloned() {
+            for (param, required_traits) in &bounds {
+                if let Some(concrete_ty) = type_map.get(param) {
+                    let type_name = Self::type_name_for_bound_check(concrete_ty);
+                    for trait_name in required_traits {
+                        if !self.type_satisfies_trait(&type_name, trait_name) {
+                            return Err(format!(
+                                "type `{type_name}` does not satisfy trait bound `{trait_name}` \
+                                 required by type parameter `{param}` in `{name}`"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         let mangled = Self::mangle_generic(name, type_map, &gf.type_params);
         if self.fns.contains_key(&mangled) {
             return Ok(mangled);
@@ -315,5 +332,43 @@ impl Typer {
         }
         let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
         Ok(Some(mangled))
+    }
+
+    fn type_name_for_bound_check(ty: &Type) -> String {
+        match ty {
+            Type::I64 => "i64".into(),
+            Type::F64 => "f64".into(),
+            Type::Bool => "bool".into(),
+            Type::String => "String".into(),
+            Type::Struct(n) => n.clone(),
+            Type::Enum(n) => n.clone(),
+            Type::Vec(inner) => format!("Vec_{}", Self::type_name_for_bound_check(inner)),
+            Type::Fn(params, ret) => {
+                let ps: Vec<_> = params.iter().map(|p| Self::type_name_for_bound_check(p)).collect();
+                format!("Fn_{}_{}", ps.join("_"), Self::type_name_for_bound_check(ret))
+            }
+            _ => format!("{ty:?}"),
+        }
+    }
+
+    fn type_satisfies_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        // Check user-defined trait impls
+        if let Some(impls) = self.trait_impls.get(type_name) {
+            if impls.contains(&trait_name.to_string()) {
+                return true;
+            }
+        }
+        Self::builtin_trait_satisfied(type_name, trait_name)
+    }
+
+    fn builtin_trait_satisfied(type_name: &str, trait_name: &str) -> bool {
+        match trait_name {
+            "Iter" => matches!(type_name, "String") || type_name.starts_with("Vec_"),
+            "Display" => matches!(type_name, "i64" | "f64" | "bool" | "String"),
+            "Eq" => matches!(type_name, "i64" | "f64" | "bool" | "String"),
+            "Ord" => matches!(type_name, "i64" | "f64" | "String"),
+            "Add" | "Sub" | "Mul" | "Div" => matches!(type_name, "i64" | "f64"),
+            _ => false,
+        }
     }
 }

@@ -62,21 +62,42 @@ impl Parser {
         }
     }
 
-    fn parse_type_params(&mut self) -> Vec<String> {
+    fn parse_type_params(&mut self) -> (Vec<String>, Vec<(String, Vec<String>)>) {
         let mut tp = Vec::new();
+        let mut bounds = Vec::new();
         if self.check(Token::Of) {
             self.advance();
             if let Token::Ident(_) = self.peek() {
-                tp.push(self.ident().unwrap());
+                let name = self.ident().unwrap();
+                if self.check(Token::Colon) {
+                    self.advance();
+                    let mut bs = vec![self.ident().unwrap_or_default()];
+                    while self.check(Token::Plus) {
+                        self.advance();
+                        bs.push(self.ident().unwrap_or_default());
+                    }
+                    bounds.push((name.clone(), bs));
+                }
+                tp.push(name);
                 while self.check(Token::Comma) {
                     self.advance();
                     if let Token::Ident(_) = self.peek() {
-                        tp.push(self.ident().unwrap());
+                        let name = self.ident().unwrap();
+                        if self.check(Token::Colon) {
+                            self.advance();
+                            let mut bs = vec![self.ident().unwrap_or_default()];
+                            while self.check(Token::Plus) {
+                                self.advance();
+                                bs.push(self.ident().unwrap_or_default());
+                            }
+                            bounds.push((name.clone(), bs));
+                        }
+                        tp.push(name);
                     }
                 }
             }
         }
-        tp
+        (tp, bounds)
     }
 
     fn parse_extern(&mut self) -> Result<ExternFn, ParseError> {
@@ -124,7 +145,7 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Star)?;
         let name = self.ident()?;
-        let type_params = self.parse_type_params();
+        let (type_params, type_bounds) = self.parse_type_params();
         let mut params = Vec::new();
 
         if self.check(Token::LParen) {
@@ -218,6 +239,7 @@ impl Parser {
         Ok(Fn {
             name,
             type_params,
+            type_bounds,
             params,
             ret,
             body,
@@ -256,7 +278,7 @@ impl Parser {
         }
         self.expect(Token::Type)?;
         let name = self.ident()?;
-        let type_params = self.parse_type_params();
+        let (type_params, _) = self.parse_type_params();
         let layout = self.parse_layout_attrs()?;
         self.expect(Token::Newline)?;
         let (mut fields, mut methods) = (Vec::new(), Vec::new());
@@ -345,7 +367,7 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Enum)?;
         let name = self.ident()?;
-        let type_params = self.parse_type_params();
+        let (type_params, _) = self.parse_type_params();
         self.expect(Token::Newline)?;
         let mut variants = Vec::new();
         if self.check(Token::Indent) {
@@ -958,9 +980,10 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Trait)?;
         let name = self.ident()?;
-        let type_params = self.parse_type_params();
+        let (type_params, _) = self.parse_type_params();
         self.expect(Token::Newline)?;
         let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
         if self.check(Token::Indent) {
             self.advance();
             while !self.check(Token::Dedent) && !self.eof() {
@@ -968,7 +991,13 @@ impl Parser {
                 if self.check(Token::Dedent) || self.eof() {
                     break;
                 }
-                methods.push(self.parse_trait_method()?);
+                if self.check(Token::Type) {
+                    self.advance();
+                    assoc_types.push(self.ident()?);
+                    self.skip_nl();
+                } else {
+                    methods.push(self.parse_trait_method()?);
+                }
             }
             if self.check(Token::Dedent) {
                 self.advance();
@@ -977,6 +1006,7 @@ impl Parser {
         Ok(TraitDef {
             name,
             type_params,
+            assoc_types,
             methods,
             span: sp,
         })
@@ -1043,15 +1073,27 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Impl)?;
         let first_name = self.ident()?;
-        let (trait_name, type_name) = if self.check(Token::For) {
+        let (trait_name, trait_type_args, type_name) = if self.check(Token::Of) {
+            // `impl TraitName of TypeArg, ... for TypeName`
+            self.advance();
+            let mut type_args = vec![self.parse_type()?];
+            while self.check(Token::Comma) {
+                self.advance();
+                type_args.push(self.parse_type()?);
+            }
+            self.expect(Token::For)?;
+            let tn = self.ident()?;
+            (Some(first_name), type_args, tn)
+        } else if self.check(Token::For) {
             self.advance();
             let tn = self.ident()?;
-            (Some(first_name), tn)
+            (Some(first_name), Vec::new(), tn)
         } else {
-            (None, first_name)
+            (None, Vec::new(), first_name)
         };
         self.expect(Token::Newline)?;
         let mut methods = Vec::new();
+        let mut assoc_type_bindings = Vec::new();
         if self.check(Token::Indent) {
             self.advance();
             while !self.check(Token::Dedent) && !self.eof() {
@@ -1059,7 +1101,16 @@ impl Parser {
                 if self.check(Token::Dedent) || self.eof() {
                     break;
                 }
-                methods.push(self.parse_fn()?);
+                if self.check(Token::Type) {
+                    self.advance();
+                    let aname = self.ident()?;
+                    self.expect(Token::Is)?;
+                    let aty = self.parse_type()?;
+                    assoc_type_bindings.push((aname, aty));
+                    self.skip_nl();
+                } else {
+                    methods.push(self.parse_fn()?);
+                }
             }
             if self.check(Token::Dedent) {
                 self.advance();
@@ -1067,7 +1118,9 @@ impl Parser {
         }
         Ok(ImplBlock {
             trait_name,
+            trait_type_args,
             type_name,
+            assoc_type_bindings,
             methods,
             span: sp,
         })
@@ -2160,6 +2213,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
     Fn {
         name: first.name.clone(),
         type_params: first.type_params.clone(),
+        type_bounds: first.type_bounds.clone(),
         params: unified_params,
         ret: first.ret.clone(),
         body,

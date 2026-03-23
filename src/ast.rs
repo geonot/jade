@@ -218,6 +218,7 @@ pub struct Program {
 pub struct Fn {
     pub name: String,
     pub type_params: Vec<String>,
+    pub type_bounds: Vec<(String, Vec<String>)>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub body: Block,
@@ -431,6 +432,7 @@ pub struct StoreDef {
 pub struct TraitDef {
     pub name: String,
     pub type_params: Vec<String>,
+    pub assoc_types: Vec<String>,
     pub methods: Vec<TraitMethod>,
     pub span: Span,
 }
@@ -447,7 +449,9 @@ pub struct TraitMethod {
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
     pub trait_name: Option<String>,
+    pub trait_type_args: Vec<Type>,
     pub type_name: String,
+    pub assoc_type_bindings: Vec<(String, Type)>,
     pub methods: Vec<Fn>,
     pub span: Span,
 }

@@ -48,6 +48,9 @@ pub struct Typer {
     pub(crate) mono_depth: u32,
     pub(crate) traits: HashMap<String, Vec<TraitMethodSig>>,
     pub(crate) trait_impls: HashMap<String, Vec<String>>,
+    pub(crate) generic_bounds: HashMap<String, Vec<(String, Vec<String>)>>,
+    pub(crate) trait_impl_type_args: HashMap<(String, String), Vec<Type>>,
+    pub(crate) assoc_types: HashMap<(String, String), Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +83,9 @@ impl Typer {
             mono_depth: 0,
             traits: HashMap::new(),
             trait_impls: HashMap::new(),
+            generic_bounds: HashMap::new(),
+            trait_impl_type_args: HashMap::new(),
+            assoc_types: HashMap::new(),
         }
     }
 
@@ -520,6 +526,9 @@ impl Typer {
         for d in &prog.decls {
             match d {
                 ast::Decl::Fn(f) if Self::is_generic_fn(f) => {
+                    if !f.type_bounds.is_empty() {
+                        self.generic_bounds.insert(f.name.clone(), f.type_bounds.clone());
+                    }
                     self.generic_fns
                         .insert(f.name.clone(), Self::normalize_generic_fn(f));
                 }
@@ -784,12 +793,18 @@ impl Typer {
 
     fn lower_impl_block(&mut self, ib: &ast::ImplBlock) -> Result<hir::TraitImpl, String> {
         let mut hir_methods = Vec::new();
+        let is_iter_impl = ib.trait_name.as_deref() == Some("Iter");
         for m in &ib.methods {
-            let hm = self.lower_method(&ib.type_name, m)?;
+            let hm = if is_iter_impl {
+                self.lower_method_by_ptr(&ib.type_name, m)?
+            } else {
+                self.lower_method(&ib.type_name, m)?
+            };
             hir_methods.push(hm);
         }
         Ok(hir::TraitImpl {
             trait_name: ib.trait_name.clone(),
+            trait_type_args: ib.trait_type_args.clone(),
             type_name: ib.type_name.clone(),
             methods: hir_methods,
             span: ib.span,
@@ -1008,6 +1023,71 @@ impl Typer {
         })
     }
 
+    fn lower_method_by_ptr(&mut self, type_name: &str, m: &ast::Fn) -> Result<hir::Fn, String> {
+        let method_name = format!("{type_name}_{}", m.name);
+        let (id, ptys, ret) = self
+            .fns
+            .get(&method_name)
+            .ok_or_else(|| format!("undeclared method: {method_name}"))?
+            .clone();
+
+        self.push_scope();
+        let mut params = Vec::new();
+
+        let self_id = self.fresh_id();
+        let self_ty = ptys[0].clone(); // Ptr(Struct(type_name))
+        // Bind 'self' as the pointer type so field access goes through GEP
+        self.define_var(
+            "self",
+            VarInfo {
+                def_id: self_id,
+                ty: self_ty.clone(),
+                ownership: Ownership::Borrowed,
+            },
+        );
+        params.push(hir::Param {
+            def_id: self_id,
+            name: "self".to_string(),
+            ty: self_ty,
+            ownership: Ownership::Borrowed,
+            span: m.span,
+        });
+
+        for (i, p) in m.params.iter().enumerate() {
+            let pid = self.fresh_id();
+            let ty = ptys[i + 1].clone();
+            let ownership = Self::ownership_for_type(&ty);
+            self.define_var(
+                &p.name,
+                VarInfo {
+                    def_id: pid,
+                    ty: ty.clone(),
+                    ownership,
+                },
+            );
+            params.push(hir::Param {
+                def_id: pid,
+                name: p.name.clone(),
+                ty,
+                ownership,
+                span: p.span,
+            });
+        }
+
+        let body = self.lower_block(&m.body, &ret)?;
+        self.pop_scope();
+
+        Ok(hir::Fn {
+            def_id: id,
+            name: method_name,
+            params,
+            ret,
+            body,
+            span: m.span,
+            generic_origin: None,
+        })
+    }
+
     fn lower_enum_def(&mut self, ed: &ast::EnumDef) -> hir::EnumDef {
         let id = self.fresh_id();
         let variants: Vec<hir::Variant> = ed
@@ -1071,6 +1151,140 @@ impl Typer {
             variants,
             span: ed.span,
         }
+    }
+
+    fn type_implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        self.trait_impls
+            .get(type_name)
+            .map(|impls| impls.contains(&trait_name.to_string()))
+            .unwrap_or(false)
+    }
+
+    fn iter_element_type(&self, type_name: &str) -> Type {
+        if let Some(args) = self.trait_impl_type_args.get(&(type_name.into(), "Iter".into())) {
+            if let Some(t) = args.first() {
+                return t.clone();
+            }
+        }
+        // Fallback: check the next() return type
+        let fn_name = format!("{type_name}_next");
+        if let Some((_, _, ret)) = self.fns.get(&fn_name) {
+            if let Type::Enum(ename) = ret {
+                if let Some(stripped) = ename.strip_prefix("Option_") {
+                    return match stripped {
+                        "i64" => Type::I64,
+                        "f64" => Type::F64,
+                        "bool" => Type::Bool,
+                        "String" => Type::String,
+                        other => Type::Struct(other.into()),
+                    };
+                }
+            }
+        }
+        Type::I64
+    }
+
+    fn desugar_for_iter(
+        &mut self,
+        f: &ast::For,
+        iter_expr: hir::Expr,
+        type_name: String,
+        elem_ty: Type,
+        ret_ty: &Type,
+    ) -> Result<hir::Stmt, String> {
+        let span = f.span;
+
+        // Monomorphize Option for this element type
+        let mut option_type_map = HashMap::new();
+        option_type_map.insert("T".into(), elem_ty.clone());
+        let option_enum_name = self.monomorphize_enum("Option", &option_type_map)?;
+
+        // Get Some/Nothing tags from the monomorphized Option
+        let some_tag = self.variant_tags.get("Some").map(|(_, t)| *t).unwrap_or(0);
+        let nothing_tag = self.variant_tags.get("Nothing").map(|(_, t)| *t).unwrap_or(1);
+
+        // Bind the iterator to a mutable variable
+        let iter_bind_id = self.fresh_id();
+        let iter_var_name = format!("__iter_{}", f.bind);
+
+        self.define_var(&iter_var_name, VarInfo {
+            def_id: iter_bind_id,
+            ty: iter_expr.ty.clone(),
+            ownership: Ownership::Owned,
+        });
+
+        let bind_stmt = hir::Stmt::Bind(hir::Bind {
+            def_id: iter_bind_id,
+            name: iter_var_name.clone(),
+            value: iter_expr.clone(),
+            ty: iter_expr.ty.clone(),
+            ownership: Ownership::Owned,
+            span,
+        });
+
+        // Build: __iter.next() call via IterNext
+        let method_name = format!("{type_name}_next");
+        let ret = self.fns.get(&method_name).map(|(_, _, r)| r.clone())
+            .unwrap_or(Type::Enum(option_enum_name.clone()));
+
+        let next_call = hir::Expr {
+            kind: hir::ExprKind::IterNext(
+                iter_var_name.clone(),
+                type_name.clone(),
+                "next".into(),
+            ),
+            ty: ret,
+            span,
+        };
+
+        // Build match arms: Some(x) → { body }, Nothing → break
+        let bind_id = self.fresh_id();
+        let some_pat = hir::Pat::Ctor(
+            "Some".into(), some_tag,
+            vec![hir::Pat::Bind(bind_id, f.bind.clone(), elem_ty.clone(), span)],
+            span,
+        );
+        let nothing_pat = hir::Pat::Ctor("Nothing".into(), nothing_tag, vec![], span);
+
+        self.push_scope();
+        self.define_var(&f.bind, VarInfo {
+            def_id: bind_id,
+            ty: elem_ty.clone(),
+            ownership: Ownership::Owned,
+        });
+        let body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        self.pop_scope();
+
+        let some_arm = hir::Arm {
+            pat: some_pat,
+            guard: None,
+            body,
+            span,
+        };
+        let nothing_arm = hir::Arm {
+            pat: nothing_pat,
+            guard: None,
+            body: vec![hir::Stmt::Break(None, span)],
+            span,
+        };
+
+        let match_stmt = hir::Stmt::Match(hir::Match {
+            subject: next_call,
+            arms: vec![some_arm, nothing_arm],
+            ty: Type::Void,
+            span,
+        });
+
+        let loop_stmt = hir::Stmt::Loop(hir::Loop {
+            body: vec![match_stmt],
+            span,
+        });
+
+        Ok(hir::Stmt::Expr(hir::Expr {
+            kind: hir::ExprKind::Block(vec![bind_stmt, loop_stmt]),
+            ty: Type::Void,
+            span,
+        }))
     }
 
     fn lower_block(&mut self, block: &ast::Block, ret_ty: &Type) -> Result<hir::Block, String> {
@@ -1366,7 +1580,19 @@ impl Typer {
                     match &iter.ty {
                         Type::Array(et, _) => *et.clone(),
                         Type::Ptr(et) => *et.clone(),
-                        _ => Type::I64,
+                        Type::Vec(et) => *et.clone(),
+                        Type::String => Type::I64,
+                        _ => {
+                            // Check for iterator protocol
+                            let iter_ty = iter.ty.clone();
+                            if let Type::Struct(tn) = iter_ty {
+                                if self.type_implements_trait(&tn, "Iter") {
+                                    let elem_ty = self.iter_element_type(&tn);
+                                    return self.desugar_for_iter(f, iter, tn, elem_ty, ret_ty);
+                                }
+                            }
+                            Type::I64
+                        }
                     }
                 };
                 let bind_id = self.fresh_id();

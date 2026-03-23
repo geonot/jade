@@ -56,6 +56,16 @@ impl Typer {
                 ],
                 span: s,
             });
+
+        // Register the Iter trait: trait Iter of T { type Item; fn next(self) -> Option of T }
+        self.traits.entry("Iter".into()).or_insert_with(|| {
+            vec![super::TraitMethodSig {
+                name: "next".into(),
+                _params: vec![],
+                _ret: Some(Type::Enum("Option".into())),
+                has_default: false,
+            }]
+        });
     }
 
     pub(crate) fn declare_fn_sig(&mut self, f: &ast::Fn) {
@@ -76,6 +86,20 @@ impl Typer {
     pub(crate) fn declare_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
         let method_name = format!("{type_name}_{}", m.name);
         let self_ty = Type::Struct(type_name.to_string());
+        let mut ptys = vec![self_ty];
+        for p in &m.params {
+            ptys.push(p.ty.clone().unwrap_or(Type::I64));
+        }
+        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
+        let id = self.fresh_id();
+        self.fns.insert(method_name, (id, ptys, ret));
+    }
+
+    /// Like declare_method_sig but first param is Ptr(Struct(type_name))
+    /// Used for Iter methods where next() takes a mutable pointer to self.
+    pub(crate) fn declare_method_sig_by_ptr(&mut self, type_name: &str, m: &ast::Fn) {
+        let method_name = format!("{type_name}_{}", m.name);
+        let self_ty = Type::Ptr(Box::new(Type::Struct(type_name.to_string())));
         let mut ptys = vec![self_ty];
         for p in &m.params {
             ptys.push(p.ty.clone().unwrap_or(Type::I64));
@@ -182,6 +206,8 @@ impl Typer {
             ));
         }
 
+        let is_iter_impl;
+
         if let Some(ref trait_name) = ib.trait_name {
             if !self.traits.contains_key(trait_name) {
                 return Err(format!(
@@ -189,6 +215,8 @@ impl Typer {
                     ib.span.line, trait_name
                 ));
             }
+
+            is_iter_impl = trait_name == "Iter";
 
             // Verify all required trait methods are provided
             let trait_sigs = self.traits.get(trait_name).cloned().unwrap();
@@ -206,15 +234,37 @@ impl Typer {
                 .entry(ib.type_name.clone())
                 .or_default()
                 .push(trait_name.clone());
+
+            // Store trait type args (e.g., impl Iter of i64 for MyIter)
+            if !ib.trait_type_args.is_empty() {
+                self.trait_impl_type_args.insert(
+                    (ib.type_name.clone(), trait_name.clone()),
+                    ib.trait_type_args.clone(),
+                );
+            }
+
+            // Store associated type bindings (e.g., type Item is i64)
+            for (assoc_name, assoc_ty) in &ib.assoc_type_bindings {
+                self.assoc_types.insert(
+                    (ib.type_name.clone(), assoc_name.clone()),
+                    assoc_ty.clone(),
+                );
+            }
+        } else {
+            is_iter_impl = false;
         }
 
-        // Register impl methods as type methods (same as inline methods)
+        // Register impl methods as type methods
         for m in &ib.methods {
             self.methods
                 .entry(ib.type_name.clone())
                 .or_default()
                 .push(m.clone());
-            self.declare_method_sig(&ib.type_name, m);
+            if is_iter_impl {
+                self.declare_method_sig_by_ptr(&ib.type_name, m);
+            } else {
+                self.declare_method_sig(&ib.type_name, m);
+            }
         }
 
         Ok(())
