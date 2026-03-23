@@ -51,6 +51,7 @@ pub struct Typer {
     pub(crate) generic_bounds: HashMap<String, Vec<(String, Vec<String>)>>,
     pub(crate) trait_impl_type_args: HashMap<(String, String), Vec<Type>>,
     pub(crate) assoc_types: HashMap<(String, String), Type>,
+    pub(crate) trait_assoc_types: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +87,7 @@ impl Typer {
             generic_bounds: HashMap::new(),
             trait_impl_type_args: HashMap::new(),
             assoc_types: HashMap::new(),
+            trait_assoc_types: HashMap::new(),
         }
     }
 
@@ -1053,7 +1055,7 @@ impl Typer {
             span: m.span,
         });
 
-        for (i, p) in m.params.iter().enumerate() {
+        for (i, p) in m.params.iter().filter(|p| p.name != "self").enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i + 1].clone();
             let ownership = Self::ownership_for_type(&ty);
@@ -1224,8 +1226,13 @@ impl Typer {
 
         // Build: __iter.next() call via IterNext
         let method_name = format!("{type_name}_next");
-        let ret = self.fns.get(&method_name).map(|(_, _, r)| r.clone())
-            .unwrap_or(Type::Enum(option_enum_name.clone()));
+        // Always use the monomorphized Option type — fn signature inference may be wrong
+        // since `next` often has no explicit return type annotation.
+        let ret = Type::Enum(option_enum_name.clone());
+        // Ensure the fn entry uses the correct return type too
+        if let Some(entry) = self.fns.get_mut(&method_name) {
+            entry.2 = ret.clone();
+        }
 
         let next_call = hir::Expr {
             kind: hir::ExprKind::IterNext(
@@ -2038,7 +2045,15 @@ impl Typer {
 
             ast::Expr::Field(obj, field, span) => {
                 let hobj = self.lower_expr(obj)?;
-                let (ty, idx) = if let Type::Struct(ref name) = hobj.ty {
+                let struct_name = match &hobj.ty {
+                    Type::Struct(name) => Some(name.clone()),
+                    Type::Ptr(inner) => match inner.as_ref() {
+                        Type::Struct(name) => Some(name.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let (ty, idx) = if let Some(ref name) = struct_name {
                     if let Some(fields) = self.structs.get(name) {
                         if let Some((i, (_, fty))) =
                             fields.iter().enumerate().find(|(_, (n, _))| n == field)

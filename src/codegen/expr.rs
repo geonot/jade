@@ -872,8 +872,12 @@ impl<'ctx> Compiler<'ctx> {
             let sv = self.compile_expr(obj)?;
             return self.string_len(sv);
         }
-        let ty_name = match obj_ty {
-            Type::Struct(n) => n,
+        let (ty_name, is_ptr) = match obj_ty {
+            Type::Struct(n) => (n.as_str(), false),
+            Type::Ptr(inner) => match inner.as_ref() {
+                Type::Struct(n) => (n.as_str(), true),
+                other => return Err(format!("field access on non-struct: {other}")),
+            },
             other => return Err(format!("field access on non-struct: {other}")),
         };
         let fields = self
@@ -892,6 +896,14 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("no LLVM struct: {ty_name}"))?;
         if let hir::ExprKind::Var(_, n) = &obj.kind {
             if let Some((ptr, _)) = self.find_var(n).cloned() {
+                if is_ptr {
+                    // self is a pointer to a struct — load the pointer, then GEP
+                    let struct_ptr = b!(self.bld.build_load(
+                        self.ctx.ptr_type(inkwell::AddressSpace::default()), ptr, "self.ptr"
+                    )).into_pointer_value();
+                    let gep = b!(self.bld.build_struct_gep(st, struct_ptr, idx as u32, field));
+                    return Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)));
+                }
                 let gep = b!(self.bld.build_struct_gep(st, ptr, idx as u32, field));
                 return Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)));
             }
@@ -1493,20 +1505,6 @@ impl<'ctx> Compiler<'ctx> {
         let fn_ty = ret_ty.fn_type(&param_tys, false);
         let result = b!(self.bld.build_indirect_call(fn_ty, fn_ptr, &call_args, "dyn.call"));
         Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
-    }
-
-    pub(crate) fn compile_iter_next(
-        &mut self,
-        iter_var: &hir::Expr,
-        type_name: &str,
-        method_name: &str,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Get the alloca pointer for the iterator variable
-        let var_name = match &iter_var.kind {
-            hir::ExprKind::Var(_, name) => name.clone(),
-            _ => return Err("IterNext requires a variable".into()),
-        };
-        self.compile_iter_next_by_name(&var_name, type_name, method_name)
     }
 
     fn compile_iter_next_by_name(

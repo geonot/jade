@@ -347,6 +347,7 @@ impl Typer {
                 let ps: Vec<_> = params.iter().map(|p| Self::type_name_for_bound_check(p)).collect();
                 format!("Fn_{}_{}", ps.join("_"), Self::type_name_for_bound_check(ret))
             }
+            Type::Param(name) => name.clone(),
             _ => format!("{ty:?}"),
         }
     }

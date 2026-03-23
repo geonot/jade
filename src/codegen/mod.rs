@@ -320,14 +320,19 @@ impl<'ctx> Compiler<'ctx> {
                         let thunk_fn = self.module.add_function(&thunk_name, thunk_fn_ty, None);
                         let entry = self.ctx.append_basic_block(thunk_fn, "entry");
                         self.bld.position_at_end(entry);
-                        // Load concrete type from ptr
+                        // Load concrete type from ptr (or forward ptr for by-ptr methods)
                         let self_ptr = thunk_fn.get_first_param().unwrap().into_pointer_value();
-                        let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self.module.get_struct_type(&ti.type_name)
-                            .map(|st| st.into())
-                            .unwrap_or_else(|| self.ctx.i64_type().into());
-                        let loaded_self = b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"));
-                        // Build call args: loaded self + forwarded params
-                        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = vec![loaded_self.into()];
+                        let first_arg: inkwell::values::BasicValueEnum<'ctx> = if matches!(param_tys.first(), Some(Type::Ptr(_))) {
+                            // By-ptr method: pass pointer directly
+                            self_ptr.into()
+                        } else {
+                            let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self.module.get_struct_type(&ti.type_name)
+                                .map(|st| st.into())
+                                .unwrap_or_else(|| self.ctx.i64_type().into());
+                            b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"))
+                        };
+                        // Build call args: self (loaded or ptr) + forwarded params
+                        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = vec![first_arg.into()];
                         for i in 1..thunk_fn.count_params() {
                             call_args.push(thunk_fn.get_nth_param(i).unwrap().into());
                         }

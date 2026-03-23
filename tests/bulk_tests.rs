@@ -3689,3 +3689,182 @@ fn b_trait_bound_with_impl() {
         "42",
     );
 }
+
+#[test]
+fn b_trait_bound_struct_satisfies() {
+    // Struct with trait impl satisfies generic bound
+    expect(
+        "type Weight\n    kg: i64\n\ntrait Measurable\n    *measure() -> i64\n\nimpl Measurable for Weight\n    *measure() -> i64\n        self.kg\n\n*weigh of T: Measurable(item: T) -> i64\n    item.measure()\n\n*main()\n    w is Weight(kg is 75)\n    log(weigh(w))\n",
+        "75",
+    );
+}
+
+#[test]
+fn b_trait_bound_param_name() {
+    // Type::Param fallthrough gives clear error with type param name
+    let err = expect_compile_fail(
+        "type Empty\n    x: i64\n\n*process of T: Ord(v: T) -> T\n    v\n\n*main()\n    log(process(Empty(x is 1)))\n",
+    );
+    assert!(
+        err.contains("does not satisfy") || err.contains("Ord"),
+        "expected trait bound error mentioning Ord, got: {err}"
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Associated types in traits
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_assoc_type_basic() {
+    // Trait with associated type, impl provides it
+    expect(
+        "trait Container\n    type Item\n    *get() -> i64\n\ntype Box\n    val: i64\n\nimpl Container for Box\n    type Item is i64\n    *get() -> i64\n        self.val\n\n*main()\n    b is Box(val is 42)\n    log(b.get())\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_assoc_type_missing() {
+    // Missing associated type binding should fail
+    let err = expect_compile_fail(
+        "trait Container\n    type Item\n    *get() -> i64\n\ntype Box\n    val: i64\n\nimpl Container for Box\n    *get() -> i64\n        self.val\n\n*main()\n    log(0)\n",
+    );
+    assert!(
+        err.contains("missing associated type") || err.contains("Item"),
+        "expected missing associated type error, got: {err}"
+    );
+}
+
+#[test]
+fn b_assoc_type_multiple() {
+    // Trait with multiple associated types
+    expect(
+        "trait Pair\n    type First\n    type Second\n    *sum() -> i64\n\ntype TwoVals\n    a: i64\n    b: i64\n\nimpl Pair for TwoVals\n    type First is i64\n    type Second is i64\n    *sum() -> i64\n        self.a + self.b\n\n*main()\n    t is TwoVals(a is 10, b is 20)\n    log(t.sum())\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_assoc_type_partial_missing() {
+    // One of two associated types missing
+    let err = expect_compile_fail(
+        "trait Pair\n    type First\n    type Second\n    *sum() -> i64\n\ntype TwoVals\n    a: i64\n    b: i64\n\nimpl Pair for TwoVals\n    type First is i64\n    *sum() -> i64\n        self.a + self.b\n\n*main()\n    log(0)\n",
+    );
+    assert!(
+        err.contains("missing associated type") || err.contains("Second"),
+        "expected missing associated type error, got: {err}"
+    );
+}
+
+#[test]
+fn b_assoc_type_no_assoc_required() {
+    // Trait without associated types still works
+    expect(
+        "trait Simple\n    *val() -> i64\n\ntype Num\n    v: i64\n\nimpl Simple for Num\n    *val() -> i64\n        self.v\n\n*main()\n    n is Num(v is 7)\n    log(n.val())\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_assoc_type_with_methods() {
+    // Associated type alongside multiple methods
+    expect(
+        "trait Collection\n    type Elem\n    *first() -> i64\n    *second() -> i64\n\ntype Duo\n    x: i64\n    y: i64\n\nimpl Collection for Duo\n    type Elem is i64\n    *first() -> i64\n        self.x\n    *second() -> i64\n        self.y\n\n*main()\n    d is Duo(x is 3, y is 7)\n    log(d.first())\n    log(d.second())\n",
+        "3\n7",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Custom iterator protocol (for x in CustomIter)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_iter_basic_counter() {
+    // Counter yields 0,1,2,3,4 — sum should be 10
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 5)\n        total is total + x\n    log(total)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_iter_empty() {
+    // max is 0, nothing yielded
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 0)\n        total is total + x\n    log(total)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_iter_single_element() {
+    // max is 1, yields only 0
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 1)\n        total is total + x\n    log(total)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_iter_log_each() {
+    // Log each element individually
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    for x in Counter(n is 0, max is 3)\n        log(x)\n",
+        "0\n1\n2",
+    );
+}
+
+#[test]
+fn b_iter_break() {
+    // Break after accumulating 3 elements
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 10)\n        count is count + 1\n        if count equals 3\n            break\n    log(count)\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_iter_with_offset() {
+    // Start from 5, go to 8: yields 5,6,7 — sum 18
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 5, max is 8)\n        total is total + x\n    log(total)\n",
+        "18",
+    );
+}
+
+#[test]
+fn b_iter_count_elements() {
+    // Count how many elements yielded
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 7)\n        count is count + 1\n    log(count)\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_iter_two_sequential() {
+    // Two separate iterators in sequence
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    a is 0\n    for x in Counter(n is 0, max is 3)\n        a is a + x\n    b is 0\n    for y in Counter(n is 10, max is 13)\n        b is b + y\n    log(a)\n    log(b)\n",
+        "3\n33",
+    );
+}
+
+#[test]
+fn b_iter_accumulate_product() {
+    // Product: 1*2*3*4 = 24
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    prod is 1\n    for x in Counter(n is 1, max is 5)\n        prod is prod * x\n    log(prod)\n",
+        "24",
+    );
+}
+
+#[test]
+fn b_iter_large_range() {
+    // Sum 0..100 = 4950
+    expect(
+        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 100)\n        total is total + x\n    log(total)\n",
+        "4950",
+    );
+}

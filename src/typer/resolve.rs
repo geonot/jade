@@ -102,6 +102,7 @@ impl Typer {
         let self_ty = Type::Ptr(Box::new(Type::Struct(type_name.to_string())));
         let mut ptys = vec![self_ty];
         for p in &m.params {
+            if p.name == "self" { continue; }
             ptys.push(p.ty.clone().unwrap_or(Type::I64));
         }
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
@@ -196,6 +197,9 @@ impl Typer {
             })
             .collect();
         self.traits.insert(td.name.clone(), sigs);
+        if !td.assoc_types.is_empty() {
+            self.trait_assoc_types.insert(td.name.clone(), td.assoc_types.clone());
+        }
     }
 
     pub(crate) fn declare_impl_block(&mut self, ib: &ast::ImplBlock) -> Result<(), String> {
@@ -217,6 +221,19 @@ impl Typer {
             }
 
             is_iter_impl = trait_name == "Iter";
+
+            // Verify all required associated types are provided
+            if let Some(required_assocs) = self.trait_assoc_types.get(trait_name) {
+                let provided: Vec<&str> = ib.assoc_type_bindings.iter().map(|(n, _)| n.as_str()).collect();
+                for required in required_assocs {
+                    if !provided.contains(&required.as_str()) {
+                        return Err(format!(
+                            "line {}: impl {} for {} is missing required associated type '{}'",
+                            ib.span.line, trait_name, ib.type_name, required
+                        ));
+                    }
+                }
+            }
 
             // Verify all required trait methods are provided
             let trait_sigs = self.traits.get(trait_name).cloned().unwrap();

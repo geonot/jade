@@ -579,7 +579,15 @@ impl<'ctx> Compiler<'ctx> {
         let ascii_bb = self.ctx.append_basic_block(fv, "fs.ascii");
         let multi_bb = self.ctx.append_basic_block(fv, "fs.multi");
         let merge_bb = self.ctx.append_basic_block(fv, "fs.merge");
+        let trunc_bb = self.ctx.append_basic_block(fv, "fs.trunc");
         b!(self.bld.build_conditional_branch(is_ascii, ascii_bb, multi_bb));
+
+        // Truncated UTF-8 fallback: emit replacement char U+FFFD, advance 1
+        self.bld.position_at_end(trunc_bb);
+        let cp_trunc = i64t.const_int(0xFFFD, false);
+        let adv_trunc = i64t.const_int(1, false);
+        b!(self.bld.build_unconditional_branch(merge_bb));
+        let trunc_bb_end = self.bld.get_insert_block().unwrap();
 
         // ASCII fast path: codepoint = b0, advance = 1
         self.bld.position_at_end(ascii_bb);
@@ -603,6 +611,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // 2-byte: 110xxxxx 10xxxxxx
         self.bld.position_at_end(two_bb);
+        // Bounds check: need idx+2 <= len
+        let need_2 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(2, false), "n2"));
+        let ok_2 = b!(self.bld.build_int_compare(IntPredicate::ULE, need_2, len, "ok2"));
+        let two_ok_bb = self.ctx.append_basic_block(fv, "fs.2ok");
+        b!(self.bld.build_conditional_branch(ok_2, two_ok_bb, trunc_bb));
+        self.bld.position_at_end(two_ok_bb);
         let idx_plus1 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "i1"));
         let bp1 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_plus1], "bp1")) };
         let b1_raw = b!(self.bld.build_load(i8t, bp1, "b1r")).into_int_value();
@@ -630,6 +644,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // 3-byte: 1110xxxx 10xxxxxx 10xxxxxx
         self.bld.position_at_end(three_bb);
+        // Bounds check: need idx+3 <= len
+        let need_3 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(3, false), "n3"));
+        let ok_3 = b!(self.bld.build_int_compare(IntPredicate::ULE, need_3, len, "ok3"));
+        let three_ok_bb = self.ctx.append_basic_block(fv, "fs.3ok");
+        b!(self.bld.build_conditional_branch(ok_3, three_ok_bb, trunc_bb));
+        self.bld.position_at_end(three_ok_bb);
         let idx_p1 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "3i1"));
         let idx_p2 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(2, false), "3i2"));
         let bp3_1 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_p1], "3bp1")) };
@@ -652,6 +672,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         self.bld.position_at_end(four_bb);
+        // Bounds check: need idx+4 <= len
+        let need_4 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(4, false), "n4"));
+        let ok_4 = b!(self.bld.build_int_compare(IntPredicate::ULE, need_4, len, "ok4"));
+        let four_ok_bb = self.ctx.append_basic_block(fv, "fs.4ok");
+        b!(self.bld.build_conditional_branch(ok_4, four_ok_bb, trunc_bb));
+        self.bld.position_at_end(four_ok_bb);
         let idx_p1 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "4i1"));
         let idx_p2 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(2, false), "4i2"));
         let idx_p3 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(3, false), "4i3"));
@@ -687,6 +713,7 @@ impl<'ctx> Compiler<'ctx> {
             (&cp_2b, two_bb_end),
             (&cp_3b, three_bb_end),
             (&cp_4b, four_bb_end),
+            (&cp_trunc, trunc_bb_end),
         ]);
         let adv_phi = b!(self.bld.build_phi(i64t, "adv"));
         adv_phi.add_incoming(&[
@@ -694,6 +721,7 @@ impl<'ctx> Compiler<'ctx> {
             (&adv_2, two_bb_end),
             (&adv_3, three_bb_end),
             (&adv_4, four_bb_end),
+            (&adv_trunc, trunc_bb_end),
         ]);
 
         b!(self.bld.build_store(cp_alloca, cp_phi.as_basic_value()));
@@ -1150,7 +1178,15 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::Field(obj_expr, field, _idx) => {
                 let obj_ty = &obj_expr.ty;
                 let val = self.compile_expr(value)?;
-                if let Type::Struct(sname) = obj_ty {
+                let (sname, is_ptr) = match obj_ty {
+                    Type::Struct(n) => (n.as_str(), false),
+                    Type::Ptr(inner) => match inner.as_ref() {
+                        Type::Struct(n) => (n.as_str(), true),
+                        _ => return Err("field assignment only on structs".into()),
+                    },
+                    _ => return Err("field assignment only on structs".into()),
+                };
+                {
                     let fields = self
                         .structs
                         .get(sname)
@@ -1169,13 +1205,19 @@ impl<'ctx> Compiler<'ctx> {
                     };
                     let ftys: Vec<_> = fields.iter().map(|(_, t)| self.llvm_ty(t)).collect();
                     let st = self.ctx.struct_type(&ftys, false);
-                    let gep =
-                        b!(self
-                            .bld
-                            .build_struct_gep(st, obj_ptr, idx as u32, "field.assign"));
-                    b!(self.bld.build_store(gep, val));
-                } else {
-                    return Err("field assignment only on structs".into());
+                    if is_ptr {
+                        let struct_ptr = b!(self.bld.build_load(
+                            self.ctx.ptr_type(inkwell::AddressSpace::default()), obj_ptr, "self.ptr"
+                        )).into_pointer_value();
+                        let gep = b!(self.bld.build_struct_gep(st, struct_ptr, idx as u32, "field.assign"));
+                        b!(self.bld.build_store(gep, val));
+                    } else {
+                        let gep =
+                            b!(self
+                                .bld
+                                .build_struct_gep(st, obj_ptr, idx as u32, "field.assign"));
+                        b!(self.bld.build_store(gep, val));
+                    }
                 }
             }
             _ => return Err("invalid assignment target".into()),
