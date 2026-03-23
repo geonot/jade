@@ -477,6 +477,18 @@ impl Parser {
             Token::Delete => self.parse_delete_stmt(),
             Token::Set => self.parse_set_stmt(),
             Token::Transaction => self.parse_transaction(),
+            Token::Close => {
+                let sp = self.span();
+                self.advance();
+                let ch = self.parse_expr()?;
+                Ok(Stmt::ChannelClose(ch, sp))
+            }
+            Token::Stop => {
+                let sp = self.span();
+                self.advance();
+                let target = self.parse_expr()?;
+                Ok(Stmt::Stop(target, sp))
+            }
             Token::Bang => {
                 let sp = self.span();
                 self.advance();
@@ -1639,6 +1651,82 @@ impl Parser {
                 let name = self.ident()?;
                 Ok(Expr::Spawn(name, sp))
             }
+            Token::Channel => {
+                // channel of Type(capacity) or channel of Type
+                self.advance();
+                self.expect(Token::Of)?;
+                let elem_ty = self.parse_type()?;
+                let cap = if self.check(Token::LParen) {
+                    self.advance();
+                    let c = self.parse_expr()?;
+                    self.expect(Token::RParen)?;
+                    c
+                } else {
+                    Expr::Int(16, sp)
+                };
+                Ok(Expr::ChannelCreate(elem_ty, Box::new(cap), sp))
+            }
+            Token::Select => {
+                self.advance();
+                self.expect(Token::Newline)?;
+                self.expect(Token::Indent)?;
+                let mut arms = Vec::new();
+                let mut default_body = None;
+                while !self.check(Token::Dedent) && !self.eof() {
+                    self.skip_nl();
+                    if self.check(Token::Dedent) || self.eof() {
+                        break;
+                    }
+                    let arm_sp = self.span();
+                    if self.check(Token::Default) {
+                        self.advance();
+                        self.expect(Token::Newline)?;
+                        default_body = Some(self.parse_block()?);
+                    } else if self.check(Token::Send) {
+                        // send ch, value
+                        self.advance();
+                        let ch = self.parse_expr()?;
+                        self.expect(Token::Comma)?;
+                        let val = self.parse_expr()?;
+                        self.expect(Token::Newline)?;
+                        let body = self.parse_block()?;
+                        arms.push(crate::ast::SelectArm {
+                            is_send: true,
+                            chan: ch,
+                            value: Some(val),
+                            binding: None,
+                            body,
+                            span: arm_sp,
+                        });
+                    } else if self.check(Token::Receive) {
+                        // receive ch as binding  OR  receive ch
+                        self.advance();
+                        let ch = self.parse_expr()?;
+                        let binding = if self.check(Token::As) {
+                            self.advance();
+                            Some(self.ident()?)
+                        } else {
+                            None
+                        };
+                        self.expect(Token::Newline)?;
+                        let body = self.parse_block()?;
+                        arms.push(crate::ast::SelectArm {
+                            is_send: false,
+                            chan: ch,
+                            value: None,
+                            binding,
+                            body,
+                            span: arm_sp,
+                        });
+                    } else {
+                        return Err(self.error("expected 'send', 'receive', or 'default' in select"));
+                    }
+                }
+                if self.check(Token::Dedent) {
+                    self.advance();
+                }
+                Ok(Expr::Select(arms, default_body, sp))
+            }
             Token::Send | Token::Dispatch => {
                 let is_dispatch = matches!(self.peek(), Token::Dispatch);
                 self.advance();
@@ -1665,22 +1753,30 @@ impl Parser {
                     }
                 }
                 // Actor send: `send/dispatch expr, @handler(args)`
+                // Channel send: `send expr, value` (no @)
                 let target = self.parse_expr()?;
                 self.expect(Token::Comma)?;
-                self.expect(Token::At)?;
-                let handler = self.ident()?;
-                let mut args = Vec::new();
-                if self.check(Token::LParen) {
+                if self.check(Token::At) {
+                    // Actor send
                     self.advance();
-                    while !self.check(Token::RParen) && !self.eof() {
-                        args.push(self.parse_expr()?);
-                        if !self.check(Token::RParen) {
-                            self.expect(Token::Comma)?;
+                    let handler = self.ident()?;
+                    let mut args = Vec::new();
+                    if self.check(Token::LParen) {
+                        self.advance();
+                        while !self.check(Token::RParen) && !self.eof() {
+                            args.push(self.parse_expr()?);
+                            if !self.check(Token::RParen) {
+                                self.expect(Token::Comma)?;
+                            }
                         }
+                        self.expect(Token::RParen)?;
                     }
-                    self.expect(Token::RParen)?;
+                    Ok(Expr::Send(Box::new(target), handler, args, sp))
+                } else {
+                    // Channel send
+                    let val = self.parse_expr()?;
+                    Ok(Expr::ChannelSend(Box::new(target), Box::new(val), sp))
                 }
-                Ok(Expr::Send(Box::new(target), handler, args, sp))
             }
             Token::Yield => {
                 self.advance();
@@ -1689,6 +1785,12 @@ impl Parser {
             }
             Token::Receive => {
                 self.advance();
+                // If next token is NOT newline, it's a channel receive: `receive ch`
+                if !self.check(Token::Newline) {
+                    let ch = self.parse_expr()?;
+                    return Ok(Expr::ChannelRecv(Box::new(ch), sp));
+                }
+                // Otherwise it's actor receive with @handler arms
                 self.expect(Token::Newline)?;
                 self.expect(Token::Indent)?;
                 let mut arms = Vec::new();

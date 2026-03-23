@@ -64,6 +64,8 @@ pub struct Compiler<'ctx> {
     pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
     /// Trait method order: trait_name → [method_name, ...]
     pub(crate) trait_method_order: HashMap<String, Vec<String>>,
+    /// Whether the compiled program needs the C runtime (jade_rt)
+    pub needs_runtime: bool,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
@@ -96,6 +98,7 @@ impl<'ctx> Compiler<'ctx> {
             store_defs: HashMap::new(),
             vtables: HashMap::new(),
             trait_method_order: HashMap::new(),
+            needs_runtime: false,
         }
     }
 
@@ -213,6 +216,13 @@ impl<'ctx> Compiler<'ctx> {
         }
         for ed in &prog.err_defs {
             self.declare_err_def(ed)?;
+        }
+
+        // Declare concurrency runtime only if the program uses concurrency features
+        let needs_runtime = !prog.actors.is_empty() || Self::uses_concurrency(prog);
+        self.needs_runtime = needs_runtime;
+        if needs_runtime {
+            self.declare_jade_runtime();
         }
 
         // Declare actor runtime if actors are present
@@ -598,6 +608,53 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
+    /// Check whether the HIR program uses any concurrency features
+    /// (channels, select, coroutines) that require the C runtime.
+    fn uses_concurrency(prog: &hir::Program) -> bool {
+        use crate::hir::{ExprKind, Stmt};
+        fn scan_expr(e: &hir::Expr) -> bool {
+            match &e.kind {
+                ExprKind::ChannelCreate(_, _)
+                | ExprKind::ChannelSend(_, _)
+                | ExprKind::ChannelRecv(_)
+                | ExprKind::Select(_, _)
+                | ExprKind::CoroutineCreate(_, _)
+                | ExprKind::Yield(_) => true,
+                _ => false,
+            }
+        }
+        fn scan_stmt(s: &hir::Stmt) -> bool {
+            match s {
+                Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) => true,
+                _ => false,
+            }
+        }
+        fn scan_block(block: &[hir::Stmt]) -> bool {
+            block.iter().any(|s| {
+                if scan_stmt(s) { return true; }
+                match s {
+                    Stmt::Expr(e) => scan_expr(e),
+                    Stmt::Bind(b) => scan_expr(&b.value),
+                    Stmt::If(i) => {
+                        scan_block(&i.then) || i.elifs.iter().any(|(c, b)| scan_expr(c) || scan_block(b)) || i.els.as_ref().map_or(false, |b| scan_block(b))
+                    }
+                    Stmt::While(w) => scan_expr(&w.cond) || scan_block(&w.body),
+                    Stmt::For(f) => scan_expr(&f.iter) || scan_block(&f.body),
+                    Stmt::Loop(l) => scan_block(&l.body),
+                    Stmt::Match(m) => scan_expr(&m.subject) || m.arms.iter().any(|a| scan_block(&a.body)),
+                    Stmt::Ret(Some(e), _, _) => scan_expr(e),
+                    _ => false,
+                }
+            })
+        }
+        fn scan_fn(f: &hir::Fn) -> bool {
+            scan_block(&f.body)
+        }
+        prog.fns.iter().any(|f| scan_fn(f))
+            || prog.types.iter().any(|td| td.methods.iter().any(|m| scan_fn(m)))
+            || prog.trait_impls.iter().any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
+    }
+
     /// Declare all C runtime functions from jade_rt.h.
     pub(crate) fn declare_jade_runtime(&mut self) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
@@ -630,8 +687,8 @@ impl<'ctx> Compiler<'ctx> {
         // Channel
         decl!("jade_chan_create", ptr.fn_type(&[i64t.into(), i64t.into()], false));
         decl!("jade_chan_destroy", void.fn_type(&[ptr.into()], false));
-        decl!("jade_chan_send", bool_t.fn_type(&[ptr.into(), ptr.into()], false));
-        decl!("jade_chan_recv", bool_t.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!("jade_chan_send", void.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!("jade_chan_recv", i32t.fn_type(&[ptr.into(), ptr.into()], false));
         decl!("jade_chan_close", void.fn_type(&[ptr.into()], false));
 
         // Actor

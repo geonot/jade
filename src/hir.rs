@@ -208,6 +208,20 @@ pub enum Stmt {
     StoreDelete(String, Box<StoreFilter>, Span),
     StoreSet(String, Vec<(String, Expr)>, Box<StoreFilter>, Span),
     Transaction(Block, Span),
+    ChannelClose(Expr, Span),
+    Stop(Expr, Span),
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectArm {
+    pub is_send: bool,
+    pub chan: Expr,
+    pub value: Option<Expr>,
+    pub binding: Option<String>,
+    pub bind_id: Option<DefId>,
+    pub elem_ty: Type,
+    pub body: Block,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -288,6 +302,14 @@ pub enum ExprKind {
     StoreCount(String),
     StoreAll(String),
     IterNext(String, String, String),
+    /// Channel create: (element_type, capacity_expr)
+    ChannelCreate(Type, Box<Expr>),
+    /// Channel send: (channel_expr, value_expr)
+    ChannelSend(Box<Expr>, Box<Expr>),
+    /// Channel recv: (channel_expr)
+    ChannelRecv(Box<Expr>),
+    /// Select: (arms, default_body)
+    Select(Vec<SelectArm>, Option<Block>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -633,6 +655,12 @@ impl PrettyPrinter {
                 self.line("transaction:");
                 self.push(); self.block(blk); self.pop();
             }
+            Stmt::ChannelClose(e, _) => {
+                self.line(&format!("close {}", self.expr_str(e)));
+            }
+            Stmt::Stop(e, _) => {
+                self.line(&format!("stop {}", self.expr_str(e)));
+            }
         }
     }
 
@@ -792,6 +820,18 @@ impl PrettyPrinter {
             }
             ExprKind::IterNext(var, ty, method) => {
                 format!("{var}.{ty}_{method}()")
+            }
+            ExprKind::ChannelCreate(ty, cap) => {
+                format!("channel of {ty}({})", self.expr_str(cap))
+            }
+            ExprKind::ChannelSend(ch, val) => {
+                format!("chan_send({}, {})", self.expr_str(ch), self.expr_str(val))
+            }
+            ExprKind::ChannelRecv(ch) => {
+                format!("chan_recv({})", self.expr_str(ch))
+            }
+            ExprKind::Select(arms, _) => {
+                format!("select({} arms)", arms.len())
             }
         }
     }

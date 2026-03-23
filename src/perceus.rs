@@ -236,6 +236,12 @@ impl PerceusPass {
             Stmt::Transaction(body, _) => {
                 self.count_uses_block(body, uses);
             }
+            Stmt::ChannelClose(e, _) => {
+                self.count_uses_expr(e, uses);
+            }
+            Stmt::Stop(e, _) => {
+                self.count_uses_expr(e, uses);
+            }
         }
     }
 
@@ -322,6 +328,12 @@ impl PerceusPass {
             Stmt::Transaction(body, _) => {
                 self.collect_refs_block(body, refs);
             }
+            Stmt::ChannelClose(e, _) => {
+                self.collect_refs_expr(e, refs);
+            }
+            Stmt::Stop(e, _) => {
+                self.collect_refs_expr(e, refs);
+            }
         }
     }
 
@@ -407,6 +419,28 @@ impl PerceusPass {
             ExprKind::Syscall(args) => {
                 for a in args {
                     self.collect_refs_expr(a, refs);
+                }
+            }
+            ExprKind::ChannelCreate(_, cap) => {
+                self.collect_refs_expr(cap, refs);
+            }
+            ExprKind::ChannelSend(ch, val) => {
+                self.collect_refs_expr(ch, refs);
+                self.collect_refs_expr(val, refs);
+            }
+            ExprKind::ChannelRecv(ch) => {
+                self.collect_refs_expr(ch, refs);
+            }
+            ExprKind::Select(arms, default_body) => {
+                for arm in arms {
+                    self.collect_refs_expr(&arm.chan, refs);
+                    if let Some(ref v) = arm.value {
+                        self.collect_refs_expr(v, refs);
+                    }
+                    self.collect_refs_block(&arm.body, refs);
+                }
+                if let Some(body) = default_body {
+                    self.collect_refs_block(body, refs);
                 }
             }
             _ => {}
@@ -641,6 +675,36 @@ impl PerceusPass {
                     self.count_uses_expr_escaping(a, uses);
                 }
             }
+            ExprKind::ChannelCreate(_, cap) => {
+                self.count_uses_expr(cap, uses);
+            }
+            ExprKind::ChannelSend(ch, val) => {
+                self.count_uses_expr(ch, uses);
+                self.count_uses_expr_escaping(val, uses);
+            }
+            ExprKind::ChannelRecv(ch) => {
+                self.count_uses_expr(ch, uses);
+            }
+            ExprKind::Select(arms, default_body) => {
+                for arm in arms {
+                    self.count_uses_expr(&arm.chan, uses);
+                    if let Some(ref v) = arm.value {
+                        self.count_uses_expr_escaping(v, uses);
+                    }
+                    if let Some(_bind_name) = &arm.binding {
+                        if let Some(bind_id) = arm.bind_id {
+                            uses.insert(
+                                bind_id,
+                                UseInfo::new(arm.elem_ty.clone(), Ownership::Owned),
+                            );
+                        }
+                    }
+                    self.count_uses_block(&arm.body, uses);
+                }
+                if let Some(body) = default_body {
+                    self.count_uses_block(body, uses);
+                }
+            }
         }
     }
 
@@ -788,6 +852,7 @@ impl PerceusPass {
             Type::Coroutine(_) => 8,
             Type::DynTrait(_) => 16,
             Type::Vec(_) | Type::Map(_, _) => 24,
+            Type::Channel(_) => 8,
         }
     }
 

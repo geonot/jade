@@ -241,6 +241,12 @@ impl OwnershipVerifier {
             Stmt::Transaction(body, _) => {
                 self.verify_block(body);
             }
+            Stmt::ChannelClose(e, _) => {
+                self.verify_expr(e);
+            }
+            Stmt::Stop(e, _) => {
+                self.verify_expr(e);
+            }
         }
     }
 
@@ -451,6 +457,28 @@ impl OwnershipVerifier {
                 for a in args { self.verify_expr(a); }
             }
             ExprKind::IterNext(_, _, _) => {}
+            ExprKind::ChannelCreate(_, cap) => {
+                self.verify_expr(cap);
+            }
+            ExprKind::ChannelSend(ch, val) => {
+                self.verify_expr(ch);
+                self.verify_expr(val);
+            }
+            ExprKind::ChannelRecv(ch) => {
+                self.verify_expr(ch);
+            }
+            ExprKind::Select(arms, default_body) => {
+                for arm in arms {
+                    self.verify_expr(&arm.chan);
+                    if let Some(ref v) = arm.value {
+                        self.verify_expr(v);
+                    }
+                    self.verify_block(&arm.body);
+                }
+                if let Some(body) = default_body {
+                    self.verify_block(body);
+                }
+            }
         }
     }
 

@@ -55,6 +55,8 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::StoreDelete(_, _, s) => *s,
             hir::Stmt::StoreSet(_, _, _, s) => *s,
             hir::Stmt::Transaction(_, s) => *s,
+            hir::Stmt::ChannelClose(_, s) => *s,
+            hir::Stmt::Stop(_, s) => *s,
         };
         self.set_debug_location(span.line, span.col);
         match stmt {
@@ -213,6 +215,14 @@ impl<'ctx> Compiler<'ctx> {
             }
             hir::Stmt::Transaction(body, _) => {
                 self.compile_block(body)?;
+                Ok(None)
+            }
+            hir::Stmt::ChannelClose(ch_expr, _) => {
+                self.compile_channel_close(ch_expr)?;
+                Ok(None)
+            }
+            hir::Stmt::Stop(actor_expr, _) => {
+                self.compile_stop(actor_expr)?;
                 Ok(None)
             }
         }

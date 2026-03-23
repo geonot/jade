@@ -94,6 +94,8 @@ pub enum Stmt {
     StoreDelete(String, StoreFilter, Span),
     StoreSet(String, Vec<(String, Expr)>, StoreFilter, Span),
     Transaction(Block, Span),
+    ChannelClose(Expr, Span),
+    Stop(Expr, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +165,10 @@ pub enum Expr {
     Receive(Vec<ReceiveArm>, Span),
     Yield(Box<Expr>, Span),
     DispatchBlock(String, Block, Span),
+    ChannelCreate(Type, Box<Expr>, Span),
+    ChannelSend(Box<Expr>, Box<Expr>, Span),
+    ChannelRecv(Box<Expr>, Span),
+    Select(Vec<SelectArm>, Option<Block>, Span),
 }
 
 impl Expr {
@@ -203,7 +209,11 @@ impl Expr {
             | Self::Send(_, _, _, s)
             | Self::Receive(_, s)
             | Self::Yield(_, s)
-            | Self::DispatchBlock(_, _, s) => *s,
+            | Self::DispatchBlock(_, _, s)
+            | Self::ChannelCreate(_, _, s)
+            | Self::ChannelSend(_, _, s)
+            | Self::ChannelRecv(_, s)
+            | Self::Select(_, _, s) => *s,
             Self::IfExpr(i) => i.span,
         }
     }
@@ -416,6 +426,16 @@ pub struct Handler {
 pub struct ReceiveArm {
     pub handler: String,
     pub bindings: Vec<String>,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectArm {
+    pub is_send: bool,
+    pub chan: Expr,
+    pub value: Option<Expr>,
+    pub binding: Option<String>,
     pub body: Block,
     pub span: Span,
 }

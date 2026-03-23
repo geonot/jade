@@ -250,6 +250,10 @@ fn main() {
 
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(&cli.output).arg("-lm");
+    if comp.needs_runtime {
+        let rt_dir = env!("JADE_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljade_rt").arg("-lpthread");
+    }
     for extra in &cli.link {
         cc.arg(extra);
     }

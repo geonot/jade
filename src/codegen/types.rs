@@ -38,7 +38,7 @@ impl<'ctx> Compiler<'ctx> {
                     false,
                 )
                 .into(),
-            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) | Type::ActorRef(_) | Type::Coroutine(_) => {
+            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) | Type::ActorRef(_) | Type::Coroutine(_) | Type::Channel(_) => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
             Type::DynTrait(_) => {

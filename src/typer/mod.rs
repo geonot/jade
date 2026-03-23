@@ -326,6 +326,10 @@ impl Typer {
                 }
             }
             ast::Expr::StoreQuery(_, _, _) | ast::Expr::StoreCount(_, _) | ast::Expr::StoreAll(_, _) => Type::I64,
+            ast::Expr::ChannelCreate(ty, _, _) => Type::Channel(Box::new(ty.clone())),
+            ast::Expr::ChannelSend(_, _, _) => Type::Void,
+            ast::Expr::ChannelRecv(_, _) => Type::I64, // will be refined during lowering
+            ast::Expr::Select(_, _, _) => Type::I64,
         }
     }
 
@@ -1490,6 +1494,22 @@ impl Typer {
                 let hbody = self.lower_block(body, ret_ty)?;
                 Ok(hir::Stmt::Transaction(hbody, *span))
             }
+
+            ast::Stmt::ChannelClose(ch, span) => {
+                let hch = self.lower_expr(ch)?;
+                if !matches!(&hch.ty, Type::Channel(_)) {
+                    return Err(format!("close: target must be a Channel, got {}", hch.ty));
+                }
+                Ok(hir::Stmt::ChannelClose(hch, *span))
+            }
+
+            ast::Stmt::Stop(target, span) => {
+                let htarget = self.lower_expr(target)?;
+                if !matches!(&htarget.ty, Type::ActorRef(_)) {
+                    return Err(format!("stop: target must be an ActorRef, got {}", htarget.ty));
+                }
+                Ok(hir::Stmt::Stop(htarget, *span))
+            }
         }
     }
 
@@ -2151,6 +2171,88 @@ impl Typer {
                 Ok(hir::Expr {
                     kind: hir::ExprKind::CoroutineCreate(name.clone(), hbody),
                     ty: Type::Coroutine(Box::new(yield_ty)),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::ChannelCreate(elem_ty, cap, span) => {
+                let hcap = self.lower_expr(cap)?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::ChannelCreate(elem_ty.clone(), Box::new(hcap)),
+                    ty: Type::Channel(Box::new(elem_ty.clone())),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::ChannelSend(ch, val, span) => {
+                let hch = self.lower_expr(ch)?;
+                let elem_ty = match &hch.ty {
+                    Type::Channel(t) => (**t).clone(),
+                    _ => return Err(format!("send: target must be a Channel, got {}", hch.ty)),
+                };
+                let hval = self.lower_expr(val)?;
+                let _ = elem_ty; // type checking can be added later
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::ChannelSend(Box::new(hch), Box::new(hval)),
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::ChannelRecv(ch, span) => {
+                let hch = self.lower_expr(ch)?;
+                let elem_ty = match &hch.ty {
+                    Type::Channel(t) => (**t).clone(),
+                    _ => return Err(format!("receive: target must be a Channel, got {}", hch.ty)),
+                };
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::ChannelRecv(Box::new(hch)),
+                    ty: elem_ty,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::Select(arms, default_body, span) => {
+                let mut harms = Vec::new();
+                for arm in arms {
+                    let hch = self.lower_expr(&arm.chan)?;
+                    let elem_ty = match &hch.ty {
+                        Type::Channel(t) => (**t).clone(),
+                        _ => return Err(format!("select: channel must be a Channel type, got {}", hch.ty)),
+                    };
+                    let hval = if let Some(ref v) = arm.value {
+                        Some(self.lower_expr(v)?)
+                    } else {
+                        None
+                    };
+                    let bind_id = arm.binding.as_ref().map(|_| self.fresh_id());
+                    if let (Some(name), Some(id)) = (&arm.binding, bind_id) {
+                        self.define_var(name, VarInfo {
+                            def_id: id,
+                            ty: elem_ty.clone(),
+                            ownership: hir::Ownership::Owned,
+                        });
+                    }
+                    let hbody = self.lower_block_no_scope(&arm.body, &Type::Void)?;
+                    harms.push(hir::SelectArm {
+                        is_send: arm.is_send,
+                        chan: hch,
+                        value: hval,
+                        binding: arm.binding.clone(),
+                        bind_id,
+                        elem_ty,
+                        body: hbody,
+                        span: arm.span,
+                    });
+                }
+                let hdefault = if let Some(body) = default_body {
+                    Some(self.lower_block_no_scope(body, &Type::Void)?)
+                } else {
+                    None
+                };
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Select(harms, hdefault),
+                    ty: Type::I64,
                     span: *span,
                 })
             }
