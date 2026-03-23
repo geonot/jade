@@ -1,0 +1,20 @@
+store users
+    name: String
+    age: i64
+
+*main
+    insert users 'Alice', 30
+    insert users 'Bob', 25
+    insert users 'Charlie', 35
+
+    n is count users
+    log n
+
+    delete users where age > 28
+
+    n2 is count users
+    log n2
+
+    remaining is users where age < 30
+    log remaining.name
+    log remaining.age

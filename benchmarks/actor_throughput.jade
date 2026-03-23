@@ -1,0 +1,15 @@
+extern *usleep(us: i32) -> i32
+
+actor Counter
+    count: i64
+    @inc n: i64
+        count is count + n
+
+*main()
+    w is spawn Counter
+    i is 0
+    while i < 5000000
+        send w, @inc(1)
+        i is i + 1
+    usleep(800000)
+    log(0)

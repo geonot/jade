@@ -62,28 +62,22 @@ pub struct PerceusStats {
 #[derive(Debug, Clone)]
 struct UseInfo {
     use_count: u32,
-    use_spans: Vec<Span>,
+    last_use_span: Option<Span>,
     escapes: bool,
     borrowed: bool,
-    #[allow(dead_code)]
-    mut_borrowed: bool,
     ty: Type,
     ownership: Ownership,
-    #[allow(dead_code)]
-    def_span: Span,
 }
 
 impl UseInfo {
-    fn new(ty: Type, ownership: Ownership, def_span: Span) -> Self {
+    fn new(ty: Type, ownership: Ownership) -> Self {
         Self {
             use_count: 0,
-            use_spans: Vec::new(),
+            last_use_span: None,
             escapes: false,
             borrowed: false,
-            mut_borrowed: false,
             ty,
             ownership,
-            def_span,
         }
     }
 }
@@ -108,18 +102,23 @@ impl PerceusPass {
                 self.analyze_fn(m);
             }
         }
+        for ti in &prog.trait_impls {
+            for m in &ti.methods {
+                self.analyze_fn(m);
+            }
+        }
         self.hints.clone()
     }
 
     fn analyze_fn(&mut self, f: &Fn) {
         let mut uses: HashMap<DefId, UseInfo> = HashMap::new();
         for p in &f.params {
-            uses.insert(p.def_id, UseInfo::new(p.ty.clone(), p.ownership, p.span));
+            uses.insert(p.def_id, UseInfo::new(p.ty.clone(), p.ownership));
         }
         self.count_uses_block(&f.body, &mut uses);
         self.analyze_drop_specialization(&uses);
         self.analyze_reuse(&f.body, &uses);
-        self.analyze_borrow_elision(&f.body, &uses);
+        self.promote_borrows(&uses);
         self.analyze_last_use(&uses);
         self.analyze_fbip(&f.body, &uses);
         self.analyze_tail_reuse(f, &uses);
@@ -137,7 +136,7 @@ impl PerceusPass {
         match stmt {
             Stmt::Bind(b) => {
                 self.count_uses_expr(&b.value, uses);
-                uses.insert(b.def_id, UseInfo::new(b.ty.clone(), b.ownership, b.span));
+                uses.insert(b.def_id, UseInfo::new(b.ty.clone(), b.ownership));
                 self.hints.stats.total_bindings_analyzed += 1;
             }
             Stmt::TupleBind(bindings, value, _) => {
@@ -145,7 +144,7 @@ impl PerceusPass {
                 for (def_id, _, ty) in bindings {
                     uses.insert(
                         *def_id,
-                        UseInfo::new(ty.clone(), ty.default_ownership(), Span::dummy()),
+                        UseInfo::new(ty.clone(), ty.default_ownership()),
                     );
                     self.hints.stats.total_bindings_analyzed += 1;
                 }
@@ -182,7 +181,7 @@ impl PerceusPass {
                 }
                 uses.insert(
                     f.bind_id,
-                    UseInfo::new(f.bind_ty.clone(), Ownership::Owned, f.span),
+                    UseInfo::new(f.bind_ty.clone(), Ownership::Owned),
                 );
                 self.count_uses_block_conservative(&f.body, uses);
             }
@@ -204,6 +203,9 @@ impl PerceusPass {
                 self.count_uses_expr(&m.subject, uses);
                 for arm in &m.arms {
                     self.count_uses_pat(&arm.pat, uses);
+                    if let Some(ref g) = arm.guard {
+                        self.count_uses_expr(g, uses);
+                    }
                     self.count_uses_block(&arm.body, uses);
                 }
             }
@@ -220,17 +222,29 @@ impl PerceusPass {
             Stmt::ErrReturn(e, _, _) => {
                 self.count_uses_expr_escaping(e, uses);
             }
+            Stmt::StoreInsert(_, exprs, _) => {
+                for e in exprs {
+                    self.count_uses_expr_escaping(e, uses);
+                }
+            }
+            Stmt::StoreDelete(_, _, _) => {}
+            Stmt::StoreSet(_, assigns, _, _) => {
+                for (_, e) in assigns {
+                    self.count_uses_expr_escaping(e, uses);
+                }
+            }
+            Stmt::Transaction(body, _) => {
+                self.count_uses_block(body, uses);
+            }
         }
     }
 
-    /// Conservatively count uses in a loop body — mark all referenced
-    /// outer variables as escaping (cannot assume single-use in a loop).
     fn count_uses_block_conservative(&mut self, block: &Block, uses: &mut HashMap<DefId, UseInfo>) {
         let mut refs = Vec::new();
         self.collect_refs_block(block, &mut refs);
         for def_id in &refs {
             if let Some(info) = uses.get_mut(def_id) {
-                info.use_count = info.use_count.saturating_add(2); // At least 2 uses
+                info.use_count = info.use_count.saturating_add(2);
                 info.escapes = true;
             }
         }
@@ -281,6 +295,9 @@ impl PerceusPass {
             Stmt::Match(m) => {
                 self.collect_refs_expr(&m.subject, refs);
                 for arm in &m.arms {
+                    if let Some(ref g) = arm.guard {
+                        self.collect_refs_expr(g, refs);
+                    }
                     self.collect_refs_block(&arm.body, refs);
                 }
             }
@@ -291,6 +308,20 @@ impl PerceusPass {
             }
             Stmt::Drop(id, _, _, _) => refs.push(*id),
             Stmt::ErrReturn(e, _, _) => self.collect_refs_expr(e, refs),
+            Stmt::StoreInsert(_, exprs, _) => {
+                for e in exprs {
+                    self.collect_refs_expr(e, refs);
+                }
+            }
+            Stmt::StoreDelete(_, _, _) => {}
+            Stmt::StoreSet(_, assigns, _, _) => {
+                for (_, e) in assigns {
+                    self.collect_refs_expr(e, refs);
+                }
+            }
+            Stmt::Transaction(body, _) => {
+                self.collect_refs_block(body, refs);
+            }
         }
     }
 
@@ -314,7 +345,8 @@ impl PerceusPass {
                     self.collect_refs_expr(a, refs);
                 }
             }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args) => {
+            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
                 self.collect_refs_expr(obj, refs);
                 for a in args {
                     self.collect_refs_expr(a, refs);
@@ -331,11 +363,12 @@ impl PerceusPass {
                 self.collect_refs_expr(e, refs);
             }
             ExprKind::Coerce(e, _) | ExprKind::Cast(e, _) => self.collect_refs_expr(e, refs),
-            ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
+            ExprKind::Array(elems) | ExprKind::Tuple(elems) | ExprKind::VecNew(elems) => {
                 for e in elems {
                     self.collect_refs_expr(e, refs);
                 }
             }
+            ExprKind::MapNew => {}
             ExprKind::Struct(_, inits) | ExprKind::VariantCtor(_, _, _, inits) => {
                 for fi in inits {
                     self.collect_refs_expr(&fi.value, refs);
@@ -383,10 +416,10 @@ impl PerceusPass {
     fn count_uses_pat(&mut self, pat: &Pat, uses: &mut HashMap<DefId, UseInfo>) {
         match pat {
             Pat::Wild(_) => {}
-            Pat::Bind(def_id, _, ty, span) => {
+            Pat::Bind(def_id, _, ty, _) => {
                 uses.insert(
                     *def_id,
-                    UseInfo::new(ty.clone(), ty.default_ownership(), *span),
+                    UseInfo::new(ty.clone(), ty.default_ownership()),
                 );
                 self.hints.stats.total_bindings_analyzed += 1;
             }
@@ -407,6 +440,11 @@ impl PerceusPass {
                 self.count_uses_expr(lo, uses);
                 self.count_uses_expr(hi, uses);
             }
+            Pat::Tuple(pats, _) | Pat::Array(pats, _) => {
+                for p in pats {
+                    self.count_uses_pat(p, uses);
+                }
+            }
         }
     }
 
@@ -415,7 +453,7 @@ impl PerceusPass {
             ExprKind::Var(def_id, _) => {
                 if let Some(info) = uses.get_mut(def_id) {
                     info.use_count += 1;
-                    info.use_spans.push(expr.span);
+                    info.last_use_span = Some(expr.span);
                 }
             }
             ExprKind::FnRef(_, _) | ExprKind::VariantRef(_, _, _) => {}
@@ -448,10 +486,24 @@ impl PerceusPass {
                 let escapes = !matches!(
                     builtin,
                     BuiltinFn::Log
+                        | BuiltinFn::ToString
                         | BuiltinFn::Popcount
                         | BuiltinFn::Clz
                         | BuiltinFn::Ctz
+                        | BuiltinFn::RotateLeft
+                        | BuiltinFn::RotateRight
                         | BuiltinFn::Bswap
+                        | BuiltinFn::WrappingAdd
+                        | BuiltinFn::WrappingSub
+                        | BuiltinFn::WrappingMul
+                        | BuiltinFn::SaturatingAdd
+                        | BuiltinFn::SaturatingSub
+                        | BuiltinFn::SaturatingMul
+                        | BuiltinFn::CheckedAdd
+                        | BuiltinFn::CheckedSub
+                        | BuiltinFn::CheckedMul
+                        | BuiltinFn::SignalRaise
+                        | BuiltinFn::SignalIgnore
                 );
                 for a in args {
                     if escapes {
@@ -515,7 +567,7 @@ impl PerceusPass {
             ExprKind::Lambda(params, body) => {
                 let mut lambda_uses: HashMap<DefId, UseInfo> = HashMap::new();
                 for p in params {
-                    lambda_uses.insert(p.def_id, UseInfo::new(p.ty.clone(), p.ownership, p.span));
+                    lambda_uses.insert(p.def_id, UseInfo::new(p.ty.clone(), p.ownership));
                 }
                 let mut refs = Vec::new();
                 self.collect_refs_block(body, &mut refs);
@@ -541,7 +593,7 @@ impl PerceusPass {
                 self.count_uses_expr(iter, uses);
                 uses.insert(
                     *bind_id,
-                    UseInfo::new(body.ty.clone(), Ownership::Owned, Span::dummy()),
+                    UseInfo::new(body.ty.clone(), Ownership::Owned),
                 );
                 self.count_uses_expr(body, uses);
                 if let Some(c) = cond {
@@ -556,16 +608,47 @@ impl PerceusPass {
                     self.count_uses_expr_escaping(a, uses);
                 }
             }
+            ExprKind::Spawn(_) => {}
+            ExprKind::Send(target, _, _, _, args) => {
+                self.count_uses_expr(target, uses);
+                for a in args {
+                    self.count_uses_expr_escaping(a, uses);
+                }
+            }
+            ExprKind::StoreQuery(_, _) | ExprKind::StoreCount(_) | ExprKind::StoreAll(_) => {}
+            ExprKind::CoroutineCreate(_, body) => {
+                self.count_uses_block(body, uses);
+            }
+            ExprKind::CoroutineNext(inner) | ExprKind::Yield(inner) | ExprKind::DynCoerce(inner, _, _) => {
+                self.count_uses_expr(inner, uses);
+            }
+            ExprKind::DynDispatch(obj, _, _, args) => {
+                self.count_uses_expr(obj, uses);
+                for a in args {
+                    self.count_uses_expr_escaping(a, uses);
+                }
+            }
+            ExprKind::VecNew(args) => {
+                for a in args {
+                    self.count_uses_expr_escaping(a, uses);
+                }
+            }
+            ExprKind::MapNew => {}
+            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
+                self.count_uses_expr(obj, uses);
+                for a in args {
+                    self.count_uses_expr_escaping(a, uses);
+                }
+            }
         }
     }
 
-    /// Count a use that causes the value to escape (passed as arg, stored in struct, returned).
     fn count_uses_expr_escaping(&mut self, expr: &Expr, uses: &mut HashMap<DefId, UseInfo>) {
         if let ExprKind::Var(def_id, _) = &expr.kind {
             if let Some(info) = uses.get_mut(def_id) {
                 info.use_count += 1;
                 info.escapes = true;
-                info.use_spans.push(expr.span);
+                info.last_use_span = Some(expr.span);
             }
         } else {
             self.count_uses_expr(expr, uses);
@@ -621,7 +704,7 @@ impl PerceusPass {
                         },
                     );
                     self.hints.stats.reuse_sites += 1;
-                    break; // one reuse per released value
+                    break;
                 }
             }
         }
@@ -659,14 +742,13 @@ impl PerceusPass {
                     self.analyze_reuse(&arm.body, uses);
                 }
             }
-            Stmt::While(_w) => {}
+            Stmt::For(f) => self.analyze_reuse(&f.body, uses),
+            Stmt::While(w) => self.analyze_reuse(&w.body, uses),
+            Stmt::Loop(l) => self.analyze_reuse(&l.body, uses),
             _ => {}
         }
     }
 
-    /// Two types have compatible layouts if they have the same size
-    /// in the Rc envelope. For our purposes, all Rc<T> where T has
-    /// the same LLVM layout size are compatible.
     fn layouts_compatible(a: &Type, b: &Type) -> bool {
         let inner_a = match a {
             Type::Rc(inner) => inner.as_ref(),
@@ -679,7 +761,6 @@ impl PerceusPass {
         Self::type_layout_size(inner_a) == Self::type_layout_size(inner_b)
     }
 
-    /// Approximate layout size in bytes for reuse compatibility.
     fn type_layout_size(ty: &Type) -> u64 {
         match ty {
             Type::I8 | Type::U8 | Type::Bool => 1,
@@ -687,184 +768,48 @@ impl PerceusPass {
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
             Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => 8,
-            Type::String => 24, // ptr + len + cap (typical)
+            Type::String => 24,
             Type::Void => 0,
             Type::Array(inner, len) => Self::type_layout_size(inner) * (*len as u64),
             Type::Tuple(tys) => {
-                // Sum with 8-byte alignment padding
                 tys.iter()
                     .map(|t| {
                         let sz = Self::type_layout_size(t);
-                        (sz + 7) & !7 // align to 8
+                        (sz + 7) & !7
                     })
                     .sum()
             }
-            // Conservative estimate for struct: tag (4 bytes) + N pointer-sized fields
-            // This is pessimistic but ensures we only reuse when safe.
             Type::Struct(_) => 0,
-            // Enum: tag (4) + max variant size. Conservative: use 0 for unknown.
             Type::Enum(_) => 0,
-            Type::Fn(_, _) => 16, // function pointer + env pointer for closures
+            Type::Fn(_, _) => 16,
             Type::Param(_) | Type::Inferred => 0,
+            Type::ActorRef(_) => 8,
+            Type::Coroutine(_) => 8,
+            Type::DynTrait(_) => 16,
+            Type::Vec(_) | Type::Map(_, _) => 24,
         }
     }
 
-    fn analyze_borrow_elision(&mut self, body: &Block, uses: &HashMap<DefId, UseInfo>) {
-        for stmt in body {
-            self.find_borrow_elision_in_stmt(stmt, uses);
+    fn promote_borrows(&mut self, uses: &HashMap<DefId, UseInfo>) {
+        for (&def_id, info) in uses {
+            if info.borrowed
+                && info.ownership == Ownership::Owned
+                && info.use_count <= 1
+                && !info.escapes
+            {
+                self.hints.borrow_to_move.insert(def_id);
+                self.hints.stats.borrows_promoted += 1;
+            }
         }
     }
 
-    fn find_borrow_elision_in_stmt(&mut self, stmt: &Stmt, uses: &HashMap<DefId, UseInfo>) {
-        match stmt {
-            Stmt::Bind(b) => {
-                self.find_borrow_elision_in_expr(&b.value, uses);
-            }
-            Stmt::TupleBind(_, value, _) => {
-                self.find_borrow_elision_in_expr(value, uses);
-            }
-            Stmt::Assign(t, v, _) => {
-                self.find_borrow_elision_in_expr(t, uses);
-                self.find_borrow_elision_in_expr(v, uses);
-            }
-            Stmt::Expr(e) => {
-                self.find_borrow_elision_in_expr(e, uses);
-            }
-            Stmt::If(i) => {
-                self.find_borrow_elision_in_expr(&i.cond, uses);
-                self.analyze_borrow_elision(&i.then, uses);
-                for (ec, eb) in &i.elifs {
-                    self.find_borrow_elision_in_expr(ec, uses);
-                    self.analyze_borrow_elision(eb, uses);
-                }
-                if let Some(els) = &i.els {
-                    self.analyze_borrow_elision(els, uses);
-                }
-            }
-            Stmt::While(w) => {
-                self.find_borrow_elision_in_expr(&w.cond, uses);
-            }
-            Stmt::For(f) => {
-                self.find_borrow_elision_in_expr(&f.iter, uses);
-            }
-            Stmt::Ret(v, _, _) | Stmt::Break(v, _) => {
-                if let Some(e) = v {
-                    self.find_borrow_elision_in_expr(e, uses);
-                }
-            }
-            Stmt::Match(m) => {
-                self.find_borrow_elision_in_expr(&m.subject, uses);
-                for arm in &m.arms {
-                    self.analyze_borrow_elision(&arm.body, uses);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn find_borrow_elision_in_expr(&mut self, expr: &Expr, uses: &HashMap<DefId, UseInfo>) {
-        match &expr.kind {
-            ExprKind::Ref(inner) => {
-                if let ExprKind::Var(def_id, _) = &inner.kind {
-                    if let Some(info) = uses.get(def_id) {
-                        if info.ownership == Ownership::Owned
-                            && info.use_count <= 1
-                            && !info.escapes
-                        {
-                            self.hints.borrow_to_move.insert(*def_id);
-                            self.hints.stats.borrows_promoted += 1;
-                        }
-                    }
-                }
-                self.find_borrow_elision_in_expr(inner, uses);
-            }
-            ExprKind::BinOp(l, _, r) => {
-                self.find_borrow_elision_in_expr(l, uses);
-                self.find_borrow_elision_in_expr(r, uses);
-            }
-            ExprKind::UnaryOp(_, e)
-            | ExprKind::Coerce(e, _)
-            | ExprKind::Cast(e, _)
-            | ExprKind::Deref(e) => {
-                self.find_borrow_elision_in_expr(e, uses);
-            }
-            ExprKind::Call(_, _, args) | ExprKind::Builtin(_, args) | ExprKind::Syscall(args) => {
-                for a in args {
-                    self.find_borrow_elision_in_expr(a, uses);
-                }
-            }
-            ExprKind::IndirectCall(callee, args) => {
-                self.find_borrow_elision_in_expr(callee, uses);
-                for a in args {
-                    self.find_borrow_elision_in_expr(a, uses);
-                }
-            }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args) => {
-                self.find_borrow_elision_in_expr(obj, uses);
-                for a in args {
-                    self.find_borrow_elision_in_expr(a, uses);
-                }
-            }
-            ExprKind::Field(obj, _, _) => self.find_borrow_elision_in_expr(obj, uses),
-            ExprKind::Index(a, i) => {
-                self.find_borrow_elision_in_expr(a, uses);
-                self.find_borrow_elision_in_expr(i, uses);
-            }
-            ExprKind::Ternary(c, t, e) => {
-                self.find_borrow_elision_in_expr(c, uses);
-                self.find_borrow_elision_in_expr(t, uses);
-                self.find_borrow_elision_in_expr(e, uses);
-            }
-            ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
-                for e in elems {
-                    self.find_borrow_elision_in_expr(e, uses);
-                }
-            }
-            ExprKind::Struct(_, inits) | ExprKind::VariantCtor(_, _, _, inits) => {
-                for fi in inits {
-                    self.find_borrow_elision_in_expr(&fi.value, uses);
-                }
-            }
-            ExprKind::IfExpr(i) => {
-                self.find_borrow_elision_in_expr(&i.cond, uses);
-                self.analyze_borrow_elision(&i.then, uses);
-                for (ec, eb) in &i.elifs {
-                    self.find_borrow_elision_in_expr(ec, uses);
-                    self.analyze_borrow_elision(eb, uses);
-                }
-                if let Some(els) = &i.els {
-                    self.analyze_borrow_elision(els, uses);
-                }
-            }
-            ExprKind::Pipe(first, _, _, rest) => {
-                self.find_borrow_elision_in_expr(first, uses);
-                for a in rest {
-                    self.find_borrow_elision_in_expr(a, uses);
-                }
-            }
-            ExprKind::Block(stmts) => self.analyze_borrow_elision(stmts, uses),
-            ExprKind::Lambda(_, body) => self.analyze_borrow_elision(body, uses),
-            ExprKind::ListComp(body, _, _, iter, cond, map) => {
-                self.find_borrow_elision_in_expr(iter, uses);
-                self.find_borrow_elision_in_expr(body, uses);
-                if let Some(c) = cond {
-                    self.find_borrow_elision_in_expr(c, uses);
-                }
-                if let Some(m) = map {
-                    self.find_borrow_elision_in_expr(m, uses);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-impl PerceusPass {
     fn analyze_last_use(&mut self, uses: &HashMap<DefId, UseInfo>) {
         for (def_id, info) in uses {
-            if info.use_count > 0 && info.ownership == Ownership::Owned {
-                if let Some(last_span) = info.use_spans.last() {
-                    self.hints.last_use.insert(*def_id, *last_span);
+            if info.use_count > 0
+                && matches!(info.ownership, Ownership::Owned | Ownership::Rc)
+            {
+                if let Some(last_span) = info.last_use_span {
+                    self.hints.last_use.insert(*def_id, last_span);
                     self.hints.stats.last_use_tracked += 1;
                 }
             }
@@ -921,7 +866,6 @@ impl PerceusPass {
         }
     }
 
-    /// Find a constructor expression in a block's tail position.
     fn find_constructor_in_block(&self, block: &Block) -> Option<Type> {
         match block.last() {
             Some(Stmt::Expr(e)) => self.find_constructor_type(e),
@@ -987,7 +931,6 @@ impl PerceusPass {
                     }
                 }
                 Stmt::Bind(b) => {
-                    // A bind that immediately goes out of scope with trivial type
                     if b.ty.is_trivially_droppable() {
                         if let Some(info) = uses.get(&b.def_id) {
                             if info.use_count == 0 {
@@ -1045,6 +988,9 @@ impl PerceusPass {
                         self.analyze_drop_fusion(&arm.body, uses);
                     }
                 }
+                Stmt::For(f) => self.analyze_drop_fusion(&f.body, uses),
+                Stmt::While(w) => self.analyze_drop_fusion(&w.body, uses),
+                Stmt::Loop(l) => self.analyze_drop_fusion(&l.body, uses),
                 _ => {}
             }
         }
@@ -1094,6 +1040,9 @@ impl PerceusPass {
                         self.analyze_speculative_reuse(&arm.body, uses);
                     }
                 }
+                Stmt::For(f) => self.analyze_speculative_reuse(&f.body, uses),
+                Stmt::While(w) => self.analyze_speculative_reuse(&w.body, uses),
+                Stmt::Loop(l) => self.analyze_speculative_reuse(&l.body, uses),
                 _ => {}
             }
         }
@@ -1121,7 +1070,6 @@ mod tests {
         let hints = analyze(
             "*main()\n    x is 42\n    y is 3.14\n    z is true\n    log(x)\n    log(y)\n    log(z)\n",
         );
-        // x, y, z are all trivially droppable scalars
         assert!(
             hints.stats.drops_elided >= 3,
             "expected >= 3 drops elided for scalars, got {}",
@@ -1132,7 +1080,6 @@ mod tests {
     #[test]
     fn test_array_of_scalars_drops_elided() {
         let hints = analyze("*main()\n    arr is [1, 2, 3]\n    log(arr[0])\n");
-        // Fixed array of i64 is trivially droppable
         assert!(
             hints.stats.drops_elided >= 1,
             "expected >= 1 drop elided for scalar array, got {}",
@@ -1149,21 +1096,13 @@ mod tests {
     #[test]
     fn test_string_not_elided() {
         let hints = analyze("*main()\n    s is \"hello\"\n    log(s)\n");
-        // String may hold heap data — should NOT be in elide_drops
-        // Only params/borrows might be elided, not the string binding
-        let has_string_elided = hints.elide_drops.iter().any(|id| {
-            // We can't easily check this without DefId→type mapping,
-            // but the stats should reflect that not all drops were elided
-            false
-        });
-        assert!(!has_string_elided);
+        assert!(!Type::String.is_trivially_droppable());
+        assert!(hints.stats.total_bindings_analyzed >= 1);
     }
 
     #[test]
     fn test_rc_not_elided() {
         let hints = analyze("*main()\n    x is rc(42)\n    log(@x)\n");
-        // Rc values need refcount decrement — should NOT be elided
-        // Check that the Rc binding's drop is not in elide_drops
         assert!(
             hints.stats.total_bindings_analyzed >= 1,
             "should have analyzed at least 1 binding"
@@ -1173,7 +1112,6 @@ mod tests {
     #[test]
     fn test_borrow_promoted_single_use() {
         let hints = analyze("*main()\n    x is 42\n    p is %x\n    log(@p)\n");
-        // x is used only via borrow ref, analysis should run without crashing
         assert!(hints.stats.total_bindings_analyzed >= 2);
     }
 
@@ -1181,9 +1119,6 @@ mod tests {
     fn test_rc_reuse_same_type() {
         let hints =
             analyze("*main()\n    x is rc(10)\n    log(@x)\n    y is rc(20)\n    log(@y)\n");
-        // x and y are both Rc<i64>. If x is consumed before y is
-        // allocated, x's memory could be reused for y.
-        // (This depends on exact use analysis.)
         assert!(hints.stats.total_bindings_analyzed >= 2);
     }
 
@@ -1191,8 +1126,6 @@ mod tests {
     fn test_no_reuse_different_layout() {
         let hints =
             analyze("*main()\n    x is rc(10)\n    log(@x)\n    y is rc(3.14)\n    log(@y)\n");
-        // Rc<i64> and Rc<f64> have the same layout (both 8 bytes),
-        // so reuse IS possible here. Check analysis runs.
         assert!(hints.stats.total_bindings_analyzed >= 2);
     }
 
@@ -1202,7 +1135,6 @@ mod tests {
             "*factorial(n: i64) -> i64\n    if n <= 1\n        1\n    else\n        n * factorial(n - 1)\n\n*main()\n    result is factorial(10)\n    log(result)\n",
         );
         assert!(hints.stats.total_bindings_analyzed >= 1);
-        // All bindings in factorial are scalar → drops elided
         assert!(hints.stats.drops_elided >= 1);
     }
 
@@ -1211,8 +1143,6 @@ mod tests {
         let hints = analyze(
             "*main()\n    x is rc(0)\n    i is 0\n    while i < 10\n        log(@x)\n        i is i + 1\n",
         );
-        // x is used inside a loop → should NOT be reuse candidate
-        // (escapes due to conservative loop analysis)
         assert!(hints.reuse_candidates.is_empty() || hints.stats.reuse_sites == 0);
     }
 
@@ -1220,9 +1150,6 @@ mod tests {
     fn test_function_params_analyzed() {
         let hints =
             analyze("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
-        // Function params are registered + body bindings analyzed
-        // Params are analyzed for ownership but don't count as "bindings"
-        // i64 params → drops elided
         assert!(hints.stats.drops_elided >= 2);
     }
 
@@ -1244,22 +1171,18 @@ mod tests {
 
     #[test]
     fn test_nested_array_droppable() {
-        // [i64; 3] → trivially droppable
         assert!(Type::Array(Box::new(Type::I64), 3).is_trivially_droppable());
         assert!(!Type::Array(Box::new(Type::String), 3).is_trivially_droppable());
     }
 
     #[test]
     fn test_layout_compatibility() {
-        // Same-type Rc should be compatible
         let rc_i64 = Type::Rc(Box::new(Type::I64));
         assert!(PerceusPass::layouts_compatible(&rc_i64, &rc_i64));
 
-        // i64 and f64 have same size → compatible
         let rc_f64 = Type::Rc(Box::new(Type::F64));
         assert!(PerceusPass::layouts_compatible(&rc_i64, &rc_f64));
 
-        // i64 and i8 have different sizes → incompatible
         let rc_i8 = Type::Rc(Box::new(Type::I8));
         assert!(!PerceusPass::layouts_compatible(&rc_i64, &rc_i8));
     }
@@ -1286,7 +1209,6 @@ mod tests {
         let hints = analyze(
             "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(3.14))\n",
         );
-        // Monomorphized generics are analyzed; params get drops elided
         assert!(hints.stats.drops_elided >= 1);
     }
 

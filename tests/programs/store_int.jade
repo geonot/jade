@@ -1,0 +1,13 @@
+store scores
+    value: i64
+
+*main
+    insert scores 10
+    insert scores 20
+    insert scores 30
+
+    n is count scores
+    log n
+
+    big is scores where value > 15
+    log big.value

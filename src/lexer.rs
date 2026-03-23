@@ -48,6 +48,23 @@ pub enum Token {
     End,
     Log,
     Of,
+    Test,
+    Embed,
+    Assert,
+    Query,
+    Store,
+    Insert,
+    Delete,
+    Set,
+    Transaction,
+    Actor,
+    Spawn,
+    Send,
+    Receive,
+    Trait,
+    Impl,
+    Dispatch,
+    Yield,
     Plus,
     Minus,
     Star,
@@ -144,6 +161,14 @@ impl std::fmt::Display for Token {
             Self::End => f.write_str("end"),
             Self::Log => f.write_str("log"),
             Self::Of => f.write_str("of"),
+            Self::Test => f.write_str("test"),
+            Self::Embed => f.write_str("embed"),
+            Self::Assert => f.write_str("assert"),
+            Self::Query => f.write_str("query"),
+            Self::Store => f.write_str("store"),
+            Self::Insert => f.write_str("insert"),
+            Self::Delete => f.write_str("delete"),
+            Self::Transaction => f.write_str("transaction"),
             Self::Plus => f.write_str("+"),
             Self::Minus => f.write_str("-"),
             Self::Star => f.write_str("*"),
@@ -189,6 +214,15 @@ impl std::fmt::Display for Token {
             Self::CaretEq => f.write_str("^="),
             Self::ShlEq => f.write_str("<<="),
             Self::ShrEq => f.write_str(">>="),
+            Self::Actor => f.write_str("actor"),
+            Self::Spawn => f.write_str("spawn"),
+            Self::Send => f.write_str("send"),
+            Self::Receive => f.write_str("receive"),
+            Self::Trait => f.write_str("trait"),
+            Self::Impl => f.write_str("impl"),
+            Self::Dispatch => f.write_str("dispatch"),
+            Self::Yield => f.write_str("yield"),
+            Self::Set => f.write_str("set"),
         }
     }
 }
@@ -214,6 +248,7 @@ pub struct Lexer<'s> {
     pending: Vec<Spanned>,
     sol: bool,
     nl: bool,
+    interp_depth: u32,
 }
 
 fn keyword(s: &str) -> Option<Token> {
@@ -257,6 +292,23 @@ fn keyword(s: &str) -> Option<Token> {
         "end" => Token::End,
         "log" => Token::Log,
         "of" => Token::Of,
+        "test" => Token::Test,
+        "embed" => Token::Embed,
+        "assert" => Token::Assert,
+        "query" => Token::Query,
+        "store" => Token::Store,
+        "insert" => Token::Insert,
+        "delete" => Token::Delete,
+        "set" => Token::Set,
+        "transaction" => Token::Transaction,
+        "actor" => Token::Actor,
+        "spawn" => Token::Spawn,
+        "send" => Token::Send,
+        "receive" => Token::Receive,
+        "trait" => Token::Trait,
+        "impl" => Token::Impl,
+        "dispatch" => Token::Dispatch,
+        "yield" => Token::Yield,
         "true" => Token::True,
         "false" => Token::False,
         "none" => Token::None,
@@ -275,6 +327,7 @@ impl<'s> Lexer<'s> {
             pending: Vec::new(),
             sol: true,
             nl: false,
+            interp_depth: 0,
         }
     }
 
@@ -614,7 +667,6 @@ impl<'s> Lexer<'s> {
             }
             if self.src[self.pos] == b'{' {
                 has_interp = true;
-                // Push the string part accumulated so far
                 let sp = Span::new(start, self.pos, self.line, sc);
                 if !val.is_empty() || self.pending.is_empty() || !has_interp {
                     self.pending.push(Spanned {
@@ -631,8 +683,7 @@ impl<'s> Lexer<'s> {
                     token: Token::InterpStart,
                     span: sp,
                 });
-                self.advance(); // skip '{'
-                // Tokenize the expression inside {}
+                self.advance();
                 let mut depth = 1u32;
                 let expr_start = self.pos;
                 while self.pos < self.src.len() && depth > 0 {
@@ -649,10 +700,13 @@ impl<'s> Lexer<'s> {
                 if depth > 0 {
                     return self.err("unterminated interpolation");
                 }
-                // Lex the inner expression
                 let inner_src = &self.src[expr_start..self.pos];
                 let inner_str = std::str::from_utf8(inner_src).unwrap();
+                if self.interp_depth >= 8 {
+                    return self.err("string interpolation nested too deeply (max 8)");
+                }
                 let mut inner_lexer = Lexer::new(inner_str);
+                inner_lexer.interp_depth = self.interp_depth + 1;
                 let inner_tokens = inner_lexer.lex_all()?;
                 for t in inner_tokens {
                     if !matches!(t.token, Token::Newline | Token::Eof) {
@@ -664,7 +718,7 @@ impl<'s> Lexer<'s> {
                     token: Token::InterpEnd,
                     span: isp,
                 });
-                self.advance(); // skip '}'
+                self.advance();
                 continue;
             }
             if self.src[self.pos] == b'\\' {
@@ -691,14 +745,13 @@ impl<'s> Lexer<'s> {
         if self.pos >= self.src.len() {
             return self.err("unterminated string");
         }
-        self.advance(); // skip closing '
+        self.advance();
         if has_interp {
             let sp = Span::new(start, self.pos, self.line, sc);
             self.pending.push(Spanned {
                 token: Token::Str(val),
                 span: sp,
             });
-            // Return the first pending token
             return Ok(self.pending.remove(0));
         }
         Ok(Spanned {

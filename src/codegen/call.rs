@@ -137,7 +137,6 @@ impl<'ctx> Compiler<'ctx> {
                     let target: inkwell::types::BasicTypeEnum =
                         (*pt).try_into().unwrap_or(v.get_type());
                     if v.get_type() == st.into() && target.is_pointer_type() {
-                        // String → ptr coercion for extern C calls
                         self.string_data(v)?
                     } else {
                         self.coerce_val(v, target)

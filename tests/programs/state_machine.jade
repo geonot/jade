@@ -1,0 +1,78 @@
+# state_machine.jade — Simple state machine with enums
+# Complexity: Intermediate
+# Demonstrates: enums, match, loops, structs, methods
+
+enum State
+    Idle
+    Running(i64)
+    Paused(i64)
+    Done(i64)
+
+enum Event
+    Start
+    Pause
+    Resume
+    Tick
+    Stop
+
+*transition(state: State, event: Event)
+    match state
+        Idle ?
+            match event
+                Start ? Running(0)
+                _ ? Idle
+        Running(count) ?
+            match event
+                Tick ? Running(count + 1)
+                Pause ? Paused(count)
+                Stop ? Done(count)
+                _ ? Running(count)
+        Paused(count) ?
+            match event
+                Resume ? Running(count)
+                Stop ? Done(count)
+                _ ? Paused(count)
+        Done(count) ?
+            Done(count)
+
+*state_name(state: State)
+    match state
+        Idle ? log('idle')
+        Running(n) ? log('running')
+        Paused(n) ? log('paused')
+        Done(n) ? log('done')
+
+*state_count(state: State)
+    match state
+        Idle ? 0
+        Running(n) ? n
+        Paused(n) ? n
+        Done(n) ? n
+
+*main()
+    # Simulate a state machine
+    s is Idle
+
+    # Start
+    s is transition(s, Start)
+    state_name(s)                       # running
+
+    # Tick a few times
+    s is transition(s, Tick)
+    s is transition(s, Tick)
+    s is transition(s, Tick)
+    log(state_count(s))                 # 3
+
+    # Pause and resume
+    s is transition(s, Pause)
+    state_name(s)                       # paused
+
+    s is transition(s, Resume)
+    state_name(s)                       # running
+
+    # Tick more and stop
+    s is transition(s, Tick)
+    s is transition(s, Tick)
+    s is transition(s, Stop)
+    state_name(s)                       # done
+    log(state_count(s))                 # 5

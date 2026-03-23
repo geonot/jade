@@ -1,0 +1,113 @@
+# raytracer.jade — Minimal raytracer / ray-sphere intersection
+# Complexity: Advanced
+# Demonstrates: structs, methods, math builtins, type casting, control flow
+
+type Vec3f
+    x: f64
+    y: f64
+    z: f64
+
+    *add(self, other: Vec3f)
+        Vec3f(x is self.x + other.x, y is self.y + other.y, z is self.z + other.z)
+
+    *sub(self, other: Vec3f)
+        Vec3f(x is self.x - other.x, y is self.y - other.y, z is self.z - other.z)
+
+    *scale(self, s: f64)
+        Vec3f(x is self.x * s, y is self.y * s, z is self.z * s)
+
+    *dot(self, other: Vec3f)
+        self.x * other.x + self.y * other.y + self.z * other.z
+
+    *length(self)
+        self.dot(self).sqrt()
+
+    *normalize(self)
+        len is self.length()
+        self.scale(1.0 / len)
+
+type Ray
+    origin: Vec3f
+    dir: Vec3f
+
+    *at(self, t: f64)
+        self.origin.add(self.dir.scale(t))
+
+type Sphere
+    center: Vec3f
+    radius: f64
+
+# Returns t of intersection, or -1.0 if no hit
+*intersect(ray: Ray, sphere: Sphere)
+    oc is ray.origin.sub(sphere.center)
+    a is ray.dir.dot(ray.dir)
+    b is 2.0 * oc.dot(ray.dir)
+    c is oc.dot(oc) - sphere.radius * sphere.radius
+    discriminant is b * b - 4.0 * a * c
+
+    if discriminant < 0.0
+        return -1.0
+
+    sqrt_disc is discriminant.sqrt()
+    t1 is (0.0 - b - sqrt_disc) / (2.0 * a)
+    t2 is (0.0 - b + sqrt_disc) / (2.0 * a)
+
+    # Return nearest positive t
+    if t1 > 0.001
+        return t1
+    if t2 > 0.001
+        return t2
+    -1.0
+
+# Compute color based on normal direction (simple diffuse)
+*shade(ray: Ray, sphere: Sphere, t: f64)
+    hit_point is ray.at(t)
+    normal is hit_point.sub(sphere.center).normalize()
+    # Map normal to 0-255 color channel
+    r is ((normal.x + 1.0) * 0.5 * 255.0) as i64
+    g is ((normal.y + 1.0) * 0.5 * 255.0) as i64
+    b is ((normal.z + 1.0) * 0.5 * 255.0) as i64
+    r * 65536 + g * 256 + b
+
+*main()
+    sphere is Sphere(
+        center is Vec3f(x is 0.0, y is 0.0, z is -5.0),
+        radius is 1.0
+    )
+
+    # Shoot rays in a small grid
+    hits is 0
+    misses is 0
+
+    for py from 0 to 10
+        for px from 0 to 10
+            # Map pixel to -1..1 range
+            u is (px as f64) / 10.0 * 2.0 - 1.0
+            v is (py as f64) / 10.0 * 2.0 - 1.0
+
+            ray is Ray(
+                origin is Vec3f(x is 0.0, y is 0.0, z is 0.0),
+                dir is Vec3f(x is u, y is v, z is -1.0).normalize()
+            )
+
+            t is intersect(ray, sphere)
+            if t > 0.0
+                color is shade(ray, sphere, t)
+                hits is hits + 1
+            else
+                misses is misses + 1
+
+    log(hits)
+    log(misses)
+    log('ray tracing complete')
+
+    # Test specific rays
+    center_ray is Ray(
+        origin is Vec3f(x is 0.0, y is 0.0, z is 0.0),
+        dir is Vec3f(x is 0.0, y is 0.0, z is -1.0)
+    )
+    t is intersect(center_ray, sphere)
+    log(t)                          # 4.0 (distance to sphere at z=-5, r=1)
+
+    color is shade(center_ray, sphere, t)
+    log(color)

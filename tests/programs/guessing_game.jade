@@ -1,0 +1,29 @@
+# guessing_game.jade — Number guessing with pseudo-random
+# Complexity: Beginner
+# Demonstrates: loops, conditionals, string interpolation, functions
+
+*lcg_next(seed)
+    # Linear congruential generator (simple PRNG)
+    (seed * 1103515245 + 12345) & 0x7FFFFFFF
+
+*main()
+    # Generate a "random" target between 0-99
+    seed is 42
+    seed is lcg_next(seed)
+    target is seed % 100
+
+    # Simulate guesses
+    guesses is [50, 25, 75, 37, 62, 43, 48, 45, 44, 42]
+    attempts is 0
+
+    for i from 0 to 10
+        guess is guesses[i]
+        attempts is attempts + 1
+        if guess equals target
+            log('found it!')
+            log(attempts)
+            break
+        elif guess < target
+            log('too low')
+        else
+            log('too high')

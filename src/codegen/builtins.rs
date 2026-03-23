@@ -15,6 +15,9 @@ impl<'ctx> Compiler<'ctx> {
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         match builtin {
+            hir::BuiltinFn::ActorSpawn | hir::BuiltinFn::ActorSend => {
+                Err("actor builtins are dispatched via ExprKind, not BuiltinFn".into())
+            }
             hir::BuiltinFn::Log => self.compile_log(args),
             hir::BuiltinFn::ToString => {
                 if args.len() != 1 {
@@ -149,6 +152,12 @@ impl<'ctx> Compiler<'ctx> {
             | hir::BuiltinFn::RotateLeft
             | hir::BuiltinFn::RotateRight
             | hir::BuiltinFn::Bswap => self.compile_bit_intrinsic(builtin, args),
+            hir::BuiltinFn::Assert => {
+                if args.is_empty() {
+                    return Err("assert requires a condition".into());
+                }
+                self.compile_assert(&args[0])
+            }
         }
     }
 
@@ -171,7 +180,6 @@ impl<'ctx> Compiler<'ctx> {
         let fmt = self.fmt_for_ty(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt"));
         if matches!(ty, Type::String) {
-            // Use %.*s with explicit length — no null-termination required
             let len = self.string_len(val)?.into_int_value();
             let len_i32 = b!(self
                 .bld
@@ -217,12 +225,24 @@ impl<'ctx> Compiler<'ctx> {
     fn compile_to_string(&mut self, expr: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
         let val = self.compile_expr(expr)?;
         let ty = self.resolve_ty(expr.ty.clone());
-        match ty {
+        match &ty {
             Type::String => Ok(val),
             Type::I64 | Type::I32 | Type::I16 | Type::I8 => self.int_to_string(val, false),
             Type::U64 | Type::U32 | Type::U16 | Type::U8 => self.int_to_string(val, true),
             Type::F64 | Type::F32 => self.float_to_string(val),
             Type::Bool => self.bool_to_string(val),
+            Type::Struct(name) => {
+                let fn_name = format!("{name}_display");
+                if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
+                    let result = b!(self.bld.build_call(fv, &[val.into()], "display.call"))
+                        .try_as_basic_value()
+                        .basic()
+                        .unwrap();
+                    Ok(result)
+                } else {
+                    self.int_to_string(val, false)
+                }
+            }
             _ => self.int_to_string(val, false),
         }
     }
@@ -485,12 +505,13 @@ impl<'ctx> Compiler<'ctx> {
         let rc_gep = b!(self
             .bld
             .build_struct_gep(layout, ptr.into_pointer_value(), 0, "rc.cnt"));
-        let old = b!(self.bld.build_load(self.ctx.i64_type(), rc_gep, "rc.old")).into_int_value();
-        let new =
-            b!(self
-                .bld
-                .build_int_nuw_add(old, self.ctx.i64_type().const_int(1, false), "rc.inc"));
-        b!(self.bld.build_store(rc_gep, new));
+        // Atomic increment — safe across actor threads
+        b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Add,
+            rc_gep,
+            self.ctx.i64_type().const_int(1, false),
+            inkwell::AtomicOrdering::AcquireRelease,
+        ));
         Ok(())
     }
 
@@ -505,15 +526,18 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let heap_ptr = ptr.into_pointer_value();
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
-        let old = b!(self.bld.build_load(i64t, rc_gep, "rc.old")).into_int_value();
-        let new = b!(self
-            .bld
-            .build_int_nsw_sub(old, i64t.const_int(1, false), "rc.dec"));
-        b!(self.bld.build_store(rc_gep, new));
+        // Atomic decrement — returns the old value
+        let old = b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Sub,
+            rc_gep,
+            i64t.const_int(1, false),
+            inkwell::AtomicOrdering::AcquireRelease,
+        ));
+        // old == 1 means new count is 0 → free
         let is_zero = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
-            new,
-            i64t.const_int(0, false),
+            old,
+            i64t.const_int(1, false),
             "rc.dead"
         ));
         let free_bb = self.ctx.append_basic_block(fv, "rc.free");
@@ -549,28 +573,15 @@ impl<'ctx> Compiler<'ctx> {
         )))
     }
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Weak references — cycle-breaking shared ownership
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    //
-    // Weak reference layout: { strong_count: i64, weak_count: i64, data: T }
-    // - Downgrade: increments weak_count on the same RC allocation
-    // - Upgrade: checks strong_count > 0, increments strong_count, returns rc
-    // - Release: decrements weak_count, frees if both counts are zero
-    //
-    // The weak pointer points to the same allocation as the rc pointer.
-    // This requires the rc layout to include a weak_count field:
-    //   { strong: i64, weak: i64, data: T }
-
     pub(crate) fn weak_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
         let name = format!("Weak_{inner}");
         self.module.get_struct_type(&name).unwrap_or_else(|| {
             let st = self.ctx.opaque_struct_type(&name);
             st.set_body(
                 &[
-                    self.ctx.i64_type().into(), // strong count
-                    self.ctx.i64_type().into(), // weak count
-                    self.llvm_ty(inner),        // data
+                    self.ctx.i64_type().into(),
+                    self.ctx.i64_type().into(),
+                    self.llvm_ty(inner),
                 ],
                 false,
             );
@@ -583,8 +594,6 @@ impl<'ctx> Compiler<'ctx> {
         rc_ptr: BasicValueEnum<'ctx>,
         inner: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Increment the weak count on the rc allocation.
-        // For now, weak shares the same pointer as rc but with a separate count.
         let layout = self.weak_layout_ty(inner);
         let heap_ptr = rc_ptr.into_pointer_value();
         let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "weak.cnt"));
@@ -603,8 +612,6 @@ impl<'ctx> Compiler<'ctx> {
         weak_ptr: BasicValueEnum<'ctx>,
         inner: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Check if strong count > 0. If yes, increment strong and return pointer.
-        // If strong == 0, the referent is dead — return null.
         let fv = self.cur_fn.unwrap();
         let layout = self.weak_layout_ty(inner);
         let i64t = self.ctx.i64_type();
@@ -622,7 +629,6 @@ impl<'ctx> Compiler<'ctx> {
         let merge_bb = self.ctx.append_basic_block(fv, "weak.merge");
         b!(self.bld.build_conditional_branch(is_alive, alive_bb, dead_bb));
 
-        // Alive: increment strong count and return pointer
         self.bld.position_at_end(alive_bb);
         let new_strong = b!(self.bld.build_int_nuw_add(
             strong,
@@ -633,7 +639,6 @@ impl<'ctx> Compiler<'ctx> {
         let alive_val: BasicValueEnum<'ctx> = heap_ptr.into();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
-        // Dead: return null pointer
         self.bld.position_at_end(dead_bb);
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let null_val: BasicValueEnum<'ctx> = ptr_ty.const_null().into();
@@ -659,7 +664,6 @@ impl<'ctx> Compiler<'ctx> {
         let new = b!(self.bld.build_int_nsw_sub(old, i64t.const_int(1, false), "weak.dec"));
         b!(self.bld.build_store(weak_gep, new));
 
-        // Free only if both strong == 0 AND weak == 0
         let strong_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "strong.cnt"));
         let strong = b!(self.bld.build_load(i64t, strong_gep, "strong")).into_int_value();
         let strong_zero = b!(self.bld.build_int_compare(
@@ -682,10 +686,6 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(cont_bb);
         Ok(())
     }
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Volatile reads/writes — hardware-observable memory operations
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     fn compile_volatile_load(
         &mut self,
@@ -714,15 +714,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Integer overflow control
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    //
-    // Default: nsw/nuw flags (UB on overflow — LLVM optimizes aggressively)
-    // wrapping_*: two's complement wrap (no nsw/nuw flags)
-    // saturating_*: clamp to type min/max via LLVM sadd.sat / uadd.sat intrinsics
-    // checked_*: returns (result, overflowed) tuple via LLVM sadd.with.overflow
-
     fn compile_wrapping_op(
         &mut self,
         builtin: &hir::BuiltinFn,
@@ -730,7 +721,6 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let lhs = self.compile_expr(&args[0])?.into_int_value();
         let rhs = self.compile_expr(&args[1])?.into_int_value();
-        // Plain add/sub/mul without nsw/nuw flags — two's complement wrap
         Ok(match builtin {
             hir::BuiltinFn::WrappingAdd => b!(self.bld.build_int_add(lhs, rhs, "wrap.add")).into(),
             hir::BuiltinFn::WrappingSub => b!(self.bld.build_int_sub(lhs, rhs, "wrap.sub")).into(),
@@ -754,7 +744,6 @@ impl<'ctx> Compiler<'ctx> {
             hir::BuiltinFn::SaturatingSub if signed => (format!("llvm.ssub.sat.i{bw}"), lhs.get_type()),
             hir::BuiltinFn::SaturatingSub => (format!("llvm.usub.sat.i{bw}"), lhs.get_type()),
             hir::BuiltinFn::SaturatingMul => {
-                // No direct LLVM intrinsic for saturating mul — emulate
                 return self.compile_saturating_mul(lhs, rhs, signed);
             }
             _ => unreachable!(),
@@ -774,7 +763,6 @@ impl<'ctx> Compiler<'ctx> {
         rhs: inkwell::values::IntValue<'ctx>,
         signed: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Saturating mul: mul with overflow check, clamp if overflowed
         let fv = self.cur_fn.unwrap();
         let bw = lhs.get_type().get_bit_width();
         let it = lhs.get_type();
@@ -799,7 +787,7 @@ impl<'ctx> Compiler<'ctx> {
         };
         let clamped: BasicValueEnum = b!(self.bld.build_select::<BasicValueEnum, _>(overflowed, max_val.into(), val.into(), "sat.mul"));
 
-        let _ = fv; // used for basic block context
+        let _ = fv;
         Ok(clamped)
     }
 
@@ -828,20 +816,13 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap_or_else(|| self.module.add_function(&intrinsic, ft, None));
         let result = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "chk"))
             .try_as_basic_value().basic().unwrap();
-        // Returns the LLVM struct { iN result, i1 overflowed } directly.
-        // The Jade type system maps this to (iN, bool) tuple.
         Ok(result)
     }
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Signal handling — POSIX signal(2) / raise(3) wrappers
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     fn ensure_signal(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         self.module.get_function("signal").unwrap_or_else(|| {
             let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
             let i32t = self.ctx.i32_type();
-            // signal(int signum, void (*handler)(int)) -> void (*)(int)
             let ft = ptr_ty.fn_type(&[i32t.into(), ptr_ty.into()], false);
             self.module
                 .add_function("signal", ft, Some(inkwell::module::Linkage::External))
@@ -890,7 +871,6 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let signum = self.compile_expr(&args[0])?;
         let signal_fn = self.ensure_signal();
-        // SIG_IGN is typically 1 on POSIX systems
         let sig_ign = self
             .bld
             .build_int_to_ptr(
@@ -904,6 +884,40 @@ impl<'ctx> Compiler<'ctx> {
             &[signum.into(), sig_ign.into()],
             "sig.ign"
         ));
+        Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    fn compile_assert(&mut self, cond_expr: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
+        let fv = self.cur_fn.unwrap();
+        let cond_val = self.compile_expr(cond_expr)?;
+        let cond = self.to_bool(cond_val);
+
+        let pass_bb = self.ctx.append_basic_block(fv, "assert.pass");
+        let fail_bb = self.ctx.append_basic_block(fv, "assert.fail");
+        b!(self.bld.build_conditional_branch(cond, pass_bb, fail_bb));
+
+        self.bld.position_at_end(fail_bb);
+        let printf = self.module.get_function("printf").unwrap();
+        let line = cond_expr.span.line;
+        let msg = format!("assertion failed at line {line}\n\0");
+        let gs = b!(self.bld.build_global_string_ptr(&msg, "assert.msg"));
+        b!(self.bld.build_call(printf, &[gs.as_pointer_value().into()], ""));
+        let exit_fn = self.module.get_function("exit").unwrap_or_else(|| {
+            let i32t = self.ctx.i32_type();
+            self.module.add_function(
+                "exit",
+                self.ctx.void_type().fn_type(&[i32t.into()], false),
+                Some(Linkage::External),
+            )
+        });
+        b!(self.bld.build_call(
+            exit_fn,
+            &[self.ctx.i32_type().const_int(1, false).into()],
+            ""
+        ));
+        b!(self.bld.build_unreachable());
+
+        self.bld.position_at_end(pass_bb);
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 }

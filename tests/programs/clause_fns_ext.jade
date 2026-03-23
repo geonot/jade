@@ -1,0 +1,23 @@
+# Extended clause function tests
+
+# Paren-free inline body
+*triple x is x * 3
+*negate x is 0 - x
+
+# Multi-param clauses
+*gcd(0, b) is b
+*gcd(a, 0) is a
+*gcd(a, b)
+    if a > b
+        return gcd(a - b, b)
+    gcd(a, b - a)
+
+# Chain: inline single-clause + paren-free
+*add a, b is a + b
+
+*main()
+    log(triple(7))
+    log(negate(42))
+    log(gcd(12, 8))
+    log(gcd(100, 75))
+    log(add(10, 20))

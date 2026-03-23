@@ -1,0 +1,19 @@
+extern *usleep(us: i32) -> i32
+
+actor Accumulator
+    sum: i64
+    @add n: i64
+        sum is sum + n
+    @result
+        log(sum)
+
+*main()
+    a is spawn Accumulator
+    i is 1
+    while i <= 1000
+        send a, @add(i)
+        i is i + 1
+    usleep(200000)
+    send a, @result()
+    usleep(100000)
+    0

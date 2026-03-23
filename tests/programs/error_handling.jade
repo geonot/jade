@@ -1,0 +1,99 @@
+# error_handling.jade — Comprehensive error handling patterns
+# Complexity: Intermediate
+# Demonstrates: err definitions, ! return operator, match on errors, enums
+
+err MathError
+    DivisionByZero
+    Overflow
+    NegativeRoot
+
+err IoError
+    FileNotFound(String)
+    PermissionDenied(String)
+    Timeout(i64)
+
+*safe_divide(a, b)
+    if b equals 0
+        ! DivisionByZero
+    a / b
+
+*safe_sqrt(x: f64)
+    if x < 0.0
+        ! NegativeRoot
+    x.sqrt()
+
+*checked_factorial(n)
+    if n < 0
+        ! Overflow
+    if n > 20
+        ! Overflow
+    result is 1
+    for i from 2 to n + 1
+        result is result * i
+    result
+
+*open_file(path: String)
+    if path equals ''
+        ! FileNotFound('empty path')
+    if path equals '/root/secret'
+        ! PermissionDenied('/root/secret')
+    42   # file descriptor
+
+*read_with_timeout(fd: i64, timeout_ms: i64)
+    if timeout_ms <= 0
+        ! Timeout(0)
+    if fd < 0
+        ! FileNotFound('bad fd')
+    'data'
+
+*main()
+    # Safe division
+    match safe_divide(10, 3)
+        DivisionByZero ? log('div by zero')
+        _ ? log('ok')
+
+    match safe_divide(10, 0)
+        DivisionByZero ? log('caught division by zero')
+        _ ? log('ok')
+
+    # Safe sqrt
+    match safe_sqrt(16.0)
+        NegativeRoot ? log('negative')
+        _ ? log('sqrt ok')
+
+    match safe_sqrt(-1.0)
+        NegativeRoot ? log('caught negative root')
+        _ ? log('ok')
+
+    # Checked factorial
+    match checked_factorial(10)
+        Overflow ? log('overflow')
+        _ ? log('factorial ok')
+
+    match checked_factorial(21)
+        Overflow ? log('caught overflow')
+        _ ? log('ok')
+
+    # IO errors
+    match open_file('test.txt')
+        FileNotFound(msg) ? log(msg)
+        PermissionDenied(msg) ? log(msg)
+        _ ? log('file opened')
+
+    match open_file('')
+        FileNotFound(msg) ? log(msg)
+        _ ? log('ok')
+
+    match open_file('/root/secret')
+        PermissionDenied(msg) ? log(msg)
+        _ ? log('ok')
+
+    # Chained operations
+    match read_with_timeout(42, 1000)
+        Timeout(ms) ? log('timed out')
+        FileNotFound(msg) ? log(msg)
+        _ ? log('read ok')
+
+    match read_with_timeout(42, 0)
+        Timeout(ms) ? log('caught timeout')
+        _ ? log('ok')

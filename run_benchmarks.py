@@ -52,7 +52,7 @@ def compile_jade(jade_path, opt, out_dir):
 def compile_c(c_path, opt, out_dir):
     name = os.path.basename(c_path).replace(".c", "")
     out = os.path.join(out_dir, f"{name}_c_O{opt}")
-    r = subprocess.run([CC, f"-O{opt}", "-o", out, c_path, "-lm"], capture_output=True)
+    r = subprocess.run([CC, f"-O{opt}", "-march=native", "-o", out, c_path, "-lm", "-lpthread"], capture_output=True)
     return (out, None) if r.returncode == 0 else (None, r.stderr.decode())
 
 

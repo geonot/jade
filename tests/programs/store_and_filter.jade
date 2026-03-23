@@ -1,0 +1,20 @@
+store products
+    name: String
+    price: i64
+    stock: i64
+
+*main
+    insert products 'Apple', 100, 50
+    insert products 'Banana', 50, 100
+    insert products 'Cherry', 100, 10
+    insert products 'Dragonfruit', 200, 5
+
+    # AND filter: price equals 100 and stock > 20
+    r is products where price equals 100 and stock > 20
+    log r.name
+    log r.stock
+
+    # Delete with AND filter
+    delete products where price equals 100 and stock < 20
+    c is count products
+    log c

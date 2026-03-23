@@ -40,7 +40,9 @@ impl Parser {
             }
             decls.push(self.parse_decl()?);
         }
-        Ok(Program { decls })
+        let mut prog = Program { decls };
+        desugar_multi_clause_fns(&mut prog);
+        Ok(prog)
     }
 
     fn parse_decl(&mut self) -> Result<Decl, ParseError> {
@@ -51,7 +53,12 @@ impl Parser {
             Token::Extern => Ok(Decl::Extern(self.parse_extern()?)),
             Token::Use => Ok(Decl::Use(self.parse_use_decl()?)),
             Token::Err => Ok(Decl::ErrDef(self.parse_err_def()?)),
-            _ => Err(self.error("expected *, type, enum, extern, use, or err")),
+            Token::Test => Ok(Decl::Test(self.parse_test_block()?)),
+            Token::Actor => Ok(Decl::Actor(self.parse_actor_def()?)),
+            Token::Store => Ok(Decl::Store(self.parse_store_def()?)),
+            Token::Trait => Ok(Decl::Trait(self.parse_trait_def()?)),
+            Token::Impl => Ok(Decl::Impl(self.parse_impl_block()?)),
+            _ => Err(self.error("expected *, type, enum, extern, use, err, test, actor, store, trait, or impl")),
         }
     }
 
@@ -122,16 +129,70 @@ impl Parser {
 
         if self.check(Token::LParen) {
             self.advance();
+            let mut arg_idx = 0u32;
             while !self.check(Token::RParen) && !self.eof() {
-                params.push(self.parse_param(true)?);
+                match self.peek() {
+                    Token::Int(_) | Token::Float(_) | Token::True | Token::False | Token::Str(_) => {
+                        let lit_sp = self.span();
+                        let lit_expr = self.parse_literal_token()?;
+                        params.push(Param {
+                            name: format!("__arg{arg_idx}"),
+                            ty: None,
+                            default: None,
+                            literal: Some(lit_expr),
+                            span: lit_sp,
+                        });
+                    }
+                    Token::Minus => {
+                        let lit_sp = self.span();
+                        let lit_expr = self.parse_unary()?;
+                        params.push(Param {
+                            name: format!("__arg{arg_idx}"),
+                            ty: None,
+                            default: None,
+                            literal: Some(lit_expr),
+                            span: lit_sp,
+                        });
+                    }
+                    _ => {
+                        params.push(self.parse_param(true)?);
+                    }
+                }
+                arg_idx += 1;
                 if !self.check(Token::RParen) {
                     self.expect(Token::Comma)?;
                 }
             }
             self.expect(Token::RParen)?;
         } else {
-            while !self.check(Token::Newline) && !self.check(Token::Arrow) && !self.eof() {
-                params.push(self.parse_param(false)?);
+            while !self.check(Token::Newline) && !self.check(Token::Arrow) && !self.check(Token::Is) && !self.eof() {
+                match self.peek() {
+                    Token::Int(_) | Token::Float(_) | Token::True | Token::False | Token::Str(_) => {
+                        let lit_sp = self.span();
+                        let lit_expr = self.parse_literal_token()?;
+                        params.push(Param {
+                            name: format!("__arg{}", params.len()),
+                            ty: None,
+                            default: None,
+                            literal: Some(lit_expr),
+                            span: lit_sp,
+                        });
+                    }
+                    Token::Minus => {
+                        let lit_sp = self.span();
+                        let lit_expr = self.parse_unary()?;
+                        params.push(Param {
+                            name: format!("__arg{}", params.len()),
+                            ty: None,
+                            default: None,
+                            literal: Some(lit_expr),
+                            span: lit_sp,
+                        });
+                    }
+                    _ => {
+                        params.push(self.parse_param(false)?);
+                    }
+                }
                 if self.check(Token::Comma) {
                     self.advance();
                 }
@@ -144,8 +205,16 @@ impl Parser {
         } else {
             None
         };
-        self.expect(Token::Newline)?;
-        let body = self.parse_block()?;
+
+        let body = if self.check(Token::Is) {
+            self.advance();
+            let expr = self.parse_expr()?;
+            vec![Stmt::Expr(expr)]
+        } else {
+            self.expect(Token::Newline)?;
+            self.parse_block()?
+        };
+
         Ok(Fn {
             name,
             type_params,
@@ -165,7 +234,7 @@ impl Parser {
         } else {
             None
         };
-        let default = if self.check(Token::Is) {
+        let default = if typed && self.check(Token::Is) {
             self.advance();
             Some(self.parse_expr()?)
         } else {
@@ -175,6 +244,7 @@ impl Parser {
             name,
             ty,
             default,
+            literal: None,
             span: sp,
         })
     }
@@ -403,6 +473,10 @@ impl Parser {
             }
             Token::Match => self.parse_match(),
             Token::Asm => self.parse_asm_stmt(),
+            Token::Insert => self.parse_insert_stmt(),
+            Token::Delete => self.parse_delete_stmt(),
+            Token::Set => self.parse_set_stmt(),
+            Token::Transaction => self.parse_transaction(),
             Token::Bang => {
                 let sp = self.span();
                 self.advance();
@@ -449,7 +523,6 @@ impl Parser {
     }
 
     fn is_tuple_bind(&self) -> bool {
-        // x, y is ...  →  Ident Comma Ident (Comma Ident)* Is
         if !matches!(self.peek(), Token::Ident(_)) {
             return false;
         }
@@ -647,6 +720,12 @@ impl Parser {
     fn parse_arm(&mut self) -> Result<Arm, ParseError> {
         let sp = self.span();
         let pat = self.parse_pat()?;
+        let guard = if self.check(Token::When) {
+            self.advance();
+            Some(self.parse_pipeline()?)
+        } else {
+            None
+        };
         self.expect(Token::Question)?;
         let body = if self.check(Token::Newline) {
             self.advance();
@@ -656,6 +735,7 @@ impl Parser {
         };
         Ok(Arm {
             pat,
+            guard,
             body,
             span: sp,
         })
@@ -771,7 +851,342 @@ impl Parser {
         })
     }
 
+    fn parse_test_block(&mut self) -> Result<TestBlock, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Test)?;
+        let name = match self.peek() {
+            Token::Str(ref s) => {
+                let n = s.clone();
+                self.advance();
+                n
+            }
+            _ => return Err(self.error("test requires a string name")),
+        };
+        self.expect(Token::Newline)?;
+        let body = self.parse_block()?;
+        Ok(TestBlock { name, body, span: sp })
+    }
+
+    fn parse_actor_def(&mut self) -> Result<ActorDef, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Actor)?;
+        let name = self.ident()?;
+        self.expect(Token::Newline)?;
+        let mut fields = Vec::new();
+        let mut handlers = Vec::new();
+        if self.check(Token::Indent) {
+            self.advance();
+            while !self.check(Token::Dedent) && !self.eof() {
+                self.skip_nl();
+                if self.check(Token::Dedent) || self.eof() {
+                    break;
+                }
+                if self.check(Token::At) {
+                    handlers.push(self.parse_handler()?);
+                } else {
+                    fields.push(self.parse_field()?);
+                    self.skip_nl();
+                }
+            }
+            if self.check(Token::Dedent) {
+                self.advance();
+            }
+        }
+        Ok(ActorDef {
+            name,
+            fields,
+            handlers,
+            span: sp,
+        })
+    }
+
+    fn parse_handler(&mut self) -> Result<Handler, ParseError> {
+        let sp = self.span();
+        self.expect(Token::At)?;
+        let name = self.ident()?;
+        let mut params = Vec::new();
+        while !self.check(Token::Newline) && !self.check(Token::Is) && !self.eof() {
+            params.push(self.parse_param(true)?);
+            if self.check(Token::Comma) {
+                self.advance();
+            }
+        }
+        let body = if self.check(Token::Is) {
+            self.advance();
+            let expr = self.parse_expr()?;
+            vec![Stmt::Expr(expr)]
+        } else {
+            self.expect(Token::Newline)?;
+            self.parse_block()?
+        };
+        Ok(Handler {
+            name,
+            params,
+            body,
+            span: sp,
+        })
+    }
+
+    fn parse_store_def(&mut self) -> Result<StoreDef, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Store)?;
+        let name = self.ident()?;
+        self.expect(Token::Newline)?;
+        let mut fields = Vec::new();
+        if self.check(Token::Indent) {
+            self.advance();
+            while !self.check(Token::Dedent) && !self.eof() {
+                self.skip_nl();
+                if self.check(Token::Dedent) || self.eof() {
+                    break;
+                }
+                fields.push(self.parse_field()?);
+                self.skip_nl();
+            }
+            if self.check(Token::Dedent) {
+                self.advance();
+            }
+        }
+        Ok(StoreDef {
+            name,
+            fields,
+            span: sp,
+        })
+    }
+
+    fn parse_trait_def(&mut self) -> Result<TraitDef, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Trait)?;
+        let name = self.ident()?;
+        let type_params = self.parse_type_params();
+        self.expect(Token::Newline)?;
+        let mut methods = Vec::new();
+        if self.check(Token::Indent) {
+            self.advance();
+            while !self.check(Token::Dedent) && !self.eof() {
+                self.skip_nl();
+                if self.check(Token::Dedent) || self.eof() {
+                    break;
+                }
+                methods.push(self.parse_trait_method()?);
+            }
+            if self.check(Token::Dedent) {
+                self.advance();
+            }
+        }
+        Ok(TraitDef {
+            name,
+            type_params,
+            methods,
+            span: sp,
+        })
+    }
+
+    fn parse_trait_method(&mut self) -> Result<TraitMethod, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Star)?;
+        let name = self.ident()?;
+        let mut params = Vec::new();
+
+        if self.check(Token::LParen) {
+            self.advance();
+            while !self.check(Token::RParen) && !self.eof() {
+                params.push(self.parse_param(true)?);
+                if !self.check(Token::RParen) {
+                    self.expect(Token::Comma)?;
+                }
+            }
+            self.expect(Token::RParen)?;
+        } else {
+            // Paren-free: parse 'self' first (untyped), then typed params
+            while !self.check(Token::Newline) && !self.check(Token::Arrow) && !self.check(Token::Is) && !self.eof() {
+                let is_self = matches!(self.peek(), Token::Ident(ref s) if s == "self");
+                params.push(self.parse_param(!is_self)?);
+                if self.check(Token::Comma) {
+                    self.advance();
+                }
+            }
+        }
+
+        let ret = if self.check(Token::Arrow) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        let default_body = if self.check(Token::Is) {
+            self.advance();
+            let expr = self.parse_expr()?;
+            Some(vec![Stmt::Expr(expr)])
+        } else if self.check(Token::Newline) {
+            self.advance();
+            if self.check(Token::Indent) {
+                Some(self.parse_block()?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(TraitMethod {
+            name,
+            params,
+            ret,
+            default_body,
+            span: sp,
+        })
+    }
+
+    fn parse_impl_block(&mut self) -> Result<ImplBlock, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Impl)?;
+        let first_name = self.ident()?;
+        let (trait_name, type_name) = if self.check(Token::For) {
+            self.advance();
+            let tn = self.ident()?;
+            (Some(first_name), tn)
+        } else {
+            (None, first_name)
+        };
+        self.expect(Token::Newline)?;
+        let mut methods = Vec::new();
+        if self.check(Token::Indent) {
+            self.advance();
+            while !self.check(Token::Dedent) && !self.eof() {
+                self.skip_nl();
+                if self.check(Token::Dedent) || self.eof() {
+                    break;
+                }
+                methods.push(self.parse_fn()?);
+            }
+            if self.check(Token::Dedent) {
+                self.advance();
+            }
+        }
+        Ok(ImplBlock {
+            trait_name,
+            type_name,
+            methods,
+            span: sp,
+        })
+    }
+
+    fn parse_insert_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Insert)?;
+        let store = self.ident()?;
+        let mut values = vec![self.parse_expr()?];
+        while self.check(Token::Comma) {
+            self.advance();
+            values.push(self.parse_expr()?);
+        }
+        Ok(Stmt::StoreInsert(store, values, sp))
+    }
+
+    fn parse_delete_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Delete)?;
+        let store = self.ident()?;
+        let filter = self.parse_store_filter()?;
+        Ok(Stmt::StoreDelete(store, filter, sp))
+    }
+
+    /// Parse `set <store> where <filter> <field> <expr> [, <field> <expr>]*`
+    fn parse_set_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Set)?;
+        let store = self.ident()?;
+        // Filter comes first: `where field op value`
+        let filter = self.parse_store_filter()?;
+        // Then field assignments: field expr [, field expr]*
+        let mut assignments = Vec::new();
+        loop {
+            if self.check(Token::Newline) || self.check(Token::Eof) {
+                break;
+            }
+            let field = self.ident()?;
+            let value = self.parse_expr()?;
+            assignments.push((field, value));
+            if self.check(Token::Comma) {
+                self.advance();
+            }
+        }
+        if assignments.is_empty() {
+            return Err(self.error("expected at least one field assignment in set statement"));
+        }
+        Ok(Stmt::StoreSet(store, assignments, filter, sp))
+    }
+
+    fn parse_transaction(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Transaction)?;
+        self.expect(Token::Newline)?;
+        let body = self.parse_block()?;
+        Ok(Stmt::Transaction(body, sp))
+    }
+
+    fn parse_store_filter(&mut self) -> Result<StoreFilter, ParseError> {
+        let sp = self.span();
+        let kw = self.ident()?;
+        if kw != "where" {
+            return Err(self.error("expected 'where'"));
+        }
+        let field = self.ident()?;
+        let op = self.parse_filter_op()?;
+        let value = self.parse_add()?;
+        let mut extra = Vec::new();
+        loop {
+            match self.peek() {
+                Token::And => {
+                    self.advance();
+                    let f = self.ident()?;
+                    let o = self.parse_filter_op()?;
+                    let v = self.parse_add()?;
+                    extra.push((LogicalOp::And, StoreFilterCond { field: f, op: o, value: v }));
+                }
+                Token::Or => {
+                    self.advance();
+                    let f = self.ident()?;
+                    let o = self.parse_filter_op()?;
+                    let v = self.parse_add()?;
+                    extra.push((LogicalOp::Or, StoreFilterCond { field: f, op: o, value: v }));
+                }
+                _ => break,
+            }
+        }
+        Ok(StoreFilter { field, op, value, span: sp, extra })
+    }
+
+    fn parse_filter_op(&mut self) -> Result<BinOp, ParseError> {
+        match self.peek() {
+            Token::Equals => { self.advance(); Ok(BinOp::Eq) }
+            Token::Isnt => { self.advance(); Ok(BinOp::Ne) }
+            Token::Lt => { self.advance(); Ok(BinOp::Lt) }
+            Token::Gt => { self.advance(); Ok(BinOp::Gt) }
+            Token::LtEq => { self.advance(); Ok(BinOp::Le) }
+            Token::GtEq => { self.advance(); Ok(BinOp::Ge) }
+            _ => Err(self.error("expected comparison operator (equals, isnt, <, >, <=, >=)")),
+        }
+    }
+
     fn parse_pat(&mut self) -> Result<Pat, ParseError> {
+        let first = self.parse_single_pat()?;
+        // Or-pattern: `A or B or C`
+        if self.check(Token::Or) {
+            let sp = first.span();
+            let mut pats = vec![first];
+            while self.check(Token::Or) {
+                self.advance();
+                pats.push(self.parse_single_pat()?);
+            }
+            return Ok(Pat::Or(pats, sp));
+        }
+        Ok(first)
+    }
+
+    fn parse_single_pat(&mut self) -> Result<Pat, ParseError> {
         let sp = self.span();
         match self.peek() {
             Token::Ident(ref s) if s == "_" => {
@@ -796,14 +1211,52 @@ impl Parser {
                 }
             }
             Token::Int(_) | Token::Float(_) | Token::Str(_) | Token::True | Token::False => {
-                Ok(Pat::Lit(self.parse_primary()?))
+                let lit = self.parse_primary()?;
+                // Range pattern: `1 to 10`
+                if self.check(Token::To) {
+                    self.advance();
+                    let hi = self.parse_primary()?;
+                    Ok(Pat::Range(lit, hi, sp))
+                } else {
+                    Ok(Pat::Lit(lit))
+                }
+            }
+            Token::LParen => {
+                // Tuple pattern: (a, b, c)
+                self.advance();
+                let mut pats = Vec::new();
+                while !self.check(Token::RParen) && !self.eof() {
+                    pats.push(self.parse_pat()?);
+                    if !self.check(Token::RParen) {
+                        self.expect(Token::Comma)?;
+                    }
+                }
+                self.expect(Token::RParen)?;
+                Ok(Pat::Tuple(pats, sp))
+            }
+            Token::LBracket => {
+                // Array pattern: [a, b, c]
+                self.advance();
+                let mut pats = Vec::new();
+                while !self.check(Token::RBracket) && !self.eof() {
+                    pats.push(self.parse_pat()?);
+                    if !self.check(Token::RBracket) {
+                        self.expect(Token::Comma)?;
+                    }
+                }
+                self.expect(Token::RBracket)?;
+                Ok(Pat::Array(pats, sp))
             }
             _ => Err(self.error("expected pattern")),
         }
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_ternary()
+        let e = self.parse_ternary()?;
+        if self.check(Token::Query) {
+            return self.parse_query_block(e);
+        }
+        Ok(e)
     }
 
     fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
@@ -929,6 +1382,15 @@ impl Parser {
                     self.advance();
                     e = Expr::As(Box::new(e), self.parse_type()?, sp);
                 }
+                Token::Ident(ref kw) if kw == "where" => {
+                    if let Expr::Ident(ref store_name, sp) = e {
+                        let store = store_name.clone();
+                        let filter = self.parse_store_filter()?;
+                        e = Expr::StoreQuery(store, Box::new(filter), sp);
+                    } else {
+                        break;
+                    }
+                }
                 _ => break,
             }
         }
@@ -949,7 +1411,6 @@ impl Parser {
             Token::Str(ref s) => {
                 let v = s.clone();
                 self.advance();
-                // Check for string interpolation: Str InterpStart expr InterpEnd Str ...
                 if self.check(Token::InterpStart) {
                     return self.parse_interp(v, sp);
                 }
@@ -1051,6 +1512,34 @@ impl Parser {
                 ))
             }
             Token::If => Ok(Expr::IfExpr(Box::new(self.parse_if()?))),
+            Token::Assert => {
+                self.advance();
+                let arg = if self.check(Token::LParen) {
+                    self.advance();
+                    let a = self.parse_expr()?;
+                    self.expect(Token::RParen)?;
+                    a
+                } else {
+                    self.parse_expr()?
+                };
+                Ok(Expr::Call(
+                    Box::new(Expr::Ident("assert".into(), sp)),
+                    vec![arg],
+                    sp,
+                ))
+            }
+            Token::Embed => {
+                self.advance();
+                let path = match self.peek() {
+                    Token::Str(ref s) => {
+                        let p = s.clone();
+                        self.advance();
+                        p
+                    }
+                    _ => return Err(self.error("embed requires a string literal path")),
+                };
+                Ok(Expr::Embed(path, sp))
+            }
             Token::Ident(ref name) => {
                 let name = name.clone();
                 self.advance();
@@ -1077,6 +1566,18 @@ impl Parser {
                     }
                     self.expect(Token::RParen)?;
                     return Ok(Expr::Struct(name, fields, sp));
+                }
+                if name == "count" {
+                    if let Token::Ident(_) = self.peek() {
+                        let store = self.ident()?;
+                        return Ok(Expr::StoreCount(store, sp));
+                    }
+                }
+                if name == "all" {
+                    if let Token::Ident(_) = self.peek() {
+                        let store = self.ident()?;
+                        return Ok(Expr::StoreAll(store, sp));
+                    }
                 }
                 Ok(Expr::Ident(name, sp))
             }
@@ -1133,7 +1634,170 @@ impl Parser {
                 let inner = self.parse_primary()?;
                 Ok(Expr::Ref(Box::new(inner), sp))
             }
+            Token::Spawn => {
+                self.advance();
+                let name = self.ident()?;
+                Ok(Expr::Spawn(name, sp))
+            }
+            Token::Send | Token::Dispatch => {
+                let is_dispatch = matches!(self.peek(), Token::Dispatch);
+                self.advance();
+                // Coroutine: `dispatch name\n  body` (dispatch + ident + newline means coroutine)
+                if is_dispatch {
+                    if let Token::Ident(_) = self.peek() {
+                        // Look ahead: if ident is followed by newline (not comma), it's a coroutine
+                        let next_idx = self.pos + 1;
+                        if next_idx < self.tok.len() && matches!(self.tok[next_idx].token, Token::Newline) {
+                            let name = self.ident()?;
+                            self.expect(Token::Newline)?;
+                            let body = self.parse_block()?;
+                            return Ok(Expr::DispatchBlock(name, body, sp));
+                        }
+                    }
+                    // `dispatch\n  body` (anonymous coroutine)
+                    if self.check(Token::Newline) {
+                        let next_idx = self.pos + 1;
+                        if next_idx < self.tok.len() && matches!(self.tok[next_idx].token, Token::Indent) {
+                            self.advance(); // consume newline
+                            let body = self.parse_block()?;
+                            return Ok(Expr::DispatchBlock("__anon".to_string(), body, sp));
+                        }
+                    }
+                }
+                // Actor send: `send/dispatch expr, @handler(args)`
+                let target = self.parse_expr()?;
+                self.expect(Token::Comma)?;
+                self.expect(Token::At)?;
+                let handler = self.ident()?;
+                let mut args = Vec::new();
+                if self.check(Token::LParen) {
+                    self.advance();
+                    while !self.check(Token::RParen) && !self.eof() {
+                        args.push(self.parse_expr()?);
+                        if !self.check(Token::RParen) {
+                            self.expect(Token::Comma)?;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                }
+                Ok(Expr::Send(Box::new(target), handler, args, sp))
+            }
+            Token::Yield => {
+                self.advance();
+                let val = self.parse_expr()?;
+                Ok(Expr::Yield(Box::new(val), sp))
+            }
+            Token::Receive => {
+                self.advance();
+                self.expect(Token::Newline)?;
+                self.expect(Token::Indent)?;
+                let mut arms = Vec::new();
+                while !self.check(Token::Dedent) && !self.eof() {
+                    self.skip_nl();
+                    if self.check(Token::Dedent) || self.eof() {
+                        break;
+                    }
+                    let arm_sp = self.span();
+                    self.expect(Token::At)?;
+                    let handler_name = self.ident()?;
+                    let mut bindings = Vec::new();
+                    if self.check(Token::LParen) {
+                        self.advance();
+                        while !self.check(Token::RParen) && !self.eof() {
+                            bindings.push(self.ident()?);
+                            if !self.check(Token::RParen) {
+                                self.expect(Token::Comma)?;
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                    }
+                    self.expect(Token::Newline)?;
+                    let body = self.parse_block()?;
+                    arms.push(ReceiveArm {
+                        handler: handler_name,
+                        bindings,
+                        body,
+                        span: arm_sp,
+                    });
+                }
+                if self.check(Token::Dedent) {
+                    self.advance();
+                }
+                Ok(Expr::Receive(arms, sp))
+            }
             _ => Err(self.error(&format!("unexpected token: {}", self.peek()))),
+        }
+    }
+
+    fn parse_literal_token(&mut self) -> Result<Expr, ParseError> {
+        let sp = self.span();
+        match self.peek() {
+            Token::Int(n) => { self.advance(); Ok(Expr::Int(n, sp)) }
+            Token::Float(n) => { self.advance(); Ok(Expr::Float(n, sp)) }
+            Token::True => { self.advance(); Ok(Expr::Bool(true, sp)) }
+            Token::False => { self.advance(); Ok(Expr::Bool(false, sp)) }
+            Token::Str(ref s) => { let v = s.clone(); self.advance(); Ok(Expr::Str(v, sp)) }
+            _ => Err(self.error("expected literal")),
+        }
+    }
+
+    fn parse_query_block(&mut self, source: Expr) -> Result<Expr, ParseError> {
+        let sp = source.span();
+        self.expect(Token::Query)?;
+        self.expect(Token::Newline)?;
+        self.expect(Token::Indent)?;
+        let mut clauses = Vec::new();
+        while !self.check(Token::Dedent) && !self.eof() {
+            self.skip_nl();
+            if self.check(Token::Dedent) || self.eof() {
+                break;
+            }
+            clauses.push(self.parse_query_clause()?);
+            self.skip_nl();
+        }
+        if self.check(Token::Dedent) {
+            self.advance();
+        }
+        Ok(Expr::Query(Box::new(source), clauses, sp))
+    }
+
+    fn parse_query_clause(&mut self) -> Result<QueryClause, ParseError> {
+        let sp = self.span();
+        let kw = self.ident()?;
+        match kw.as_str() {
+            "where" => {
+                let cond = self.parse_expr()?;
+                Ok(QueryClause::Where(cond, sp))
+            }
+            "limit" => {
+                let n = self.parse_expr()?;
+                Ok(QueryClause::Limit(n, sp))
+            }
+            "sort" => {
+                let field = self.ident()?;
+                let asc = if let Token::Ident(ref dir) = self.peek() {
+                    if dir == "desc" { self.advance(); false }
+                    else if dir == "asc" { self.advance(); true }
+                    else { true }
+                } else { true };
+                Ok(QueryClause::Sort(field, asc, sp))
+            }
+            "take" => {
+                let n = self.parse_expr()?;
+                Ok(QueryClause::Take(n, sp))
+            }
+            "skip" => {
+                let n = self.parse_expr()?;
+                Ok(QueryClause::Skip(n, sp))
+            }
+            "set" => {
+                let field = self.ident()?;
+                self.expect(Token::Is)?;
+                let val = self.parse_expr()?;
+                Ok(QueryClause::Set(field, val, sp))
+            }
+            "delete" => Ok(QueryClause::Delete(sp)),
+            _ => Err(self.error(&format!("unknown query clause: {kw}"))),
         }
     }
 
@@ -1162,6 +1826,15 @@ impl Parser {
                 Ok(Type::Ptr(Box::new(inner)))
             }
             Token::Ident(ref n) => {
+                if n == "dyn" {
+                    self.advance();
+                    if let Token::Ident(ref trait_name) = self.peek() {
+                        let name = trait_name.clone();
+                        self.advance();
+                        return Ok(Type::DynTrait(name));
+                    }
+                    return Err(self.error("expected trait name after 'dyn'"));
+                }
                 let t = self.ident_to_type(n);
                 self.advance();
                 if self.check(Token::Of) {
@@ -1231,23 +1904,20 @@ impl Parser {
     /// Parse a string interpolation: 'hello {expr} world {expr2} end'
     /// Already consumed the first Str token; sp is the span of the opening string.
     fn parse_interp(&mut self, first: String, sp: Span) -> Result<Expr, ParseError> {
-        // Build a chain of BinOp::Add expressions for string concatenation
         let mut result: Expr = Expr::Str(first, sp);
         while self.check(Token::InterpStart) {
-            self.advance(); // consume InterpStart
+            self.advance();
             let expr = self.parse_expr()?;
             if !self.check(Token::InterpEnd) {
                 return Err(self.error("expected closing } in string interpolation"));
             }
-            self.advance(); // consume InterpEnd
-            // Wrap the expression in a to_string call for non-string types
+            self.advance();
             let interp_expr = Expr::Call(
                 Box::new(Expr::Ident("to_string".into(), expr.span())),
                 vec![expr],
                 sp,
             );
             result = Expr::BinOp(Box::new(result), BinOp::Add, Box::new(interp_expr), sp);
-            // Check for the next string part
             if let Token::Str(ref s) = self.peek() {
                 let tail = s.clone();
                 self.advance();
@@ -1305,11 +1975,10 @@ impl Parser {
     }
 
     fn ident(&mut self) -> Result<String, ParseError> {
-        if let Token::Ident(n) = self.peek() {
-            self.advance();
-            Ok(n)
-        } else {
-            Err(self.error(&format!("expected identifier, got {}", self.peek())))
+        match self.peek() {
+            Token::Ident(n) => { self.advance(); Ok(n) }
+            Token::Set => { self.advance(); Ok("set".into()) }
+            _ => Err(self.error(&format!("expected identifier, got {}", self.peek())))
         }
     }
 
@@ -1320,6 +1989,181 @@ impl Parser {
             col: sp.col,
             msg: msg.into(),
         }
+    }
+}
+
+/// Merge multiple function definitions with the same name (pattern-directed clauses)
+/// into a single function with an if/elif/else chain that dispatches on literal params.
+fn desugar_multi_clause_fns(prog: &mut Program) {
+    // Collect indices of Fn decls grouped by name, preserving order.
+    let mut name_indices: Vec<(String, Vec<usize>)> = Vec::new();
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for (i, decl) in prog.decls.iter().enumerate() {
+        if let Decl::Fn(f) = decl {
+            if let Some(&group_idx) = seen.get(&f.name) {
+                name_indices[group_idx].1.push(i);
+            } else {
+                seen.insert(f.name.clone(), name_indices.len());
+                name_indices.push((f.name.clone(), vec![i]));
+            }
+        }
+    }
+
+    // Find groups with >1 clause.
+    let multi_groups: Vec<(String, Vec<usize>)> = name_indices
+        .into_iter()
+        .filter(|(_, indices)| indices.len() > 1)
+        .collect();
+
+    if multi_groups.is_empty() {
+        return;
+    }
+
+    // For each multi-clause group, merge into a single Fn and mark the rest for removal.
+    let mut to_remove: std::collections::HashSet<usize> = std::collections::HashSet::new();
+
+    for (_, indices) in &multi_groups {
+        let clauses: Vec<Fn> = indices
+            .iter()
+            .map(|&i| {
+                if let Decl::Fn(f) = &prog.decls[i] {
+                    f.clone()
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
+        let merged = merge_fn_clauses(&clauses);
+
+        // Replace the first occurrence, mark the rest for removal.
+        prog.decls[indices[0]] = Decl::Fn(merged);
+        for &i in &indices[1..] {
+            to_remove.insert(i);
+        }
+    }
+
+    // Remove merged-away decls in reverse order.
+    let mut remove_sorted: Vec<usize> = to_remove.into_iter().collect();
+    remove_sorted.sort_unstable_by(|a, b| b.cmp(a));
+    for i in remove_sorted {
+        prog.decls.remove(i);
+    }
+}
+
+fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
+    let first = &clauses[0];
+    let param_count = first.params.len();
+    let sp = first.span;
+
+    // Build unified params: use __argN for positions that have any literal in any clause,
+    // otherwise use the name from the catch-all (last) clause or first named clause.
+    let mut unified_params: Vec<Param> = Vec::new();
+    for pi in 0..param_count {
+        // Find a clause that has a real name (non-literal) for this position.
+        let real_name = clauses
+            .iter()
+            .find_map(|c| {
+                c.params.get(pi).and_then(|p| {
+                    if p.literal.is_none() {
+                        Some(p.name.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| format!("__arg{pi}"));
+
+        // Use the type from whichever clause has an explicit type.
+        let ty = clauses.iter().find_map(|c| c.params.get(pi).and_then(|p| p.ty.clone()));
+
+        unified_params.push(Param {
+            name: real_name,
+            ty,
+            default: None,
+            literal: None,
+            span: sp,
+        });
+    }
+
+    // Separate clauses with literal patterns (guarded) from the catch-all.
+    let mut guarded: Vec<&Fn> = Vec::new();
+    let mut catchall: Option<&Fn> = None;
+    for c in clauses {
+        if c.params.iter().any(|p| p.literal.is_some()) {
+            guarded.push(c);
+        } else {
+            catchall = Some(c);
+        }
+    }
+
+    // Build if/elif/else body.
+    let build_cond = |clause: &Fn| -> Expr {
+        let mut conds: Vec<Expr> = Vec::new();
+        for (pi, p) in clause.params.iter().enumerate() {
+            if let Some(ref lit) = p.literal {
+                let arg_ref = Expr::Ident(unified_params[pi].name.clone(), sp);
+                conds.push(Expr::BinOp(
+                    Box::new(arg_ref),
+                    BinOp::Eq,
+                    Box::new(lit.clone()),
+                    sp,
+                ));
+            }
+        }
+        conds
+            .into_iter()
+            .reduce(|a, b| Expr::BinOp(Box::new(a), BinOp::And, Box::new(b), sp))
+            .unwrap()
+    };
+
+    let build_body = |clause: &Fn| -> Block {
+        let mut body = Vec::new();
+        // Bind named params that differ from unified names.
+        for (pi, p) in clause.params.iter().enumerate() {
+            if p.literal.is_none() && p.name != unified_params[pi].name {
+                body.push(Stmt::Bind(crate::ast::Bind {
+                    name: p.name.clone(),
+                    value: Expr::Ident(unified_params[pi].name.clone(), sp),
+                    ty: None,
+                    span: sp,
+                }));
+            }
+        }
+        body.extend(clause.body.clone());
+        body
+    };
+
+    let body = if guarded.is_empty() {
+        // No literal params at all, just use the catch-all.
+        catchall.map(|c| c.body.clone()).unwrap_or_default()
+    } else {
+        let first_guarded = guarded[0];
+        let then_cond = build_cond(first_guarded);
+        let then_body = build_body(first_guarded);
+        let mut elifs: Vec<(Expr, Block)> = Vec::new();
+        for g in &guarded[1..] {
+            elifs.push((build_cond(g), build_body(g)));
+        }
+        let els = catchall.map(|c| build_body(c));
+
+        vec![Stmt::Expr(Expr::IfExpr(Box::new(If {
+            cond: then_cond,
+            then: then_body,
+            elifs,
+            els,
+            span: sp,
+        })))]
+    };
+
+    Fn {
+        name: first.name.clone(),
+        type_params: first.type_params.clone(),
+        params: unified_params,
+        ret: first.ret.clone(),
+        body,
+        span: sp,
     }
 }
 
@@ -1737,6 +2581,103 @@ mod tests {
                 assert_eq!(**ret, Type::I64);
             } else {
                 panic!("expected fn type on param, got: {:?}", f.params[0].ty);
+            }
+        }
+    }
+
+    #[test]
+    fn inline_body_parens() {
+        let p = parse("*double(x) is x * 2\n");
+        if let Decl::Fn(f) = &p.decls[0] {
+            assert_eq!(f.name, "double");
+            assert_eq!(f.params.len(), 1);
+            assert_eq!(f.params[0].name, "x");
+            assert_eq!(f.body.len(), 1);
+            assert!(matches!(f.body[0], Stmt::Expr(Expr::BinOp(_, BinOp::Mul, _, _))));
+        } else {
+            panic!("expected fn");
+        }
+    }
+
+    #[test]
+    fn inline_body_paren_free() {
+        let p = parse("*add a, b is a + b\n");
+        if let Decl::Fn(f) = &p.decls[0] {
+            assert_eq!(f.name, "add");
+            assert_eq!(f.params.len(), 2);
+            assert_eq!(f.params[0].name, "a");
+            assert_eq!(f.params[1].name, "b");
+            assert_eq!(f.body.len(), 1);
+            assert!(matches!(f.body[0], Stmt::Expr(Expr::BinOp(_, BinOp::Add, _, _))));
+        } else {
+            panic!("expected fn");
+        }
+    }
+
+    #[test]
+    fn literal_param_single() {
+        // *fib(0) is 0 / *fib(n) is n — merges into one fn with if
+        let p = parse("*fib(0) is 0\n\n*fib(n)\n    n\n");
+        assert_eq!(p.decls.len(), 1);
+        if let Decl::Fn(f) = &p.decls[0] {
+            assert_eq!(f.name, "fib");
+            assert_eq!(f.params.len(), 1);
+            assert!(f.params[0].literal.is_none()); // merged: unified param has no literal
+            assert_eq!(f.body.len(), 1);
+            // Body should be an IfExpr (desugared from clauses)
+            assert!(matches!(f.body[0], Stmt::Expr(Expr::IfExpr(_))));
+        } else {
+            panic!("expected fn");
+        }
+    }
+
+    #[test]
+    fn literal_param_multi_clause() {
+        let p = parse("*fib(0) is 0\n\n*fib(1) is 1\n\n*fib(n)\n    fib(n - 1) + fib(n - 2)\n");
+        assert_eq!(p.decls.len(), 1); // all merged into one
+        if let Decl::Fn(f) = &p.decls[0] {
+            assert_eq!(f.name, "fib");
+            if let Stmt::Expr(Expr::IfExpr(ref i)) = f.body[0] {
+                assert_eq!(i.elifs.len(), 1); // one elif for *fib(1)
+                assert!(i.els.is_some());     // else for *fib(n)
+            } else {
+                panic!("expected desugared if-expr");
+            }
+        }
+    }
+
+    #[test]
+    fn query_block() {
+        let p = parse("*main()\n    x is Users query\n        where age >= 18\n        limit 10\n");
+        if let Decl::Fn(f) = &p.decls[0] {
+            if let Stmt::Bind(b) = &f.body[0] {
+                if let Expr::Query(source, clauses, _) = &b.value {
+                    assert!(matches!(source.as_ref(), Expr::Ident(n, _) if n == "Users"));
+                    assert_eq!(clauses.len(), 2);
+                    assert!(matches!(clauses[0], QueryClause::Where(_, _)));
+                    assert!(matches!(clauses[1], QueryClause::Limit(_, _)));
+                } else {
+                    panic!("expected query expr, got: {:?}", b.value);
+                }
+            } else {
+                panic!("expected bind");
+            }
+        }
+    }
+
+    #[test]
+    fn query_sort_clause() {
+        let p = parse("*main()\n    x is Items query\n        sort name desc\n");
+        if let Decl::Fn(f) = &p.decls[0] {
+            if let Stmt::Bind(b) = &f.body[0] {
+                if let Expr::Query(_, clauses, _) = &b.value {
+                    if let QueryClause::Sort(field, asc, _) = &clauses[0] {
+                        assert_eq!(field, "name");
+                        assert!(!asc);
+                    } else {
+                        panic!("expected sort clause");
+                    }
+                }
             }
         }
     }

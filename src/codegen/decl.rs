@@ -65,7 +65,6 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn declare_method(&mut self, _type_name: &str, m: &hir::Fn) -> Result<(), String> {
         let method_name = m.name.clone();
-        // HIR method params already include `self` as the first param
         let ptys: Vec<Type> = m.params.iter().map(|p| p.ty.clone()).collect();
         let ret = m.ret.clone();
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
@@ -87,7 +86,10 @@ impl<'ctx> Compiler<'ctx> {
         params: &[(String, Type)],
         body: &hir::Block,
         ret: &Type,
+        name: &str,
+        line: u32,
     ) -> Result<(), String> {
+        self.create_debug_function(fv, name, line);
         self.cur_fn = Some(fv);
         let entry = self.ctx.append_basic_block(fv, "entry");
         self.bld.position_at_end(entry);
@@ -115,6 +117,7 @@ impl<'ctx> Compiler<'ctx> {
         }
         self.vars.pop();
         self.cur_fn = None;
+        self.pop_debug_scope();
         Ok(())
     }
 
@@ -143,7 +146,7 @@ impl<'ctx> Compiler<'ctx> {
             .enumerate()
             .map(|(i, p)| (p.name.clone(), ptys[i].clone()))
             .collect();
-        self.emit_body(fv, &params, &f.body, &ret)
+        self.emit_body(fv, &params, &f.body, &ret, &f.name, f.span.line)
     }
 
     pub(crate) fn declare_type(&mut self, td: &hir::TypeDef) -> Result<(), String> {
@@ -178,7 +181,6 @@ impl<'ctx> Compiler<'ctx> {
             .iter()
             .map(|(_, t)| {
                 if matches!(t, Type::String) {
-                    // Extern C functions receive a char* for String args
                     self.ctx
                         .ptr_type(inkwell::AddressSpace::default())
                         .into()
@@ -232,6 +234,38 @@ impl<'ctx> Compiler<'ctx> {
                 .insert(vname.clone(), (name.to_string(), *tag));
             resolved.push((vname.clone(), ftys.clone()));
         }
+
+        // Zero-cost optimization: fieldless enums → tag-only
+        if max_payload == 0 {
+            let st = self.ctx.opaque_struct_type(name);
+            st.set_body(&[i32t.into()], false);
+            self.enums.insert(name.to_string(), resolved);
+            return Ok(());
+        }
+
+        // Zero-cost optimization: Option-like (1 empty variant + 1 single-pointer variant) → nullable ptr
+        if variants.len() == 2 {
+            let empty_idx = variants.iter().position(|(_, fs, _)| fs.is_empty());
+            let payload_idx = variants.iter().position(|(_, fs, _)| fs.len() == 1);
+            if let (Some(_ei), Some(pi)) = (empty_idx, payload_idx) {
+                let field_ty = &variants[pi].1[0];
+                let is_ptr_like = matches!(
+                    field_ty,
+                    Type::String | Type::Rc(_) | Type::Weak(_) | Type::Fn(_, _)
+                ) || matches!(field_ty, Type::Struct(_) | Type::Enum(_))
+                    && !Self::is_recursive_field(field_ty, name);
+                if is_ptr_like {
+                    // Nullable pointer: the whole enum is just a pointer.
+                    // null = empty variant, non-null = payload variant.
+                    let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                    let st = self.ctx.opaque_struct_type(name);
+                    st.set_body(&[ptr.into()], false);
+                    self.enums.insert(name.to_string(), resolved);
+                    return Ok(());
+                }
+            }
+        }
+
         let payload_ty = self.ctx.i8_type().array_type(max_payload as u32);
         let st = self.ctx.opaque_struct_type(name);
         st.set_body(&[i32t.into(), payload_ty.into()], false);

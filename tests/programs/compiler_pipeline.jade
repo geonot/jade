@@ -1,0 +1,160 @@
+# compiler_pipeline.jade — Mini language compiler (lexer + parser + evaluator)
+# Complexity: Advanced
+# Demonstrates: enums, pattern matching, string ops, recursion, structs
+# Represents Jade's vision for real-world programs
+
+# ── Tokens ──────────────────────────────────────────────────────────────────
+
+enum Token
+    TNum(i64)
+    TPlus
+    TMinus
+    TStar
+    TSlash
+    TLParen
+    TRParen
+    TEnd
+
+# ── AST ─────────────────────────────────────────────────────────────────────
+
+enum Ast
+    ANum(i64)
+    AAdd(Ast, Ast)
+    ASub(Ast, Ast)
+    AMul(Ast, Ast)
+    ADiv(Ast, Ast)
+
+# ── Lexer ───────────────────────────────────────────────────────────────────
+
+*is_digit(ch: i64)
+    ch >= 48 and ch <= 57
+
+*is_space(ch: i64)
+    ch equals 32 or ch equals 9
+
+*lex_number(src: String, pos: i64)
+    n is 0
+    p is pos
+    while p < src.length and is_digit(src.char_at(p))
+        n is n * 10 + (src.char_at(p) - 48)
+        p is p + 1
+    (TNum(n), p)
+
+*lex_one(src: String, pos: i64)
+    # Skip whitespace
+    p is pos
+    while p < src.length and is_space(src.char_at(p))
+        p is p + 1
+
+    if p >= src.length
+        return (TEnd, p)
+
+    ch is src.char_at(p)
+    if is_digit(ch)
+        return lex_number(src, p)
+    if ch equals 43     # '+'
+        return (TPlus, p + 1)
+    if ch equals 45     # '-'
+        return (TMinus, p + 1)
+    if ch equals 42     # '*'
+        return (TStar, p + 1)
+    if ch equals 47     # '/'
+        return (TSlash, p + 1)
+    if ch equals 40     # '('
+        return (TLParen, p + 1)
+    if ch equals 41     # ')'
+        return (TRParen, p + 1)
+    (TEnd, p)
+
+# ── Parser (recursive descent, respects precedence) ─────────────────────────
+
+# parse_primary: number or (expr)
+*parse_primary(src: String, pos: i64)
+    tok, p is lex_one(src, pos)
+    match tok
+        TNum(n) ? (ANum(n), p)
+        TLParen ?
+            expr, p2 is parse_add(src, p)
+            # skip closing paren
+            _, p3 is lex_one(src, p2)
+            (expr, p3)
+        _ ? (ANum(0), p)    # error fallback
+
+# parse_mul: handles * and /
+*parse_mul(src: String, pos: i64)
+    left, p is parse_primary(src, pos)
+    loop
+        tok, p2 is lex_one(src, p)
+        match tok
+            TStar ?
+                right, p3 is parse_primary(src, p2)
+                left is AMul(left, right)
+                p is p3
+            TSlash ?
+                right, p3 is parse_primary(src, p2)
+                left is ADiv(left, right)
+                p is p3
+            _ ?
+                return (left, p)
+
+# parse_add: handles + and -
+*parse_add(src: String, pos: i64)
+    left, p is parse_mul(src, pos)
+    loop
+        tok, p2 is lex_one(src, p)
+        match tok
+            TPlus ?
+                right, p3 is parse_mul(src, p2)
+                left is AAdd(left, right)
+                p is p3
+            TMinus ?
+                right, p3 is parse_mul(src, p2)
+                left is ASub(left, right)
+                p is p3
+            _ ?
+                return (left, p)
+
+# ── Evaluator ───────────────────────────────────────────────────────────────
+
+*eval(node: Ast)
+    match node
+        ANum(n) ? n
+        AAdd(a, b) ? eval(a) + eval(b)
+        ASub(a, b) ? eval(a) - eval(b)
+        AMul(a, b) ? eval(a) * eval(b)
+        ADiv(a, b) ? eval(a) / eval(b)
+
+*ast_depth(node: Ast)
+    match node
+        ANum(_) ? 0
+        AAdd(a, b) ? 1 + max(ast_depth(a), ast_depth(b))
+        ASub(a, b) ? 1 + max(ast_depth(a), ast_depth(b))
+        AMul(a, b) ? 1 + max(ast_depth(a), ast_depth(b))
+        ADiv(a, b) ? 1 + max(ast_depth(a), ast_depth(b))
+
+*max(a, b)
+    a > b ? a ! b
+
+# ── Main ────────────────────────────────────────────────────────────────────
+
+*main()
+    # Parse and evaluate "3 + 4 * 2"
+    ast1, _ is parse_add('3 + 4 * 2', 0)
+    log(eval(ast1))                  # 11 (not 14, respects precedence)
+    log(ast_depth(ast1))             # 2
+
+    # "(3 + 4) * 2"
+    ast2, _ is parse_add('(3 + 4) * 2', 0)
+    log(eval(ast2))                  # 14
+
+    # "10 - 2 * 3 + 1"
+    ast3, _ is parse_add('10 - 2 * 3 + 1', 0)
+    log(eval(ast3))                  # 5
+
+    # "100 / (5 + 5)"
+    ast4, _ is parse_add('100 / (5 + 5)', 0)
+    log(eval(ast4))                  # 10
+
+    # Simple number
+    ast5, _ is parse_add('42', 0)
+    log(eval(ast5))                  # 42

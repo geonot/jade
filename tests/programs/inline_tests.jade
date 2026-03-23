@@ -1,0 +1,13 @@
+*add(a, b)
+    return a + b
+
+test 'addition'
+    assert add(2, 3) equals 5
+    assert add(0, 0) equals 0
+
+test 'negative addition'
+    assert add(-1, 1) equals 0
+    assert add(-3, -4) equals -7
+
+*main()
+    log 'this should not run in test mode'

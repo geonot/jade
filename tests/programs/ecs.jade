@@ -1,0 +1,121 @@
+# ecs.jade — Entity Component System pattern
+# Complexity: Advanced
+# Demonstrates: structs, enums, arrays, methods, generics, pattern matching
+# Note: uses planned features (traits, dynamic arrays) — may not fully compile yet
+
+# Components
+type Position
+    x: f64
+    y: f64
+
+type Velocity
+    vx: f64
+    vy: f64
+
+type Health
+    current: i64
+    max_hp: i64
+
+    *is_alive(self)
+        self.current > 0
+
+    *damage(self, amount: i64)
+        result is self.current - amount
+        Health(current is result < 0 ? 0 ! result, max_hp is self.max_hp)
+
+    *heal(self, amount: i64)
+        result is self.current + amount
+        Health(
+            current is result > self.max_hp ? self.max_hp ! result,
+            max_hp is self.max_hp
+        )
+
+    *percent(self)
+        (self.current * 100) / self.max_hp
+
+enum EntityKind
+    Player
+    Enemy(String)
+    Projectile
+    Item(String)
+
+# An entity with optional components
+type Entity
+    id: i64
+    kind: EntityKind
+    pos: Position
+    vel: Velocity
+    hp: Health
+
+    *move_step(self, dt: f64)
+        Entity(
+            id is self.id,
+            kind is self.kind,
+            pos is Position(
+                x is self.pos.x + self.vel.vx * dt,
+                y is self.pos.y + self.vel.vy * dt
+            ),
+            vel is self.vel,
+            hp is self.hp
+        )
+
+*distance(a: Position, b: Position)
+    dx is a.x - b.x
+    dy is a.y - b.y
+    (dx * dx + dy * dy).sqrt()
+
+*describe_entity(e: Entity)
+    match e.kind
+        Player ? log('player')
+        Enemy(name) ? log(name)
+        Projectile ? log('projectile')
+        Item(name) ? log(name)
+    log(e.pos.x)
+    log(e.pos.y)
+    log(e.hp.percent())
+
+*main()
+    player is Entity(
+        id is 1,
+        kind is Player,
+        pos is Position(x is 0.0, y is 0.0),
+        vel is Velocity(vx is 1.0, vy is 0.5),
+        hp is Health(current is 100, max_hp is 100)
+    )
+
+    enemy is Entity(
+        id is 2,
+        kind is Enemy('goblin'),
+        pos is Position(x is 10.0, y is 10.0),
+        vel is Velocity(vx is -0.5, vy is -0.3),
+        hp is Health(current is 50, max_hp is 50)
+    )
+
+    # Simulate 5 ticks
+    p is player
+    e is enemy
+    for tick from 0 to 5
+        p is p.move_step(1.0)
+        e is e.move_step(1.0)
+        d is distance(p.pos, e.pos)
+        log(d)
+
+    # Combat
+    e_damaged is Entity(
+        id is e.id,
+        kind is e.kind,
+        pos is e.pos,
+        vel is e.vel,
+        hp is e.hp.damage(30)
+    )
+    describe_entity(e_damaged)
+    log(e_damaged.hp.is_alive())     # true
+
+    e_dead is Entity(
+        id is e_damaged.id,
+        kind is e_damaged.kind,
+        pos is e_damaged.pos,
+        vel is e_damaged.vel,
+        hp is e_damaged.hp.damage(999)
+    )
+    log(e_dead.hp.is_alive())        # false

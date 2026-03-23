@@ -1,0 +1,22 @@
+# Pattern-directed function clauses + inline body
+
+*fib(0) is 0
+*fib(1) is 1
+*fib(n)
+    fib(n - 1) + fib(n - 2)
+
+*fact(0) is 1
+*fact(n) is n * fact(n - 1)
+
+# Inline body (no literal params)
+*double(x) is x * 2
+*square(x) is x * x
+
+*main()
+    log(fib(0))
+    log(fib(1))
+    log(fib(10))
+    log(fact(5))
+    log(fact(10))
+    log(double(21))
+    log(square(7))

@@ -5,13 +5,13 @@
 Jade inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/`!` ternary, `~` pipelines, indentation structure — and compiles through LLVM 21 to native code that matches Clang -O3. No runtime. No GC. No 64-byte Value struct. Every integer is a register. Every struct is contiguous memory. Every function is a native call.
 
 ```jade
-*fib(n)
+*fib n
     if n < 2
         return n
     fib(n - 1) + fib(n - 2)
 
-*main()
-    log(fib(40))
+*main
+    log fib(40)
 ```
 
 This compiles to the same LLVM IR as equivalent C. Same speed. Zero overhead.
@@ -121,28 +121,84 @@ p is Vec3(x is 1, y is 2, z is 3)
 ## Functions
 
 ```jade
-*add(a, b)
+# Parentheses are optional on definitions and calls
+*add a, b
     a + b
 
-*greet(name: String)
+*greet name: String
     'hello {name}'
 
 # With defaults
-*connect(host: String, port: i64 is 8080)
+*connect host: String, port: i64 is 8080
     ...
+
+# No-arg functions — no parens needed
+*hello
+    log 'hi'
+
+# Calling
+result is add 1, 2
+greet 'world'
+hello
+
+# Parentheses still allowed where clarity helps
+result is add(1, 2)
 ```
 
-Parameters infer types from usage. Return type inferred from body. Explicit annotations optional.
+Parameters infer types from usage. Return type inferred from body. Explicit annotations optional. Parentheses are always optional on both definitions and calls.
+
+### Pattern-Directed Function Clauses
+
+Multiple definitions of the same function with literal parameters. The compiler merges them into a single function with conditional dispatch.
+
+```jade
+# Fibonacci by pattern
+*fib(0) is 0
+*fib(1) is 1
+*fib n
+    fib(n - 1) + fib(n - 2)
+
+# Factorial
+*fact(0) is 1
+*fact n
+    n * fact(n - 1)
+
+# GCD with base case
+*gcd(a, 0) is a
+*gcd a, b
+    gcd b, a % b
+```
+
+Literal parameters (`0`, `1`, `true`, `3.14`, `'hello'`) match by equality. Non-literal clauses become the `else` branch. Clauses are checked in definition order.
+
+### Inline Body Syntax
+
+Single-expression functions use `is` instead of an indented block.
+
+```jade
+*double x is x * 2
+*square(x: i64) is x * x
+*add a, b is a + b
+*neg x is 0 - x
+```
+
+Combines naturally with pattern clauses:
+
+```jade
+*fib(0) is 0
+*fib(1) is 1
+*fib n is fib(n - 1) + fib(n - 2)
+```
 
 ### Higher-Order Functions
 
 ```jade
-*apply(f: (i64) -> i64, x: i64)
-    f(x)
+*apply f: (i64) -> i64, x: i64
+    f x
 
-*main()
+*main
     double is *fn(x: i64) x * 2
-    log(apply(double, 21))
+    log apply(double, 21)
 ```
 
 ### Lambdas
@@ -154,12 +210,10 @@ square is *fn(x: i64) x * x
 # Placeholder shorthand
 doubled is items ~ *fn(x) x * 2
 
-# Multi-line with do...end
-result is items ~ do
-    *fn(x)
-        y is x * 2
-        y + 1
-end
+# Multi-line — just indent the body
+result is items ~ *fn(x)
+    y is x * 2
+    y + 1
 ```
 
 ### Pipelines
@@ -178,11 +232,11 @@ result is value ~ double ~ add_one ~ square
 
 ```jade
 if x > 0
-    log('positive')
+    log 'positive'
 elif x equals 0
-    log('zero')
+    log 'zero'
 else
-    log('negative')
+    log 'negative'
 
 # If as expression
 sign is if x > 0 ? 1 ! -1
@@ -198,37 +252,41 @@ abs_x is x >= 0 ? x ! 0 - x
 while n > 0
     n is n - 1
 
-# For range
-for i in 0 to 100
-    log(i)
+# For range (implicit assignment with 'from')
+for i from 0 to 100
+    log i
+
+# For range (explicit assignment with 'is')
+for i is 1 to 100
+    log i
 
 # For with step
-for i in 0 to 100 by 2
-    log(i)
+for i from 0 to 100 by 2
+    log i
 
 # Infinite loop
 loop
     if done
         break
 
-# Break/continue with values
+# Yield — return a value from a loop
 result is loop
     if check()
-        break 42
+        yield 42
 ```
 
 ### Match
 
 ```jade
 match shape
-    Circle(r) ? log(3.14 * r * r)
-    Rect(w, h) ? log(w * h)
+    Circle(r) ? log 3.14 * r * r
+    Rect(w, h) ? log w * h
 
 # With wildcard
 match n
-    0 ? log('zero')
-    1 ? log('one')
-    _ ? log('other')
+    0 ? log 'zero'
+    1 ? log 'one'
+    _ ? log 'other'
 ```
 
 Pattern types: literals, identifiers (bind), constructors with destructuring, wildcards.
@@ -261,9 +319,9 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 
 ```jade
 if x equals 0
-    log('zero')
+    log 'zero'
 if x isnt y
-    log('different')
+    log 'different'
 ```
 
 ### Logical
@@ -290,7 +348,7 @@ type Point
 p is Point(x is 10, y is 20)
 
 # Field access
-log(p.x)
+log p.x
 
 # Methods
 type Vec3
@@ -298,10 +356,10 @@ type Vec3
     y: i64
     z: i64
 
-    *length(self)
+    *length self
         ((self.x * self.x + self.y * self.y + self.z * self.z) as f64) ** 0.5
 
-    *dot(self, other: Vec3)
+    *dot self, other: Vec3
         self.x * other.x + self.y * other.y + self.z * other.z
 ```
 
@@ -318,7 +376,7 @@ enum Color
     Blue
     Custom(u8, u8, u8)
 
-*describe(c: Color)
+*describe c: Color
     match c
         Red ? 1
         Green ? 2
@@ -339,16 +397,16 @@ err FileError
     NotFound
     PermissionDenied(String)
 
-*read_file(path: String)
+*read_file path: String
     if path equals ''
         ! NotFound
     42
 
-*main()
+*main
     match read_file('test.txt')
-        NotFound ? log('not found')
-        PermissionDenied(msg) ? log(msg)
-        _ ? log('ok')
+        NotFound ? log 'not found'
+        PermissionDenied(msg) ? log msg
+        _ ? log 'ok'
 ```
 
 `!` is the error return operator — returns the error value from the current function.
@@ -358,9 +416,27 @@ err FileError
 ## List Comprehensions
 
 ```jade
-squares is [x ** 2 for x in 0 to 10]
-evens is [x for x in 0 to 100 if x % 2 equals 0]
+squares is [x ** 2 for x from 0 to 10]
+evens is [x for x from 0 to 100 if x % 2 equals 0]
 ```
+
+---
+
+## Query Blocks
+
+Native query syntax for structured data operations. Parsing is implemented; execution is deferred to 0.2.0 (Persistence phase).
+
+```jade
+# Query with clauses
+query users
+    where age > 21
+    sort name
+    limit 10
+
+# Available clauses: where, sort, limit, take, skip, set, delete
+```
+
+Query blocks produce a `query` expression over a source with typed clauses. The compiler validates clause structure at parse time.
 
 ---
 
@@ -368,17 +444,79 @@ evens is [x for x in 0 to 100 if x % 2 equals 0]
 
 ```jade
 # math.jade
-*add(a, b)
+*add a, b
     a + b
 
 # main.jade
 use math
 
-*main()
-    log(math.add(1, 2))
+*main
+    log math.add(1, 2)
 ```
 
 File = module. `use` imports. Recursive module resolution.
+
+---
+
+## Persistent Stores
+
+Stores are typed, persistent data collections that survive across program runs. They compile to flat binary files with compile-time query validation.
+
+```jade
+# Define a store with typed fields
+store users
+    name: String
+    age: i64
+
+# Insert records (values match field order)
+insert users 'Alice', 30
+insert users 'Bob', 25
+insert users 'Carol', 35
+
+# Query — returns first matching record as a struct
+young is users where age < 30
+log young.name    # Bob
+log young.age     # 25
+
+# String equality queries
+found is users where name equals 'Bob'
+
+# Multi-field filters with AND/OR
+result is users where age > 20 and name equals 'Alice'
+match is users where age < 25 or age > 30
+
+# Delete matching records
+delete users where age > 28
+delete users where name equals 'Bob' and age < 30
+
+# Update records with set
+set users where name equals 'Alice' age 31
+set users where age > 30 name 'Senior', age 99
+
+# Count records
+total is count users
+
+# All records (returns pointer to array)
+all_users is all users
+
+# Transactions (atomic batches)
+transaction
+    insert users 'Dave', 40
+    insert users 'Eve', 22
+    delete users where age > 50
+```
+
+**Supported field types:** `i64`, `f64`, `bool`, `String` (fixed 256-byte buffers on disk).
+
+**Query operators:** `equals`, `isnt`, `<`, `>`, `<=`, `>=` — validated at compile time.
+
+**Compound filters:** Chain conditions with `and` / `or` for multi-field filtering.
+
+**Set (update):** `set <store> where <filter> <field> <value> [, <field> <value>]*` — updates matching records in-place.
+
+**Transactions:** `transaction` blocks group store operations for batch execution.
+
+**Persistence:** Store data lives in `<name>.store` files in the working directory. Data accumulates across program runs.
 
 ---
 
@@ -389,15 +527,15 @@ File = module. `use` imports. Recursive module resolution.
 ```jade
 extern *printf(fmt: &i8, ...) -> i32
 
-*main()
-    printf('hello from jade\n')
+*main
+    printf 'hello from jade\n'
 ```
 
 ### System Calls
 
 ```jade
-*main()
-    syscall(1, 1, 'hello\n', 6)   # write(stdout, msg, len)
+*main
+    syscall 1, 1, 'hello\n', 6   # write(stdout, msg, len)
 ```
 
 ### Inline Assembly
@@ -423,10 +561,10 @@ Hardware-observable reads and writes. No compiler reordering, no elision.
 ```jade
 extern *mmio_base() -> &i32
 
-*poll_device()
+*poll_device
     reg is mmio_base()
-    status is volatile_load(reg)       # Always reads from memory
-    volatile_store(reg, status | 1)    # Always writes to memory
+    status is volatile_load reg       # Always reads from memory
+    volatile_store reg, status | 1    # Always writes to memory
 ```
 
 ### Weak References
@@ -438,10 +576,10 @@ type Node
     value: i64
     parent: weak rc Node     # weak reference breaks the cycle
 
-*main()
+*main
     root is rc(Node { value: 1, parent: none })
-    child_parent is weak(root)            # downgrade to weak
-    strong is weak_upgrade(child_parent)  # upgrade: returns rc or none
+    child_parent is weak root            # downgrade to weak
+    strong is weak_upgrade child_parent  # upgrade: returns rc or none
 ```
 
 ### Signal Handling
@@ -449,13 +587,13 @@ type Node
 POSIX signal infrastructure.
 
 ```jade
-*handler(sig: i32)
-    log(sig)
+*handler sig: i32
+    log sig
 
-*main()
-    signal_handle(2, handler)     # SIGINT → handler
-    signal_ignore(13)             # SIGPIPE → ignore
-    signal_raise(2)               # raise SIGINT
+*main
+    signal_handle 2, handler     # SIGINT → handler
+    signal_ignore 13             # SIGPIPE → ignore
+    signal_raise 2               # raise SIGINT
 ```
 
 ### Integer Overflow Control
@@ -463,13 +601,13 @@ POSIX signal infrastructure.
 Default: trap on overflow. Explicit control via builtins:
 
 ```jade
-*main()
+*main
     a is 9223372036854775807       # i64 max
-    w is wrapping_add(a, 1)        # wraps to i64 min
-    s is saturating_add(a, 1)      # stays at i64 max
-    result, overflowed is checked_add(a, 1)
+    w is wrapping_add a, 1         # wraps to i64 min
+    s is saturating_add a, 1       # stays at i64 max
+    result, overflowed is checked_add a, 1
     if overflowed
-        log('overflow detected')
+        log 'overflow detected'
 ```
 
 Available for `add`, `sub`, `mul` — each in `wrapping_`, `saturating_`, `checked_` variants.
@@ -512,14 +650,19 @@ jadec <INPUT> [-o OUTPUT] [--emit-ir] [--opt 0-3] [--lto] [-g/--debug]
 
 | Component | LOC |
 |-----------|-----|
-| codegen.rs | ~3,645 |
-| parser.rs | ~1,635 |
-| lexer.rs | ~984 |
-| ast.rs | ~325 |
-| main.rs | ~142 |
-| types.rs | ~106 |
-| diagnostic.rs | ~72 |
-| **Total** | **~6,917** |
+| codegen/ | 3,658 (builtins 904 · expr 1,181 · stmt 877 · strings 502 · mod 436 · types 360 · decl 247 · call 151) |
+| typer.rs | 2,721 |
+| parser.rs | 2,210 |
+| perceus.rs | 1,147 |
+| lexer.rs | 1,024 |
+| ownership.rs | 613 |
+| ast.rs | 360 |
+| hir.rs | 347 |
+| main.rs | 236 |
+| diagnostic.rs | 197 |
+| types.rs | 147 |
+| lib.rs | 12 |
+| **Total** | **13,672** |
 
 ---
 
@@ -529,17 +672,21 @@ jadec <INPUT> [-o OUTPUT] [--emit-ir] [--opt 0-3] [--lto] [-g/--debug]
 
 ```ebnf
 program      = { NEWLINE | declaration } ;
-declaration  = function_def | type_def | enum_def | extern_def | use_decl | err_def ;
+declaration  = function_def | type_def | enum_def | extern_def | use_decl | err_def | store_def ;
 ```
 
 ### Functions
 
 ```ebnf
 function_def = '*' , IDENT , [ 'of' , type_params ] ,
-               '(' , [ param_list ] , ')' , [ '->' , type ] , NEWLINE , block ;
+               [ '(' ] , [ param_list ] , [ ')' ] , [ '->' , type ] ,
+               ( 'is' , expression | NEWLINE , block ) ;
 param_list   = param , { ',' , param } ;
-param        = IDENT , [ ':' , type ] , [ 'is' , expression ] ;
+param        = ( IDENT , [ ':' , type ] , [ 'is' , expression ] ) | literal ;
+literal      = INT | FLOAT | BOOL | STRING ;
 ```
+
+Multiple definitions of the same function name with literal parameters are merged into a single function with conditional dispatch (pattern-directed clauses).
 
 ### Types & Enums
 
@@ -555,10 +702,23 @@ variant_def  = IDENT , [ '(' , type_list , ')' ] , NEWLINE ;
 
 ```ebnf
 statement    = bind_stmt | if_stmt | while_stmt | for_stmt | loop_stmt
-             | match_stmt | return_stmt | break_stmt | continue_stmt | expr_stmt ;
+             | match_stmt | return_stmt | break_stmt | continue_stmt
+             | insert_stmt | delete_stmt | expr_stmt ;
 bind_stmt    = IDENT , 'is' , expression ;
-for_stmt     = 'for' , IDENT , 'in' , expr , [ 'to' , expr ] , [ 'by' , expr ] , NEWLINE , block ;
+insert_stmt  = 'insert' , IDENT , expr , { ',' , expr } ;
+delete_stmt  = 'delete' , IDENT , store_filter ;
+for_stmt     = 'for' , IDENT , ( 'from' | 'is' ) , expr , 'to' , expr , [ 'by' , expr ] , NEWLINE , block ;
 match_stmt   = 'match' , expression , NEWLINE , INDENT , { pattern , '?' , body } , DEDENT ;
+```
+
+### Stores
+
+```ebnf
+store_def    = 'store' , IDENT , NEWLINE , INDENT , { field_def } , DEDENT ;
+store_filter = 'where' , IDENT , ( 'equals' | 'isnt' | '<' | '>' | '<=' | '>=' ) , expr ;
+store_query  = IDENT , store_filter ;
+store_count  = 'count' , IDENT ;
+store_all    = 'all' , IDENT ;
 ```
 
 ### Expressions (precedence low → high)
@@ -584,10 +744,11 @@ postfix_expr = primary , { '(' args ')' | '[' expr ']' | '.' IDENT | 'as' type }
 ### Lexical
 
 ```
-Keywords (37): is isnt equals and or not if elif else while for in loop
-               break continue return match when type enum err pub use
-               as from to by array unsafe extern fn do end log of
-               true false none
+Keywords (42): is isnt equals and or not if elif else while for from loop
+               yield continue return match when type enum err pub use
+               as to by array unsafe extern fn log of query
+               true false none store insert delete transaction
+               count all where
 ```
 
 Indentation-based (spaces only, tabs prohibited). `#` comments. Single-quoted strings with `{interpolation}`. Double-quoted raw strings.
@@ -596,25 +757,28 @@ Indentation-based (spaces only, tabs prohibited). `#` comments. Single-quoted st
 
 ## Performance
 
-Jade compiles to identical LLVM IR as equivalent C. Benchmark suite of 12 programs tested against C (Clang 21 -O3, same LLVM backend), Rust (rustc -C opt-level=3), and Python 3. Five runs, median reported.
+Jade compiles to identical LLVM IR as equivalent C. Benchmark suite of 15 programs tested against C (Clang 21 -O3, same LLVM backend), Rust (rustc -C opt-level=3), and Python 3. Three runs, median reported.
 
-| Benchmark | Jade | Clang | Rust | Python | J/C | J/Rust |
-|-----------|------|-------|------|--------|-----|--------|
-| ackermann(3,10) | 185ms | 183ms | 183ms | 5.12s | 1.01× | 1.01× |
-| fibonacci(40) | 340ms | 338ms | 344ms | 13.9s | 1.01× | 0.99× |
-| collatz(1M) | 162ms | 192ms | 195ms | 11.0s | 0.84× | 0.83× |
-| sieve(1M) | 141ms | 141ms | 141ms | 5.25s | 1.00× | 1.00× |
-| gcd_intensive | 24ms | 24ms | 26ms | 289ms | 0.99× | 0.93× |
-| math_compute | 383μs | 489μs | 170ms | 13.9s | 0.78× | — |
-| struct_ops | 414μs | 465μs | 570μs | 4.29s | 0.89× | 0.73× |
-| enum_dispatch | 413μs | 464μs | 581μs | 2.00s | 0.89× | 0.71× |
-| hof_pipeline | 410μs | 470μs | 560μs | 2.79s | 0.87× | 0.73× |
-| array_ops | 390μs | 468μs | 845μs | 3.27s | 0.83× | 0.46× |
-| tight_loop | 400μs | 490μs | 553μs | 7.30s | 0.82× | 0.72× |
-| closure_capture | 451μs | 486μs | — | 2.45s | 0.93× | — |
-| **TOTAL** | **855ms** | **881ms** | **1.06s** | **71.5s** | **0.97×** | **0.81×** |
+| Benchmark | Jade | Clang | J/C |
+|-----------|------|-------|-----|
+| ackermann(3,10) | 182ms | 186ms | 0.98× |
+| fibonacci(40) | 337ms | 337ms | 1.00× |
+| collatz(1M) | 176ms | 191ms | 0.92× |
+| sieve(1M) | 144ms | 142ms | 1.02× |
+| gcd_intensive | 26ms | 24ms | 1.11× |
+| spectral_norm | 238ms | 691ms | 0.34× |
+| nbody | 137ms | 147ms | 0.93× |
+| math_compute | 373μs | 530μs | 0.70× |
+| matrix_mul | 414μs | 531μs | 0.78× |
+| struct_ops | 369μs | 497μs | 0.74× |
+| enum_dispatch | 422μs | 460μs | 0.92× |
+| hof_pipeline | 430μs | 452μs | 0.95× |
+| array_ops | 466μs | 503μs | 0.92× |
+| closure_capture | 449μs | 499μs | 0.90× |
+| tight_loop | 366μs | 528μs | 0.69× |
+| **TOTAL** | **1.24s** | **1.72s** | **0.72×** |
 
-Jade is **3% faster than Clang** and **19% faster than Rust** across the full suite. Versus Python: **84× faster**.
+Jade is **28% faster than Clang** across the full suite. Versus Python: **84× faster**.
 
 Run benchmarks:
 ```

@@ -1,0 +1,14 @@
+store Users
+    name: String
+    age: i64
+
+*main
+    transaction
+        insert Users 'Alice', 30
+        insert Users 'Bob', 25
+        insert Users 'Charlie', 35
+    c is count Users
+    log c
+    results is Users where name equals 'Bob'
+    log results.name
+    log results.age

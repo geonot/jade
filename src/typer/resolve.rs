@@ -1,0 +1,222 @@
+//! Name resolution: pre-declaration of functions, types, enums, actors,
+//! traits, impl blocks, and prelude types.
+
+use crate::ast::{self, Span};
+use crate::types::Type;
+
+use super::Typer;
+
+impl Typer {
+    pub(crate) fn register_prelude_types(&mut self) {
+        let s = Span::dummy();
+        self.generic_enums
+            .entry("Option".into())
+            .or_insert_with(|| ast::EnumDef {
+                name: "Option".into(),
+                type_params: vec!["T".into()],
+                variants: vec![
+                    ast::Variant {
+                        name: "Some".into(),
+                        fields: vec![ast::VField {
+                            name: None,
+                            ty: Type::Param("T".into()),
+                        }],
+                        span: s,
+                    },
+                    ast::Variant {
+                        name: "Nothing".into(),
+                        fields: vec![],
+                        span: s,
+                    },
+                ],
+                span: s,
+            });
+        self.generic_enums
+            .entry("Result".into())
+            .or_insert_with(|| ast::EnumDef {
+                name: "Result".into(),
+                type_params: vec!["T".into(), "E".into()],
+                variants: vec![
+                    ast::Variant {
+                        name: "Ok".into(),
+                        fields: vec![ast::VField {
+                            name: None,
+                            ty: Type::Param("T".into()),
+                        }],
+                        span: s,
+                    },
+                    ast::Variant {
+                        name: "Err".into(),
+                        fields: vec![ast::VField {
+                            name: None,
+                            ty: Type::Param("E".into()),
+                        }],
+                        span: s,
+                    },
+                ],
+                span: s,
+            });
+    }
+
+    pub(crate) fn declare_fn_sig(&mut self, f: &ast::Fn) {
+        let ptys: Vec<Type> = f
+            .params
+            .iter()
+            .map(|p| p.ty.clone().unwrap_or(Type::I64))
+            .collect();
+        let ret = if f.name == "main" {
+            Type::I32
+        } else {
+            f.ret.clone().unwrap_or_else(|| self.infer_ret_ast(f))
+        };
+        let id = self.fresh_id();
+        self.fns.insert(f.name.clone(), (id, ptys, ret));
+    }
+
+    pub(crate) fn declare_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
+        let method_name = format!("{type_name}_{}", m.name);
+        let self_ty = Type::Struct(type_name.to_string());
+        let mut ptys = vec![self_ty];
+        for p in &m.params {
+            ptys.push(p.ty.clone().unwrap_or(Type::I64));
+        }
+        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
+        let id = self.fresh_id();
+        self.fns.insert(method_name, (id, ptys, ret));
+    }
+
+    pub(crate) fn declare_type_def(&mut self, td: &ast::TypeDef) {
+        let fields: Vec<(String, Type)> = td
+            .fields
+            .iter()
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)),
+                )
+            })
+            .collect();
+        self.structs.insert(td.name.clone(), fields);
+    }
+
+    pub(crate) fn declare_enum_def(&mut self, ed: &ast::EnumDef) {
+        let mut variants = Vec::new();
+        for (tag, v) in ed.variants.iter().enumerate() {
+            let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
+            self.variant_tags
+                .insert(v.name.clone(), (ed.name.clone(), tag as u32));
+            variants.push((v.name.clone(), ftys));
+        }
+        self.enums.insert(ed.name.clone(), variants);
+    }
+
+    pub(crate) fn declare_extern_sig(&mut self, ef: &ast::ExternFn) {
+        let ptys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
+        let id = self.fresh_id();
+        self.fns.insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
+    }
+
+    pub(crate) fn declare_err_def_sig(&mut self, ed: &ast::ErrDef) {
+        let mut variants = Vec::new();
+        for (tag, v) in ed.variants.iter().enumerate() {
+            let ftys = v.fields.clone();
+            self.variant_tags
+                .insert(v.name.clone(), (ed.name.clone(), tag as u32));
+            variants.push((v.name.clone(), ftys));
+        }
+        self.enums.insert(ed.name.clone(), variants);
+    }
+
+    pub(crate) fn declare_actor_def(&mut self, ad: &ast::ActorDef) {
+        let id = self.fresh_id();
+        let fields: Vec<(String, Type)> = ad
+            .fields
+            .iter()
+            .map(|f| {
+                (
+                    f.name.clone(),
+                    f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)),
+                )
+            })
+            .collect();
+        let handlers: Vec<(String, Vec<Type>, u32)> = ad
+            .handlers
+            .iter()
+            .enumerate()
+            .map(|(tag, h)| {
+                let ptys: Vec<Type> = h
+                    .params
+                    .iter()
+                    .map(|p| p.ty.clone().unwrap_or(Type::I64))
+                    .collect();
+                (h.name.clone(), ptys, tag as u32)
+            })
+            .collect();
+        self.actors
+            .insert(ad.name.clone(), (id, fields, handlers));
+    }
+
+    pub(crate) fn declare_trait_def(&mut self, td: &ast::TraitDef) {
+        let sigs: Vec<super::TraitMethodSig> = td
+            .methods
+            .iter()
+            .map(|m| super::TraitMethodSig {
+                name: m.name.clone(),
+                _params: m
+                    .params
+                    .iter()
+                    .map(|p| (p.name.clone(), p.ty.clone()))
+                    .collect(),
+                _ret: m.ret.clone(),
+                has_default: m.default_body.is_some(),
+            })
+            .collect();
+        self.traits.insert(td.name.clone(), sigs);
+    }
+
+    pub(crate) fn declare_impl_block(&mut self, ib: &ast::ImplBlock) -> Result<(), String> {
+        if !self.structs.contains_key(&ib.type_name) {
+            return Err(format!(
+                "line {}: impl references unknown type '{}'",
+                ib.span.line, ib.type_name
+            ));
+        }
+
+        if let Some(ref trait_name) = ib.trait_name {
+            if !self.traits.contains_key(trait_name) {
+                return Err(format!(
+                    "line {}: impl references unknown trait '{}'",
+                    ib.span.line, trait_name
+                ));
+            }
+
+            // Verify all required trait methods are provided
+            let trait_sigs = self.traits.get(trait_name).cloned().unwrap();
+            let impl_method_names: Vec<&str> = ib.methods.iter().map(|m| m.name.as_str()).collect();
+            for sig in &trait_sigs {
+                if !sig.has_default && !impl_method_names.contains(&sig.name.as_str()) {
+                    return Err(format!(
+                        "line {}: impl {} for {} is missing required method '{}'",
+                        ib.span.line, trait_name, ib.type_name, sig.name
+                    ));
+                }
+            }
+
+            self.trait_impls
+                .entry(ib.type_name.clone())
+                .or_default()
+                .push(trait_name.clone());
+        }
+
+        // Register impl methods as type methods (same as inline methods)
+        for m in &ib.methods {
+            self.methods
+                .entry(ib.type_name.clone())
+                .or_default()
+                .push(m.clone());
+            self.declare_method_sig(&ib.type_name, m);
+        }
+
+        Ok(())
+    }
+}

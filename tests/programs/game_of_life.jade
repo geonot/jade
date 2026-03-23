@@ -1,0 +1,90 @@
+# game_of_life.jade — Conway's Game of Life on a fixed grid
+# Complexity: Advanced
+# Demonstrates: arrays, nested loops, conditionals, functions
+
+# Grid size
+*grid_size()
+    10
+
+# Index into flat 10x10 array
+*idx(row, col)
+    row * grid_size() + col
+
+# Count live neighbors (toroidal wrapping)
+*count_neighbors(grid, row, col)
+    n is grid_size()
+    count is 0
+    for dr from -1 to 2
+        for dc from -1 to 2
+            if dr equals 0 and dc equals 0
+                continue
+            nr is (row + dr + n) % n
+            nc is (col + dc + n) % n
+            if grid[idx(nr, nc)] equals 1
+                count is count + 1
+    count
+
+# Count total live cells
+*count_alive(grid, size)
+    total is 0
+    for i from 0 to size
+        total is total + grid[i]
+    total
+
+*main()
+    n is grid_size()
+    total is n * n       # 100 cells
+
+    # Initialize a glider pattern in top-left
+    # .X.
+    # ..X
+    # XXX
+    grid is [
+        0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ]
+
+    log(count_alive(grid, total))    # 5 (glider has 5 cells)
+
+    # Simulate 4 generations
+    for gen from 0 to 4
+        # Build next generation
+        next is [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]
+
+        for row from 0 to n
+            for col from 0 to n
+                neighbors is count_neighbors(grid, row, col)
+                alive is grid[idx(row, col)]
+                if alive equals 1
+                    # Survive with 2 or 3 neighbors
+                    if neighbors equals 2 or neighbors equals 3
+                        next[idx(row, col)] is 1
+                else
+                    # Birth with exactly 3 neighbors
+                    if neighbors equals 3
+                        next[idx(row, col)] is 1
+
+        grid is next
+        log(count_alive(grid, total))
+
+    # After 4 generations, glider should still have 5 cells
+    log(count_alive(grid, total))    # 5

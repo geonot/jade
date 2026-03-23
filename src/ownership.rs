@@ -24,7 +24,6 @@ pub enum DiagKind {
 #[derive(Debug, Clone)]
 struct VarState {
     ownership: Ownership,
-    #[allow(dead_code)] // retained for future drop-elaboration pass
     ty: Type,
     moved: bool,
     borrow_count: u32,
@@ -62,6 +61,12 @@ impl OwnershipVerifier {
             }
         }
 
+        for ti in &prog.trait_impls {
+            for m in &ti.methods {
+                self.verify_fn(m);
+            }
+        }
+
         self.diagnostics.clone()
     }
 
@@ -91,7 +96,6 @@ impl OwnershipVerifier {
         for stmt in block {
             self.verify_stmt(stmt);
         }
-        self.check_scope_drops();
         self.pop_scope();
     }
 
@@ -198,6 +202,9 @@ impl OwnershipVerifier {
                 for arm in &m.arms {
                     self.push_scope();
                     self.verify_pat(&arm.pat);
+                    if let Some(ref g) = arm.guard {
+                        self.verify_expr(g);
+                    }
                     self.verify_block_no_scope(&arm.body);
                     self.pop_scope();
                 }
@@ -208,18 +215,31 @@ impl OwnershipVerifier {
                 }
             }
             Stmt::Drop(def_id, _, _, span) => {
+                // Drop of an already-moved value is a valid no-op —
+                // codegen / Perceus will elide it. Only verify live values.
                 if let Some(state) = self.lookup(*def_id) {
-                    if state.moved {
-                        self.diagnostics.push(OwnershipDiag {
-                            kind: DiagKind::UseAfterMove,
-                            span: *span,
-                            message: "drop of already-moved value".into(),
-                        });
+                    if !state.moved {
+                        // Mark as consumed so double-drops are detected
+                        self.record_move(*def_id, *span);
                     }
                 }
             }
             Stmt::ErrReturn(e, _, _) => {
                 self.verify_expr(e);
+            }
+            Stmt::StoreInsert(_, exprs, _) => {
+                for e in exprs {
+                    self.verify_expr(e);
+                }
+            }
+            Stmt::StoreDelete(_, _, _) => {}
+            Stmt::StoreSet(_, assigns, _, _) => {
+                for (_, e) in assigns {
+                    self.verify_expr(e);
+                }
+            }
+            Stmt::Transaction(body, _) => {
+                self.verify_block(body);
             }
         }
     }
@@ -398,6 +418,38 @@ impl OwnershipVerifier {
                     self.verify_expr(a);
                 }
             }
+
+            ExprKind::Spawn(_) => {}
+
+            ExprKind::Send(target, _, _, _, args) => {
+                self.verify_expr(target);
+                for a in args {
+                    self.verify_expr(a);
+                }
+            }
+
+            ExprKind::StoreQuery(_, _) | ExprKind::StoreCount(_) | ExprKind::StoreAll(_) => {}
+            ExprKind::CoroutineCreate(_, body) => {
+                self.verify_block(body);
+            }
+            ExprKind::CoroutineNext(inner) | ExprKind::Yield(inner) => {
+                self.verify_expr(inner);
+            }
+            ExprKind::DynDispatch(obj, _, _, args) => {
+                self.verify_expr(obj);
+                for a in args { self.verify_expr(a); }
+            }
+            ExprKind::DynCoerce(inner, _, _) => {
+                self.verify_expr(inner);
+            }
+            ExprKind::VecNew(args) => {
+                for a in args { self.verify_expr(a); }
+            }
+            ExprKind::MapNew => {}
+            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
+                self.verify_expr(obj);
+                for a in args { self.verify_expr(a); }
+            }
         }
     }
 
@@ -433,6 +485,11 @@ impl OwnershipVerifier {
             Pat::Range(lo, hi, _) => {
                 self.verify_expr(lo);
                 self.verify_expr(hi);
+            }
+            Pat::Tuple(pats, _) | Pat::Array(pats, _) => {
+                for p in pats {
+                    self.verify_pat(p);
+                }
             }
         }
     }
@@ -482,7 +539,6 @@ impl OwnershipVerifier {
                     ),
                 });
             }
-            // Warn when weak refs are used directly (should upgrade first)
             if state.ownership == Ownership::Weak {
                 self.diagnostics.push(OwnershipDiag {
                     kind: DiagKind::WeakUpgradeWithoutCheck,
@@ -533,22 +589,12 @@ impl OwnershipVerifier {
         }
     }
 
-    fn check_scope_drops(&self) {
-        if let Some(scope) = self.scopes.last() {
-            for (_, state) in scope {
-                if state.ownership == Ownership::Owned
-                    && !state.moved
-                    && !state.ty.is_trivially_droppable()
-                {}
-            }
-        }
-    }
+
     fn record_move(&mut self, id: DefId, span: crate::ast::Span) {
         if id == DefId::BUILTIN {
             return;
         }
         if let Some(state) = self.lookup(id).cloned() {
-            // Weak and Rc values are shared — they don't move.
             if (state.ownership == Ownership::Owned || state.ownership == Ownership::BorrowMut)
                 && !state.ty.is_trivially_droppable()
             {

@@ -11,57 +11,57 @@
 //! that codegen can read without re-discovering types.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::ast::{self, BinOp, Span, UnaryOp};
 use crate::hir::{self, CoercionKind, DefId, Ownership};
 use crate::types::Type;
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Scope
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[derive(Debug, Clone)]
-struct VarInfo {
-    def_id: DefId,
-    ty: Type,
-    #[allow(dead_code)] // stored for HIR bind ownership propagation
-    ownership: Ownership,
+pub(crate) struct VarInfo {
+    pub(crate) def_id: DefId,
+    pub(crate) ty: Type,
+    #[allow(dead_code)]
+    pub(crate) ownership: Ownership,
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Typer
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+mod mono;
+mod resolve;
 
 pub struct Typer {
-    next_id: u32,
-    /// Scoped variable stack: each entry is a scope.
-    scopes: Vec<HashMap<String, VarInfo>>,
-    /// Function signatures: name → (DefId, param types, return type).
-    fns: HashMap<String, (DefId, Vec<Type>, Type)>,
-    /// Struct definitions: name → fields.
-    structs: HashMap<String, Vec<(String, Type)>>,
-    /// Enum definitions: name → variants.
-    enums: HashMap<String, Vec<(String, Vec<Type>)>>,
-    /// Variant → (enum_name, tag).
-    variant_tags: HashMap<String, (String, u32)>,
-    /// Generic function ASTs, stored for on-demand monomorphization.
-    generic_fns: HashMap<String, ast::Fn>,
-    /// Generic enum ASTs.
-    generic_enums: HashMap<String, ast::EnumDef>,
-    /// Generic type ASTs.
-    generic_types: HashMap<String, ast::TypeDef>,
-    /// Methods by type name.
-    methods: HashMap<String, Vec<ast::Fn>>,
-    /// Already-monomorphized generic functions (avoid re-emission).
-    mono_fns: Vec<hir::Fn>,
-    /// Already-monomorphized enum defs.
-    mono_enums: Vec<hir::EnumDef>,
+    pub(crate) next_id: u32,
+    pub(crate) scopes: Vec<HashMap<String, VarInfo>>,
+    pub(crate) fns: HashMap<String, (DefId, Vec<Type>, Type)>,
+    pub(crate) structs: HashMap<String, Vec<(String, Type)>>,
+    pub(crate) enums: HashMap<String, Vec<(String, Vec<Type>)>>,
+    pub(crate) variant_tags: HashMap<String, (String, u32)>,
+    pub(crate) generic_fns: HashMap<String, ast::Fn>,
+    pub(crate) generic_enums: HashMap<String, ast::EnumDef>,
+    pub(crate) generic_types: HashMap<String, ast::TypeDef>,
+    pub(crate) methods: HashMap<String, Vec<ast::Fn>>,
+    pub(crate) mono_fns: Vec<hir::Fn>,
+    pub(crate) mono_enums: Vec<hir::EnumDef>,
+    pub(crate) source_dir: Option<PathBuf>,
+    pub(crate) test_mode: bool,
+    pub(crate) actors: HashMap<String, (DefId, Vec<(String, Type)>, Vec<(String, Vec<Type>, u32)>)>,
+    pub(crate) store_schemas: HashMap<String, Vec<(String, Type)>>,
+    pub(crate) mono_depth: u32,
+    pub(crate) traits: HashMap<String, Vec<TraitMethodSig>>,
+    pub(crate) trait_impls: HashMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TraitMethodSig {
+    pub(crate) name: String,
+    pub(crate) _params: Vec<(String, Option<Type>)>,
+    pub(crate) _ret: Option<Type>,
+    pub(crate) has_default: bool,
 }
 
 impl Typer {
     pub fn new() -> Self {
         Self {
-            next_id: 1, // 0 is BUILTIN
+            next_id: 1,
             scopes: Vec::new(),
             fns: HashMap::new(),
             structs: HashMap::new(),
@@ -73,7 +73,22 @@ impl Typer {
             methods: HashMap::new(),
             mono_fns: Vec::new(),
             mono_enums: Vec::new(),
+            source_dir: None,
+            test_mode: false,
+            actors: HashMap::new(),
+            store_schemas: HashMap::new(),
+            mono_depth: 0,
+            traits: HashMap::new(),
+            trait_impls: HashMap::new(),
         }
+    }
+
+    pub fn set_source_dir(&mut self, dir: PathBuf) {
+        self.source_dir = Some(dir);
+    }
+
+    pub fn set_test_mode(&mut self, enabled: bool) {
+        self.test_mode = enabled;
     }
 
     fn fresh_id(&mut self) -> DefId {
@@ -81,8 +96,6 @@ impl Typer {
         self.next_id += 1;
         id
     }
-
-    // ── Scope management ─────────────────────────────────────────
 
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
@@ -119,8 +132,6 @@ impl Typer {
         }
     }
 
-    // ── Type helpers ─────────────────────────────────────────────
-
     fn resolve_ty(&self, ty: Type) -> Type {
         match &ty {
             Type::Struct(n) if self.enums.contains_key(n) => Type::Enum(n.clone()),
@@ -135,110 +146,6 @@ impl Typer {
             _ => Ownership::Owned,
         }
     }
-
-    // ── Generic helpers ──────────────────────────────────────────
-
-    fn substitute_type(ty: &Type, type_map: &HashMap<String, Type>) -> Type {
-        match ty {
-            Type::Param(n) => type_map.get(n).cloned().unwrap_or_else(|| ty.clone()),
-            Type::Array(inner, sz) => {
-                Type::Array(Box::new(Self::substitute_type(inner, type_map)), *sz)
-            }
-            Type::Tuple(tys) => Type::Tuple(
-                tys.iter()
-                    .map(|t| Self::substitute_type(t, type_map))
-                    .collect(),
-            ),
-            Type::Fn(ptys, ret) => Type::Fn(
-                ptys.iter()
-                    .map(|t| Self::substitute_type(t, type_map))
-                    .collect(),
-                Box::new(Self::substitute_type(ret, type_map)),
-            ),
-            Type::Ptr(inner) => Type::Ptr(Box::new(Self::substitute_type(inner, type_map))),
-            Type::Rc(inner) => Type::Rc(Box::new(Self::substitute_type(inner, type_map))),
-            _ => ty.clone(),
-        }
-    }
-
-    fn mangle_generic(
-        base: &str,
-        type_map: &HashMap<String, Type>,
-        type_params: &[String],
-    ) -> String {
-        let mut name = base.to_string();
-        for tp in type_params {
-            if let Some(ty) = type_map.get(tp) {
-                name = format!("{name}_{ty}");
-            }
-        }
-        name
-    }
-
-    fn effective_type_params(f: &ast::Fn) -> Vec<String> {
-        if !f.type_params.is_empty() {
-            return f.type_params.clone();
-        }
-        let mut tps = Vec::new();
-        for (i, p) in f.params.iter().enumerate() {
-            if p.ty.is_none() {
-                let name = format!("__{i}");
-                if !tps.contains(&name) {
-                    tps.push(name);
-                }
-            }
-            if let Some(ty) = &p.ty {
-                Self::collect_type_params_from(ty, &mut tps);
-            }
-        }
-        if let Some(ret) = &f.ret {
-            Self::collect_type_params_from(ret, &mut tps);
-        }
-        tps
-    }
-
-    fn collect_type_params_from(ty: &Type, out: &mut Vec<String>) {
-        match ty {
-            Type::Param(n) => {
-                if !out.contains(n) {
-                    out.push(n.clone());
-                }
-            }
-            Type::Array(inner, _) | Type::Ptr(inner) | Type::Rc(inner) => {
-                Self::collect_type_params_from(inner, out);
-            }
-            Type::Tuple(tys) => {
-                for t in tys {
-                    Self::collect_type_params_from(t, out);
-                }
-            }
-            Type::Fn(ptys, ret) => {
-                for t in ptys {
-                    Self::collect_type_params_from(t, out);
-                }
-                Self::collect_type_params_from(ret, out);
-            }
-            _ => {}
-        }
-    }
-
-    fn is_generic_fn(f: &ast::Fn) -> bool {
-        !Self::effective_type_params(f).is_empty()
-    }
-
-    fn normalize_generic_fn(f: &ast::Fn) -> ast::Fn {
-        let mut gf = f.clone();
-        gf.type_params = Self::effective_type_params(f);
-        for (i, p) in gf.params.iter_mut().enumerate() {
-            if p.ty.is_none() {
-                p.ty = Some(Type::Param(format!("__{i}")));
-            }
-        }
-        gf
-    }
-
-    // ── Type inference (synthesis) ───────────────────────────────
-    // Mirrors codegen's expr_ty but is used during HIR construction.
 
     fn expr_ty_ast(&self, expr: &ast::Expr) -> Type {
         match expr {
@@ -271,7 +178,6 @@ impl Typer {
                 _ => {
                     let lt = self.expr_ty_ast(l);
                     let rt = self.expr_ty_ast(r);
-                    // Float promotion: int op float → float
                     if lt.is_int() && rt.is_float() {
                         rt
                     } else if lt.is_float() && rt.is_int() {
@@ -309,8 +215,6 @@ impl Typer {
                         if let Some((_, _, r)) = self.fns.get(&mangled) {
                             return r.clone();
                         }
-                        // For recursive generics, fall through to I64 rather than
-                        // risking infinite recursion via infer_ret_ast → expr_ty_ast.
                         if let Some(ret) = &gf.ret {
                             return Self::substitute_type(ret, &type_map);
                         }
@@ -349,6 +253,8 @@ impl Typer {
             }
             ast::Expr::Index(arr, _, _) => match self.expr_ty_ast(arr) {
                 Type::Array(et, _) => *et,
+                Type::Vec(et) => *et,
+                Type::Map(_, vt) => *vt,
                 Type::Tuple(tys) => tys.first().cloned().unwrap_or(Type::I64),
                 _ => Type::I64,
             },
@@ -375,6 +281,7 @@ impl Typer {
             },
             ast::Expr::ListComp(body, _, _, _, _, _) => Type::Ptr(Box::new(self.expr_ty_ast(body))),
             ast::Expr::Syscall(_, _) => Type::I64,
+            ast::Expr::Embed(_, _) => Type::String,
             ast::Expr::Method(obj, m, _, _) => {
                 let obj_ty = self.expr_ty_ast(obj);
                 if matches!(obj_ty, Type::String) {
@@ -386,7 +293,6 @@ impl Typer {
                         _ => Type::I64,
                     }
                 } else if let Type::Struct(ref type_name) = obj_ty {
-                    // Try to find the method return type
                     let method_name = format!("{type_name}_{m}");
                     if let Some((_, _, ret)) = self.fns.get(&method_name) {
                         ret.clone()
@@ -398,7 +304,6 @@ impl Typer {
                 }
             }
             ast::Expr::IfExpr(i) => {
-                // Type of if-expression is type of then branch's last expr
                 match i.then.last() {
                     Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
                     _ => Type::I64,
@@ -408,6 +313,19 @@ impl Typer {
                 Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
                 _ => Type::Void,
             },
+            ast::Expr::Query(_, _, _) => Type::Void,
+            ast::Expr::Spawn(_, _) => Type::I64,
+            ast::Expr::Send(_, _, _, _) => Type::Void,
+            ast::Expr::Receive(_, _) => Type::Void,
+            ast::Expr::Yield(inner, _) => self.expr_ty_ast(inner),
+            ast::Expr::DispatchBlock(_, body, _) => {
+                match body.last() {
+                    Some(ast::Stmt::Ret(Some(e), _)) => Type::Coroutine(Box::new(self.expr_ty_ast(e))),
+                    Some(ast::Stmt::Expr(e)) => Type::Coroutine(Box::new(self.expr_ty_ast(e))),
+                    _ => Type::Coroutine(Box::new(Type::I64)),
+                }
+            }
+            ast::Expr::StoreQuery(_, _, _) | ast::Expr::StoreCount(_, _) | ast::Expr::StoreAll(_, _) => Type::I64,
         }
     }
 
@@ -420,14 +338,64 @@ impl Typer {
         }
     }
 
+    fn infer_coroutine_yield_type(&self, body: &[hir::Stmt]) -> Type {
+        // Walk the HIR body to find yield statements and infer the type
+        for stmt in body {
+            if let Some(ty) = self.find_yield_type_stmt(stmt) {
+                return ty;
+            }
+        }
+        // Fallback: check last expression for return type
+        if let Some(hir::Stmt::Ret(Some(e), ty, _)) = body.last() {
+            let _ = e;
+            return ty.clone();
+        }
+        Type::I64
+    }
+
+    fn find_yield_type_stmt(&self, stmt: &hir::Stmt) -> Option<Type> {
+        match stmt {
+            hir::Stmt::Expr(e) => self.find_yield_type_expr(e),
+            hir::Stmt::If(i) => {
+                for s in &i.then { if let Some(ty) = self.find_yield_type_stmt(s) { return Some(ty); } }
+                for (_, blk) in &i.elifs { for s in blk { if let Some(ty) = self.find_yield_type_stmt(s) { return Some(ty); } } }
+                if let Some(els) = &i.els { for s in els { if let Some(ty) = self.find_yield_type_stmt(s) { return Some(ty); } } }
+                None
+            }
+            hir::Stmt::While(w) => { for s in &w.body { if let Some(ty) = self.find_yield_type_stmt(s) { return Some(ty); } } None }
+            hir::Stmt::For(f) => { for s in &f.body { if let Some(ty) = self.find_yield_type_stmt(s) { return Some(ty); } } None }
+            hir::Stmt::Loop(l) => { for s in &l.body { if let Some(ty) = self.find_yield_type_stmt(s) { return Some(ty); } } None }
+            hir::Stmt::Ret(Some(e), _, _) => Some(e.ty.clone()),
+            _ => None,
+        }
+    }
+
+    fn find_yield_type_expr(&self, e: &hir::Expr) -> Option<Type> {
+        if let hir::ExprKind::Yield(inner) = &e.kind {
+            return Some(inner.ty.clone());
+        }
+        None
+    }
+
+    fn infer_dyn_method_ret(&self, trait_name: &str, method: &str) -> Type {
+        // Look through trait_impls to find the return type for this method
+        for (type_name, impls) in &self.trait_impls {
+            if impls.contains(&trait_name.to_string()) {
+                let fn_name = format!("{type_name}_{method}");
+                if let Some((_, _, ret)) = self.fns.get(&fn_name) {
+                    return ret.clone();
+                }
+            }
+        }
+        Type::I64
+    }
+
     fn infer_field_ty(&self, f: &ast::Field) -> Type {
         f.default
             .as_ref()
             .map(|e| self.expr_ty_ast(e))
             .unwrap_or(Type::I64)
     }
-
-    // ── Coercion helpers ─────────────────────────────────────────
 
     fn needs_int_coercion(from: &Type, to: &Type) -> Option<CoercionKind> {
         if !from.is_int() || !to.is_int() {
@@ -455,7 +423,6 @@ impl Typer {
     fn coerce_binop_operands(&self, lhs: hir::Expr, rhs: hir::Expr) -> (hir::Expr, hir::Expr) {
         let lt = lhs.ty.clone();
         let rt = rhs.ty.clone();
-        // Float promotion: int op float → float op float
         if lt.is_int() && rt.is_float() {
             let span = lhs.span;
             return (
@@ -488,7 +455,6 @@ impl Typer {
                 },
             );
         }
-        // Float width promotion: f32 op f64 → f64 op f64
         if lt.is_float() && rt.is_float() && lt.bits() != rt.bits() {
             if lt.bits() < rt.bits() {
                 let span = lhs.span;
@@ -512,7 +478,6 @@ impl Typer {
                 );
             }
         }
-        // Int width promotion
         if !lt.is_int() || !rt.is_int() || lt.bits() == rt.bits() {
             return (lhs, rhs);
         }
@@ -549,14 +514,9 @@ impl Typer {
         }
     }
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Main entry point: lower entire program
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     pub fn lower_program(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
         self.register_prelude_types();
 
-        // Pass 1: register all declarations (names, types, signatures)
         for d in &prog.decls {
             match d {
                 ast::Decl::Fn(f) if Self::is_generic_fn(f) => {
@@ -594,19 +554,53 @@ impl Typer {
                 ast::Decl::ErrDef(ed) => {
                     self.declare_err_def_sig(ed);
                 }
+                ast::Decl::Test(_) => {}
+                ast::Decl::Actor(ad) => {
+                    self.declare_actor_def(ad);
+                }
+                ast::Decl::Store(sd) => {
+                    let fields: Vec<(String, Type)> = sd
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            (
+                                f.name.clone(),
+                                f.ty.clone().unwrap_or(Type::I64),
+                            )
+                        })
+                        .collect();
+                    self.structs.insert(format!("__store_{}", sd.name), fields.clone());
+                    self.store_schemas.insert(sd.name.clone(), fields);
+                }
+                ast::Decl::Trait(td) => {
+                    self.declare_trait_def(td);
+                }
+                ast::Decl::Impl(_) => {}
             }
         }
 
-        // Pass 2: lower function and method bodies
+        // Register impl block methods (after all types and traits are declared)
+        for d in &prog.decls {
+            if let ast::Decl::Impl(ib) = d {
+                self.declare_impl_block(ib)?;
+            }
+        }
+
         let mut hir_fns = Vec::new();
         let mut hir_types = Vec::new();
         let mut hir_enums = Vec::new();
         let mut hir_externs = Vec::new();
         let mut hir_err_defs = Vec::new();
+        let mut hir_actors = Vec::new();
+        let mut hir_stores = Vec::new();
+        let mut test_fns: Vec<(String, String)> = Vec::new();
 
         for d in &prog.decls {
             match d {
                 ast::Decl::Fn(f) if !Self::is_generic_fn(f) => {
+                    if self.test_mode && f.name == "main" {
+                        continue;
+                    }
                     let hfn = self.lower_fn(f)?;
                     hir_fns.push(hfn);
                 }
@@ -626,11 +620,49 @@ impl Typer {
                     let hed = self.lower_err_def(ed);
                     hir_err_defs.push(hed);
                 }
+                ast::Decl::Test(tb) if self.test_mode => {
+                    let fn_name = format!("__test_{}", test_fns.len());
+                    let test_fn = self.lower_test_block(tb, &fn_name)?;
+                    let test_id = test_fn.def_id;
+                    self.fns.insert(fn_name.clone(), (test_id, vec![], Type::Void));
+                    hir_fns.push(test_fn);
+                    test_fns.push((tb.name.clone(), fn_name));
+                }
                 _ => {}
             }
         }
 
-        // Append monomorphized generics (produced on-demand during lowering)
+        // Lower actor definitions
+        for d in &prog.decls {
+            if let ast::Decl::Actor(ad) = d {
+                let ha = self.lower_actor_def(ad)?;
+                hir_actors.push(ha);
+            }
+        }
+
+        // Lower store definitions
+        for d in &prog.decls {
+            if let ast::Decl::Store(sd) = d {
+                let hs = self.lower_store_def(sd)?;
+                hir_stores.push(hs);
+            }
+        }
+
+        // Lower trait impl blocks
+        let mut hir_trait_impls = Vec::new();
+        for d in &prog.decls {
+            if let ast::Decl::Impl(ib) = d {
+                let hi = self.lower_impl_block(ib)?;
+                hir_trait_impls.push(hi);
+            }
+        }
+
+        if self.test_mode && !test_fns.is_empty() {
+            let main_fn = self.build_test_runner(&test_fns);
+            self.fns.insert("main".into(), (main_fn.def_id, vec![], Type::I32));
+            hir_fns.push(main_fn);
+        }
+
         hir_fns.extend(self.mono_fns.drain(..));
         hir_enums.extend(self.mono_enums.drain(..));
 
@@ -640,311 +672,129 @@ impl Typer {
             enums: hir_enums,
             externs: hir_externs,
             err_defs: hir_err_defs,
+            actors: hir_actors,
+            stores: hir_stores,
+            trait_impls: hir_trait_impls,
         })
     }
 
-    // ── Declaration registration ─────────────────────────────────
+    fn lower_actor_def(&mut self, ad: &ast::ActorDef) -> Result<hir::ActorDef, String> {
+        let (id, _, ref handler_info) = self
+            .actors
+            .get(&ad.name)
+            .ok_or_else(|| format!("undeclared actor: {}", ad.name))?
+            .clone();
 
-    fn register_prelude_types(&mut self) {
-        let s = Span::dummy();
-        self.generic_enums
-            .entry("Option".into())
-            .or_insert_with(|| ast::EnumDef {
-                name: "Option".into(),
-                type_params: vec!["T".into()],
-                variants: vec![
-                    ast::Variant {
-                        name: "Some".into(),
-                        fields: vec![ast::VField {
-                            name: None,
-                            ty: Type::Param("T".into()),
-                        }],
-                        span: s,
-                    },
-                    ast::Variant {
-                        name: "Nothing".into(),
-                        fields: vec![],
-                        span: s,
-                    },
-                ],
-                span: s,
-            });
-        self.generic_enums
-            .entry("Result".into())
-            .or_insert_with(|| ast::EnumDef {
-                name: "Result".into(),
-                type_params: vec!["T".into(), "E".into()],
-                variants: vec![
-                    ast::Variant {
-                        name: "Ok".into(),
-                        fields: vec![ast::VField {
-                            name: None,
-                            ty: Type::Param("T".into()),
-                        }],
-                        span: s,
-                    },
-                    ast::Variant {
-                        name: "Err".into(),
-                        fields: vec![ast::VField {
-                            name: None,
-                            ty: Type::Param("E".into()),
-                        }],
-                        span: s,
-                    },
-                ],
-                span: s,
-            });
-    }
-
-    fn declare_fn_sig(&mut self, f: &ast::Fn) {
-        let ptys: Vec<Type> = f
-            .params
-            .iter()
-            .map(|p| p.ty.clone().unwrap_or(Type::I64))
-            .collect();
-        let ret = if f.name == "main" {
-            Type::I32
-        } else {
-            f.ret.clone().unwrap_or_else(|| self.infer_ret_ast(f))
-        };
-        let id = self.fresh_id();
-        self.fns.insert(f.name.clone(), (id, ptys, ret));
-    }
-
-    fn declare_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
-        let method_name = format!("{type_name}_{}", m.name);
-        let self_ty = Type::Struct(type_name.to_string());
-        let mut ptys = vec![self_ty];
-        for p in &m.params {
-            ptys.push(p.ty.clone().unwrap_or(Type::I64));
-        }
-        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
-        let id = self.fresh_id();
-        self.fns.insert(method_name, (id, ptys, ret));
-    }
-
-    fn declare_type_def(&mut self, td: &ast::TypeDef) {
-        let fields: Vec<(String, Type)> = td
+        let fields: Vec<hir::Field> = ad
             .fields
             .iter()
             .map(|f| {
-                (
-                    f.name.clone(),
-                    f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)),
-                )
+                let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
+                let default = f.default.as_ref().map(|e| {
+                    self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
+                        kind: hir::ExprKind::Int(0),
+                        ty: Type::I64,
+                        span: e.span(),
+                    })
+                });
+                hir::Field {
+                    name: f.name.clone(),
+                    ty,
+                    default,
+                    span: f.span,
+                }
             })
             .collect();
-        self.structs.insert(td.name.clone(), fields);
-    }
 
-    fn declare_enum_def(&mut self, ed: &ast::EnumDef) {
-        let mut variants = Vec::new();
-        for (tag, v) in ed.variants.iter().enumerate() {
-            let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
-            self.variant_tags
-                .insert(v.name.clone(), (ed.name.clone(), tag as u32));
-            variants.push((v.name.clone(), ftys));
-        }
-        self.enums.insert(ed.name.clone(), variants);
-    }
-
-    fn declare_extern_sig(&mut self, ef: &ast::ExternFn) {
-        let ptys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
-        let id = self.fresh_id();
-        self.fns.insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
-    }
-
-    fn declare_err_def_sig(&mut self, ed: &ast::ErrDef) {
-        let mut variants = Vec::new();
-        for (tag, v) in ed.variants.iter().enumerate() {
-            let ftys = v.fields.clone();
-            self.variant_tags
-                .insert(v.name.clone(), (ed.name.clone(), tag as u32));
-            variants.push((v.name.clone(), ftys));
-        }
-        self.enums.insert(ed.name.clone(), variants);
-    }
-
-    // ── Monomorphization ─────────────────────────────────────────
-
-    fn monomorphize_fn(
-        &mut self,
-        name: &str,
-        type_map: &HashMap<String, Type>,
-    ) -> Result<String, String> {
-        let gf = self
-            .generic_fns
-            .get(name)
-            .ok_or_else(|| format!("no generic fn: {name}"))?
-            .clone();
-        let mangled = Self::mangle_generic(name, type_map, &gf.type_params);
-        if self.fns.contains_key(&mangled) {
-            return Ok(mangled);
-        }
-        let ptys: Vec<Type> = gf
-            .params
-            .iter()
-            .map(|p| {
-                let base = p.ty.clone().unwrap_or(Type::I64);
-                Self::substitute_type(&base, type_map)
-            })
-            .collect();
-        let ret = gf
-            .ret
-            .clone()
-            .map(|r| Self::substitute_type(&r, type_map))
-            .unwrap_or_else(|| {
-                let inferred = self.infer_ret_ast(&gf);
-                Self::substitute_type(&inferred, type_map)
-            });
-        let id = self.fresh_id();
-        self.fns
-            .insert(mangled.clone(), (id, ptys.clone(), ret.clone()));
-
-        // Lower the generic body with substituted types
-        let mono_fn = self.lower_generic_fn_body(&gf, &mangled, id, &ptys, &ret, name)?;
-        self.mono_fns.push(mono_fn);
-        Ok(mangled)
-    }
-
-    fn lower_generic_fn_body(
-        &mut self,
-        gf: &ast::Fn,
-        mangled: &str,
-        def_id: DefId,
-        ptys: &[Type],
-        ret: &Type,
-        origin: &str,
-    ) -> Result<hir::Fn, String> {
-        // Save scope state
-        let saved_scopes = std::mem::take(&mut self.scopes);
-        self.push_scope();
-
-        let mut params = Vec::new();
-        for (i, p) in gf.params.iter().enumerate() {
-            let pid = self.fresh_id();
-            let ty = ptys[i].clone();
-            let ownership = Self::ownership_for_type(&ty);
-            self.define_var(
-                &p.name,
-                VarInfo {
+        let mut hir_handlers = Vec::new();
+        for (i, h) in ad.handlers.iter().enumerate() {
+            self.push_scope();
+            // Bind actor state fields as variables
+            for f in &fields {
+                let fid = self.fresh_id();
+                self.define_var(
+                    &f.name,
+                    VarInfo {
+                        def_id: fid,
+                        ty: f.ty.clone(),
+                        ownership: Ownership::Owned,
+                    },
+                );
+            }
+            let mut params = Vec::new();
+            for p in &h.params {
+                let pid = self.fresh_id();
+                let ty = p.ty.clone().unwrap_or(Type::I64);
+                let ownership = Self::ownership_for_type(&ty);
+                self.define_var(
+                    &p.name,
+                    VarInfo {
+                        def_id: pid,
+                        ty: ty.clone(),
+                        ownership,
+                    },
+                );
+                params.push(hir::Param {
                     def_id: pid,
-                    ty: ty.clone(),
+                    name: p.name.clone(),
+                    ty,
                     ownership,
-                },
-            );
-            params.push(hir::Param {
-                def_id: pid,
-                name: p.name.clone(),
-                ty,
-                ownership,
-                span: p.span,
+                    span: p.span,
+                });
+            }
+            let body = self.lower_block(&h.body, &Type::Void)?;
+            self.pop_scope();
+            hir_handlers.push(hir::HandlerDef {
+                name: h.name.clone(),
+                params,
+                body,
+                tag: handler_info[i].2,
+                span: h.span,
             });
         }
 
-        let body = self.lower_block(&gf.body, ret)?;
-
-        self.pop_scope();
-        self.scopes = saved_scopes;
-
-        Ok(hir::Fn {
-            def_id,
-            name: mangled.to_string(),
-            params,
-            ret: ret.clone(),
-            body,
-            span: gf.span,
-            generic_origin: Some(origin.to_string()),
+        Ok(hir::ActorDef {
+            def_id: id,
+            name: ad.name.clone(),
+            fields,
+            handlers: hir_handlers,
+            span: ad.span,
         })
     }
 
-    fn monomorphize_enum(
-        &mut self,
-        name: &str,
-        type_map: &HashMap<String, Type>,
-    ) -> Result<String, String> {
-        let ge = self
-            .generic_enums
-            .get(name)
-            .ok_or_else(|| format!("no generic enum: {name}"))?
-            .clone();
-        let mangled = Self::mangle_generic(name, type_map, &ge.type_params);
-        if self.enums.contains_key(&mangled) {
-            return Ok(mangled);
-        }
-        // Register in enums + variant_tags
-        let mut variants = Vec::new();
-        let mut hir_variants = Vec::new();
-        for (tag, v) in ge.variants.iter().enumerate() {
-            let ftys: Vec<Type> = v
-                .fields
-                .iter()
-                .map(|f| Self::substitute_type(&f.ty, type_map))
-                .collect();
-            self.variant_tags
-                .insert(v.name.clone(), (mangled.clone(), tag as u32));
-            let hv = hir::Variant {
-                name: v.name.clone(),
-                fields: ftys
-                    .iter()
-                    .enumerate()
-                    .map(|(fi, fty)| hir::VField {
-                        name: v.fields.get(fi).and_then(|f| f.name.clone()),
-                        ty: fty.clone(),
-                    })
-                    .collect(),
-                tag: tag as u32,
-                span: v.span,
-            };
-            hir_variants.push(hv);
-            variants.push((v.name.clone(), ftys));
-        }
-        self.enums.insert(mangled.clone(), variants);
-        let hed = hir::EnumDef {
-            def_id: self.fresh_id(),
-            name: mangled.clone(),
-            variants: hir_variants,
-            span: ge.span,
-        };
-        self.mono_enums.push(hed);
-        Ok(mangled)
+    fn lower_store_def(&mut self, sd: &ast::StoreDef) -> Result<hir::StoreDef, String> {
+        let id = self.fresh_id();
+        let fields: Vec<hir::Field> = sd
+            .fields
+            .iter()
+            .map(|f| hir::Field {
+                name: f.name.clone(),
+                ty: f.ty.clone().unwrap_or(Type::I64),
+                default: None,
+                span: f.span,
+            })
+            .collect();
+        Ok(hir::StoreDef {
+            def_id: id,
+            name: sd.name.clone(),
+            fields,
+            span: sd.span,
+        })
     }
 
-    fn try_monomorphize_generic_variant(
-        &mut self,
-        variant_name: &str,
-        inits: &[ast::FieldInit],
-    ) -> Result<Option<String>, String> {
-        let found = self.generic_enums.iter().find_map(|(ename, edef)| {
-            edef.variants
-                .iter()
-                .find(|v| v.name == variant_name)
-                .map(|v| (ename.clone(), edef.clone(), v.clone()))
-        });
-        let (enum_name, edef, variant) = match found {
-            Some(f) => f,
-            None => return Ok(None),
-        };
-        let mut type_map = HashMap::new();
-        for (i, field) in variant.fields.iter().enumerate() {
-            if let Type::Param(ref p) = field.ty {
-                if let Some(init) = inits.get(i) {
-                    type_map.insert(p.clone(), self.expr_ty_ast(&init.value));
-                }
-            }
+    fn lower_impl_block(&mut self, ib: &ast::ImplBlock) -> Result<hir::TraitImpl, String> {
+        let mut hir_methods = Vec::new();
+        for m in &ib.methods {
+            let hm = self.lower_method(&ib.type_name, m)?;
+            hir_methods.push(hm);
         }
-        if type_map.is_empty() && !edef.type_params.is_empty() {
-            for tp in &edef.type_params {
-                type_map.entry(tp.clone()).or_insert(Type::I64);
-            }
-        }
-        let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
-        Ok(Some(mangled))
+        Ok(hir::TraitImpl {
+            trait_name: ib.trait_name.clone(),
+            type_name: ib.type_name.clone(),
+            methods: hir_methods,
+            span: ib.span,
+        })
     }
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Lowering: AST → HIR
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let (id, ptys, ret) = self
@@ -989,6 +839,69 @@ impl Typer {
         })
     }
 
+    fn lower_test_block(&mut self, tb: &ast::TestBlock, fn_name: &str) -> Result<hir::Fn, String> {
+        let id = self.fresh_id();
+        self.push_scope();
+        let body = self.lower_block(&tb.body, &Type::Void)?;
+        self.pop_scope();
+        Ok(hir::Fn {
+            def_id: id,
+            name: fn_name.to_string(),
+            params: vec![],
+            ret: Type::Void,
+            body,
+            span: tb.span,
+            generic_origin: None,
+        })
+    }
+
+    fn build_test_runner(&mut self, tests: &[(String, String)]) -> hir::Fn {
+        let id = self.fresh_id();
+        let s = Span::dummy();
+        let mut body: hir::Block = Vec::new();
+        for (display_name, fn_name) in tests {
+            body.push(hir::Stmt::Expr(hir::Expr {
+                kind: hir::ExprKind::Builtin(
+                    hir::BuiltinFn::Log,
+                    vec![hir::Expr {
+                        kind: hir::ExprKind::Str(format!("test {display_name} ...")),
+                        ty: Type::String,
+                        span: s,
+                    }],
+                ),
+                ty: Type::Void,
+                span: s,
+            }));
+            let test_id = self.fns.get(fn_name).unwrap().0;
+            body.push(hir::Stmt::Expr(hir::Expr {
+                kind: hir::ExprKind::Call(test_id, fn_name.clone(), vec![]),
+                ty: Type::Void,
+                span: s,
+            }));
+            body.push(hir::Stmt::Expr(hir::Expr {
+                kind: hir::ExprKind::Builtin(
+                    hir::BuiltinFn::Log,
+                    vec![hir::Expr {
+                        kind: hir::ExprKind::Str("  ok".into()),
+                        ty: Type::String,
+                        span: s,
+                    }],
+                ),
+                ty: Type::Void,
+                span: s,
+            }));
+        }
+        hir::Fn {
+            def_id: id,
+            name: "main".into(),
+            params: vec![],
+            ret: Type::I32,
+            body,
+            span: s,
+            generic_origin: None,
+        }
+    }
+
     fn lower_type_def(&mut self, td: &ast::TypeDef) -> Result<hir::TypeDef, String> {
         let id = self.fresh_id();
         let fields: Vec<hir::Field> = td
@@ -997,7 +910,6 @@ impl Typer {
             .map(|f| {
                 let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
                 let default = f.default.as_ref().map(|e| {
-                    // Lower default expression (best-effort, no scope needed)
                     self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
                         kind: hir::ExprKind::Int(0),
                         ty: Type::I64,
@@ -1043,7 +955,6 @@ impl Typer {
         self.push_scope();
         let mut params = Vec::new();
 
-        // `self` parameter (first)
         let self_id = self.fresh_id();
         let self_ty = ptys[0].clone();
         self.define_var(
@@ -1097,8 +1008,8 @@ impl Typer {
         })
     }
 
-    fn lower_enum_def(&self, ed: &ast::EnumDef) -> hir::EnumDef {
-        let id = DefId(self.next_id); // peek (don't bump for immutable method)
+    fn lower_enum_def(&mut self, ed: &ast::EnumDef) -> hir::EnumDef {
+        let id = self.fresh_id();
         let variants: Vec<hir::Variant> = ed
             .variants
             .iter()
@@ -1141,8 +1052,8 @@ impl Typer {
         }
     }
 
-    fn lower_err_def(&self, ed: &ast::ErrDef) -> hir::ErrDef {
-        let id = DefId(self.next_id);
+    fn lower_err_def(&mut self, ed: &ast::ErrDef) -> hir::ErrDef {
+        let id = self.fresh_id();
         let variants: Vec<hir::ErrVariant> = ed
             .variants
             .iter()
@@ -1162,8 +1073,6 @@ impl Typer {
         }
     }
 
-    // ── Block lowering ───────────────────────────────────────────
-
     fn lower_block(&mut self, block: &ast::Block, ret_ty: &Type) -> Result<hir::Block, String> {
         self.push_scope();
         let mut stmts = Vec::new();
@@ -1171,11 +1080,178 @@ impl Typer {
             let hs = self.lower_stmt(s, ret_ty)?;
             stmts.push(hs);
         }
+        // Check if last statement is a return/break/continue — drops are unreachable after those
+        let ends_with_jump = stmts.last().map_or(false, |s| {
+            matches!(s, hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..))
+        });
+        if ends_with_jump {
+            // Insert drops BEFORE the jump so heap resources are freed on
+            // early-exit paths (return / break / continue).
+            let jump = stmts.pop().unwrap();
+            self.emit_scope_drops(&mut stmts);
+            stmts.push(jump);
+        } else {
+            self.emit_scope_drops(&mut stmts);
+        }
         self.pop_scope();
         Ok(stmts)
     }
 
-    // ── Statement lowering ───────────────────────────────────────
+    fn emit_scope_drops(&self, stmts: &mut Vec<hir::Stmt>) {
+        let scope = match self.scopes.last() {
+            Some(s) => s,
+            None => return,
+        };
+        // Emit drops in reverse definition order (LIFO).
+        // Only drop types with heap resources that need cleanup.
+        let mut drops: Vec<_> = scope
+            .iter()
+            .filter(|(_, info)| Self::needs_drop(&info.ty))
+            .collect();
+        drops.sort_by_key(|(_, info)| std::cmp::Reverse(info.def_id.0));
+        for (name, info) in drops {
+            stmts.push(hir::Stmt::Drop(
+                info.def_id,
+                name.clone(),
+                info.ty.clone(),
+                crate::ast::Span::dummy(),
+            ));
+        }
+    }
+
+    /// Returns true if a type has heap resources that need cleanup at scope exit.
+    fn needs_drop(ty: &Type) -> bool {
+        matches!(ty, Type::String | Type::Vec(_) | Type::Map(_, _) | Type::Rc(_) | Type::Weak(_))
+    }
+
+    // ── Exhaustiveness checking ──────────────────────────────────────
+
+    fn check_exhaustiveness(&self, subject_ty: &Type, arms: &[hir::Arm], _span: Span) -> Result<(), String> {
+        // Only guard-free arms contribute to exhaustiveness
+        let pats: Vec<&hir::Pat> = arms.iter()
+            .filter(|a| a.guard.is_none())
+            .map(|a| &a.pat)
+            .collect();
+
+        let missing = self.find_missing_patterns(&pats, subject_ty);
+        if !missing.is_empty() {
+            let missing_str = missing.join(", ");
+            let ty_name = match subject_ty {
+                Type::Enum(n) => format!("`{n}`"),
+                Type::Bool => "Bool".to_string(),
+                _ => format!("{:?}", subject_ty),
+            };
+            return Err(format!(
+                "non-exhaustive match on {ty_name}: missing {missing_str}"
+            ));
+        }
+
+        // Warn about unreachable patterns (duplicates)
+        if let Type::Enum(_) = subject_ty {
+            let mut seen: Vec<&str> = Vec::new();
+            for arm in arms {
+                if let hir::Pat::Ctor(n, _, subs, _) = &arm.pat {
+                    if subs.is_empty() && seen.contains(&n.as_str()) {
+                        eprintln!("warning: unreachable pattern `{n}` — already matched above");
+                    }
+                    if subs.is_empty() {
+                        seen.push(n.as_str());
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn find_missing_patterns(&self, pats: &[&hir::Pat], ty: &Type) -> Vec<String> {
+        // Flatten Or patterns
+        let mut flat: Vec<&hir::Pat> = Vec::new();
+        for p in pats {
+            Self::flatten_or_pat(p, &mut flat);
+        }
+
+        // Wildcard or binding catches everything
+        if flat.iter().any(|p| matches!(p, hir::Pat::Wild(_) | hir::Pat::Bind(..))) {
+            return vec![];
+        }
+
+        // Resolve the type (Struct → Enum if applicable)
+        let ty = self.resolve_ty(ty.clone());
+
+        match &ty {
+            Type::Enum(name) => {
+                let variants = match self.enums.get(name) {
+                    Some(v) => v,
+                    None => return vec![],
+                };
+                let mut missing = Vec::new();
+                for (vname, field_tys) in variants {
+                    let sub_lists: Vec<&Vec<hir::Pat>> = flat.iter()
+                        .filter_map(|p| match p {
+                            hir::Pat::Ctor(n, _, subs, _) if n == vname => Some(subs),
+                            _ => None,
+                        })
+                        .collect();
+
+                    if sub_lists.is_empty() {
+                        // Variant completely uncovered
+                        if field_tys.is_empty() {
+                            missing.push(vname.clone());
+                        } else {
+                            let fields = vec!["_"; field_tys.len()].join(", ");
+                            missing.push(format!("{}({})", vname, fields));
+                        }
+                    } else if !field_tys.is_empty() {
+                        // Recursively check each field position
+                        for (i, ft) in field_tys.iter().enumerate() {
+                            let col: Vec<&hir::Pat> = sub_lists.iter()
+                                .filter_map(|subs| subs.get(i))
+                                .collect();
+                            let sub_missing = self.find_missing_patterns(&col, ft);
+                            for sm in &sub_missing {
+                                let fields: Vec<String> = field_tys.iter().enumerate()
+                                    .map(|(j, _)| if j == i { sm.clone() } else { "_".to_string() })
+                                    .collect();
+                                missing.push(format!("{}({})", vname, fields.join(", ")));
+                            }
+                        }
+                    }
+                }
+                missing
+            }
+            Type::Bool => {
+                let has_true = flat.iter().any(|p| match p {
+                    hir::Pat::Lit(e) => matches!(e.kind, hir::ExprKind::Bool(true)),
+                    _ => false,
+                });
+                let has_false = flat.iter().any(|p| match p {
+                    hir::Pat::Lit(e) => matches!(e.kind, hir::ExprKind::Bool(false)),
+                    _ => false,
+                });
+                let mut missing = Vec::new();
+                if !has_true { missing.push("true".to_string()); }
+                if !has_false { missing.push("false".to_string()); }
+                missing
+            }
+            Type::I64 | Type::F64 | Type::String => {
+                // Infinite-domain types: always non-exhaustive without wildcard
+                vec!["_".to_string()]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn flatten_or_pat<'a>(pat: &'a hir::Pat, out: &mut Vec<&'a hir::Pat>) {
+        match pat {
+            hir::Pat::Or(pats, _) => {
+                for p in pats {
+                    Self::flatten_or_pat(p, out);
+                }
+            }
+            _ => out.push(pat),
+        }
+    }
 
     fn lower_stmt(&mut self, stmt: &ast::Stmt, ret_ty: &Type) -> Result<hir::Stmt, String> {
         match stmt {
@@ -1188,7 +1264,6 @@ impl Typer {
                 };
                 let ownership = Self::ownership_for_type(&ty);
                 let id = self.fresh_id();
-                // Check if var already exists (reassignment) or new binding
                 if let Some(existing) = self.find_var(&b.name) {
                     let id = existing.def_id;
                     let existing_ty = existing.ty.clone();
@@ -1286,7 +1361,6 @@ impl Typer {
                 let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let bind_ty = if end.is_some() || matches!(iter.ty, Type::I64) {
-                    // Range-based for: bind is an integer
                     Type::I64
                 } else {
                     match &iter.ty {
@@ -1361,7 +1435,93 @@ impl Typer {
                 let he = self.lower_expr(e)?;
                 Ok(hir::Stmt::ErrReturn(he, ret_ty.clone(), *span))
             }
+
+            ast::Stmt::StoreInsert(store, values, span) => {
+                let schema = self.store_schemas.get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                if values.len() != schema.len() {
+                    return Err(format!(
+                        "store '{store}' has {} fields but {} values given",
+                        schema.len(), values.len()
+                    ));
+                }
+                let mut hvalues = Vec::new();
+                for (v, (_fname, _fty)) in values.iter().zip(schema.iter()) {
+                    hvalues.push(self.lower_expr(v)?);
+                }
+                Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span))
+            }
+
+            ast::Stmt::StoreDelete(store, filter, span) => {
+                let schema = self.store_schemas.get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                Ok(hir::Stmt::StoreDelete(
+                    store.clone(),
+                    Box::new(hfilter),
+                    *span,
+                ))
+            }
+
+            ast::Stmt::StoreSet(store, assignments, filter, span) => {
+                let schema = self.store_schemas.get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                // Validate and lower each field assignment
+                let mut hassigns = Vec::new();
+                for (fname, fval) in assignments {
+                    if !schema.iter().any(|(n, _)| n == fname) {
+                        return Err(format!("store '{store}' has no field '{fname}'"));
+                    }
+                    hassigns.push((fname.clone(), self.lower_expr(fval)?));
+                }
+                Ok(hir::Stmt::StoreSet(
+                    store.clone(),
+                    hassigns,
+                    Box::new(hfilter),
+                    *span,
+                ))
+            }
+
+            ast::Stmt::Transaction(body, span) => {
+                let hbody = self.lower_block(body, ret_ty)?;
+                Ok(hir::Stmt::Transaction(hbody, *span))
+            }
         }
+    }
+
+    fn lower_store_filter(
+        &mut self,
+        filter: &ast::StoreFilter,
+        schema: &[(String, Type)],
+        store: &str,
+    ) -> Result<hir::StoreFilter, String> {
+        if !schema.iter().any(|(n, _)| n == &filter.field) {
+            return Err(format!("store '{store}' has no field '{}'", filter.field));
+        }
+        let hvalue = self.lower_expr(&filter.value)?;
+        let mut hextra = Vec::new();
+        for (lop, cond) in &filter.extra {
+            if !schema.iter().any(|(n, _)| n == &cond.field) {
+                return Err(format!("store '{store}' has no field '{}'", cond.field));
+            }
+            let hv = self.lower_expr(&cond.value)?;
+            hextra.push((*lop, hir::StoreFilterCond {
+                field: cond.field.clone(),
+                op: cond.op,
+                value: hv,
+            }));
+        }
+        Ok(hir::StoreFilter {
+            field: filter.field.clone(),
+            op: filter.op,
+            value: hvalue,
+            span: filter.span,
+            extra: hextra,
+        })
     }
 
     fn lower_block_no_scope(
@@ -1375,8 +1535,6 @@ impl Typer {
         }
         Ok(stmts)
     }
-
-    // ── If lowering ──────────────────────────────────────────────
 
     fn lower_if(&mut self, i: &ast::If, ret_ty: &Type) -> Result<hir::If, String> {
         let cond = self.lower_expr(&i.cond)?;
@@ -1401,8 +1559,6 @@ impl Typer {
         })
     }
 
-    // ── Match lowering ───────────────────────────────────────────
-
     fn lower_match(&mut self, m: &ast::Match, ret_ty: &Type) -> Result<hir::Match, String> {
         let subject = self.lower_expr(&m.subject)?;
         let subj_ty = subject.ty.clone();
@@ -1410,27 +1566,32 @@ impl Typer {
         for a in &m.arms {
             self.push_scope();
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
+            let guard = a.guard.as_ref().map(|g| self.lower_expr(g)).transpose()?;
             let body = self.lower_block_no_scope(&a.body, ret_ty)?;
             self.pop_scope();
             arms.push(hir::Arm {
                 pat,
+                guard,
                 body,
                 span: a.span,
             });
         }
-        Ok(hir::Match {
+        let result = hir::Match {
             subject,
             arms,
-            ty: subj_ty,
+            ty: subj_ty.clone(),
             span: m.span,
-        })
+        };
+
+        self.check_exhaustiveness(&subj_ty, &result.arms, m.span)?;
+
+        Ok(result)
     }
 
     fn lower_pat(&mut self, pat: &ast::Pat, expected_ty: &Type) -> Result<hir::Pat, String> {
         match pat {
             ast::Pat::Wild(span) => Ok(hir::Pat::Wild(*span)),
             ast::Pat::Ident(name, span) => {
-                // Check if this identifier is a known variant (unit constructor)
                 if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
                     return Ok(hir::Pat::Ctor(name.clone(), tag, vec![], *span));
                 }
@@ -1453,7 +1614,6 @@ impl Typer {
             ast::Pat::Ctor(name, sub_pats, span) => {
                 let tag = self.variant_tags.get(name).map(|(_, t)| *t).unwrap_or(0);
 
-                // Find the variant field types for sub-pattern typing
                 let enum_name = self.variant_tags.get(name).map(|(en, _)| en.clone());
                 let field_tys: Vec<Type> = if let Some(ref en) = enum_name {
                     if let Some(variants) = self.enums.get(en) {
@@ -1476,10 +1636,43 @@ impl Typer {
                 }
                 Ok(hir::Pat::Ctor(name.clone(), tag, hpats, *span))
             }
+            ast::Pat::Or(pats, span) => {
+                let mut hpats = Vec::new();
+                for p in pats {
+                    hpats.push(self.lower_pat(p, expected_ty)?);
+                }
+                Ok(hir::Pat::Or(hpats, *span))
+            }
+            ast::Pat::Range(lo, hi, span) => {
+                let hlo = self.lower_expr(lo)?;
+                let hhi = self.lower_expr(hi)?;
+                Ok(hir::Pat::Range(Box::new(hlo), Box::new(hhi), *span))
+            }
+            ast::Pat::Tuple(pats, span) => {
+                let tys = match expected_ty {
+                    Type::Tuple(ts) => ts.clone(),
+                    _ => vec![Type::I64; pats.len()],
+                };
+                let mut hpats = Vec::new();
+                for (i, p) in pats.iter().enumerate() {
+                    let ety = tys.get(i).cloned().unwrap_or(Type::I64);
+                    hpats.push(self.lower_pat(p, &ety)?);
+                }
+                Ok(hir::Pat::Tuple(hpats, *span))
+            }
+            ast::Pat::Array(pats, span) => {
+                let elem_ty = match expected_ty {
+                    Type::Array(et, _) => et.as_ref().clone(),
+                    _ => Type::I64,
+                };
+                let mut hpats = Vec::new();
+                for p in pats {
+                    hpats.push(self.lower_pat(p, &elem_ty)?);
+                }
+                Ok(hir::Pat::Array(hpats, *span))
+            }
         }
     }
-
-    // ── Expression lowering ──────────────────────────────────────
 
     fn lower_expr(&mut self, expr: &ast::Expr) -> Result<hir::Expr, String> {
         match expr {
@@ -1520,9 +1713,7 @@ impl Typer {
             }),
 
             ast::Expr::Ident(name, span) => {
-                // 1. Check if it's a variant reference
                 if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
-                    // Check if it's a unit variant (no fields)
                     let is_unit = self
                         .enums
                         .get(&enum_name)
@@ -1536,7 +1727,6 @@ impl Typer {
                             span: *span,
                         });
                     }
-                    // Non-unit variant used as an ident — try generic monomorphization
                     if let Ok(Some(_mangled)) = self.try_monomorphize_generic_variant_bare(name) {
                         let (en2, tag2) = self
                             .variant_tags
@@ -1550,7 +1740,6 @@ impl Typer {
                         });
                     }
                 } else if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant_bare(name) {
-                    // Variant from a generic enum (e.g. Nothing from Option<T>)
                     if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
                         return Ok(hir::Expr {
                             kind: hir::ExprKind::VariantRef(mangled.clone(), name.clone(), tag),
@@ -1559,7 +1748,6 @@ impl Typer {
                         });
                     }
                 }
-                // 2. Check variables
                 if let Some(v) = self.find_var(name) {
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Var(v.def_id, name.clone()),
@@ -1567,7 +1755,6 @@ impl Typer {
                         span: *span,
                     });
                 }
-                // 3. Check functions
                 if let Some((id, ptys, ret)) = self.fns.get(name).cloned() {
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::FnRef(id, name.clone()),
@@ -1575,7 +1762,6 @@ impl Typer {
                         span: *span,
                     });
                 }
-                // 4. Fallback
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Var(DefId::BUILTIN, name.clone()),
                     ty: Type::I64,
@@ -1586,7 +1772,6 @@ impl Typer {
             ast::Expr::BinOp(lhs, op, rhs, span) => {
                 let hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr(rhs)?;
-                // Insert width/promotion coercions
                 let (hl, hr) = self.coerce_binop_operands(hl, hr);
                 let result_ty = match op {
                     BinOp::Eq
@@ -1656,6 +1841,8 @@ impl Typer {
                 let hidx = self.lower_expr(idx)?;
                 let elem_ty = match &harr.ty {
                     Type::Array(et, _) => *et.clone(),
+                    Type::Vec(et) => *et.clone(),
+                    Type::Map(_, vt) => *vt.clone(),
                     Type::Tuple(tys) => tys.first().cloned().unwrap_or(Type::I64),
                     _ => Type::I64,
                 };
@@ -1720,13 +1907,11 @@ impl Typer {
             }
 
             ast::Expr::IfExpr(i) => {
-                // Infer result type from then-branch tail expression
                 let result_ty = match i.then.last() {
                     Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
                     _ => Type::Void,
                 };
                 let hi = self.lower_if(i, &result_ty)?;
-                // Derive type from lowered then-block
                 let ty = match hi.then.last() {
                     Some(hir::Stmt::Expr(e)) => e.ty.clone(),
                     _ => Type::Void,
@@ -1836,10 +2021,141 @@ impl Typer {
                     span: *span,
                 })
             }
+
+            ast::Expr::Embed(path, span) => {
+                let base = self.source_dir.clone().unwrap_or_else(|| PathBuf::from("."));
+                let file_path = base.join(path);
+                let contents = std::fs::read_to_string(&file_path).map_err(|e| {
+                    format!("embed '{}': {}", file_path.display(), e)
+                })?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Str(contents),
+                    ty: Type::String,
+                    span: *span,
+                })
+            }
+            ast::Expr::Query(_, _, span) => {
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Void,
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StoreQuery(store, filter, span) => {
+                let schema = self.store_schemas.get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let struct_name = format!("__store_{store}");
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreQuery(
+                        store.clone(),
+                        Box::new(hfilter),
+                    ),
+                    ty: Type::Struct(struct_name),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StoreCount(store, span) => {
+                if !self.store_schemas.contains_key(store) {
+                    return Err(format!("unknown store '{store}'"));
+                }
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreCount(store.clone()),
+                    ty: Type::I64,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StoreAll(store, span) => {
+                if !self.store_schemas.contains_key(store) {
+                    return Err(format!("unknown store '{store}'"));
+                }
+                let struct_name = format!("__store_{store}");
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreAll(store.clone()),
+                    ty: Type::Ptr(Box::new(Type::Struct(struct_name))),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::Spawn(name, span) => {
+                if !self.actors.contains_key(name) {
+                    return Err(format!("spawn: unknown actor '{name}'"));
+                }
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Spawn(name.clone()),
+                    ty: Type::ActorRef(name.clone()),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::Send(target, handler, args, span) => {
+                let htarget = self.lower_expr(target)?;
+                let actor_name = match &htarget.ty {
+                    Type::ActorRef(name) => name.clone(),
+                    _ => return Err(format!("send: target must be an ActorRef, got {}", htarget.ty)),
+                };
+                let (_, _, ref handlers) = self
+                    .actors
+                    .get(&actor_name)
+                    .ok_or_else(|| format!("send: unknown actor '{actor_name}'"))?
+                    .clone();
+                let (_, _, tag) = handlers
+                    .iter()
+                    .find(|(n, _, _)| n == handler)
+                    .ok_or_else(|| format!("send: actor '{actor_name}' has no handler '@{handler}'"))?;
+                let tag = *tag;
+                let hargs: Vec<hir::Expr> = args
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<_, _>>()?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Send(
+                        Box::new(htarget),
+                        actor_name,
+                        handler.clone(),
+                        tag,
+                        hargs,
+                    ),
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::Receive(_, span) => {
+                // Receive is only valid inside actor handlers — for now stub it
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Void,
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::Yield(inner, span) => {
+                let hi = self.lower_expr(inner)?;
+                let ty = hi.ty.clone();
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Yield(Box::new(hi)),
+                    ty,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::DispatchBlock(name, body, span) => {
+                let hbody = self.lower_block_no_scope(body, &Type::Void)?;
+                // Infer yield type from the body
+                let yield_ty = self.infer_coroutine_yield_type(&hbody);
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::CoroutineCreate(name.clone(), hbody),
+                    ty: Type::Coroutine(Box::new(yield_ty)),
+                    span: *span,
+                })
+            }
         }
     }
-
-    // ── Call lowering ────────────────────────────────────────────
 
     fn lower_call(
         &mut self,
@@ -1847,10 +2163,19 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
-        // Named call
         if let ast::Expr::Ident(name, _) = callee {
-            // Builtins
             match name.as_str() {
+                "assert" => {
+                    if args.is_empty() {
+                        return Err("assert requires a condition".into());
+                    }
+                    let hcond = self.lower_expr(&args[0])?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Builtin(hir::BuiltinFn::Assert, vec![hcond]),
+                        ty: Type::Void,
+                        span,
+                    });
+                }
                 "log" => {
                     let hargs: Vec<hir::Expr> = args
                         .iter()
@@ -1906,7 +2231,6 @@ impl Typer {
                 }
                 "weak" if args.len() == 1 && !self.fns.contains_key(name) => {
                     let harg = self.lower_expr(&args[0])?;
-                    // weak() takes an rc value and creates a weak reference
                     let inner_ty = match &harg.ty {
                         Type::Rc(inner) => inner.as_ref().clone(),
                         _ => return Err(format!("weak() requires an rc value, got {}", harg.ty)),
@@ -1995,7 +2319,6 @@ impl Typer {
                         "checked_mul" => hir::BuiltinFn::CheckedMul,
                         _ => unreachable!(),
                     };
-                    // checked ops return a tuple (result, overflowed)
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
                         ty: Type::Tuple(vec![ty, Type::Bool]),
@@ -2047,10 +2370,28 @@ impl Typer {
                         span,
                     });
                 }
+                "vec" if !self.fns.contains_key(name) => {
+                    let hargs: Vec<hir::Expr> = args
+                        .iter()
+                        .map(|e| self.lower_expr(e))
+                        .collect::<Result<_, _>>()?;
+                    let elem_ty = hargs.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecNew(hargs),
+                        ty: Type::Vec(Box::new(elem_ty)),
+                        span,
+                    });
+                }
+                "map" if !self.fns.contains_key(name) => {
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::MapNew,
+                        ty: Type::Map(Box::new(Type::String), Box::new(Type::I64)),
+                        span,
+                    });
+                }
                 _ => {}
             }
 
-            // Generic function call
             if let Some(gf) = self.generic_fns.get(name).cloned() {
                 let arg_tys: Vec<Type> = args.iter().map(|e| self.expr_ty_ast(e)).collect();
                 let mut type_map = HashMap::new();
@@ -2061,7 +2402,6 @@ impl Typer {
                         }
                     }
                 }
-                // Fill any remaining type params with I64
                 for tp in &gf.type_params {
                     type_map.entry(tp.clone()).or_insert(Type::I64);
                 }
@@ -2078,12 +2418,18 @@ impl Typer {
                 });
             }
 
-            // Known function
-            if let Some((id, _, ret)) = self.fns.get(name).cloned() {
-                let hargs: Vec<hir::Expr> = args
+            if let Some((id, param_tys, ret)) = self.fns.get(name).cloned() {
+                let mut hargs: Vec<hir::Expr> = args
                     .iter()
                     .map(|e| self.lower_expr(e))
                     .collect::<Result<_, _>>()?;
+                // Coerce arguments to declared parameter types (e.g. Struct → dyn Trait)
+                for (i, ha) in hargs.iter_mut().enumerate() {
+                    if let Some(pt) = param_tys.get(i) {
+                        let taken = std::mem::replace(ha, hir::Expr { kind: hir::ExprKind::Int(0), ty: Type::I64, span });
+                        *ha = self.maybe_coerce_to(taken, pt);
+                    }
+                }
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Call(id, name.clone(), hargs),
                     ty: ret,
@@ -2091,7 +2437,6 @@ impl Typer {
                 });
             }
 
-            // Variable-as-fn-pointer
             if let Some(v) = self.find_var(name) {
                 if let Type::Fn(_, ret) = &v.ty {
                     let ret = *ret.clone();
@@ -2112,19 +2457,13 @@ impl Typer {
                 }
             }
 
-            // Fallback: assume it returns I64
-            let hargs: Vec<hir::Expr> = args
+            let _hargs: Vec<hir::Expr> = args
                 .iter()
                 .map(|e| self.lower_expr(e))
                 .collect::<Result<_, _>>()?;
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::Call(DefId::BUILTIN, name.clone(), hargs),
-                ty: Type::I64,
-                span,
-            });
+            return Err(format!("undefined function: '{name}'"));
         }
 
-        // Indirect call (expression as callee)
         let hcallee = self.lower_expr(callee)?;
         let ret = match &hcallee.ty {
             Type::Fn(_, ret) => *ret.clone(),
@@ -2141,8 +2480,6 @@ impl Typer {
         })
     }
 
-    // ── Method call lowering ─────────────────────────────────────
-
     fn lower_method_call(
         &mut self,
         obj: &ast::Expr,
@@ -2152,7 +2489,6 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         let obj_ty = self.expr_ty_ast(obj);
 
-        // String methods
         if matches!(obj_ty, Type::String) {
             let hobj = self.lower_expr(obj)?;
             let hargs: Vec<hir::Expr> = args
@@ -2161,8 +2497,9 @@ impl Typer {
                 .collect::<Result<_, _>>()?;
             let ret_ty = match method {
                 "contains" | "starts_with" | "ends_with" => Type::Bool,
-                "char_at" | "len" => Type::I64,
-                "slice" => Type::String,
+                "char_at" | "len" | "find" => Type::I64,
+                "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower" => Type::String,
+                "split" => Type::Vec(Box::new(Type::String)),
                 _ => Type::I64,
             };
             return Ok(hir::Expr {
@@ -2172,7 +2509,80 @@ impl Typer {
             });
         }
 
-        // Struct methods
+        if let Type::Vec(ref elem_ty) = obj_ty {
+            let hobj = self.lower_expr(obj)?;
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .map(|e| self.lower_expr(e))
+                .collect::<Result<_, _>>()?;
+            let ret_ty = match method {
+                "push" | "clear" => Type::Void,
+                "pop" | "get" | "remove" => *elem_ty.clone(),
+                "len" => Type::I64,
+                "set" => Type::Void,
+                _ => return Err(format!("no method '{method}' on Vec")),
+            };
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::VecMethod(Box::new(hobj), method.to_string(), hargs),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        if let Type::Map(ref key_ty, ref val_ty) = obj_ty {
+            let hobj = self.lower_expr(obj)?;
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .map(|e| self.lower_expr(e))
+                .collect::<Result<_, _>>()?;
+            let ret_ty = match method {
+                "set" | "remove" | "clear" => Type::Void,
+                "get" => *val_ty.clone(),
+                "has" => Type::Bool,
+                "len" => Type::I64,
+                "keys" => Type::Vec(key_ty.clone()),
+                "values" => Type::Vec(val_ty.clone()),
+                _ => return Err(format!("no method '{method}' on Map")),
+            };
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::MapMethod(Box::new(hobj), method.to_string(), hargs),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        if let Type::Coroutine(ref yield_ty) = obj_ty {
+            if method == "next" {
+                let hobj = self.lower_expr(obj)?;
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::CoroutineNext(Box::new(hobj)),
+                    ty: *yield_ty.clone(),
+                    span,
+                });
+            }
+            return Err(format!("no method '{method}' on Coroutine"));
+        }
+
+        if let Type::DynTrait(ref trait_name) = obj_ty {
+            let hobj = self.lower_expr(obj)?;
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .map(|e| self.lower_expr(e))
+                .collect::<Result<_, _>>()?;
+            // Look up the method's return type from any impl of this trait
+            let ret_ty = self.infer_dyn_method_ret(trait_name, method);
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::DynDispatch(
+                    Box::new(hobj),
+                    trait_name.clone(),
+                    method.to_string(),
+                    hargs,
+                ),
+                ty: ret_ty,
+                span,
+            });
+        }
+
         if let Type::Struct(ref type_name) = obj_ty {
             let method_name = format!("{type_name}_{method}");
             if let Some((_, _, ret)) = self.fns.get(&method_name).cloned() {
@@ -2194,7 +2604,6 @@ impl Typer {
             }
         }
 
-        // Fallback
         let hobj = self.lower_expr(obj)?;
         let hargs: Vec<hir::Expr> = args
             .iter()
@@ -2207,15 +2616,12 @@ impl Typer {
         })
     }
 
-    // ── Struct/Variant construction ──────────────────────────────
-
     fn lower_struct_or_variant(
         &mut self,
         name: &str,
         inits: &[ast::FieldInit],
         span: Span,
     ) -> Result<hir::Expr, String> {
-        // Check if it's an enum variant
         if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
             let hinits: Vec<hir::FieldInit> = inits
                 .iter()
@@ -2233,7 +2639,6 @@ impl Typer {
             });
         }
 
-        // Try generic enum variant monomorphization
         if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, inits) {
             let (_, tag) = self
                 .variant_tags
@@ -2256,7 +2661,6 @@ impl Typer {
             });
         }
 
-        // Regular struct
         let hinits: Vec<hir::FieldInit> = inits
             .iter()
             .map(|fi| {
@@ -2273,8 +2677,6 @@ impl Typer {
         })
     }
 
-    // ── Pipe lowering ────────────────────────────────────────────
-
     fn lower_pipe(
         &mut self,
         left: &ast::Expr,
@@ -2283,9 +2685,7 @@ impl Typer {
         span: Span,
     ) -> Result<hir::Expr, String> {
         let hleft = self.lower_expr(left)?;
-        // Right side should be a function name
         if let ast::Expr::Ident(name, _) = right {
-            // Check if generic
             if let Some(gf) = self.generic_fns.get(name).cloned() {
                 let left_ty = hleft.ty.clone();
                 let mut type_map = HashMap::new();
@@ -2325,7 +2725,6 @@ impl Typer {
                     span,
                 });
             }
-            // Fallback: try as indirect call
             let hright = self.lower_expr(right)?;
             let ret = match &hright.ty {
                 Type::Fn(_, r) => *r.clone(),
@@ -2342,7 +2741,6 @@ impl Typer {
             });
         }
 
-        // Non-ident right side — check for Call with function name
         if let ast::Expr::Call(callee, call_args, _) = right {
             if let ast::Expr::Ident(name, _) = callee.as_ref() {
                 let has_placeholder = call_args
@@ -2363,7 +2761,6 @@ impl Typer {
                         all_args.push(self.lower_expr(a)?);
                     }
                 }
-                // Check if generic
                 if let Some(gf) = self.generic_fns.get(name).cloned() {
                     let left_ty = all_args[0].ty.clone();
                     let mut type_map = HashMap::new();
@@ -2398,7 +2795,6 @@ impl Typer {
             }
         }
 
-        // Fallback: non-ident right side
         let hright = self.lower_expr(right)?;
         let ret = match &hright.ty {
             Type::Fn(_, r) => *r.clone(),
@@ -2414,8 +2810,6 @@ impl Typer {
             span,
         })
     }
-
-    // ── Lambda lowering ──────────────────────────────────────────
 
     fn lower_lambda(
         &mut self,
@@ -2464,13 +2858,10 @@ impl Typer {
         })
     }
 
-    // ── Coercion insertion ───────────────────────────────────────
-
     fn maybe_coerce_to(&self, expr: hir::Expr, target: &Type) -> hir::Expr {
         if &expr.ty == target {
             return expr;
         }
-        // Int width coercion (i8→i64, etc.)
         if let Some(coercion) = Self::needs_int_coercion(&expr.ty, target) {
             let span = expr.span;
             return hir::Expr {
@@ -2479,7 +2870,6 @@ impl Typer {
                 span,
             };
         }
-        // Int → Float promotion
         if expr.ty.is_int() && target.is_float() {
             let span = expr.span;
             return hir::Expr {
@@ -2491,7 +2881,6 @@ impl Typer {
                 span,
             };
         }
-        // Float → Int truncation
         if expr.ty.is_float() && target.is_int() {
             let span = expr.span;
             return hir::Expr {
@@ -2505,7 +2894,6 @@ impl Typer {
                 span,
             };
         }
-        // Float width coercion (f32↔f64)
         if expr.ty.is_float() && target.is_float() && expr.ty.bits() != target.bits() {
             let span = expr.span;
             let coercion = if expr.ty.bits() < target.bits() {
@@ -2519,7 +2907,6 @@ impl Typer {
                 span,
             };
         }
-        // Bool → Int promotion
         if expr.ty == Type::Bool && target.is_int() {
             let span = expr.span;
             return hir::Expr {
@@ -2528,31 +2915,24 @@ impl Typer {
                 span,
             };
         }
-        expr
-    }
-
-    // ── Helper for bare variant monomorphization ─────────────────
-
-    fn try_monomorphize_generic_variant_bare(
-        &mut self,
-        variant_name: &str,
-    ) -> Result<Option<String>, String> {
-        let found = self.generic_enums.iter().find_map(|(ename, edef)| {
-            edef.variants
-                .iter()
-                .find(|v| v.name == variant_name)
-                .map(|v| (ename.clone(), edef.clone(), v.clone()))
-        });
-        let (enum_name, edef, _variant) = match found {
-            Some(f) => f,
-            None => return Ok(None),
-        };
-        let mut type_map = HashMap::new();
-        for tp in &edef.type_params {
-            type_map.entry(tp.clone()).or_insert(Type::I64);
+        // Struct → dyn Trait coercion
+        if let Type::DynTrait(trait_name) = &target {
+            if let Type::Struct(type_name) = &expr.ty {
+                let tn = type_name.clone();
+                let trn = trait_name.clone();
+                let span = expr.span;
+                return hir::Expr {
+                    kind: hir::ExprKind::DynCoerce(
+                        Box::new(expr),
+                        tn,
+                        trn,
+                    ),
+                    ty: target.clone(),
+                    span,
+                };
+            }
         }
-        let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
-        Ok(Some(mangled))
+        expr
     }
 }
 
@@ -2586,7 +2966,6 @@ mod tests {
     fn test_variable_binding_typed() {
         let hir = type_check("*main()\n    x is 10\n    log(x)\n");
         let main = &hir.fns[0];
-        // First stmt should be a bind
         if let hir::Stmt::Bind(b) = &main.body[0] {
             assert_eq!(b.name, "x");
             assert_eq!(b.ty, Type::I64);
@@ -2659,7 +3038,6 @@ mod tests {
     #[test]
     fn test_generic_fn_monomorphized() {
         let hir = type_check("*identity(x)\n    x\n*main()\n    log(identity(42))\n");
-        // Should have main + monomorphized identity_i64
         assert!(
             hir.fns.len() >= 2,
             "expected at least 2 fns, got {}",

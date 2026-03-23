@@ -1,0 +1,44 @@
+# power.jade — Power / exponentiation variants
+# Complexity: Beginner
+# Demonstrates: recursion, while loops, operators
+
+# Naive recursive power
+*power_recursive(base, exp)
+    if exp equals 0
+        return 1
+    base * power_recursive(base, exp - 1)
+
+# Iterative power
+*power_iterative(base, exp)
+    result is 1
+    i is 0
+    while i < exp
+        result is result * base
+        i is i + 1
+    result
+
+# Fast power (square and multiply)
+*power_fast(base, exp)
+    result is 1
+    b is base
+    e is exp
+    while e > 0
+        if e % 2 equals 1
+            result is result * b
+        b is b * b
+        e is e / 2
+    result
+
+*main()
+    # All three should give the same results
+    log(power_recursive(2, 10))    # 1024
+    log(power_iterative(2, 10))    # 1024
+    log(power_fast(2, 10))         # 1024
+
+    log(power_recursive(3, 5))     # 243
+    log(power_iterative(3, 5))     # 243
+    log(power_fast(3, 5))          # 243
+
+    # Built-in exponentiation operator
+    log(2 ** 10)                    # 1024
+    log(3 ** 5)                     # 243

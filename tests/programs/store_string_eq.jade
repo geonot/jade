@@ -1,0 +1,13 @@
+store people
+    name: String
+    age: i64
+
+*main
+    insert people 'Alice', 30
+    insert people 'Bob', 25
+    insert people 'Charlie', 35
+    insert people 'Alice', 22
+
+    found is people where name equals 'Bob'
+    log found.name
+    log found.age

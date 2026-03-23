@@ -52,6 +52,78 @@ fn expect_compile_fail(src: &str) -> String {
     String::from_utf8(output.stderr).unwrap()
 }
 
+fn compile_and_run_test_mode(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let status = Command::new(jadec())
+        .arg("--test")
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec --test compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "test binary exited with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn expect_runtime_fail(src: &str) {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let status = Command::new(jadec())
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        !output.status.success(),
+        "expected runtime failure for:\n{src}"
+    );
+}
+
+fn compile_and_run_with_file(src: &str, extra_name: &str, extra_content: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let extra = dir.path().join(extra_name);
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    std::fs::write(&extra, extra_content).unwrap();
+    let status = Command::new(jadec())
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "binary exited with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH 1: Integer arithmetic
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2611,5 +2683,892 @@ fn b_tuple_bind_expr() {
     expect(
         "*main()\n    x, y is (3 + 4, 10 * 2)\n    log(x)\n    log(y)\n",
         "7\n20",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PATTERN MATCHING GUARDS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_match_guard_value() {
+    expect(
+        "*main()\n    x is 5\n    match x\n        n when n > 3 ? log 'big'\n        _ ? log 'small'\n",
+        "big",
+    );
+}
+
+#[test]
+fn b_match_guard_fallthrough() {
+    expect(
+        "*main()\n    x is 1\n    match x\n        n when n > 3 ? log 'big'\n        _ ? log 'small'\n",
+        "small",
+    );
+}
+
+#[test]
+fn b_match_guard_enum() {
+    expect(
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main()\n    s is Circle(10)\n    match s\n        Circle(r) when r > 5 ? log 'big circle'\n        Circle(r) ? log 'small circle'\n        _ ? log 'other'\n",
+        "big circle",
+    );
+}
+
+#[test]
+fn b_match_guard_enum_fail() {
+    expect(
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main()\n    s is Circle(2)\n    match s\n        Circle(r) when r > 5 ? log 'big circle'\n        Circle(r) ? log 'small circle'\n        _ ? log 'other'\n",
+        "small circle",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EXTENSION METHODS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_ext_method_basic() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\nimpl Point\n    *sum() -> i64\n        self.x + self.y\n\n*main()\n    p is Point(3, 4)\n    log p.sum()\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_ext_method_with_args() {
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\nimpl Vec2\n    *add(other: Vec2) -> Vec2\n        Vec2(self.x + other.x, self.y + other.y)\n\n*main()\n    a is Vec2(1, 2)\n    b is Vec2(3, 4)\n    c is a.add(b)\n    log c.x\n    log c.y\n",
+        "4\n6",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ASSERT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_assert_pass() {
+    expect(
+        "*main()\n    assert 1 equals 1\n    log 'ok'\n",
+        "ok",
+    );
+}
+
+#[test]
+fn b_assert_parens() {
+    expect(
+        "*main()\n    assert(2 + 2 equals 4)\n    log 'ok'\n",
+        "ok",
+    );
+}
+
+#[test]
+fn b_assert_fail() {
+    expect_runtime_fail("*main()\n    assert 1 equals 2\n");
+}
+
+#[test]
+fn b_assert_expr() {
+    expect(
+        "*main()\n    assert(10 > 5)\n    assert(3 < 100)\n    log 'passed'\n",
+        "passed",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// EMBED
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_embed_file() {
+    let out = compile_and_run_with_file(
+        "*main()\n    log embed 'data.txt'\n",
+        "data.txt",
+        "hello embedded",
+    );
+    assert_eq!(out.trim(), "hello embedded");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TEST BLOCKS (--test mode)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_test_mode_runs_tests() {
+    let out = compile_and_run_test_mode(
+        "*add(a, b)\n    return a + b\n\ntest 'addition'\n    assert add(2, 3) equals 5\n\n*main()\n    log 'skip'\n",
+    );
+    let trimmed = out.trim();
+    assert!(trimmed.contains("test addition ..."), "expected test header, got: {trimmed}");
+    assert!(trimmed.contains("ok"), "expected ok, got: {trimmed}");
+    assert!(!trimmed.contains("skip"), "main should not run in test mode");
+}
+
+#[test]
+fn b_test_mode_multiple() {
+    let out = compile_and_run_test_mode(
+        "*add(a, b)\n    return a + b\n\ntest 'first'\n    assert add(1, 1) equals 2\n\ntest 'second'\n    assert add(0, 0) equals 0\n\n*main()\n    log 'nope'\n",
+    );
+    let trimmed = out.trim();
+    assert!(trimmed.contains("test first ..."), "missing first test");
+    assert!(trimmed.contains("test second ..."), "missing second test");
+}
+
+#[test]
+fn b_test_blocks_stripped_normal() {
+    expect(
+        "*add(a, b)\n    return a + b\n\ntest 'whatever'\n    assert add(1, 1) equals 2\n\n*main()\n    log 'normal'\n",
+        "normal",
+    );
+}
+
+// --- Pattern-directed function clauses ---
+
+#[test]
+fn b_clause_fn_fib() {
+    expect(
+        "*fib(0) is 0\n\n*fib(1) is 1\n\n*fib(n)\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "55",
+    );
+}
+
+#[test]
+fn b_clause_fn_fact() {
+    expect(
+        "*fact(0) is 1\n\n*fact(n) is n * fact(n - 1)\n\n*main()\n    log(fact(5))\n",
+        "120",
+    );
+}
+
+#[test]
+fn b_clause_fn_base_case() {
+    expect(
+        "*val(0) is 99\n\n*val(n) is n\n\n*main()\n    log(val(0))\n    log(val(7))\n",
+        "99\n7",
+    );
+}
+
+#[test]
+fn b_clause_fn_gcd() {
+    expect(
+        "*gcd(0, b) is b\n\n*gcd(a, 0) is a\n\n*gcd(a, b)\n    if a > b\n        return gcd(a - b, b)\n    gcd(a, b - a)\n\n*main()\n    log(gcd(12, 8))\n",
+        "4",
+    );
+}
+
+// --- Inline body ---
+
+#[test]
+fn b_inline_body_parens() {
+    expect(
+        "*double(x) is x * 2\n\n*main()\n    log(double(21))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_inline_body_paren_free() {
+    expect(
+        "*add a, b is a + b\n\n*main()\n    log(add(10, 20))\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_inline_body_multi() {
+    expect(
+        "*square(x) is x * x\n\n*cube(x) is x * x * x\n\n*main()\n    log(square(5))\n    log(cube(3))\n",
+        "25\n27",
+    );
+}
+
+#[test]
+fn b_inline_fib_all_clauses() {
+    expect(
+        "*fib(0) is 0\n\n*fib(1) is 1\n\n*fib(n) is fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "55",
+    );
+}
+
+// ── Actor tests ──────────────────────────────────────────────────────
+
+// Helper: compile and run a Jade program, executing the binary inside the tempdir
+// so that .store files are created in isolation.
+fn compile_and_run_in_dir(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let status = Command::new(jadec())
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "binary exited with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim_end().to_string()
+}
+
+#[test]
+fn b_actor_spawn_send_basic() {
+    // Actor that logs a value when it receives a message
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Printer\n    @say n: i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    send p, @say(42)\n    usleep(100000)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_actor_multiple_messages() {
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Echo\n    @say n: i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    send e, @say(1)\n    send e, @say(2)\n    send e, @say(3)\n    usleep(100000)\n    0\n",
+        "1\n2\n3",
+    );
+}
+
+#[test]
+fn b_actor_state_accumulation() {
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Adder\n    total: i64\n    @add n: i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    send a, @add(10)\n    send a, @add(20)\n    send a, @add(30)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    0\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_actor_multi_handler() {
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Math\n    val: i64\n    @assign n: i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    send m, @assign(5)\n    send m, @double()\n    usleep(100000)\n    send m, @show()\n    usleep(100000)\n    0\n",
+        "10",
+    );
+}
+
+// ── Additional actor tests ───────────────────────────────────────────
+
+#[test]
+fn b_actor_zero_param_handler() {
+    // Handler with no parameters
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Pinger\n    count: i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    send p, @ping()\n    send p, @ping()\n    send p, @ping()\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_actor_two_param_handler() {
+    // Handler with two parameters
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Calc\n    result: i64\n    @add a: i64, b: i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(17, 25)\n    usleep(100000)\n    send c, @show()\n    usleep(100000)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_actor_multiple_state_fields() {
+    // Actor with multiple state fields
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Point\n    x: i64\n    y: i64\n    @set_x n: i64\n        x is n\n    @set_y n: i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    send p, @set_x(10)\n    send p, @set_y(20)\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_actor_sequential_messages() {
+    // Actor processes messages in FIFO order
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Logger\n    @say n: i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say(10)\n    send l, @say(20)\n    send l, @say(30)\n    send l, @say(40)\n    send l, @say(50)\n    usleep(100000)\n    0\n",
+        "10\n20\n30\n40\n50",
+    );
+}
+
+// ── Store tests ──────────────────────────────────────────────────────
+
+#[test]
+fn b_store_insert_and_count() {
+    // Basic insert and count
+    let out = compile_and_run_in_dir(
+        "store items\n    key: i64\n    val: i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    c is count items\n    log(c)\n",
+    );
+    assert_eq!(out, "3");
+}
+
+#[test]
+fn b_store_query_equals() {
+    // Query with equals filter
+    let out = compile_and_run_in_dir(
+        "store data\n    key: i64\n    val: i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    log(r.val)\n",
+    );
+    assert_eq!(out, "200");
+}
+
+#[test]
+fn b_store_query_less_than() {
+    // Query with less-than filter
+    let out = compile_and_run_in_dir(
+        "store nums\n    id: i64\n    score: i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is nums where score < 40\n    log(r.id)\n",
+    );
+    assert_eq!(out, "2");
+}
+
+#[test]
+fn b_store_query_greater_than() {
+    // Query with greater-than filter
+    let out = compile_and_run_in_dir(
+        "store vals\n    x: i64\n    y: i64\n\n*main()\n    insert vals 10, 1\n    insert vals 20, 2\n    insert vals 30, 3\n    r is vals where x > 15\n    log(r.y)\n",
+    );
+    assert_eq!(out, "2");
+}
+
+#[test]
+fn b_store_delete() {
+    // Delete records matching a filter
+    let out = compile_and_run_in_dir(
+        "store items\n    key: i64\n    val: i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    delete items where key equals 2\n    c is count items\n    log(c)\n",
+    );
+    assert_eq!(out, "2");
+}
+
+#[test]
+fn b_store_all() {
+    // Get all records and verify data via count
+    let out = compile_and_run_in_dir(
+        "store recs\n    n: i64\n\n*main()\n    insert recs 10\n    insert recs 20\n    insert recs 30\n    c is count recs\n    log(c)\n    a is all recs\n    log(0)\n",
+    );
+    assert_eq!(out, "3\n0");
+}
+
+#[test]
+fn b_store_set_update() {
+    // Update records with set (spec syntax: set store where filter field value)
+    let out = compile_and_run_in_dir(
+        "store users\n    id: i64\n    score: i64\n\n*main()\n    insert users 1, 100\n    insert users 2, 200\n    set users where id equals 1 score 999\n    r is users where id equals 1\n    log(r.score)\n",
+    );
+    assert_eq!(out, "999");
+}
+
+#[test]
+fn b_store_multiple_inserts_query() {
+    // Insert many records and query
+    let out = compile_and_run_in_dir(
+        "store db\n    key: i64\n    val: i64\n\n*main()\n    i is 0\n    while i < 100\n        insert db i, i * 7\n        i is i + 1\n    r is db where key equals 50\n    log(r.val)\n",
+    );
+    assert_eq!(out, "350");
+}
+
+#[test]
+fn b_store_transaction_basic() {
+    // Transaction block groups store operations
+    let out = compile_and_run_in_dir(
+        "store ledger\n    amount: i64\n\n*main()\n    transaction\n        insert ledger 10\n        insert ledger 20\n        insert ledger 30\n    c is count ledger\n    log(c)\n",
+    );
+    assert_eq!(out, "3");
+}
+
+#[test]
+fn b_store_compound_filter_and() {
+    // AND compound filter
+    let out = compile_and_run_in_dir(
+        "store items\n    cat: i64\n    val: i64\n\n*main()\n    insert items 1, 10\n    insert items 1, 20\n    insert items 2, 30\n    insert items 2, 40\n    r is items where cat equals 1 and val > 15\n    log(r.val)\n",
+    );
+    assert_eq!(out, "20");
+}
+
+#[test]
+fn b_store_string_field() {
+    // Store with string fields
+    let out = compile_and_run_in_dir(
+        "store people\n    name: String\n    age: i64\n\n*main()\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    r is people where age equals 25\n    log(r.name)\n",
+    );
+    assert_eq!(out, "Bob");
+}
+
+#[test]
+fn b_store_delete_and_recount() {
+    // Delete multiple records and verify count
+    let out = compile_and_run_in_dir(
+        "store records\n    key: i64\n    val: i64\n\n*main()\n    insert records 1, 10\n    insert records 2, 20\n    insert records 3, 30\n    insert records 4, 40\n    insert records 5, 50\n    delete records where key > 3\n    c is count records\n    log(c)\n",
+    );
+    assert_eq!(out, "3");
+}
+
+// ==================== Trait tests ====================
+
+#[test]
+fn b_trait_basic_impl() {
+    // Define a trait and implement it for a struct
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\ntrait Summable\n    *sum() -> i64\n\nimpl Summable for Vec2\n    *sum() -> i64\n        self.x + self.y\n\n*main()\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_trait_multiple_methods() {
+    // Trait with multiple methods
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\ntrait Describable\n    *get_x() -> i64\n    *get_y() -> i64\n\nimpl Describable for Point\n    *get_x() -> i64\n        self.x\n    *get_y() -> i64\n        self.y\n\n*main()\n    p is Point(x is 5, y is 12)\n    log(p.get_x())\n    log(p.get_y())\n",
+        "5\n12",
+    );
+}
+
+#[test]
+fn b_trait_with_params() {
+    // Trait method with extra parameters
+    expect(
+        "type Counter\n    val: i64\n\ntrait Addable\n    *add_to(n: i64) -> i64\n\nimpl Addable for Counter\n    *add_to(n: i64) -> i64\n        self.val + n\n\n*main()\n    c is Counter(val is 10)\n    log(c.add_to(5))\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_trait_impl_alongside_methods() {
+    // Struct with inline methods AND trait impl methods
+    expect(
+        "type Num\n    v: i64\n\n    *double() -> i64\n        self.v * 2\n\ntrait Showable\n    *value() -> i64\n\nimpl Showable for Num\n    *value() -> i64\n        self.v\n\n*main()\n    n is Num(v is 21)\n    log(n.double())\n    log(n.value())\n",
+        "42\n21",
+    );
+}
+
+#[test]
+fn b_trait_multiple_impls() {
+    // Same trait implemented for different types
+    expect(
+        "type A\n    x: i64\n\ntype B\n    y: i64\n\ntrait GetVal\n    *val() -> i64\n\nimpl GetVal for A\n    *val() -> i64\n        self.x\n\nimpl GetVal for B\n    *val() -> i64\n        self.y\n\n*main()\n    a is A(x is 10)\n    b is B(y is 20)\n    log(a.val())\n    log(b.val())\n",
+        "10\n20",
+    );
+}
+
+#[test]
+fn b_trait_missing_method_fails() {
+    // Impl missing a required method should fail compilation
+    let err = expect_compile_fail(
+        "type Foo\n    x: i64\n\ntrait NeedTwo\n    *first() -> i64\n    *second() -> i64\n\nimpl NeedTwo for Foo\n    *first() -> i64\n        self.x\n\n*main()\n    log(0)\n",
+    );
+    assert!(err.contains("missing required method 'second'"), "expected missing method error, got: {err}");
+}
+
+#[test]
+fn b_trait_unknown_trait_fails() {
+    // Impl for nonexistent trait should fail
+    let err = expect_compile_fail(
+        "type Bar\n    x: i64\n\nimpl Nonexistent for Bar\n    *foo() -> i64\n        self.x\n\n*main()\n    log(0)\n",
+    );
+    assert!(err.contains("unknown trait"), "expected unknown trait error, got: {err}");
+}
+
+#[test]
+fn b_trait_unknown_type_fails() {
+    // Impl for nonexistent type should fail
+    let err = expect_compile_fail(
+        "trait MyTrait\n    *foo() -> i64\n\nimpl MyTrait for Nonexistent\n    *foo() -> i64\n        0\n\n*main()\n    log(0)\n",
+    );
+    assert!(err.contains("unknown type"), "expected unknown type error, got: {err}");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Vec operations
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_vec_create_empty() {
+    expect("*main()\n    v is vec()\n    log(v.len())\n", "0");
+}
+
+#[test]
+fn b_vec_create_with_elems() {
+    expect("*main()\n    v is vec(10, 20, 30)\n    log(v.len())\n", "3");
+}
+
+#[test]
+fn b_vec_push_and_len() {
+    expect(
+        "*main()\n    v is vec()\n    v.push(1)\n    v.push(2)\n    v.push(3)\n    log(v.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_vec_get() {
+    expect(
+        "*main()\n    v is vec(10, 20, 30)\n    log(v.get(0))\n    log(v.get(1))\n    log(v.get(2))\n",
+        "10\n20\n30",
+    );
+}
+
+#[test]
+fn b_vec_set() {
+    expect(
+        "*main()\n    v is vec(10, 20, 30)\n    v.set(1, 99)\n    log(v.get(1))\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_vec_pop() {
+    expect(
+        "*main()\n    v is vec(10, 20, 30)\n    x is v.pop()\n    log(x)\n    log(v.len())\n",
+        "30\n2",
+    );
+}
+
+#[test]
+fn b_vec_remove() {
+    expect(
+        "*main()\n    v is vec(10, 20, 30, 40)\n    x is v.remove(1)\n    log(x)\n    log(v.len())\n    log(v.get(0))\n    log(v.get(1))\n    log(v.get(2))\n",
+        "20\n3\n10\n30\n40",
+    );
+}
+
+#[test]
+fn b_vec_clear() {
+    expect(
+        "*main()\n    v is vec(1, 2, 3)\n    v.clear()\n    log(v.len())\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_vec_push_grow() {
+    // Push enough to trigger realloc
+    expect(
+        "*main()\n    v is vec()\n    for i in 0 to 100\n        v.push(i)\n    log(v.len())\n    log(v.get(99))\n",
+        "100\n99",
+    );
+}
+
+#[test]
+fn b_vec_for_in() {
+    expect(
+        "*main()\n    v is vec(10, 20, 30)\n    total is 0\n    for x in v\n        total is total + x\n    log(total)\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_vec_for_in_empty() {
+    expect(
+        "*main()\n    v is vec()\n    total is 0\n    for x in v\n        total is total + x\n    log(total)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Map operations
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_map_create_empty() {
+    expect("*main()\n    m is map()\n    log(m.len())\n", "0");
+}
+
+#[test]
+fn b_map_set_get() {
+    expect(
+        "*main()\n    m is map()\n    m.set('a', 1)\n    m.set('b', 2)\n    log(m.get('a'))\n    log(m.get('b'))\n",
+        "1\n2",
+    );
+}
+
+#[test]
+fn b_map_has() {
+    expect(
+        "*main()\n    m is map()\n    m.set('x', 42)\n    log(m.has('x'))\n    log(m.has('y'))\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn b_map_remove() {
+    expect(
+        "*main()\n    m is map()\n    m.set('a', 10)\n    m.set('b', 20)\n    m.remove('a')\n    log(m.has('a'))\n    log(m.get('b'))\n    log(m.len())\n",
+        "0\n20\n1",
+    );
+}
+
+#[test]
+fn b_map_len() {
+    expect(
+        "*main()\n    m is map()\n    m.set('a', 1)\n    m.set('b', 2)\n    m.set('c', 3)\n    log(m.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_map_overwrite() {
+    expect(
+        "*main()\n    m is map()\n    m.set('a', 1)\n    m.set('a', 99)\n    log(m.get('a'))\n    log(m.len())\n",
+        "99\n1",
+    );
+}
+
+#[test]
+fn b_map_clear() {
+    expect(
+        "*main()\n    m is map()\n    m.set('a', 1)\n    m.set('b', 2)\n    m.clear()\n    log(m.len())\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: String new methods
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_str_find_found() {
+    expect("*main()\n    log('hello world'.find('world'))\n", "6");
+}
+
+#[test]
+fn b_str_find_not_found() {
+    expect("*main()\n    log('hello world'.find('xyz'))\n", "-1");
+}
+
+#[test]
+fn b_str_find_beginning() {
+    expect("*main()\n    log('hello'.find('hello'))\n", "0");
+}
+
+#[test]
+fn b_str_trim_spaces() {
+    expect("*main()\n    log('  hello  '.trim())\n", "hello");
+}
+
+#[test]
+fn b_str_trim_no_spaces() {
+    expect("*main()\n    log('hello'.trim())\n", "hello");
+}
+
+#[test]
+fn b_str_trim_left() {
+    let out = compile_and_run("*main()\n    log('  hello  '.trim_left())\n");
+    assert_eq!(out, "hello  \n");
+}
+
+#[test]
+fn b_str_trim_right() {
+    expect("*main()\n    log('  hello  '.trim_right())\n", "  hello");
+}
+
+#[test]
+fn b_str_to_upper() {
+    expect("*main()\n    log('hello'.to_upper())\n", "HELLO");
+}
+
+#[test]
+fn b_str_to_lower() {
+    expect("*main()\n    log('HELLO'.to_lower())\n", "hello");
+}
+
+#[test]
+fn b_str_to_upper_mixed() {
+    expect("*main()\n    log('Hello World'.to_upper())\n", "HELLO WORLD");
+}
+
+#[test]
+fn b_str_replace_basic() {
+    expect(
+        "*main()\n    log('hello world'.replace('world', 'jade'))\n",
+        "hello jade",
+    );
+}
+
+#[test]
+fn b_str_replace_multiple() {
+    expect(
+        "*main()\n    log('aabaa'.replace('a', 'x'))\n",
+        "xxbxx",
+    );
+}
+
+#[test]
+fn b_str_replace_not_found() {
+    expect(
+        "*main()\n    log('hello'.replace('xyz', 'abc'))\n",
+        "hello",
+    );
+}
+
+#[test]
+fn b_str_split_basic() {
+    expect(
+        "*main()\n    parts is 'a,b,c'.split(',')\n    log(parts.len())\n    log(parts.get(0))\n    log(parts.get(1))\n    log(parts.get(2))\n",
+        "3\na\nb\nc",
+    );
+}
+
+#[test]
+fn b_str_split_no_delim() {
+    expect(
+        "*main()\n    parts is 'hello'.split(',')\n    log(parts.len())\n    log(parts.get(0))\n",
+        "1\nhello",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: String equality
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_str_eq_same() {
+    expect("*main()\n    log('hello' equals 'hello')\n", "1");
+}
+
+#[test]
+fn b_str_eq_diff() {
+    expect("*main()\n    log('hello' equals 'world')\n", "0");
+}
+
+#[test]
+fn b_str_ne_same() {
+    expect("*main()\n    log('hello' isnt 'hello')\n", "0");
+}
+
+#[test]
+fn b_str_ne_diff() {
+    expect("*main()\n    log('hello' isnt 'world')\n", "1");
+}
+
+#[test]
+fn b_str_eq_empty() {
+    expect("*main()\n    log('' equals '')\n", "1");
+}
+
+#[test]
+fn b_str_eq_var() {
+    expect(
+        "*main()\n    a is 'test'\n    b is 'test'\n    log(a equals b)\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Range patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_range_pat_hit() {
+    expect(
+        "*main()\n    x is 3\n    match x\n        1 to 5 ? log(1)\n        _ ? log(0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_range_pat_lo_bound() {
+    expect(
+        "*main()\n    x is 1\n    match x\n        1 to 5 ? log(1)\n        _ ? log(0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_range_pat_hi_bound() {
+    expect(
+        "*main()\n    x is 5\n    match x\n        1 to 5 ? log(1)\n        _ ? log(0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_range_pat_miss() {
+    expect(
+        "*main()\n    x is 6\n    match x\n        1 to 5 ? log(1)\n        _ ? log(0)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_range_pat_multi() {
+    expect(
+        "*classify(x: i64) -> i64\n    match x\n        0 to 9 ? 1\n        10 to 99 ? 2\n        _ ? 3\n\n*main()\n    log(classify(5))\n    log(classify(42))\n    log(classify(100))\n",
+        "1\n2\n3",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Or-patterns
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_or_pat_match() {
+    expect(
+        "*main()\n    x is 2\n    match x\n        1 or 2 or 3 ? log(1)\n        _ ? log(0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_or_pat_miss() {
+    expect(
+        "*main()\n    x is 5\n    match x\n        1 or 2 or 3 ? log(1)\n        _ ? log(0)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_or_pat_first() {
+    expect(
+        "*main()\n    x is 1\n    match x\n        1 or 2 ? log(10)\n        3 or 4 ? log(20)\n        _ ? log(0)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_or_pat_second() {
+    expect(
+        "*main()\n    x is 4\n    match x\n        1 or 2 ? log(10)\n        3 or 4 ? log(20)\n        _ ? log(0)\n",
+        "20",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Struct operator overloading (eq/neq)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_struct_eq_true() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\ntrait Eq\n    *eq(other: Point) -> bool\n\nimpl Eq for Point\n    *eq(other: Point) -> bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 1, y is 2)\n    log(a equals b)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_struct_eq_false() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\ntrait Eq\n    *eq(other: Point) -> bool\n\nimpl Eq for Point\n    *eq(other: Point) -> bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a equals b)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_struct_neq() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\ntrait Eq\n    *eq(other: Point) -> bool\n\nimpl Eq for Point\n    *eq(other: Point) -> bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a isnt b)\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Dispatch keyword (actor send alias)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_dispatch_keyword_parses() {
+    // dispatch is an alias for send — verify it compiles
+    // We can't easily test actor behavior without threads,
+    // but we test that the parser accepts `dispatch` syntax
+    expect(
+        "actor Counter\n    count: i64\n    @show\n        log(count)\n\n*main()\n    c is spawn Counter\n    dispatch c, @show()\n",
+        "",
     );
 }

@@ -18,7 +18,12 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
         let mut last = None;
         for s in block {
-            last = self.compile_stmt(s)?;
+            let v = self.compile_stmt(s)?;
+            // Drop stmts are cleanup side-effects; they must not clobber
+            // the block's semantic return value.
+            if !matches!(s, hir::Stmt::Drop(..)) {
+                last = v;
+            }
         }
         Ok(last)
     }
@@ -27,6 +32,31 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         stmt: &hir::Stmt,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        let span = match stmt {
+            hir::Stmt::Bind(b) => b.span,
+            hir::Stmt::TupleBind(_, _, s) => *s,
+            hir::Stmt::Assign(_, _, s) => *s,
+            hir::Stmt::Expr(e) => e.span,
+            hir::Stmt::If(i) => i.cond.span,
+            hir::Stmt::While(w) => w.cond.span,
+            hir::Stmt::For(f) => f.iter.span,
+            hir::Stmt::Loop(l) => l.body.first().map(|s| match s {
+                hir::Stmt::Expr(e) => e.span,
+                _ => crate::ast::Span::dummy(),
+            }).unwrap_or(crate::ast::Span::dummy()),
+            hir::Stmt::Ret(_, _, s) => *s,
+            hir::Stmt::Break(_, s) => *s,
+            hir::Stmt::Continue(s) => *s,
+            hir::Stmt::Match(m) => m.subject.span,
+            hir::Stmt::Asm(a) => a.span,
+            hir::Stmt::Drop(_, _, _, s) => *s,
+            hir::Stmt::ErrReturn(_, _, s) => *s,
+            hir::Stmt::StoreInsert(_, _, s) => *s,
+            hir::Stmt::StoreDelete(_, _, s) => *s,
+            hir::Stmt::StoreSet(_, _, _, s) => *s,
+            hir::Stmt::Transaction(_, s) => *s,
+        };
+        self.set_debug_location(span.line, span.col);
         match stmt {
             hir::Stmt::Bind(bind) => {
                 let val = self.compile_expr(&bind.value)?;
@@ -105,20 +135,30 @@ impl<'ctx> Compiler<'ctx> {
                 if self.hints.elide_drops.contains(def_id) {
                     return Ok(None);
                 }
-                // Perceus reuse: if this variable is a reuse candidate,
-                // skip the free — the allocation will be reused in-place.
-                if self.hints.reuse_candidates.contains_key(def_id) {
+                if self.hints.reuse_candidates.contains_key(def_id)
+                    || self.hints.speculative_reuse.contains_key(def_id)
+                {
                     return Ok(None);
                 }
-                // Perceus borrow→move: promoted borrows don't need drops.
                 if self.hints.borrow_to_move.contains(def_id) {
                     return Ok(None);
                 }
                 match ty {
-                    Type::Struct(_) | Type::Enum(_) | Type::String | Type::Array(_, _) => {
+                    Type::String => {
                         if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            let free = self.ensure_free();
-                            b!(self.bld.build_call(free, &[ptr.into()], ""));
+                            let st = self.string_type();
+                            let val = b!(self.bld.build_load(st, ptr, "drop.str"));
+                            self.drop_string(val)?;
+                        }
+                    }
+                    Type::Vec(_) => {
+                        if let Some((ptr, _)) = self.find_var(name).cloned() {
+                            self.drop_vec(ptr)?;
+                        }
+                    }
+                    Type::Map(_, _) => {
+                        if let Some((ptr, _)) = self.find_var(name).cloned() {
+                            self.drop_map(ptr)?;
                         }
                     }
                     Type::Rc(inner) => {
@@ -150,6 +190,31 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_return(Some(&val)));
                 Ok(None)
             }
+            hir::Stmt::StoreInsert(store_name, values, _) => {
+                let sd = self.store_defs.get(store_name)
+                    .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                    .clone();
+                self.compile_store_insert(store_name, values, &sd)?;
+                Ok(None)
+            }
+            hir::Stmt::StoreDelete(store_name, filter, _) => {
+                let sd = self.store_defs.get(store_name)
+                    .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                    .clone();
+                self.compile_store_delete(store_name, filter, &sd)?;
+                Ok(None)
+            }
+            hir::Stmt::StoreSet(store_name, assignments, filter, _) => {
+                let sd = self.store_defs.get(store_name)
+                    .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                    .clone();
+                self.compile_store_set(store_name, assignments, filter, &sd)?;
+                Ok(None)
+            }
+            hir::Stmt::Transaction(body, _) => {
+                self.compile_block(body)?;
+                Ok(None)
+            }
         }
     }
 
@@ -168,7 +233,6 @@ impl<'ctx> Compiler<'ctx> {
         let mut phi_in: Vec<(BasicValueEnum<'ctx>, BasicBlock<'ctx>)> = Vec::new();
         let mut all_valued = i.els.is_some();
 
-        // Then
         self.bld.position_at_end(then_bb);
         let then_val = self.compile_block(&i.then)?;
         if self.no_term() {
@@ -182,7 +246,6 @@ impl<'ctx> Compiler<'ctx> {
             all_valued = false;
         }
 
-        // Elifs
         for (elif_cond, elif_body) in &i.elifs {
             self.bld.position_at_end(else_bb);
             let cv = self.compile_expr(elif_cond)?;
@@ -205,7 +268,6 @@ impl<'ctx> Compiler<'ctx> {
             else_bb = next_else;
         }
 
-        // Else
         self.bld.position_at_end(else_bb);
         if let Some(ref els) = i.els {
             let else_val = self.compile_block(els)?;
@@ -258,7 +320,6 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         f: &hir::For,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        // Array iteration
         if f.end.is_none() && f.step.is_none() {
             if let Type::Array(ref elem_ty, len) = f.bind_ty {
                 return self.compile_for_array(f, elem_ty, len);
@@ -266,6 +327,12 @@ impl<'ctx> Compiler<'ctx> {
             let iter_ty = &f.iter.ty;
             if let Type::Array(elem_ty, len) = iter_ty {
                 return self.compile_for_array(f, elem_ty, *len);
+            }
+            if let Type::Vec(ref elem_ty) = f.bind_ty {
+                return self.compile_for_vec(f, elem_ty);
+            }
+            if let Type::Vec(elem_ty) = iter_ty {
+                return self.compile_for_vec(f, elem_ty);
             }
         }
         let fv = self.cur_fn.unwrap();
@@ -390,6 +457,69 @@ impl<'ctx> Compiler<'ctx> {
         Ok(None)
     }
 
+    fn compile_for_vec(
+        &mut self,
+        f: &hir::For,
+        elem_ty: &Type,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        let fv = self.cur_fn.unwrap();
+        let i64t = self.ctx.i64_type();
+        let vec_val = self.compile_expr(&f.iter)?;
+        let vec_ptr = vec_val.into_pointer_value();
+        let header_ty = self.vec_header_type();
+        let lty = self.llvm_ty(elem_ty);
+
+        // Load len and data ptr
+        let len_gep = b!(self.bld.build_struct_gep(header_ty, vec_ptr, 1, "fv.lenp"));
+        let len = b!(self.bld.build_load(i64t, len_gep, "fv.len")).into_int_value();
+        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, vec_ptr, 0, "fv.ptrp"));
+        let data_ptr = b!(self.bld.build_load(
+            self.ctx.ptr_type(AddressSpace::default()),
+            ptr_gep,
+            "fv.data"
+        )).into_pointer_value();
+
+        let idx_alloca = self.entry_alloca(i64t.into(), "__idx");
+        b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
+        let elem_alloca = self.entry_alloca(lty, &f.bind);
+        self.set_var(&f.bind, elem_alloca, elem_ty.clone());
+
+        let cond_bb = self.ctx.append_basic_block(fv, "fv.cond");
+        let body_bb = self.ctx.append_basic_block(fv, "fv.body");
+        let inc_bb = self.ctx.append_basic_block(fv, "fv.inc");
+        let end_bb = self.ctx.append_basic_block(fv, "fv.end");
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(cond_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_alloca, "idx")).into_int_value();
+        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, idx, len, "fv.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
+
+        self.bld.position_at_end(body_bb);
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "fv.egep")) };
+        let elem = b!(self.bld.build_load(lty, elem_gep, "fv.elem"));
+        b!(self.bld.build_store(elem_alloca, elem));
+
+        self.loop_stack.push(super::LoopCtx {
+            continue_bb: inc_bb,
+            break_bb: end_bb,
+        });
+        self.compile_block(&f.body)?;
+        self.loop_stack.pop();
+        if self.no_term() {
+            b!(self.bld.build_unconditional_branch(inc_bb));
+        }
+
+        self.bld.position_at_end(inc_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_alloca, "idx")).into_int_value();
+        let next = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "inc"));
+        b!(self.bld.build_store(idx_alloca, next));
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(end_bb);
+        Ok(None)
+    }
+
     pub(crate) fn compile_loop(
         &mut self,
         l: &hir::Loop,
@@ -420,8 +550,6 @@ impl<'ctx> Compiler<'ctx> {
         let subject_val = self.compile_expr(&m.subject)?;
         let subject_ty = self.resolve_ty(m.subject.ty.clone());
 
-        self.check_exhaustive(m, &subject_ty)?;
-
         let is_enum = matches!(subject_ty, Type::Enum(_))
             || matches!(&subject_ty, Type::Struct(n) if self.enums.contains_key(n));
 
@@ -450,16 +578,33 @@ impl<'ctx> Compiler<'ctx> {
             .collect();
         let mut cases = Vec::new();
         let mut default_bb = None;
+        let mut seen_tags = std::collections::HashSet::new();
         for (i, arm) in m.arms.iter().enumerate() {
             match &arm.pat {
                 hir::Pat::Ctor(_, tag, _, _) => {
-                    cases.push((
-                        self.ctx.i32_type().const_int(*tag as u64, false),
-                        arm_bbs[i],
-                    ));
+                    if seen_tags.insert(*tag) {
+                        cases.push((
+                            self.ctx.i32_type().const_int(*tag as u64, false),
+                            arm_bbs[i],
+                        ));
+                    }
+                }
+                hir::Pat::Or(pats, _) => {
+                    for pat in pats {
+                        if let hir::Pat::Ctor(_, tag, _, _) = pat {
+                            if seen_tags.insert(*tag) {
+                                cases.push((
+                                    self.ctx.i32_type().const_int(*tag as u64, false),
+                                    arm_bbs[i],
+                                ));
+                            }
+                        }
+                    }
                 }
                 hir::Pat::Wild(_) | hir::Pat::Bind(_, _, _, _) => {
-                    default_bb = Some(arm_bbs[i]);
+                    if default_bb.is_none() {
+                        default_bb = Some(arm_bbs[i]);
+                    }
                 }
                 _ => {}
             }
@@ -533,6 +678,18 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_store(a, subject_val));
                 self.set_var(name, a, subject_ty.clone());
             }
+            if let Some(ref guard) = arm.guard {
+                let guard_val = self.compile_expr(guard)?;
+                let gv = guard_val.into_int_value();
+                let guard_pass = self.ctx.append_basic_block(fv, &format!("match.guard_pass{i}"));
+                let guard_fail = if i + 1 < arm_bbs.len() {
+                    arm_bbs[i + 1]
+                } else {
+                    merge_bb
+                };
+                b!(self.bld.build_conditional_branch(gv, guard_pass, guard_fail));
+                self.bld.position_at_end(guard_pass);
+            }
             let arm_val = self.compile_block(&arm.body)?;
             self.vars.pop();
             let cur_bb = self.bld.get_insert_block().unwrap();
@@ -548,89 +705,6 @@ impl<'ctx> Compiler<'ctx> {
         self.build_match_phi(&phi_in, all_valued)
     }
 
-    fn check_exhaustive(&self, m: &hir::Match, subject_ty: &Type) -> Result<(), String> {
-        let has_wild = m
-            .arms
-            .iter()
-            .any(|a| matches!(&a.pat, hir::Pat::Wild(_) | hir::Pat::Bind(..)));
-        if has_wild {
-            return Ok(());
-        }
-
-        // For enum types: check all variants are covered
-        let enum_name = match subject_ty {
-            Type::Enum(n) | Type::Struct(n) if self.enums.contains_key(n) => n,
-            // For integer matches without wildcard: warn about non-exhaustive
-            _ if !m.arms.is_empty() => {
-                use crate::diagnostic::{Diagnostic, ErrorCode};
-                let diag = Diagnostic::warning("match on non-enum type without wildcard pattern")
-                    .with_code(ErrorCode::E500)
-                    .at(m.span)
-                    .suggestion("add a wildcard arm: _ ? ...");
-                eprintln!("{}", diag.render("input", &self.source));
-                return Ok(());
-            }
-            _ => return Ok(()),
-        };
-
-        let variants = &self.enums[enum_name];
-        let covered: Vec<&str> = m
-            .arms
-            .iter()
-            .filter_map(|a| match &a.pat {
-                hir::Pat::Ctor(n, _, _, _) => Some(n.as_str()),
-                _ => None,
-            })
-            .collect();
-        let missing: Vec<&str> = variants
-            .iter()
-            .filter(|(n, _)| !covered.contains(&n.as_str()))
-            .map(|(n, _)| n.as_str())
-            .collect();
-        if !missing.is_empty() {
-            use crate::diagnostic::{Diagnostic, ErrorCode};
-            let missing_str = missing.join(", ");
-            let diag = Diagnostic::error(format!(
-                "non-exhaustive match on `{enum_name}`: missing {missing_str}"
-            ))
-            .with_code(ErrorCode::E500)
-            .at(m.span)
-            .note(format!(
-                "{enum_name} has {} variants, {} covered in match",
-                variants.len(),
-                covered.len()
-            ))
-            .suggestion(format!(
-                "add arms for: {}",
-                missing
-                    .iter()
-                    .map(|v| format!("{v} ? ..."))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-            return Err(diag.render("input", &self.source));
-        }
-
-        // Check for duplicate/unreachable patterns
-        let mut seen: Vec<&str> = Vec::new();
-        for arm in &m.arms {
-            if let hir::Pat::Ctor(n, _, _, _) = &arm.pat {
-                if seen.contains(&n.as_str()) {
-                    use crate::diagnostic::{Diagnostic, ErrorCode};
-                    let diag = Diagnostic::warning(format!(
-                        "unreachable pattern: `{n}` already matched above"
-                    ))
-                    .with_code(ErrorCode::E501)
-                    .at(arm.span);
-                    eprintln!("{}", diag.render("input", &self.source));
-                }
-                seen.push(n.as_str());
-            }
-        }
-
-        Ok(())
-    }
-
     fn compile_value_match(
         &mut self,
         m: &hir::Match,
@@ -639,6 +713,120 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
         let fv = self.cur_fn.unwrap();
         let merge_bb = self.ctx.append_basic_block(fv, "match.end");
+
+        // Check if any arm uses Range or Or patterns — if so, use if-else chain
+        let has_complex = m.arms.iter().any(|a| {
+            matches!(&a.pat, hir::Pat::Range(..) | hir::Pat::Or(..) | hir::Pat::Tuple(..) | hir::Pat::Array(..))
+        });
+
+        if has_complex {
+            // If-else chain: separate check blocks + arm blocks
+            let check_bbs: Vec<_> = m.arms.iter().enumerate()
+                .map(|(i, _)| self.ctx.append_basic_block(fv, &format!("match.check{i}")))
+                .collect();
+            let arm_bbs: Vec<_> = m.arms.iter().enumerate()
+                .map(|(i, _)| self.ctx.append_basic_block(fv, &format!("match.arm{i}")))
+                .collect();
+            // Only convert to int when the subject is actually an int (not tuple/array)
+            let iv_opt = subject_val.is_int_value().then(|| subject_val.into_int_value());
+            let mut phi_in: Vec<(BasicValueEnum<'ctx>, BasicBlock<'ctx>)> = Vec::new();
+            let mut all_valued = true;
+
+            // Entry → first check block
+            b!(self.bld.build_unconditional_branch(check_bbs[0]));
+
+            for (i, arm) in m.arms.iter().enumerate() {
+                let next_bb = if i + 1 < check_bbs.len() {
+                    check_bbs[i + 1]
+                } else {
+                    merge_bb
+                };
+
+                // Build condition in check block
+                self.bld.position_at_end(check_bbs[i]);
+                match &arm.pat {
+                    hir::Pat::Wild(_) | hir::Pat::Bind(_, _, _, _) => {
+                        b!(self.bld.build_unconditional_branch(arm_bbs[i]));
+                    }
+                    hir::Pat::Lit(expr) => {
+                        let lit_val = self.compile_expr(expr)?;
+                        let iv = iv_opt.unwrap();
+                        let cmp = b!(self.bld.build_int_compare(
+                            IntPredicate::EQ, iv, lit_val.into_int_value(), "match.cmp"
+                        ));
+                        b!(self.bld.build_conditional_branch(cmp, arm_bbs[i], next_bb));
+                    }
+                    hir::Pat::Range(lo, hi, _) => {
+                        let iv = iv_opt.unwrap();
+                        let lo_val = self.compile_expr(lo)?.into_int_value();
+                        let hi_val = self.compile_expr(hi)?.into_int_value();
+                        let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, iv, lo_val, "rng.ge"));
+                        let le = b!(self.bld.build_int_compare(IntPredicate::SLE, iv, hi_val, "rng.le"));
+                        let in_range = b!(self.bld.build_and(ge, le, "rng.in"));
+                        b!(self.bld.build_conditional_branch(in_range, arm_bbs[i], next_bb));
+                    }
+                    hir::Pat::Or(pats, _) => {
+                        let iv = iv_opt.unwrap();
+                        let mut any_match = self.ctx.bool_type().const_int(0, false);
+                        for pat in pats {
+                            let sub_match = match pat {
+                                hir::Pat::Lit(e) => {
+                                    let lv = self.compile_expr(e)?.into_int_value();
+                                    b!(self.bld.build_int_compare(IntPredicate::EQ, iv, lv, "or.cmp"))
+                                }
+                                hir::Pat::Range(lo, hi, _) => {
+                                    let lo_val = self.compile_expr(lo)?.into_int_value();
+                                    let hi_val = self.compile_expr(hi)?.into_int_value();
+                                    let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, iv, lo_val, "or.ge"));
+                                    let le = b!(self.bld.build_int_compare(IntPredicate::SLE, iv, hi_val, "or.le"));
+                                    b!(self.bld.build_and(ge, le, "or.rng"))
+                                }
+                                _ => self.ctx.bool_type().const_int(1, false),
+                            };
+                            any_match = b!(self.bld.build_or(any_match, sub_match, "or.any"));
+                        }
+                        b!(self.bld.build_conditional_branch(any_match, arm_bbs[i], next_bb));
+                    }
+                    _ => {
+                        b!(self.bld.build_unconditional_branch(arm_bbs[i]));
+                    }
+                }
+
+                // Compile arm body in arm block
+                self.bld.position_at_end(arm_bbs[i]);
+                self.vars.push(HashMap::new());
+                if let hir::Pat::Bind(_, ref name, ref _bty, _) = arm.pat {
+                    let a = self.entry_alloca(self.llvm_ty(subject_ty), name);
+                    b!(self.bld.build_store(a, subject_val));
+                    self.set_var(name, a, subject_ty.clone());
+                } else if let hir::Pat::Tuple(ref pats, _) = arm.pat {
+                    self.bind_tuple_pat(pats, subject_val, subject_ty)?;
+                } else if let hir::Pat::Array(ref pats, _) = arm.pat {
+                    self.bind_array_pat(pats, subject_val, subject_ty)?;
+                }
+                if let Some(ref guard) = arm.guard {
+                    let guard_val = self.compile_expr(guard)?;
+                    let gv = guard_val.into_int_value();
+                    let guard_pass = self.ctx.append_basic_block(fv, &format!("match.guard_pass{i}"));
+                    b!(self.bld.build_conditional_branch(gv, guard_pass, next_bb));
+                    self.bld.position_at_end(guard_pass);
+                }
+                let arm_val = self.compile_block(&arm.body)?;
+                self.vars.pop();
+                let cur_bb = self.bld.get_insert_block().unwrap();
+                if self.no_term() {
+                    match arm_val {
+                        Some(v) => phi_in.push((v, cur_bb)),
+                        None => all_valued = false,
+                    }
+                    b!(self.bld.build_unconditional_branch(merge_bb));
+                }
+            }
+            self.bld.position_at_end(merge_bb);
+            return self.build_match_phi(&phi_in, all_valued);
+        }
+
+        // Original switch-based path for simple Lit/Wild/Bind patterns
         let arm_bbs: Vec<_> = m
             .arms
             .iter()
@@ -653,10 +841,14 @@ impl<'ctx> Compiler<'ctx> {
                 hir::Pat::Lit(expr) => {
                     if let hir::ExprKind::Int(n) = expr.kind {
                         cases.push((self.ctx.i64_type().const_int(n as u64, true), arm_bbs[i]));
+                    } else if let hir::ExprKind::Bool(b) = expr.kind {
+                        cases.push((self.ctx.bool_type().const_int(b as u64, false), arm_bbs[i]));
                     }
                 }
                 hir::Pat::Wild(_) | hir::Pat::Bind(_, _, _, _) => {
-                    default_bb = Some(arm_bbs[i]);
+                    if default_bb.is_none() {
+                        default_bb = Some(arm_bbs[i]);
+                    }
                 }
                 _ => return Err("unsupported match pattern".into()),
             }
@@ -675,6 +867,18 @@ impl<'ctx> Compiler<'ctx> {
                 let a = self.entry_alloca(self.llvm_ty(subject_ty), name);
                 b!(self.bld.build_store(a, subject_val));
                 self.set_var(name, a, subject_ty.clone());
+            }
+            if let Some(ref guard) = arm.guard {
+                let guard_val = self.compile_expr(guard)?;
+                let gv = guard_val.into_int_value();
+                let guard_pass = self.ctx.append_basic_block(fv, &format!("match.guard_pass{i}"));
+                let guard_fail = if i + 1 < arm_bbs.len() {
+                    arm_bbs[i + 1]
+                } else {
+                    merge_bb
+                };
+                b!(self.bld.build_conditional_branch(gv, guard_pass, guard_fail));
+                self.bld.position_at_end(guard_pass);
             }
             let arm_val = self.compile_block(&arm.body)?;
             let cur_bb = self.bld.get_insert_block().unwrap();
@@ -849,5 +1053,73 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             Ok(None)
         }
+    }
+
+    fn bind_tuple_pat(
+        &mut self,
+        pats: &[hir::Pat],
+        subject_val: BasicValueEnum<'ctx>,
+        subject_ty: &Type,
+    ) -> Result<(), String> {
+        let elem_tys: Vec<Type> = match subject_ty {
+            Type::Tuple(ts) => ts.clone(),
+            _ => vec![Type::I64; pats.len()],
+        };
+        let llvm_tys: Vec<BasicTypeEnum<'ctx>> = elem_tys.iter().map(|t| self.llvm_ty(t)).collect();
+        let st = self.ctx.struct_type(&llvm_tys, false);
+        let tmp = self.entry_alloca(st.into(), "tup.match");
+        b!(self.bld.build_store(tmp, subject_val));
+        for (i, pat) in pats.iter().enumerate() {
+            if let hir::Pat::Bind(_, name, _, _) = pat {
+                let ety = elem_tys.get(i).cloned().unwrap_or(Type::I64);
+                let lty = self.llvm_ty(&ety);
+                let gep = b!(self.bld.build_struct_gep(st, tmp, i as u32, "tup.el"));
+                let elem = b!(self.bld.build_load(lty, gep, name));
+                let a = self.entry_alloca(lty, name);
+                b!(self.bld.build_store(a, elem));
+                self.set_var(name, a, ety);
+            }
+            // Wild pattern = skip
+        }
+        Ok(())
+    }
+
+    fn bind_array_pat(
+        &mut self,
+        pats: &[hir::Pat],
+        subject_val: BasicValueEnum<'ctx>,
+        subject_ty: &Type,
+    ) -> Result<(), String> {
+        let elem_ty = match subject_ty {
+            Type::Array(inner, _) => inner.as_ref().clone(),
+            _ => Type::I64,
+        };
+        // If the subject is a pointer, use it directly; otherwise store to stack
+        let arr_ptr = if subject_val.is_pointer_value() {
+            subject_val.into_pointer_value()
+        } else {
+            let alloc = self.entry_alloca(subject_val.get_type(), "arr.tmp");
+            b!(self.bld.build_store(alloc, subject_val));
+            alloc
+        };
+        let lty = self.llvm_ty(&elem_ty);
+        let i64t = self.ctx.i64_type();
+        for (i, pat) in pats.iter().enumerate() {
+            if let hir::Pat::Bind(_, name, _, _) = pat {
+                let gep = unsafe {
+                    b!(self.bld.build_gep(
+                        lty,
+                        arr_ptr,
+                        &[i64t.const_int(i as u64, false)],
+                        "arr.el"
+                    ))
+                };
+                let elem = b!(self.bld.build_load(lty, gep, name));
+                let a = self.entry_alloca(lty, name);
+                b!(self.bld.build_store(a, elem));
+                self.set_var(name, a, elem_ty.clone());
+            }
+        }
+        Ok(())
     }
 }

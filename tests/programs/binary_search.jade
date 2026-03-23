@@ -1,0 +1,42 @@
+# binary_search.jade — Binary search + sorting
+# Complexity: Intermediate
+# Demonstrates: arrays, loops, functions, conditionals
+
+*binary_search(arr, size, target)
+    lo is 0
+    hi is size - 1
+    while lo <= hi
+        mid is lo + (hi - lo) / 2
+        if arr[mid] equals target
+            return mid
+        elif arr[mid] < target
+            lo is mid + 1
+        else
+            hi is mid - 1
+    return -1
+
+# Insertion sort (in-place via array rebinding)
+*insertion_sort(arr, size)
+    for i from 1 to size
+        key is arr[i]
+        j is i - 1
+        while j >= 0 and arr[j] > key
+            arr[j + 1] is arr[j]
+            j is j - 1
+        arr[j + 1] is key
+    arr
+
+*main()
+    # Sorted array — binary search
+    sorted is [2, 5, 8, 12, 16, 23, 38, 56, 72, 91]
+
+    log(binary_search(sorted, 10, 23))    # 5
+    log(binary_search(sorted, 10, 72))    # 8
+    log(binary_search(sorted, 10, 1))     # -1
+    log(binary_search(sorted, 10, 100))   # -1
+
+    # Sorting
+    unsorted is [64, 34, 25, 12, 22, 11, 90]
+    result is insertion_sort(unsorted, 7)
+    for i from 0 to 7
+        log(result[i])

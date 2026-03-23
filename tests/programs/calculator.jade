@@ -1,0 +1,56 @@
+# calculator.jade — Simple expression evaluator with enums
+# Complexity: Intermediate
+# Demonstrates: enums with data, recursive pattern matching, structs
+
+enum Expr
+    Num(f64)
+    Add(Expr, Expr)
+    Sub(Expr, Expr)
+    Mul(Expr, Expr)
+    Div(Expr, Expr)
+    Neg(Expr)
+
+*eval(e: Expr)
+    match e
+        Num(n) ? n
+        Add(a, b) ? eval(a) + eval(b)
+        Sub(a, b) ? eval(a) - eval(b)
+        Mul(a, b) ? eval(a) * eval(b)
+        Div(a, b) ? eval(a) / eval(b)
+        Neg(a) ? 0.0 - eval(a)
+
+*depth(e: Expr)
+    match e
+        Num(_) ? 0
+        Add(a, b) ? 1 + max(depth(a), depth(b))
+        Sub(a, b) ? 1 + max(depth(a), depth(b))
+        Mul(a, b) ? 1 + max(depth(a), depth(b))
+        Div(a, b) ? 1 + max(depth(a), depth(b))
+        Neg(a) ? 1 + depth(a)
+
+*max(a, b)
+    a > b ? a ! b
+
+*main()
+    # (3 + 4) * 2 = 14
+    e1 is Mul(Add(Num(3.0), Num(4.0)), Num(2.0))
+    log(eval(e1))
+
+    # 10 / (5 - 3) = 5
+    e2 is Div(Num(10.0), Sub(Num(5.0), Num(3.0)))
+    log(eval(e2))
+
+    # -(2 + 3) = -5
+    e3 is Neg(Add(Num(2.0), Num(3.0)))
+    log(eval(e3))
+
+    # Nested: ((1 + 2) * (3 + 4)) - 5 = 16
+    e4 is Sub(
+        Mul(
+            Add(Num(1.0), Num(2.0)),
+            Add(Num(3.0), Num(4.0))
+        ),
+        Num(5.0)
+    )
+    log(eval(e4))
+    log(depth(e4))                  # 3

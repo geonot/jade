@@ -1,0 +1,33 @@
+extern *usleep(us: i32) -> i32
+
+actor Adder
+    total: i64
+    @add n: i64
+        total is total + n
+    @show
+        log(total)
+
+actor Multiplier
+    product: i64
+    @init
+        product is 1
+    @mul n: i64
+        product is product * n
+    @show
+        log(product)
+
+*main()
+    a is spawn Adder
+    m is spawn Multiplier
+    send m, @init()
+    send a, @add(10)
+    send a, @add(20)
+    send a, @add(30)
+    send m, @mul(2)
+    send m, @mul(3)
+    send m, @mul(7)
+    usleep(100000)
+    send a, @show()
+    send m, @show()
+    usleep(100000)
+    0

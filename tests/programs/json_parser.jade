@@ -1,0 +1,105 @@
+# json_parser.jade — Recursive descent JSON parser
+# Complexity: Advanced
+# Demonstrates: enums, recursion, string ops, pattern matching, error handling
+# Note: some features (iterators, Vec) may require future stdlib
+
+enum Json
+    JNull
+    JBool(bool)
+    JNum(f64)
+    JStr(String)
+    JArray(Json, Json)     # Cons-style linked list of values
+    JEmpty                 # End of array/object
+    JObject(String, Json, Json)  # key, value, rest of object
+
+err ParseError
+    UnexpectedChar(i64)
+    UnexpectedEnd
+    InvalidToken(String)
+
+# Skip whitespace, return new position
+*skip_ws(s: String, pos: i64)
+    p is pos
+    while p < s.length
+        ch is s.char_at(p)
+        if ch equals 32 or ch equals 10 or ch equals 13 or ch equals 9
+            p is p + 1
+        else
+            return p
+    p
+
+# Parse a JSON number (integers only for simplicity)
+*parse_number(s: String, pos: i64)
+    p is pos
+    neg is false
+    if s.char_at(p) equals 45      # '-'
+        neg is true
+        p is p + 1
+    n is 0
+    while p < s.length
+        ch is s.char_at(p)
+        if ch >= 48 and ch <= 57   # '0'-'9'
+            n is n * 10 + (ch - 48)
+            p is p + 1
+        else
+            break
+    val is neg ? 0 - n ! n
+    (JNum(val as f64), p)
+
+# Parse a JSON string (assumes well-formed, no escape handling)
+*parse_string(s: String, pos: i64)
+    # skip opening quote
+    p is pos + 1
+    start is p
+    while p < s.length and s.char_at(p) isnt 34   # '"'
+        p is p + 1
+    content is s.slice(start, p)
+    p is p + 1    # skip closing quote
+    (JStr(content), p)
+
+*describe(j: Json)
+    match j
+        JNull ? log('null')
+        JBool(b) ? log(b)
+        JNum(n) ? log(n)
+        JStr(s) ? log(s)
+        JArray(_, _) ? log('array')
+        JObject(_, _, _) ? log('object')
+        JEmpty ? log('empty')
+
+*count_nodes(j: Json)
+    match j
+        JNull ? 1
+        JBool(_) ? 1
+        JNum(_) ? 1
+        JStr(_) ? 1
+        JArray(head, tail) ? 1 + count_nodes(head) + count_nodes(tail)
+        JObject(_, val, rest) ? 1 + count_nodes(val) + count_nodes(rest)
+        JEmpty ? 0
+
+*main()
+    # Build JSON values manually
+    obj is JObject(
+        'name', JStr('jade'),
+        JObject(
+            'version', JNum(0.0),
+            JObject(
+                'compiled', JBool(true),
+                JEmpty
+            )
+        )
+    )
+
+    describe(obj)
+    log(count_nodes(obj))
+
+    arr is JArray(JNum(1.0), JArray(JNum(2.0), JArray(JNum(3.0), JEmpty)))
+    describe(arr)
+    log(count_nodes(arr))
+
+    # Parse a simple number
+    result, pos is parse_number('42', 0)
+    describe(result)
+
+    result2, pos2 is parse_string('"hello"', 0)
+    describe(result2)

@@ -1,10 +1,13 @@
 mod builtins;
 mod call;
+mod collections;
 mod decl;
 mod expr;
 mod stmt;
 mod strings;
 mod types;
+mod actors;
+mod stores;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -36,10 +39,6 @@ macro_rules! b {
 }
 pub(crate) use b;
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Compiler state
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 pub struct Compiler<'ctx> {
     pub(crate) ctx: &'ctx Context,
     pub(crate) module: Module<'ctx>,
@@ -60,16 +59,17 @@ pub struct Compiler<'ctx> {
     pub(crate) di_compile_unit: Option<DICompileUnit<'ctx>>,
     pub(crate) di_scope_stack: Vec<DIScope<'ctx>>,
     pub(crate) filename: String,
+    pub(crate) store_defs: HashMap<String, hir::StoreDef>,
+    /// VTable globals: (type_name, trait_name) → global pointer to vtable array
+    pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
+    /// Trait method order: trait_name → [method_name, ...]
+    pub(crate) trait_method_order: HashMap<String, Vec<String>>,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
     pub continue_bb: BasicBlock<'ctx>,
     pub break_bb: BasicBlock<'ctx>,
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Public API
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 impl<'ctx> Compiler<'ctx> {
     pub fn new(ctx: &'ctx Context, name: &str) -> Self {
@@ -93,6 +93,9 @@ impl<'ctx> Compiler<'ctx> {
             di_compile_unit: None,
             di_scope_stack: Vec::new(),
             filename: name.to_string(),
+            store_defs: HashMap::new(),
+            vtables: HashMap::new(),
+            trait_method_order: HashMap::new(),
         }
     }
 
@@ -108,12 +111,14 @@ impl<'ctx> Compiler<'ctx> {
         self.debug = true;
         self.filename = filename.to_string();
         let (di_builder, di_cu) = self.module.create_debug_info_builder(
-            true, // allow_unresolved
-            DWARFSourceLanguage::C, // closest match for Jade's ABI
+            true,
+            // DWARF: use user-defined language range for Jade (0x8000 + 1)
+            // C is used as fallback since inkwell doesn't expose DW_LANG_lo_user directly
+            DWARFSourceLanguage::C,
             filename,
             ".",
             "jadec",
-            false, // is_optimized (set at emit time)
+            false,
             "",
             0,
             "",
@@ -132,6 +137,26 @@ impl<'ctx> Compiler<'ctx> {
         self.module.print_to_string().to_string()
     }
 
+    pub fn emit_ir_optimized(&self, opt: OptimizationLevel) -> Result<String, String> {
+        let passes = match opt {
+            OptimizationLevel::None => "default<O0>",
+            OptimizationLevel::Less => "default<O1>",
+            OptimizationLevel::Default => "default<O2>",
+            OptimizationLevel::Aggressive => "default<O3>",
+        };
+        let tm = self.target_machine(opt)?;
+        let pb = PassBuilderOptions::create();
+        let o2plus = matches!(opt, OptimizationLevel::Default | OptimizationLevel::Aggressive);
+        pb.set_loop_vectorization(o2plus);
+        pb.set_loop_slp_vectorization(o2plus);
+        pb.set_loop_unrolling(o2plus);
+        pb.set_loop_interleaving(o2plus);
+        pb.set_call_graph_profile(o2plus);
+        pb.set_merge_functions(matches!(opt, OptimizationLevel::Aggressive));
+        self.module.run_passes(passes, &tm, pb).map_err(|e| e.to_string())?;
+        Ok(self.module.print_to_string().to_string())
+    }
+
     pub fn emit_object(&self, path: &Path, opt: OptimizationLevel) -> Result<(), String> {
         let passes = match opt {
             OptimizationLevel::None => "default<O0>",
@@ -141,18 +166,15 @@ impl<'ctx> Compiler<'ctx> {
         };
         let tm = self.target_machine(opt)?;
         let pb = PassBuilderOptions::create();
-        pb.set_loop_vectorization(matches!(
+        let o2plus = matches!(
             opt,
             OptimizationLevel::Default | OptimizationLevel::Aggressive
-        ));
-        pb.set_loop_slp_vectorization(matches!(
-            opt,
-            OptimizationLevel::Default | OptimizationLevel::Aggressive
-        ));
-        pb.set_loop_unrolling(matches!(
-            opt,
-            OptimizationLevel::Default | OptimizationLevel::Aggressive
-        ));
+        );
+        pb.set_loop_vectorization(o2plus);
+        pb.set_loop_slp_vectorization(o2plus);
+        pb.set_loop_unrolling(o2plus);
+        pb.set_loop_interleaving(o2plus);
+        pb.set_call_graph_profile(o2plus);
         pb.set_merge_functions(matches!(opt, OptimizationLevel::Aggressive));
         self.module
             .run_passes(passes, &tm, pb)
@@ -170,7 +192,13 @@ impl<'ctx> Compiler<'ctx> {
         self.setup_target()?;
         self.declare_builtins();
 
-        // Phase 1: declare all types, enums, externs, error defs, functions
+        // SSO correctness: string struct must be exactly 24 bytes ({ptr, i64, i64}).
+        debug_assert_eq!(
+            self.type_store_size(self.string_type().into()),
+            24,
+            "String SSO layout changed — expected 24 bytes"
+        );
+
         for td in &prog.types {
             self.declare_type(td)?;
             for m in &td.methods {
@@ -186,11 +214,46 @@ impl<'ctx> Compiler<'ctx> {
         for ed in &prog.err_defs {
             self.declare_err_def(ed)?;
         }
+
+        // Declare actor runtime if actors are present
+        if !prog.actors.is_empty() {
+            self.declare_actor_runtime();
+            for ad in &prog.actors {
+                self.declare_actor(ad)?;
+            }
+        }
+
+        // Declare store runtime if stores are present
+        if !prog.stores.is_empty() {
+            self.declare_store_runtime();
+            for sd in &prog.stores {
+                self.declare_store(sd)?;
+                self.store_defs.insert(sd.name.clone(), sd.clone());
+            }
+        }
+
         for f in &prog.fns {
             self.declare_fn(f)?;
         }
 
-        // Phase 2: compile all function and method bodies
+        // Declare trait impl methods (before compilation, so calls resolve)
+        for ti in &prog.trait_impls {
+            for m in &ti.methods {
+                if !self.fns.contains_key(&m.name) {
+                    self.declare_method(&ti.type_name, m)?;
+                }
+            }
+        }
+
+        // Generate vtables for dyn Trait dispatch (after declarations, before body compilation)
+        self.generate_vtables(&prog.trait_impls)?;
+
+        // Compile actor loop functions before user functions
+        // (so spawn can reference the loop fn)
+        for ad in &prog.actors {
+            self.compile_actor_loop(ad)?;
+        }
+
         for f in &prog.fns {
             self.compile_fn(f)?;
         }
@@ -202,14 +265,102 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        // Compile trait impl method bodies
+        for ti in &prog.trait_impls {
+            for m in &ti.methods {
+                if self.fns.contains_key(&m.name) {
+                    self.compile_method_body(&ti.type_name, &m.name, m)?;
+                }
+            }
+        }
+
+        // Generate vtables already done above (before body compilation)
+
         self.finalize_debug();
         self.module.verify().map_err(|e| e.to_string())
     }
-}
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// DWARF debug info
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    fn generate_vtables(&mut self, trait_impls: &[hir::TraitImpl]) -> Result<(), String> {
+        let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+
+        // Build trait method order from the impls
+        for ti in trait_impls {
+            if let Some(ref trait_name) = ti.trait_name {
+                let order = self.trait_method_order
+                    .entry(trait_name.clone())
+                    .or_default();
+                for m in &ti.methods {
+                    // Method names are mangled as TypeName_methodname
+                    let base_name = m.name.strip_prefix(&format!("{}_", ti.type_name))
+                        .unwrap_or(&m.name);
+                    if !order.contains(&base_name.to_string()) {
+                        order.push(base_name.to_string());
+                    }
+                }
+            }
+        }
+
+        // For each (type, trait) pair, build thunks and a vtable global
+        for ti in trait_impls {
+            if let Some(ref trait_name) = ti.trait_name {
+                let method_order = self.trait_method_order.get(trait_name).cloned().unwrap_or_default();
+                let mut fn_ptrs: Vec<inkwell::values::PointerValue<'ctx>> = Vec::new();
+                for method_name in &method_order {
+                    let mangled = format!("{}_{method_name}", ti.type_name);
+                    if let Some((fv, param_tys, ret_ty)) = self.fns.get(&mangled).cloned() {
+                        // Generate a thunk: takes ptr as self, loads concrete type, calls original
+                        let thunk_name = format!("__thunk_{mangled}");
+                        let mut thunk_param_tys: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr.into()];
+                        // Skip the first param (self) — remaining params keep their types
+                        for pt in param_tys.iter().skip(1) {
+                            thunk_param_tys.push(self.llvm_ty(pt).into());
+                        }
+                        let thunk_ret = self.llvm_ty(&ret_ty);
+                        let thunk_fn_ty = thunk_ret.fn_type(&thunk_param_tys, false);
+                        let thunk_fn = self.module.add_function(&thunk_name, thunk_fn_ty, None);
+                        let entry = self.ctx.append_basic_block(thunk_fn, "entry");
+                        self.bld.position_at_end(entry);
+                        // Load concrete type from ptr
+                        let self_ptr = thunk_fn.get_first_param().unwrap().into_pointer_value();
+                        let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self.module.get_struct_type(&ti.type_name)
+                            .map(|st| st.into())
+                            .unwrap_or_else(|| self.ctx.i64_type().into());
+                        let loaded_self = b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"));
+                        // Build call args: loaded self + forwarded params
+                        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = vec![loaded_self.into()];
+                        for i in 1..thunk_fn.count_params() {
+                            call_args.push(thunk_fn.get_nth_param(i).unwrap().into());
+                        }
+                        let result = b!(self.bld.build_call(fv, &call_args, "thunk.call"));
+                        if let Some(rv) = result.try_as_basic_value().basic() {
+                            b!(self.bld.build_return(Some(&rv)));
+                        } else {
+                            b!(self.bld.build_return(None));
+                        }
+                        fn_ptrs.push(thunk_fn.as_global_value().as_pointer_value());
+                    } else {
+                        fn_ptrs.push(ptr.const_null());
+                    }
+                }
+                if fn_ptrs.is_empty() {
+                    continue;
+                }
+                let arr_ty = ptr.array_type(fn_ptrs.len() as u32);
+                let vtable_const = ptr.const_array(&fn_ptrs);
+                let vtable_name = format!("__vtable_{}_{}", ti.type_name, trait_name);
+                let gv = self.module.add_global(arr_ty, None, &vtable_name);
+                gv.set_initializer(&vtable_const);
+                gv.set_constant(true);
+                gv.set_linkage(inkwell::module::Linkage::Internal);
+                self.vtables.insert(
+                    (ti.type_name.clone(), trait_name.clone()),
+                    gv,
+                );
+            }
+        }
+        Ok(())
+    }
+}
 
 impl<'ctx> Compiler<'ctx> {
     fn finalize_debug(&self) {
@@ -233,8 +384,8 @@ impl<'ctx> Compiler<'ctx> {
         let file = cu.get_file();
         let di_type = di.create_subroutine_type(
             file,
-            None, // return type
-            &[],  // parameter types
+            None,
+            &[],
             DIFlags::PUBLIC,
         );
         let subprogram = di.create_function(
@@ -244,11 +395,11 @@ impl<'ctx> Compiler<'ctx> {
             file,
             line,
             di_type,
-            true,   // is_local_to_unit
-            true,   // is_definition
-            line,   // scope_line
+            true,
+            true,
+            line,
             DIFlags::PUBLIC,
-            false,  // is_optimized
+            false,
         );
         fv.set_subprogram(subprogram);
         self.di_scope_stack.push(subprogram.as_debug_info_scope());
@@ -273,10 +424,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Internal helpers
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn setup_target(&self) -> Result<(), String> {
@@ -322,6 +469,7 @@ impl<'ctx> Compiler<'ctx> {
         }
         if will_return {
             fv.add_attribute(AttributeLoc::Function, self.attr("willreturn"));
+            fv.add_attribute(AttributeLoc::Function, self.attr("norecurse"));
         }
     }
 

@@ -37,6 +37,11 @@ pub enum Decl {
     Extern(ExternFn),
     Use(UseDecl),
     ErrDef(ErrDef),
+    Test(TestBlock),
+    Actor(ActorDef),
+    Store(StoreDef),
+    Trait(TraitDef),
+    Impl(ImplBlock),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,6 +90,10 @@ pub enum Stmt {
     Match(Match),
     Asm(AsmBlock),
     ErrReturn(Expr, Span),
+    StoreInsert(String, Vec<Expr>, Span),
+    StoreDelete(String, StoreFilter, Span),
+    StoreSet(String, Vec<(String, Expr)>, StoreFilter, Span),
+    Transaction(Block, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +102,19 @@ pub enum Pat {
     Ident(String, Span),
     Lit(Expr),
     Ctor(String, Vec<Pat>, Span),
+    Or(Vec<Pat>, Span),
+    Range(Expr, Expr, Span),
+    Tuple(Vec<Pat>, Span),
+    Array(Vec<Pat>, Span),
+}
+
+impl Pat {
+    pub fn span(&self) -> Span {
+        match self {
+            Pat::Wild(s) | Pat::Ident(_, s) | Pat::Ctor(_, _, s) | Pat::Or(_, s) | Pat::Range(_, _, s) | Pat::Tuple(_, s) | Pat::Array(_, s) => *s,
+            Pat::Lit(e) => e.span(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +144,7 @@ pub enum Expr {
     Placeholder(Span),
     Ref(Box<Expr>, Span),
     Deref(Box<Expr>, Span),
+    Embed(String, Span),
     ListComp(
         Box<Expr>,
         String,
@@ -131,6 +154,15 @@ pub enum Expr {
         Span,
     ),
     Syscall(Vec<Expr>, Span),
+    Query(Box<Expr>, Vec<QueryClause>, Span),
+    StoreQuery(String, Box<StoreFilter>, Span),
+    StoreCount(String, Span),
+    StoreAll(String, Span),
+    Spawn(String, Span),
+    Send(Box<Expr>, String, Vec<Expr>, Span),
+    Receive(Vec<ReceiveArm>, Span),
+    Yield(Box<Expr>, Span),
+    DispatchBlock(String, Block, Span),
 }
 
 impl Expr {
@@ -160,8 +192,18 @@ impl Expr {
             | Self::Placeholder(s)
             | Self::Ref(_, s)
             | Self::Deref(_, s)
+            | Self::Embed(_, s)
             | Self::ListComp(_, _, _, _, _, s)
-            | Self::Syscall(_, s) => *s,
+            | Self::Syscall(_, s)
+            | Self::Query(_, _, s)
+            | Self::StoreQuery(_, _, s)
+            | Self::StoreCount(_, s)
+            | Self::StoreAll(_, s)
+            | Self::Spawn(_, s)
+            | Self::Send(_, _, _, s)
+            | Self::Receive(_, s)
+            | Self::Yield(_, s)
+            | Self::DispatchBlock(_, _, s) => *s,
             Self::IfExpr(i) => i.span,
         }
     }
@@ -187,6 +229,7 @@ pub struct Param {
     pub name: String,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
+    pub literal: Option<Expr>,
     pub span: Span,
 }
 
@@ -286,6 +329,7 @@ pub struct Match {
 #[derive(Debug, Clone)]
 pub struct Arm {
     pub pat: Pat,
+    pub guard: Option<Expr>,
     pub body: Block,
     pub span: Span,
 }
@@ -315,6 +359,17 @@ pub struct AsmBlock {
 }
 
 #[derive(Debug, Clone)]
+pub enum QueryClause {
+    Where(Expr, Span),
+    Limit(Expr, Span),
+    Sort(String, bool, Span),
+    Take(Expr, Span),
+    Skip(Expr, Span),
+    Set(String, Expr, Span),
+    Delete(Span),
+}
+
+#[derive(Debug, Clone)]
 pub struct UseDecl {
     pub path: Vec<String>,
     pub span: Span,
@@ -332,4 +387,86 @@ pub struct ErrVariant {
     pub name: String,
     pub fields: Vec<Type>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestBlock {
+    pub name: String,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActorDef {
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub handlers: Vec<Handler>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct Handler {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReceiveArm {
+    pub handler: String,
+    pub bindings: Vec<String>,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreDef {
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitDef {
+    pub name: String,
+    pub type_params: Vec<String>,
+    pub methods: Vec<TraitMethod>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: Option<Type>,
+    pub default_body: Option<Block>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImplBlock {
+    pub trait_name: Option<String>,
+    pub type_name: String,
+    pub methods: Vec<Fn>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicalOp { And, Or }
+
+#[derive(Debug, Clone)]
+pub struct StoreFilter {
+    pub field: String,
+    pub op: BinOp,
+    pub value: Expr,
+    pub span: Span,
+    pub extra: Vec<(LogicalOp, StoreFilterCond)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreFilterCond {
+    pub field: String,
+    pub op: BinOp,
+    pub value: Expr,
 }

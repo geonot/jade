@@ -1,0 +1,15 @@
+store items
+    name: String
+    val: i64
+
+*main
+    insert items 'aaa', 100
+    insert items 'bbb', 200
+    insert items 'ccc', 300
+
+    n is count items
+    log n
+
+    x is items where val > 0
+    log x.val
+    log x.name

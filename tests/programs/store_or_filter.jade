@@ -1,0 +1,18 @@
+store items
+    name: String
+    value: i64
+
+*main
+    insert items 'Alpha', 10
+    insert items 'Beta', 20
+    insert items 'Gamma', 30
+
+    # OR filter: value equals 10 or value equals 30
+    delete items where value equals 10 or value equals 30
+    c is count items
+    log c
+
+    # Should only have Beta left
+    r is items where name equals 'Beta'
+    log r.name
+    log r.value

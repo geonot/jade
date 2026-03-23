@@ -1,0 +1,62 @@
+# higher_order.jade — Higher-order function patterns
+# Complexity: Intermediate
+# Demonstrates: lambdas, pipelines, closures, HOFs
+
+# Apply a function to a value
+*apply(f: (i64) -> i64, x: i64)
+    f(x)
+
+# Apply a function twice
+*apply_twice(f: (i64) -> i64, x: i64)
+    f(f(x))
+
+# Compose two functions
+*compose(f: (i64) -> i64, g: (i64) -> i64, x: i64)
+    f(g(x))
+
+# Repeat a function n times
+*repeat(f: (i64) -> i64, n: i64, x: i64)
+    result is x
+    for i from 0 to n
+        result is f(result)
+    result
+
+# Fold over an array
+*fold(arr, size: i64, init: i64, f: (i64, i64) -> i64)
+    acc is init
+    for i from 0 to size
+        acc is f(acc, arr[i])
+    acc
+
+*main()
+    double is *fn(x: i64) x * 2
+    inc is *fn(x: i64) x + 1
+    square is *fn(x: i64) x * x
+
+    # apply
+    log(apply(double, 21))           # 42
+    log(apply(square, 7))            # 49
+
+    # apply_twice
+    log(apply_twice(double, 3))      # 12
+    log(apply_twice(inc, 10))        # 12
+
+    # compose
+    log(compose(double, inc, 5))     # 12 = double(inc(5))
+    log(compose(inc, double, 5))     # 11 = inc(double(5))
+
+    # repeat
+    log(repeat(double, 10, 1))       # 1024 = 2^10
+    log(repeat(inc, 100, 0))         # 100
+
+    # fold — sum and product
+    nums is [1, 2, 3, 4, 5]
+    sum_fn is *fn(a: i64, b: i64) a + b
+    mul_fn is *fn(a: i64, b: i64) a * b
+
+    log(fold(nums, 5, 0, sum_fn))    # 15
+    log(fold(nums, 5, 1, mul_fn))    # 120
+
+    # Pipeline
+    result is 5 ~ inc ~ double ~ square
+    log(result)                       # 144 = ((5+1)*2)^2

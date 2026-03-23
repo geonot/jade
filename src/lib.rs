@@ -2,6 +2,7 @@ pub mod ast;
 pub mod codegen;
 pub mod diagnostic;
 pub mod hir;
+pub mod hir_validate;
 pub mod lexer;
 pub mod ownership;
 pub mod parser;

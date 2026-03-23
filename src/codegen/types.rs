@@ -27,6 +27,10 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|s| s.into())
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
+            Type::Vec(_) | Type::Map(_, _) => {
+                // Vec and Map are heap-allocated: {ptr, len, cap} or {ptr, len, cap}
+                self.ctx.ptr_type(AddressSpace::default()).into()
+            }
             Type::Tuple(tys) => self
                 .ctx
                 .struct_type(
@@ -34,8 +38,13 @@ impl<'ctx> Compiler<'ctx> {
                     false,
                 )
                 .into(),
-            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => {
+            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) | Type::ActorRef(_) | Type::Coroutine(_) => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
+            }
+            Type::DynTrait(_) => {
+                // Fat pointer: {data: ptr, vtable: ptr}
+                let ptr = self.ctx.ptr_type(AddressSpace::default());
+                self.ctx.struct_type(&[ptr.into(), ptr.into()], false).into()
             }
             Type::Param(_) => self.ctx.i64_type().into(),
         }

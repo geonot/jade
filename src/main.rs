@@ -21,8 +21,15 @@ struct Cli {
     input: PathBuf,
     #[arg(short, long, default_value = "a.out")]
     output: PathBuf,
+    /// Dump LLVM IR to stdout
     #[arg(long)]
     emit_ir: bool,
+    /// Dump LLVM IR to stdout (alias for --emit-ir)
+    #[arg(long)]
+    emit_llvm: bool,
+    /// Dump HIR to stdout
+    #[arg(long)]
+    emit_hir: bool,
     /// Emit object file without linking
     #[arg(long)]
     emit_obj: bool,
@@ -39,6 +46,9 @@ struct Cli {
     /// Emit DWARF debug info (-g)
     #[arg(short = 'g', long)]
     debug: bool,
+    /// Run inline test blocks instead of main
+    #[arg(long)]
+    test: bool,
 }
 
 fn die(msg: &str) -> ! {
@@ -113,14 +123,29 @@ fn main() {
     let mut loaded = HashSet::new();
     resolve_modules(&mut prog, base_dir, &mut loaded);
 
-    // ── HIR: type check → Perceus optimization → ownership verification ──
     let mut typer = Typer::new();
+    typer.set_source_dir(base_dir.to_path_buf());
+    if cli.test {
+        typer.set_test_mode(true);
+    }
     let hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,
         Err(e) => die(&format!("hir: {e}")),
     };
 
-    // Perceus optimizations
+    if cli.emit_hir {
+        print!("{}", jadec::hir::pretty_print(&hir_prog));
+        return;
+    }
+
+    let hir_errors = jadec::hir_validate::HirValidator::validate(&hir_prog);
+    for e in &hir_errors {
+        eprintln!("hir-validate: {e}");
+    }
+    if !hir_errors.is_empty() {
+        die("compilation aborted due to HIR validation errors");
+    }
+
     let mut perceus = PerceusPass::new();
     let hints = perceus.optimize(&hir_prog);
     if hints.stats.drops_elided > 0
@@ -142,24 +167,28 @@ fn main() {
         );
     }
 
-    // Ownership verification
     let mut verifier = OwnershipVerifier::new();
     let diags = verifier.verify(&hir_prog);
+    let mut has_hard_error = false;
     for d in &diags {
+        let level = match d.kind {
+            jadec::ownership::DiagKind::UseAfterMove => { has_hard_error = true; "error" },
+            jadec::ownership::DiagKind::DoubleMutableBorrow => { has_hard_error = true; "error" },
+            jadec::ownership::DiagKind::MoveOfBorrowed => { has_hard_error = true; "error" },
+            jadec::ownership::DiagKind::InvalidRcDeref => { has_hard_error = true; "error" },
+            jadec::ownership::DiagKind::ReturnOfBorrowed => { has_hard_error = true; "error" },
+            jadec::ownership::DiagKind::WeakUpgradeWithoutCheck => "warning",
+            jadec::ownership::DiagKind::Warning => "warning",
+        };
         eprintln!(
             "ownership: {} (line {}): {}",
-            match d.kind {
-                jadec::ownership::DiagKind::UseAfterMove => "error",
-                jadec::ownership::DiagKind::DoubleMutableBorrow => "error",
-                jadec::ownership::DiagKind::MoveOfBorrowed => "error",
-                jadec::ownership::DiagKind::InvalidRcDeref => "error",
-                jadec::ownership::DiagKind::ReturnOfBorrowed => "error",
-                jadec::ownership::DiagKind::WeakUpgradeWithoutCheck => "warning",
-                jadec::ownership::DiagKind::Warning => "warning",
-            },
+            level,
             d.span.line,
             d.message
         );
+    }
+    if has_hard_error {
+        die("compilation aborted due to ownership errors");
     }
 
     let ctx = Context::create();
@@ -193,6 +222,14 @@ fn main() {
         3 => OptimizationLevel::Aggressive,
         _ => die("opt must be 0-3"),
     };
+
+    if cli.emit_llvm {
+        match comp.emit_ir_optimized(opt) {
+            Ok(ir) => println!("{ir}"),
+            Err(e) => die(&format!("opt: {e}")),
+        }
+        return;
+    }
 
     if cli.emit_obj {
         let obj = if cli.output.extension().is_some() {

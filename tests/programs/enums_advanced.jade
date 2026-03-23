@@ -1,0 +1,108 @@
+# enums_advanced.jade — Advanced enum patterns
+# Complexity: Intermediate
+# Demonstrates: enums with data, recursive enums, pattern matching, generic enums
+
+# Generic option-like type
+enum Maybe of T
+    Just(T)
+    Nothing
+
+# Result type with error info
+enum Result of T
+    Ok(T)
+    Err(String)
+
+# Recursive tree
+enum Tree of T
+    Leaf(T)
+    Branch(Tree of T, Tree of T)
+
+*tree_sum(t: Tree of i64)
+    match t
+        Leaf(n) ? n
+        Branch(left, right) ? tree_sum(left) + tree_sum(right)
+
+*tree_depth(t: Tree of i64)
+    match t
+        Leaf(_) ? 1
+        Branch(left, right) ?
+            l is tree_depth(left)
+            r is tree_depth(right)
+            1 + (l > r ? l ! r)
+
+*tree_count(t: Tree of i64)
+    match t
+        Leaf(_) ? 1
+        Branch(left, right) ? tree_count(left) + tree_count(right)
+
+# Arithmetic expression tree
+enum Expr
+    Lit(i64)
+    Add(Expr, Expr)
+    Mul(Expr, Expr)
+    IfPos(Expr, Expr, Expr)   # if first > 0 then second else third
+
+*eval_expr(e: Expr)
+    match e
+        Lit(n) ? n
+        Add(a, b) ? eval_expr(a) + eval_expr(b)
+        Mul(a, b) ? eval_expr(a) * eval_expr(b)
+        IfPos(cond, yes, no) ?
+            if eval_expr(cond) > 0
+                eval_expr(yes)
+            else
+                eval_expr(no)
+
+# Multi-variant command pattern
+enum Command
+    Quit
+    Print(String)
+    Move(i64, i64)
+    Resize(i64, i64)
+    SetColor(i64, i64, i64)
+
+*execute(cmd: Command)
+    match cmd
+        Quit ? log('quit')
+        Print(msg) ? log(msg)
+        Move(x, y) ? log(x + y)
+        Resize(w, h) ? log(w * h)
+        SetColor(r, g, b) ? log(r * 65536 + g * 256 + b)
+
+*main()
+    # Maybe
+    x is Just(42)
+    match x
+        Just(v) ? log(v)
+        Nothing ? log('nothing')
+
+    # Result
+    r is Ok(100)
+    match r
+        Ok(v) ? log(v)
+        Err(msg) ? log(msg)
+
+    # Tree
+    tree is Branch(
+        Branch(Leaf(1), Leaf(2)),
+        Branch(Leaf(3), Branch(Leaf(4), Leaf(5)))
+    )
+    log(tree_sum(tree))              # 15
+    log(tree_depth(tree))            # 4
+    log(tree_count(tree))            # 5
+
+    # Expression evaluation
+    # if (3 > 0) then (2 + 5) else (1 * 0) = 7
+    expr is IfPos(Lit(3), Add(Lit(2), Lit(5)), Mul(Lit(1), Lit(0)))
+    log(eval_expr(expr))             # 7
+
+    # Negative: if (-1 > 0) then 10 else 20 = 20
+    expr2 is IfPos(Lit(-1), Lit(10), Lit(20))
+    log(eval_expr(expr2))            # 20
+
+    # Commands
+    execute(Quit)
+    execute(Print('hello'))
+    execute(Move(10, 20))
+    execute(Resize(80, 24))
+    execute(SetColor(255, 128, 0))

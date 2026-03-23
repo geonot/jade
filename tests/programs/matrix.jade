@@ -1,0 +1,71 @@
+# matrix.jade — Matrix operations with structs
+# Complexity: Intermediate
+# Demonstrates: structs, methods, nested loops, type casting
+
+type Mat2
+    a: f64
+    b: f64
+    c: f64
+    d: f64
+
+    # Determinant: ad - bc
+    *det(self)
+        self.a * self.d - self.b * self.c
+
+    # Trace: a + d
+    *trace(self)
+        self.a + self.d
+
+    # Transpose
+    *transpose(self)
+        Mat2(a is self.a, b is self.c, c is self.b, d is self.d)
+
+    # Scalar multiply
+    *scale(self, s: f64)
+        Mat2(a is self.a * s, b is self.b * s, c is self.c * s, d is self.d * s)
+
+# Matrix multiplication (2x2)
+*mat_mul(m1: Mat2, m2: Mat2)
+    Mat2(
+        a is m1.a * m2.a + m1.b * m2.c,
+        b is m1.a * m2.b + m1.b * m2.d,
+        c is m1.c * m2.a + m1.d * m2.c,
+        d is m1.c * m2.b + m1.d * m2.d
+    )
+
+# Matrix power (repeated multiplication)
+*mat_pow(m: Mat2, n: i64)
+    result is Mat2(a is 1.0, b is 0.0, c is 0.0, d is 1.0)
+    i is 0
+    while i < n
+        result is mat_mul(result, m)
+        i is i + 1
+    result
+
+*main()
+    m is Mat2(a is 1.0, b is 2.0, c is 3.0, d is 4.0)
+
+    log(m.det())                     # -2.0
+    log(m.trace())                   # 5.0
+
+    t is m.transpose()
+    log(t.a)                         # 1.0
+    log(t.b)                         # 3.0
+    log(t.c)                         # 2.0
+    log(t.d)                         # 4.0
+
+    s is m.scale(2.0)
+    log(s.a)                         # 2.0
+    log(s.d)                         # 8.0
+
+    # Matrix multiply
+    m2 is Mat2(a is 5.0, b is 6.0, c is 7.0, d is 8.0)
+    prod is mat_mul(m, m2)
+    log(prod.a)                      # 19.0
+    log(prod.d)                      # 50.0
+
+    # Fibonacci via matrix exponentiation!
+    # [[1,1],[1,0]]^n gives fib(n) in top-left
+    fib_mat is Mat2(a is 1.0, b is 1.0, c is 1.0, d is 0.0)
+    result is mat_pow(fib_mat, 10)
+    log(result.a as i64)             # fib(11) = 89

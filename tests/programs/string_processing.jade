@@ -1,0 +1,93 @@
+# string_processing.jade — String manipulation and parsing
+# Complexity: Intermediate
+# Demonstrates: string methods, char_at, loops, string interpolation
+
+# Count occurrences of a character in a string
+*count_char(s: String, ch: i64)
+    count is 0
+    for i from 0 to s.length
+        if s.char_at(i) equals ch
+            count is count + 1
+    count
+
+# Check if string is a palindrome (ASCII)
+*is_palindrome(s: String)
+    left is 0
+    right is s.length - 1
+    while left < right
+        if s.char_at(left) isnt s.char_at(right)
+            return false
+        left is left + 1
+        right is right - 1
+    true
+
+# Count words (split by spaces, char 32)
+*count_words(s: String)
+    if s.length equals 0
+        return 0
+    words is 1
+    for i from 0 to s.length
+        if s.char_at(i) equals 32
+            words is words + 1
+    words
+
+# Caesar cipher (shift ASCII letters)
+*caesar_shift(ch: i64, shift: i64)
+    if ch >= 97 and ch <= 122    # a-z
+        return ((ch - 97 + shift) % 26) + 97
+    if ch >= 65 and ch <= 90     # A-Z
+        return ((ch - 65 + shift) % 26) + 65
+    ch
+
+# Check for substring match at position
+*matches_at(s: String, pattern: String, pos: i64)
+    if pos + pattern.length > s.length
+        return false
+    for i from 0 to pattern.length
+        if s.char_at(pos + i) isnt pattern.char_at(i)
+            return false
+    true
+
+# Count all substring occurrences
+*count_occurrences(s: String, pattern: String)
+    count is 0
+    for i from 0 to s.length
+        if matches_at(s, pattern, i)
+            count is count + 1
+    count
+
+*main()
+    msg is 'hello world'
+
+    # Character counting
+    log(count_char(msg, 108))        # 3 ('l')
+    log(count_char(msg, 111))        # 2 ('o')
+    log(count_char(msg, 122))        # 0 ('z')
+
+    # Palindrome detection
+    log(is_palindrome('racecar'))    # true
+    log(is_palindrome('madam'))      # true
+    log(is_palindrome('hello'))      # false
+    log(is_palindrome('a'))          # true
+
+    # Word counting
+    log(count_words('hello world'))             # 2
+    log(count_words('the quick brown fox'))     # 4
+    log(count_words('single'))                  # 1
+
+    # String interpolation
+    x is 42
+    log('the answer is {x}')
+    log('double: {x * 2}, triple: {x * 3}')
+
+    # String methods
+    log(msg.contains('world'))       # true
+    log(msg.starts_with('hello'))    # true
+    log(msg.ends_with('world'))      # true
+
+    sub is msg.slice(0, 5)
+    log(sub)                         # hello
+
+    # Substring counting
+    log(count_occurrences('abcabcabc', 'abc'))   # 3
+    log(count_occurrences('aaa', 'aa'))           # 2

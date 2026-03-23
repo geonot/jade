@@ -1,0 +1,29 @@
+extern *usleep(us: i32) -> i32
+
+actor Worker
+    sum: i64
+    @add n: i64
+        sum is sum + n
+
+*main()
+    a is spawn Worker
+    b is spawn Worker
+    c is spawn Worker
+    d is spawn Worker
+    e is spawn Worker
+    f is spawn Worker
+    g is spawn Worker
+    h is spawn Worker
+    i is 0
+    while i < 1000000
+        send a, @add(1)
+        send b, @add(1)
+        send c, @add(1)
+        send d, @add(1)
+        send e, @add(1)
+        send f, @add(1)
+        send g, @add(1)
+        send h, @add(1)
+        i is i + 1
+    usleep(800000)
+    log(0)

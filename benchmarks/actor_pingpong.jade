@@ -1,0 +1,15 @@
+extern *usleep(us: i32) -> i32
+
+actor Worker
+    count: i64
+    @ping n: i64
+        count is count + n
+
+*main()
+    w is spawn Worker
+    i is 0
+    while i < 1000000
+        send w, @ping(1)
+        i is i + 1
+    usleep(500000)
+    log(0)

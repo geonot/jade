@@ -79,6 +79,37 @@ fn expect_compile_fail(src: &str) -> String {
     String::from_utf8_lossy(&output.stderr).to_string()
 }
 
+/// Like compile_and_run but sets working directory to temp dir so .store files are isolated.
+fn compile_and_run_in_dir(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let status = Command::new(jadec())
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "binary exited with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn expect_store(src: &str, expected: &str) {
+    let got = compile_and_run_in_dir(src);
+    assert_eq!(got.trim(), expected.trim(), "source:\n{src}");
+}
+
 // ── Hello World ──────────────────────────────────────────────────────
 
 #[test]
@@ -1113,6 +1144,82 @@ fn match_non_exhaustive_fails() {
     );
 }
 
+#[test]
+fn exhaust_or_pattern_covers_variants() {
+    expect(
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Green\n    match c\n        Red or Green ? log(1)\n        Blue ? log(2)\n    0\n",
+        "1",
+    );
+}
+
+#[test]
+fn exhaust_int_without_wildcard_fails() {
+    let err = expect_compile_fail(
+        "*main() -> i32\n    x is 5\n    match x\n        1 ? log(1)\n        2 ? log(2)\n    0\n",
+    );
+    assert!(
+        err.contains("non-exhaustive") || err.contains("missing"),
+        "expected exhaustiveness error, got: {err}"
+    );
+}
+
+#[test]
+fn exhaust_bool_both_covered() {
+    expect(
+        "*main() -> i32\n    b is true\n    match b\n        true ? log(1)\n        false ? log(0)\n    0\n",
+        "1",
+    );
+}
+
+#[test]
+fn exhaust_bool_missing_false_fails() {
+    let err = expect_compile_fail(
+        "*main() -> i32\n    b is true\n    match b\n        true ? log(1)\n    0\n",
+    );
+    assert!(
+        err.contains("non-exhaustive") || err.contains("missing"),
+        "expected exhaustiveness error, got: {err}"
+    );
+}
+
+#[test]
+fn exhaust_bool_wildcard() {
+    expect(
+        "*main() -> i32\n    b is false\n    match b\n        true ? log(1)\n        _ ? log(0)\n    0\n",
+        "0",
+    );
+}
+
+#[test]
+fn exhaust_guard_not_counted() {
+    // Guard arms don't guarantee coverage — the only guard-free arm is `_`
+    // so this succeeds despite all enum arms having guards
+    expect(
+        "enum D\n    A\n    B\n\n*main() -> i32\n    d is A\n    match d\n        A when false ? log(0)\n        _ ? log(1)\n    0\n",
+        "1",
+    );
+}
+
+#[test]
+fn exhaust_nested_enum() {
+    // Nested enum variant fields must also be exhaustive
+    expect(
+        "enum Inner\n    X\n    Y\n\nenum Outer\n    Wrap(Inner)\n\n*main() -> i32\n    o is Wrap(X)\n    match o\n        Wrap(X) ? log(1)\n        Wrap(Y) ? log(2)\n    0\n",
+        "1",
+    );
+}
+
+#[test]
+fn exhaust_nested_enum_missing_fails() {
+    let err = expect_compile_fail(
+        "enum Inner\n    X\n    Y\n\nenum Outer\n    Wrap(Inner)\n\n*main() -> i32\n    o is Wrap(X)\n    match o\n        Wrap(X) ? log(1)\n    0\n",
+    );
+    assert!(
+        err.contains("non-exhaustive") || err.contains("missing"),
+        "expected exhaustiveness error, got: {err}"
+    );
+}
+
 // ── Option type ─────────────────────────────────────────────────────
 
 #[test]
@@ -1701,5 +1808,342 @@ fn nested_array_access() {
     expect(
         "*main() -> i32\n    a is [10, 20, 30]\n    i is 2\n    log(a[i])\n    log(a[0] + a[i])\n    0\n",
         "30\n40",
+    );
+}
+
+// ── Store Tests ──────────────────────────────────────────────────────
+
+#[test]
+fn store_insert_count_int() {
+    expect_store(
+        "store nums\n    val: i64\n\n*main\n    insert nums 10\n    insert nums 20\n    insert nums 30\n    n is count nums\n    log n\n",
+        "3",
+    );
+}
+
+#[test]
+fn store_insert_count_string() {
+    expect_store(
+        "store names\n    name: String\n    age: i64\n\n*main\n    insert names 'Alice', 30\n    insert names 'Bob', 25\n    insert names 'Charlie', 35\n    n is count names\n    log n\n",
+        "3",
+    );
+}
+
+#[test]
+fn store_query_int() {
+    expect_store(
+        "store vals\n    x: i64\n\n*main\n    insert vals 10\n    insert vals 20\n    insert vals 30\n    r is vals where x > 15\n    log r.x\n",
+        "20",
+    );
+}
+
+#[test]
+fn store_query_string_field() {
+    expect_store(
+        "store people\n    name: String\n    age: i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    insert people 'Charlie', 35\n    young is people where age < 30\n    log young.name\n    log young.age\n",
+        "Bob\n25",
+    );
+}
+
+#[test]
+fn store_query_string_equality() {
+    expect_store(
+        "store people\n    name: String\n    age: i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    found is people where name equals 'Bob'\n    log found.name\n    log found.age\n",
+        "Bob\n25",
+    );
+}
+
+#[test]
+fn store_delete() {
+    expect_store(
+        "store users\n    name: String\n    age: i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    n1 is count users\n    log n1\n    delete users where age > 28\n    n2 is count users\n    log n2\n",
+        "3\n1",
+    );
+}
+
+#[test]
+fn store_empty_count() {
+    expect_store(
+        "store empty\n    val: i64\n\n*main\n    n is count empty\n    log n\n",
+        "0",
+    );
+}
+
+#[test]
+fn store_set_basic() {
+    expect_store(
+        "store users\n    name: String\n    age: i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    set users where name equals 'Bob' age 99\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "Bob\n99",
+    );
+}
+
+#[test]
+fn store_set_multiple_fields() {
+    expect_store(
+        "store items\n    name: String\n    price: i64\n    qty: i64\n\n*main\n    insert items 'Widget', 100, 50\n    set items where name equals 'Widget' price 200, qty 10\n    r is items where name equals 'Widget'\n    log r.price\n    log r.qty\n",
+        "200\n10",
+    );
+}
+
+#[test]
+fn store_set_no_match() {
+    expect_store(
+        "store nums\n    val: i64\n\n*main\n    insert nums 10\n    insert nums 20\n    set nums where val equals 999 val 99\n    n is count nums\n    log n\n    r is nums where val equals 10\n    log r.val\n",
+        "2\n10",
+    );
+}
+
+#[test]
+fn store_transaction() {
+    expect_store(
+        "store users\n    name: String\n    age: i64\n\n*main\n    transaction\n        insert users 'Alice', 30\n        insert users 'Bob', 25\n        insert users 'Charlie', 35\n    c is count users\n    log c\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "3\nBob\n25",
+    );
+}
+
+#[test]
+fn store_and_filter_query() {
+    expect_store(
+        "store products\n    name: String\n    price: i64\n    stock: i64\n\n*main\n    insert products 'Apple', 100, 50\n    insert products 'Banana', 50, 100\n    insert products 'Cherry', 100, 10\n    r is products where price equals 100 and stock > 20\n    log r.name\n    log r.stock\n",
+        "Apple\n50",
+    );
+}
+
+#[test]
+fn store_and_filter_delete() {
+    expect_store(
+        "store products\n    name: String\n    price: i64\n    stock: i64\n\n*main\n    insert products 'Apple', 100, 50\n    insert products 'Banana', 50, 100\n    insert products 'Cherry', 100, 10\n    delete products where price equals 100 and stock < 20\n    c is count products\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_or_filter_delete() {
+    expect_store(
+        "store items\n    name: String\n    value: i64\n\n*main\n    insert items 'Alpha', 10\n    insert items 'Beta', 20\n    insert items 'Gamma', 30\n    delete items where value equals 10 or value equals 30\n    c is count items\n    log c\n    r is items where name equals 'Beta'\n    log r.value\n",
+        "1\n20",
+    );
+}
+
+#[test]
+fn store_and_filter_set() {
+    expect_store(
+        "store users\n    name: String\n    age: i64\n    active: i64\n\n*main\n    insert users 'Alice', 30, 1\n    insert users 'Bob', 25, 1\n    insert users 'Charlie', 25, 0\n    set users where age equals 25 and active equals 1 age 99\n    r is users where name equals 'Bob'\n    log r.age\n    r2 is users where name equals 'Charlie'\n    log r2.age\n",
+        "99\n25",
+    );
+}
+
+#[test]
+fn store_delete_then_query() {
+    expect_store(
+        "store users\n    name: String\n    age: i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    delete users where name equals 'Bob'\n    r is users where name equals 'Charlie'\n    log r.name\n    log r.age\n",
+        "Charlie\n35",
+    );
+}
+
+#[test]
+fn store_multi_type_fields() {
+    expect_store(
+        "store data\n    x: i64\n    y: f64\n\n*main\n    insert data 42, 3.14\n    r is data where x equals 42\n    log r.x\n",
+        "42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Tuple destructuring in match
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn match_tuple_basic() {
+    expect(
+        "*main() -> i32\n    t is (10, 20)\n    match t\n        (a, b) ? log(a + b)\n    0\n",
+        "30",
+    );
+}
+
+#[test]
+fn match_tuple_multiple_arms() {
+    expect(
+        "*main() -> i32\n    t is (10, 20)\n    match t\n        (a, b) ? log(a + b)\n    t2 is (3, 4)\n    match t2\n        (x, y) ? log(x * y)\n    0\n",
+        "30\n12",
+    );
+}
+
+#[test]
+fn match_array_basic() {
+    expect(
+        "*main() -> i32\n    a is [10, 20, 30]\n    match a\n        [x, y, z] ? log(x + y + z)\n    0\n",
+        "60",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Operator overloading (Add, Sub, Mul, Div, Lt, Gt, Le, Ge)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn operator_overload_add() {
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\ntrait Add\n    *add(other: Vec2) -> Vec2\n\nimpl Add for Vec2\n    *add(other: Vec2) -> Vec2\n        Vec2(x is self.x + other.x, y is self.y + other.y)\n\n*main() -> i32\n    a is Vec2(x is 1, y is 2)\n    b is Vec2(x is 3, y is 4)\n    c is a + b\n    log(c.x)\n    log(c.y)\n    0\n",
+        "4\n6",
+    );
+}
+
+#[test]
+fn operator_overload_sub() {
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\ntrait Sub\n    *sub(other: Vec2) -> Vec2\n\nimpl Sub for Vec2\n    *sub(other: Vec2) -> Vec2\n        Vec2(x is self.x - other.x, y is self.y - other.y)\n\n*main() -> i32\n    a is Vec2(x is 10, y is 20)\n    b is Vec2(x is 3, y is 5)\n    c is a - b\n    log(c.x)\n    log(c.y)\n    0\n",
+        "7\n15",
+    );
+}
+
+#[test]
+fn operator_overload_mul() {
+    expect(
+        "type Vec2\n    x: i64\n    y: i64\n\ntrait Mul\n    *mul(other: Vec2) -> i64\n\nimpl Mul for Vec2\n    *mul(other: Vec2) -> i64\n        self.x * other.x + self.y * other.y\n\n*main() -> i32\n    a is Vec2(x is 2, y is 3)\n    b is Vec2(x is 4, y is 5)\n    log(a * b)\n    0\n",
+        "23",
+    );
+}
+
+#[test]
+fn operator_overload_lt() {
+    expect(
+        "type Score\n    val: i64\n\ntrait Ord\n    *lt(other: Score) -> bool\n\nimpl Ord for Score\n    *lt(other: Score) -> bool\n        self.val < other.val\n\n*main() -> i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(a < b)\n    log(b < a)\n    0\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn operator_overload_gt() {
+    expect(
+        "type Score\n    val: i64\n\ntrait Ord\n    *gt(other: Score) -> bool\n\nimpl Ord for Score\n    *gt(other: Score) -> bool\n        self.val > other.val\n\n*main() -> i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(b > a)\n    log(a > b)\n    0\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn operator_overload_le_ge() {
+    expect(
+        "type Val\n    n: i64\n\ntrait Cmp\n    *le(other: Val) -> bool\n    *ge(other: Val) -> bool\n\nimpl Cmp for Val\n    *le(other: Val) -> bool\n        self.n <= other.n\n    *ge(other: Val) -> bool\n        self.n >= other.n\n\n*main() -> i32\n    a is Val(n is 5)\n    b is Val(n is 5)\n    c is Val(n is 10)\n    log(a <= b)\n    log(a >= b)\n    log(a <= c)\n    log(c >= a)\n    0\n",
+        "1\n1\n1\n1",
+    );
+}
+
+#[test]
+fn operator_overload_display() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\ntrait Display\n    *display() -> String\n\nimpl Display for Point\n    *display() -> String\n        'point'\n\n*main() -> i32\n    p is Point(x is 3, y is 4)\n    s is to_string(p)\n    log(s)\n    0\n",
+        "point",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Dynamic dispatch (dyn Trait)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn dyn_trait_basic() {
+    expect(
+        "type Dog\n    x: i64\n\ntrait Animal\n    *speak() -> i64\n\nimpl Animal for Dog\n    *speak() -> i64\n        self.x\n\n*call_speak(a: dyn Animal) -> i64\n    a.speak()\n\n*main() -> i32\n    d is Dog(x is 42)\n    log(call_speak(d))\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn dyn_trait_multiple_types() {
+    expect(
+        "type Cat\n    lives: i64\n\ntype Dog\n    age: i64\n\ntrait Animal\n    *value() -> i64\n\nimpl Animal for Cat\n    *value() -> i64\n        self.lives\n\nimpl Animal for Dog\n    *value() -> i64\n        self.age\n\n*get_val(a: dyn Animal) -> i64\n    a.value()\n\n*main() -> i32\n    c is Cat(lives is 9)\n    d is Dog(age is 5)\n    log(get_val(c))\n    log(get_val(d))\n    0\n",
+        "9\n5",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Fieldless enum zero-cost (tag-only)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn fieldless_enum_still_works() {
+    expect(
+        "enum Dir\n    North\n    South\n    East\n    West\n\n*main() -> i32\n    d is South()\n    match d\n        North() ? log(0)\n        South() ? log(1)\n        East() ? log(2)\n        West() ? log(3)\n    0\n",
+        "1",
+    );
+}
+
+#[test]
+fn option_still_works() {
+    expect(
+        "enum Option of T\n    Some(T)\n    Nothing\n\n*main() -> i32\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n        Nothing() ? log(0)\n    0\n",
+        "42",
+    );
+}
+
+// ── Perceus / Drop tests ──────────────────────────────────────────────
+
+#[test]
+fn drop_short_string_sso() {
+    // SSO strings (≤23 chars) should not crash — no heap to free
+    expect(
+        "*main()\n    s is 'short'\n    log(s)\n",
+        "short",
+    );
+}
+
+#[test]
+fn drop_long_string_heap() {
+    // Long strings (>23 chars) use heap — drop should not crash
+    expect(
+        "*main()\n    s is 'this is a long string that exceeds sso'\n    log(s.length)\n",
+        "38",
+    );
+}
+
+#[test]
+fn drop_string_in_scope_block() {
+    // String bound inside an if-block should be dropped at block exit
+    expect(
+        "*main() -> i32\n    if true\n        temp is 'hello world from a block'\n        log(temp)\n    0\n",
+        "hello world from a block",
+    );
+}
+
+#[test]
+fn drop_multiple_strings() {
+    expect(
+        "*main()\n    a is 'first'\n    b is 'second'\n    c is 'third'\n    log(a)\n    log(b)\n    log(c)\n",
+        "first\nsecond\nthird",
+    );
+}
+
+#[test]
+fn drop_string_after_fn_call() {
+    // String passed to a function should not double-free
+    expect(
+        "*greet(name: String)\n    log(name)\n\n*main()\n    s is 'world'\n    greet(s)\n",
+        "world",
+    );
+}
+
+#[test]
+fn drop_rc_basic() {
+    expect(
+        "*main()\n    x is rc(42)\n    log(@x)\n",
+        "42",
+    );
+}
+
+#[test]
+fn drop_vec_basic() {
+    expect(
+        "*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn drop_does_not_affect_scalars() {
+    // Scalars should have elided drops — no crash
+    expect(
+        "*main()\n    x is 42\n    y is 3.14\n    z is true\n    log(x)\n    log(y)\n    log(z)\n",
+        "42\n3.140000\n1",
     );
 }

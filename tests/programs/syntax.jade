@@ -1,0 +1,762 @@
+                                                                                 # ============================================================================
+# syntax.jade — Complete Jade Language Reference
+# ============================================================================
+# This file demonstrates every Jade syntax feature and builtin.
+# It serves as a quick-reference programmer's guide.
+# Some features shown here are planned and may not yet compile.
+# ============================================================================
+
+
+# ── 1. Primitives & Literals ────────────────────────────────────────────────
+
+*primitives()
+    # Integer types: i8, i16, i32, i64, u8, u16, u32, u64
+    a is 42                     # inferred i64
+    b: i32 is 100               # explicit type annotation
+    c: u8 is 255
+
+    # Float types: f32, f64
+    pi is 3.14159               # inferred f64
+    e: f32 is 2.718
+
+    # Boolean
+    yes is true
+    no is false
+
+    # Void (unit type)
+    # Functions that return nothing return void implicitly
+
+    # Integer literal formats
+    hex is 0xFF
+    bin is 0b10101010
+    oct is 0o777
+    big is 1_000_000            # underscores for readability
+
+    # Negative literals
+    neg is -42
+
+    # Strings — single quotes, with {interpolation}
+    name is 'jade'
+    greeting is 'hello {name}'
+    expr_interp is 'two plus two is {2 + 2}'
+
+    log(a)
+    log(pi)
+    log(hex)
+    log(greeting)
+
+
+# ── 2. Bindings ─────────────────────────────────────────────────────────────
+
+*bindings()
+    # Basic binding with `is`
+    x is 10
+
+    # Rebinding (same name, new value)
+    x is x + 1
+
+    # Typed binding
+    count: i32 is 0
+
+    # Augmented assignment (desugars to rebinding)
+    x += 5              # x is x + 5
+    x -= 2              # x is x - 2
+    x *= 3              # x is x * 3
+    x /= 4              # x is x / 4
+    x %= 7              # x is x % 7
+
+    # Bitwise augmented assignment
+    flags is 0
+    flags |= 0x80       # flags is flags | 0x80
+    flags &= 0xFF       # flags is flags & 0xFF
+    flags ^= 0x0F       # flags is flags ^ 0x0F
+    flags <<= 2         # flags is flags << 2
+    flags >>= 1         # flags is flags >> 1
+
+    log(x)
+
+
+# ── 3. Operators ────────────────────────────────────────────────────────────
+
+*operators()
+    # Arithmetic: + - * / % **
+    log(2 + 3)           # 5
+    log(10 - 4)          # 6
+    log(6 * 7)           # 42
+    log(15 / 4)          # 3 (integer division)
+    log(17 % 5)          # 2
+    log(2 ** 10)         # 1024
+
+    # Comparison: < > <= >=
+    log(3 < 5)           # true
+    log(5 >= 5)          # true
+
+    # Equality: equals, isnt (NOT == or !=)
+    log(7 equals 7)      # true
+    log(7 isnt 8)        # true
+
+    # Logical: and, or, not (NOT &&, ||, !)
+    log(true and false)  # false
+    log(true or false)   # true
+    log(not true)        # false
+
+    # Bitwise: & | ^ << >> ~
+    log(0xFF & 0x0F)     # 15
+    log(0xF0 | 0x0F)     # 255
+    log(0xFF ^ 0x0F)     # 240
+    log(1 << 10)         # 1024
+    log(1024 >> 5)       # 32
+
+    # Type casting with `as`
+    x is 42
+    y is x as f64        # 42.0
+    z is 3.99 as i64     # 3 (truncation)
+    log(y)
+    log(z)
+
+
+# ── 4. Functions ────────────────────────────────────────────────────────────
+
+# Function definition: * prefix, parameters infer types
+# Parentheses are optional — both forms are valid
+*add(a, b)
+    a + b                       # implicit return (last expression)
+
+*subtract a, b                  # paren-free definition
+    a - b
+
+# Explicit return
+*factorial(n)
+    if n <= 1
+        return 1
+    return n * factorial(n - 1)
+
+# Typed parameters
+*greet name: String
+    log 'hello {name}'
+
+# Default parameters
+*connect host: String, port: i64 is 8080
+    log 'connecting to {host}:{port}'
+
+# Multiple return values (tuples)
+*divmod(a, b)
+    (a / b, a % b)
+
+# No-arg functions — no parens needed
+*hello
+    log 'hello'
+
+# Recursion
+*fib(n)
+    if n < 2
+        return n
+    fib(n - 1) + fib(n - 2)
+
+# Infinite recursion — no parens, no args
+*spin
+    spin
+
+*demo_functions()
+    log(add(3, 4))               # 7  — parens call
+    log add 3, 4                 # 7  — paren-free call
+    log subtract 10, 3           # 7  — paren-free
+    log(factorial(10))           # 3628800
+    log(fib(10))                 # 55
+    q, r is divmod 17, 5
+    log(q)                       # 3
+    log(r)                       # 2
+    hello                        # no-arg call
+
+
+# ── 5. Higher-Order Functions & Lambdas ─────────────────────────────────────
+
+# Function type: (ParamTypes) -> ReturnType
+*apply(f: (i64) -> i64, x: i64)
+    f(x)
+
+*demo_higher_order()
+    # Lambda: *fn(params) body
+    double is *fn(x: i64) x * 2
+    log(apply(double, 21))       # 42
+
+    square is *fn(x: i64) x * x
+    log(apply(square, 7))        # 49
+
+    # Multi-line lambda — just indent the body
+    transform is *fn(x: i64)
+        y is x * 2
+        y + 1
+    log(transform(10))           # 21
+
+
+# ── 6. Pipelines ───────────────────────────────────────────────────────────
+
+*increment(x)
+    x + 1
+
+*triple(x)
+    x * 3
+
+*demo_pipelines()
+    # ~ pipes left value as first argument to right function
+    result is 10 ~ increment ~ triple ~ increment
+    log(result)                  # 34 = ((10+1)*3)+1
+
+    # Pipeline with extra arguments
+    # val ~ fn(extra) → fn(val, extra)
+
+
+# ── 7. Control Flow ────────────────────────────────────────────────────────
+
+*demo_control_flow()
+    x is 10
+
+    # If / elif / else
+    if x > 5
+        log('big')
+    elif x > 3
+        log('medium')
+    else
+        log('small')
+
+    # Ternary: condition ? true_val ! false_val
+    abs_x is x >= 0 ? x ! 0 - x
+    log(abs_x)
+
+    # If as expression (same ternary form)
+    sign is x > 0 ? 1 ! -1
+    log(sign)
+
+    # While loop
+    n is 5
+    while n > 0
+        log(n)
+        n is n - 1
+
+    # For loop: implicit assignment (assigns i starting from 0)
+    for i from 0 to 5
+        log(i)                   # 0, 1, 2, 3, 4
+
+    # For with explicit assignment
+    for i is 1 to 10
+        log(i)                   # 1, 2, ..., 9
+
+    # For with step
+    for i from 0 to 20 by 3
+        log(i)                   # 0, 3, 6, 9, 12, 15, 18
+
+    # Infinite loop + break
+    counter is 0
+    loop
+        if counter >= 3
+            break
+        counter is counter + 1
+
+    # Yield — return a value from a loop
+    found is loop
+        if counter > 0
+            yield counter
+
+    # Continue
+    i is 0
+    while i < 10
+        i is i + 1
+        if i % 2 equals 0
+            continue
+        log(i)
+
+
+# ── 8. Structs ──────────────────────────────────────────────────────────────
+
+type Point
+    x: i64
+    y: i64
+
+type Vec3
+    x: i64
+    y: i64
+    z: i64
+
+    # Methods — *name self, ... inside type body (parens optional)
+    *length_squared self
+        self.x * self.x + self.y * self.y + self.z * self.z
+
+    *dot self, other: Vec3
+        self.x * other.x + self.y * other.y + self.z * other.z
+
+*demo_structs()
+    # Construction: named fields
+    p is Point(x is 10, y is 20)
+    log p.x
+    log p.y
+
+    v is Vec3(x is 1, y is 2, z is 3)
+    log v.length_squared         # 14 — no-arg method call, no parens
+    log v.dot v                  # 14 — method call, paren-free
+
+
+# ── 9. Enums (Tagged Unions) ───────────────────────────────────────────────
+
+enum Color
+    Red
+    Green
+    Blue
+    Custom(i64, i64, i64)
+
+enum Shape
+    Circle(f64)
+    Rect(f64, f64)
+    Triangle(f64, f64, f64)
+
+*color_value(c: Color)
+    match c
+        Red ? 1
+        Green ? 2
+        Blue ? 3
+        Custom(r, g, b) ? r + g + b
+
+*demo_enums()
+    log(color_value(Red))
+    log(color_value(Custom(10, 20, 30)))
+
+
+# ── 10. Pattern Matching ───────────────────────────────────────────────────
+
+*describe_number(n)
+    match n
+        0 ? log('zero')
+        1 ? log('one')
+        _ ? log('other')
+
+*area(s: Shape)
+    match s
+        Circle(r) ? 3 * r * r
+        Rect(w, h) ? w * h
+        Triangle(a, b, c) ? 0
+
+*demo_matching()
+    describe_number(0)
+    describe_number(1)
+    describe_number(42)
+
+    log(area(Circle(5.0)))
+    log(area(Rect(3.0, 4.0)))
+
+
+# ── 11. Generics ───────────────────────────────────────────────────────────
+
+# Generic function — `of` keyword
+*max_val of T(a: T, b: T)
+    a > b ? a ! b
+
+# Generic struct
+type Pair of A, B
+    first: A
+    second: B
+
+# Generic enum
+enum Option of T
+    Some(T)
+    None
+
+*demo_generics()
+    log(max_val(10, 20))         # 20
+    log(max_val(3.14, 2.72))     # 3.14
+
+    p is Pair(first is 1, second is 2)
+    log(p.first)
+    log(p.second)
+
+
+# ── 12. Error Handling ─────────────────────────────────────────────────────
+
+err FileError
+    NotFound
+    PermissionDenied(String)
+    Corrupted(String)
+
+*read_data(path: String)
+    if path equals ''
+        ! NotFound
+    if path equals '/secret'
+        ! PermissionDenied('access denied')
+    42
+
+*demo_errors()
+    match read_data('test.txt')
+        NotFound ? log('not found')
+        PermissionDenied(msg) ? log(msg)
+        _ ? log('ok')
+
+    match read_data('')
+        NotFound ? log('caught: not found')
+        _ ? log('ok')
+
+
+# ── 13. Tuples ──────────────────────────────────────────────────────────────
+
+*demo_tuples()
+    # Tuple literal
+    point is (10, 20, 30)
+
+    # Destructuring bind
+    x, y, z is point
+    log(x)
+    log(y)
+    log(z)
+
+    # Tuples as return values
+    a, b is divmod(100, 7)
+    log(a)
+    log(b)
+
+
+# ── 14. Arrays ──────────────────────────────────────────────────────────────
+
+*demo_arrays()
+    # Fixed array literal
+    nums is [1, 2, 3, 4, 5]
+
+    # Indexing (bounds-checked)
+    log(nums[0])                 # 1
+    log(nums[4])                 # 5
+
+    # Array length
+    log(nums.length)             # 5
+
+
+# ── 15. List Comprehensions ────────────────────────────────────────────────
+
+*demo_comprehensions()
+    # Basic comprehension
+    squares is [x ** 2 for x from 0 to 10]
+    log(squares[4])              # 16
+
+    # Filtered comprehension
+    evens is [x for x from 0 to 20 if x % 2 equals 0]
+    log(evens[3])                # 6
+
+
+# ── 16. String Operations ──────────────────────────────────────────────────
+
+*demo_strings()
+    s is 'hello jade'
+
+    # String methods
+    log(s.contains('jade'))       # true
+    log(s.starts_with('hello'))   # true
+    log(s.ends_with('jade'))      # true
+    log(s.char_at(0))             # 104 (ascii 'h')
+
+    # String interpolation
+    name is 'world'
+    log('hello {name}')
+    x is 42
+    log('value is {x}, doubled is {x * 2}')
+
+    # Slicing
+    sub is s.slice(0, 5)
+    log(sub)                      # hello
+
+
+# ── 17. Inline Assembly ────────────────────────────────────────────────────
+
+*demo_asm()
+    asm
+        'mov $1, %rax'
+        'mov $1, %rdi'
+        'syscall'
+
+
+# ── 18. Extern / FFI ───────────────────────────────────────────────────────
+
+extern *printf(fmt: &i8, ...) -> i32
+extern *puts(s: &i8) -> i32
+
+*demo_ffi()
+    printf('hello from C: %d\n', 42)
+    puts('puts says hi')
+
+
+# ── 19. Systems Builtins ───────────────────────────────────────────────────
+
+*demo_systems()
+    # Bit manipulation builtins
+    log(popcount(0xFF))          # 8
+    log(clz(1))                  # 63 (for i64)
+    log(ctz(8))                  # 3
+    log(bswap(0x0102030405060708))
+
+    # Integer overflow control
+    big is 9223372036854775807   # i64 max
+    w is wrapping_add(big, 1)    # wraps to i64 min
+    s is saturating_add(big, 1)  # stays at i64 max
+    log(w)
+    log(s)
+
+    # Checked arithmetic — returns (result, overflowed)
+    result, overflowed is checked_add(big, 1)
+    if overflowed
+        log('overflow detected')
+
+    # Rotate
+    log(rotate_left(1, 3))       # 8
+    log(rotate_right(8, 3))      # 1
+
+
+# ── 20. Signal Handling ────────────────────────────────────────────────────
+
+*sig_handler(sig: i32)
+    log(sig)
+
+*demo_signals()
+    signal_handle(2, sig_handler)   # SIGINT → handler
+    signal_ignore(13)               # SIGPIPE → ignore
+    signal_raise(2)                 # raise SIGINT
+
+
+# ── 21. Memory Layout Annotations ──────────────────────────────────────────
+
+# C-compatible field ordering
+type CHeader @strict
+    magic: u32
+    version: u16
+    flags: u16
+
+# No padding between fields
+type Pixel @packed
+    r: u8
+    g: u8
+    b: u8
+
+# Force alignment
+type CacheLine @align(64)
+    data: i64
+
+# Combinable
+type NetPacket @packed @strict @align(4)
+    header: u32
+    payload: i64
+
+
+# ── 22. Raw Pointers ───────────────────────────────────────────────────────
+
+*demo_pointers()
+    x is 42
+    ptr is &x                    # address-of
+    val is @ptr                  # dereference
+    log(val)                     # 42
+
+
+# ── 23. Volatile Memory ────────────────────────────────────────────────────
+
+*demo_volatile()
+    x is 42
+    ptr is &x
+    volatile_store(ptr, 100)     # hardware-observable write
+    v is volatile_load(ptr)      # hardware-observable read
+    log(v)                       # 100
+
+
+# ── 24. Reference Counting ─────────────────────────────────────────────────
+
+*demo_rc()
+    # RC wrapping (usually inferred, explicit for clarity)
+    x is rc(42)
+
+    # Weak references — explicit cycle-breaking
+    w is weak(x)                 # downgrade to weak
+    strong is weak_upgrade(w)    # upgrade back (or none)
+
+
+# ── 25. Float Builtins ─────────────────────────────────────────────────────
+
+*demo_float_builtins()
+    x is 2.0
+    log(x.sqrt())                # 1.414...
+    log(x.abs())
+    log(x.floor())
+    log(x.ceil())
+    log(x.round())
+
+    log(x.min(3.0))              # 2.0
+    log(x.max(3.0))              # 3.0
+    log(x.clamp(1.0, 5.0))      # 2.0
+
+    pi is 3.14159
+    log(pi.sin())
+    log(pi.cos())
+    log(pi.tan())
+
+    nan is 0.0 / 0.0
+    log(nan.is_nan())            # true
+
+
+# ── 26. Global Builtins ────────────────────────────────────────────────────
+
+*demo_globals()
+    log('printing')              # log: print to stdout
+    log(sqrt(16.0))              # 4.0
+    log(abs(-7))                 # 7
+    log(min(3, 5))               # 3
+    log(max(3, 5))               # 5
+    log(time_now())              # nanosecond timestamp
+
+
+# ── 27. Modules ─────────────────────────────────────────────────────────────
+
+# In separate file: math.jade
+# *add(a, b)
+#     a + b
+#
+# In main file:
+# use math
+# log(math.add(1, 2))
+
+
+# ── 28. Traits (0.1.0 — planned) ───────────────────────────────────────────
+
+# trait Printable
+#     *display(self) -> String
+#
+# impl Printable for Point
+#     *display(self)
+#         '({self.x}, {self.y})'
+#
+# trait Add of T
+#     *add(self, other: T) -> T
+#
+# impl Add for Vec3
+#     *add(self, other: Vec3)
+#         Vec3(x is self.x + other.x, y is self.y + other.y, z is self.z + other.z)
+
+
+# ── 29. Async/Await (0.3.0 — planned) ──────────────────────────────────────
+
+# async *fetch(url: String)
+#     response is await http_get(url)
+#     response.body
+#
+# async *main()
+#     data is await fetch('http://example.com')
+#     log(data)
+
+
+# ── 30. Actors (0.1.0 — planned) ───────────────────────────────────────────
+
+# type Counter
+#     value: i64
+#
+#     @increment self, amount: i64
+#         self.value += amount
+#
+#     @get self
+#         self.value
+
+
+# ── 31. Persistent Stores (0.2.0 — planned) ────────────────────────────────
+# Jade treats persistence as a first-class language feature.
+# Stores are typed, transactional, and queryable — no ORM layer.
+
+# store Users
+#     name: String
+#     email: String
+#     age: i64
+#
+# store Posts
+#     title: String
+#     body: String
+#     author: String
+#     likes: i64
+#
+# *demo_stores
+#     # Insert records
+#     Users.insert name is 'alice', email is 'alice@jade.dev', age is 30
+#     Users.insert name is 'bob', email is 'bob@jade.dev', age is 25
+#
+#     # Query — returns matching records
+#     admins is Users.where age >= 18
+#
+#     # Update
+#     Users.where(name equals 'bob').set age is 26
+#
+#     # Delete
+#     Users.where(name equals 'alice').delete
+#
+#     # Transactions — atomic, all-or-nothing
+#     transaction
+#         Posts.insert title is 'hello', body is 'first post', author is 'alice', likes is 0
+#         Users.where(name equals 'alice').set age is 31
+#
+#     # Count
+#     log Users.count
+#
+#     # Iterate
+#     for user from Users.all
+#         log user.name
+
+
+# ── Main: Run all demos ────────────────────────────────────────────────────
+
+*main()
+    log('=== Jade Language Syntax Reference ===')
+
+    log('--- primitives ---')
+    primitives()
+
+    log('--- bindings ---')
+    bindings()
+
+    log('--- operators ---')
+    operators()
+
+    log('--- functions ---')
+    demo_functions()
+
+    log('--- higher-order ---')
+    demo_higher_order()
+
+    log('--- pipelines ---')
+    demo_pipelines()
+
+    log('--- control flow ---')
+    demo_control_flow()
+
+    log('--- structs ---')
+    demo_structs()
+
+    log('--- enums ---')
+    demo_enums()
+
+    log('--- matching ---')
+    demo_matching()
+
+    log('--- generics ---')
+    demo_generics()
+
+    log('--- errors ---')
+    demo_errors()
+
+    log('--- tuples ---')
+    demo_tuples()
+
+    log('--- arrays ---')
+    demo_arrays()
+
+    log('--- comprehensions ---')
+    demo_comprehensions()
+
+    log('--- strings ---')
+    demo_strings()
+
+    log('--- systems ---')
+    demo_systems()
+
+    log('--- float builtins ---')
+    demo_float_builtins()
+
+    log('--- global builtins ---')
+    demo_globals()
+
+    log('=== done ===')

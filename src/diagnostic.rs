@@ -24,49 +24,40 @@ pub enum Severity {
 /// | W200–W299 | Safety warnings       |
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ErrorCode {
-    // Syntax
-    E001, // unexpected token
-    E002, // invalid indentation
-    E003, // unterminated string
-    // Name resolution
-    E100, // undefined variable
-    E101, // undefined function
-    E102, // undefined type
-    E103, // duplicate definition
-    // Type errors
-    E200, // type mismatch
-    E201, // cannot infer type
-    E202, // invalid cast
-    E203, // wrong number of arguments
-    // Ownership & borrow
-    E300, // use after move
-    E301, // double mutable borrow
-    E302, // move of borrowed value
-    E303, // return of borrowed value
-    E304, // invalid rc deref
-    // Safety & FFI
-    E400, // volatile on non-pointer type
-    E401, // invalid extern signature
-    E402, // raw pointer arithmetic
-    // Pattern matching
-    E500, // non-exhaustive match
-    E501, // unreachable pattern
-    E502, // duplicate pattern
-    // Memory
-    E600, // potential reference cycle
-    E601, // weak upgrade may fail
-    E602, // invalid layout annotation
-    // Overflow
-    E700, // integer overflow
-    E701, // division by zero
-    // Warnings
-    W001, // unused variable
-    W002, // unused import
-    W100, // rc where owned would suffice
-    W101, // allocation in hot loop
-    W200, // potential cycle without weak
-    W201, // volatile without fence
-    W202, // unchecked overflow in user arithmetic
+    E001,
+    E002,
+    E003,
+    E100,
+    E101,
+    E102,
+    E103,
+    E200,
+    E201,
+    E202,
+    E203,
+    E300,
+    E301,
+    E302,
+    E303,
+    E304,
+    E400,
+    E401,
+    E402,
+    E500,
+    E501,
+    E502,
+    E600,
+    E601,
+    E602,
+    E700,
+    E701,
+    W001,
+    W002,
+    W100,
+    W101,
+    W200,
+    W201,
+    W202,
 }
 
 impl std::fmt::Display for ErrorCode {

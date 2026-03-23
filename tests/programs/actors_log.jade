@@ -1,0 +1,13 @@
+extern *usleep(us: i32) -> i32
+
+actor Printer
+    @say n: i64
+        log(n)
+
+*main()
+    p is spawn Printer
+    send p, @say(42)
+    send p, @say(100)
+    send p, @say(7)
+    usleep(100000)
+    0

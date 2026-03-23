@@ -1,0 +1,92 @@
+# neural_net.jade — Simple feedforward neural network (no backprop)
+# Complexity: Advanced
+# Demonstrates: structs, methods, arrays, math, float ops, type casting
+# Uses fixed-size weights for a 2-input, 2-hidden, 1-output network
+
+# Activation function (ReLU)
+*relu(x: f64)
+    x > 0.0 ? x ! 0.0
+
+# Sigmoid approximation: 1 / (1 + e^-x)
+# Using a fast piecewise approximation
+*sigmoid(x: f64)
+    if x > 6.0
+        return 1.0
+    if x < -6.0
+        return 0.0
+    # Pade approximant: (x/2 + 1) / (|x| + 2) is rough but avoids exp
+    ax is x.abs()
+    (x * 0.5 + 1.0) / (ax + 2.0)
+
+# Dot product of two small arrays
+*dot2(a0: f64, a1: f64, b0: f64, b1: f64)
+    a0 * b0 + a1 * b1
+
+type NeuralNet
+    # Input to hidden weights (2x2 = 4 weights)
+    w_ih0: f64    # input[0] -> hidden[0]
+    w_ih1: f64    # input[1] -> hidden[0]
+    w_ih2: f64    # input[0] -> hidden[1]
+    w_ih3: f64    # input[1] -> hidden[1]
+    # Hidden biases
+    b_h0: f64
+    b_h1: f64
+    # Hidden to output weights (2 weights)
+    w_ho0: f64    # hidden[0] -> output
+    w_ho1: f64    # hidden[1] -> output
+    # Output bias
+    b_o: f64
+
+    # Forward pass
+    *forward(self, x0: f64, x1: f64)
+        # Hidden layer
+        h0 is relu(x0 * self.w_ih0 + x1 * self.w_ih1 + self.b_h0)
+        h1 is relu(x0 * self.w_ih2 + x1 * self.w_ih3 + self.b_h1)
+        # Output
+        sigmoid(h0 * self.w_ho0 + h1 * self.w_ho1 + self.b_o)
+
+# Mean squared error
+*mse(predicted: f64, actual: f64)
+    diff is predicted - actual
+    diff * diff
+
+*main()
+    # Create a network that approximates XOR
+    # (hand-tuned weights — normally learned via backprop)
+    net is NeuralNet(
+        w_ih0 is 10.0,   w_ih1 is 10.0,
+        w_ih2 is 10.0,   w_ih3 is 10.0,
+        b_h0 is -5.0,    b_h1 is -15.0,
+        w_ho0 is 10.0,   w_ho1 is -20.0,
+        b_o is -1.0
+    )
+
+    # XOR truth table
+    # (0,0) → 0, (0,1) → 1, (1,0) → 1, (1,1) → 0
+    r00 is net.forward(0.0, 0.0)
+    r01 is net.forward(0.0, 1.0)
+    r10 is net.forward(1.0, 0.0)
+    r11 is net.forward(1.0, 1.0)
+
+    log(r00)    # should be close to 0
+    log(r01)    # should be close to 1
+    log(r10)    # should be close to 1
+    log(r11)    # should be close to 0
+
+    # Compute total error
+    total_error is mse(r00, 0.0) + mse(r01, 1.0) + mse(r10, 1.0) + mse(r11, 0.0)
+    log(total_error)
+
+    # Test another network: simple AND gate
+    and_net is NeuralNet(
+        w_ih0 is 10.0,  w_ih1 is 10.0,
+        w_ih2 is 0.0,   w_ih3 is 0.0,
+        b_h0 is -15.0,  b_h1 is 0.0,
+        w_ho0 is 10.0,  w_ho1 is 0.0,
+        b_o is -1.0
+    )
+
+    log(and_net.forward(0.0, 0.0))   # ~0
+    log(and_net.forward(0.0, 1.0))   # ~0
+    log(and_net.forward(1.0, 0.0))   # ~0
+    log(and_net.forward(1.0, 1.0))   # ~1

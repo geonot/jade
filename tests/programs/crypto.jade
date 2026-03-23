@@ -1,0 +1,134 @@
+# crypto.jade — Cryptographic primitives
+# Complexity: Advanced
+# Demonstrates: bitwise ops, integer overflow, functions, loops, arrays, systems builtins
+
+# ── FNV-1a Hash ─────────────────────────────────────────────────────────────
+
+*fnv1a_hash(data: String)
+    hash is 14695981039346656037    # FNV offset basis (u64)
+    for i from 0 to data.length
+        byte is data.char_at(i)
+        hash is hash ^ byte
+        hash is wrapping_mul(hash, 1099511628211)   # FNV prime
+    hash
+
+# ── Simple XOR cipher ──────────────────────────────────────────────────────
+
+*xor_byte(a: i64, b: i64)
+    a ^ b
+
+*xor_encrypt(data: String, key: i64)
+    # XOR each byte with key (returns checksum for verification)
+    checksum is 0
+    for i from 0 to data.length
+        byte is data.char_at(i)
+        encrypted is xor_byte(byte, key)
+        checksum is checksum + encrypted
+    checksum
+
+# ── Bit mixing (hash finalizer) ────────────────────────────────────────────
+
+*mix64(x: i64)
+    h is x
+    h is h ^ (h >> 33)
+    h is wrapping_mul(h, -49064778989728563)   # 0xff51afd7ed558ccd
+    h is h ^ (h >> 33)
+    h is wrapping_mul(h, -4265267296055464877)  # 0xc4ceb9fe1a85ec53
+    h is h ^ (h >> 33)
+    h
+
+# ── CRC32-like checksum ────────────────────────────────────────────────────
+
+*simple_crc(data: String)
+    crc is 0xFFFFFFFF
+    for i from 0 to data.length
+        byte is data.char_at(i)
+        crc is crc ^ byte
+        for bit from 0 to 8
+            if crc & 1 equals 1
+                crc is (crc >> 1) ^ 0xEDB88320
+            else
+                crc is crc >> 1
+    crc ^ 0xFFFFFFFF
+
+# ── Modular exponentiation (for RSA-like ops) ──────────────────────────────
+
+*mod_pow(base: i64, exp: i64, modulus: i64)
+    result is 1
+    b is base % modulus
+    e is exp
+    while e > 0
+        if e % 2 equals 1
+            result is (result * b) % modulus
+        e is e / 2
+        b is (b * b) % modulus
+    result
+
+# ── Miller-Rabin primality test (simplified) ───────────────────────────────
+
+*is_probable_prime(n: i64)
+    if n < 2
+        return false
+    if n < 4
+        return true
+    if n % 2 equals 0
+        return false
+
+    # Write n-1 as 2^r * d
+    d is n - 1
+    r is 0
+    while d % 2 equals 0
+        d is d / 2
+        r is r + 1
+
+    # Test with witness a=2
+    a is 2
+    x is mod_pow(a, d, n)
+    if x equals 1 or x equals n - 1
+        return true
+
+    i is 0
+    while i < r - 1
+        x is (x * x) % n
+        if x equals n - 1
+            return true
+        i is i + 1
+    false
+
+*main()
+    # FNV-1a hashing
+    h1 is fnv1a_hash('hello')
+    h2 is fnv1a_hash('hello')
+    h3 is fnv1a_hash('world')
+    log(h1 equals h2)               # true  (deterministic)
+    log(h1 equals h3)               # false (different input)
+    log(h1)
+    log(h3)
+
+    # XOR cipher roundtrip property
+    key is 42
+    c1 is xor_encrypt('secret', key)
+    log(c1)
+
+    # Bit mixing
+    log(mix64(1))
+    log(mix64(2))
+    log(mix64(1) isnt mix64(2))      # true (good avalanche)
+
+    # CRC32
+    crc1 is simple_crc('hello')
+    crc2 is simple_crc('hello')
+    crc3 is simple_crc('world')
+    log(crc1 equals crc2)            # true
+    log(crc1 equals crc3)            # false
+
+    # Modular exponentiation
+    log(mod_pow(2, 10, 1000))        # 24
+    log(mod_pow(3, 13, 1000))        # 1594323 % 1000 = 323
+
+    # Primality testing
+    log(is_probable_prime(2))        # true
+    log(is_probable_prime(17))       # true
+    log(is_probable_prime(561))      # false (Carmichael number)
+    log(is_probable_prime(997))      # true
+    log(is_probable_prime(1000))     # false

@@ -1,17 +1,3 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OverflowMode {
-    Trap,       // default: UB on overflow (nsw/nuw)
-    Wrapping,   // two's complement wrap
-    Saturating, // clamp to min/max
-    Checked,    // returns Option (None on overflow)
-}
-
-impl Default for OverflowMode {
-    fn default() -> Self {
-        Self::Trap
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     I8,
@@ -28,6 +14,8 @@ pub enum Type {
     Void,
     String,
     Array(Box<Type>, usize),
+    Vec(Box<Type>),
+    Map(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
     Struct(String),
     Enum(String),
@@ -36,6 +24,9 @@ pub enum Type {
     Ptr(Box<Type>),
     Rc(Box<Type>),
     Weak(Box<Type>),
+    ActorRef(String),
+    Coroutine(Box<Type>),
+    DynTrait(String),
     Inferred,
 }
 
@@ -96,8 +87,10 @@ impl Type {
             | Self::Bool
             | Self::Void
             | Self::Inferred
-            | Self::Ptr(_) => true,
+            | Self::Ptr(_)
+            | Self::ActorRef(_) => true,
             Self::Array(inner, _) => inner.is_trivially_droppable(),
+            Self::Vec(_) | Self::Map(_, _) => false,
             Self::Tuple(tys) => tys.iter().all(|t| t.is_trivially_droppable()),
             _ => false,
         }
@@ -132,6 +125,8 @@ impl std::fmt::Display for Type {
             Self::Inferred => f.write_str("_"),
             Self::Struct(n) | Self::Enum(n) => f.write_str(n),
             Self::Array(e, l) => write!(f, "[{e}; {l}]"),
+            Self::Vec(e) => write!(f, "Vec of {e}"),
+            Self::Map(k, v) => write!(f, "Map of {k}, {v}"),
             Self::Tuple(ts) => {
                 f.write_str("(")?;
                 for (i, t) in ts.iter().enumerate() {
@@ -146,6 +141,9 @@ impl std::fmt::Display for Type {
             Self::Ptr(inner) => write!(f, "&{inner}"),
             Self::Rc(inner) => write!(f, "rc {inner}"),
             Self::Weak(inner) => write!(f, "weak {inner}"),
+            Self::ActorRef(name) => write!(f, "ActorRef<{name}>"),
+            Self::Coroutine(inner) => write!(f, "Coroutine of {inner}"),
+            Self::DynTrait(name) => write!(f, "dyn {name}"),
             Self::Fn(ps, r) => {
                 f.write_str("(")?;
                 for (i, p) in ps.iter().enumerate() {

@@ -1,0 +1,61 @@
+# closures.jade — Closure patterns and capturing
+# Complexity: Intermediate
+# Demonstrates: lambdas, closures capturing variables, HOFs, pipelines
+
+*make_adder(n: i64)
+    *fn(x: i64) x + n
+
+*make_multiplier(n: i64)
+    *fn(x: i64) x * n
+
+*apply(f: (i64) -> i64, x: i64)
+    f(x)
+
+*apply_to_range(f: (i64) -> i64, start: i64, end_val: i64)
+    total is 0
+    for i from start to end_val
+        total is total + f(i)
+    total
+
+# Build a pipeline of transformations
+*transform(x: i64)
+    add5 is make_adder(5)
+    dbl is make_multiplier(2)
+
+    # Manual composition
+    result is dbl(add5(x))
+    result
+
+*main()
+    # Closure capturing
+    add10 is make_adder(10)
+    log(add10(5))                    # 15
+    log(add10(100))                  # 110
+
+    mul3 is make_multiplier(3)
+    log(mul3(7))                     # 21
+
+    # Apply closures
+    log(apply(add10, 32))            # 42
+
+    # Sum the transformed range
+    double is make_multiplier(2)
+    total is apply_to_range(double, 1, 11)
+    log(total)                       # 2+4+6+8+10+12+14+16+18+20 = 110
+
+    # Pipeline with closures
+    log(transform(10))               # (10+5)*2 = 30
+    log(transform(0))                # (0+5)*2 = 10
+
+    # Inline lambdas
+    sq is *fn(x: i64) x * x
+    log(sq(9))                       # 81
+
+    # Lambda in pipeline
+    result is 5 ~ make_adder(3) ~ make_multiplier(2)
+    log(result)                      # should be (5+3)*2 = 16
+
+    # Nested closures
+    outer is 100
+    f is *fn(x: i64) x + outer
+    log(f(42))                       # 142
