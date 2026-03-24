@@ -2082,10 +2082,7 @@ fn option_still_works() {
 #[test]
 fn drop_short_string_sso() {
     // SSO strings (≤23 chars) should not crash — no heap to free
-    expect(
-        "*main()\n    s is 'short'\n    log(s)\n",
-        "short",
-    );
+    expect("*main()\n    s is 'short'\n    log(s)\n", "short");
 }
 
 #[test]
@@ -2125,18 +2122,12 @@ fn drop_string_after_fn_call() {
 
 #[test]
 fn drop_rc_basic() {
-    expect(
-        "*main()\n    x is rc(42)\n    log(@x)\n",
-        "42",
-    );
+    expect("*main()\n    x is rc(42)\n    log(@x)\n", "42");
 }
 
 #[test]
 fn drop_vec_basic() {
-    expect(
-        "*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n",
-        "3",
-    );
+    expect("*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n", "3");
 }
 
 #[test]

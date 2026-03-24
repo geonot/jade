@@ -18,7 +18,7 @@ fn main() {
     loop {
         let msg = match transport::read_message(&mut reader) {
             Ok(Some(m)) => m,
-            Ok(None) => break, // EOF
+            Ok(None) => break,
             Err(e) => {
                 eprintln!("jadec-lsp: read error: {e}");
                 break;
@@ -39,9 +39,7 @@ fn main() {
                 send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
                 initialized = true;
             }
-            "initialized" => {
-                // Client ack — nothing to do
-            }
+            "initialized" => {}
             "shutdown" => {
                 send_response(&mut writer, req.id.unwrap_or(Value::Null), Value::Null);
             }
@@ -78,9 +76,7 @@ fn main() {
                 send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
             }
             _ => {
-                // Unknown or notification — ignore
                 if let Some(id) = req.id {
-                    // Request needs a response — send method-not-found
                     let err = serde_json::json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -100,7 +96,11 @@ fn send_response(writer: &mut impl Write, id: Value, result: Value) {
     let _ = transport::write_message(writer, &body);
 }
 
-fn publish_diagnostics(writer: &mut impl Write, uri: &str, diagnostics: Vec<jadec::lsp::protocol::Diagnostic>) {
+fn publish_diagnostics(
+    writer: &mut impl Write,
+    uri: &str,
+    diagnostics: Vec<jadec::lsp::protocol::Diagnostic>,
+) {
     let params = PublishDiagnosticsParams {
         uri: uri.to_string(),
         diagnostics,

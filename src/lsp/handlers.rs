@@ -2,18 +2,19 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::ast;
-use super::analysis::{self, FileAnalysis, SymbolKind, DiagSeverity};
+use super::analysis::{self, DiagSeverity, FileAnalysis, SymbolKind};
 use super::protocol::*;
+use crate::ast;
 
-/// Per-file state: source text + latest analysis.
 pub struct ServerState {
     pub files: HashMap<String, String>,
 }
 
 impl ServerState {
     pub fn new() -> Self {
-        Self { files: HashMap::new() }
+        Self {
+            files: HashMap::new(),
+        }
     }
 
     fn analysis_for(&self, uri: &str) -> Option<FileAnalysis> {
@@ -21,12 +22,10 @@ impl ServerState {
     }
 }
 
-// ── Initialize ─────────────────────────────────────────────────
-
 pub fn handle_initialize(_params: Value) -> Value {
     let result = InitializeResult {
         capabilities: ServerCapabilities {
-            text_document_sync: 1, // Full sync
+            text_document_sync: 1,
             hover_provider: true,
             definition_provider: true,
             document_symbol_provider: true,
@@ -42,16 +41,20 @@ pub fn handle_initialize(_params: Value) -> Value {
     serde_json::to_value(result).unwrap()
 }
 
-// ── Document Sync ──────────────────────────────────────────────
-
-pub fn handle_did_open(state: &mut ServerState, params: Value) -> Option<(String, Vec<Diagnostic>)> {
+pub fn handle_did_open(
+    state: &mut ServerState,
+    params: Value,
+) -> Option<(String, Vec<Diagnostic>)> {
     let p: DidOpenTextDocumentParams = serde_json::from_value(params).ok()?;
     let uri = p.text_document.uri.clone();
     state.files.insert(uri.clone(), p.text_document.text);
     Some((uri.clone(), build_diagnostics(state, &uri)))
 }
 
-pub fn handle_did_change(state: &mut ServerState, params: Value) -> Option<(String, Vec<Diagnostic>)> {
+pub fn handle_did_change(
+    state: &mut ServerState,
+    params: Value,
+) -> Option<(String, Vec<Diagnostic>)> {
     let p: DidChangeTextDocumentParams = serde_json::from_value(params).ok()?;
     let uri = p.text_document.uri.clone();
     if let Some(change) = p.content_changes.into_iter().last() {
@@ -66,8 +69,6 @@ pub fn handle_did_close(state: &mut ServerState, params: Value) {
     }
 }
 
-// ── Hover ──────────────────────────────────────────────────────
-
 pub fn handle_hover(state: &ServerState, params: Value) -> Value {
     let p: TextDocumentPositionParams = match serde_json::from_value(params) {
         Ok(p) => p,
@@ -77,7 +78,6 @@ pub fn handle_hover(state: &ServerState, params: Value) -> Value {
         Some(s) => s,
         None => return Value::Null,
     };
-    // LSP positions are 0-based; Jade spans are 1-based
     let line1 = p.position.line + 1;
     let col1 = p.position.character + 1;
     let ident = match analysis::find_ident_at(src, line1, col1) {
@@ -97,8 +97,6 @@ pub fn handle_hover(state: &ServerState, params: Value) -> Value {
     }
     Value::Null
 }
-
-// ── Go to Definition ───────────────────────────────────────────
 
 pub fn handle_definition(state: &ServerState, params: Value) -> Value {
     let p: TextDocumentPositionParams = match serde_json::from_value(params) {
@@ -126,8 +124,6 @@ pub fn handle_definition(state: &ServerState, params: Value) -> Value {
     Value::Null
 }
 
-// ── Document Symbols ───────────────────────────────────────────
-
 pub fn handle_document_symbols(state: &ServerState, params: Value) -> Value {
     let p: DocumentSymbolParams = match serde_json::from_value(params) {
         Ok(p) => p,
@@ -137,15 +133,9 @@ pub fn handle_document_symbols(state: &ServerState, params: Value) -> Value {
         Some(a) => a,
         None => return Value::Array(vec![]),
     };
-    let syms: Vec<DocumentSymbol> = analysis
-        .symbols
-        .iter()
-        .map(|s| symbol_to_lsp(s))
-        .collect();
+    let syms: Vec<DocumentSymbol> = analysis.symbols.iter().map(|s| symbol_to_lsp(s)).collect();
     serde_json::to_value(syms).unwrap()
 }
-
-// ── Completion ─────────────────────────────────────────────────
 
 pub fn handle_completion(state: &ServerState, params: Value) -> Value {
     let p: TextDocumentPositionParams = match serde_json::from_value(params) {
@@ -154,16 +144,18 @@ pub fn handle_completion(state: &ServerState, params: Value) -> Value {
     };
     let mut items: Vec<CompletionItem> = Vec::new();
 
-    // Add keywords/builtins
     for (label, kind_str) in analysis::completions_for_context() {
         items.push(CompletionItem {
             label,
-            kind: if kind_str == "function" { CK_FUNCTION } else { CK_KEYWORD },
+            kind: if kind_str == "function" {
+                CK_FUNCTION
+            } else {
+                CK_KEYWORD
+            },
             detail: None,
         });
     }
 
-    // Add symbols from current file
     if let Some(analysis) = state.analysis_for(&p.text_document.uri) {
         for sym in &analysis.symbols {
             let kind = match sym.kind {
@@ -183,8 +175,6 @@ pub fn handle_completion(state: &ServerState, params: Value) -> Value {
     serde_json::to_value(items).unwrap()
 }
 
-// ── Helpers ────────────────────────────────────────────────────
-
 fn build_diagnostics(state: &ServerState, uri: &str) -> Vec<Diagnostic> {
     let analysis = match state.analysis_for(uri) {
         Some(a) => a,
@@ -196,11 +186,21 @@ fn build_diagnostics(state: &ServerState, uri: &str) -> Vec<Diagnostic> {
         .map(|d| {
             let line0 = d.line.saturating_sub(1);
             let col0 = d.col.saturating_sub(1);
-            let end_col0 = if d.end_col > d.col { d.end_col - 1 } else { col0 + 1 };
+            let end_col0 = if d.end_col > d.col {
+                d.end_col - 1
+            } else {
+                col0 + 1
+            };
             Diagnostic {
                 range: Range {
-                    start: PositionOut { line: line0, character: col0 },
-                    end: PositionOut { line: line0, character: end_col0 },
+                    start: PositionOut {
+                        line: line0,
+                        character: col0,
+                    },
+                    end: PositionOut {
+                        line: line0,
+                        character: end_col0,
+                    },
                 },
                 severity: match d.severity {
                     DiagSeverity::Error => 1,
@@ -217,8 +217,14 @@ fn span_to_range(span: ast::Span) -> Range {
     let line0 = span.line.saturating_sub(1);
     let col0 = span.col.saturating_sub(1);
     Range {
-        start: PositionOut { line: line0, character: col0 },
-        end: PositionOut { line: line0, character: col0 + (span.end.saturating_sub(span.start)) as u32 },
+        start: PositionOut {
+            line: line0,
+            character: col0,
+        },
+        end: PositionOut {
+            line: line0,
+            character: col0 + (span.end.saturating_sub(span.start)) as u32,
+        },
     }
 }
 

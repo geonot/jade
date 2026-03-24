@@ -1,13 +1,13 @@
+mod actors;
 mod builtins;
 mod call;
 mod collections;
 mod decl;
 mod expr;
 mod stmt;
+mod stores;
 mod strings;
 mod types;
-mod actors;
-mod stores;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -26,7 +26,10 @@ use inkwell::{AddressSpace, OptimizationLevel};
 
 use inkwell::attributes::{Attribute, AttributeLoc};
 
-use inkwell::debug_info::{AsDIScope, DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
+use inkwell::debug_info::{
+    AsDIScope, DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind,
+    DWARFSourceLanguage, DebugInfoBuilder,
+};
 
 use crate::hir;
 use crate::perceus::PerceusHints;
@@ -60,11 +63,8 @@ pub struct Compiler<'ctx> {
     pub(crate) di_scope_stack: Vec<DIScope<'ctx>>,
     pub(crate) filename: String,
     pub(crate) store_defs: HashMap<String, hir::StoreDef>,
-    /// VTable globals: (type_name, trait_name) → global pointer to vtable array
     pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
-    /// Trait method order: trait_name → [method_name, ...]
     pub(crate) trait_method_order: HashMap<String, Vec<String>>,
-    /// Whether the compiled program needs the C runtime (jade_rt)
     pub needs_runtime: bool,
 }
 
@@ -115,8 +115,6 @@ impl<'ctx> Compiler<'ctx> {
         self.filename = filename.to_string();
         let (di_builder, di_cu) = self.module.create_debug_info_builder(
             true,
-            // DWARF: use user-defined language range for Jade (0x8000 + 1)
-            // C is used as fallback since inkwell doesn't expose DW_LANG_lo_user directly
             DWARFSourceLanguage::C,
             filename,
             ".",
@@ -149,14 +147,19 @@ impl<'ctx> Compiler<'ctx> {
         };
         let tm = self.target_machine(opt)?;
         let pb = PassBuilderOptions::create();
-        let o2plus = matches!(opt, OptimizationLevel::Default | OptimizationLevel::Aggressive);
+        let o2plus = matches!(
+            opt,
+            OptimizationLevel::Default | OptimizationLevel::Aggressive
+        );
         pb.set_loop_vectorization(o2plus);
         pb.set_loop_slp_vectorization(o2plus);
         pb.set_loop_unrolling(o2plus);
         pb.set_loop_interleaving(o2plus);
         pb.set_call_graph_profile(o2plus);
         pb.set_merge_functions(matches!(opt, OptimizationLevel::Aggressive));
-        self.module.run_passes(passes, &tm, pb).map_err(|e| e.to_string())?;
+        self.module
+            .run_passes(passes, &tm, pb)
+            .map_err(|e| e.to_string())?;
         Ok(self.module.print_to_string().to_string())
     }
 
@@ -195,7 +198,6 @@ impl<'ctx> Compiler<'ctx> {
         self.setup_target()?;
         self.declare_builtins();
 
-        // SSO correctness: string struct must be exactly 24 bytes ({ptr, i64, i64}).
         debug_assert_eq!(
             self.type_store_size(self.string_type().into()),
             24,
@@ -218,14 +220,12 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_err_def(ed)?;
         }
 
-        // Declare concurrency runtime only if the program uses concurrency features
         let needs_runtime = !prog.actors.is_empty() || Self::uses_concurrency(prog);
         self.needs_runtime = needs_runtime;
         if needs_runtime {
             self.declare_jade_runtime();
         }
 
-        // Declare actor runtime if actors are present
         if !prog.actors.is_empty() {
             self.declare_actor_runtime();
             for ad in &prog.actors {
@@ -233,7 +233,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Declare store runtime if stores are present
         if !prog.stores.is_empty() {
             self.declare_store_runtime();
             for sd in &prog.stores {
@@ -246,7 +245,6 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_fn(f)?;
         }
 
-        // Declare trait impl methods (before compilation, so calls resolve)
         for ti in &prog.trait_impls {
             for m in &ti.methods {
                 if !self.fns.contains_key(&m.name) {
@@ -255,11 +253,8 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Generate vtables for dyn Trait dispatch (after declarations, before body compilation)
         self.generate_vtables(&prog.trait_impls)?;
 
-        // Compile actor loop functions before user functions
-        // (so spawn can reference the loop fn)
         for ad in &prog.actors {
             self.compile_actor_loop(ad)?;
         }
@@ -275,7 +270,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Compile trait impl method bodies
         for ti in &prog.trait_impls {
             for m in &ti.methods {
                 if self.fns.contains_key(&m.name) {
@@ -284,8 +278,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Generate vtables already done above (before body compilation)
-
         self.finalize_debug();
         self.module.verify().map_err(|e| e.to_string())
     }
@@ -293,15 +285,16 @@ impl<'ctx> Compiler<'ctx> {
     fn generate_vtables(&mut self, trait_impls: &[hir::TraitImpl]) -> Result<(), String> {
         let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
-        // Build trait method order from the impls
         for ti in trait_impls {
             if let Some(ref trait_name) = ti.trait_name {
-                let order = self.trait_method_order
+                let order = self
+                    .trait_method_order
                     .entry(trait_name.clone())
                     .or_default();
                 for m in &ti.methods {
-                    // Method names are mangled as TypeName_methodname
-                    let base_name = m.name.strip_prefix(&format!("{}_", ti.type_name))
+                    let base_name = m
+                        .name
+                        .strip_prefix(&format!("{}_", ti.type_name))
                         .unwrap_or(&m.name);
                     if !order.contains(&base_name.to_string()) {
                         order.push(base_name.to_string());
@@ -310,18 +303,20 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // For each (type, trait) pair, build thunks and a vtable global
         for ti in trait_impls {
             if let Some(ref trait_name) = ti.trait_name {
-                let method_order = self.trait_method_order.get(trait_name).cloned().unwrap_or_default();
+                let method_order = self
+                    .trait_method_order
+                    .get(trait_name)
+                    .cloned()
+                    .unwrap_or_default();
                 let mut fn_ptrs: Vec<inkwell::values::PointerValue<'ctx>> = Vec::new();
                 for method_name in &method_order {
                     let mangled = format!("{}_{method_name}", ti.type_name);
                     if let Some((fv, param_tys, ret_ty)) = self.fns.get(&mangled).cloned() {
-                        // Generate a thunk: takes ptr as self, loads concrete type, calls original
                         let thunk_name = format!("__thunk_{mangled}");
-                        let mut thunk_param_tys: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr.into()];
-                        // Skip the first param (self) — remaining params keep their types
+                        let mut thunk_param_tys: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                            vec![ptr.into()];
                         for pt in param_tys.iter().skip(1) {
                             thunk_param_tys.push(self.llvm_ty(pt).into());
                         }
@@ -330,19 +325,20 @@ impl<'ctx> Compiler<'ctx> {
                         let thunk_fn = self.module.add_function(&thunk_name, thunk_fn_ty, None);
                         let entry = self.ctx.append_basic_block(thunk_fn, "entry");
                         self.bld.position_at_end(entry);
-                        // Load concrete type from ptr (or forward ptr for by-ptr methods)
                         let self_ptr = thunk_fn.get_first_param().unwrap().into_pointer_value();
-                        let first_arg: inkwell::values::BasicValueEnum<'ctx> = if matches!(param_tys.first(), Some(Type::Ptr(_))) {
-                            // By-ptr method: pass pointer directly
-                            self_ptr.into()
-                        } else {
-                            let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self.module.get_struct_type(&ti.type_name)
-                                .map(|st| st.into())
-                                .unwrap_or_else(|| self.ctx.i64_type().into());
-                            b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"))
-                        };
-                        // Build call args: self (loaded or ptr) + forwarded params
-                        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = vec![first_arg.into()];
+                        let first_arg: inkwell::values::BasicValueEnum<'ctx> =
+                            if matches!(param_tys.first(), Some(Type::Ptr(_))) {
+                                self_ptr.into()
+                            } else {
+                                let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self
+                                    .module
+                                    .get_struct_type(&ti.type_name)
+                                    .map(|st| st.into())
+                                    .unwrap_or_else(|| self.ctx.i64_type().into());
+                                b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"))
+                            };
+                        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+                            vec![first_arg.into()];
                         for i in 1..thunk_fn.count_params() {
                             call_args.push(thunk_fn.get_nth_param(i).unwrap().into());
                         }
@@ -367,10 +363,8 @@ impl<'ctx> Compiler<'ctx> {
                 gv.set_initializer(&vtable_const);
                 gv.set_constant(true);
                 gv.set_linkage(inkwell::module::Linkage::Internal);
-                self.vtables.insert(
-                    (ti.type_name.clone(), trait_name.clone()),
-                    gv,
-                );
+                self.vtables
+                    .insert((ti.type_name.clone(), trait_name.clone()), gv);
             }
         }
         Ok(())
@@ -384,25 +378,14 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Create a debug info subprogram for a function and set it.
-    pub(crate) fn create_debug_function(
-        &mut self,
-        fv: FunctionValue<'ctx>,
-        name: &str,
-        line: u32,
-    ) {
+    pub(crate) fn create_debug_function(&mut self, fv: FunctionValue<'ctx>, name: &str, line: u32) {
         if !self.debug {
             return;
         }
         let di = self.di_builder.as_ref().unwrap();
         let cu = self.di_compile_unit.as_ref().unwrap();
         let file = cu.get_file();
-        let di_type = di.create_subroutine_type(
-            file,
-            None,
-            &[],
-            DIFlags::PUBLIC,
-        );
+        let di_type = di.create_subroutine_type(file, None, &[], DIFlags::PUBLIC);
         let subprogram = di.create_function(
             file.as_debug_info_scope(),
             name,
@@ -420,14 +403,12 @@ impl<'ctx> Compiler<'ctx> {
         self.di_scope_stack.push(subprogram.as_debug_info_scope());
     }
 
-    /// Pop the debug scope (call at end of function compilation).
     pub(crate) fn pop_debug_scope(&mut self) {
         if self.debug {
             self.di_scope_stack.pop();
         }
     }
 
-    /// Emit a debug location for the current instruction position.
     pub(crate) fn set_debug_location(&self, line: u32, col: u32) {
         if !self.debug {
             return;
@@ -613,8 +594,6 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Check whether the HIR program uses any concurrency features
-    /// (channels, select, coroutines) that require the C runtime.
     fn uses_concurrency(prog: &hir::Program) -> bool {
         use crate::hir::{ExprKind, Stmt};
         fn scan_expr(e: &hir::Expr) -> bool {
@@ -636,17 +615,23 @@ impl<'ctx> Compiler<'ctx> {
         }
         fn scan_block(block: &[hir::Stmt]) -> bool {
             block.iter().any(|s| {
-                if scan_stmt(s) { return true; }
+                if scan_stmt(s) {
+                    return true;
+                }
                 match s {
                     Stmt::Expr(e) => scan_expr(e),
                     Stmt::Bind(b) => scan_expr(&b.value),
                     Stmt::If(i) => {
-                        scan_block(&i.then) || i.elifs.iter().any(|(c, b)| scan_expr(c) || scan_block(b)) || i.els.as_ref().map_or(false, |b| scan_block(b))
+                        scan_block(&i.then)
+                            || i.elifs.iter().any(|(c, b)| scan_expr(c) || scan_block(b))
+                            || i.els.as_ref().map_or(false, |b| scan_block(b))
                     }
                     Stmt::While(w) => scan_expr(&w.cond) || scan_block(&w.body),
                     Stmt::For(f) => scan_expr(&f.iter) || scan_block(&f.body),
                     Stmt::Loop(l) => scan_block(&l.body),
-                    Stmt::Match(m) => scan_expr(&m.subject) || m.arms.iter().any(|a| scan_block(&a.body)),
+                    Stmt::Match(m) => {
+                        scan_expr(&m.subject) || m.arms.iter().any(|a| scan_block(&a.body))
+                    }
                     Stmt::Ret(Some(e), _, _) => scan_expr(e),
                     _ => false,
                 }
@@ -656,11 +641,16 @@ impl<'ctx> Compiler<'ctx> {
             scan_block(&f.body)
         }
         prog.fns.iter().any(|f| scan_fn(f))
-            || prog.types.iter().any(|td| td.methods.iter().any(|m| scan_fn(m)))
-            || prog.trait_impls.iter().any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
+            || prog
+                .types
+                .iter()
+                .any(|td| td.methods.iter().any(|m| scan_fn(m)))
+            || prog
+                .trait_impls
+                .iter()
+                .any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
     }
 
-    /// Declare all C runtime functions from jade_rt.h.
     pub(crate) fn declare_jade_runtime(&mut self) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
@@ -671,17 +661,19 @@ impl<'ctx> Compiler<'ctx> {
         macro_rules! decl {
             ($name:expr, $ft:expr) => {
                 if self.module.get_function($name).is_none() {
-                    self.module.add_function($name, $ft, Some(Linkage::External));
+                    self.module
+                        .add_function($name, $ft, Some(Linkage::External));
                 }
             };
         }
 
-        // Coroutine
-        decl!("jade_coro_create", ptr.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!(
+            "jade_coro_create",
+            ptr.fn_type(&[ptr.into(), ptr.into()], false)
+        );
         decl!("jade_coro_destroy", void.fn_type(&[ptr.into()], false));
         decl!("jade_coro_set_daemon", void.fn_type(&[ptr.into()], false));
 
-        // Scheduler
         decl!("jade_sched_init", void.fn_type(&[i32t.into()], false));
         decl!("jade_sched_run", void.fn_type(&[], false));
         decl!("jade_sched_shutdown", void.fn_type(&[], false));
@@ -691,28 +683,44 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jade_sched_park", void.fn_type(&[], false));
         decl!("jade_sched_unpark", void.fn_type(&[ptr.into()], false));
 
-        // Channel
-        decl!("jade_chan_create", ptr.fn_type(&[i64t.into(), i64t.into()], false));
+        decl!(
+            "jade_chan_create",
+            ptr.fn_type(&[i64t.into(), i64t.into()], false)
+        );
         decl!("jade_chan_destroy", void.fn_type(&[ptr.into()], false));
-        decl!("jade_chan_send", void.fn_type(&[ptr.into(), ptr.into()], false));
-        decl!("jade_chan_recv", i32t.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!(
+            "jade_chan_send",
+            void.fn_type(&[ptr.into(), ptr.into()], false)
+        );
+        decl!(
+            "jade_chan_recv",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false)
+        );
         decl!("jade_chan_close", void.fn_type(&[ptr.into()], false));
 
-        // Actor
-        decl!("jade_actor_create", ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false));
+        decl!(
+            "jade_actor_create",
+            ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false)
+        );
         decl!("jade_actor_destroy", void.fn_type(&[ptr.into()], false));
-        decl!("jade_actor_send", void.fn_type(&[ptr.into(), i32t.into(), ptr.into(), i64t.into()], false));
+        decl!(
+            "jade_actor_send",
+            void.fn_type(&[ptr.into(), i32t.into(), ptr.into(), i64t.into()], false)
+        );
         decl!("jade_actor_recv", ptr.fn_type(&[ptr.into()], false));
         decl!("jade_actor_stop", void.fn_type(&[ptr.into()], false));
 
-        // Select
-        decl!("jade_select", i32t.fn_type(&[ptr.into(), i32t.into(), bool_t.into()], false));
+        decl!(
+            "jade_select",
+            i32t.fn_type(&[ptr.into(), i32t.into(), bool_t.into()], false)
+        );
 
-        // Timer
-        decl!("jade_timer_set", void.fn_type(&[ptr.into(), i64t.into()], false));
+        decl!(
+            "jade_timer_set",
+            void.fn_type(&[ptr.into(), i64t.into()], false)
+        );
         decl!("jade_timer_check", void.fn_type(&[], false));
 
-        // Ensure basic C functions
         self.ensure_malloc();
         self.ensure_free();
         self.ensure_memcpy();

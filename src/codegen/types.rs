@@ -27,10 +27,7 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|s| s.into())
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
-            Type::Vec(_) | Type::Map(_, _) => {
-                // Vec and Map are heap-allocated: {ptr, len, cap} or {ptr, len, cap}
-                self.ctx.ptr_type(AddressSpace::default()).into()
-            }
+            Type::Vec(_) | Type::Map(_, _) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Tuple(tys) => self
                 .ctx
                 .struct_type(
@@ -38,13 +35,18 @@ impl<'ctx> Compiler<'ctx> {
                     false,
                 )
                 .into(),
-            Type::Fn(_, _) | Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) | Type::ActorRef(_) | Type::Coroutine(_) | Type::Channel(_) => {
-                self.ctx.ptr_type(AddressSpace::default()).into()
-            }
+            Type::Fn(_, _)
+            | Type::Ptr(_)
+            | Type::Rc(_)
+            | Type::Weak(_)
+            | Type::ActorRef(_)
+            | Type::Coroutine(_)
+            | Type::Channel(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::DynTrait(_) => {
-                // Fat pointer: {data: ptr, vtable: ptr}
                 let ptr = self.ctx.ptr_type(AddressSpace::default());
-                self.ctx.struct_type(&[ptr.into(), ptr.into()], false).into()
+                self.ctx
+                    .struct_type(&[ptr.into(), ptr.into()], false)
+                    .into()
             }
             Type::Param(_) => self.ctx.i64_type().into(),
         }
@@ -280,7 +282,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Compile an explicit HIR coercion.
     pub(crate) fn compile_coercion(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -359,7 +360,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Check if a field type is a recursive reference to the enclosing enum.
     pub(crate) fn is_recursive_field(fty: &Type, enum_name: &str) -> bool {
         match fty {
             Type::Enum(n) | Type::Struct(n) => n == enum_name,

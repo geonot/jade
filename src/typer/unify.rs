@@ -1,13 +1,6 @@
-//! Union-Find based unification engine for type inference.
-//!
-//! Provides `InferCtx` — a context that manages inference variables (TypeVar)
-//! and unifies them into concrete types using a weighted quick-union with
-//! path compression.
-
 use crate::ast::Span;
 use crate::types::Type;
 
-/// Records the origin of a type constraint for diagnostic purposes.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct ConstraintOrigin {
@@ -15,16 +8,12 @@ pub(crate) struct ConstraintOrigin {
     pub reason: &'static str,
 }
 
-/// Inference context: manages unification variables and their solutions.
 pub(crate) struct InferCtx {
-    /// Union-find parent pointers. `parent[i] == i` means `i` is a root.
     parent: Vec<u32>,
-    /// Rank for union-by-rank.
     rank: Vec<u8>,
-    /// Resolved type for a root variable (None = still unconstrained).
     types: Vec<Option<Type>>,
-    /// Origin span for each variable's binding (set when unified with concrete).
     origins: Vec<Option<ConstraintOrigin>>,
+    pub(crate) debug: bool,
 }
 
 impl InferCtx {
@@ -34,10 +23,10 @@ impl InferCtx {
             rank: Vec::new(),
             types: Vec::new(),
             origins: Vec::new(),
+            debug: false,
         }
     }
 
-    /// Create a fresh inference variable and return `Type::TypeVar(id)`.
     pub(crate) fn fresh_var(&mut self) -> Type {
         let id = self.parent.len() as u32;
         self.parent.push(id);
@@ -47,7 +36,6 @@ impl InferCtx {
         Type::TypeVar(id)
     }
 
-    /// Find the root representative of variable `v` with path compression.
     fn find(&mut self, v: u32) -> u32 {
         let p = self.parent[v as usize];
         if p != v {
@@ -59,9 +47,23 @@ impl InferCtx {
         }
     }
 
-    /// Unify two types with constraint origin tracking.
-    pub(crate) fn unify_at(&mut self, a: &Type, b: &Type, span: Span, reason: &'static str) -> Result<(), String> {
-        // Record origin for any TypeVar being bound
+    pub(crate) fn unify_at(
+        &mut self,
+        a: &Type,
+        b: &Type,
+        span: Span,
+        reason: &'static str,
+    ) -> Result<(), String> {
+        if self.debug {
+            let ra = self.shallow_resolve(a);
+            let rb = self.shallow_resolve(b);
+            if ra != rb {
+                eprintln!(
+                    "[type:unify] {} ~ {} (line {}, {})",
+                    ra, rb, span.line, reason
+                );
+            }
+        }
         if let Type::TypeVar(v) = self.shallow_resolve(a) {
             let root = self.find(v);
             if self.origins[root as usize].is_none() {
@@ -77,7 +79,6 @@ impl InferCtx {
         self.unify(a, b)
     }
 
-    /// Get the constraint origin for a type variable (if any).
     #[allow(dead_code)]
     pub(crate) fn origin_of(&mut self, ty: &Type) -> Option<ConstraintOrigin> {
         if let Type::TypeVar(v) = ty {
@@ -88,7 +89,6 @@ impl InferCtx {
         }
     }
 
-    /// Unify two types. Returns Ok(()) on success, Err(msg) on conflict.
     pub(crate) fn unify(&mut self, a: &Type, b: &Type) -> Result<(), String> {
         let a = self.shallow_resolve(a);
         let b = self.shallow_resolve(b);
@@ -104,7 +104,6 @@ impl InferCtx {
                 if ra == rb {
                     return Ok(());
                 }
-                // Merge: if one root has a type, keep that one as root
                 let ta = self.types[ra as usize].clone();
                 let tb = self.types[rb as usize].clone();
                 self.union(ra, rb);
@@ -133,7 +132,6 @@ impl InferCtx {
                 }
                 Ok(())
             }
-            // Structural unification
             (Type::Array(ea, la), Type::Array(eb, lb)) => {
                 if la != lb {
                     return Err(format!("array length mismatch: {la} vs {lb}"));
@@ -147,7 +145,11 @@ impl InferCtx {
             }
             (Type::Tuple(ta), Type::Tuple(tb)) => {
                 if ta.len() != tb.len() {
-                    return Err(format!("tuple arity mismatch: {} vs {}", ta.len(), tb.len()));
+                    return Err(format!(
+                        "tuple arity mismatch: {} vs {}",
+                        ta.len(),
+                        tb.len()
+                    ));
                 }
                 for (a, b) in ta.iter().zip(tb.iter()) {
                     self.unify(a, b)?;
@@ -172,14 +174,11 @@ impl InferCtx {
             (Type::Weak(a), Type::Weak(b)) => self.unify(a, b),
             (Type::Channel(a), Type::Channel(b)) => self.unify(a, b),
             (Type::Coroutine(a), Type::Coroutine(b)) => self.unify(a, b),
-            // Inferred acts like a wildcard — unify with anything silently
             (Type::Inferred, _) | (_, Type::Inferred) => Ok(()),
-            // Concrete type mismatch
             _ => Err(format!("type mismatch: expected `{a}`, found `{b}`")),
         }
     }
 
-    /// Union two roots by rank.
     fn union(&mut self, a: u32, b: u32) {
         let ra = self.rank[a as usize];
         let rb = self.rank[b as usize];
@@ -193,7 +192,6 @@ impl InferCtx {
         }
     }
 
-    /// Occurs check: does variable `v` appear in `ty`?
     fn occurs_in(&mut self, v: u32, ty: &Type) -> bool {
         match ty {
             Type::TypeVar(u) => {
@@ -206,8 +204,12 @@ impl InferCtx {
                 }
                 false
             }
-            Type::Array(inner, _) | Type::Vec(inner) | Type::Ptr(inner)
-            | Type::Rc(inner) | Type::Weak(inner) | Type::Coroutine(inner)
+            Type::Array(inner, _)
+            | Type::Vec(inner)
+            | Type::Ptr(inner)
+            | Type::Rc(inner)
+            | Type::Weak(inner)
+            | Type::Coroutine(inner)
             | Type::Channel(inner) => self.occurs_in(v, inner),
             Type::Map(k, val) => self.occurs_in(v, k) || self.occurs_in(v, val),
             Type::Tuple(tys) => tys.iter().any(|t| self.occurs_in(v, t)),
@@ -218,8 +220,6 @@ impl InferCtx {
         }
     }
 
-    /// Shallow resolve: if `ty` is a TypeVar, follow the chain to its current binding.
-    /// Does NOT recurse into compound types.
     pub(crate) fn shallow_resolve(&mut self, ty: &Type) -> Type {
         match ty {
             Type::TypeVar(v) => {
@@ -234,8 +234,6 @@ impl InferCtx {
         }
     }
 
-    /// Deep resolve: recursively replace all TypeVars with their solutions.
-    /// Unsolved vars get defaulted by the `default` closure.
     pub(crate) fn resolve(&mut self, ty: &Type) -> Type {
         match ty {
             Type::TypeVar(v) => {
@@ -243,7 +241,6 @@ impl InferCtx {
                 if let Some(resolved) = self.types[root as usize].clone() {
                     self.resolve(&resolved)
                 } else {
-                    // Unsolved — default to i64 (matches existing behavior)
                     Type::I64
                 }
             }
@@ -265,7 +262,6 @@ impl InferCtx {
         }
     }
 
-    /// Resolve a type, but return None for unsolved vars instead of defaulting.
     pub(crate) fn try_resolve(&mut self, ty: &Type) -> Option<Type> {
         match ty {
             Type::TypeVar(v) => {
@@ -447,9 +443,14 @@ mod tests {
     fn test_deeply_nested_unification() {
         let mut ctx = InferCtx::new();
         let v = ctx.fresh_var();
-        // Vec(Map(String, ?v)) ~ Vec(Map(String, Bool))
-        let a = Type::Vec(Box::new(Type::Map(Box::new(Type::String), Box::new(v.clone()))));
-        let b = Type::Vec(Box::new(Type::Map(Box::new(Type::String), Box::new(Type::Bool))));
+        let a = Type::Vec(Box::new(Type::Map(
+            Box::new(Type::String),
+            Box::new(v.clone()),
+        )));
+        let b = Type::Vec(Box::new(Type::Map(
+            Box::new(Type::String),
+            Box::new(Type::Bool),
+        )));
         ctx.unify(&a, &b).unwrap();
         assert_eq!(ctx.resolve(&v), Type::Bool);
     }
@@ -458,8 +459,14 @@ mod tests {
     fn test_unify_at_records_origin() {
         let mut ctx = InferCtx::new();
         let v = ctx.fresh_var();
-        let span = crate::ast::Span { start: 0, end: 1, line: 10, col: 5 };
-        ctx.unify_at(&v, &Type::String, span, "test constraint").unwrap();
+        let span = crate::ast::Span {
+            start: 0,
+            end: 1,
+            line: 10,
+            col: 5,
+        };
+        ctx.unify_at(&v, &Type::String, span, "test constraint")
+            .unwrap();
         let origin = ctx.origin_of(&v).unwrap();
         assert_eq!(origin.span.line, 10);
         assert_eq!(origin.reason, "test constraint");

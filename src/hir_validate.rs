@@ -4,11 +4,9 @@ use crate::ast::Span;
 use crate::hir::{self, DefId};
 use crate::types::Type;
 
-/// Validates the HIR program between typer output and codegen.
-/// Catches bugs that would otherwise surface as cryptic LLVM errors.
 pub struct HirValidator {
-    fn_defs: HashMap<u32, Span>, // top-level DefId uniqueness (fns, types, enums, externs)
-    fn_sigs: HashMap<u32, (String, usize)>, // DefId → (name, param_count)
+    fn_defs: HashMap<u32, Span>,
+    fn_sigs: HashMap<u32, (String, usize)>,
     errors: Vec<String>,
 }
 
@@ -20,15 +18,15 @@ impl HirValidator {
             errors: Vec::new(),
         };
 
-        // Pre-collect function signatures for arity checking
         for f in &prog.fns {
-            v.fn_sigs.insert(f.def_id.0, (f.name.clone(), f.params.len()));
+            v.fn_sigs
+                .insert(f.def_id.0, (f.name.clone(), f.params.len()));
         }
         for ext in &prog.externs {
-            v.fn_sigs.insert(ext.def_id.0, (ext.name.clone(), ext.params.len()));
+            v.fn_sigs
+                .insert(ext.def_id.0, (ext.name.clone(), ext.params.len()));
         }
 
-        // Validate each top-level item
         for f in &prog.fns {
             v.check_top_level_def(f.def_id, &f.name, f.span);
             v.validate_fn(f);
@@ -89,8 +87,10 @@ impl HirValidator {
                 break;
             }
             self.validate_stmt(stmt);
-            if matches!(stmt, hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)) {
-                // Drop statements after terminators are OK (emitted by scope cleanup)
+            if matches!(
+                stmt,
+                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
+            ) {
                 let remaining = &block[i + 1..];
                 if remaining.iter().any(|s| !matches!(s, hir::Stmt::Drop(..))) {
                     saw_terminator = true;
@@ -103,7 +103,6 @@ impl HirValidator {
         match stmt {
             hir::Stmt::Bind(b) => {
                 self.validate_expr(&b.value);
-                // Type consistency: binding type should match value type
                 if b.ty != b.value.ty && b.value.ty != Type::Void {
                     self.errors.push(format!(
                         "type mismatch in binding `{}` at line {}: declared {:?} but value is {:?}",
@@ -191,7 +190,6 @@ impl HirValidator {
             hir::ExprKind::BinOp(lhs, op, rhs) => {
                 self.validate_expr(lhs);
                 self.validate_expr(rhs);
-                // Arithmetic ops require matching operand types
                 use crate::ast::BinOp::*;
                 match op {
                     Add | Sub | Mul | Div | Mod | Lt | Gt | Le | Ge => {
@@ -210,12 +208,14 @@ impl HirValidator {
                 for a in args {
                     self.validate_expr(a);
                 }
-                // Check arity for known functions (skip variadics/builtins/closures)
                 if let Some((_, expected)) = self.fn_sigs.get(&id.0) {
                     if args.len() != *expected {
                         self.errors.push(format!(
                             "call to `{}` at line {}: expected {} args, got {}",
-                            name, expr.span.line, expected, args.len()
+                            name,
+                            expr.span.line,
+                            expected,
+                            args.len()
                         ));
                     }
                 }
@@ -330,7 +330,6 @@ impl HirValidator {
                 }
             }
             hir::ExprKind::StoreQuery(_, _) => {}
-            // Leaf expressions — no sub-expressions to validate
             hir::ExprKind::Int(_)
             | hir::ExprKind::Float(_)
             | hir::ExprKind::Str(_)

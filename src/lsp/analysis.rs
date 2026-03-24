@@ -4,11 +4,9 @@ use crate::ast::{self, Span};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 
-/// Lightweight analysis result for a single file.
 pub struct FileAnalysis {
     pub symbols: Vec<Symbol>,
     pub diagnostics: Vec<LspDiag>,
-    /// Map from definition name → (type signature, span)
     pub defs: HashMap<String, (String, Span)>,
 }
 
@@ -41,14 +39,11 @@ pub enum DiagSeverity {
     Warning,
 }
 
-/// Analyze a Jade source file: lex → parse, extract symbols and diagnostics.
-/// Does NOT do codegen (fast enough for interactive use).
 pub fn analyze(src: &str) -> FileAnalysis {
     let mut diagnostics = Vec::new();
     let mut symbols = Vec::new();
     let mut defs = HashMap::new();
 
-    // Lex
     let tokens = match Lexer::new(src).tokenize() {
         Ok(t) => t,
         Err(e) => {
@@ -59,11 +54,14 @@ pub fn analyze(src: &str) -> FileAnalysis {
                 message: e.to_string(),
                 severity: DiagSeverity::Error,
             });
-            return FileAnalysis { symbols, diagnostics, defs };
+            return FileAnalysis {
+                symbols,
+                diagnostics,
+                defs,
+            };
         }
     };
 
-    // Parse
     let prog = match Parser::new(tokens).parse_program() {
         Ok(p) => p,
         Err(e) => {
@@ -74,11 +72,14 @@ pub fn analyze(src: &str) -> FileAnalysis {
                 message: e.to_string(),
                 severity: DiagSeverity::Error,
             });
-            return FileAnalysis { symbols, diagnostics, defs };
+            return FileAnalysis {
+                symbols,
+                diagnostics,
+                defs,
+            };
         }
     };
 
-    // Extract symbols from declarations
     for d in &prog.decls {
         match d {
             ast::Decl::Fn(f) => {
@@ -174,10 +175,13 @@ pub fn analyze(src: &str) -> FileAnalysis {
         }
     }
 
-    FileAnalysis { symbols, diagnostics, defs }
+    FileAnalysis {
+        symbols,
+        diagnostics,
+        defs,
+    }
 }
 
-/// Find the definition name at a given (1-based) line and column.
 pub fn find_ident_at(src: &str, line: u32, col: u32) -> Option<String> {
     let target_line = src.lines().nth((line.saturating_sub(1)) as usize)?;
     let col0 = (col.saturating_sub(1)) as usize;
@@ -230,7 +234,6 @@ fn extern_signature(ef: &ast::ExternFn) -> String {
     format!("extern *{}({}){}", ef.name, params.join(", "), ret)
 }
 
-/// Build a keyword/builtin completion list for Jade.
 pub fn completions_for_context() -> Vec<(String, &'static str)> {
     vec![
         ("if".into(), "keyword"),

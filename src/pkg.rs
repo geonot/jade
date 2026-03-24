@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::lexer::{Lexer, Token};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct SemVer {
@@ -21,9 +21,15 @@ impl SemVer {
             return Err(format!("invalid semver: {s}"));
         }
         Ok(SemVer {
-            major: parts[0].parse().map_err(|_| format!("invalid major: {}", parts[0]))?,
-            minor: parts[1].parse().map_err(|_| format!("invalid minor: {}", parts[1]))?,
-            patch: parts[2].parse().map_err(|_| format!("invalid patch: {}", parts[2]))?,
+            major: parts[0]
+                .parse()
+                .map_err(|_| format!("invalid major: {}", parts[0]))?,
+            minor: parts[1]
+                .parse()
+                .map_err(|_| format!("invalid minor: {}", parts[1]))?,
+            patch: parts[2]
+                .parse()
+                .map_err(|_| format!("invalid patch: {}", parts[2]))?,
         })
     }
 }
@@ -44,12 +50,6 @@ pub struct Package {
 }
 
 impl Package {
-    /// Parse a jade.pkg manifest. Uses the Jade lexer for tokenization.
-    /// Format:
-    ///   package <name>
-    ///   version <X.Y.Z>
-    ///   author <name>
-    ///   require <name> <url> <version>
     pub fn parse(input: &str) -> Result<Self, String> {
         let mut name = None;
         let mut version = None;
@@ -70,23 +70,30 @@ impl Package {
                     if let Some(Token::Ident(n)) = toks.get(1) {
                         name = Some(n.clone());
                     } else {
-                        return Err(format!("jade.pkg line {}: expected package name", line_num + 1));
+                        return Err(format!(
+                            "jade.pkg line {}: expected package name",
+                            line_num + 1
+                        ));
                     }
                 }
                 Some(Token::Ident(kw)) if kw == "version" => {
                     let rest = trimmed.strip_prefix("version").unwrap().trim();
-                    version = Some(SemVer::parse(rest)
-                        .map_err(|e| format!("jade.pkg line {}: {e}", line_num + 1))?);
+                    version = Some(
+                        SemVer::parse(rest)
+                            .map_err(|e| format!("jade.pkg line {}: {e}", line_num + 1))?,
+                    );
                 }
                 Some(Token::Ident(kw)) if kw == "author" => {
                     let rest = trimmed.strip_prefix("author").unwrap().trim();
                     author = Some(rest.to_string());
                 }
                 Some(Token::Ident(kw)) if kw == "require" => {
-                    // require <name> <url> <version>
                     let parts: Vec<&str> = trimmed.splitn(4, char::is_whitespace).collect();
                     if parts.len() < 4 {
-                        return Err(format!("jade.pkg line {}: require needs name url version", line_num + 1));
+                        return Err(format!(
+                            "jade.pkg line {}: require needs name url version",
+                            line_num + 1
+                        ));
                     }
                     requires.push(Dependency {
                         name: parts[1].to_string(),
@@ -96,7 +103,10 @@ impl Package {
                     });
                 }
                 _ => {
-                    return Err(format!("jade.pkg line {}: unknown directive: {trimmed}", line_num + 1));
+                    return Err(format!(
+                        "jade.pkg line {}: unknown directive: {trimmed}",
+                        line_num + 1
+                    ));
                 }
             }
         }
@@ -115,7 +125,6 @@ impl Package {
         Self::parse(&input)
     }
 
-    /// Generate a jade.pkg manifest string
     pub fn to_string_repr(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("package {}\n", self.name));
@@ -126,7 +135,10 @@ impl Package {
         if !self.requires.is_empty() {
             out.push('\n');
             for dep in &self.requires {
-                out.push_str(&format!("require {} {} {}\n", dep.name, dep.url, dep.version));
+                out.push_str(&format!(
+                    "require {} {} {}\n",
+                    dep.name, dep.url, dep.version
+                ));
             }
         }
         out

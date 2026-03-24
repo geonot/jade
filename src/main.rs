@@ -24,50 +24,37 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
 
-    /// Input .jade file to compile (default command)
     input: Option<PathBuf>,
     #[arg(short, long, default_value = "a.out")]
     output: PathBuf,
-    /// Dump LLVM IR to stdout
     #[arg(long)]
     emit_ir: bool,
-    /// Dump LLVM IR to stdout (alias for --emit-ir)
     #[arg(long)]
     emit_llvm: bool,
-    /// Dump HIR to stdout
     #[arg(long)]
     emit_hir: bool,
-    /// Emit object file without linking
     #[arg(long)]
     emit_obj: bool,
     #[arg(long, default_value = "3")]
     opt: u8,
     #[arg(long)]
     lto: bool,
-    /// Compile as library (external linkage, no main required)
     #[arg(long)]
     lib: bool,
-    /// Extra object files or libraries to link with
     #[arg(long)]
     link: Vec<PathBuf>,
-    /// Emit DWARF debug info (-g)
     #[arg(short = 'g', long)]
     debug: bool,
-    /// Run inline test blocks instead of main
+    #[arg(long)]
+    debug_types: bool,
     #[arg(long)]
     test: bool,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Initialize a new Jade package
-    Init {
-        /// Package name (defaults to current directory name)
-        name: Option<String>,
-    },
-    /// Fetch and cache all dependencies
+    Init { name: Option<String> },
     Fetch,
-    /// Re-resolve dependencies and update jade.lock
     Update,
 }
 
@@ -101,7 +88,6 @@ fn resolve_modules(
         loaded.insert(key.clone());
         let file_path = path.join("/");
         let name = path.last().unwrap();
-        // Check if first segment matches a package name
         let mut candidate = if let Some(pkg_path) = packages.get(&path[0]) {
             if path.len() > 1 {
                 let rest = path[1..].join("/");
@@ -116,11 +102,8 @@ fn resolve_modules(
             candidate = base_dir.join(format!("{file_path}.jade"));
         }
         if !candidate.exists() {
-            candidate = base_dir
-                .join("std")
-                .join(format!("{name}.jade"));
+            candidate = base_dir.join("std").join(format!("{name}.jade"));
         }
-        // Fallback: std/ next to the compiler binary
         if !candidate.exists() {
             if let Ok(exe) = std::env::current_exe() {
                 if let Some(exe_dir) = exe.parent() {
@@ -131,11 +114,12 @@ fn resolve_modules(
                 }
             }
         }
-        // Fallback: std/ relative to the project root (for development)
         if !candidate.exists() {
             let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
             if !manifest.is_empty() {
-                let c = PathBuf::from(&manifest).join("std").join(format!("{name}.jade"));
+                let c = PathBuf::from(&manifest)
+                    .join("std")
+                    .join(format!("{name}.jade"));
                 if c.exists() {
                     candidate = c;
                 }
@@ -179,7 +163,11 @@ fn cmd_init(name: Option<String>) {
     }
     let pkg = Package {
         name: pkg_name.clone(),
-        version: jadec::pkg::SemVer { major: 0, minor: 1, patch: 0 },
+        version: jadec::pkg::SemVer {
+            major: 0,
+            minor: 1,
+            patch: 0,
+        },
         author: None,
         requires: Vec::new(),
     };
@@ -205,11 +193,11 @@ fn cmd_fetch() {
     } else {
         None
     };
-    let resolved = cache.resolve(&pkg, existing_lock.as_ref())
+    let resolved = cache
+        .resolve(&pkg, existing_lock.as_ref())
         .unwrap_or_else(|e| die(&format!("resolve: {e}")));
     let lock_content = resolved.write();
-    fs::write(&lock_path, &lock_content)
-        .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+    fs::write(&lock_path, &lock_content).unwrap_or_else(|e| die(&format!("write lock: {e}")));
     println!("fetched {} dependencies", pkg.requires.len());
 }
 
@@ -223,22 +211,20 @@ fn cmd_update() {
         println!("no dependencies to update");
         return;
     }
-    // Delete existing lockfile to force re-resolution
     let lock_path = PathBuf::from("jade.lock");
     let _ = fs::remove_file(&lock_path);
     let cache = Cache::new();
-    let resolved = cache.resolve(&pkg, None)
+    let resolved = cache
+        .resolve(&pkg, None)
         .unwrap_or_else(|e| die(&format!("resolve: {e}")));
     let lock_content = resolved.write();
-    fs::write(&lock_path, &lock_content)
-        .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+    fs::write(&lock_path, &lock_content).unwrap_or_else(|e| die(&format!("write lock: {e}")));
     println!("updated {} dependencies", pkg.requires.len());
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    // Handle subcommands
     if let Some(cmd) = cli.command {
         match cmd {
             Cmd::Init { name } => cmd_init(name),
@@ -258,18 +244,17 @@ fn main() {
         .parse_program()
         .unwrap_or_else(|e| die(&format!("{e}")));
 
-    let base_dir = input
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
+    let base_dir = input.parent().unwrap_or_else(|| std::path::Path::new("."));
     let mut loaded = HashSet::new();
 
-    // Load package manifest if present
     let pkg_file = base_dir.join("jade.pkg");
     let packages = if pkg_file.exists() {
         let pkg = Package::from_file(&pkg_file).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
         let lock_file = base_dir.join("jade.lock");
         let existing_lock = if lock_file.exists() {
-            Some(Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
+            Some(
+                Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))),
+            )
         } else {
             None
         };
@@ -277,7 +262,8 @@ fn main() {
             HashMap::new()
         } else {
             let cache = Cache::new();
-            let resolved = cache.resolve(&pkg, existing_lock.as_ref())
+            let resolved = cache
+                .resolve(&pkg, existing_lock.as_ref())
                 .unwrap_or_else(|e| die(&format!("resolve: {e}")));
             let lock_content = resolved.write();
             fs::write(&lock_file, &lock_content)
@@ -294,6 +280,9 @@ fn main() {
     typer.set_source_dir(base_dir.to_path_buf());
     if cli.test {
         typer.set_test_mode(true);
+    }
+    if cli.debug_types {
+        typer.set_debug_types(true);
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,
@@ -341,20 +330,30 @@ fn main() {
     let mut has_hard_error = false;
     for d in &diags {
         let level = match d.kind {
-            jadec::ownership::DiagKind::UseAfterMove => { has_hard_error = true; "error" },
-            jadec::ownership::DiagKind::DoubleMutableBorrow => { has_hard_error = true; "error" },
-            jadec::ownership::DiagKind::MoveOfBorrowed => { has_hard_error = true; "error" },
-            jadec::ownership::DiagKind::InvalidRcDeref => { has_hard_error = true; "error" },
-            jadec::ownership::DiagKind::ReturnOfBorrowed => { has_hard_error = true; "error" },
+            jadec::ownership::DiagKind::UseAfterMove => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::DoubleMutableBorrow => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::MoveOfBorrowed => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::InvalidRcDeref => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::ReturnOfBorrowed => {
+                has_hard_error = true;
+                "error"
+            }
             jadec::ownership::DiagKind::WeakUpgradeWithoutCheck => "warning",
             jadec::ownership::DiagKind::Warning => "warning",
         };
-        eprintln!(
-            "ownership: {} (line {}): {}",
-            level,
-            d.span.line,
-            d.message
-        );
+        eprintln!("ownership: {} (line {}): {}", level, d.span.line, d.message);
     }
     if has_hard_error {
         die("compilation aborted due to ownership errors");

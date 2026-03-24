@@ -215,11 +215,8 @@ impl OwnershipVerifier {
                 }
             }
             Stmt::Drop(def_id, _, _, span) => {
-                // Drop of an already-moved value is a valid no-op —
-                // codegen / Perceus will elide it. Only verify live values.
                 if let Some(state) = self.lookup(*def_id) {
                     if !state.moved {
-                        // Mark as consumed so double-drops are detected
                         self.record_move(*def_id, *span);
                     }
                 }
@@ -443,18 +440,24 @@ impl OwnershipVerifier {
             }
             ExprKind::DynDispatch(obj, _, _, args) => {
                 self.verify_expr(obj);
-                for a in args { self.verify_expr(a); }
+                for a in args {
+                    self.verify_expr(a);
+                }
             }
             ExprKind::DynCoerce(inner, _, _) => {
                 self.verify_expr(inner);
             }
             ExprKind::VecNew(args) => {
-                for a in args { self.verify_expr(a); }
+                for a in args {
+                    self.verify_expr(a);
+                }
             }
             ExprKind::MapNew => {}
             ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
                 self.verify_expr(obj);
-                for a in args { self.verify_expr(a); }
+                for a in args {
+                    self.verify_expr(a);
+                }
             }
             ExprKind::IterNext(_, _, _) => {}
             ExprKind::ChannelCreate(_, cap) => {
@@ -617,7 +620,6 @@ impl OwnershipVerifier {
             }
         }
     }
-
 
     fn record_move(&mut self, id: DefId, span: crate::ast::Span) {
         if id == DefId::BUILTIN {

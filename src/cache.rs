@@ -29,11 +29,9 @@ impl Cache {
         self.package_path(dep).exists()
     }
 
-    /// Clone or reuse a package. Returns the git commit hash.
     pub fn fetch(&self, dep: &Dependency) -> Result<String, String> {
         let dir = self.package_path(dep);
         if dir.exists() {
-            // Already cached, read commit
             return Self::read_commit(&dir);
         }
         std::fs::create_dir_all(&dir)
@@ -46,7 +44,6 @@ impl Cache {
             .map_err(|e| format!("git clone failed: {e}"))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // Clean up failed clone
             let _ = std::fs::remove_dir_all(&dir);
             return Err(format!("git clone {} failed: {stderr}", dep.url));
         }
@@ -65,7 +62,6 @@ impl Cache {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    /// Resolve all dependencies, producing a lockfile.
     pub fn resolve(
         &self,
         pkg: &Package,
@@ -89,11 +85,9 @@ impl Cache {
         if !resolving.insert(dep.name.clone()) {
             return Err(format!("circular dependency: {}", dep.name));
         }
-        // Check if already pinned in lockfile
         let commit = if let Some(lock) = existing_lock {
             if let Some(entry) = lock.find(&dep.name) {
                 if entry.version.to_string() == dep.version.to_string() {
-                    // Reuse pinned commit
                     if !self.is_cached(dep) {
                         self.fetch(dep)?;
                     }
@@ -106,7 +100,6 @@ impl Cache {
             self.fetch(dep)?
         };
 
-        // Check for transitive dependencies
         let pkg_dir = self.package_path(dep);
         let sub_pkg_file = pkg_dir.join("jade.pkg");
         let mut sub_deps = Vec::new();
@@ -129,7 +122,6 @@ impl Cache {
     }
 }
 
-/// Build name → cache path map from a resolved lockfile
 pub fn build_package_map(cache: &Cache, lockfile: &Lockfile) -> HashMap<String, PathBuf> {
     let mut map = HashMap::new();
     for entry in &lockfile.entries {
@@ -145,14 +137,12 @@ fn collect_paths(cache: &Cache, entry: &LockEntry, map: &mut HashMap<String, Pat
     }
 }
 
-/// Convert a URL to a directory path for caching
 fn url_to_dir(url: &str) -> String {
     url.trim_start_matches("https://")
         .trim_start_matches("http://")
         .replace(':', "_")
 }
 
-/// Get the user's cache directory
 fn dirs_cache() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".cache")

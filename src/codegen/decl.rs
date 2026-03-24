@@ -38,8 +38,6 @@ impl<'ctx> Compiler<'ctx> {
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
             ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
 
-        // For main: create a C-level main(i32, ptr)->i32 wrapper that stores
-        // argc/argv into globals, then calls the user-defined main.
         if f.name == "main" && !self.lib_mode {
             let ft = self.mk_fn_type(&ret, &lp, false);
             let user_fv = self.module.add_function("__jade_user_main", ft, None);
@@ -51,13 +49,11 @@ impl<'ctx> Compiler<'ctx> {
             user_fv.set_linkage(Linkage::Internal);
             self.fns.insert(f.name.clone(), (user_fv, ptys, ret));
 
-            // Create C-level main(i32, ptr) -> i32 wrapper
             let i32t = self.ctx.i32_type();
             let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
             let main_ft = i32t.fn_type(&[i32t.into(), ptr_ty.into()], false);
             let main_fv = self.module.add_function("main", main_ft, None);
 
-            // Declare globals for argc/argv
             let argc_global = self.module.add_global(i32t, None, "__jade_argc");
             argc_global.set_initializer(&i32t.const_int(0, false));
             let argv_global = self.module.add_global(ptr_ty, None, "__jade_argv");
@@ -67,22 +63,24 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(entry);
             let argc_param = main_fv.get_nth_param(0).unwrap();
             let argv_param = main_fv.get_nth_param(1).unwrap();
-            b!(self.bld.build_store(argc_global.as_pointer_value(), argc_param));
-            b!(self.bld.build_store(argv_global.as_pointer_value(), argv_param));
+            b!(self
+                .bld
+                .build_store(argc_global.as_pointer_value(), argc_param));
+            b!(self
+                .bld
+                .build_store(argv_global.as_pointer_value(), argv_param));
 
-            // Initialize scheduler if runtime is declared
             if let Some(sched_init) = self.module.get_function("jade_sched_init") {
-                b!(self.bld.build_call(sched_init, &[i32t.const_int(0, false).into()], ""));
+                b!(self
+                    .bld
+                    .build_call(sched_init, &[i32t.const_int(0, false).into()], ""));
             }
 
-            // Call user's main
             let call_result = b!(self.bld.build_call(user_fv, &[], "user_main"));
 
-            // Run scheduler to completion (waits for all non-daemon coroutines)
             if let Some(sched_run) = self.module.get_function("jade_sched_run") {
                 b!(self.bld.build_call(sched_run, &[], ""));
             }
-            // Shutdown scheduler (joins worker threads, cleans up)
             if let Some(sched_shutdown) = self.module.get_function("jade_sched_shutdown") {
                 b!(self.bld.build_call(sched_shutdown, &[], ""));
             }
@@ -227,7 +225,8 @@ impl<'ctx> Compiler<'ctx> {
         let st = self.ctx.opaque_struct_type(&td.name);
         st.set_body(&ltys, td.layout.packed);
         self.structs.insert(td.name.clone(), fields);
-        self.struct_layouts.insert(td.name.clone(), td.layout.clone());
+        self.struct_layouts
+            .insert(td.name.clone(), td.layout.clone());
         Ok(())
     }
 
@@ -249,9 +248,7 @@ impl<'ctx> Compiler<'ctx> {
             .iter()
             .map(|(_, t)| {
                 if matches!(t, Type::String) {
-                    self.ctx
-                        .ptr_type(inkwell::AddressSpace::default())
-                        .into()
+                    self.ctx.ptr_type(inkwell::AddressSpace::default()).into()
                 } else {
                     self.llvm_ty(t).into()
                 }
@@ -303,7 +300,6 @@ impl<'ctx> Compiler<'ctx> {
             resolved.push((vname.clone(), ftys.clone()));
         }
 
-        // Zero-cost optimization: fieldless enums → tag-only
         if max_payload == 0 {
             let st = self.ctx.opaque_struct_type(name);
             st.set_body(&[i32t.into()], false);
@@ -311,7 +307,6 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(());
         }
 
-        // Zero-cost optimization: Option-like (1 empty variant + 1 single-pointer variant) → nullable ptr
         if variants.len() == 2 {
             let empty_idx = variants.iter().position(|(_, fs, _)| fs.is_empty());
             let payload_idx = variants.iter().position(|(_, fs, _)| fs.len() == 1);
@@ -323,8 +318,6 @@ impl<'ctx> Compiler<'ctx> {
                 ) || matches!(field_ty, Type::Struct(_) | Type::Enum(_))
                     && !Self::is_recursive_field(field_ty, name);
                 if is_ptr_like {
-                    // Nullable pointer: the whole enum is just a pointer.
-                    // null = empty variant, non-null = payload variant.
                     let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
                     let st = self.ctx.opaque_struct_type(name);
                     st.set_body(&[ptr.into()], false);

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// ── JSON-RPC base ──────────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct Request {
     pub id: Option<Value>,
@@ -20,7 +18,11 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: Value, result: Value) -> Self {
-        Self { jsonrpc: "2.0", id, result }
+        Self {
+            jsonrpc: "2.0",
+            id,
+            result,
+        }
     }
 }
 
@@ -30,8 +32,6 @@ pub struct Notification {
     pub method: &'static str,
     pub params: Value,
 }
-
-// ── Initialize ─────────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct ServerCapabilities {
@@ -65,8 +65,6 @@ pub struct ServerInfo {
     pub name: String,
     pub version: String,
 }
-
-// ── Text Document Items ────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct TextDocumentIdentifier {
@@ -132,8 +130,6 @@ pub struct Position {
     pub character: u32,
 }
 
-// ── Response types ─────────────────────────────────────────────
-
 #[derive(Serialize)]
 pub struct Hover {
     pub contents: MarkupContent,
@@ -184,8 +180,6 @@ pub struct CompletionItem {
     pub detail: Option<String>,
 }
 
-// ── Diagnostics ────────────────────────────────────────────────
-
 #[derive(Serialize)]
 pub struct Diagnostic {
     pub range: Range,
@@ -201,8 +195,6 @@ pub struct PublishDiagnosticsParams {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-// ── Symbol kinds (LSP spec) ────────────────────────────────────
-
 pub const SK_FUNCTION: i32 = 12;
 pub const SK_STRUCT: i32 = 23;
 pub const SK_ENUM: i32 = 10;
@@ -210,7 +202,6 @@ pub const SK_FIELD: i32 = 8;
 pub const SK_VARIABLE: i32 = 13;
 pub const SK_CONSTANT: i32 = 14;
 
-// Completion item kinds
 pub const CK_FUNCTION: i32 = 3;
 pub const CK_FIELD: i32 = 5;
 pub const CK_VARIABLE: i32 = 6;

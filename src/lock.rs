@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::pkg::SemVer;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct LockEntry {
@@ -29,7 +29,6 @@ impl Lockfile {
             if !line.starts_with(' ') {
                 let entry = Self::parse_entry(line, 0)?;
                 let mut top = entry;
-                // Collect indented children
                 i += 1;
                 while i < lines.len() && lines[i].starts_with("  ") {
                     let child_line = lines[i].trim();

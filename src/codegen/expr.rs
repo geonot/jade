@@ -85,19 +85,25 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_send(target, actor_name, handler_name, *tag, args)
             }
             hir::ExprKind::StoreQuery(store_name, filter) => {
-                let sd = self.store_defs.get(store_name)
+                let sd = self
+                    .store_defs
+                    .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
                 self.compile_store_query(store_name, filter, &sd)
             }
             hir::ExprKind::StoreCount(store_name) => {
-                let sd = self.store_defs.get(store_name)
+                let sd = self
+                    .store_defs
+                    .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
                 self.compile_store_count(store_name, &sd)
             }
             hir::ExprKind::StoreAll(store_name) => {
-                let sd = self.store_defs.get(store_name)
+                let sd = self
+                    .store_defs
+                    .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
                 self.compile_store_all(store_name, &sd)
@@ -110,15 +116,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::MapMethod(obj, method, args) => {
                 self.compile_map_method(obj, method, args)
             }
-            hir::ExprKind::CoroutineCreate(name, body) => {
-                self.compile_coroutine_create(name, body)
-            }
-            hir::ExprKind::CoroutineNext(coro) => {
-                self.compile_coroutine_next(coro)
-            }
+            hir::ExprKind::CoroutineCreate(name, body) => self.compile_coroutine_create(name, body),
+            hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro),
             hir::ExprKind::Yield(_inner) => {
-                // Yield should only appear inside coroutine body compilation
-                // which intercepts it. If we reach here, it's an error.
                 panic!("yield expression outside of coroutine body")
             }
             hir::ExprKind::DynDispatch(obj, trait_name, method, args) => {
@@ -136,9 +136,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::ChannelSend(ch_expr, val_expr) => {
                 self.compile_channel_send(ch_expr, val_expr)
             }
-            hir::ExprKind::ChannelRecv(ch_expr) => {
-                self.compile_channel_recv(ch_expr, &expr.ty)
-            }
+            hir::ExprKind::ChannelRecv(ch_expr) => self.compile_channel_recv(ch_expr, &expr.ty),
             hir::ExprKind::Select(arms, default_body) => {
                 self.compile_select(arms, default_body.as_ref())
             }
@@ -191,15 +189,16 @@ impl<'ctx> Compiler<'ctx> {
         if matches!(ety, Type::String) && matches!(op, BinOp::Eq | BinOp::Ne) {
             return self.string_eq(lhs, rhs, matches!(op, BinOp::Ne));
         }
-        // Struct operator overloading: if type has an `eq` trait method, use it
         if matches!(op, BinOp::Eq | BinOp::Ne) {
             if let Type::Struct(name) = ety {
                 let fn_name = format!("{name}_eq");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let result = b!(self.bld.build_call(fv, &[lhs.into(), rhs.into()], "eq.call"))
-                        .try_as_basic_value()
-                        .basic()
-                        .unwrap();
+                    let result = b!(self
+                        .bld
+                        .build_call(fv, &[lhs.into(), rhs.into()], "eq.call"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap();
                     return if matches!(op, BinOp::Ne) {
                         Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
                     } else {
@@ -208,7 +207,6 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
         }
-        // Struct operator overloading: arithmetic (add, sub, mul, div)
         if let Type::Struct(name) = ety {
             let trait_name = match op {
                 BinOp::Add => Some("add"),
@@ -224,10 +222,14 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(method) = trait_name {
                 let fn_name = format!("{name}_{method}");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let result = b!(self.bld.build_call(fv, &[lhs.into(), rhs.into()], &format!("{method}.call")))
-                        .try_as_basic_value()
-                        .basic()
-                        .unwrap();
+                    let result = b!(self.bld.build_call(
+                        fv,
+                        &[lhs.into(), rhs.into()],
+                        &format!("{method}.call")
+                    ))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap();
                     return Ok(result);
                 }
             }
@@ -302,8 +304,6 @@ impl<'ctx> Compiler<'ctx> {
         let (l, r) = (lhs.into_int_value(), rhs.into_int_value());
         let s = ety.is_signed();
         Ok(match op {
-            // Wrapping arithmetic by default — defined behavior on overflow (like Go/Zig).
-            // Users can opt into checked_add/saturating_add etc. for explicit overflow handling.
             BinOp::Add => b!(self.bld.build_int_add(l, r, "add")).into(),
             BinOp::Sub => b!(self.bld.build_int_sub(l, r, "sub")).into(),
             BinOp::Mul => b!(self.bld.build_int_mul(l, r, "mul")).into(),
@@ -367,9 +367,6 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Division with a zero-check trap. Emits a conditional branch:
-    /// if divisor == 0 → call trap (abort), else → perform division.
-    /// LLVM will optimize away the branch when the divisor is provably non-zero.
     fn checked_div(
         &mut self,
         l: inkwell::values::IntValue<'ctx>,
@@ -378,7 +375,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let fv = self.cur_fn.unwrap();
         let zero = r.get_type().const_int(0, false);
-        let is_zero = b!(self.bld.build_int_compare(IntPredicate::EQ, r, zero, "div.z"));
+        let is_zero = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, r, zero, "div.z"));
         let trap_bb = self.ctx.append_basic_block(fv, "div.trap");
         let ok_bb = self.ctx.append_basic_block(fv, "div.ok");
         b!(self.bld.build_conditional_branch(is_zero, trap_bb, ok_bb));
@@ -392,7 +391,6 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Remainder with a zero-check trap.
     fn checked_rem(
         &mut self,
         l: inkwell::values::IntValue<'ctx>,
@@ -401,7 +399,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let fv = self.cur_fn.unwrap();
         let zero = r.get_type().const_int(0, false);
-        let is_zero = b!(self.bld.build_int_compare(IntPredicate::EQ, r, zero, "rem.z"));
+        let is_zero = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, r, zero, "rem.z"));
         let trap_bb = self.ctx.append_basic_block(fv, "rem.trap");
         let ok_bb = self.ctx.append_basic_block(fv, "rem.ok");
         b!(self.bld.build_conditional_branch(is_zero, trap_bb, ok_bb));
@@ -415,46 +415,65 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Emit a trap: print message + abort. Used for div-by-zero and OOB.
     fn emit_trap(&mut self, msg: &str) {
-        let trap_fn = self.module.get_function("__jade_trap").unwrap_or_else(|| {
-            self.build_trap_fn()
-        });
-        let msg_str = self.bld.build_global_string_ptr(msg, "trap.msg")
+        let trap_fn = self
+            .module
+            .get_function("__jade_trap")
+            .unwrap_or_else(|| self.build_trap_fn());
+        let msg_str = self
+            .bld
+            .build_global_string_ptr(msg, "trap.msg")
             .expect("build_global_string_ptr");
-        self.bld.build_call(trap_fn, &[msg_str.as_pointer_value().into()], "")
+        self.bld
+            .build_call(trap_fn, &[msg_str.as_pointer_value().into()], "")
             .expect("build_call trap");
         self.bld.build_unreachable().expect("build_unreachable");
     }
 
-    /// Build the internal `__jade_trap(msg: *const i8)` function once.
     fn build_trap_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         let i32t = self.ctx.i32_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
-        let f = self.module.add_function("__jade_trap", ft, Some(Linkage::Internal));
+        let f = self
+            .module
+            .add_function("__jade_trap", ft, Some(Linkage::Internal));
         let entry = self.ctx.append_basic_block(f, "entry");
         let saved_bb = self.bld.get_insert_block();
         self.bld.position_at_end(entry);
         let fprintf_fn = self.module.get_function("fprintf").unwrap_or_else(|| {
             let ft2 = i32t.fn_type(&[ptr_ty.into(), ptr_ty.into()], true);
-            self.module.add_function("fprintf", ft2, Some(Linkage::External))
+            self.module
+                .add_function("fprintf", ft2, Some(Linkage::External))
         });
         let stderr_g = self.module.get_global("stderr").unwrap_or_else(|| {
             let g = self.module.add_global(ptr_ty, None, "stderr");
             g.set_linkage(Linkage::External);
             g
         });
-        let stderr_val = self.bld.build_load(ptr_ty, stderr_g.as_pointer_value(), "se")
+        let stderr_val = self
+            .bld
+            .build_load(ptr_ty, stderr_g.as_pointer_value(), "se")
             .expect("load stderr");
-        let fmt = self.bld.build_global_string_ptr("runtime error: %s\n", "trap.fmt")
+        let fmt = self
+            .bld
+            .build_global_string_ptr("runtime error: %s\n", "trap.fmt")
             .expect("fmt string");
         let msg_param = f.get_nth_param(0).unwrap();
-        self.bld.build_call(fprintf_fn, &[stderr_val.into(), fmt.as_pointer_value().into(), msg_param.into()], "")
+        self.bld
+            .build_call(
+                fprintf_fn,
+                &[
+                    stderr_val.into(),
+                    fmt.as_pointer_value().into(),
+                    msg_param.into(),
+                ],
+                "",
+            )
             .expect("call fprintf");
         let abort_fn = self.module.get_function("abort").unwrap_or_else(|| {
             let ft3 = self.ctx.void_type().fn_type(&[], false);
-            self.module.add_function("abort", ft3, Some(Linkage::External))
+            self.module
+                .add_function("abort", ft3, Some(Linkage::External))
         });
         self.bld.build_call(abort_fn, &[], "").expect("call abort");
         self.bld.build_unreachable().expect("unreachable");
@@ -464,7 +483,6 @@ impl<'ctx> Compiler<'ctx> {
         f
     }
 
-    /// Bounds check: if idx >= len, trap. LLVM eliminates at O2+ when provably safe.
     fn emit_bounds_check(
         &mut self,
         idx: inkwell::values::IntValue<'ctx>,
@@ -472,7 +490,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<(), String> {
         let fv = self.cur_fn.unwrap();
         let len_val = idx.get_type().const_int(len, false);
-        let oob = b!(self.bld.build_int_compare(IntPredicate::UGE, idx, len_val, "oob"));
+        let oob = b!(self
+            .bld
+            .build_int_compare(IntPredicate::UGE, idx, len_val, "oob"));
         let trap_bb = self.ctx.append_basic_block(fv, "oob.trap");
         let ok_bb = self.ctx.append_basic_block(fv, "oob.ok");
         b!(self.bld.build_conditional_branch(oob, trap_bb, ok_bb));
@@ -714,7 +734,6 @@ impl<'ctx> Compiler<'ctx> {
             ))
             .into());
         }
-        // ptr as i64 (ptrtoint)
         if matches!(src, Type::Ptr(_)) && target.is_int() {
             return Ok(b!(self.bld.build_ptr_to_int(
                 val.into_pointer_value(),
@@ -784,10 +803,7 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_struct_type(name)
             .ok_or_else(|| format!("no LLVM struct: {name}"))?;
-        let align = self
-            .struct_layouts
-            .get(name)
-            .and_then(|l| l.align);
+        let align = self.struct_layouts.get(name).and_then(|l| l.align);
         let ptr = if let Some(a) = align {
             self.entry_alloca_aligned(st.into(), name, a)
         } else {
@@ -922,10 +938,12 @@ impl<'ctx> Compiler<'ctx> {
         if let hir::ExprKind::Var(_, n) = &obj.kind {
             if let Some((ptr, _)) = self.find_var(n).cloned() {
                 if is_ptr {
-                    // self is a pointer to a struct — load the pointer, then GEP
                     let struct_ptr = b!(self.bld.build_load(
-                        self.ctx.ptr_type(inkwell::AddressSpace::default()), ptr, "self.ptr"
-                    )).into_pointer_value();
+                        self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                        ptr,
+                        "self.ptr"
+                    ))
+                    .into_pointer_value();
                     let gep = b!(self.bld.build_struct_gep(st, struct_ptr, idx as u32, field));
                     return Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)));
                 }
@@ -955,7 +973,6 @@ impl<'ctx> Compiler<'ctx> {
                     _ => self.compile_expr(arr)?.into_pointer_value(),
                 };
                 let idx_val = self.wrap_negative_index(idx_val, *n as u64)?;
-                // Bounds check — LLVM eliminates this at O2+ when provably in-range
                 self.emit_bounds_check(idx_val, *n as u64)?;
                 let gep = unsafe {
                     b!(self.bld.build_gep(
@@ -1009,9 +1026,7 @@ impl<'ctx> Compiler<'ctx> {
                         .bld
                         .build_gep(i8t, out, &[i64t.const_int(i as u64, false)], "sso.b"))
                 };
-                b!(self
-                    .bld
-                    .build_store(bp, i8t.const_int(byte as u64, false)));
+                b!(self.bld.build_store(bp, i8t.const_int(byte as u64, false)));
             }
             let tag_ptr = unsafe {
                 b!(self
@@ -1094,7 +1109,6 @@ impl<'ctx> Compiler<'ctx> {
                 let lt = self.llvm_ty(&ty);
                 let g = self.module.add_global(lt, None, &gname);
                 g.set_initializer(&self.default_val(&ty));
-                // Thread-local: prevents data races when lambdas are sent to actors
                 g.set_thread_local(true);
                 b!(self.bld.build_store(g.as_pointer_value(), val));
                 cap_globals.push((id.clone(), g.as_pointer_value(), ty));
@@ -1234,8 +1248,10 @@ impl<'ctx> Compiler<'ctx> {
                     Self::collect_var_refs_expr(a, out);
                 }
             }
-            hir::ExprKind::Method(obj, _, _, args) | hir::ExprKind::StringMethod(obj, _, args)
-            | hir::ExprKind::VecMethod(obj, _, args) | hir::ExprKind::MapMethod(obj, _, args) => {
+            hir::ExprKind::Method(obj, _, _, args)
+            | hir::ExprKind::StringMethod(obj, _, args)
+            | hir::ExprKind::VecMethod(obj, _, args)
+            | hir::ExprKind::MapMethod(obj, _, args) => {
                 Self::collect_var_refs_expr(obj, out);
                 for a in args {
                     Self::collect_var_refs_expr(a, out);
@@ -1365,19 +1381,22 @@ impl<'ctx> Compiler<'ctx> {
         let start_val = self.compile_expr(start)?.into_int_value();
         let end_val = self.compile_expr(end_expr)?.into_int_value();
         let elem_ty = i64t;
-        // Heap-allocate: size = max(end - start, 0) * elem_size
         let range = b!(self.bld.build_int_sub(end_val, start_val, "comp.range"));
         let zero = i64t.const_int(0, false);
-        let is_pos = b!(self.bld.build_int_compare(IntPredicate::SGT, range, zero, "comp.pos"));
+        let is_pos = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SGT, range, zero, "comp.pos"));
         let safe_range = b!(self.bld.build_select(is_pos, range, zero, "comp.sz")).into_int_value();
         let elem_size = i64t.const_int(8, false);
         let alloc_size = b!(self.bld.build_int_mul(safe_range, elem_size, "comp.bytes"));
         let malloc_fn = self.ensure_malloc();
-        let arr_ptr = b!(self.bld.build_call(malloc_fn, &[alloc_size.into()], "comp_arr"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_pointer_value();
+        let arr_ptr = b!(self
+            .bld
+            .build_call(malloc_fn, &[alloc_size.into()], "comp_arr"))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
         let fv = self.cur_fn.unwrap();
         let loop_bb = self.ctx.append_basic_block(fv, "comp_loop");
         let body_bb = self.ctx.append_basic_block(fv, "comp_body");
@@ -1450,7 +1469,6 @@ impl<'ctx> Compiler<'ctx> {
         let val = self.compile_expr(inner)?;
         let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
-        // Allocate the concrete value on heap and get a pointer
         let data_ptr = if val.is_pointer_value() {
             val.into_pointer_value()
         } else {
@@ -1460,20 +1478,22 @@ impl<'ctx> Compiler<'ctx> {
             alloc
         };
 
-        // Get vtable pointer
         let vtable_ptr = self
             .vtables
             .get(&(type_name.to_string(), trait_name.to_string()))
             .map(|gv| gv.as_pointer_value())
             .unwrap_or_else(|| ptr.const_null());
 
-        // Build fat pointer struct {data, vtable}
         let fat_ty = self.ctx.struct_type(&[ptr.into(), ptr.into()], false);
         let fat = fat_ty.const_zero();
-        let fat = b!(self.bld.build_insert_value(fat, data_ptr, 0, "dyn.fat.data"))
-            .into_struct_value();
-        let fat = b!(self.bld.build_insert_value(fat, vtable_ptr, 1, "dyn.fat.vtable"))
-            .into_struct_value();
+        let fat = b!(self
+            .bld
+            .build_insert_value(fat, data_ptr, 0, "dyn.fat.data"))
+        .into_struct_value();
+        let fat = b!(self
+            .bld
+            .build_insert_value(fat, vtable_ptr, 1, "dyn.fat.vtable"))
+        .into_struct_value();
         Ok(fat.into())
     }
 
@@ -1489,21 +1509,20 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let fat_ty = self.ctx.struct_type(&[ptr_ty.into(), ptr_ty.into()], false);
 
-        // Extract data and vtable pointers
         let tmp = self.entry_alloca(fat_ty.into(), "dyn.tmp");
         b!(self.bld.build_store(tmp, fat));
         let data_gep = b!(self.bld.build_struct_gep(fat_ty, tmp, 0, "dyn.data.gep"));
         let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dyn.data")).into_pointer_value();
         let vtable_gep = b!(self.bld.build_struct_gep(fat_ty, tmp, 1, "dyn.vtable.gep"));
-        let vtable_ptr = b!(self.bld.build_load(ptr_ty, vtable_gep, "dyn.vtable")).into_pointer_value();
+        let vtable_ptr =
+            b!(self.bld.build_load(ptr_ty, vtable_gep, "dyn.vtable")).into_pointer_value();
 
-        // Look up method index in trait_method_order
-        let method_idx = self.trait_method_order
+        let method_idx = self
+            .trait_method_order
             .get(trait_name)
             .and_then(|methods| methods.iter().position(|m| m == method))
             .unwrap_or(0) as u64;
 
-        // Load function pointer from vtable
         let fn_ptr_gep = unsafe {
             b!(self.bld.build_gep(
                 ptr_ty,
@@ -1514,22 +1533,26 @@ impl<'ctx> Compiler<'ctx> {
         };
         let fn_ptr = b!(self.bld.build_load(ptr_ty, fn_ptr_gep, "dyn.fn")).into_pointer_value();
 
-        // Build call args: self (data_ptr) + remaining args
-        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = vec![data_ptr.into()];
+        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+            vec![data_ptr.into()];
         for arg in args {
             let av = self.compile_expr(arg)?;
             call_args.push(av.into());
         }
 
-        // Build the indirect call
         let ret_ty = self.llvm_ty(result_ty);
         let mut param_tys: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
         for arg in args {
             param_tys.push(self.llvm_ty(&arg.ty).into());
         }
         let fn_ty = ret_ty.fn_type(&param_tys, false);
-        let result = b!(self.bld.build_indirect_call(fn_ty, fn_ptr, &call_args, "dyn.call"));
-        Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
+        let result = b!(self
+            .bld
+            .build_indirect_call(fn_ty, fn_ptr, &call_args, "dyn.call"));
+        Ok(result
+            .try_as_basic_value()
+            .basic()
+            .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
     }
 
     fn compile_iter_next_by_name(
@@ -1538,16 +1561,20 @@ impl<'ctx> Compiler<'ctx> {
         type_name: &str,
         method_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let ptr = self.find_var(var_name)
+        let ptr = self
+            .find_var(var_name)
             .ok_or_else(|| format!("undefined iter variable: {var_name}"))?
             .0;
 
-        // Call TypeName_method(ptr)
         let fn_name = format!("{type_name}_{method_name}");
-        let fv = self.module.get_function(&fn_name)
+        let fv = self
+            .module
+            .get_function(&fn_name)
             .ok_or_else(|| format!("no function {fn_name}"))?;
         let result = b!(self.bld.build_call(fv, &[ptr.into()], "iter.next"));
-        Ok(result.try_as_basic_value().basic()
+        Ok(result
+            .try_as_basic_value()
+            .basic()
             .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
     }
 }

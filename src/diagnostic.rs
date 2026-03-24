@@ -7,21 +7,6 @@ pub enum Severity {
     Info,
 }
 
-/// Structured error codes for the Jade compiler.
-///
-/// | Range     | Category              |
-/// |-----------|-----------------------|
-/// | E001–E099 | Syntax errors         |
-/// | E100–E199 | Name resolution       |
-/// | E200–E299 | Type errors           |
-/// | E300–E399 | Ownership & borrow    |
-/// | E400–E499 | Safety & FFI          |
-/// | E500–E599 | Pattern matching      |
-/// | E600–E699 | Memory management     |
-/// | E700–E799 | Overflow & arithmetic |
-/// | W001–W099 | General warnings      |
-/// | W100–W199 | Performance warnings  |
-/// | W200–W299 | Safety warnings       |
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ErrorCode {
     E001,
@@ -66,7 +51,6 @@ impl std::fmt::Display for ErrorCode {
     }
 }
 
-/// A secondary label pointing at a related source location.
 #[derive(Debug, Clone)]
 pub struct Label {
     pub span: Span,

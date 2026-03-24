@@ -1,17 +1,16 @@
 use std::io::{self, BufRead, Write};
 
-/// Reads a single LSP JSON-RPC message from stdin (Content-Length framing).
 pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     let mut content_length: Option<usize> = None;
     loop {
         let mut header = String::new();
         let n = reader.read_line(&mut header)?;
         if n == 0 {
-            return Ok(None); // EOF
+            return Ok(None);
         }
         let header = header.trim();
         if header.is_empty() {
-            break; // end of headers
+            break;
         }
         if let Some(val) = header.strip_prefix("Content-Length:") {
             if let Ok(len) = val.trim().parse::<usize>() {
@@ -21,7 +20,12 @@ pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     }
     let len = match content_length {
         Some(l) => l,
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length")),
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "missing Content-Length",
+            ));
+        }
     };
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;
@@ -30,7 +34,6 @@ pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// Writes a single LSP JSON-RPC message to stdout with Content-Length framing.
 pub fn write_message(writer: &mut impl Write, body: &str) -> io::Result<()> {
     write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
     writer.flush()

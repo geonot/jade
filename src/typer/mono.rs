@@ -1,6 +1,3 @@
-//! Generic monomorphization: stamping out concrete instances of generic
-//! functions and enums at their call‑sites.
-
 use std::collections::HashMap;
 
 use crate::ast;
@@ -115,7 +112,9 @@ impl Typer {
         type_map: &HashMap<String, Type>,
     ) -> Result<String, String> {
         if self.mono_depth >= 64 {
-            return Err(format!("monomorphization depth limit exceeded for '{name}' (possible infinite recursion in generics)"));
+            return Err(format!(
+                "monomorphization depth limit exceeded for '{name}' (possible infinite recursion in generics)"
+            ));
         }
         self.mono_depth += 1;
         let result = self.monomorphize_fn_inner(name, type_map);
@@ -133,7 +132,6 @@ impl Typer {
             .get(name)
             .ok_or_else(|| format!("no generic fn: {name}"))?
             .clone();
-        // Check trait bounds on type parameters
         if let Some(bounds) = self.generic_bounds.get(name).cloned() {
             for (param, required_traits) in &bounds {
                 if let Some(concrete_ty) = type_map.get(param) {
@@ -162,7 +160,6 @@ impl Typer {
                 Self::substitute_type(&base, type_map)
             })
             .collect();
-        // Bind params in scope so infer_ret_ast can see their types
         self.push_scope();
         for (i, p) in gf.params.iter().enumerate() {
             if i < ptys.len() {
@@ -360,8 +357,15 @@ impl Typer {
             Type::Enum(n) => n.clone(),
             Type::Vec(inner) => format!("Vec_{}", Self::type_name_for_bound_check(inner)),
             Type::Fn(params, ret) => {
-                let ps: Vec<_> = params.iter().map(|p| Self::type_name_for_bound_check(p)).collect();
-                format!("Fn_{}_{}", ps.join("_"), Self::type_name_for_bound_check(ret))
+                let ps: Vec<_> = params
+                    .iter()
+                    .map(|p| Self::type_name_for_bound_check(p))
+                    .collect();
+                format!(
+                    "Fn_{}_{}",
+                    ps.join("_"),
+                    Self::type_name_for_bound_check(ret)
+                )
             }
             Type::Param(name) => name.clone(),
             _ => format!("{ty:?}"),
@@ -369,7 +373,6 @@ impl Typer {
     }
 
     fn type_satisfies_trait(&self, type_name: &str, trait_name: &str) -> bool {
-        // Check user-defined trait impls
         if let Some(impls) = self.trait_impls.get(type_name) {
             if impls.contains(&trait_name.to_string()) {
                 return true;

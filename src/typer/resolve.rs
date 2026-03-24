@@ -1,6 +1,3 @@
-//! Name resolution: pre-declaration of functions, types, enums, actors,
-//! traits, impl blocks, and prelude types.
-
 use crate::ast::{self, BinOp, Span};
 use crate::types::Type;
 
@@ -57,7 +54,6 @@ impl Typer {
                 span: s,
             });
 
-        // Register the Iter trait: trait Iter of T { type Item; fn next(self) -> Option of T }
         self.traits.entry("Iter".into()).or_insert_with(|| {
             vec![super::TraitMethodSig {
                 name: "next".into(),
@@ -79,17 +75,25 @@ impl Typer {
         } else if let Some(ref explicit) = f.ret {
             explicit.clone()
         } else {
-            // Try AST-level inference first; if it gives us something useful, use it.
-            // Otherwise, create a TypeVar that will be resolved during lowering.
             let inferred = self.infer_ret_ast(f);
             if inferred != Type::I64 && inferred != Type::Void {
                 inferred
             } else {
-                // Use AST inference result but also track as potentially improvable via TypeVar
                 inferred
             }
         };
         let id = self.fresh_id();
+        if self.debug_types {
+            eprintln!(
+                "[type:sig] {} :: ({}) -> {}",
+                f.name,
+                ptys.iter()
+                    .map(|t| format!("{t}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                ret
+            );
+        }
         self.fns.insert(f.name.clone(), (id, ptys, ret));
     }
 
@@ -105,14 +109,14 @@ impl Typer {
         self.fns.insert(method_name, (id, ptys, ret));
     }
 
-    /// Like declare_method_sig but first param is Ptr(Struct(type_name))
-    /// Used for Iter methods where next() takes a mutable pointer to self.
     pub(crate) fn declare_method_sig_by_ptr(&mut self, type_name: &str, m: &ast::Fn) {
         let method_name = format!("{type_name}_{}", m.name);
         let self_ty = Type::Ptr(Box::new(Type::Struct(type_name.to_string())));
         let mut ptys = vec![self_ty];
         for p in &m.params {
-            if p.name == "self" { continue; }
+            if p.name == "self" {
+                continue;
+            }
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
@@ -187,8 +191,7 @@ impl Typer {
                 (h.name.clone(), ptys, tag as u32)
             })
             .collect();
-        self.actors
-            .insert(ad.name.clone(), (id, fields, handlers));
+        self.actors.insert(ad.name.clone(), (id, fields, handlers));
     }
 
     pub(crate) fn declare_trait_def(&mut self, td: &ast::TraitDef) {
@@ -208,7 +211,8 @@ impl Typer {
             .collect();
         self.traits.insert(td.name.clone(), sigs);
         if !td.assoc_types.is_empty() {
-            self.trait_assoc_types.insert(td.name.clone(), td.assoc_types.clone());
+            self.trait_assoc_types
+                .insert(td.name.clone(), td.assoc_types.clone());
         }
     }
 
@@ -232,9 +236,12 @@ impl Typer {
 
             is_iter_impl = trait_name == "Iter";
 
-            // Verify all required associated types are provided
             if let Some(required_assocs) = self.trait_assoc_types.get(trait_name) {
-                let provided: Vec<&str> = ib.assoc_type_bindings.iter().map(|(n, _)| n.as_str()).collect();
+                let provided: Vec<&str> = ib
+                    .assoc_type_bindings
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect();
                 for required in required_assocs {
                     if !provided.contains(&required.as_str()) {
                         return Err(format!(
@@ -245,7 +252,6 @@ impl Typer {
                 }
             }
 
-            // Verify all required trait methods are provided
             let trait_sigs = self.traits.get(trait_name).cloned().unwrap();
             let impl_method_names: Vec<&str> = ib.methods.iter().map(|m| m.name.as_str()).collect();
             for sig in &trait_sigs {
@@ -262,7 +268,6 @@ impl Typer {
                 .or_default()
                 .push(trait_name.clone());
 
-            // Store trait type args (e.g., impl Iter of i64 for MyIter)
             if !ib.trait_type_args.is_empty() {
                 self.trait_impl_type_args.insert(
                     (ib.type_name.clone(), trait_name.clone()),
@@ -270,18 +275,14 @@ impl Typer {
                 );
             }
 
-            // Store associated type bindings (e.g., type Item is i64)
             for (assoc_name, assoc_ty) in &ib.assoc_type_bindings {
-                self.assoc_types.insert(
-                    (ib.type_name.clone(), assoc_name.clone()),
-                    assoc_ty.clone(),
-                );
+                self.assoc_types
+                    .insert((ib.type_name.clone(), assoc_name.clone()), assoc_ty.clone());
             }
         } else {
             is_iter_impl = false;
         }
 
-        // Register impl methods as type methods
         for m in &ib.methods {
             self.methods
                 .entry(ib.type_name.clone())
@@ -297,18 +298,7 @@ impl Typer {
         Ok(())
     }
 
-    // ── Bidirectional parameter type inference ──────────────────────────
-    //
-    // After all signatures are declared (some with Type::Inferred slots),
-    // we iteratively refine them by looking at:
-    //   1. Body-driven: how params are used inside the function body
-    //   2. Call-site-driven: what types callers pass in
-    //
-    // Iterate until no more changes (fixed-point), then default any
-    // remaining Inferred slots to i64.
-
     pub(crate) fn infer_param_types(&mut self, prog: &ast::Program) {
-        // Collect all functions with their AST bodies for inference
         let mut fn_asts: Vec<(String, Vec<String>, &[ast::Stmt])> = Vec::new();
         for d in &prog.decls {
             match d {
@@ -319,7 +309,6 @@ impl Typer {
                 ast::Decl::Type(td) if td.type_params.is_empty() => {
                     for m in &td.methods {
                         let method_name = format!("{}_{}", td.name, m.name);
-                        // skip "self" — it's always typed
                         let pnames: Vec<String> = m.params.iter().map(|p| p.name.clone()).collect();
                         fn_asts.push((method_name, pnames, &m.body));
                     }
@@ -335,17 +324,14 @@ impl Typer {
             }
         }
 
-        // Fixed-point iteration: keep refining until stable
-        for _ in 0..8 {
+        for iteration in 0..8 {
             let mut changed = false;
 
-            // Body-driven: infer from how params are used in the function body
             for (fn_name, pnames, body) in &fn_asts {
                 let sig = match self.fns.get(fn_name.as_str()) {
                     Some(s) => s.clone(),
                     None => continue,
                 };
-                // offset: methods have self prepended
                 let offset = sig.1.len().saturating_sub(pnames.len());
 
                 for (pi, pname) in pnames.iter().enumerate() {
@@ -356,14 +342,18 @@ impl Typer {
                     let slot_ty = &sig.1[slot];
                     let is_unsolved = matches!(slot_ty, Type::Inferred)
                         || matches!(slot_ty, Type::TypeVar(_))
-                        && self.infer_ctx.try_resolve(slot_ty).is_none();
+                            && self.infer_ctx.try_resolve(slot_ty).is_none();
                     if !is_unsolved {
                         continue;
                     }
                     if let Some(ty) = self.infer_param_from_body(pname, body) {
+                        if self.debug_types {
+                            eprintln!(
+                                "[type:infer] iter={} body-driven: {}.{} : {} -> {}",
+                                iteration, fn_name, pname, slot_ty, ty
+                            );
+                        }
                         if let Some(entry) = self.fns.get_mut(fn_name.as_str()) {
-                            // Unify the TypeVar with the inferred type, then resolve
-                            // to propagate through the union-find instead of orphaning
                             let _ = self.infer_ctx.unify(&entry.1[slot], &ty);
                             entry.1[slot] = self.infer_ctx.resolve(&entry.1[slot]);
                             changed = true;
@@ -372,33 +362,42 @@ impl Typer {
                 }
             }
 
-            // Call-site-driven: infer from what types callers pass in
             for (_fn_name, _pnames, body) in &fn_asts {
                 changed |= self.infer_from_call_sites(body);
             }
 
             if !changed {
+                if self.debug_types {
+                    eprintln!(
+                        "[type:infer] converged after {} iteration(s)",
+                        iteration + 1
+                    );
+                }
                 break;
             }
         }
 
-        // Re-infer return types now that params are resolved.
-        // Functions whose return type was inferred before param types
-        // were known may have gotten wrong results.
         for d in &prog.decls {
             if let ast::Decl::Fn(f) = d {
-                if Self::is_generic_fn(f) { continue; }
-                if f.ret.is_some() || f.name == "main" { continue; }
-                // Re-run return type inference with updated param knowledge
+                if Self::is_generic_fn(f) {
+                    continue;
+                }
+                if f.ret.is_some() || f.name == "main" {
+                    continue;
+                }
                 let ret = self.infer_ret_ast_with_params(f, &f.name.clone());
                 if let Some(entry) = self.fns.get_mut(&f.name) {
                     entry.2 = ret;
                 }
             }
             if let ast::Decl::Type(td) = d {
-                if !td.type_params.is_empty() { continue; }
+                if !td.type_params.is_empty() {
+                    continue;
+                }
                 for m in &td.methods {
-                    if m.ret.is_some() { continue; }
+                    if m.ret.is_some() {
+                        continue;
+                    }
                     let method_name = format!("{}_{}", td.name, m.name);
                     let ret = self.infer_ret_ast_with_params(m, &method_name);
                     if let Some(entry) = self.fns.get_mut(&method_name) {
@@ -408,7 +407,9 @@ impl Typer {
             }
             if let ast::Decl::Impl(ib) = d {
                 for m in &ib.methods {
-                    if m.ret.is_some() { continue; }
+                    if m.ret.is_some() {
+                        continue;
+                    }
                     let method_name = format!("{}_{}", ib.type_name, m.name);
                     let ret = self.infer_ret_ast_with_params(m, &method_name);
                     if let Some(entry) = self.fns.get_mut(&method_name) {
@@ -418,8 +419,6 @@ impl Typer {
             }
         }
 
-        // Resolve all TypeVar and Inferred slots to concrete types.
-        // Unsolved TypeVars default to i64 (via InferCtx::resolve).
         let keys: Vec<String> = self.fns.keys().cloned().collect();
         for k in keys {
             let entry = self.fns.get_mut(&k).unwrap();
@@ -428,14 +427,30 @@ impl Typer {
                     *ty = self.infer_ctx.resolve(ty);
                 }
             }
-            // Also resolve return types that may contain TypeVars
             if entry.2.has_type_var() || entry.2 == Type::Inferred {
                 entry.2 = self.infer_ctx.resolve(&entry.2);
             }
         }
+
+        if self.debug_types {
+            eprintln!("[type:resolved] final signatures:");
+            let mut names: Vec<String> = self.fns.keys().cloned().collect();
+            names.sort();
+            for name in &names {
+                let (_, ptys, ret) = &self.fns[name];
+                eprintln!(
+                    "  {} :: ({}) -> {}",
+                    name,
+                    ptys.iter()
+                        .map(|t| format!("{t}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    ret
+                );
+            }
+        }
     }
 
-    /// Walk statements looking for constraints on `param_name`.
     fn infer_param_from_body(&self, param_name: &str, body: &[ast::Stmt]) -> Option<Type> {
         let mut result = None;
         for stmt in body {
@@ -454,11 +469,19 @@ impl Typer {
             ast::Stmt::Assign(_, rhs, _) => self.constraint_from_expr(name, rhs),
             ast::Stmt::Ret(Some(e), _) => self.constraint_from_expr(name, e),
             ast::Stmt::If(i) => {
-                if let Some(t) = self.constraint_from_expr(name, &i.cond) { return Some(t); }
-                if let Some(t) = self.constraint_from_body(name, &i.then) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, &i.cond) {
+                    return Some(t);
+                }
+                if let Some(t) = self.constraint_from_body(name, &i.then) {
+                    return Some(t);
+                }
                 for (c, b) in &i.elifs {
-                    if let Some(t) = self.constraint_from_expr(name, c) { return Some(t); }
-                    if let Some(t) = self.constraint_from_body(name, b) { return Some(t); }
+                    if let Some(t) = self.constraint_from_expr(name, c) {
+                        return Some(t);
+                    }
+                    if let Some(t) = self.constraint_from_body(name, b) {
+                        return Some(t);
+                    }
                 }
                 if let Some(b) = &i.els {
                     return self.constraint_from_body(name, b);
@@ -466,18 +489,26 @@ impl Typer {
                 None
             }
             ast::Stmt::While(w) => {
-                if let Some(t) = self.constraint_from_expr(name, &w.cond) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, &w.cond) {
+                    return Some(t);
+                }
                 self.constraint_from_body(name, &w.body)
             }
             ast::Stmt::For(f) => {
-                if let Some(t) = self.constraint_from_expr(name, &f.iter) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, &f.iter) {
+                    return Some(t);
+                }
                 self.constraint_from_body(name, &f.body)
             }
             ast::Stmt::Loop(l) => self.constraint_from_body(name, &l.body),
             ast::Stmt::Match(m) => {
-                if let Some(t) = self.constraint_from_expr(name, &m.subject) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, &m.subject) {
+                    return Some(t);
+                }
                 for arm in &m.arms {
-                    if let Some(t) = self.constraint_from_body(name, &arm.body) { return Some(t); }
+                    if let Some(t) = self.constraint_from_body(name, &arm.body) {
+                        return Some(t);
+                    }
                 }
                 None
             }
@@ -495,14 +526,13 @@ impl Typer {
         None
     }
 
-    /// Extract a type constraint on `name` from an expression.
     fn constraint_from_expr(&self, name: &str, expr: &ast::Expr) -> Option<Type> {
         match expr {
-            // Direct call: f(name) — adopt f's param type at that position
             ast::Expr::Call(callee, args, _) => {
                 if let ast::Expr::Ident(fn_name, _) = callee.as_ref() {
-                    // Check registered functions first, then builtins
-                    let ptys: Option<Vec<Type>> = self.fns.get(fn_name.as_str())
+                    let ptys: Option<Vec<Type>> = self
+                        .fns
+                        .get(fn_name.as_str())
                         .map(|(_, ptys, _)| ptys.clone())
                         .or_else(|| Self::builtin_param_tys(fn_name));
                     if let Some(ptys) = ptys {
@@ -517,40 +547,31 @@ impl Typer {
                         }
                     }
                 }
-                // Recurse into args
                 for arg in args {
-                    if let Some(t) = self.constraint_from_expr(name, arg) { return Some(t); }
+                    if let Some(t) = self.constraint_from_expr(name, arg) {
+                        return Some(t);
+                    }
                 }
                 self.constraint_from_expr(name, callee)
             }
 
-            // Method call: name.method(...) — infer from method receiver patterns
             ast::Expr::Method(obj, method, args, _) => {
                 if Self::expr_is_ident(obj, name) {
                     match method.as_str() {
                         "length" | "char_at" | "slice" | "contains" | "starts_with"
-                        | "ends_with" | "split" | "trim" | "to_upper" | "to_lower"
-                        | "replace" | "index_of" | "find" => return Some(Type::String),
+                        | "ends_with" | "split" | "trim" | "to_upper" | "to_lower" | "replace"
+                        | "index_of" | "find" => return Some(Type::String),
                         "get" | "set" | "push" | "pop" | "remove" | "insert" | "sort"
-                        | "reverse" | "clear" | "extend" | "map" | "filter" | "reduce"
-                        | "any" | "all" | "flat_map" | "zip" => {
-                            // Could be Vec — but we need element type info.
-                            // length is ambiguous (String or Vec), handled by String first
-                            // since .get/.push are Vec-specific, try to figure out element type
-                        }
-                        _ => {
-                            // Check if it's a known struct method
-                            // name.method -> name is some Struct type
-                        }
+                        | "reverse" | "clear" | "extend" | "map" | "filter" | "reduce" | "any"
+                        | "all" | "flat_map" | "zip" => {}
+                        _ => {}
                     }
                 }
-                // Check if name is passed as an argument to the method
                 if let ast::Expr::Ident(obj_name, _) = obj.as_ref() {
                     if let Some(v) = self.find_var(obj_name) {
                         if let Type::Struct(type_name) = &v.ty {
                             let method_name = format!("{type_name}_{method}");
                             if let Some((_, ptys, _)) = self.fns.get(&method_name) {
-                                // ptys[0] is self, args start at ptys[1]
                                 for (i, arg) in args.iter().enumerate() {
                                     if Self::expr_is_ident(arg, name) {
                                         if let Some(pty) = ptys.get(i + 1) {
@@ -565,14 +586,18 @@ impl Typer {
                     }
                 }
                 for arg in args {
-                    if let Some(t) = self.constraint_from_expr(name, arg) { return Some(t); }
+                    if let Some(t) = self.constraint_from_expr(name, arg) {
+                        return Some(t);
+                    }
                 }
                 self.constraint_from_expr(name, obj)
             }
 
-            // BinOp: name + 1.0 => f64, name + "s" => String
             ast::Expr::BinOp(l, op, r, _) => {
-                let is_arith = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod);
+                let is_arith = matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+                );
                 if is_arith {
                     if Self::expr_is_ident(l, name) {
                         let rty = self.expr_ty_ast(r);
@@ -587,34 +612,46 @@ impl Typer {
                         }
                     }
                 }
-                if let Some(t) = self.constraint_from_expr(name, l) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, l) {
+                    return Some(t);
+                }
                 self.constraint_from_expr(name, r)
             }
 
-            // Ternary: cond ? then : else
             ast::Expr::Ternary(c, t, f, _) => {
-                if let Some(ty) = self.constraint_from_expr(name, c) { return Some(ty); }
-                if let Some(ty) = self.constraint_from_expr(name, t) { return Some(ty); }
+                if let Some(ty) = self.constraint_from_expr(name, c) {
+                    return Some(ty);
+                }
+                if let Some(ty) = self.constraint_from_expr(name, t) {
+                    return Some(ty);
+                }
                 self.constraint_from_expr(name, f)
             }
 
-            // Recurse into nested expressions
-            ast::Expr::UnaryOp(_, inner, _) => {
-                self.constraint_from_expr(name, inner)
-            }
+            ast::Expr::UnaryOp(_, inner, _) => self.constraint_from_expr(name, inner),
             ast::Expr::Ref(inner, _) | ast::Expr::Deref(inner, _) => {
                 self.constraint_from_expr(name, inner)
             }
             ast::Expr::Index(arr, idx, _) => {
-                if let Some(t) = self.constraint_from_expr(name, arr) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, arr) {
+                    return Some(t);
+                }
                 self.constraint_from_expr(name, idx)
             }
             ast::Expr::IfExpr(i) => {
-                if let Some(t) = self.constraint_from_expr(name, &i.cond) { return Some(t); }
-                if let Some(t) = self.constraint_from_body(name, &i.then) { return Some(t); }
+                if let Some(t) = self.constraint_from_expr(name, &i.cond) {
+                    return Some(t);
+                }
+                if let Some(t) = self.constraint_from_body(name, &i.then) {
+                    return Some(t);
+                }
                 for (c, b) in &i.elifs {
-                    if let Some(t) = self.constraint_from_expr(name, c) { return Some(t); }
-                    if let Some(t) = self.constraint_from_body(name, b) { return Some(t); }
+                    if let Some(t) = self.constraint_from_expr(name, c) {
+                        return Some(t);
+                    }
+                    if let Some(t) = self.constraint_from_body(name, b) {
+                        return Some(t);
+                    }
                 }
                 if let Some(b) = &i.els {
                     return self.constraint_from_body(name, b);
@@ -628,8 +665,6 @@ impl Typer {
         }
     }
 
-    /// Walk call sites: for `f(expr)`, if we know expr's type and f's param
-    /// is Inferred, refine it. Returns true if anything changed.
     fn infer_from_call_sites(&mut self, body: &[ast::Stmt]) -> bool {
         let mut changed = false;
         for stmt in body {
@@ -646,33 +681,49 @@ impl Typer {
             ast::Stmt::Ret(Some(e), _) => self.call_site_expr(e),
             ast::Stmt::If(i) => {
                 let mut c = self.call_site_expr(&i.cond);
-                for s in &i.then { c |= self.call_site_stmt(s); }
+                for s in &i.then {
+                    c |= self.call_site_stmt(s);
+                }
                 for (cond, b) in &i.elifs {
                     c |= self.call_site_expr(cond);
-                    for s in b { c |= self.call_site_stmt(s); }
+                    for s in b {
+                        c |= self.call_site_stmt(s);
+                    }
                 }
-                if let Some(b) = &i.els { for s in b { c |= self.call_site_stmt(s); } }
+                if let Some(b) = &i.els {
+                    for s in b {
+                        c |= self.call_site_stmt(s);
+                    }
+                }
                 c
             }
             ast::Stmt::While(w) => {
                 let mut c = self.call_site_expr(&w.cond);
-                for s in &w.body { c |= self.call_site_stmt(s); }
+                for s in &w.body {
+                    c |= self.call_site_stmt(s);
+                }
                 c
             }
             ast::Stmt::For(f) => {
                 let mut c = self.call_site_expr(&f.iter);
-                for s in &f.body { c |= self.call_site_stmt(s); }
+                for s in &f.body {
+                    c |= self.call_site_stmt(s);
+                }
                 c
             }
             ast::Stmt::Loop(l) => {
                 let mut c = false;
-                for s in &l.body { c |= self.call_site_stmt(s); }
+                for s in &l.body {
+                    c |= self.call_site_stmt(s);
+                }
                 c
             }
             ast::Stmt::Match(m) => {
                 let mut c = self.call_site_expr(&m.subject);
                 for arm in &m.arms {
-                    for s in &arm.body { c |= self.call_site_stmt(s); }
+                    for s in &arm.body {
+                        c |= self.call_site_stmt(s);
+                    }
                 }
                 c
             }
@@ -692,7 +743,7 @@ impl Typer {
                             if i < ptys.len() {
                                 let is_unsolved = matches!(&ptys[i], Type::Inferred)
                                     || matches!(&ptys[i], Type::TypeVar(_))
-                                    && self.infer_ctx.try_resolve(&ptys[i]).is_none();
+                                        && self.infer_ctx.try_resolve(&ptys[i]).is_none();
                                 if is_unsolved {
                                     let arg_ty = self.expr_ty_ast(arg);
                                     if arg_ty != Type::I64 || !matches!(arg, ast::Expr::Ident(..)) {
@@ -709,41 +760,57 @@ impl Typer {
                         }
                     }
                 }
-                for arg in args { c |= self.call_site_expr(arg); }
+                for arg in args {
+                    c |= self.call_site_expr(arg);
+                }
                 c
             }
             ast::Expr::Method(obj, _, args, _) => {
                 let mut c = self.call_site_expr(obj);
-                for arg in args { c |= self.call_site_expr(arg); }
+                for arg in args {
+                    c |= self.call_site_expr(arg);
+                }
                 c
             }
-            ast::Expr::BinOp(l, _, r, _) => {
-                self.call_site_expr(l) | self.call_site_expr(r)
-            }
+            ast::Expr::BinOp(l, _, r, _) => self.call_site_expr(l) | self.call_site_expr(r),
             ast::Expr::Ternary(a, b, c_expr, _) => {
                 self.call_site_expr(a) | self.call_site_expr(b) | self.call_site_expr(c_expr)
             }
-            ast::Expr::UnaryOp(_, e, _) | ast::Expr::Ref(e, _) | ast::Expr::Deref(e, _)
+            ast::Expr::UnaryOp(_, e, _)
+            | ast::Expr::Ref(e, _)
+            | ast::Expr::Deref(e, _)
             | ast::Expr::As(e, _, _) => self.call_site_expr(e),
             ast::Expr::Index(a, b, _) => self.call_site_expr(a) | self.call_site_expr(b),
             ast::Expr::IfExpr(i) => {
                 let mut c = self.call_site_expr(&i.cond);
-                for s in &i.then { c |= self.call_site_stmt(s); }
+                for s in &i.then {
+                    c |= self.call_site_stmt(s);
+                }
                 for (cond, b) in &i.elifs {
                     c |= self.call_site_expr(cond);
-                    for s in b { c |= self.call_site_stmt(s); }
+                    for s in b {
+                        c |= self.call_site_stmt(s);
+                    }
                 }
-                if let Some(b) = &i.els { for s in b { c |= self.call_site_stmt(s); } }
+                if let Some(b) = &i.els {
+                    for s in b {
+                        c |= self.call_site_stmt(s);
+                    }
+                }
                 c
             }
             ast::Expr::Block(stmts, _) => {
                 let mut c = false;
-                for s in stmts { c |= self.call_site_stmt(s); }
+                for s in stmts {
+                    c |= self.call_site_stmt(s);
+                }
                 c
             }
             ast::Expr::Pipe(a, b, extra, _) => {
                 let mut c = self.call_site_expr(a) | self.call_site_expr(b);
-                for e in extra { c |= self.call_site_expr(e); }
+                for e in extra {
+                    c |= self.call_site_expr(e);
+                }
                 c
             }
             _ => false,

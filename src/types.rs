@@ -29,8 +29,6 @@ pub enum Type {
     Channel(Box<Type>),
     DynTrait(String),
     Inferred,
-    /// Unification variable created during type inference.
-    /// Resolved to a concrete type before HIR leaves the typer.
     TypeVar(u32),
 }
 
@@ -167,12 +165,15 @@ impl std::fmt::Display for Type {
 }
 
 impl Type {
-    /// Returns true if this type contains any unresolved TypeVar.
     pub fn has_type_var(&self) -> bool {
         match self {
             Self::TypeVar(_) => true,
-            Self::Array(inner, _) | Self::Vec(inner) | Self::Ptr(inner)
-            | Self::Rc(inner) | Self::Weak(inner) | Self::Coroutine(inner)
+            Self::Array(inner, _)
+            | Self::Vec(inner)
+            | Self::Ptr(inner)
+            | Self::Rc(inner)
+            | Self::Weak(inner)
+            | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.has_type_var(),
             Self::Map(k, v) => k.has_type_var() || v.has_type_var(),
             Self::Tuple(tys) => tys.iter().any(|t| t.has_type_var()),

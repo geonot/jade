@@ -8,29 +8,22 @@ use crate::types::Type;
 use super::Compiler;
 use super::b;
 
-/// Vec layout: { ptr: *T, len: i64, cap: i64 } — 24 bytes, heap buffer
-/// Map layout: { entries: *Entry, len: i64, cap: i64 } — 24 bytes
-///   Entry: { hash: i64, key: K, value: V, occupied: i8 }
-///
-/// Both are pointer-sized in the LLVM type system (opaque ptr to heap struct).
-/// The actual struct is allocated on the heap via malloc.
-
 impl<'ctx> Compiler<'ctx> {
-    // ── Vec type: {ptr, len, cap} ──────────────────────────────────────
-
     pub(crate) fn vec_header_type(&self) -> inkwell::types::StructType<'ctx> {
-        self.module.get_struct_type("__vec_header").unwrap_or_else(|| {
-            let st = self.ctx.opaque_struct_type("__vec_header");
-            st.set_body(
-                &[
-                    self.ctx.ptr_type(AddressSpace::default()).into(), // data ptr
-                    self.ctx.i64_type().into(),                        // len
-                    self.ctx.i64_type().into(),                        // cap
-                ],
-                false,
-            );
-            st
-        })
+        self.module
+            .get_struct_type("__vec_header")
+            .unwrap_or_else(|| {
+                let st = self.ctx.opaque_struct_type("__vec_header");
+                st.set_body(
+                    &[
+                        self.ctx.ptr_type(AddressSpace::default()).into(),
+                        self.ctx.i64_type().into(),
+                        self.ctx.i64_type().into(),
+                    ],
+                    false,
+                );
+                st
+            })
     }
 
     pub(crate) fn compile_vec_new(
@@ -42,16 +35,21 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let malloc = self.ensure_malloc();
 
-        // Allocate header on heap: {ptr, len, cap}
         let header_size = i64t.const_int(24, false);
-        let header_ptr = b!(self.bld.build_call(malloc, &[header_size.into()], "vec.hdr"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_pointer_value();
+        let header_ptr = b!(self
+            .bld
+            .build_call(malloc, &[header_size.into()], "vec.hdr"))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
 
         let n = elems.len();
-        let cap = if n == 0 { 0u64 } else { n.next_power_of_two() as u64 };
+        let cap = if n == 0 {
+            0u64
+        } else {
+            n.next_power_of_two() as u64
+        };
 
         if n > 0 {
             let elem_ty = &elems[0].ty;
@@ -64,35 +62,37 @@ impl<'ctx> Compiler<'ctx> {
                 .unwrap()
                 .into_pointer_value();
 
-            // Store elements
             for (i, e) in elems.iter().enumerate() {
                 let val = self.compile_expr(e)?;
                 let gep = unsafe {
-                    b!(self.bld.build_gep(
-                        lty,
-                        buf,
-                        &[i64t.const_int(i as u64, false)],
-                        "vec.elem"
-                    ))
+                    b!(self
+                        .bld
+                        .build_gep(lty, buf, &[i64t.const_int(i as u64, false)], "vec.elem"))
                 };
                 b!(self.bld.build_store(gep, val));
             }
 
-            // Store ptr field
-            let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
+            let ptr_gep = b!(self
+                .bld
+                .build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
             b!(self.bld.build_store(ptr_gep, buf));
         } else {
-            // Null data pointer for empty vec
-            let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
+            let ptr_gep = b!(self
+                .bld
+                .build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
             b!(self.bld.build_store(ptr_gep, ptr_ty.const_null()));
         }
 
-        // Store len
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vec.len"));
-        b!(self.bld.build_store(len_gep, i64t.const_int(n as u64, false)));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vec.len"));
+        b!(self
+            .bld
+            .build_store(len_gep, i64t.const_int(n as u64, false)));
 
-        // Store cap
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "vec.cap"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "vec.cap"));
         b!(self.bld.build_store(cap_gep, i64t.const_int(cap, false)));
 
         Ok(header_ptr.into())
@@ -129,7 +129,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let header_ty = self.vec_header_type();
         let i64t = self.ctx.i64_type();
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vl.len"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vl.len"));
         Ok(b!(self.bld.build_load(i64t, len_gep, "vl.v")))
     }
 
@@ -149,56 +151,67 @@ impl<'ctx> Compiler<'ctx> {
         let elem_size = self.type_store_size(lty);
         let fv = self.cur_fn.unwrap();
 
-        // Load len and cap
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vp.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vp.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vp.len")).into_int_value();
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "vp.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "vp.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "vp.cap")).into_int_value();
 
-        // Check if we need to grow
-        let needs_grow = b!(self.bld.build_int_compare(IntPredicate::SGE, len, cap, "vp.full"));
+        let needs_grow = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SGE, len, cap, "vp.full"));
         let grow_bb = self.ctx.append_basic_block(fv, "vp.grow");
         let store_bb = self.ctx.append_basic_block(fv, "vp.store");
-        b!(self.bld.build_conditional_branch(needs_grow, grow_bb, store_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(needs_grow, grow_bb, store_bb));
 
-        // Grow: new_cap = max(cap * 2, 4)
         self.bld.position_at_end(grow_bb);
-        let doubled = b!(self.bld.build_int_nsw_mul(cap, i64t.const_int(2, false), "vp.dbl"));
+        let doubled = b!(self
+            .bld
+            .build_int_nsw_mul(cap, i64t.const_int(2, false), "vp.dbl"));
         let new_cap_cmp = b!(self.bld.build_int_compare(
             IntPredicate::SGT,
             doubled,
             i64t.const_int(4, false),
             "vp.cmp"
         ));
-        let new_cap = b!(self.bld.build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "vp.nc"))
+        let new_cap =
+            b!(self
+                .bld
+                .build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "vp.nc"))
             .into_int_value();
-        let new_size = b!(self.bld.build_int_nsw_mul(
-            new_cap,
-            i64t.const_int(elem_size, false),
-            "vp.ns"
-        ));
+        let new_size =
+            b!(self
+                .bld
+                .build_int_nsw_mul(new_cap, i64t.const_int(elem_size, false), "vp.ns"));
         let realloc = self.ensure_realloc();
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vp.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vp.ptrp"));
         let old_ptr = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
             "vp.optr"
         ));
-        let new_ptr = b!(self.bld.build_call(
-            realloc,
-            &[old_ptr.into(), new_size.into()],
-            "vp.nptr"
-        ))
-        .try_as_basic_value()
-        .basic()
-        .unwrap();
+        let new_ptr =
+            b!(self
+                .bld
+                .build_call(realloc, &[old_ptr.into(), new_size.into()], "vp.nptr"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap();
         b!(self.bld.build_store(ptr_gep, new_ptr));
         b!(self.bld.build_store(cap_gep, new_cap));
         b!(self.bld.build_unconditional_branch(store_bb));
 
-        // Store element at index len
         self.bld.position_at_end(store_bb);
-        let ptr_gep2 = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vp.ptrp2"));
+        let ptr_gep2 = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vp.ptrp2"));
         let data_ptr = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep2,
@@ -206,20 +219,17 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
         let len2 = b!(self.bld.build_load(i64t, len_gep, "vp.len2")).into_int_value();
-        let elem_gep = unsafe {
-            b!(self.bld.build_gep(lty, data_ptr, &[len2], "vp.egep"))
-        };
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[len2], "vp.egep")) };
         b!(self.bld.build_store(elem_gep, val));
 
-        // Increment len
-        let new_len = b!(self.bld.build_int_nsw_add(len2, i64t.const_int(1, false), "vp.nl"));
+        let new_len = b!(self
+            .bld
+            .build_int_nsw_add(len2, i64t.const_int(1, false), "vp.nl"));
         b!(self.bld.build_store(len_gep, new_len));
 
-        // Return void (as i8 0)
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    /// Push a pre-compiled value into a vec — used by string_split and similar.
     pub(crate) fn vec_push_raw(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -231,37 +241,79 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let fv = self.cur_fn.unwrap();
 
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vpr.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vpr.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vpr.len")).into_int_value();
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "vpr.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "vpr.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "vpr.cap")).into_int_value();
 
-        let needs_grow = b!(self.bld.build_int_compare(IntPredicate::SGE, len, cap, "vpr.full"));
+        let needs_grow = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SGE, len, cap, "vpr.full"));
         let grow_bb = self.ctx.append_basic_block(fv, "vpr.grow");
         let store_bb = self.ctx.append_basic_block(fv, "vpr.store");
-        b!(self.bld.build_conditional_branch(needs_grow, grow_bb, store_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(needs_grow, grow_bb, store_bb));
 
         self.bld.position_at_end(grow_bb);
-        let doubled = b!(self.bld.build_int_nsw_mul(cap, i64t.const_int(2, false), "vpr.dbl"));
-        let new_cap_cmp = b!(self.bld.build_int_compare(IntPredicate::SGT, doubled, i64t.const_int(4, false), "vpr.cmp"));
-        let new_cap = b!(self.bld.build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "vpr.nc")).into_int_value();
-        let new_size = b!(self.bld.build_int_nsw_mul(new_cap, i64t.const_int(elem_size, false), "vpr.ns"));
+        let doubled = b!(self
+            .bld
+            .build_int_nsw_mul(cap, i64t.const_int(2, false), "vpr.dbl"));
+        let new_cap_cmp = b!(self.bld.build_int_compare(
+            IntPredicate::SGT,
+            doubled,
+            i64t.const_int(4, false),
+            "vpr.cmp"
+        ));
+        let new_cap =
+            b!(self
+                .bld
+                .build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "vpr.nc"))
+            .into_int_value();
+        let new_size =
+            b!(self
+                .bld
+                .build_int_nsw_mul(new_cap, i64t.const_int(elem_size, false), "vpr.ns"));
         let realloc = self.ensure_realloc();
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vpr.ptrp"));
-        let old_ptr = b!(self.bld.build_load(self.ctx.ptr_type(AddressSpace::default()), ptr_gep, "vpr.optr"));
-        let new_ptr = b!(self.bld.build_call(realloc, &[old_ptr.into(), new_size.into()], "vpr.nptr"))
-            .try_as_basic_value().basic().unwrap();
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vpr.ptrp"));
+        let old_ptr = b!(self.bld.build_load(
+            self.ctx.ptr_type(AddressSpace::default()),
+            ptr_gep,
+            "vpr.optr"
+        ));
+        let new_ptr =
+            b!(self
+                .bld
+                .build_call(realloc, &[old_ptr.into(), new_size.into()], "vpr.nptr"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap();
         b!(self.bld.build_store(ptr_gep, new_ptr));
         b!(self.bld.build_store(cap_gep, new_cap));
         b!(self.bld.build_unconditional_branch(store_bb));
 
         self.bld.position_at_end(store_bb);
-        let ptr_gep2 = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vpr.ptrp2"));
-        let data_ptr = b!(self.bld.build_load(self.ctx.ptr_type(AddressSpace::default()), ptr_gep2, "vpr.data")).into_pointer_value();
+        let ptr_gep2 = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vpr.ptrp2"));
+        let data_ptr = b!(self.bld.build_load(
+            self.ctx.ptr_type(AddressSpace::default()),
+            ptr_gep2,
+            "vpr.data"
+        ))
+        .into_pointer_value();
         let len2 = b!(self.bld.build_load(i64t, len_gep, "vpr.len2")).into_int_value();
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[len2], "vpr.egep")) };
         b!(self.bld.build_store(elem_gep, val));
-        let new_len = b!(self.bld.build_int_nsw_add(len2, i64t.const_int(1, false), "vpr.nl"));
+        let new_len = b!(self
+            .bld
+            .build_int_nsw_add(len2, i64t.const_int(1, false), "vpr.nl"));
         b!(self.bld.build_store(len_gep, new_len));
         Ok(())
     }
@@ -275,21 +327,25 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
 
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vpop.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vpop.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vpop.len")).into_int_value();
-        let new_len = b!(self.bld.build_int_nsw_sub(len, i64t.const_int(1, false), "vpop.nl"));
+        let new_len = b!(self
+            .bld
+            .build_int_nsw_sub(len, i64t.const_int(1, false), "vpop.nl"));
         b!(self.bld.build_store(len_gep, new_len));
 
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vpop.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vpop.ptrp"));
         let data_ptr = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
             "vpop.data"
         ))
         .into_pointer_value();
-        let elem_gep = unsafe {
-            b!(self.bld.build_gep(lty, data_ptr, &[new_len], "vpop.egep"))
-        };
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[new_len], "vpop.egep")) };
         Ok(b!(self.bld.build_load(lty, elem_gep, "vpop.v")))
     }
 
@@ -307,7 +363,9 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
 
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vg.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vg.ptrp"));
         let data_ptr = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -315,14 +373,13 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
 
-        // Bounds check
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vg.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vg.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vg.len")).into_int_value();
         self.emit_vec_bounds_check(idx, len)?;
 
-        let elem_gep = unsafe {
-            b!(self.bld.build_gep(lty, data_ptr, &[idx], "vg.egep"))
-        };
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vg.egep")) };
         Ok(b!(self.bld.build_load(lty, elem_gep, "vg.v")))
     }
 
@@ -341,7 +398,9 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
 
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vs.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vs.ptrp"));
         let data_ptr = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -349,13 +408,13 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
 
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vs.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vs.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vs.len")).into_int_value();
         self.emit_vec_bounds_check(idx, len)?;
 
-        let elem_gep = unsafe {
-            b!(self.bld.build_gep(lty, data_ptr, &[idx], "vs.egep"))
-        };
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vs.egep")) };
         b!(self.bld.build_store(elem_gep, val));
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
@@ -375,7 +434,9 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
 
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vr.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vr.ptrp"));
         let data_ptr = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -383,32 +444,32 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
 
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vr.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vr.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vr.len")).into_int_value();
         self.emit_vec_bounds_check(idx, len)?;
 
-        // Save removed element
-        let elem_gep = unsafe {
-            b!(self.bld.build_gep(lty, data_ptr, &[idx], "vr.egep"))
-        };
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vr.egep")) };
         let removed = b!(self.bld.build_load(lty, elem_gep, "vr.v"));
 
-        // memmove elements after idx left by one
-        let next_idx = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "vr.ni"));
-        let src = unsafe {
-            b!(self.bld.build_gep(lty, data_ptr, &[next_idx], "vr.src"))
-        };
+        let next_idx = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "vr.ni"));
+        let src = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[next_idx], "vr.src")) };
         let count = b!(self.bld.build_int_nsw_sub(len, next_idx, "vr.cnt"));
-        let bytes = b!(self.bld.build_int_nsw_mul(
-            count,
-            i64t.const_int(elem_size, false),
-            "vr.bytes"
-        ));
+        let bytes =
+            b!(self
+                .bld
+                .build_int_nsw_mul(count, i64t.const_int(elem_size, false), "vr.bytes"));
         let memmove = self.ensure_memmove();
-        b!(self.bld.build_call(memmove, &[elem_gep.into(), src.into(), bytes.into()], ""));
+        b!(self
+            .bld
+            .build_call(memmove, &[elem_gep.into(), src.into(), bytes.into()], ""));
 
-        // Decrement len
-        let new_len = b!(self.bld.build_int_nsw_sub(len, i64t.const_int(1, false), "vr.nl"));
+        let new_len = b!(self
+            .bld
+            .build_int_nsw_sub(len, i64t.const_int(1, false), "vr.nl"));
         b!(self.bld.build_store(len_gep, new_len));
 
         Ok(removed)
@@ -420,7 +481,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vc.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vc.lenp"));
         b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
@@ -431,7 +494,9 @@ impl<'ctx> Compiler<'ctx> {
         len: inkwell::values::IntValue<'ctx>,
     ) -> Result<(), String> {
         let fv = self.cur_fn.unwrap();
-        let ok = b!(self.bld.build_int_compare(IntPredicate::ULT, idx, len, "vbc.ok"));
+        let ok = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULT, idx, len, "vbc.ok"));
         let ok_bb = self.ctx.append_basic_block(fv, "vbc.ok");
         let fail_bb = self.ctx.append_basic_block(fv, "vbc.fail");
         b!(self.bld.build_conditional_branch(ok, ok_bb, fail_bb));
@@ -445,28 +510,29 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    // ── Map type: open-addressing hash table ───────────────────────────
-
     pub(crate) fn compile_map_new(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
-        let header_ty = self.vec_header_type(); // Same {ptr, len, cap} layout
+        let header_ty = self.vec_header_type();
         let malloc = self.ensure_malloc();
 
-        // Allocate header
         let header_size = i64t.const_int(24, false);
-        let header_ptr = b!(self.bld.build_call(malloc, &[header_size.into()], "map.hdr"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_pointer_value();
+        let header_ptr = b!(self
+            .bld
+            .build_call(malloc, &[header_size.into()], "map.hdr"))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
 
-        // Initial capacity 16 entries, each entry is {hash: i64, key: String(24B), value: i64, occupied: i8} = 41 bytes, round to 48
         let init_cap = 16u64;
-        let entry_size = 48u64; // Padded entry size
+        let entry_size = 48u64;
         let calloc = self.ensure_calloc();
         let buf = b!(self.bld.build_call(
             calloc,
-            &[i64t.const_int(init_cap, false).into(), i64t.const_int(entry_size, false).into()],
+            &[
+                i64t.const_int(init_cap, false).into(),
+                i64t.const_int(entry_size, false).into()
+            ],
             "map.buf"
         ))
         .try_as_basic_value()
@@ -474,14 +540,22 @@ impl<'ctx> Compiler<'ctx> {
         .unwrap()
         .into_pointer_value();
 
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "map.ptr"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "map.ptr"));
         b!(self.bld.build_store(ptr_gep, buf));
 
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "map.len"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "map.len"));
         b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
 
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "map.cap"));
-        b!(self.bld.build_store(cap_gep, i64t.const_int(init_cap, false)));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "map.cap"));
+        b!(self
+            .bld
+            .build_store(cap_gep, i64t.const_int(init_cap, false)));
 
         Ok(header_ptr.into())
     }
@@ -496,7 +570,7 @@ impl<'ctx> Compiler<'ctx> {
         let header_ptr = obj_val.into_pointer_value();
 
         match method {
-            "len" => self.vec_len(header_ptr), // Same header layout
+            "len" => self.vec_len(header_ptr),
             "set" => self.map_set(header_ptr, obj, args),
             "get" => self.map_get(header_ptr, obj, args),
             "has" => self.map_has(header_ptr, obj, args),
@@ -505,10 +579,6 @@ impl<'ctx> Compiler<'ctx> {
             _ => Err(format!("no method '{method}' on Map")),
         }
     }
-
-    // Map operations use a runtime helper approach — emit calls to C stdlib
-    // functions for hashing and comparison, with inline LLVM IR for the
-    // open-addressing probe loop.
 
     fn map_set(
         &mut self,
@@ -519,26 +589,27 @@ impl<'ctx> Compiler<'ctx> {
         if args.len() < 2 {
             return Err("map.set() requires key and value".into());
         }
-        // For String->i64 maps: hash the key, probe, insert
         let key_val = self.compile_expr(&args[0])?;
         let val_val = self.compile_expr(&args[1])?;
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
         let fv = self.cur_fn.unwrap();
 
-        // Hash the key (FNV-1a on string data)
         let hash = self.fnv_hash_string(key_val)?;
 
-        // Load cap
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "ms.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "ms.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "ms.cap")).into_int_value();
 
-        // index = hash & (cap - 1)
-        let mask = b!(self.bld.build_int_nsw_sub(cap, i64t.const_int(1, false), "ms.mask"));
+        let mask = b!(self
+            .bld
+            .build_int_nsw_sub(cap, i64t.const_int(1, false), "ms.mask"));
         let start_idx = b!(self.bld.build_and(hash, mask, "ms.idx"));
 
-        // Load entries ptr
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "ms.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "ms.ptrp"));
         let entries = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -546,8 +617,6 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
 
-        // Probe loop: linear probing
-        // Entry layout at runtime: [hash:i64][key:24B String][value:i64][occupied:i8][pad:7B] = 48B
         let entry_size = i64t.const_int(48, false);
         let i8t = self.ctx.i8_type();
 
@@ -561,23 +630,15 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(loop_bb);
         let phi_idx = b!(self.bld.build_phi(i64t, "ms.i"));
         phi_idx.add_incoming(&[(&start_idx, pre_loop_bb)]);
-        // Fix: get the predecessor block before we started the phi
         let idx = phi_idx.as_basic_value().into_int_value();
 
-        // entry_ptr = entries + idx * 48
         let byte_off = b!(self.bld.build_int_nsw_mul(idx, entry_size, "ms.off"));
-        let entry_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entries, &[byte_off], "ms.eptr"))
-        };
+        let entry_ptr = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "ms.eptr")) };
 
-        // Check occupied byte at offset 40
         let occ_ptr = unsafe {
-            b!(self.bld.build_gep(
-                i8t,
-                entry_ptr,
-                &[i64t.const_int(40, false)],
-                "ms.occp"
-            ))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "ms.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "ms.occ")).into_int_value();
         let is_occupied = b!(self.bld.build_int_compare(
@@ -586,66 +647,82 @@ impl<'ctx> Compiler<'ctx> {
             i8t.const_int(0, false),
             "ms.isocc"
         ));
-        b!(self.bld.build_conditional_branch(is_occupied, found_bb, empty_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_occupied, found_bb, empty_bb));
 
-        // Found occupied slot — check if key matches, if not continue probing
         self.bld.position_at_end(found_bb);
-        // Compare stored hash with our hash (fast path)
         let stored_hash_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "ms.shp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "ms.shp"))
         };
         let stored_hash = b!(self.bld.build_load(i64t, stored_hash_ptr, "ms.sh")).into_int_value();
-        let hash_eq = b!(self.bld.build_int_compare(IntPredicate::EQ, stored_hash, hash, "ms.heq"));
+        let hash_eq = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, stored_hash, hash, "ms.heq"));
 
         let overwrite_bb = self.ctx.append_basic_block(fv, "ms.overwrite");
         let next_bb = self.ctx.append_basic_block(fv, "ms.next");
-        b!(self.bld.build_conditional_branch(hash_eq, overwrite_bb, next_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(hash_eq, overwrite_bb, next_bb));
 
-        // Overwrite existing value
         self.bld.position_at_end(overwrite_bb);
         let val_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "ms.vp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "ms.vp"))
         };
         b!(self.bld.build_store(val_ptr, val_val));
         b!(self.bld.build_unconditional_branch(done_bb));
 
-        // Continue probing
         self.bld.position_at_end(next_bb);
-        let next_idx = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "ms.ni"));
+        let next_idx = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "ms.ni"));
         let wrapped = b!(self.bld.build_and(next_idx, mask, "ms.wi"));
         phi_idx.add_incoming(&[(&wrapped, next_bb)]);
         b!(self.bld.build_unconditional_branch(loop_bb));
 
-        // Empty slot — insert here
         self.bld.position_at_end(empty_bb);
-        // Store hash
         let hash_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "ms.hp2"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "ms.hp2"))
         };
         b!(self.bld.build_store(hash_ptr, hash));
-        // Store key (24 bytes at offset 8)
         let key_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(8, false)], "ms.kp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(8, false)], "ms.kp"))
         };
         let memcpy = self.ensure_memcpy();
         let key_alloca = self.entry_alloca(self.string_type().into(), "ms.ktmp");
         b!(self.bld.build_store(key_alloca, key_val));
         b!(self.bld.build_call(
             memcpy,
-            &[key_ptr.into(), key_alloca.into(), i64t.const_int(24, false).into()],
+            &[
+                key_ptr.into(),
+                key_alloca.into(),
+                i64t.const_int(24, false).into()
+            ],
             ""
         ));
-        // Store value at offset 32
         let val_ptr2 = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "ms.vp2"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "ms.vp2"))
         };
         b!(self.bld.build_store(val_ptr2, val_val));
-        // Set occupied
         b!(self.bld.build_store(occ_ptr, i8t.const_int(1, false)));
-        // Increment len
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "ms.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "ms.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "ms.len")).into_int_value();
-        let new_len = b!(self.bld.build_int_nsw_add(len, i64t.const_int(1, false), "ms.nl"));
+        let new_len = b!(self
+            .bld
+            .build_int_nsw_add(len, i64t.const_int(1, false), "ms.nl"));
         b!(self.bld.build_store(len_gep, new_len));
         b!(self.bld.build_unconditional_branch(done_bb));
 
@@ -669,12 +746,18 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
 
         let hash = self.fnv_hash_string(key_val)?;
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "mg.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "mg.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "mg.cap")).into_int_value();
-        let mask = b!(self.bld.build_int_nsw_sub(cap, i64t.const_int(1, false), "mg.mask"));
+        let mask = b!(self
+            .bld
+            .build_int_nsw_sub(cap, i64t.const_int(1, false), "mg.mask"));
         let start_idx = b!(self.bld.build_and(hash, mask, "mg.idx"));
 
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "mg.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "mg.ptrp"));
         let entries = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -698,27 +781,40 @@ impl<'ctx> Compiler<'ctx> {
         let idx = phi_idx.as_basic_value().into_int_value();
 
         let byte_off = b!(self.bld.build_int_nsw_mul(idx, entry_size, "mg.off"));
-        let entry_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entries, &[byte_off], "mg.eptr"))
-        };
+        let entry_ptr = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "mg.eptr")) };
         let occ_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mg.occp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mg.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "mg.occ")).into_int_value();
-        let is_occ = b!(self.bld.build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mg.io"));
-        b!(self.bld.build_conditional_branch(is_occ, check_bb, notfound_bb));
+        let is_occ =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mg.io"));
+        b!(self
+            .bld
+            .build_conditional_branch(is_occ, check_bb, notfound_bb));
 
         self.bld.position_at_end(check_bb);
         let stored_hash_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "mg.shp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "mg.shp"))
         };
         let stored_hash = b!(self.bld.build_load(i64t, stored_hash_ptr, "mg.sh")).into_int_value();
-        let hash_eq = b!(self.bld.build_int_compare(IntPredicate::EQ, stored_hash, hash, "mg.heq"));
-        b!(self.bld.build_conditional_branch(hash_eq, found_bb, next_bb));
+        let hash_eq = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, stored_hash, hash, "mg.heq"));
+        b!(self
+            .bld
+            .build_conditional_branch(hash_eq, found_bb, next_bb));
 
         self.bld.position_at_end(found_bb);
         let val_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "mg.vp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "mg.vp"))
         };
         let found_val = b!(self.bld.build_load(i64t, val_ptr, "mg.fv"));
         b!(self.bld.build_unconditional_branch(merge_bb));
@@ -727,14 +823,19 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(next_bb);
-        let next_idx = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "mg.ni"));
+        let next_idx = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "mg.ni"));
         let wrapped = b!(self.bld.build_and(next_idx, mask, "mg.wi"));
         phi_idx.add_incoming(&[(&wrapped, next_bb)]);
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(merge_bb);
         let phi = b!(self.bld.build_phi(i64t, "mg.v"));
-        phi.add_incoming(&[(&found_val, found_bb), (&i64t.const_int(0, false), notfound_bb)]);
+        phi.add_incoming(&[
+            (&found_val, found_bb),
+            (&i64t.const_int(0, false), notfound_bb),
+        ]);
         Ok(phi.as_basic_value())
     }
 
@@ -754,11 +855,17 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
 
         let hash = self.fnv_hash_string(key_val)?;
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "mh.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "mh.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "mh.cap")).into_int_value();
-        let mask = b!(self.bld.build_int_nsw_sub(cap, i64t.const_int(1, false), "mh.mask"));
+        let mask = b!(self
+            .bld
+            .build_int_nsw_sub(cap, i64t.const_int(1, false), "mh.mask"));
         let start_idx = b!(self.bld.build_and(hash, mask, "mh.idx"));
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "mh.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "mh.ptrp"));
         let entries = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -783,16 +890,27 @@ impl<'ctx> Compiler<'ctx> {
         let byte_off = b!(self.bld.build_int_nsw_mul(idx, entry_size, "mh.off"));
         let entry_ptr = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "mh.eptr")) };
         let occ_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mh.occp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mh.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "mh.occ")).into_int_value();
-        let is_occ = b!(self.bld.build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mh.io"));
+        let is_occ =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mh.io"));
         b!(self.bld.build_conditional_branch(is_occ, check_bb, nf_bb));
 
         self.bld.position_at_end(check_bb);
-        let shp = unsafe { b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "mh.shp")) };
+        let shp = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "mh.shp"))
+        };
         let sh = b!(self.bld.build_load(i64t, shp, "mh.sh")).into_int_value();
-        let heq = b!(self.bld.build_int_compare(IntPredicate::EQ, sh, hash, "mh.heq"));
+        let heq = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, sh, hash, "mh.heq"));
         b!(self.bld.build_conditional_branch(heq, found_bb, next_bb));
 
         self.bld.position_at_end(found_bb);
@@ -800,7 +918,9 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(nf_bb);
         b!(self.bld.build_unconditional_branch(merge_bb));
         self.bld.position_at_end(next_bb);
-        let ni = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "mh.ni"));
+        let ni = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "mh.ni"));
         let wi = b!(self.bld.build_and(ni, mask, "mh.wi"));
         phi_idx.add_incoming(&[(&wi, next_bb)]);
         b!(self.bld.build_unconditional_branch(loop_bb));
@@ -831,11 +951,17 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
 
         let hash = self.fnv_hash_string(key_val)?;
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "mr.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "mr.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "mr.cap")).into_int_value();
-        let mask = b!(self.bld.build_int_nsw_sub(cap, i64t.const_int(1, false), "mr.mask"));
+        let mask = b!(self
+            .bld
+            .build_int_nsw_sub(cap, i64t.const_int(1, false), "mr.mask"));
         let start_idx = b!(self.bld.build_and(hash, mask, "mr.idx"));
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "mr.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "mr.ptrp"));
         let entries = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
@@ -859,30 +985,45 @@ impl<'ctx> Compiler<'ctx> {
         let byte_off = b!(self.bld.build_int_nsw_mul(idx, entry_size, "mr.off"));
         let entry_ptr = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "mr.eptr")) };
         let occ_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mr.occp"))
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mr.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "mr.occ")).into_int_value();
-        let is_occ = b!(self.bld.build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mr.io"));
+        let is_occ =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mr.io"));
         b!(self.bld.build_conditional_branch(is_occ, check_bb, nf_bb));
 
         self.bld.position_at_end(check_bb);
-        let shp = unsafe { b!(self.bld.build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "mr.shp")) };
+        let shp = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(0, false)], "mr.shp"))
+        };
         let sh = b!(self.bld.build_load(i64t, shp, "mr.sh")).into_int_value();
-        let heq = b!(self.bld.build_int_compare(IntPredicate::EQ, sh, hash, "mr.heq"));
+        let heq = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, sh, hash, "mr.heq"));
         b!(self.bld.build_conditional_branch(heq, found_bb, next_bb));
 
         self.bld.position_at_end(found_bb);
-        // Clear occupied flag
         b!(self.bld.build_store(occ_ptr, i8t.const_int(0, false)));
-        // Decrement len
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "mr.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "mr.lenp"));
         let cur_len = b!(self.bld.build_load(i64t, len_gep, "mr.len")).into_int_value();
-        let new_len = b!(self.bld.build_int_nsw_sub(cur_len, i64t.const_int(1, false), "mr.nl"));
+        let new_len = b!(self
+            .bld
+            .build_int_nsw_sub(cur_len, i64t.const_int(1, false), "mr.nl"));
         b!(self.bld.build_store(len_gep, new_len));
         b!(self.bld.build_unconditional_branch(nf_bb));
 
         self.bld.position_at_end(next_bb);
-        let ni = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "mr.ni"));
+        let ni = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "mr.ni"));
         let wi = b!(self.bld.build_and(ni, mask, "mr.wi"));
         phi_idx.add_incoming(&[(&wi, next_bb)]);
         b!(self.bld.build_unconditional_branch(loop_bb));
@@ -898,29 +1039,36 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
 
-        // Zero out all entries
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "mc.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "mc.ptrp"));
         let entries = b!(self.bld.build_load(
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
             "mc.entries"
         ))
         .into_pointer_value();
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "mc.capp"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "mc.capp"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "mc.cap")).into_int_value();
-        let total = b!(self.bld.build_int_nsw_mul(cap, i64t.const_int(48, false), "mc.total"));
+        let total = b!(self
+            .bld
+            .build_int_nsw_mul(cap, i64t.const_int(48, false), "mc.total"));
         let memset = self.ensure_memset();
         let zero_i32 = self.ctx.i32_type().const_int(0, false);
-        b!(self.bld.build_call(memset, &[entries.into(), zero_i32.into(), total.into()], ""));
+        b!(self
+            .bld
+            .build_call(memset, &[entries.into(), zero_i32.into(), total.into()], ""));
 
-        // Reset len
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "mc.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "mc.lenp"));
         b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
 
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    // FNV-1a hash on string data — inline LLVM IR loop
     fn fnv_hash_string(
         &mut self,
         str_val: BasicValueEnum<'ctx>,
@@ -932,7 +1080,6 @@ impl<'ctx> Compiler<'ctx> {
         let data = self.string_data(str_val)?.into_pointer_value();
         let len = self.string_len(str_val)?.into_int_value();
 
-        // FNV offset basis
         let basis = i64t.const_int(0xcbf29ce484222325, false);
         let prime = i64t.const_int(0x00000100000001B3, false);
 
@@ -949,7 +1096,9 @@ impl<'ctx> Compiler<'ctx> {
         phi_i.add_incoming(&[(&i64t.const_int(0, false), entry_bb)]);
         let cur_i = phi_i.as_basic_value().into_int_value();
         let cur_hash = phi_hash.as_basic_value().into_int_value();
-        let done = b!(self.bld.build_int_compare(IntPredicate::SGE, cur_i, len, "fnv.done"));
+        let done = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SGE, cur_i, len, "fnv.done"));
         b!(self.bld.build_conditional_branch(done, done_bb, body_bb));
 
         self.bld.position_at_end(body_bb);
@@ -958,7 +1107,9 @@ impl<'ctx> Compiler<'ctx> {
         let ext = b!(self.bld.build_int_z_extend(byte, i64t, "fnv.ext"));
         let xored = b!(self.bld.build_xor(cur_hash, ext, "fnv.xor"));
         let mulled = b!(self.bld.build_int_nsw_mul(xored, prime, "fnv.mul"));
-        let next_i = b!(self.bld.build_int_nsw_add(cur_i, i64t.const_int(1, false), "fnv.ni"));
+        let next_i = b!(self
+            .bld
+            .build_int_nsw_add(cur_i, i64t.const_int(1, false), "fnv.ni"));
         phi_hash.add_incoming(&[(&mulled, body_bb)]);
         phi_i.add_incoming(&[(&next_i, body_bb)]);
         b!(self.bld.build_unconditional_branch(cond_bb));
@@ -966,8 +1117,6 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(done_bb);
         Ok(phi_hash.as_basic_value().into_int_value())
     }
-
-    // ── Helpers: ensure libc functions ──────────────────────────────────
 
     pub(crate) fn ensure_realloc(&self) -> inkwell::values::FunctionValue<'ctx> {
         let name = "realloc";
@@ -1009,8 +1158,10 @@ impl<'ctx> Compiler<'ctx> {
         }
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i64t = self.ctx.i64_type();
-        // memset(ptr, val, n) -> ptr
-        let ft = ptr_ty.fn_type(&[ptr_ty.into(), self.ctx.i32_type().into(), i64t.into()], false);
+        let ft = ptr_ty.fn_type(
+            &[ptr_ty.into(), self.ctx.i32_type().into(), i64t.into()],
+            false,
+        );
         self.module.add_function(name, ft, Some(Linkage::External))
     }
 
@@ -1022,7 +1173,6 @@ impl<'ctx> Compiler<'ctx> {
         self.module.add_function("llvm.trap", ft, None)
     }
 
-    /// Drop a Vec — free the data buffer, then free the header.
     pub(crate) fn drop_vec(
         &mut self,
         header_alloca: inkwell::values::PointerValue<'ctx>,
@@ -1032,48 +1182,49 @@ impl<'ctx> Compiler<'ctx> {
         let free = self.ensure_free();
         let fv = self.cur_fn.unwrap();
         let null = ptr_ty.const_null();
-        // Load the header pointer from the alloca
-        let header_ptr = b!(self.bld.build_load(ptr_ty, header_alloca, "dv.hdr")).into_pointer_value();
-        // Guard: skip if header is null (uninitialised / moved / already freed)
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, header_ptr, null, "dv.null"
-        ));
+        let header_ptr =
+            b!(self.bld.build_load(ptr_ty, header_alloca, "dv.hdr")).into_pointer_value();
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dv.null"));
         let free_bb = self.ctx.append_basic_block(fv, "dv.free");
         let done_bb = self.ctx.append_basic_block(fv, "dv.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
         self.bld.position_at_end(free_bb);
-        // Load data pointer (field 0 of header)
-        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dv.data"));
+        let data_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "dv.data"));
         let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dv.buf"));
-        // Free data buffer (free(NULL) is safe per C standard)
         b!(self.bld.build_call(free, &[data_ptr.into()], ""));
-        // Free header
         b!(self.bld.build_call(free, &[header_ptr.into()], ""));
         b!(self.bld.build_unconditional_branch(done_bb));
         self.bld.position_at_end(done_bb);
         Ok(())
     }
 
-    /// Drop a Map — free the entries buffer, then free the header.
     pub(crate) fn drop_map(
         &mut self,
         header_alloca: inkwell::values::PointerValue<'ctx>,
     ) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let header_ty = self.vec_header_type(); // Map uses same header layout
+        let header_ty = self.vec_header_type();
         let free = self.ensure_free();
         let fv = self.cur_fn.unwrap();
         let null = ptr_ty.const_null();
-        let header_ptr = b!(self.bld.build_load(ptr_ty, header_alloca, "dm.hdr")).into_pointer_value();
-        // Guard: skip if header is null
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, header_ptr, null, "dm.null"
-        ));
+        let header_ptr =
+            b!(self.bld.build_load(ptr_ty, header_alloca, "dm.hdr")).into_pointer_value();
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dm.null"));
         let free_bb = self.ctx.append_basic_block(fv, "dm.free");
         let done_bb = self.ctx.append_basic_block(fv, "dm.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
         self.bld.position_at_end(free_bb);
-        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dm.data"));
+        let data_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "dm.data"));
         let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dm.buf"));
         b!(self.bld.build_call(free, &[data_ptr.into()], ""));
         b!(self.bld.build_call(free, &[header_ptr.into()], ""));

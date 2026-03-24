@@ -417,7 +417,6 @@ impl<'s> Lexer<'s> {
         Ok(out)
     }
 
-    /// Tokenize a fragment (expression inside interpolation) — no indent/dedent handling.
     pub fn lex_all(&mut self) -> Result<Vec<Spanned>, LexError> {
         let mut out = Vec::new();
         while self.pos < self.src.len() {

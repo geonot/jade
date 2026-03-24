@@ -42,7 +42,7 @@ pub enum Decl {
     Store(StoreDef),
     Trait(TraitDef),
     Impl(ImplBlock),
-    Const(String, Expr, Span),  // top-level constant: NAME is EXPR
+    Const(String, Expr, Span),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,7 +114,13 @@ pub enum Pat {
 impl Pat {
     pub fn span(&self) -> Span {
         match self {
-            Pat::Wild(s) | Pat::Ident(_, s) | Pat::Ctor(_, _, s) | Pat::Or(_, s) | Pat::Range(_, _, s) | Pat::Tuple(_, s) | Pat::Array(_, s) => *s,
+            Pat::Wild(s)
+            | Pat::Ident(_, s)
+            | Pat::Ctor(_, _, s)
+            | Pat::Or(_, s)
+            | Pat::Range(_, _, s)
+            | Pat::Tuple(_, s)
+            | Pat::Array(_, s) => *s,
             Pat::Lit(e) => e.span(),
         }
     }
@@ -478,7 +484,10 @@ pub struct ImplBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogicalOp { And, Or }
+pub enum LogicalOp {
+    And,
+    Or,
+}
 
 #[derive(Debug, Clone)]
 pub struct StoreFilter {

@@ -1,7 +1,7 @@
+use jadec::lock::Lockfile;
+use jadec::pkg::Package;
 use std::path::PathBuf;
 use std::process::Command;
-use jadec::pkg::Package;
-use jadec::lock::Lockfile;
 
 fn jadec() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
@@ -66,7 +66,10 @@ fn compile_and_run_test_mode(src: &str) -> String {
         .arg(&out)
         .status()
         .expect("jadec failed to start");
-    assert!(status.success(), "jadec --test compilation failed for:\n{src}");
+    assert!(
+        status.success(),
+        "jadec --test compilation failed for:\n{src}"
+    );
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -2750,18 +2753,12 @@ fn b_ext_method_with_args() {
 
 #[test]
 fn b_assert_pass() {
-    expect(
-        "*main()\n    assert 1 equals 1\n    log 'ok'\n",
-        "ok",
-    );
+    expect("*main()\n    assert 1 equals 1\n    log 'ok'\n", "ok");
 }
 
 #[test]
 fn b_assert_parens() {
-    expect(
-        "*main()\n    assert(2 + 2 equals 4)\n    log 'ok'\n",
-        "ok",
-    );
+    expect("*main()\n    assert(2 + 2 equals 4)\n    log 'ok'\n", "ok");
 }
 
 #[test]
@@ -2801,9 +2798,15 @@ fn b_test_mode_runs_tests() {
         "*add(a, b)\n    return a + b\n\ntest 'addition'\n    assert add(2, 3) equals 5\n\n*main()\n    log 'skip'\n",
     );
     let trimmed = out.trim();
-    assert!(trimmed.contains("test addition ..."), "expected test header, got: {trimmed}");
+    assert!(
+        trimmed.contains("test addition ..."),
+        "expected test header, got: {trimmed}"
+    );
     assert!(trimmed.contains("ok"), "expected ok, got: {trimmed}");
-    assert!(!trimmed.contains("skip"), "main should not run in test mode");
+    assert!(
+        !trimmed.contains("skip"),
+        "main should not run in test mode"
+    );
 }
 
 #[test]
@@ -2918,7 +2921,10 @@ fn compile_and_run_in_dir(src: &str) -> String {
         output.status.code(),
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).unwrap().trim_end().to_string()
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .trim_end()
+        .to_string()
 }
 
 #[test]
@@ -3155,7 +3161,10 @@ fn b_trait_missing_method_fails() {
     let err = expect_compile_fail(
         "type Foo\n    x: i64\n\ntrait NeedTwo\n    *first() -> i64\n    *second() -> i64\n\nimpl NeedTwo for Foo\n    *first() -> i64\n        self.x\n\n*main()\n    log(0)\n",
     );
-    assert!(err.contains("missing required method 'second'"), "expected missing method error, got: {err}");
+    assert!(
+        err.contains("missing required method 'second'"),
+        "expected missing method error, got: {err}"
+    );
 }
 
 #[test]
@@ -3164,7 +3173,10 @@ fn b_trait_unknown_trait_fails() {
     let err = expect_compile_fail(
         "type Bar\n    x: i64\n\nimpl Nonexistent for Bar\n    *foo() -> i64\n        self.x\n\n*main()\n    log(0)\n",
     );
-    assert!(err.contains("unknown trait"), "expected unknown trait error, got: {err}");
+    assert!(
+        err.contains("unknown trait"),
+        "expected unknown trait error, got: {err}"
+    );
 }
 
 #[test]
@@ -3173,7 +3185,10 @@ fn b_trait_unknown_type_fails() {
     let err = expect_compile_fail(
         "trait MyTrait\n    *foo() -> i64\n\nimpl MyTrait for Nonexistent\n    *foo() -> i64\n        0\n\n*main()\n    log(0)\n",
     );
-    assert!(err.contains("unknown type"), "expected unknown type error, got: {err}");
+    assert!(
+        err.contains("unknown type"),
+        "expected unknown type error, got: {err}"
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3372,7 +3387,10 @@ fn b_str_to_lower() {
 
 #[test]
 fn b_str_to_upper_mixed() {
-    expect("*main()\n    log('Hello World'.to_upper())\n", "HELLO WORLD");
+    expect(
+        "*main()\n    log('Hello World'.to_upper())\n",
+        "HELLO WORLD",
+    );
 }
 
 #[test]
@@ -3385,18 +3403,12 @@ fn b_str_replace_basic() {
 
 #[test]
 fn b_str_replace_multiple() {
-    expect(
-        "*main()\n    log('aabaa'.replace('a', 'x'))\n",
-        "xxbxx",
-    );
+    expect("*main()\n    log('aabaa'.replace('a', 'x'))\n", "xxbxx");
 }
 
 #[test]
 fn b_str_replace_not_found() {
-    expect(
-        "*main()\n    log('hello'.replace('xyz', 'abc'))\n",
-        "hello",
-    );
+    expect("*main()\n    log('hello'.replace('xyz', 'abc'))\n", "hello");
 }
 
 #[test]
@@ -3625,10 +3637,7 @@ fn b_string_iter_break() {
 
 #[test]
 fn b_string_iter_single_char() {
-    expect(
-        "*main()\n    for ch in 'X'\n        log(ch)\n",
-        "88",
-    );
+    expect("*main()\n    for ch in 'X'\n        log(ch)\n", "88");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4234,10 +4243,7 @@ fn b_vec_length_field() {
 
 #[test]
 fn b_vec_length_empty() {
-    expect(
-        "*main()\n    v is vec()\n    log(v.length)\n",
-        "0",
-    );
+    expect("*main()\n    v is vec()\n    log(v.length)\n", "0");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4370,12 +4376,18 @@ fn b_comptime_int_nested() {
 #[test]
 fn b_comptime_float_fold() {
     // Float constant folding
-    expect("*main()\n    x is 1.0 + 2.5\n    log(x > 3.4)\n    log(x < 3.6)\n", "1\n1");
+    expect(
+        "*main()\n    x is 1.0 + 2.5\n    log(x > 3.4)\n    log(x < 3.6)\n",
+        "1\n1",
+    );
 }
 
 #[test]
 fn b_comptime_bool_fold() {
-    expect("*main()\n    log(true and false)\n    log(true or false)\n    log(not true)\n", "0\n1\n0");
+    expect(
+        "*main()\n    log(true and false)\n    log(true or false)\n    log(not true)\n",
+        "0\n1\n0",
+    );
 }
 
 #[test]
@@ -4385,7 +4397,10 @@ fn b_comptime_string_concat() {
 
 #[test]
 fn b_comptime_comparison_fold() {
-    expect("*main()\n    log(5 > 3)\n    log(2 > 7)\n    log(4 equals 4)\n", "1\n0\n1");
+    expect(
+        "*main()\n    log(5 > 3)\n    log(2 > 7)\n    log(4 equals 4)\n",
+        "1\n0\n1",
+    );
 }
 
 #[test]
@@ -4400,19 +4415,13 @@ fn b_comptime_division() {
 #[test]
 fn b_infer_assign_propagates() {
     // Assignment should unify target and value types
-    expect(
-        "*main()\n    x is 42\n    x is 100\n    log(x)\n",
-        "100",
-    );
+    expect("*main()\n    x is 42\n    x is 100\n    log(x)\n", "100");
 }
 
 #[test]
 fn b_infer_ternary_branches() {
     // Ternary branches should produce the same type
-    expect(
-        "*main()\n    x is true ? 1 ! 2\n    log(x)\n",
-        "1",
-    );
+    expect("*main()\n    x is true ? 1 ! 2\n    log(x)\n", "1");
 }
 
 #[test]
@@ -4445,19 +4454,13 @@ fn b_infer_lambda_from_context() {
 #[test]
 fn b_infer_bind_simple() {
     // Bind infers type from value expression
-    expect(
-        "*main()\n    x is 42\n    y is x + 8\n    log(y)\n",
-        "50",
-    );
+    expect("*main()\n    x is 42\n    y is x + 8\n    log(y)\n", "50");
 }
 
 #[test]
 fn b_infer_vec_element_type() {
     // Vec element type unified across all elements
-    expect(
-        "*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n",
-        "3",
-    );
+    expect("*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n", "3");
 }
 
 #[test]
@@ -4481,8 +4484,5 @@ fn b_infer_struct_field_from_literal() {
 #[test]
 fn b_infer_if_expr_type() {
     // If expression: ternary infers unified type
-    expect(
-        "*main()\n    val is true ? 42 ! 0\n    log(val)\n",
-        "42",
-    );
+    expect("*main()\n    val is true ? 42 ! 0\n    log(val)\n", "42");
 }

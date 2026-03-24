@@ -19,8 +19,6 @@ impl<'ctx> Compiler<'ctx> {
         let mut last = None;
         for s in block {
             let v = self.compile_stmt(s)?;
-            // Drop stmts are cleanup side-effects; they must not clobber
-            // the block's semantic return value.
             if !matches!(s, hir::Stmt::Drop(..)) {
                 last = v;
             }
@@ -40,10 +38,14 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::If(i) => i.cond.span,
             hir::Stmt::While(w) => w.cond.span,
             hir::Stmt::For(f) => f.iter.span,
-            hir::Stmt::Loop(l) => l.body.first().map(|s| match s {
-                hir::Stmt::Expr(e) => e.span,
-                _ => crate::ast::Span::dummy(),
-            }).unwrap_or(crate::ast::Span::dummy()),
+            hir::Stmt::Loop(l) => l
+                .body
+                .first()
+                .map(|s| match s {
+                    hir::Stmt::Expr(e) => e.span,
+                    _ => crate::ast::Span::dummy(),
+                })
+                .unwrap_or(crate::ast::Span::dummy()),
             hir::Stmt::Ret(_, _, s) => *s,
             hir::Stmt::Break(_, s) => *s,
             hir::Stmt::Continue(s) => *s,
@@ -193,21 +195,27 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(None)
             }
             hir::Stmt::StoreInsert(store_name, values, _) => {
-                let sd = self.store_defs.get(store_name)
+                let sd = self
+                    .store_defs
+                    .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
                 self.compile_store_insert(store_name, values, &sd)?;
                 Ok(None)
             }
             hir::Stmt::StoreDelete(store_name, filter, _) => {
-                let sd = self.store_defs.get(store_name)
+                let sd = self
+                    .store_defs
+                    .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
                 self.compile_store_delete(store_name, filter, &sd)?;
                 Ok(None)
             }
             hir::Stmt::StoreSet(store_name, assignments, filter, _) => {
-                let sd = self.store_defs.get(store_name)
+                let sd = self
+                    .store_defs
+                    .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
                 self.compile_store_set(store_name, assignments, filter, &sd)?;
@@ -344,7 +352,9 @@ impl<'ctx> Compiler<'ctx> {
             if let Type::Vec(elem_ty) = iter_ty {
                 return self.compile_for_vec(f, elem_ty);
             }
-            if matches!(iter_ty, Type::String) || matches!(f.bind_ty, Type::I64) && matches!(iter_ty, Type::String) {
+            if matches!(iter_ty, Type::String)
+                || matches!(f.bind_ty, Type::I64) && matches!(iter_ty, Type::String)
+            {
                 return self.compile_for_string(f);
             }
         }
@@ -482,7 +492,6 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
 
-        // Load len and data ptr
         let len_gep = b!(self.bld.build_struct_gep(header_ty, vec_ptr, 1, "fv.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "fv.len")).into_int_value();
         let ptr_gep = b!(self.bld.build_struct_gep(header_ty, vec_ptr, 0, "fv.ptrp"));
@@ -490,7 +499,8 @@ impl<'ctx> Compiler<'ctx> {
             self.ctx.ptr_type(AddressSpace::default()),
             ptr_gep,
             "fv.data"
-        )).into_pointer_value();
+        ))
+        .into_pointer_value();
 
         let idx_alloca = self.entry_alloca(i64t.into(), "__idx");
         b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
@@ -505,7 +515,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(cond_bb);
         let idx = b!(self.bld.build_load(i64t, idx_alloca, "idx")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, idx, len, "fv.cmp"));
+        let cmp = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULT, idx, len, "fv.cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);
@@ -525,7 +537,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(inc_bb);
         let idx = b!(self.bld.build_load(i64t, idx_alloca, "idx")).into_int_value();
-        let next = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "inc"));
+        let next = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(1, false), "inc"));
         b!(self.bld.build_store(idx_alloca, next));
         b!(self.bld.build_unconditional_branch(cond_bb));
 
@@ -533,28 +547,20 @@ impl<'ctx> Compiler<'ctx> {
         Ok(None)
     }
 
-    /// Iterate over a String's UTF-8 bytes, decoding each Unicode codepoint as i64.
-    fn compile_for_string(
-        &mut self,
-        f: &hir::For,
-    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+    fn compile_for_string(&mut self, f: &hir::For) -> Result<Option<BasicValueEnum<'ctx>>, String> {
         let fv = self.cur_fn.unwrap();
         let i8t = self.ctx.i8_type();
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
 
-        // Get the string value (SSO-aware struct)
         let str_val = self.compile_expr(&f.iter)?;
 
-        // Use SSO-aware accessors to get data pointer and length
         let str_ptr = self.string_data(str_val)?.into_pointer_value();
         let len = self.string_len(str_val)?.into_int_value();
 
-        // idx alloca (byte offset)
         let idx_alloca = self.entry_alloca(i64t.into(), "__sidx");
         b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
 
-        // codepoint alloca for the bind variable
         let cp_alloca = self.entry_alloca(i64t.into(), &f.bind);
         self.set_var(&f.bind, cp_alloca, crate::types::Type::I64);
 
@@ -563,22 +569,20 @@ impl<'ctx> Compiler<'ctx> {
         let end_bb = self.ctx.append_basic_block(fv, "fs.end");
         b!(self.bld.build_unconditional_branch(cond_bb));
 
-        // cond: idx < len
         self.bld.position_at_end(cond_bb);
         let idx = b!(self.bld.build_load(i64t, idx_alloca, "idx")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, idx, len, "fs.cmp"));
+        let cmp = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULT, idx, len, "fs.cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
 
-        // body: decode UTF-8 codepoint
         self.bld.position_at_end(body_bb);
         let idx = b!(self.bld.build_load(i64t, idx_alloca, "idx")).into_int_value();
 
-        // Load first byte
         let byte_ptr = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx], "fs.bp")) };
         let b0 = b!(self.bld.build_load(i8t, byte_ptr, "fs.b0")).into_int_value();
         let b0_32 = b!(self.bld.build_int_z_extend(b0, i32t, "b0z"));
 
-        // Check byte patterns for UTF-8 sequences
         let is_ascii = b!(self.bld.build_int_compare(
             IntPredicate::ULT,
             b0_32,
@@ -590,23 +594,22 @@ impl<'ctx> Compiler<'ctx> {
         let multi_bb = self.ctx.append_basic_block(fv, "fs.multi");
         let merge_bb = self.ctx.append_basic_block(fv, "fs.merge");
         let trunc_bb = self.ctx.append_basic_block(fv, "fs.trunc");
-        b!(self.bld.build_conditional_branch(is_ascii, ascii_bb, multi_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_ascii, ascii_bb, multi_bb));
 
-        // Truncated UTF-8 fallback: emit replacement char U+FFFD, advance 1
         self.bld.position_at_end(trunc_bb);
         let cp_trunc = i64t.const_int(0xFFFD, false);
         let adv_trunc = i64t.const_int(1, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
         let trunc_bb_end = self.bld.get_insert_block().unwrap();
 
-        // ASCII fast path: codepoint = b0, advance = 1
         self.bld.position_at_end(ascii_bb);
         let cp_ascii = b!(self.bld.build_int_z_extend(b0_32, i64t, "cp_a"));
         let adv_ascii = i64t.const_int(1, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
         let ascii_bb_end = self.bld.get_insert_block().unwrap();
 
-        // Multi-byte: check 2, 3, or 4 byte sequences
         self.bld.position_at_end(multi_bb);
         let is_2byte = b!(self.bld.build_int_compare(
             IntPredicate::ULT,
@@ -617,30 +620,41 @@ impl<'ctx> Compiler<'ctx> {
 
         let two_bb = self.ctx.append_basic_block(fv, "fs.2b");
         let three_plus_bb = self.ctx.append_basic_block(fv, "fs.3p");
-        b!(self.bld.build_conditional_branch(is_2byte, two_bb, three_plus_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_2byte, two_bb, three_plus_bb));
 
-        // 2-byte: 110xxxxx 10xxxxxx
         self.bld.position_at_end(two_bb);
-        // Bounds check: need idx+2 <= len
-        let need_2 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(2, false), "n2"));
-        let ok_2 = b!(self.bld.build_int_compare(IntPredicate::ULE, need_2, len, "ok2"));
+        let need_2 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(2, false), "n2"));
+        let ok_2 = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULE, need_2, len, "ok2"));
         let two_ok_bb = self.ctx.append_basic_block(fv, "fs.2ok");
         b!(self.bld.build_conditional_branch(ok_2, two_ok_bb, trunc_bb));
         self.bld.position_at_end(two_ok_bb);
-        let idx_plus1 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "i1"));
+        let idx_plus1 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(1, false), "i1"));
         let bp1 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_plus1], "bp1")) };
         let b1_raw = b!(self.bld.build_load(i8t, bp1, "b1r")).into_int_value();
         let b1_32 = b!(self.bld.build_int_z_extend(b1_raw, i32t, "b1z"));
-        let hi = b!(self.bld.build_and(b0_32, i32t.const_int(0x1F, false), "hi2"));
-        let hi_s = b!(self.bld.build_left_shift(hi, i32t.const_int(6, false), "hi2s"));
-        let lo = b!(self.bld.build_and(b1_32, i32t.const_int(0x3F, false), "lo2"));
+        let hi = b!(self
+            .bld
+            .build_and(b0_32, i32t.const_int(0x1F, false), "hi2"));
+        let hi_s = b!(self
+            .bld
+            .build_left_shift(hi, i32t.const_int(6, false), "hi2s"));
+        let lo = b!(self
+            .bld
+            .build_and(b1_32, i32t.const_int(0x3F, false), "lo2"));
         let cp_2b_32 = b!(self.bld.build_or(hi_s, lo, "cp2b"));
         let cp_2b = b!(self.bld.build_int_z_extend(cp_2b_32, i64t, "cp2"));
         let adv_2 = i64t.const_int(2, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
         let two_bb_end = self.bld.get_insert_block().unwrap();
 
-        // 3+ byte
         self.bld.position_at_end(three_plus_bb);
         let is_3byte = b!(self.bld.build_int_compare(
             IntPredicate::ULT,
@@ -650,18 +664,28 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let three_bb = self.ctx.append_basic_block(fv, "fs.3b");
         let four_bb = self.ctx.append_basic_block(fv, "fs.4b");
-        b!(self.bld.build_conditional_branch(is_3byte, three_bb, four_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_3byte, three_bb, four_bb));
 
-        // 3-byte: 1110xxxx 10xxxxxx 10xxxxxx
         self.bld.position_at_end(three_bb);
-        // Bounds check: need idx+3 <= len
-        let need_3 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(3, false), "n3"));
-        let ok_3 = b!(self.bld.build_int_compare(IntPredicate::ULE, need_3, len, "ok3"));
+        let need_3 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(3, false), "n3"));
+        let ok_3 = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULE, need_3, len, "ok3"));
         let three_ok_bb = self.ctx.append_basic_block(fv, "fs.3ok");
-        b!(self.bld.build_conditional_branch(ok_3, three_ok_bb, trunc_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(ok_3, three_ok_bb, trunc_bb));
         self.bld.position_at_end(three_ok_bb);
-        let idx_p1 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "3i1"));
-        let idx_p2 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(2, false), "3i2"));
+        let idx_p1 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(1, false), "3i1"));
+        let idx_p2 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(2, false), "3i2"));
         let bp3_1 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_p1], "3bp1")) };
         let bp3_2 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_p2], "3bp2")) };
         let b3_1 = b!(self.bld.build_load(i8t, bp3_1, "3b1")).into_int_value();
@@ -669,10 +693,18 @@ impl<'ctx> Compiler<'ctx> {
         let b3_1_32 = b!(self.bld.build_int_z_extend(b3_1, i32t, "3b1z"));
         let b3_2_32 = b!(self.bld.build_int_z_extend(b3_2, i32t, "3b2z"));
         let h3 = b!(self.bld.build_and(b0_32, i32t.const_int(0x0F, false), "h3"));
-        let h3s = b!(self.bld.build_left_shift(h3, i32t.const_int(12, false), "h3s"));
-        let m3 = b!(self.bld.build_and(b3_1_32, i32t.const_int(0x3F, false), "m3"));
-        let m3s = b!(self.bld.build_left_shift(m3, i32t.const_int(6, false), "m3s"));
-        let l3 = b!(self.bld.build_and(b3_2_32, i32t.const_int(0x3F, false), "l3"));
+        let h3s = b!(self
+            .bld
+            .build_left_shift(h3, i32t.const_int(12, false), "h3s"));
+        let m3 = b!(self
+            .bld
+            .build_and(b3_1_32, i32t.const_int(0x3F, false), "m3"));
+        let m3s = b!(self
+            .bld
+            .build_left_shift(m3, i32t.const_int(6, false), "m3s"));
+        let l3 = b!(self
+            .bld
+            .build_and(b3_2_32, i32t.const_int(0x3F, false), "l3"));
         let cp3_1 = b!(self.bld.build_or(h3s, m3s, "cp3a"));
         let cp3_32 = b!(self.bld.build_or(cp3_1, l3, "cp3b"));
         let cp_3b = b!(self.bld.build_int_z_extend(cp3_32, i64t, "cp3"));
@@ -680,17 +712,27 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(merge_bb));
         let three_bb_end = self.bld.get_insert_block().unwrap();
 
-        // 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
         self.bld.position_at_end(four_bb);
-        // Bounds check: need idx+4 <= len
-        let need_4 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(4, false), "n4"));
-        let ok_4 = b!(self.bld.build_int_compare(IntPredicate::ULE, need_4, len, "ok4"));
+        let need_4 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(4, false), "n4"));
+        let ok_4 = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULE, need_4, len, "ok4"));
         let four_ok_bb = self.ctx.append_basic_block(fv, "fs.4ok");
-        b!(self.bld.build_conditional_branch(ok_4, four_ok_bb, trunc_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(ok_4, four_ok_bb, trunc_bb));
         self.bld.position_at_end(four_ok_bb);
-        let idx_p1 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(1, false), "4i1"));
-        let idx_p2 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(2, false), "4i2"));
-        let idx_p3 = b!(self.bld.build_int_nuw_add(idx, i64t.const_int(3, false), "4i3"));
+        let idx_p1 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(1, false), "4i1"));
+        let idx_p2 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(2, false), "4i2"));
+        let idx_p3 = b!(self
+            .bld
+            .build_int_nuw_add(idx, i64t.const_int(3, false), "4i3"));
         let bp4_1 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_p1], "4bp1")) };
         let bp4_2 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_p2], "4bp2")) };
         let bp4_3 = unsafe { b!(self.bld.build_gep(i8t, str_ptr, &[idx_p3], "4bp3")) };
@@ -701,12 +743,24 @@ impl<'ctx> Compiler<'ctx> {
         let b4_2_32 = b!(self.bld.build_int_z_extend(b4_2, i32t, "4b2z"));
         let b4_3_32 = b!(self.bld.build_int_z_extend(b4_3, i32t, "4b3z"));
         let h4 = b!(self.bld.build_and(b0_32, i32t.const_int(0x07, false), "h4"));
-        let h4s = b!(self.bld.build_left_shift(h4, i32t.const_int(18, false), "h4s"));
-        let m4a = b!(self.bld.build_and(b4_1_32, i32t.const_int(0x3F, false), "m4a"));
-        let m4as = b!(self.bld.build_left_shift(m4a, i32t.const_int(12, false), "m4as"));
-        let m4b = b!(self.bld.build_and(b4_2_32, i32t.const_int(0x3F, false), "m4b"));
-        let m4bs = b!(self.bld.build_left_shift(m4b, i32t.const_int(6, false), "m4bs"));
-        let l4 = b!(self.bld.build_and(b4_3_32, i32t.const_int(0x3F, false), "l4"));
+        let h4s = b!(self
+            .bld
+            .build_left_shift(h4, i32t.const_int(18, false), "h4s"));
+        let m4a = b!(self
+            .bld
+            .build_and(b4_1_32, i32t.const_int(0x3F, false), "m4a"));
+        let m4as = b!(self
+            .bld
+            .build_left_shift(m4a, i32t.const_int(12, false), "m4as"));
+        let m4b = b!(self
+            .bld
+            .build_and(b4_2_32, i32t.const_int(0x3F, false), "m4b"));
+        let m4bs = b!(self
+            .bld
+            .build_left_shift(m4b, i32t.const_int(6, false), "m4bs"));
+        let l4 = b!(self
+            .bld
+            .build_and(b4_3_32, i32t.const_int(0x3F, false), "l4"));
         let cp4_1 = b!(self.bld.build_or(h4s, m4as, "cp4a"));
         let cp4_2 = b!(self.bld.build_or(cp4_1, m4bs, "cp4b"));
         let cp4_32 = b!(self.bld.build_or(cp4_2, l4, "cp4c"));
@@ -715,7 +769,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(merge_bb));
         let four_bb_end = self.bld.get_insert_block().unwrap();
 
-        // Merge: phi for codepoint and advance
         self.bld.position_at_end(merge_bb);
         let cp_phi = b!(self.bld.build_phi(i64t, "cp"));
         cp_phi.add_incoming(&[
@@ -736,7 +789,6 @@ impl<'ctx> Compiler<'ctx> {
 
         b!(self.bld.build_store(cp_alloca, cp_phi.as_basic_value()));
 
-        // Advance index
         let cur_idx = b!(self.bld.build_load(i64t, idx_alloca, "cidx")).into_int_value();
         let new_idx = b!(self.bld.build_int_nuw_add(
             cur_idx,
@@ -745,7 +797,6 @@ impl<'ctx> Compiler<'ctx> {
         ));
         b!(self.bld.build_store(idx_alloca, new_idx));
 
-        // Execute user body
         self.loop_stack.push(super::LoopCtx {
             continue_bb: cond_bb,
             break_bb: end_bb,
@@ -921,13 +972,17 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(ref guard) = arm.guard {
                 let guard_val = self.compile_expr(guard)?;
                 let gv = guard_val.into_int_value();
-                let guard_pass = self.ctx.append_basic_block(fv, &format!("match.guard_pass{i}"));
+                let guard_pass = self
+                    .ctx
+                    .append_basic_block(fv, &format!("match.guard_pass{i}"));
                 let guard_fail = if i + 1 < arm_bbs.len() {
                     arm_bbs[i + 1]
                 } else {
                     merge_bb
                 };
-                b!(self.bld.build_conditional_branch(gv, guard_pass, guard_fail));
+                b!(self
+                    .bld
+                    .build_conditional_branch(gv, guard_pass, guard_fail));
                 self.bld.position_at_end(guard_pass);
             }
             let arm_val = self.compile_block(&arm.body)?;
@@ -954,25 +1009,32 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
         let merge_bb = self.ctx.append_basic_block(fv, "match.end");
 
-        // Check if any arm uses Range or Or patterns — if so, use if-else chain
         let has_complex = m.arms.iter().any(|a| {
-            matches!(&a.pat, hir::Pat::Range(..) | hir::Pat::Or(..) | hir::Pat::Tuple(..) | hir::Pat::Array(..))
+            matches!(
+                &a.pat,
+                hir::Pat::Range(..) | hir::Pat::Or(..) | hir::Pat::Tuple(..) | hir::Pat::Array(..)
+            )
         });
 
         if has_complex {
-            // If-else chain: separate check blocks + arm blocks
-            let check_bbs: Vec<_> = m.arms.iter().enumerate()
+            let check_bbs: Vec<_> = m
+                .arms
+                .iter()
+                .enumerate()
                 .map(|(i, _)| self.ctx.append_basic_block(fv, &format!("match.check{i}")))
                 .collect();
-            let arm_bbs: Vec<_> = m.arms.iter().enumerate()
+            let arm_bbs: Vec<_> = m
+                .arms
+                .iter()
+                .enumerate()
                 .map(|(i, _)| self.ctx.append_basic_block(fv, &format!("match.arm{i}")))
                 .collect();
-            // Only convert to int when the subject is actually an int (not tuple/array)
-            let iv_opt = subject_val.is_int_value().then(|| subject_val.into_int_value());
+            let iv_opt = subject_val
+                .is_int_value()
+                .then(|| subject_val.into_int_value());
             let mut phi_in: Vec<(BasicValueEnum<'ctx>, BasicBlock<'ctx>)> = Vec::new();
             let mut all_valued = true;
 
-            // Entry → first check block
             b!(self.bld.build_unconditional_branch(check_bbs[0]));
 
             for (i, arm) in m.arms.iter().enumerate() {
@@ -982,7 +1044,6 @@ impl<'ctx> Compiler<'ctx> {
                     merge_bb
                 };
 
-                // Build condition in check block
                 self.bld.position_at_end(check_bbs[i]);
                 match &arm.pat {
                     hir::Pat::Wild(_) | hir::Pat::Bind(_, _, _, _) => {
@@ -992,7 +1053,10 @@ impl<'ctx> Compiler<'ctx> {
                         let lit_val = self.compile_expr(expr)?;
                         let iv = iv_opt.unwrap();
                         let cmp = b!(self.bld.build_int_compare(
-                            IntPredicate::EQ, iv, lit_val.into_int_value(), "match.cmp"
+                            IntPredicate::EQ,
+                            iv,
+                            lit_val.into_int_value(),
+                            "match.cmp"
                         ));
                         b!(self.bld.build_conditional_branch(cmp, arm_bbs[i], next_bb));
                     }
@@ -1000,10 +1064,18 @@ impl<'ctx> Compiler<'ctx> {
                         let iv = iv_opt.unwrap();
                         let lo_val = self.compile_expr(lo)?.into_int_value();
                         let hi_val = self.compile_expr(hi)?.into_int_value();
-                        let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, iv, lo_val, "rng.ge"));
-                        let le = b!(self.bld.build_int_compare(IntPredicate::SLE, iv, hi_val, "rng.le"));
+                        let ge =
+                            b!(self
+                                .bld
+                                .build_int_compare(IntPredicate::SGE, iv, lo_val, "rng.ge"));
+                        let le =
+                            b!(self
+                                .bld
+                                .build_int_compare(IntPredicate::SLE, iv, hi_val, "rng.le"));
                         let in_range = b!(self.bld.build_and(ge, le, "rng.in"));
-                        b!(self.bld.build_conditional_branch(in_range, arm_bbs[i], next_bb));
+                        b!(self
+                            .bld
+                            .build_conditional_branch(in_range, arm_bbs[i], next_bb));
                     }
                     hir::Pat::Or(pats, _) => {
                         let iv = iv_opt.unwrap();
@@ -1012,27 +1084,43 @@ impl<'ctx> Compiler<'ctx> {
                             let sub_match = match pat {
                                 hir::Pat::Lit(e) => {
                                     let lv = self.compile_expr(e)?.into_int_value();
-                                    b!(self.bld.build_int_compare(IntPredicate::EQ, iv, lv, "or.cmp"))
+                                    b!(self.bld.build_int_compare(
+                                        IntPredicate::EQ,
+                                        iv,
+                                        lv,
+                                        "or.cmp"
+                                    ))
                                 }
                                 hir::Pat::Range(lo, hi, _) => {
                                     let lo_val = self.compile_expr(lo)?.into_int_value();
                                     let hi_val = self.compile_expr(hi)?.into_int_value();
-                                    let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, iv, lo_val, "or.ge"));
-                                    let le = b!(self.bld.build_int_compare(IntPredicate::SLE, iv, hi_val, "or.le"));
+                                    let ge = b!(self.bld.build_int_compare(
+                                        IntPredicate::SGE,
+                                        iv,
+                                        lo_val,
+                                        "or.ge"
+                                    ));
+                                    let le = b!(self.bld.build_int_compare(
+                                        IntPredicate::SLE,
+                                        iv,
+                                        hi_val,
+                                        "or.le"
+                                    ));
                                     b!(self.bld.build_and(ge, le, "or.rng"))
                                 }
                                 _ => self.ctx.bool_type().const_int(1, false),
                             };
                             any_match = b!(self.bld.build_or(any_match, sub_match, "or.any"));
                         }
-                        b!(self.bld.build_conditional_branch(any_match, arm_bbs[i], next_bb));
+                        b!(self
+                            .bld
+                            .build_conditional_branch(any_match, arm_bbs[i], next_bb));
                     }
                     _ => {
                         b!(self.bld.build_unconditional_branch(arm_bbs[i]));
                     }
                 }
 
-                // Compile arm body in arm block
                 self.bld.position_at_end(arm_bbs[i]);
                 self.vars.push(HashMap::new());
                 if let hir::Pat::Bind(_, ref name, ref _bty, _) = arm.pat {
@@ -1047,7 +1135,9 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some(ref guard) = arm.guard {
                     let guard_val = self.compile_expr(guard)?;
                     let gv = guard_val.into_int_value();
-                    let guard_pass = self.ctx.append_basic_block(fv, &format!("match.guard_pass{i}"));
+                    let guard_pass = self
+                        .ctx
+                        .append_basic_block(fv, &format!("match.guard_pass{i}"));
                     b!(self.bld.build_conditional_branch(gv, guard_pass, next_bb));
                     self.bld.position_at_end(guard_pass);
                 }
@@ -1066,7 +1156,6 @@ impl<'ctx> Compiler<'ctx> {
             return self.build_match_phi(&phi_in, all_valued);
         }
 
-        // Original switch-based path for simple Lit/Wild/Bind patterns
         let arm_bbs: Vec<_> = m
             .arms
             .iter()
@@ -1111,13 +1200,17 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(ref guard) = arm.guard {
                 let guard_val = self.compile_expr(guard)?;
                 let gv = guard_val.into_int_value();
-                let guard_pass = self.ctx.append_basic_block(fv, &format!("match.guard_pass{i}"));
+                let guard_pass = self
+                    .ctx
+                    .append_basic_block(fv, &format!("match.guard_pass{i}"));
                 let guard_fail = if i + 1 < arm_bbs.len() {
                     arm_bbs[i + 1]
                 } else {
                     merge_bb
                 };
-                b!(self.bld.build_conditional_branch(gv, guard_pass, guard_fail));
+                b!(self
+                    .bld
+                    .build_conditional_branch(gv, guard_pass, guard_fail));
                 self.bld.position_at_end(guard_pass);
             }
             let arm_val = self.compile_block(&arm.body)?;
@@ -1217,9 +1310,17 @@ impl<'ctx> Compiler<'ctx> {
                     let st = self.ctx.struct_type(&ftys, false);
                     if is_ptr {
                         let struct_ptr = b!(self.bld.build_load(
-                            self.ctx.ptr_type(inkwell::AddressSpace::default()), obj_ptr, "self.ptr"
-                        )).into_pointer_value();
-                        let gep = b!(self.bld.build_struct_gep(st, struct_ptr, idx as u32, "field.assign"));
+                            self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                            obj_ptr,
+                            "self.ptr"
+                        ))
+                        .into_pointer_value();
+                        let gep = b!(self.bld.build_struct_gep(
+                            st,
+                            struct_ptr,
+                            idx as u32,
+                            "field.assign"
+                        ));
                         b!(self.bld.build_store(gep, val));
                     } else {
                         let gep =
@@ -1333,7 +1434,6 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_store(a, elem));
                 self.set_var(name, a, ety);
             }
-            // Wild pattern = skip
         }
         Ok(())
     }
@@ -1348,7 +1448,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Array(inner, _) => inner.as_ref().clone(),
             _ => Type::I64,
         };
-        // If the subject is a pointer, use it directly; otherwise store to stack
         let arr_ptr = if subject_val.is_pointer_value() {
             subject_val.into_pointer_value()
         } else {
