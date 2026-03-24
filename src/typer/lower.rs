@@ -207,6 +207,14 @@ impl Typer {
             for m in &mut td.methods {
                 self.resolve_fn(m);
             }
+            // Update struct registry with resolved field types
+            if let Some(sfields) = self.structs.get_mut(&td.name) {
+                for (i, field) in td.fields.iter().enumerate() {
+                    if let Some(sf) = sfields.get_mut(i) {
+                        sf.1 = field.ty.clone();
+                    }
+                }
+            }
         }
         for ed in &mut prog.enums {
             for v in &mut ed.variants {

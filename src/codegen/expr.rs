@@ -809,12 +809,19 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             self.entry_alloca(st.into(), name)
         };
+        let defaults = self.struct_defaults.get(name).cloned();
         for (i, (fname, fty)) in fields.iter().enumerate() {
             let val = inits
                 .iter()
                 .find(|fi| fi.name.as_deref() == Some(fname))
                 .or_else(|| inits.get(i))
                 .map(|fi| self.compile_expr(&fi.value))
+                .or_else(|| {
+                    defaults
+                        .as_ref()
+                        .and_then(|d| d.get(fname))
+                        .map(|def| self.compile_expr(def))
+                })
                 .transpose()?
                 .unwrap_or_else(|| self.default_val(fty));
             let gep = b!(self.bld.build_struct_gep(st, ptr, i as u32, fname));

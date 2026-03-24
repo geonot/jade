@@ -426,11 +426,8 @@ impl Typer {
         Type::I64
     }
 
-    pub(crate) fn infer_field_ty(&mut self, f: &ast::Field) -> Type {
-        f.default
-            .as_ref()
-            .map(|e| self.expr_ty_ast(e))
-            .unwrap_or_else(|| self.infer_ctx.fresh_var())
+    pub(crate) fn infer_field_ty(&mut self, _f: &ast::Field) -> Type {
+        self.infer_ctx.fresh_var()
     }
 
     pub(crate) fn builtin_ret_ty(name: &str) -> Option<Type> {

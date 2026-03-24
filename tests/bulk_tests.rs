@@ -4490,3 +4490,127 @@ fn b_infer_if_expr_type() {
     // If expression: ternary infers unified type
     expect("*main()\n    val is true ? 42 ! 0\n    log(val)\n", "42");
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Struct field inference & row polymorphism
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_struct_field_infer_basic() {
+    // Struct with no type annotations — types inferred from constructor
+    expect(
+        "type Point\n    x\n    y\n\n*main() -> i32\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n    0\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_struct_field_infer_default() {
+    // Struct with default values, no type annotations
+    expect(
+        "type Config\n    width is 800\n    height is 600\n\n*main() -> i32\n    c is Config()\n    log(c.width)\n    log(c.height)\n    0\n",
+        "800\n600",
+    );
+}
+
+#[test]
+fn b_struct_field_infer_partial_override() {
+    // Override one default, keep another
+    expect(
+        "type Cfg\n    a is 10\n    b is 20\n\n*main() -> i32\n    c is Cfg(a is 99)\n    log(c.a)\n    log(c.b)\n    0\n",
+        "99\n20",
+    );
+}
+
+#[test]
+fn b_struct_field_infer_method() {
+    // Method on struct with inferred fields
+    expect(
+        "type Vec2\n    x\n    y\n\n    *mag_sq() -> i64\n        self.x * self.x + self.y * self.y\n\n*main() -> i32\n    v is Vec2(x is 3, y is 4)\n    log(v.mag_sq())\n    0\n",
+        "25",
+    );
+}
+
+#[test]
+fn b_struct_field_infer_mixed() {
+    // Mix of annotated and unannotated fields
+    expect(
+        "type Item\n    name: str\n    count\n\n*main() -> i32\n    i is Item(name is 'widget', count is 42)\n    log(i.count)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_row_poly_basic() {
+    // Generic function accessing struct field — row polymorphism via monomorphization
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*get_x(p)\n    p.x\n\n*main() -> i32\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_row_poly_two_structs() {
+    // Same generic function works with different struct types
+    expect(
+        "type A\n    x: i64\n    y: i64\n\ntype B\n    x: i64\n    z: i64\n\n*get_x(p)\n    p.x\n\n*main() -> i32\n    a is A(x is 10, y is 20)\n    b is B(x is 30, z is 40)\n    log(get_x(a))\n    log(get_x(b))\n    0\n",
+        "10\n30",
+    );
+}
+
+#[test]
+fn b_row_poly_inferred_fields() {
+    // Row polymorphism with inferred field types
+    expect(
+        "type P\n    x\n    y\n\ntype Q\n    x\n    w\n\n*get_x(obj)\n    obj.x\n\n*main() -> i32\n    p is P(x is 5, y is 6)\n    q is Q(x is 7, w is 8)\n    log(get_x(p))\n    log(get_x(q))\n    0\n",
+        "5\n7",
+    );
+}
+
+#[test]
+fn b_row_poly_computation() {
+    // Row poly function does computation on struct fields
+    expect(
+        "type Rect\n    w: i64\n    h: i64\n\n*area(r)\n    r.w * r.h\n\n*main() -> i32\n    r is Rect(w is 6, h is 7)\n    log(area(r))\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_row_poly_with_defaults() {
+    // Row poly on struct with defaults
+    expect(
+        "type Settings\n    scale is 2\n    offset is 10\n\n*apply_scale(s)\n    s.scale * s.offset\n\n*main() -> i32\n    s is Settings()\n    log(apply_scale(s))\n    0\n",
+        "20",
+    );
+}
+
+#[test]
+fn b_struct_default_typed() {
+    // Explicit types with defaults
+    expect(
+        "type Dims\n    w: i64 is 100\n    h: i64 is 200\n\n*main() -> i32\n    d is Dims()\n    log(d.w)\n    log(d.h)\n    0\n",
+        "100\n200",
+    );
+}
+
+#[test]
+fn b_struct_default_partial_typed() {
+    // Explicit types with partial override
+    expect(
+        "type Dims\n    w: i64 is 100\n    h: i64 is 200\n\n*main() -> i32\n    d is Dims(w is 50)\n    log(d.w)\n    log(d.h)\n    0\n",
+        "50\n200",
+    );
+}
+
+#[test]
+fn b_row_poly_missing_field_error() {
+    // Accessing a field that doesn't exist on the struct should fail at compile time
+    let err = expect_compile_fail(
+        "type Box\n    w: i64\n    h: i64\n\n*get_x(p)\n    p.x\n\n*main() -> i32\n    b is Box(w is 10, h is 20)\n    log(get_x(b))\n    0\n",
+    );
+    assert!(
+        err.contains("no field 'x'") || err.contains("has no field"),
+        "expected missing-field error, got: {err}"
+    );
+}

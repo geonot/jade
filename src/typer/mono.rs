@@ -310,7 +310,7 @@ impl Typer {
     pub(crate) fn try_monomorphize_generic_variant(
         &mut self,
         variant_name: &str,
-        inits: &[ast::FieldInit],
+        arg_tys: &[Type],
     ) -> Result<Option<String>, String> {
         let found = self.generic_enums.iter().find_map(|(ename, edef)| {
             edef.variants
@@ -325,8 +325,8 @@ impl Typer {
         let mut type_map = HashMap::new();
         for (i, field) in variant.fields.iter().enumerate() {
             if let Type::Param(ref p) = field.ty {
-                if let Some(init) = inits.get(i) {
-                    type_map.insert(p.clone(), self.expr_ty_ast(&init.value));
+                if let Some(ty) = arg_tys.get(i) {
+                    type_map.insert(p.clone(), ty.clone());
                 }
             }
         }

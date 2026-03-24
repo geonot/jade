@@ -225,6 +225,14 @@ impl<'ctx> Compiler<'ctx> {
         let st = self.ctx.opaque_struct_type(&td.name);
         st.set_body(&ltys, td.layout.packed);
         self.structs.insert(td.name.clone(), fields);
+        let defaults: HashMap<String, hir::Expr> = td
+            .fields
+            .iter()
+            .filter_map(|f| f.default.as_ref().map(|d| (f.name.clone(), d.clone())))
+            .collect();
+        if !defaults.is_empty() {
+            self.struct_defaults.insert(td.name.clone(), defaults);
+        }
         self.struct_layouts
             .insert(td.name.clone(), td.layout.clone());
         Ok(())

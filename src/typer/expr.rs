@@ -210,7 +210,8 @@ impl Typer {
 
             ast::Expr::Field(obj, field, span) => {
                 let hobj = self.lower_expr(obj)?;
-                let struct_name = match &hobj.ty {
+                let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
+                let struct_name = match &resolved_ty {
                     Type::Struct(name) => Some(name.clone()),
                     Type::Ptr(inner) => match inner.as_ref() {
                         Type::Struct(name) => Some(name.clone()),
@@ -223,14 +224,17 @@ impl Typer {
                         if let Some((i, (_, fty))) =
                             fields.iter().enumerate().find(|(_, (n, _))| n == field)
                         {
-                            (fty.clone(), i)
+                            (self.infer_ctx.shallow_resolve(fty), i)
                         } else {
-                            (Type::I64, 0)
+                            return Err(format!(
+                                "line {}:{}: type '{}' has no field '{}'",
+                                span.line, span.col, name, field
+                            ));
                         }
                     } else {
                         (Type::I64, 0)
                     }
-                } else if matches!(hobj.ty, Type::String) && field == "length" {
+                } else if matches!(resolved_ty, Type::String) && field == "length" {
                     (Type::I64, 0)
                 } else {
                     (self.infer_ctx.fresh_var(), 0)
@@ -1447,29 +1451,7 @@ impl Typer {
             });
         }
 
-        if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, inits) {
-            let (_, tag) = self
-                .variant_tags
-                .get(name)
-                .cloned()
-                .unwrap_or((mangled.clone(), 0));
-            // Phase 1.2: Lower inits once and reuse (instead of lowering separately)
-            let hinits: Vec<hir::FieldInit> = inits
-                .iter()
-                .map(|fi| {
-                    Ok(hir::FieldInit {
-                        name: fi.name.clone(),
-                        value: self.lower_expr(&fi.value)?,
-                    })
-                })
-                .collect::<Result<_, String>>()?;
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::VariantCtor(mangled.clone(), name.to_string(), tag, hinits),
-                ty: Type::Enum(mangled),
-                span,
-            });
-        }
-
+        // Lower inits once upfront — used by both generic variant and struct paths
         let hinits: Vec<hir::FieldInit> = inits
             .iter()
             .map(|fi| {
@@ -1479,6 +1461,20 @@ impl Typer {
                 })
             })
             .collect::<Result<_, String>>()?;
+
+        let arg_tys: Vec<Type> = hinits.iter().map(|fi| fi.value.ty.clone()).collect();
+        if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, &arg_tys) {
+            let (_, tag) = self
+                .variant_tags
+                .get(name)
+                .cloned()
+                .unwrap_or((mangled.clone(), 0));
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::VariantCtor(mangled.clone(), name.to_string(), tag, hinits),
+                ty: Type::Enum(mangled),
+                span,
+            });
+        }
 
         if let Some(fields) = self.structs.get(name).cloned() {
             for fi in &hinits {
