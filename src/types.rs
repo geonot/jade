@@ -28,7 +28,6 @@ pub enum Type {
     Coroutine(Box<Type>),
     Channel(Box<Type>),
     DynTrait(String),
-    Inferred,
     TypeVar(u32),
 }
 
@@ -88,7 +87,6 @@ impl Type {
             | Self::F64
             | Self::Bool
             | Self::Void
-            | Self::Inferred
             | Self::TypeVar(_)
             | Self::Ptr(_)
             | Self::ActorRef(_)
@@ -126,7 +124,6 @@ impl std::fmt::Display for Type {
             Self::Bool => f.write_str("bool"),
             Self::Void => f.write_str("void"),
             Self::String => f.write_str("String"),
-            Self::Inferred => f.write_str("_"),
             Self::TypeVar(n) => write!(f, "?{n}"),
             Self::Struct(n) | Self::Enum(n) => f.write_str(n),
             Self::Array(e, l) => write!(f, "[{e}; {l}]"),

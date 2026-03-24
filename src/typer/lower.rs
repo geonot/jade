@@ -24,6 +24,12 @@ impl Typer {
                         .insert(f.name.clone(), Self::normalize_generic_fn(f));
                 }
                 ast::Decl::Fn(f) => {
+                    // Store AST for functions with unannotated params — enables
+                    // auto-monomorphization fallback when called with incompatible types
+                    let has_untyped_params = f.params.iter().any(|p| p.ty.is_none());
+                    if has_untyped_params {
+                        self.inferable_fns.insert(f.name.clone(), f.clone());
+                    }
                     self.declare_fn_sig(f);
                 }
                 ast::Decl::Type(td) if !td.type_params.is_empty() => {
@@ -101,15 +107,50 @@ impl Typer {
         let mut hir_stores = Vec::new();
         let mut test_fns: Vec<(String, String)> = Vec::new();
 
-        for d in &prog.decls {
-            match d {
-                ast::Decl::Fn(f) if !Self::is_generic_fn(f) => {
-                    if self.test_mode && f.name == "main" {
-                        continue;
-                    }
+        // Collect non-generic functions for SCC ordering
+        let non_generic_fns: Vec<&ast::Fn> = prog.decls.iter().filter_map(|d| {
+            if let ast::Decl::Fn(f) = d {
+                if !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
+                    return Some(f);
+                }
+            }
+            None
+        }).collect();
+
+        // Build call graph and compute SCCs for topological ordering
+        let call_graph = super::scc::build_call_graph(&non_generic_fns);
+        let sccs = super::scc::tarjan_scc(&call_graph);
+
+        // Build lookup from name to AST function
+        let fn_lookup: std::collections::HashMap<&str, &ast::Fn> = non_generic_fns
+            .iter()
+            .map(|f| (f.name.as_str(), *f))
+            .collect();
+
+        // Lower functions in SCC topological order
+        let mut lowered_fn_names = std::collections::HashSet::new();
+        for scc in &sccs {
+            for name in scc {
+                if let Some(f) = fn_lookup.get(name.as_str()) {
                     let hfn = self.lower_fn(f)?;
                     hir_fns.push(hfn);
+                    lowered_fn_names.insert(name.clone());
                 }
+            }
+        }
+
+        // Lower any remaining functions not in the call graph (unreachable fns)
+        for f in &non_generic_fns {
+            if !lowered_fn_names.contains(&f.name) {
+                let hfn = self.lower_fn(f)?;
+                hir_fns.push(hfn);
+            }
+        }
+
+        // Lower non-function declarations
+        for d in &prog.decls {
+            match d {
+                ast::Decl::Fn(_) => {} // already handled above
                 ast::Decl::Type(td) if td.type_params.is_empty() => {
                     let htd = self.lower_type_def(td)?;
                     hir_types.push(htd);
@@ -184,6 +225,9 @@ impl Typer {
         self.resolve_deferred_methods();
         self.resolve_deferred_fields();
         self.resolve_all_types(&mut program);
+        // Collect defaulting warnings from InferCtx
+        let default_warnings = self.infer_ctx.drain_default_warnings();
+        self.warnings.extend(default_warnings);
         // Emit type inference warnings
         for w in &self.warnings {
             eprintln!("warning: {w}");
@@ -942,6 +986,14 @@ impl Typer {
                 // Only extract a tail type if there's an else branch (all paths covered)
                 if i.els.is_some() {
                     self.hir_tail_type(&i.then)
+                } else {
+                    None
+                }
+            }
+            hir::Stmt::Match(m) => {
+                // Match is exhaustive — extract tail type from first arm
+                if let Some(arm) = m.arms.first() {
+                    self.hir_tail_type(&arm.body)
                 } else {
                     None
                 }

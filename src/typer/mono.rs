@@ -48,14 +48,11 @@ impl Typer {
         if !f.type_params.is_empty() {
             return f.type_params.clone();
         }
+        // Only count explicit Type::Param references in annotations as type params.
+        // Unannotated params are NOT implicit generics — they get TypeVars via
+        // declare_fn_sig and are solved by unification, not monomorphization.
         let mut tps = Vec::new();
-        for (i, p) in f.params.iter().enumerate() {
-            if p.ty.is_none() {
-                let name = format!("__{i}");
-                if !tps.contains(&name) {
-                    tps.push(name);
-                }
-            }
+        for p in &f.params {
             if let Some(ty) = &p.ty {
                 Self::collect_type_params_from(ty, &mut tps);
             }
@@ -98,11 +95,27 @@ impl Typer {
     pub(crate) fn normalize_generic_fn(f: &ast::Fn) -> ast::Fn {
         let mut gf = f.clone();
         gf.type_params = Self::effective_type_params(f);
+        // Only explicit type params need normalization — unannotated params go
+        // through the unification path via declare_fn_sig, not monomorphization.
+        gf
+    }
+
+    /// Convert an inferable function (unannotated params) into a generic function
+    /// for monomorphization fallback. Assigns implicit `__i` type params to each
+    /// unannotated parameter.
+    pub(crate) fn normalize_inferable_fn(f: &ast::Fn) -> ast::Fn {
+        let mut gf = f.clone();
+        let mut tps = Vec::new();
         for (i, p) in gf.params.iter_mut().enumerate() {
             if p.ty.is_none() {
-                p.ty = Some(Type::Param(format!("__{i}")));
+                let name = format!("__{i}");
+                if !tps.contains(&name) {
+                    tps.push(name.clone());
+                }
+                p.ty = Some(Type::Param(name));
             }
         }
+        gf.type_params = tps;
         gf
     }
 

@@ -53,9 +53,9 @@ impl Typer {
                         span: b.span,
                     }))
                 } else {
-                    // Let-generalization: only generalize function types (lambdas/fn refs)
-                    // to avoid prematurely quantifying constrained type variables
-                    let scheme = if matches!(ty, Type::Fn(_, _)) {
+                    // Let-generalization with value restriction:
+                    // generalize if the RHS is a syntactic value (no side effects)
+                    let scheme = if Self::is_syntactic_value(&b.value) {
                         self.generalize(&ty)
                     } else {
                         Scheme::mono(ty.clone())

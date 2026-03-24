@@ -24,6 +24,8 @@ pub(crate) struct InferCtx {
     origins: Vec<Option<ConstraintOrigin>>,
     constraints: Vec<TypeConstraint>,
     pub(crate) debug: bool,
+    collect_default_warnings: bool,
+    default_warnings: Vec<String>,
 }
 
 impl InferCtx {
@@ -35,7 +37,17 @@ impl InferCtx {
             origins: Vec::new(),
             constraints: Vec::new(),
             debug: false,
+            collect_default_warnings: false,
+            default_warnings: Vec::new(),
         }
+    }
+
+    pub(crate) fn enable_default_warnings(&mut self) {
+        self.collect_default_warnings = true;
+    }
+
+    pub(crate) fn drain_default_warnings(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.default_warnings)
     }
 
     pub(crate) fn fresh_var(&mut self) -> Type {
@@ -149,9 +161,8 @@ impl InferCtx {
     }
 
     pub(crate) fn unify(&mut self, a: &Type, b: &Type) -> Result<(), String> {
-        // Convert any lingering Inferred to fresh TypeVars
-        let a = if matches!(a, Type::Inferred) { self.fresh_var() } else { a.clone() };
-        let b = if matches!(b, Type::Inferred) { self.fresh_var() } else { b.clone() };
+        let a = a.clone();
+        let b = b.clone();
         let a = self.shallow_resolve(&a);
         let b = self.shallow_resolve(&b);
 
@@ -319,11 +330,17 @@ impl InferCtx {
     }
 
     pub(crate) fn resolve(&mut self, ty: &Type) -> Type {
-        self.resolve_inner(ty, false)
+        if self.collect_default_warnings {
+            let mut warnings = Vec::new();
+            let resolved = self.resolve_inner_warn(ty, &mut warnings);
+            self.default_warnings.extend(warnings);
+            resolved
+        } else {
+            self.resolve_inner(ty, false)
+        }
     }
 
     /// Resolve with optional warning for unsolved TypeVars that default.
-    #[allow(dead_code)]
     pub(crate) fn resolve_with_warnings(&mut self, ty: &Type, warnings: &mut Vec<String>) -> Type {
         self.resolve_inner_warn(ty, warnings)
     }
@@ -355,12 +372,7 @@ impl InferCtx {
             Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner(inner, _tracking))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner(inner, _tracking))),
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner(inner, _tracking))),
-            Type::Inferred => {
-                // Legacy: treat as unconstrained — default like an unsolved TypeVar
-                match &self.constraints.get(0) {
-                    _ => Type::I64,
-                }
-            }
+
             _ => ty.clone(),
         }
     }
@@ -372,17 +384,27 @@ impl InferCtx {
                 if let Some(resolved) = self.types[root as usize].clone() {
                     self.resolve_inner_warn(&resolved, warnings)
                 } else {
-                    // Unsolved TypeVar — emit warning with origin info
-                    let default_ty = match &self.constraints[root as usize] {
+                    let constraint = &self.constraints[root as usize];
+                    let default_ty = match constraint {
                         TypeConstraint::Float => Type::F64,
                         _ => Type::I64,
                     };
                     if let Some(origin) = &self.origins[root as usize] {
-                        if matches!(self.constraints[root as usize], TypeConstraint::None) {
-                            warnings.push(format!(
-                                "line {}:{}: unsolved type variable defaulted to i64 ({})",
-                                origin.span.line, origin.span.col, origin.reason
-                            ));
+                        match constraint {
+                            TypeConstraint::None => {
+                                warnings.push(format!(
+                                    "line {}:{}: unsolved type variable defaulted to i64 ({})",
+                                    origin.span.line, origin.span.col, origin.reason
+                                ));
+                            }
+                            TypeConstraint::Numeric => {
+                                warnings.push(format!(
+                                    "line {}:{}: ambiguous numeric type defaulted to i64 ({})",
+                                    origin.span.line, origin.span.col, origin.reason
+                                ));
+                            }
+                            // Integer→I64 and Float→F64 are unambiguous — no warning
+                            _ => {}
                         }
                     }
                     default_ty
@@ -404,7 +426,7 @@ impl InferCtx {
             Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner_warn(inner, warnings))),
-            Type::Inferred => Type::I64,
+
             _ => ty.clone(),
         }
     }
@@ -462,7 +484,7 @@ impl InferCtx {
                     None
                 }
             }
-            Type::Inferred => None, // legacy: treat as unsolved
+
             _ => Some(ty.clone()),
         }
     }
@@ -669,5 +691,65 @@ mod tests {
         assert!(ctx.try_resolve(&v).is_none());
         ctx.unify(&v, &Type::Bool).unwrap();
         assert_eq!(ctx.try_resolve(&v), Some(Type::Bool));
+    }
+
+    #[test]
+    fn test_default_warnings_disabled_by_default() {
+        let mut ctx = InferCtx::new();
+        let v = ctx.fresh_var();
+        let _ = ctx.resolve(&v);
+        let warnings = ctx.drain_default_warnings();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_default_warnings_collected_when_enabled() {
+        let mut ctx = InferCtx::new();
+        ctx.enable_default_warnings();
+        let span = Span { start: 0, end: 0, line: 5, col: 3 };
+        let v = ctx.fresh_var();
+        let v2 = ctx.fresh_var();
+        // Set origin by unifying two vars at a span
+        let _ = ctx.unify_at(&v, &v2, span, "test param");
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::I64);
+        let warnings = ctx.drain_default_warnings();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unsolved type variable defaulted to i64"));
+        assert!(warnings[0].contains("test param"));
+    }
+
+    #[test]
+    fn test_default_warnings_not_emitted_for_solved_vars() {
+        let mut ctx = InferCtx::new();
+        ctx.enable_default_warnings();
+        let v = ctx.fresh_var();
+        ctx.unify(&v, &Type::String).unwrap();
+        let _ = ctx.resolve(&v);
+        let warnings = ctx.drain_default_warnings();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_default_warnings_not_emitted_for_constrained_numeric() {
+        let mut ctx = InferCtx::new();
+        ctx.enable_default_warnings();
+        let v = ctx.fresh_integer_var();
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::I64);
+        let warnings = ctx.drain_default_warnings();
+        // Integer-constrained vars default to I64 without warning (constraint is clear)
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_default_warnings_float_constraint_no_warning() {
+        let mut ctx = InferCtx::new();
+        ctx.enable_default_warnings();
+        let v = ctx.fresh_float_var();
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::F64);
+        let warnings = ctx.drain_default_warnings();
+        assert!(warnings.is_empty());
     }
 }

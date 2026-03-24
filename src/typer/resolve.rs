@@ -303,28 +303,21 @@ impl Typer {
 
     pub(crate) fn infer_param_types(&mut self, _prog: &ast::Program) {
         // Phase 3: Eliminate the dual inference system.
-        // The iterative body-driven and call-site heuristic loops are removed.
         // TypeVars in function signatures survive into the lowering pass where
         // proper unification via unify_at() at call sites will solve them.
         //
-        // Phase 1.3: Removed AST heuristic return type refinement pass.
-        // Return types are now solved through unification during lowering.
-        // We retain only TypeVar normalization (shallow resolve + Inferred→TypeVar conversion).
+        // We retain only TypeVar normalization (shallow resolve of solved chains).
 
-        // Normalize: shallow-resolve solved chains, convert Inferred→TypeVar
+        // Normalize: shallow-resolve solved TypeVar chains
         let keys: Vec<String> = self.fns.keys().cloned().collect();
         for k in keys {
             let entry = self.fns.get_mut(&k).unwrap();
             for ty in &mut entry.1 {
-                if matches!(ty, Type::Inferred) {
-                    *ty = self.infer_ctx.fresh_var();
-                } else if matches!(ty, Type::TypeVar(_)) {
+                if matches!(ty, Type::TypeVar(_)) {
                     *ty = self.infer_ctx.shallow_resolve(ty);
                 }
             }
-            if entry.2 == Type::Inferred {
-                entry.2 = self.infer_ctx.fresh_var();
-            } else if entry.2.has_type_var() {
+            if entry.2.has_type_var() {
                 entry.2 = self.infer_ctx.shallow_resolve(&entry.2);
             }
         }

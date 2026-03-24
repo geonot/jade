@@ -223,10 +223,20 @@ impl Typer {
                 })
             }
 
-            ast::Expr::Call(callee, args, span) => self.lower_call(callee, args, *span),
+            ast::Expr::Call(callee, args, span) => {
+                let result = self.lower_call(callee, args, *span)?;
+                if let Some(exp) = expected {
+                    let _ = self.infer_ctx.unify_at(exp, &result.ty, *span, "call result");
+                }
+                Ok(result)
+            }
 
             ast::Expr::Method(obj, method, args, span) => {
-                self.lower_method_call(obj, method, args, *span)
+                let result = self.lower_method_call(obj, method, args, *span)?;
+                if let Some(exp) = expected {
+                    let _ = self.infer_ctx.unify_at(exp, &result.ty, *span, "method call result");
+                }
+                Ok(result)
             }
 
             ast::Expr::Field(obj, field, span) => {
@@ -703,9 +713,13 @@ impl Typer {
 
             ast::Expr::ChannelCreate(elem_ty, cap, span) => {
                 let hcap = self.lower_expr(cap)?;
+                let resolved_elem_ty = match elem_ty {
+                    Some(ty) => ty.clone(),
+                    None => self.infer_ctx.fresh_var(),
+                };
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::ChannelCreate(elem_ty.clone(), Box::new(hcap)),
-                    ty: Type::Channel(Box::new(elem_ty.clone())),
+                    kind: hir::ExprKind::ChannelCreate(resolved_elem_ty.clone(), Box::new(hcap)),
+                    ty: Type::Channel(Box::new(resolved_elem_ty)),
                     span: *span,
                 })
             }
@@ -1288,6 +1302,51 @@ impl Typer {
                 });
             }
 
+            // Auto-monomorphization fallback for inferable functions:
+            // When a function with unannotated params has its TypeVars already solved
+            // to concrete types that conflict with the current call's arg types,
+            // fall back to monomorphization (e.g., row-polymorphic functions called
+            // with different struct types).
+            if let Some(inf_fn) = self.inferable_fns.get(name).cloned() {
+                if let Some((_, param_tys, _)) = self.fns.get(name).cloned() {
+                    let hargs: Vec<hir::Expr> = args
+                        .iter()
+                        .map(|e| self.lower_expr(e))
+                        .collect::<Result<_, _>>()?;
+                    let arg_tys: Vec<Type> = hargs.iter().map(|e| self.infer_ctx.resolve(&e.ty)).collect();
+                    let resolved_params: Vec<Type> = param_tys.iter().map(|t| self.infer_ctx.shallow_resolve(t)).collect();
+                    let needs_mono = resolved_params.iter().zip(arg_tys.iter()).any(|(pt, at)| {
+                        // If param is already solved to a concrete type that differs from the arg type
+                        !matches!(pt, Type::TypeVar(_)) && pt != at && self.infer_ctx.unify(pt, at).is_err()
+                    });
+                    if needs_mono {
+                        // Re-register as a generic function for monomorphization
+                        let normalized = Self::normalize_inferable_fn(&inf_fn);
+                        if !self.generic_fns.contains_key(name) {
+                            self.generic_fns.insert(name.to_string(), normalized.clone());
+                        }
+                        let mut type_map = HashMap::new();
+                        for (i, p) in normalized.params.iter().enumerate() {
+                            if let Some(Type::Param(tp)) = &p.ty {
+                                if i < arg_tys.len() {
+                                    type_map.insert(tp.clone(), arg_tys[i].clone());
+                                }
+                            }
+                        }
+                        for tp in &normalized.type_params {
+                            type_map.entry(tp.clone()).or_insert(Type::I64);
+                        }
+                        let mangled = self.monomorphize_fn(name, &type_map)?;
+                        let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap();
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::Call(id, mangled, hargs),
+                            ty: ret,
+                            span,
+                        });
+                    }
+                }
+            }
+
             if let Some((id, param_tys, ret)) = self.fns.get(name).cloned() {
                 let mut hargs: Vec<hir::Expr> = Vec::new();
                 for (i, arg) in args.iter().enumerate() {
@@ -1568,6 +1627,22 @@ impl Typer {
         let ret_ty = self.infer_ctx.fresh_var();
         if matches!(obj_ty, Type::TypeVar(_)) {
             let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
+
+            // Trait-guided inference: if a trait defines this method,
+            // use the return type from the trait signature as a constraint
+            for (_, sigs) in &self.traits {
+                for sig in sigs {
+                    if sig.name == method {
+                        if let Some(ref trait_ret) = sig._ret {
+                            let _ = self.infer_ctx.unify_at(
+                                &ret_ty, trait_ret, span,
+                                "trait method return type",
+                            );
+                        }
+                    }
+                }
+            }
+
             self.deferred_methods.push(super::DeferredMethod {
                 receiver_ty: obj_ty.clone(),
                 method: method.to_string(),

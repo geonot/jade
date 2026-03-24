@@ -97,8 +97,26 @@ impl Typer {
         Type::I64
     }
 
-    pub(crate) fn infer_field_ty(&mut self, _f: &ast::Field) -> Type {
-        self.infer_ctx.fresh_var()
+    pub(crate) fn infer_field_ty(&mut self, f: &ast::Field) -> Type {
+        let var = self.infer_ctx.fresh_var();
+        // If the field has a default value, use it to constrain the TypeVar
+        if let Some(ref default) = f.default {
+            if let Some(ty) = Self::literal_type(default) {
+                let _ = self.infer_ctx.unify(&var, &ty);
+            }
+        }
+        var
+    }
+
+    /// Extract a type from a simple literal expression without full lowering.
+    fn literal_type(expr: &crate::ast::Expr) -> Option<Type> {
+        match expr {
+            crate::ast::Expr::Int(_, _) => Some(Type::I64),
+            crate::ast::Expr::Float(_, _) => Some(Type::F64),
+            crate::ast::Expr::Str(_, _) => Some(Type::String),
+            crate::ast::Expr::Bool(_, _) => Some(Type::Bool),
+            _ => None,
+        }
     }
 
     pub(crate) fn builtin_ret_ty(name: &str) -> Option<Type> {

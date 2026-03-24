@@ -471,8 +471,12 @@ impl Parser {
             }
             Token::Channel => {
                 self.advance();
-                self.expect(Token::Of)?;
-                let elem_ty = self.parse_type()?;
+                let elem_ty = if self.check(Token::Of) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
                 let cap = if self.check(Token::LParen) {
                     self.advance();
                     let c = self.parse_expr()?;

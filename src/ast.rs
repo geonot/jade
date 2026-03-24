@@ -172,7 +172,7 @@ pub enum Expr {
     Receive(Vec<ReceiveArm>, Span),
     Yield(Box<Expr>, Span),
     DispatchBlock(String, Block, Span),
-    ChannelCreate(Type, Box<Expr>, Span),
+    ChannelCreate(Option<Type>, Box<Expr>, Span),
     ChannelSend(Box<Expr>, Box<Expr>, Span),
     ChannelRecv(Box<Expr>, Span),
     Select(Vec<SelectArm>, Option<Block>, Span),

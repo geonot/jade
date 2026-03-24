@@ -48,6 +48,8 @@ struct Cli {
     #[arg(long)]
     debug_types: bool,
     #[arg(long)]
+    warn_inferred_defaults: bool,
+    #[arg(long)]
     test: bool,
 }
 
@@ -283,6 +285,9 @@ fn main() {
     }
     if cli.debug_types {
         typer.set_debug_types(true);
+    }
+    if cli.warn_inferred_defaults {
+        typer.set_warn_inferred_defaults(true);
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,
