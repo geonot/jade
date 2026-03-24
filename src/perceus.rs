@@ -884,7 +884,7 @@ impl PerceusPass {
             Type::Struct(_) => 0,
             Type::Enum(_) => 0,
             Type::Fn(_, _) => 16,
-            Type::Param(_) | Type::Inferred => 0,
+            Type::Param(_) | Type::Inferred | Type::TypeVar(_) => 0,
             Type::ActorRef(_) => 8,
             Type::Coroutine(_) => 8,
             Type::DynTrait(_) => 16,

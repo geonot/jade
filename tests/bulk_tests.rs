@@ -4392,3 +4392,97 @@ fn b_comptime_comparison_fold() {
 fn b_comptime_division() {
     expect("*main()\n    log(100 / 7)\n    log(100 % 7)\n", "14\n2");
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Type inference — assignment constraint propagation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_infer_assign_propagates() {
+    // Assignment should unify target and value types
+    expect(
+        "*main()\n    x is 42\n    x is 100\n    log(x)\n",
+        "100",
+    );
+}
+
+#[test]
+fn b_infer_ternary_branches() {
+    // Ternary branches should produce the same type
+    expect(
+        "*main()\n    x is true ? 1 ! 2\n    log(x)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_infer_array_element_unification() {
+    // All array elements should have the same type (unification)
+    expect(
+        "*main()\n    arr is [10, 20, 30]\n    log(arr[0] + arr[1] + arr[2])\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_infer_return_type() {
+    // Return type should be inferred from the return expression
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_infer_lambda_from_context() {
+    // Lambda param types inferred from function signature
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    result is apply(*fn(x: i64) -> i64 x * 2, 21)\n    log(result)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_infer_bind_simple() {
+    // Bind infers type from value expression
+    expect(
+        "*main()\n    x is 42\n    y is x + 8\n    log(y)\n",
+        "50",
+    );
+}
+
+#[test]
+fn b_infer_vec_element_type() {
+    // Vec element type unified across all elements
+    expect(
+        "*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_infer_nested_lambda() {
+    // Nested lambda should infer types correctly
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(*fn(x: i64) -> i64 x + 10, 32))\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_infer_struct_field_from_literal() {
+    // Struct field type inferred from literal
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_infer_if_expr_type() {
+    // If expression: ternary infers unified type
+    expect(
+        "*main()\n    val is true ? 42 ! 0\n    log(val)\n",
+        "42",
+    );
+}

@@ -20,7 +20,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Bool => self.ctx.bool_type().into(),
             Type::Void => self.ctx.i8_type().into(),
             Type::String => self.string_type().into(),
-            Type::Inferred => self.ctx.i64_type().into(),
+            Type::Inferred | Type::TypeVar(_) => self.ctx.i64_type().into(),
             Type::Struct(name) | Type::Enum(name) => self
                 .module
                 .get_struct_type(name)

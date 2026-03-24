@@ -72,12 +72,22 @@ impl Typer {
         let ptys: Vec<Type> = f
             .params
             .iter()
-            .map(|p| p.ty.clone().unwrap_or(Type::Inferred))
+            .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
             .collect();
         let ret = if f.name == "main" {
             Type::I32
+        } else if let Some(ref explicit) = f.ret {
+            explicit.clone()
         } else {
-            f.ret.clone().unwrap_or_else(|| self.infer_ret_ast(f))
+            // Try AST-level inference first; if it gives us something useful, use it.
+            // Otherwise, create a TypeVar that will be resolved during lowering.
+            let inferred = self.infer_ret_ast(f);
+            if inferred != Type::I64 && inferred != Type::Void {
+                inferred
+            } else {
+                // Use AST inference result but also track as potentially improvable via TypeVar
+                inferred
+            }
         };
         let id = self.fresh_id();
         self.fns.insert(f.name.clone(), (id, ptys, ret));
@@ -88,7 +98,7 @@ impl Typer {
         let self_ty = Type::Struct(type_name.to_string());
         let mut ptys = vec![self_ty];
         for p in &m.params {
-            ptys.push(p.ty.clone().unwrap_or(Type::Inferred));
+            ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
         let id = self.fresh_id();
@@ -103,7 +113,7 @@ impl Typer {
         let mut ptys = vec![self_ty];
         for p in &m.params {
             if p.name == "self" { continue; }
-            ptys.push(p.ty.clone().unwrap_or(Type::I64));
+            ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
         let id = self.fresh_id();
@@ -172,7 +182,7 @@ impl Typer {
                 let ptys: Vec<Type> = h
                     .params
                     .iter()
-                    .map(|p| p.ty.clone().unwrap_or(Type::Inferred))
+                    .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
                     .collect();
                 (h.name.clone(), ptys, tag as u32)
             })
@@ -340,12 +350,22 @@ impl Typer {
 
                 for (pi, pname) in pnames.iter().enumerate() {
                     let slot = offset + pi;
-                    if slot >= sig.1.len() || sig.1[slot] != Type::Inferred {
+                    if slot >= sig.1.len() {
+                        continue;
+                    }
+                    let slot_ty = &sig.1[slot];
+                    let is_unsolved = matches!(slot_ty, Type::Inferred)
+                        || matches!(slot_ty, Type::TypeVar(_))
+                        && self.infer_ctx.try_resolve(slot_ty).is_none();
+                    if !is_unsolved {
                         continue;
                     }
                     if let Some(ty) = self.infer_param_from_body(pname, body) {
                         if let Some(entry) = self.fns.get_mut(fn_name.as_str()) {
-                            entry.1[slot] = ty;
+                            // Unify the TypeVar with the inferred type, then resolve
+                            // to propagate through the union-find instead of orphaning
+                            let _ = self.infer_ctx.unify(&entry.1[slot], &ty);
+                            entry.1[slot] = self.infer_ctx.resolve(&entry.1[slot]);
                             changed = true;
                         }
                     }
@@ -398,14 +418,19 @@ impl Typer {
             }
         }
 
-        // Default any remaining Inferred slots to i64
+        // Resolve all TypeVar and Inferred slots to concrete types.
+        // Unsolved TypeVars default to i64 (via InferCtx::resolve).
         let keys: Vec<String> = self.fns.keys().cloned().collect();
         for k in keys {
             let entry = self.fns.get_mut(&k).unwrap();
             for ty in &mut entry.1 {
-                if *ty == Type::Inferred {
-                    *ty = Type::I64;
+                if matches!(ty, Type::Inferred | Type::TypeVar(_)) {
+                    *ty = self.infer_ctx.resolve(ty);
                 }
+            }
+            // Also resolve return types that may contain TypeVars
+            if entry.2.has_type_var() || entry.2 == Type::Inferred {
+                entry.2 = self.infer_ctx.resolve(&entry.2);
             }
         }
     }
@@ -484,7 +509,7 @@ impl Typer {
                         for (i, arg) in args.iter().enumerate() {
                             if Self::expr_is_ident(arg, name) {
                                 if let Some(pty) = ptys.get(i) {
-                                    if *pty != Type::Inferred {
+                                    if !matches!(pty, Type::Inferred | Type::TypeVar(_)) {
                                         return Some(pty.clone());
                                     }
                                 }
@@ -529,7 +554,7 @@ impl Typer {
                                 for (i, arg) in args.iter().enumerate() {
                                     if Self::expr_is_ident(arg, name) {
                                         if let Some(pty) = ptys.get(i + 1) {
-                                            if *pty != Type::Inferred {
+                                            if !matches!(pty, Type::Inferred | Type::TypeVar(_)) {
                                                 return Some(pty.clone());
                                             }
                                         }
@@ -551,13 +576,13 @@ impl Typer {
                 if is_arith {
                     if Self::expr_is_ident(l, name) {
                         let rty = self.expr_ty_ast(r);
-                        if rty != Type::I64 && rty != Type::Inferred {
+                        if rty != Type::I64 && !matches!(rty, Type::Inferred | Type::TypeVar(_)) {
                             return Some(rty);
                         }
                     }
                     if Self::expr_is_ident(r, name) {
                         let lty = self.expr_ty_ast(l);
-                        if lty != Type::I64 && lty != Type::Inferred {
+                        if lty != Type::I64 && !matches!(lty, Type::Inferred | Type::TypeVar(_)) {
                             return Some(lty);
                         }
                     }
@@ -664,14 +689,19 @@ impl Typer {
                     if let Some((_, ptys, _)) = self.fns.get(&fn_name) {
                         let ptys = ptys.clone();
                         for (i, arg) in args.iter().enumerate() {
-                            if i < ptys.len() && ptys[i] == Type::Inferred {
-                                let arg_ty = self.expr_ty_ast(arg);
-                                if arg_ty != Type::I64 || !matches!(arg, ast::Expr::Ident(..)) {
-                                    // Only refine if we have real type info, not just default i64
-                                    if arg_ty != Type::Inferred {
-                                        if let Some(entry) = self.fns.get_mut(&fn_name) {
-                                            entry.1[i] = arg_ty;
-                                            c = true;
+                            if i < ptys.len() {
+                                let is_unsolved = matches!(&ptys[i], Type::Inferred)
+                                    || matches!(&ptys[i], Type::TypeVar(_))
+                                    && self.infer_ctx.try_resolve(&ptys[i]).is_none();
+                                if is_unsolved {
+                                    let arg_ty = self.expr_ty_ast(arg);
+                                    if arg_ty != Type::I64 || !matches!(arg, ast::Expr::Ident(..)) {
+                                        if !matches!(arg_ty, Type::Inferred | Type::TypeVar(_)) {
+                                            if let Some(entry) = self.fns.get_mut(&fn_name) {
+                                                let _ = self.infer_ctx.unify(&entry.1[i], &arg_ty);
+                                                entry.1[i] = self.infer_ctx.resolve(&entry.1[i]);
+                                                c = true;
+                                            }
                                         }
                                     }
                                 }

@@ -28,6 +28,7 @@ pub(crate) struct VarInfo {
 
 mod mono;
 mod resolve;
+pub(crate) mod unify;
 
 pub struct Typer {
     pub(crate) next_id: u32,
@@ -55,6 +56,7 @@ pub struct Typer {
     pub(crate) trait_assoc_types: HashMap<String, Vec<String>>,
     pub(crate) consts: HashMap<String, ast::Expr>,
     infer_depth: Cell<u8>,
+    pub(crate) infer_ctx: unify::InferCtx,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +95,7 @@ impl Typer {
             trait_assoc_types: HashMap::new(),
             consts: HashMap::new(),
             infer_depth: Cell::new(0),
+            infer_ctx: unify::InferCtx::new(),
         }
     }
 
@@ -515,6 +518,57 @@ impl Typer {
         ret
     }
 
+    /// Refine a function's return type from its lowered HIR body.
+    /// Examines return statements and tail expressions to find the actual return type.
+    fn refine_ret_from_body(&self, declared: &Type, body: &[hir::Stmt]) -> Type {
+        // If declared is already concrete and specific, keep it
+        if *declared != Type::Void && *declared != Type::I64 {
+            return declared.clone();
+        }
+        // Check for explicit return statements
+        let mut best = declared.clone();
+        self.collect_hir_ret_types(body, &mut best);
+        // Check tail expression
+        if let Some(hir::Stmt::Expr(e)) = body.last() {
+            if e.ty != Type::Void && e.ty != Type::I64 {
+                if best == Type::Void || best == Type::I64 {
+                    best = e.ty.clone();
+                }
+            }
+        }
+        best
+    }
+
+    fn collect_hir_ret_types(&self, body: &[hir::Stmt], best: &mut Type) {
+        for stmt in body {
+            match stmt {
+                hir::Stmt::Ret(Some(e), _, _) => {
+                    if *best == Type::Void || (*best == Type::I64 && e.ty != Type::I64) {
+                        *best = e.ty.clone();
+                    }
+                }
+                hir::Stmt::If(i) => {
+                    self.collect_hir_ret_types(&i.then, best);
+                    for (_, blk) in &i.elifs {
+                        self.collect_hir_ret_types(blk, best);
+                    }
+                    if let Some(els) = &i.els {
+                        self.collect_hir_ret_types(els, best);
+                    }
+                }
+                hir::Stmt::While(w) => self.collect_hir_ret_types(&w.body, best),
+                hir::Stmt::For(f) => self.collect_hir_ret_types(&f.body, best),
+                hir::Stmt::Loop(l) => self.collect_hir_ret_types(&l.body, best),
+                hir::Stmt::Match(m) => {
+                    for arm in &m.arms {
+                        self.collect_hir_ret_types(&arm.body, best);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn infer_coroutine_yield_type(&self, body: &[hir::Stmt]) -> Type {
         // Walk the HIR body to find yield statements and infer the type
         for stmt in body {
@@ -567,11 +621,11 @@ impl Typer {
         Type::I64
     }
 
-    fn infer_field_ty(&self, f: &ast::Field) -> Type {
+    fn infer_field_ty(&mut self, f: &ast::Field) -> Type {
         f.default
             .as_ref()
             .map(|e| self.expr_ty_ast(e))
-            .unwrap_or(Type::I64)
+            .unwrap_or_else(|| self.infer_ctx.fresh_var())
     }
 
     /// Return type for builtin functions (not registered in self.fns).
@@ -882,7 +936,7 @@ impl Typer {
         hir_fns.extend(self.mono_fns.drain(..));
         hir_enums.extend(self.mono_enums.drain(..));
 
-        Ok(hir::Program {
+        let mut program = hir::Program {
             fns: hir_fns,
             types: hir_types,
             enums: hir_enums,
@@ -891,11 +945,366 @@ impl Typer {
             actors: hir_actors,
             stores: hir_stores,
             trait_impls: hir_trait_impls,
-        })
+        };
+        self.resolve_all_types(&mut program);
+        Ok(program)
+    }
+
+    /// Post-lowering pass: walk the entire HIR and resolve any remaining TypeVars
+    /// to their unified concrete types (or I64 default for unsolved vars).
+    fn resolve_all_types(&mut self, prog: &mut hir::Program) {
+        for f in &mut prog.fns {
+            self.resolve_fn(f);
+        }
+        for td in &mut prog.types {
+            for field in &mut td.fields {
+                field.ty = self.infer_ctx.resolve(&field.ty);
+                if let Some(def) = &mut field.default {
+                    self.resolve_expr(def);
+                }
+            }
+            for m in &mut td.methods {
+                self.resolve_fn(m);
+            }
+        }
+        for ed in &mut prog.enums {
+            for v in &mut ed.variants {
+                for vf in &mut v.fields {
+                    vf.ty = self.infer_ctx.resolve(&vf.ty);
+                }
+            }
+        }
+        for ef in &mut prog.externs {
+            ef.ret = self.infer_ctx.resolve(&ef.ret);
+            for (_, ty) in &mut ef.params {
+                *ty = self.infer_ctx.resolve(ty);
+            }
+        }
+        for errdef in &mut prog.err_defs {
+            for v in &mut errdef.variants {
+                for ft in &mut v.fields {
+                    *ft = self.infer_ctx.resolve(ft);
+                }
+            }
+        }
+        for ad in &mut prog.actors {
+            for field in &mut ad.fields {
+                field.ty = self.infer_ctx.resolve(&field.ty);
+                if let Some(def) = &mut field.default {
+                    self.resolve_expr(def);
+                }
+            }
+            for h in &mut ad.handlers {
+                for p in &mut h.params {
+                    p.ty = self.infer_ctx.resolve(&p.ty);
+                }
+                self.resolve_block(&mut h.body);
+            }
+        }
+        for sd in &mut prog.stores {
+            for field in &mut sd.fields {
+                field.ty = self.infer_ctx.resolve(&field.ty);
+            }
+        }
+        for ti in &mut prog.trait_impls {
+            for m in &mut ti.methods {
+                self.resolve_fn(m);
+            }
+        }
+    }
+
+    fn resolve_fn(&mut self, f: &mut hir::Fn) {
+        f.ret = self.infer_ctx.resolve(&f.ret);
+        for p in &mut f.params {
+            p.ty = self.infer_ctx.resolve(&p.ty);
+        }
+        self.resolve_block(&mut f.body);
+    }
+
+    fn resolve_block(&mut self, block: &mut hir::Block) {
+        for stmt in block {
+            self.resolve_stmt(stmt);
+        }
+    }
+
+    fn resolve_stmt(&mut self, stmt: &mut hir::Stmt) {
+        match stmt {
+            hir::Stmt::Bind(b) => {
+                b.ty = self.infer_ctx.resolve(&b.ty);
+                self.resolve_expr(&mut b.value);
+            }
+            hir::Stmt::TupleBind(bindings, expr, _) => {
+                for (_, _, ty) in bindings {
+                    *ty = self.infer_ctx.resolve(ty);
+                }
+                self.resolve_expr(expr);
+            }
+            hir::Stmt::Assign(lhs, rhs, _) => {
+                self.resolve_expr(lhs);
+                self.resolve_expr(rhs);
+            }
+            hir::Stmt::Expr(e) => self.resolve_expr(e),
+            hir::Stmt::If(if_stmt) => {
+                self.resolve_expr(&mut if_stmt.cond);
+                self.resolve_block(&mut if_stmt.then);
+                for (cond, block) in &mut if_stmt.elifs {
+                    self.resolve_expr(cond);
+                    self.resolve_block(block);
+                }
+                if let Some(els) = &mut if_stmt.els {
+                    self.resolve_block(els);
+                }
+            }
+            hir::Stmt::While(w) => {
+                self.resolve_expr(&mut w.cond);
+                self.resolve_block(&mut w.body);
+            }
+            hir::Stmt::For(f) => {
+                f.bind_ty = self.infer_ctx.resolve(&f.bind_ty);
+                self.resolve_expr(&mut f.iter);
+                if let Some(end) = &mut f.end {
+                    self.resolve_expr(end);
+                }
+                if let Some(step) = &mut f.step {
+                    self.resolve_expr(step);
+                }
+                self.resolve_block(&mut f.body);
+            }
+            hir::Stmt::Loop(l) => {
+                self.resolve_block(&mut l.body);
+            }
+            hir::Stmt::Ret(expr, ty, _) => {
+                *ty = self.infer_ctx.resolve(ty);
+                if let Some(e) = expr {
+                    self.resolve_expr(e);
+                }
+            }
+            hir::Stmt::Break(expr, _) => {
+                if let Some(e) = expr {
+                    self.resolve_expr(e);
+                }
+            }
+            hir::Stmt::Continue(_) => {}
+            hir::Stmt::Match(m) => {
+                self.resolve_expr(&mut m.subject);
+                m.ty = self.infer_ctx.resolve(&m.ty);
+                for arm in &mut m.arms {
+                    self.resolve_pat(&mut arm.pat);
+                    if let Some(g) = &mut arm.guard {
+                        self.resolve_expr(g);
+                    }
+                    self.resolve_block(&mut arm.body);
+                }
+            }
+            hir::Stmt::Asm(_) => {}
+            hir::Stmt::Drop(_, _, ty, _) => {
+                *ty = self.infer_ctx.resolve(ty);
+            }
+            hir::Stmt::ErrReturn(e, ty, _) => {
+                *ty = self.infer_ctx.resolve(ty);
+                self.resolve_expr(e);
+            }
+            hir::Stmt::StoreInsert(_, exprs, _) => {
+                for e in exprs {
+                    self.resolve_expr(e);
+                }
+            }
+            hir::Stmt::StoreDelete(_, filter, _) => {
+                self.resolve_filter(filter);
+            }
+            hir::Stmt::StoreSet(_, updates, filter, _) => {
+                for (_, e) in updates {
+                    self.resolve_expr(e);
+                }
+                self.resolve_filter(filter);
+            }
+            hir::Stmt::Transaction(block, _) => {
+                self.resolve_block(block);
+            }
+            hir::Stmt::ChannelClose(e, _) => self.resolve_expr(e),
+            hir::Stmt::Stop(e, _) => self.resolve_expr(e),
+        }
+    }
+
+    fn resolve_expr(&mut self, expr: &mut hir::Expr) {
+        expr.ty = self.infer_ctx.resolve(&expr.ty);
+        match &mut expr.kind {
+            hir::ExprKind::Int(_) | hir::ExprKind::Float(_) | hir::ExprKind::Str(_)
+            | hir::ExprKind::Bool(_) | hir::ExprKind::None | hir::ExprKind::Void
+            | hir::ExprKind::MapNew | hir::ExprKind::StoreCount(_)
+            | hir::ExprKind::StoreAll(_) => {}
+            hir::ExprKind::Var(_, _) | hir::ExprKind::FnRef(_, _)
+            | hir::ExprKind::VariantRef(_, _, _) => {}
+            hir::ExprKind::BinOp(l, _, r) => {
+                self.resolve_expr(l);
+                self.resolve_expr(r);
+            }
+            hir::ExprKind::UnaryOp(_, e) => self.resolve_expr(e),
+            hir::ExprKind::Call(_, _, args) => {
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::IndirectCall(callee, args) => {
+                self.resolve_expr(callee);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Builtin(_, args) => {
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Method(recv, _, _, args) => {
+                self.resolve_expr(recv);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::StringMethod(recv, _, args)
+            | hir::ExprKind::VecMethod(recv, _, args)
+            | hir::ExprKind::MapMethod(recv, _, args) => {
+                self.resolve_expr(recv);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::VecNew(args) => {
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Field(e, _, _) => self.resolve_expr(e),
+            hir::ExprKind::Index(arr, idx) => {
+                self.resolve_expr(arr);
+                self.resolve_expr(idx);
+            }
+            hir::ExprKind::Ternary(c, t, f) => {
+                self.resolve_expr(c);
+                self.resolve_expr(t);
+                self.resolve_expr(f);
+            }
+            hir::ExprKind::Coerce(e, _) => self.resolve_expr(e),
+            hir::ExprKind::Cast(e, ty) => {
+                self.resolve_expr(e);
+                *ty = self.infer_ctx.resolve(ty);
+            }
+            hir::ExprKind::Array(elems) | hir::ExprKind::Tuple(elems) => {
+                for e in elems { self.resolve_expr(e); }
+            }
+            hir::ExprKind::Struct(_, fields) | hir::ExprKind::VariantCtor(_, _, _, fields) => {
+                for fi in fields {
+                    self.resolve_expr(&mut fi.value);
+                }
+            }
+            hir::ExprKind::IfExpr(if_stmt) => {
+                self.resolve_expr(&mut if_stmt.cond);
+                self.resolve_block(&mut if_stmt.then);
+                for (cond, block) in &mut if_stmt.elifs {
+                    self.resolve_expr(cond);
+                    self.resolve_block(block);
+                }
+                if let Some(els) = &mut if_stmt.els {
+                    self.resolve_block(els);
+                }
+            }
+            hir::ExprKind::Pipe(e, _, _, args) => {
+                self.resolve_expr(e);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Block(block) => self.resolve_block(block),
+            hir::ExprKind::Lambda(params, body) => {
+                for p in params {
+                    p.ty = self.infer_ctx.resolve(&p.ty);
+                }
+                self.resolve_block(body);
+            }
+            hir::ExprKind::Ref(e) | hir::ExprKind::Deref(e) => self.resolve_expr(e),
+            hir::ExprKind::ListComp(body, _, _, iter, cond, map) => {
+                self.resolve_expr(body);
+                self.resolve_expr(iter);
+                if let Some(c) = cond { self.resolve_expr(c); }
+                if let Some(m) = map { self.resolve_expr(m); }
+            }
+            hir::ExprKind::Syscall(args) => {
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Spawn(_) => {}
+            hir::ExprKind::Send(recv, _, _, _, args) => {
+                self.resolve_expr(recv);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::CoroutineCreate(_, stmts) => {
+                self.resolve_block(stmts);
+            }
+            hir::ExprKind::CoroutineNext(e) | hir::ExprKind::Yield(e) => {
+                self.resolve_expr(e);
+            }
+            hir::ExprKind::DynDispatch(obj, _, _, args) => {
+                self.resolve_expr(obj);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::DynCoerce(e, _, _) => self.resolve_expr(e),
+            hir::ExprKind::StoreQuery(_, filter) => self.resolve_filter(filter),
+            hir::ExprKind::IterNext(_, _, _) => {}
+            hir::ExprKind::ChannelCreate(ty, cap) => {
+                *ty = self.infer_ctx.resolve(ty);
+                self.resolve_expr(cap);
+            }
+            hir::ExprKind::ChannelSend(ch, val) => {
+                self.resolve_expr(ch);
+                self.resolve_expr(val);
+            }
+            hir::ExprKind::ChannelRecv(ch) => self.resolve_expr(ch),
+            hir::ExprKind::Select(arms, default) => {
+                for arm in arms {
+                    arm.elem_ty = self.infer_ctx.resolve(&arm.elem_ty);
+                    self.resolve_expr(&mut arm.chan);
+                    if let Some(v) = &mut arm.value {
+                        self.resolve_expr(v);
+                    }
+                    self.resolve_block(&mut arm.body);
+                }
+                if let Some(block) = default {
+                    self.resolve_block(block);
+                }
+            }
+        }
+    }
+
+    fn resolve_pat(&mut self, pat: &mut hir::Pat) {
+        match pat {
+            hir::Pat::Wild(_) => {}
+            hir::Pat::Bind(_, _, ty, _) => {
+                *ty = self.infer_ctx.resolve(ty);
+            }
+            hir::Pat::Lit(e) => self.resolve_expr(e),
+            hir::Pat::Ctor(_, _, pats, _) | hir::Pat::Tuple(pats, _)
+            | hir::Pat::Array(pats, _) | hir::Pat::Or(pats, _) => {
+                for p in pats {
+                    self.resolve_pat(p);
+                }
+            }
+            hir::Pat::Range(lo, hi, _) => {
+                self.resolve_expr(lo);
+                self.resolve_expr(hi);
+            }
+        }
+    }
+
+    fn resolve_filter(&mut self, filter: &mut hir::StoreFilter) {
+        self.resolve_expr(&mut filter.value);
+        for (_, cond) in &mut filter.extra {
+            self.resolve_expr(&mut cond.value);
+        }
+    }
+
+    /// Build a type-mismatch error string with constraint provenance when available.
+    #[allow(dead_code)]
+    pub(crate) fn type_mismatch_msg(&mut self, expected: &Type, found: &Type, context: &str) -> String {
+        let expected_resolved = self.infer_ctx.resolve(expected);
+        let found_resolved = self.infer_ctx.resolve(found);
+        let mut msg = format!("{context}: expected `{expected_resolved}`, found `{found_resolved}`");
+        if let Some(origin) = self.infer_ctx.origin_of(expected) {
+            msg.push_str(&format!(" (expected type constrained at line {} by {})", origin.span.line, origin.reason));
+        }
+        if let Some(origin) = self.infer_ctx.origin_of(found) {
+            msg.push_str(&format!(" (found type constrained at line {} by {})", origin.span.line, origin.reason));
+        }
+        msg
     }
 
     fn lower_actor_def(&mut self, ad: &ast::ActorDef) -> Result<hir::ActorDef, String> {
-        let (id, _, ref handler_info) = self
+        let (id, ref declared_fields, ref handler_info) = self
             .actors
             .get(&ad.name)
             .ok_or_else(|| format!("undeclared actor: {}", ad.name))?
@@ -905,7 +1314,11 @@ impl Typer {
             .fields
             .iter()
             .map(|f| {
-                let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
+                let ty = declared_fields
+                    .iter()
+                    .find(|(n, _)| n == &f.name)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or_else(|| f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)));
                 let default = f.default.as_ref().map(|e| {
                     self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
                         kind: hir::ExprKind::Int(0),
@@ -938,9 +1351,12 @@ impl Typer {
                 );
             }
             let mut params = Vec::new();
-            for p in &h.params {
+            let declared_ptys = &handler_info[i].1;
+            for (pi, p) in h.params.iter().enumerate() {
                 let pid = self.fresh_id();
-                let ty = p.ty.clone().unwrap_or(Type::I64);
+                let ty = p.ty.clone().unwrap_or_else(|| {
+                    declared_ptys.get(pi).map(|t| self.infer_ctx.resolve(t)).unwrap_or(Type::I64)
+                });
                 let ownership = Self::ownership_for_type(&ty);
                 self.define_var(
                     &p.name,
@@ -1050,6 +1466,13 @@ impl Typer {
         let body = self.lower_block(&f.body, &ret)?;
         self.pop_scope();
 
+        // If return type was not explicitly annotated, refine from actual body
+        let ret = if f.ret.is_none() && f.name != "main" {
+            self.refine_ret_from_body(&ret, &body)
+        } else {
+            ret
+        };
+
         Ok(hir::Fn {
             def_id: id,
             name: f.name.clone(),
@@ -1126,17 +1549,27 @@ impl Typer {
 
     fn lower_type_def(&mut self, td: &ast::TypeDef) -> Result<hir::TypeDef, String> {
         let id = self.fresh_id();
+        let declared_fields = self.structs.get(&td.name).cloned().unwrap_or_default();
         let fields: Vec<hir::Field> = td
             .fields
             .iter()
             .map(|f| {
-                let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
+                // Use the declared type (which may be a TypeVar) so unification from
+                // struct literals can propagate through the resolution pass.
+                let ty = declared_fields
+                    .iter()
+                    .find(|(n, _)| n == &f.name)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or_else(|| f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)));
                 let default = f.default.as_ref().map(|e| {
-                    self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
+                    let lowered = self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
                         kind: hir::ExprKind::Int(0),
                         ty: Type::I64,
                         span: e.span(),
-                    })
+                    });
+                    // Unify field TypeVar with default value type
+                    let _ = self.infer_ctx.unify_at(&ty, &lowered.ty, f.span, "field default value");
+                    lowered
                 });
                 hir::Field {
                     name: f.name.clone(),
@@ -1682,9 +2115,18 @@ impl Typer {
     fn lower_stmt(&mut self, stmt: &ast::Stmt, ret_ty: &Type) -> Result<hir::Stmt, String> {
         match stmt {
             ast::Stmt::Bind(b) => {
-                let value = self.lower_expr(&b.value)?;
+                let value = if let Some(ref ann) = b.ty {
+                    // Propagate annotation type as expected type into value expression
+                    let ann_ty = self.resolve_ty(ann.clone());
+                    self.lower_expr_expected(&b.value, Some(&ann_ty))?
+                } else {
+                    self.lower_expr(&b.value)?
+                };
                 let ty = if let Some(ref ann) = b.ty {
-                    self.resolve_ty(ann.clone())
+                    let ann_ty = self.resolve_ty(ann.clone());
+                    // Unify annotation with value type for bidirectional inference
+                    let _ = self.infer_ctx.unify_at(&ann_ty, &value.ty, b.span, "bind annotation");
+                    ann_ty
                 } else {
                     value.ty.clone()
                 };
@@ -1759,6 +2201,9 @@ impl Typer {
             ast::Stmt::Assign(target, value, span) => {
                 let ht = self.lower_expr(target)?;
                 let hv = self.lower_expr(value)?;
+                // Unify target and value types for inference propagation
+                let _ = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
+                let hv = self.maybe_coerce_to(hv, &ht.ty);
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
 
@@ -1837,7 +2282,11 @@ impl Typer {
             }
 
             ast::Stmt::Ret(val, span) => {
-                let hval = val.as_ref().map(|e| self.lower_expr(e)).transpose()?;
+                let hval = val.as_ref().map(|e| self.lower_expr_expected(e, Some(ret_ty))).transpose()?;
+                // Unify return value type with declared return type
+                if let Some(ref v) = hval {
+                    let _ = self.infer_ctx.unify_at(&v.ty, ret_ty, *span, "return value");
+                }
                 let hval = hval.map(|v| self.maybe_coerce_to(v, ret_ty));
                 Ok(hir::Stmt::Ret(hval, ret_ty.clone(), *span))
             }
@@ -2129,6 +2578,47 @@ impl Typer {
     }
 
     fn lower_expr(&mut self, expr: &ast::Expr) -> Result<hir::Expr, String> {
+        self.lower_expr_expected(expr, None)
+    }
+
+    /// Lower an expression with an optional expected type for bidirectional checking.
+    /// Propagates expected types into lambda expressions, array literals, and conditionals.
+    fn lower_expr_expected(
+        &mut self,
+        expr: &ast::Expr,
+        expected: Option<&Type>,
+    ) -> Result<hir::Expr, String> {
+        // If expression is a lambda expression and we have an expected function type,
+        // use bidirectional checking to infer lambda param types.
+        if let ast::Expr::Lambda(params, ret, body, span) = expr {
+            return self.lower_lambda_with_expected(params, ret, body, *span, expected);
+        }
+
+        // Propagate expected element type into array literals
+        if let ast::Expr::Array(elems, span) = expr {
+            let expected_elem = match expected {
+                Some(Type::Array(et, _)) => Some(et.as_ref()),
+                _ => None,
+            };
+            let helems: Vec<hir::Expr> = elems
+                .iter()
+                .map(|e| self.lower_expr_expected(e, expected_elem))
+                .collect::<Result<_, _>>()?;
+            let et = helems.first().map(|e| e.ty.clone())
+                .or_else(|| expected_elem.cloned())
+                .unwrap_or_else(|| self.infer_ctx.fresh_var());
+            // Unify all element types
+            for elem in helems.iter().skip(1) {
+                let _ = self.infer_ctx.unify_at(&et, &elem.ty, *span, "array element");
+            }
+            let len = helems.len();
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Array(helems),
+                ty: Type::Array(Box::new(et), len),
+                span: *span,
+            });
+        }
+
         match expr {
             ast::Expr::Int(n, span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Int(*n),
@@ -2310,7 +2800,7 @@ impl Typer {
                     Type::Vec(et) => *et.clone(),
                     Type::Map(_, vt) => *vt.clone(),
                     Type::Tuple(tys) => tys.first().cloned().unwrap_or(Type::I64),
-                    _ => Type::I64,
+                    _ => self.infer_ctx.fresh_var(),
                 };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Index(Box::new(harr), Box::new(hidx)),
@@ -2323,7 +2813,10 @@ impl Typer {
                 let hc = self.lower_expr(cond)?;
                 let ht = self.lower_expr(then)?;
                 let he = self.lower_expr(els)?;
+                // Unify then/else branch types
+                let _ = self.infer_ctx.unify_at(&ht.ty, &he.ty, *span, "ternary branches");
                 let ty = ht.ty.clone();
+                let he = self.maybe_coerce_to(he, &ty);
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Ternary(Box::new(hc), Box::new(ht), Box::new(he)),
                     ty,
@@ -2346,7 +2839,11 @@ impl Typer {
                     .iter()
                     .map(|e| self.lower_expr(e))
                     .collect::<Result<_, _>>()?;
-                let et = helems.first().map(|e| e.ty.clone()).unwrap_or(Type::I64);
+                let et = helems.first().map(|e| e.ty.clone()).unwrap_or_else(|| self.infer_ctx.fresh_var());
+                // Unify all element types with the first element's type
+                for elem in helems.iter().skip(1) {
+                    let _ = self.infer_ctx.unify_at(&et, &elem.ty, *span, "array element");
+                }
                 let len = helems.len();
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Array(helems),
@@ -2382,6 +2879,17 @@ impl Typer {
                     Some(hir::Stmt::Expr(e)) => e.ty.clone(),
                     _ => Type::Void,
                 };
+                // Unify if-expression branch types (else must match then)
+                if let Some(ref els) = hi.els {
+                    if let Some(hir::Stmt::Expr(e)) = els.last() {
+                        let _ = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "if-expression branches");
+                    }
+                }
+                for (_, branch) in &hi.elifs {
+                    if let Some(hir::Stmt::Expr(e)) = branch.last() {
+                        let _ = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");
+                    }
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::IfExpr(Box::new(hi)),
                     ty,
@@ -2407,7 +2915,7 @@ impl Typer {
             }
 
             ast::Expr::Lambda(params, ret, body, span) => {
-                self.lower_lambda(params, ret, body, *span)
+                self.lower_lambda_with_expected(params, ret, body, *span, expected)
             }
 
             ast::Expr::Placeholder(span) => Ok(hir::Expr {
@@ -2647,7 +3155,9 @@ impl Typer {
                     _ => return Err(format!("send: target must be a Channel, got {}", hch.ty)),
                 };
                 let hval = self.lower_expr(val)?;
-                let _ = elem_ty; // type checking can be added later
+                // Unify sent value type with channel element type
+                let _ = self.infer_ctx.unify_at(&elem_ty, &hval.ty, *span, "channel send");
+                let hval = self.maybe_coerce_to(hval, &elem_ty);
                 Ok(hir::Expr {
                     kind: hir::ExprKind::ChannelSend(Box::new(hch), Box::new(hval)),
                     ty: Type::Void,
@@ -2677,7 +3187,12 @@ impl Typer {
                         _ => return Err(format!("select: channel must be a Channel type, got {}", hch.ty)),
                     };
                     let hval = if let Some(ref v) = arm.value {
-                        Some(self.lower_expr(v)?)
+                        let hv = self.lower_expr(v)?;
+                        // Unify sent value type with channel element type
+                        if arm.is_send {
+                            let _ = self.infer_ctx.unify_at(&elem_ty, &hv.ty, arm.span, "select send");
+                        }
+                        Some(hv)
                     } else {
                         None
                     };
@@ -3003,7 +3518,11 @@ impl Typer {
                         .iter()
                         .map(|e| self.lower_expr(e))
                         .collect::<Result<_, _>>()?;
-                    let elem_ty = hargs.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
+                    let elem_ty = hargs.first().map(|a| a.ty.clone()).unwrap_or_else(|| self.infer_ctx.fresh_var());
+                    // Unify all elements with the first element type
+                    for a in hargs.iter().skip(1) {
+                        let _ = self.infer_ctx.unify_at(&elem_ty, &a.ty, span, "vec element");
+                    }
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::VecNew(hargs),
                         ty: Type::Vec(Box::new(elem_ty)),
@@ -3013,7 +3532,7 @@ impl Typer {
                 "map" if !self.fns.contains_key(name) => {
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::MapNew,
-                        ty: Type::Map(Box::new(Type::String), Box::new(Type::I64)),
+                        ty: Type::Map(Box::new(Type::String), Box::new(self.infer_ctx.fresh_var())),
                         span,
                     });
                 }
@@ -3047,10 +3566,17 @@ impl Typer {
             }
 
             if let Some((id, param_tys, ret)) = self.fns.get(name).cloned() {
-                let mut hargs: Vec<hir::Expr> = args
-                    .iter()
-                    .map(|e| self.lower_expr(e))
-                    .collect::<Result<_, _>>()?;
+                let mut hargs: Vec<hir::Expr> = Vec::new();
+                for (i, arg) in args.iter().enumerate() {
+                    let expected = param_tys.get(i);
+                    hargs.push(self.lower_expr_expected(arg, expected)?);
+                }
+                // Unify argument types with parameter types for inference
+                for (i, ha) in hargs.iter().enumerate() {
+                    if let Some(pt) = param_tys.get(i) {
+                        let _ = self.infer_ctx.unify_at(pt, &ha.ty, span, "function argument");
+                    }
+                }
                 // Coerce arguments to declared parameter types (e.g. Struct → dyn Trait)
                 for (i, ha) in hargs.iter_mut().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
@@ -3066,17 +3592,25 @@ impl Typer {
             }
 
             if let Some(v) = self.find_var(name) {
-                if let Type::Fn(_, ret) = &v.ty {
+                if let Type::Fn(ptys, ret) = &v.ty {
                     let ret = *ret.clone();
+                    let ptys = ptys.clone();
                     let fn_expr = hir::Expr {
                         kind: hir::ExprKind::Var(v.def_id, name.clone()),
                         ty: v.ty.clone(),
                         span,
                     };
-                    let hargs: Vec<hir::Expr> = args
-                        .iter()
-                        .map(|e| self.lower_expr(e))
-                        .collect::<Result<_, _>>()?;
+                    let mut hargs = Vec::new();
+                    for (i, arg) in args.iter().enumerate() {
+                        let expected = ptys.get(i);
+                        hargs.push(self.lower_expr_expected(arg, expected)?);
+                    }
+                    // Unify argument types with parameter types
+                    for (i, ha) in hargs.iter().enumerate() {
+                        if let Some(pt) = ptys.get(i) {
+                            let _ = self.infer_ctx.unify_at(pt, &ha.ty, span, "indirect call argument");
+                        }
+                    }
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::IndirectCall(Box::new(fn_expr), hargs),
                         ty: ret,
@@ -3298,6 +3832,18 @@ impl Typer {
                 })
             })
             .collect::<Result<_, String>>()?;
+
+        // Unify struct field TypeVars with actual value types from this literal
+        if let Some(fields) = self.structs.get(name).cloned() {
+            for fi in &hinits {
+                if let Some(fname) = &fi.name {
+                    if let Some((_, declared_ty)) = fields.iter().find(|(n, _)| n == fname) {
+                        let _ = self.infer_ctx.unify_at(declared_ty, &fi.value.ty, span, "struct literal field");
+                    }
+                }
+            }
+        }
+
         Ok(hir::Expr {
             kind: hir::ExprKind::Struct(name.to_string(), hinits),
             ty: Type::Struct(name.to_string()),
@@ -3439,19 +3985,32 @@ impl Typer {
         })
     }
 
-    fn lower_lambda(
+    fn lower_lambda_with_expected(
         &mut self,
         params: &[ast::Param],
         ret: &Option<Type>,
         body: &ast::Block,
         span: Span,
+        expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
+        // Extract expected param/return types from the expected function type
+        let (expected_ptys, expected_ret) = match expected {
+            Some(Type::Fn(ptys, ret)) => (Some(ptys.as_slice()), Some(ret.as_ref())),
+            _ => (None, None),
+        };
+
         self.push_scope();
         let mut hparams = Vec::new();
         let mut ptys = Vec::new();
-        for p in params {
+        for (i, p) in params.iter().enumerate() {
             let pid = self.fresh_id();
-            let ty = p.ty.clone().unwrap_or(Type::I64);
+            let ty = p.ty.clone().unwrap_or_else(|| {
+                // Use expected type if available, else create a fresh inference variable
+                expected_ptys
+                    .and_then(|ep| ep.get(i))
+                    .cloned()
+                    .unwrap_or_else(|| self.infer_ctx.fresh_var())
+            });
             ptys.push(ty.clone());
             let ownership = Self::ownership_for_type(&ty);
             self.define_var(
@@ -3471,17 +4030,33 @@ impl Typer {
             });
         }
 
-        let ret_ty = ret.clone().unwrap_or_else(|| match body.last() {
-            Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
-            _ => Type::Void,
+        let ret_ty = ret.clone().unwrap_or_else(|| {
+            if let Some(eret) = expected_ret {
+                eret.clone()
+            } else {
+                match body.last() {
+                    Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
+                    _ => Type::Void,
+                }
+            }
         });
 
         let hbody = self.lower_block_no_scope(body, &ret_ty)?;
         self.pop_scope();
 
+        // If ret was not explicitly annotated and not from expected type, refine from body
+        let final_ret = if ret.is_some() || expected_ret.is_some() {
+            ret_ty
+        } else {
+            match hbody.last() {
+                Some(hir::Stmt::Expr(e)) => e.ty.clone(),
+                _ => ret_ty,
+            }
+        };
+
         Ok(hir::Expr {
             kind: hir::ExprKind::Lambda(hparams, hbody),
-            ty: Type::Fn(ptys, Box::new(ret_ty)),
+            ty: Type::Fn(ptys, Box::new(final_ret)),
             span,
         })
     }
@@ -3702,5 +4277,40 @@ mod tests {
             assert_eq!(b.ownership, Ownership::Rc);
             assert!(matches!(b.ty, Type::Rc(_)));
         }
+    }
+
+    #[test]
+    fn test_typevar_resolved_after_lowering() {
+        // Struct fields without explicit types should be resolved by the resolution pass
+        let hir = type_check("type Pair\n    a: i64\n    b: f64\n\n*main() -> i32\n    p is Pair(a is 1, b is 2.0)\n    log(p.a)\n    0\n");
+        let pair = &hir.types[0];
+        assert_eq!(pair.fields[0].ty, Type::I64);
+        assert_eq!(pair.fields[1].ty, Type::F64);
+        // Verify no TypeVar remains in the HIR
+        assert!(!pair.fields[0].ty.has_type_var());
+        assert!(!pair.fields[1].ty.has_type_var());
+    }
+
+    #[test]
+    fn test_constraint_provenance() {
+        // Verify that constraint tracking works
+        let mut ctx = unify::InferCtx::new();
+        let v = ctx.fresh_var();
+        let span = crate::ast::Span { start: 0, end: 5, line: 1, col: 1 };
+        let _ = ctx.unify_at(&v, &Type::String, span, "test constraint");
+        let origin = ctx.origin_of(&v);
+        assert!(origin.is_some(), "expected constraint origin");
+        let o = origin.unwrap();
+        assert_eq!(o.reason, "test constraint");
+        assert_eq!(o.span.line, 1);
+        assert_eq!(ctx.resolve(&v), Type::String);
+    }
+
+    #[test]
+    fn test_type_mismatch_msg() {
+        let mut typer = Typer::new();
+        let msg = typer.type_mismatch_msg(&Type::I64, &Type::String, "argument");
+        assert!(msg.contains("expected `i64`"), "msg: {msg}");
+        assert!(msg.contains("found `String`"), "msg: {msg}");
     }
 }
