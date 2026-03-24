@@ -20,7 +20,7 @@ type File
     path: String
     mode: String
 
-*read_file(path: String) -> String
+*read_file(path: String)
     fp is fopen(%path, "r")
     if fp as i64 equals 0
         return ""
@@ -32,7 +32,7 @@ type File
     fclose(fp)
     __string_from_raw(buf, size, size + 1)
 
-*write_file(path: String, content: String) -> bool
+*write_file(path: String, content: String)
     fp is fopen(%path, "w")
     if fp as i64 equals 0
         return false
@@ -40,7 +40,7 @@ type File
     fclose(fp)
     true
 
-*append_file(path: String, content: String) -> bool
+*append_file(path: String, content: String)
     fp is fopen(%path, "a")
     if fp as i64 equals 0
         return false
@@ -48,11 +48,11 @@ type File
     fclose(fp)
     true
 
-*open(path: String, mode: String) -> File
+*open(path: String, mode: String)
     fp is fopen(&path, &mode)
     File(fp, path, mode)
 
-*File.read(self, size: i64) -> String
+*File.read(self, size)
     buf is malloc(size)
     n is fread(buf, 1, size, self.handle)
     __string_from_raw(buf, n, size)
@@ -63,8 +63,8 @@ type File
 *File.close(self)
     fclose(self.handle)
 
-*File.eof(self) -> bool
+*File.eof(self)
     feof(self.handle) isnt 0
 
-*file_exists(path: String) -> bool
+*file_exists(path: String)
     __file_exists(path)

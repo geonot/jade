@@ -10,6 +10,7 @@
 //! The typer does NOT emit LLVM IR. It produces a fully typed HIR
 //! that codegen can read without re-discovering types.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -53,6 +54,7 @@ pub struct Typer {
     pub(crate) assoc_types: HashMap<(String, String), Type>,
     pub(crate) trait_assoc_types: HashMap<String, Vec<String>>,
     pub(crate) consts: HashMap<String, ast::Expr>,
+    infer_depth: Cell<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +92,7 @@ impl Typer {
             assoc_types: HashMap::new(),
             trait_assoc_types: HashMap::new(),
             consts: HashMap::new(),
+            infer_depth: Cell::new(0),
         }
     }
 
@@ -210,6 +213,10 @@ impl Typer {
                     if let Some((_, _, r)) = self.fns.get(n.as_str()) {
                         return r.clone();
                     }
+                    // Builtin return types (not in self.fns)
+                    if let Some(ty) = Self::builtin_ret_ty(n) {
+                        return ty;
+                    }
                     if let Some(gf) = self.generic_fns.get(n.as_str()) {
                         let gf = gf.clone();
                         let arg_tys: Vec<Type> = args.iter().map(|e| self.expr_ty_ast(e)).collect();
@@ -227,6 +234,18 @@ impl Typer {
                         }
                         if let Some(ret) = &gf.ret {
                             return Self::substitute_type(ret, &type_map);
+                        }
+                        // No explicit return — infer from body with substituted param types
+                        // Guard against infinite recursion (e.g. fact(n) calling fact(n-1))
+                        let depth = self.infer_depth.get();
+                        if depth < 4 {
+                            self.infer_depth.set(depth + 1);
+                            let inferred = self.infer_ret_ast(&gf);
+                            self.infer_depth.set(depth);
+                            let subst = Self::substitute_type(&inferred, &type_map);
+                            if subst != Type::I64 {
+                                return subst;
+                            }
                         }
                     }
                 }
@@ -344,12 +363,156 @@ impl Typer {
     }
 
     fn infer_ret_ast(&self, f: &ast::Fn) -> Type {
-        match f.body.last() {
-            Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
-            Some(ast::Stmt::Ret(Some(e), _)) => self.expr_ty_ast(e),
-            Some(ast::Stmt::Match(_)) => Type::I64,
-            _ => Type::Void,
+        // Walk all return paths to find a non-trivial return type.
+        // Build a simple local type map from top-level bindings.
+        let mut locals = HashMap::new();
+        for s in &f.body {
+            if let ast::Stmt::Bind(b) = s {
+                let ty = self.expr_ty_ast_with_locals(&b.value, &locals);
+                locals.insert(b.name.clone(), ty);
+            }
         }
+        let mut found = Type::Void;
+        self.collect_ret_types_body(&f.body, &mut found, &locals);
+        found
+    }
+
+    /// Walk a block of statements collecting the best return type.
+    fn collect_ret_types_body(&self, body: &[ast::Stmt], found: &mut Type, locals: &HashMap<String, Type>) {
+        for (i, s) in body.iter().enumerate() {
+            let is_last = i + 1 == body.len();
+            match s {
+                ast::Stmt::Ret(Some(e), _) => {
+                    let ty = self.expr_ty_ast_with_locals(e, locals);
+                    Self::pick_better_ret(found, &ty);
+                }
+                ast::Stmt::Expr(e) if is_last => {
+                    let ty = self.expr_ty_ast_with_locals(e, locals);
+                    Self::pick_better_ret(found, &ty);
+                }
+                ast::Stmt::If(iff) => {
+                    self.collect_ret_types_body(&iff.then, found, locals);
+                    for (_, blk) in &iff.elifs {
+                        self.collect_ret_types_body(blk, found, locals);
+                    }
+                    if let Some(els) = &iff.els {
+                        self.collect_ret_types_body(els, found, locals);
+                    }
+                    // If last stmt is an if/else, check tail exprs in branches
+                    if is_last {
+                        if let Some(ty) = self.tail_type_of_if(iff, locals) {
+                            Self::pick_better_ret(found, &ty);
+                        }
+                    }
+                }
+                ast::Stmt::While(w) => self.collect_ret_types_body(&w.body, found, locals),
+                ast::Stmt::For(fl) => self.collect_ret_types_body(&fl.body, found, locals),
+                ast::Stmt::Loop(l) => self.collect_ret_types_body(&l.body, found, locals),
+                ast::Stmt::Match(m) => {
+                    for arm in &m.arms {
+                        self.collect_ret_types_body(&arm.body, found, locals);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Resolve an expression type, also checking a local binding map.
+    fn expr_ty_ast_with_locals(&self, expr: &ast::Expr, locals: &HashMap<String, Type>) -> Type {
+        if let ast::Expr::Ident(n, _) = expr {
+            if let Some(ty) = locals.get(n) {
+                return ty.clone();
+            }
+        }
+        if let ast::Expr::BinOp(l, op, r, _) = expr {
+            use ast::BinOp::*;
+            match op {
+                Eq | Ne | Lt | Gt | Le | Ge | And | Or => return Type::Bool,
+                _ => {
+                    let lt = self.expr_ty_ast_with_locals(l, locals);
+                    let rt = self.expr_ty_ast_with_locals(r, locals);
+                    if lt == Type::String || rt == Type::String {
+                        return Type::String;
+                    }
+                    if lt.is_int() && rt.is_float() { return rt; }
+                    if lt.is_float() && rt.is_int() { return lt; }
+                    return lt;
+                }
+            }
+        }
+        self.expr_ty_ast(expr)
+    }
+
+    /// Return the tail-expression type of an if/else.
+    fn tail_type_of_if(&self, iff: &ast::If, locals: &HashMap<String, Type>) -> Option<Type> {
+        let then_ty = self.tail_type_of_block(&iff.then, locals);
+        if let Some(ty) = &then_ty {
+            if *ty != Type::I64 && *ty != Type::Void {
+                return Some(ty.clone());
+            }
+        }
+        if let Some(els) = &iff.els {
+            let else_ty = self.tail_type_of_block(els, locals);
+            if let Some(ty) = &else_ty {
+                if *ty != Type::I64 && *ty != Type::Void {
+                    return Some(ty.clone());
+                }
+            }
+        }
+        for (_, blk) in &iff.elifs {
+            let ty = self.tail_type_of_block(blk, locals);
+            if let Some(ty) = &ty {
+                if *ty != Type::I64 && *ty != Type::Void {
+                    return Some(ty.clone());
+                }
+            }
+        }
+        then_ty
+    }
+
+    fn tail_type_of_block(&self, body: &[ast::Stmt], locals: &HashMap<String, Type>) -> Option<Type> {
+        match body.last() {
+            Some(ast::Stmt::Expr(e)) => Some(self.expr_ty_ast_with_locals(e, locals)),
+            Some(ast::Stmt::Ret(Some(e), _)) => Some(self.expr_ty_ast_with_locals(e, locals)),
+            Some(ast::Stmt::If(iff)) => self.tail_type_of_if(iff, locals),
+            _ => None,
+        }
+    }
+
+    /// Prefer concrete types over I64/Void defaults.
+    fn pick_better_ret(current: &mut Type, candidate: &Type) {
+        if *current == Type::Void || (*current == Type::I64 && *candidate != Type::I64 && *candidate != Type::Void) {
+            *current = candidate.clone();
+        }
+    }
+
+    /// Re-infer return type after param types have been resolved.
+    /// Temporarily binds params in scope so expr_ty_ast can see them.
+    fn infer_ret_ast_with_params(&mut self, f: &ast::Fn, lookup_name: &str) -> Type {
+        let ptys = if let Some((_, ptys, _)) = self.fns.get(lookup_name) {
+            ptys.clone()
+        } else {
+            return self.infer_ret_ast(f);
+        };
+
+        // Methods have self prepended; skip it when binding param names
+        let offset = if ptys.len() > f.params.len() { ptys.len() - f.params.len() } else { 0 };
+
+        self.push_scope();
+        for (i, p) in f.params.iter().enumerate() {
+            if offset + i < ptys.len() {
+                let info = VarInfo {
+                    def_id: self.fresh_id(),
+                    ty: ptys[offset + i].clone(),
+                    ownership: Ownership::Owned,
+                };
+                self.define_var(&p.name, info);
+            }
+        }
+        let ret = self.infer_ret_ast(f);
+        self.pop_scope();
+        ret
     }
 
     fn infer_coroutine_yield_type(&self, body: &[hir::Stmt]) -> Type {
@@ -409,6 +572,35 @@ impl Typer {
             .as_ref()
             .map(|e| self.expr_ty_ast(e))
             .unwrap_or(Type::I64)
+    }
+
+    /// Return type for builtin functions (not registered in self.fns).
+    fn builtin_ret_ty(name: &str) -> Option<Type> {
+        match name {
+            "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" | "__powf"
+            | "__copysign" | "__fma" | "__time_monotonic" => Some(Type::F64),
+            "__fmt_float" | "__fmt_hex" | "__fmt_oct" | "__fmt_bin"
+            | "__string_from_raw" | "__string_from_ptr" => Some(Type::String),
+            "__get_args" => Some(Type::Vec(Box::new(Type::String))),
+            "__file_exists" => Some(Type::Bool),
+            "__sleep_ms" => Some(Type::Void),
+            _ => None,
+        }
+    }
+
+    /// Parameter types for builtin functions, for body-driven inference.
+    fn builtin_param_tys(name: &str) -> Option<Vec<Type>> {
+        match name {
+            "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" => Some(vec![Type::F64]),
+            "__powf" | "__copysign" => Some(vec![Type::F64, Type::F64]),
+            "__fma" => Some(vec![Type::F64, Type::F64, Type::F64]),
+            "__fmt_float" => Some(vec![Type::F64, Type::I64]),
+            "__fmt_hex" | "__fmt_oct" | "__fmt_bin" | "__sleep_ms" => Some(vec![Type::I64]),
+            "__string_from_ptr" => Some(vec![Type::Ptr(Box::new(Type::I8))]),
+            "__string_from_raw" => Some(vec![Type::Ptr(Box::new(Type::I8)), Type::I64, Type::I64]),
+            "__file_exists" => Some(vec![Type::String]),
+            _ => None,
+        }
     }
 
     fn needs_int_coercion(from: &Type, to: &Type) -> Option<CoercionKind> {
@@ -605,6 +797,10 @@ impl Typer {
                 self.declare_impl_block(ib)?;
             }
         }
+
+        // Bidirectional param type inference: refine Type::Inferred slots
+        // by analyzing function bodies and call sites.
+        self.infer_param_types(prog);
 
         let mut hir_fns = Vec::new();
         let mut hir_types = Vec::new();

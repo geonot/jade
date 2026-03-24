@@ -1,18 +1,18 @@
 # std.fmt — String formatting
 
-*float_to_string(x: f64, decimals: i64) -> String
+*float_to_string(x: f64, decimals)
     __fmt_float(x, decimals)
 
-*hex(n: i64) -> String
+*hex(n)
     __fmt_hex(n)
 
-*oct(n: i64) -> String
+*oct(n)
     __fmt_oct(n)
 
-*bin(n: i64) -> String
+*bin(n)
     __fmt_bin(n)
 
-*pad_left(s: String, width: i64, fill: String) -> String
+*pad_left(s: String, width, fill)
     if s.length >= width
         return s
     padding is width - s.length
@@ -23,7 +23,7 @@
         i is i + 1
     result + s
 
-*pad_right(s: String, width: i64, fill: String) -> String
+*pad_right(s: String, width, fill)
     if s.length >= width
         return s
     padding is width - s.length
@@ -34,7 +34,7 @@
         i is i + 1
     result
 
-*join(items: Vec of String, sep: String) -> String
+*join(items: Vec of String, sep: String)
     if items.length equals 0
         return ""
     result is items.get(0)
@@ -44,7 +44,7 @@
         i is i + 1
     result
 
-*repeat(s: String, n: i64) -> String
+*repeat(s: String, n)
     result is ""
     i is 0
     while i < n

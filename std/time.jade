@@ -1,10 +1,10 @@
 # std.time — Clock, duration, sleep
 
-*monotonic() -> f64
+*monotonic()
     __time_monotonic()
 
-*sleep_ms(ms: i64)
+*sleep_ms(ms)
     __sleep_ms(ms)
 
-*elapsed(start: f64) -> f64
+*elapsed(start: f64)
     __time_monotonic() - start

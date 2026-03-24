@@ -11,7 +11,7 @@ extern *malloc(size: i64) -> %i8
 extern *free(ptr: %i8)
 extern *strlen(s: %i8) -> i64
 
-*env(name: String) -> String
+*env(name: String)
     ptr is getenv(%name)
     if ptr as i64 equals 0
         return ""
@@ -20,7 +20,7 @@ extern *strlen(s: %i8) -> i64
 *set_env(name: String, value: String)
     setenv(%name, %value, 1)
 
-*cwd() -> String
+*cwd()
     buf is malloc(4096)
     result is getcwd(buf, 4096)
     if result as i64 equals 0
@@ -29,8 +29,8 @@ extern *strlen(s: %i8) -> i64
     len is strlen(buf)
     __string_from_raw(buf, len, 4096)
 
-*args() -> Vec of String
+*args()
     __get_args()
 
-*pid() -> i32
+*pid()
     getpid()

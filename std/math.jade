@@ -8,58 +8,58 @@ TAU is 6.28318530717958647692
 extern *sqrt(x: f64) -> f64
 
 # Intrinsic wrappers
-*ln(x: f64) -> f64
+*ln(x: f64)
     __ln(x)
 
-*log2(x: f64) -> f64
+*log2(x: f64)
     __log2(x)
 
-*log10(x: f64) -> f64
+*log10(x: f64)
     __log10(x)
 
-*exp(x: f64) -> f64
+*exp(x: f64)
     __exp(x)
 
-*exp2(x: f64) -> f64
+*exp2(x: f64)
     __exp2(x)
 
-*powf(x: f64, y: f64) -> f64
+*powf(x: f64, y: f64)
     __powf(x, y)
 
-*copysign(x: f64, y: f64) -> f64
+*copysign(x: f64, y: f64)
     __copysign(x, y)
 
-*fma(a: f64, b: f64, c: f64) -> f64
+*fma(a: f64, b: f64, c: f64)
     __fma(a, b, c)
 
 # Composite functions
-*log_base(x: f64, base: f64) -> f64
+*log_base(x: f64, base: f64)
     __ln(x) / __ln(base)
 
-*degrees(radians: f64) -> f64
+*degrees(radians: f64)
     radians * 180.0 / PI
 
-*radians(deg: f64) -> f64
+*radians(deg: f64)
     deg * PI / 180.0
 
-*hypot(x: f64, y: f64) -> f64
+*hypot(x: f64, y: f64)
     sqrt(x * x + y * y)
 
-*lerp(a: f64, b: f64, t: f64) -> f64
+*lerp(a: f64, b: f64, t: f64)
     a + (b - a) * t
 
-*map_range(value: f64, in_min: f64, in_max: f64, out_min: f64, out_max: f64) -> f64
+*map_range(value: f64, in_min: f64, in_max: f64, out_min: f64, out_max: f64)
     (value - in_min) / (in_max - in_min) * (out_max - out_min) + out_min
 
-*factorial(n: i64) -> i64
+*factorial(n)
     if n <= 1
         return 1
     n * factorial(n - 1)
 
-*gcd(a: i64, b: i64) -> i64
+*gcd(a, b)
     if b equals 0
         return a
     gcd(b, a % b)
 
-*lcm(a: i64, b: i64) -> i64
+*lcm(a, b)
     (a / gcd(a, b)) * b
