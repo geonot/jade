@@ -758,7 +758,20 @@ impl Typer {
         self.pop_scope();
 
         let ret = if f.ret.is_none() && f.name != "main" {
-            self.refine_ret_from_body(&ret, &body)
+            // Phase 2: Unify tail expression type with ret TypeVar
+            if let Some(hir::Stmt::Expr(tail)) = body.last() {
+                if tail.ty != Type::Void {
+                    let _ = self.infer_ctx.unify_at(&ret, &tail.ty, f.span, "function tail expression");
+                }
+            }
+            // Resolve to see if unification solved it
+            let resolved = self.infer_ctx.shallow_resolve(&ret);
+            if matches!(resolved, Type::TypeVar(_)) {
+                // Still unsolved — fall back to heuristic refinement
+                self.refine_ret_from_body(&ret, &body)
+            } else {
+                resolved
+            }
         } else {
             ret
         };

@@ -518,6 +518,7 @@ impl Typer {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn builtin_param_tys(name: &str) -> Option<Vec<Type>> {
         match name {
             "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" => Some(vec![Type::F64]),

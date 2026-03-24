@@ -73,13 +73,13 @@ impl Typer {
                 let hval = self.lower_expr(value)?;
                 let tys = match &hval.ty {
                     Type::Tuple(ts) => ts.clone(),
-                    _ => vec![Type::I64; names.len()],
+                    _ => (0..names.len()).map(|_| self.infer_ctx.fresh_var()).collect(),
                 };
                 let bindings: Vec<(DefId, String, Type)> = names
                     .iter()
                     .enumerate()
                     .map(|(i, n)| {
-                        let ty = tys.get(i).cloned().unwrap_or(Type::I64);
+                        let ty = tys.get(i).cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
                         let id = self.fresh_id();
                         self.define_var(
                             n,
@@ -453,7 +453,7 @@ impl Typer {
 
                 let mut hpats = Vec::new();
                 for (i, sp) in sub_pats.iter().enumerate() {
-                    let ft = field_tys.get(i).cloned().unwrap_or(Type::I64);
+                    let ft = field_tys.get(i).cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
                     hpats.push(self.lower_pat(sp, &ft)?);
                 }
                 Ok(hir::Pat::Ctor(name.clone(), tag, hpats, *span))
@@ -473,11 +473,11 @@ impl Typer {
             ast::Pat::Tuple(pats, span) => {
                 let tys = match expected_ty {
                     Type::Tuple(ts) => ts.clone(),
-                    _ => vec![Type::I64; pats.len()],
+                    _ => (0..pats.len()).map(|_| self.infer_ctx.fresh_var()).collect(),
                 };
                 let mut hpats = Vec::new();
                 for (i, p) in pats.iter().enumerate() {
-                    let ety = tys.get(i).cloned().unwrap_or(Type::I64);
+                    let ety = tys.get(i).cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
                     hpats.push(self.lower_pat(p, &ety)?);
                 }
                 Ok(hir::Pat::Tuple(hpats, *span))
@@ -485,7 +485,7 @@ impl Typer {
             ast::Pat::Array(pats, span) => {
                 let elem_ty = match expected_ty {
                     Type::Array(et, _) => et.as_ref().clone(),
-                    _ => Type::I64,
+                    _ => self.infer_ctx.fresh_var(),
                 };
                 let mut hpats = Vec::new();
                 for p in pats {

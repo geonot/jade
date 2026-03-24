@@ -156,7 +156,7 @@ impl Typer {
             .params
             .iter()
             .map(|p| {
-                let base = p.ty.clone().unwrap_or(Type::I64);
+                let base = p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
                 Self::substitute_type(&base, type_map)
             })
             .collect();

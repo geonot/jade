@@ -211,7 +211,7 @@ impl Typer {
                 } else if matches!(hobj.ty, Type::String) && field == "length" {
                     (Type::I64, 0)
                 } else {
-                    (Type::I64, 0)
+                    (self.infer_ctx.fresh_var(), 0)
                 };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Field(Box::new(hobj), field.clone(), idx),
@@ -227,7 +227,7 @@ impl Typer {
                     Type::Array(et, _) => *et.clone(),
                     Type::Vec(et) => *et.clone(),
                     Type::Map(_, vt) => *vt.clone(),
-                    Type::Tuple(tys) => tys.first().cloned().unwrap_or(Type::I64),
+                    Type::Tuple(tys) => tys.first().cloned().unwrap_or_else(|| self.infer_ctx.fresh_var()),
                     _ => self.infer_ctx.fresh_var(),
                 };
                 Ok(hir::Expr {
@@ -239,8 +239,8 @@ impl Typer {
 
             ast::Expr::Ternary(cond, then, els, span) => {
                 let hc = self.lower_expr(cond)?;
-                let ht = self.lower_expr(then)?;
-                let he = self.lower_expr(els)?;
+                let ht = self.lower_expr_expected(then, expected)?;
+                let he = self.lower_expr_expected(els, expected)?;
                 let _ = self
                     .infer_ctx
                     .unify_at(&ht.ty, &he.ty, *span, "ternary branches");
@@ -303,10 +303,10 @@ impl Typer {
             }
 
             ast::Expr::IfExpr(i) => {
-                let result_ty = match i.then.last() {
+                let result_ty = expected.cloned().unwrap_or_else(|| match i.then.last() {
                     Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
                     _ => Type::Void,
-                };
+                });
                 let hi = self.lower_if(i, &result_ty)?;
                 let ty = match hi.then.last() {
                     Some(hir::Stmt::Expr(e)) => e.ty.clone(),
@@ -336,7 +336,24 @@ impl Typer {
             }
 
             ast::Expr::Block(stmts, span) => {
-                let hstmts = self.lower_block(stmts, &Type::Void)?;
+                // Phase 4: Lower all statements, but pass expected into the tail expression
+                self.push_scope();
+                let mut hstmts = Vec::new();
+                let len = stmts.len();
+                for (i, s) in stmts.iter().enumerate() {
+                    if i == len - 1 {
+                        // Tail statement: if it's an expression, use expected type
+                        if let ast::Stmt::Expr(e) = s {
+                            let he = self.lower_expr_expected(e, expected)?;
+                            hstmts.push(hir::Stmt::Expr(he));
+                        } else {
+                            hstmts.push(self.lower_stmt(s, &Type::Void)?);
+                        }
+                    } else {
+                        hstmts.push(self.lower_stmt(s, &Type::Void)?);
+                    }
+                }
+                self.pop_scope();
                 let ty = match hstmts.last() {
                     Some(hir::Stmt::Expr(e)) => e.ty.clone(),
                     _ => Type::Void,
@@ -1235,7 +1252,7 @@ impl Typer {
         let hcallee = self.lower_expr(callee)?;
         let ret = match &hcallee.ty {
             Type::Fn(_, ret) => *ret.clone(),
-            _ => Type::I64,
+            _ => self.infer_ctx.fresh_var(),
         };
         let hargs: Vec<hir::Expr> = args
             .iter()
@@ -1379,7 +1396,7 @@ impl Typer {
             .collect::<Result<_, _>>()?;
         Ok(hir::Expr {
             kind: hir::ExprKind::StringMethod(Box::new(hobj), method.to_string(), hargs),
-            ty: Type::I64,
+            ty: self.infer_ctx.fresh_var(),
             span,
         })
     }
@@ -1512,7 +1529,7 @@ impl Typer {
             let hright = self.lower_expr(right)?;
             let ret = match &hright.ty {
                 Type::Fn(_, r) => *r.clone(),
-                _ => Type::I64,
+                _ => self.infer_ctx.fresh_var(),
             };
             let mut all_args = vec![hleft];
             for a in extra_args {
@@ -1582,7 +1599,7 @@ impl Typer {
         let hright = self.lower_expr(right)?;
         let ret = match &hright.ty {
             Type::Fn(_, r) => *r.clone(),
-            _ => Type::I64,
+            _ => self.infer_ctx.fresh_var(),
         };
         let mut all_args = vec![hleft];
         for a in extra_args {

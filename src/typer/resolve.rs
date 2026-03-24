@@ -1,4 +1,4 @@
-use crate::ast::{self, BinOp, Span};
+use crate::ast::{self, Span};
 use crate::types::Type;
 
 use super::Typer;
@@ -75,11 +75,14 @@ impl Typer {
         } else if let Some(ref explicit) = f.ret {
             explicit.clone()
         } else {
-            let inferred = self.infer_ret_ast(f);
-            if inferred != Type::I64 && inferred != Type::Void {
-                inferred
+            // Phase 2: Use a TypeVar for unannotated returns. 
+            // The lowering pass will solve it via unify_at on return stmts and tail exprs.
+            // Fall back to AST heuristic only to seed a better initial guess.
+            let heuristic = self.infer_ret_ast(f);
+            if heuristic != Type::I64 && heuristic != Type::Void {
+                heuristic
             } else {
-                inferred
+                self.infer_ctx.fresh_var()
             }
         };
         let id = self.fresh_id();
@@ -104,7 +107,14 @@ impl Typer {
         for p in &m.params {
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
-        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
+        let ret = m.ret.clone().unwrap_or_else(|| {
+            let heuristic = self.infer_ret_ast(m);
+            if heuristic != Type::I64 && heuristic != Type::Void {
+                heuristic
+            } else {
+                self.infer_ctx.fresh_var()
+            }
+        });
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
     }
@@ -119,7 +129,14 @@ impl Typer {
             }
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
-        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ret_ast(m));
+        let ret = m.ret.clone().unwrap_or_else(|| {
+            let heuristic = self.infer_ret_ast(m);
+            if heuristic != Type::I64 && heuristic != Type::Void {
+                heuristic
+            } else {
+                self.infer_ctx.fresh_var()
+            }
+        });
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
     }
@@ -299,84 +316,16 @@ impl Typer {
     }
 
     pub(crate) fn infer_param_types(&mut self, prog: &ast::Program) {
-        let mut fn_asts: Vec<(String, Vec<String>, &[ast::Stmt])> = Vec::new();
-        for d in &prog.decls {
-            match d {
-                ast::Decl::Fn(f) if !Self::is_generic_fn(f) => {
-                    let pnames: Vec<String> = f.params.iter().map(|p| p.name.clone()).collect();
-                    fn_asts.push((f.name.clone(), pnames, &f.body));
-                }
-                ast::Decl::Type(td) if td.type_params.is_empty() => {
-                    for m in &td.methods {
-                        let method_name = format!("{}_{}", td.name, m.name);
-                        let pnames: Vec<String> = m.params.iter().map(|p| p.name.clone()).collect();
-                        fn_asts.push((method_name, pnames, &m.body));
-                    }
-                }
-                ast::Decl::Impl(ib) => {
-                    for m in &ib.methods {
-                        let method_name = format!("{}_{}", ib.type_name, m.name);
-                        let pnames: Vec<String> = m.params.iter().map(|p| p.name.clone()).collect();
-                        fn_asts.push((method_name, pnames, &m.body));
-                    }
-                }
-                _ => {}
-            }
-        }
+        // Phase 3: Eliminate the dual inference system.
+        // The iterative body-driven and call-site heuristic loops are removed.
+        // TypeVars in function signatures survive into the lowering pass where
+        // proper unification via unify_at() at call sites will solve them.
+        //
+        // We retain only:
+        // 1. Return type refinement via AST heuristic (seeds non-trivial types)
+        // 2. TypeVar normalization (shallow resolve + Inferred→TypeVar conversion)
 
-        for iteration in 0..8 {
-            let mut changed = false;
-
-            for (fn_name, pnames, body) in &fn_asts {
-                let sig = match self.fns.get(fn_name.as_str()) {
-                    Some(s) => s.clone(),
-                    None => continue,
-                };
-                let offset = sig.1.len().saturating_sub(pnames.len());
-
-                for (pi, pname) in pnames.iter().enumerate() {
-                    let slot = offset + pi;
-                    if slot >= sig.1.len() {
-                        continue;
-                    }
-                    let slot_ty = &sig.1[slot];
-                    let is_unsolved = matches!(slot_ty, Type::Inferred)
-                        || matches!(slot_ty, Type::TypeVar(_))
-                            && self.infer_ctx.try_resolve(slot_ty).is_none();
-                    if !is_unsolved {
-                        continue;
-                    }
-                    if let Some(ty) = self.infer_param_from_body(pname, body) {
-                        if self.debug_types {
-                            eprintln!(
-                                "[type:infer] iter={} body-driven: {}.{} : {} -> {}",
-                                iteration, fn_name, pname, slot_ty, ty
-                            );
-                        }
-                        if let Some(entry) = self.fns.get_mut(fn_name.as_str()) {
-                            let _ = self.infer_ctx.unify(&entry.1[slot], &ty);
-                            entry.1[slot] = self.infer_ctx.resolve(&entry.1[slot]);
-                            changed = true;
-                        }
-                    }
-                }
-            }
-
-            for (_fn_name, _pnames, body) in &fn_asts {
-                changed |= self.infer_from_call_sites(body);
-            }
-
-            if !changed {
-                if self.debug_types {
-                    eprintln!(
-                        "[type:infer] converged after {} iteration(s)",
-                        iteration + 1
-                    );
-                }
-                break;
-            }
-        }
-
+        // Return type refinement pass: use AST heuristic to seed TypeVars
         for d in &prog.decls {
             if let ast::Decl::Fn(f) = d {
                 if Self::is_generic_fn(f) {
@@ -387,7 +336,9 @@ impl Typer {
                 }
                 let ret = self.infer_ret_ast_with_params(f, &f.name.clone());
                 if let Some(entry) = self.fns.get_mut(&f.name) {
-                    entry.2 = ret;
+                    if ret != Type::I64 && ret != Type::Void {
+                        let _ = self.infer_ctx.unify_at(&entry.2, &ret, f.span, "return type heuristic");
+                    }
                 }
             }
             if let ast::Decl::Type(td) = d {
@@ -401,7 +352,9 @@ impl Typer {
                     let method_name = format!("{}_{}", td.name, m.name);
                     let ret = self.infer_ret_ast_with_params(m, &method_name);
                     if let Some(entry) = self.fns.get_mut(&method_name) {
-                        entry.2 = ret;
+                        if ret != Type::I64 && ret != Type::Void {
+                            let _ = self.infer_ctx.unify_at(&entry.2, &ret, m.span, "method return type heuristic");
+                        }
                     }
                 }
             }
@@ -413,22 +366,29 @@ impl Typer {
                     let method_name = format!("{}_{}", ib.type_name, m.name);
                     let ret = self.infer_ret_ast_with_params(m, &method_name);
                     if let Some(entry) = self.fns.get_mut(&method_name) {
-                        entry.2 = ret;
+                        if ret != Type::I64 && ret != Type::Void {
+                            let _ = self.infer_ctx.unify_at(&entry.2, &ret, m.span, "impl method return type heuristic");
+                        }
                     }
                 }
             }
         }
 
+        // Normalize: shallow-resolve solved chains, convert Inferred→TypeVar
         let keys: Vec<String> = self.fns.keys().cloned().collect();
         for k in keys {
             let entry = self.fns.get_mut(&k).unwrap();
             for ty in &mut entry.1 {
-                if matches!(ty, Type::Inferred | Type::TypeVar(_)) {
-                    *ty = self.infer_ctx.resolve(ty);
+                if matches!(ty, Type::Inferred) {
+                    *ty = self.infer_ctx.fresh_var();
+                } else if matches!(ty, Type::TypeVar(_)) {
+                    *ty = self.infer_ctx.shallow_resolve(ty);
                 }
             }
-            if entry.2.has_type_var() || entry.2 == Type::Inferred {
-                entry.2 = self.infer_ctx.resolve(&entry.2);
+            if entry.2 == Type::Inferred {
+                entry.2 = self.infer_ctx.fresh_var();
+            } else if entry.2.has_type_var() {
+                entry.2 = self.infer_ctx.shallow_resolve(&entry.2);
             }
         }
 
@@ -451,373 +411,4 @@ impl Typer {
         }
     }
 
-    fn infer_param_from_body(&self, param_name: &str, body: &[ast::Stmt]) -> Option<Type> {
-        let mut result = None;
-        for stmt in body {
-            if let Some(ty) = self.constraint_from_stmt(param_name, stmt) {
-                result = Some(ty);
-                break;
-            }
-        }
-        result
-    }
-
-    fn constraint_from_stmt(&self, name: &str, stmt: &ast::Stmt) -> Option<Type> {
-        match stmt {
-            ast::Stmt::Expr(e) => self.constraint_from_expr(name, e),
-            ast::Stmt::Bind(b) => self.constraint_from_expr(name, &b.value),
-            ast::Stmt::Assign(_, rhs, _) => self.constraint_from_expr(name, rhs),
-            ast::Stmt::Ret(Some(e), _) => self.constraint_from_expr(name, e),
-            ast::Stmt::If(i) => {
-                if let Some(t) = self.constraint_from_expr(name, &i.cond) {
-                    return Some(t);
-                }
-                if let Some(t) = self.constraint_from_body(name, &i.then) {
-                    return Some(t);
-                }
-                for (c, b) in &i.elifs {
-                    if let Some(t) = self.constraint_from_expr(name, c) {
-                        return Some(t);
-                    }
-                    if let Some(t) = self.constraint_from_body(name, b) {
-                        return Some(t);
-                    }
-                }
-                if let Some(b) = &i.els {
-                    return self.constraint_from_body(name, b);
-                }
-                None
-            }
-            ast::Stmt::While(w) => {
-                if let Some(t) = self.constraint_from_expr(name, &w.cond) {
-                    return Some(t);
-                }
-                self.constraint_from_body(name, &w.body)
-            }
-            ast::Stmt::For(f) => {
-                if let Some(t) = self.constraint_from_expr(name, &f.iter) {
-                    return Some(t);
-                }
-                self.constraint_from_body(name, &f.body)
-            }
-            ast::Stmt::Loop(l) => self.constraint_from_body(name, &l.body),
-            ast::Stmt::Match(m) => {
-                if let Some(t) = self.constraint_from_expr(name, &m.subject) {
-                    return Some(t);
-                }
-                for arm in &m.arms {
-                    if let Some(t) = self.constraint_from_body(name, &arm.body) {
-                        return Some(t);
-                    }
-                }
-                None
-            }
-            ast::Stmt::ErrReturn(e, _) => self.constraint_from_expr(name, e),
-            _ => None,
-        }
-    }
-
-    fn constraint_from_body(&self, name: &str, body: &[ast::Stmt]) -> Option<Type> {
-        for stmt in body {
-            if let Some(ty) = self.constraint_from_stmt(name, stmt) {
-                return Some(ty);
-            }
-        }
-        None
-    }
-
-    fn constraint_from_expr(&self, name: &str, expr: &ast::Expr) -> Option<Type> {
-        match expr {
-            ast::Expr::Call(callee, args, _) => {
-                if let ast::Expr::Ident(fn_name, _) = callee.as_ref() {
-                    let ptys: Option<Vec<Type>> = self
-                        .fns
-                        .get(fn_name.as_str())
-                        .map(|(_, ptys, _)| ptys.clone())
-                        .or_else(|| Self::builtin_param_tys(fn_name));
-                    if let Some(ptys) = ptys {
-                        for (i, arg) in args.iter().enumerate() {
-                            if Self::expr_is_ident(arg, name) {
-                                if let Some(pty) = ptys.get(i) {
-                                    if !matches!(pty, Type::Inferred | Type::TypeVar(_)) {
-                                        return Some(pty.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                for arg in args {
-                    if let Some(t) = self.constraint_from_expr(name, arg) {
-                        return Some(t);
-                    }
-                }
-                self.constraint_from_expr(name, callee)
-            }
-
-            ast::Expr::Method(obj, method, args, _) => {
-                if Self::expr_is_ident(obj, name) {
-                    match method.as_str() {
-                        "length" | "char_at" | "slice" | "contains" | "starts_with"
-                        | "ends_with" | "split" | "trim" | "to_upper" | "to_lower" | "replace"
-                        | "index_of" | "find" => return Some(Type::String),
-                        "get" | "set" | "push" | "pop" | "remove" | "insert" | "sort"
-                        | "reverse" | "clear" | "extend" | "map" | "filter" | "reduce" | "any"
-                        | "all" | "flat_map" | "zip" => {}
-                        _ => {}
-                    }
-                }
-                if let ast::Expr::Ident(obj_name, _) = obj.as_ref() {
-                    if let Some(v) = self.find_var(obj_name) {
-                        if let Type::Struct(type_name) = &v.ty {
-                            let method_name = format!("{type_name}_{method}");
-                            if let Some((_, ptys, _)) = self.fns.get(&method_name) {
-                                for (i, arg) in args.iter().enumerate() {
-                                    if Self::expr_is_ident(arg, name) {
-                                        if let Some(pty) = ptys.get(i + 1) {
-                                            if !matches!(pty, Type::Inferred | Type::TypeVar(_)) {
-                                                return Some(pty.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                for arg in args {
-                    if let Some(t) = self.constraint_from_expr(name, arg) {
-                        return Some(t);
-                    }
-                }
-                self.constraint_from_expr(name, obj)
-            }
-
-            ast::Expr::BinOp(l, op, r, _) => {
-                let is_arith = matches!(
-                    op,
-                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
-                );
-                if is_arith {
-                    if Self::expr_is_ident(l, name) {
-                        let rty = self.expr_ty_ast(r);
-                        if rty != Type::I64 && !matches!(rty, Type::Inferred | Type::TypeVar(_)) {
-                            return Some(rty);
-                        }
-                    }
-                    if Self::expr_is_ident(r, name) {
-                        let lty = self.expr_ty_ast(l);
-                        if lty != Type::I64 && !matches!(lty, Type::Inferred | Type::TypeVar(_)) {
-                            return Some(lty);
-                        }
-                    }
-                }
-                if let Some(t) = self.constraint_from_expr(name, l) {
-                    return Some(t);
-                }
-                self.constraint_from_expr(name, r)
-            }
-
-            ast::Expr::Ternary(c, t, f, _) => {
-                if let Some(ty) = self.constraint_from_expr(name, c) {
-                    return Some(ty);
-                }
-                if let Some(ty) = self.constraint_from_expr(name, t) {
-                    return Some(ty);
-                }
-                self.constraint_from_expr(name, f)
-            }
-
-            ast::Expr::UnaryOp(_, inner, _) => self.constraint_from_expr(name, inner),
-            ast::Expr::Ref(inner, _) | ast::Expr::Deref(inner, _) => {
-                self.constraint_from_expr(name, inner)
-            }
-            ast::Expr::Index(arr, idx, _) => {
-                if let Some(t) = self.constraint_from_expr(name, arr) {
-                    return Some(t);
-                }
-                self.constraint_from_expr(name, idx)
-            }
-            ast::Expr::IfExpr(i) => {
-                if let Some(t) = self.constraint_from_expr(name, &i.cond) {
-                    return Some(t);
-                }
-                if let Some(t) = self.constraint_from_body(name, &i.then) {
-                    return Some(t);
-                }
-                for (c, b) in &i.elifs {
-                    if let Some(t) = self.constraint_from_expr(name, c) {
-                        return Some(t);
-                    }
-                    if let Some(t) = self.constraint_from_body(name, b) {
-                        return Some(t);
-                    }
-                }
-                if let Some(b) = &i.els {
-                    return self.constraint_from_body(name, b);
-                }
-                None
-            }
-            ast::Expr::Pipe(input, _, _, _) => self.constraint_from_expr(name, input),
-            ast::Expr::Block(stmts, _) => self.constraint_from_body(name, stmts),
-            ast::Expr::As(inner, _, _) => self.constraint_from_expr(name, inner),
-            _ => None,
-        }
-    }
-
-    fn infer_from_call_sites(&mut self, body: &[ast::Stmt]) -> bool {
-        let mut changed = false;
-        for stmt in body {
-            changed |= self.call_site_stmt(stmt);
-        }
-        changed
-    }
-
-    fn call_site_stmt(&mut self, stmt: &ast::Stmt) -> bool {
-        match stmt {
-            ast::Stmt::Expr(e) => self.call_site_expr(e),
-            ast::Stmt::Bind(b) => self.call_site_expr(&b.value),
-            ast::Stmt::Assign(_, rhs, _) => self.call_site_expr(rhs),
-            ast::Stmt::Ret(Some(e), _) => self.call_site_expr(e),
-            ast::Stmt::If(i) => {
-                let mut c = self.call_site_expr(&i.cond);
-                for s in &i.then {
-                    c |= self.call_site_stmt(s);
-                }
-                for (cond, b) in &i.elifs {
-                    c |= self.call_site_expr(cond);
-                    for s in b {
-                        c |= self.call_site_stmt(s);
-                    }
-                }
-                if let Some(b) = &i.els {
-                    for s in b {
-                        c |= self.call_site_stmt(s);
-                    }
-                }
-                c
-            }
-            ast::Stmt::While(w) => {
-                let mut c = self.call_site_expr(&w.cond);
-                for s in &w.body {
-                    c |= self.call_site_stmt(s);
-                }
-                c
-            }
-            ast::Stmt::For(f) => {
-                let mut c = self.call_site_expr(&f.iter);
-                for s in &f.body {
-                    c |= self.call_site_stmt(s);
-                }
-                c
-            }
-            ast::Stmt::Loop(l) => {
-                let mut c = false;
-                for s in &l.body {
-                    c |= self.call_site_stmt(s);
-                }
-                c
-            }
-            ast::Stmt::Match(m) => {
-                let mut c = self.call_site_expr(&m.subject);
-                for arm in &m.arms {
-                    for s in &arm.body {
-                        c |= self.call_site_stmt(s);
-                    }
-                }
-                c
-            }
-            _ => false,
-        }
-    }
-
-    fn call_site_expr(&mut self, expr: &ast::Expr) -> bool {
-        match expr {
-            ast::Expr::Call(callee, args, _) => {
-                let mut c = false;
-                if let ast::Expr::Ident(fn_name, _) = callee.as_ref() {
-                    let fn_name = fn_name.clone();
-                    if let Some((_, ptys, _)) = self.fns.get(&fn_name) {
-                        let ptys = ptys.clone();
-                        for (i, arg) in args.iter().enumerate() {
-                            if i < ptys.len() {
-                                let is_unsolved = matches!(&ptys[i], Type::Inferred)
-                                    || matches!(&ptys[i], Type::TypeVar(_))
-                                        && self.infer_ctx.try_resolve(&ptys[i]).is_none();
-                                if is_unsolved {
-                                    let arg_ty = self.expr_ty_ast(arg);
-                                    if arg_ty != Type::I64 || !matches!(arg, ast::Expr::Ident(..)) {
-                                        if !matches!(arg_ty, Type::Inferred | Type::TypeVar(_)) {
-                                            if let Some(entry) = self.fns.get_mut(&fn_name) {
-                                                let _ = self.infer_ctx.unify(&entry.1[i], &arg_ty);
-                                                entry.1[i] = self.infer_ctx.resolve(&entry.1[i]);
-                                                c = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                for arg in args {
-                    c |= self.call_site_expr(arg);
-                }
-                c
-            }
-            ast::Expr::Method(obj, _, args, _) => {
-                let mut c = self.call_site_expr(obj);
-                for arg in args {
-                    c |= self.call_site_expr(arg);
-                }
-                c
-            }
-            ast::Expr::BinOp(l, _, r, _) => self.call_site_expr(l) | self.call_site_expr(r),
-            ast::Expr::Ternary(a, b, c_expr, _) => {
-                self.call_site_expr(a) | self.call_site_expr(b) | self.call_site_expr(c_expr)
-            }
-            ast::Expr::UnaryOp(_, e, _)
-            | ast::Expr::Ref(e, _)
-            | ast::Expr::Deref(e, _)
-            | ast::Expr::As(e, _, _) => self.call_site_expr(e),
-            ast::Expr::Index(a, b, _) => self.call_site_expr(a) | self.call_site_expr(b),
-            ast::Expr::IfExpr(i) => {
-                let mut c = self.call_site_expr(&i.cond);
-                for s in &i.then {
-                    c |= self.call_site_stmt(s);
-                }
-                for (cond, b) in &i.elifs {
-                    c |= self.call_site_expr(cond);
-                    for s in b {
-                        c |= self.call_site_stmt(s);
-                    }
-                }
-                if let Some(b) = &i.els {
-                    for s in b {
-                        c |= self.call_site_stmt(s);
-                    }
-                }
-                c
-            }
-            ast::Expr::Block(stmts, _) => {
-                let mut c = false;
-                for s in stmts {
-                    c |= self.call_site_stmt(s);
-                }
-                c
-            }
-            ast::Expr::Pipe(a, b, extra, _) => {
-                let mut c = self.call_site_expr(a) | self.call_site_expr(b);
-                for e in extra {
-                    c |= self.call_site_expr(e);
-                }
-                c
-            }
-            _ => false,
-        }
-    }
-
-    fn expr_is_ident(expr: &ast::Expr, name: &str) -> bool {
-        matches!(expr, ast::Expr::Ident(n, _) if n == name)
-    }
 }

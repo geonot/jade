@@ -8,11 +8,21 @@ pub(crate) struct ConstraintOrigin {
     pub reason: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub(crate) enum TypeConstraint {
+    None,
+    Numeric,  // I8-U64, F32-F64
+    Integer,  // I8-U64 only
+    Float,    // F32-F64 only
+}
+
 pub(crate) struct InferCtx {
     parent: Vec<u32>,
     rank: Vec<u8>,
     types: Vec<Option<Type>>,
     origins: Vec<Option<ConstraintOrigin>>,
+    constraints: Vec<TypeConstraint>,
     pub(crate) debug: bool,
 }
 
@@ -23,6 +33,7 @@ impl InferCtx {
             rank: Vec::new(),
             types: Vec::new(),
             origins: Vec::new(),
+            constraints: Vec::new(),
             debug: false,
         }
     }
@@ -33,6 +44,18 @@ impl InferCtx {
         self.rank.push(0);
         self.types.push(None);
         self.origins.push(None);
+        self.constraints.push(TypeConstraint::None);
+        Type::TypeVar(id)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn fresh_numeric_var(&mut self) -> Type {
+        let id = self.parent.len() as u32;
+        self.parent.push(id);
+        self.rank.push(0);
+        self.types.push(None);
+        self.origins.push(None);
+        self.constraints.push(TypeConstraint::Numeric);
         Type::TypeVar(id)
     }
 
@@ -182,13 +205,23 @@ impl InferCtx {
     fn union(&mut self, a: u32, b: u32) {
         let ra = self.rank[a as usize];
         let rb = self.rank[b as usize];
+        // Merge constraints: more specific wins
+        let merged = match (&self.constraints[a as usize], &self.constraints[b as usize]) {
+            (TypeConstraint::None, c) | (c, TypeConstraint::None) => c.clone(),
+            (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => TypeConstraint::Integer,
+            (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => TypeConstraint::Float,
+            (TypeConstraint::Numeric, TypeConstraint::Numeric) => TypeConstraint::Numeric,
+        };
         if ra < rb {
             self.parent[a as usize] = b;
+            self.constraints[b as usize] = merged;
         } else if ra > rb {
             self.parent[b as usize] = a;
+            self.constraints[a as usize] = merged;
         } else {
             self.parent[b as usize] = a;
             self.rank[a as usize] += 1;
+            self.constraints[a as usize] = merged;
         }
     }
 
@@ -241,7 +274,11 @@ impl InferCtx {
                 if let Some(resolved) = self.types[root as usize].clone() {
                     self.resolve(&resolved)
                 } else {
-                    Type::I64
+                    // Constraint-aware defaulting
+                    match &self.constraints[root as usize] {
+                        TypeConstraint::Float => Type::F64,
+                        _ => Type::I64, // Numeric, Integer, None all → I64
+                    }
                 }
             }
             Type::Array(inner, len) => Type::Array(Box::new(self.resolve(inner)), *len),
@@ -262,6 +299,7 @@ impl InferCtx {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn try_resolve(&mut self, ty: &Type) -> Option<Type> {
         match ty {
             Type::TypeVar(v) => {
