@@ -42,6 +42,7 @@ pub enum Decl {
     Store(StoreDef),
     Trait(TraitDef),
     Impl(ImplBlock),
+    Const(String, Expr, Span),  // top-level constant: NAME is EXPR
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

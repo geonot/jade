@@ -2,11 +2,15 @@
 //!
 //! Runtime model (per actor type):
 //!   - State struct: { field0, field1, ... }
-//!   - Message union: tag (i32) + max-sized payload
-//!   - Mailbox struct: { mutex, cond_notempty, cond_notfull, buf_ptr, cap, head, tail, count, alive, state }
-//!   - Actor loop fn: dequeue → switch on tag → dispatch to handler
-//!   - Spawn: malloc mailbox + init mutex/conds + pthread_create
-//!   - Send: lock → enqueue → signal → unlock
+//!   - Message struct: tag (i32) + max-sized payload
+//!   - Mailbox struct: { ptr channel, i32 alive, state_struct }
+//!   - Actor loop fn: recv from channel → switch on tag → dispatch to handler
+//!   - Spawn: malloc mailbox + create channel + create coroutine + sched_spawn
+//!   - Send: write msg to stack + jade_chan_send
+//!
+//! Actors are daemon coroutines (don't block jade_sched_run) that receive
+//! messages through the existing typed channel infrastructure, giving us
+//! scheduler-integrated park/wake, backpressure, and M:N scheduling for free.
 
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
@@ -23,52 +27,13 @@ use super::b;
 const MAILBOX_CAP: u64 = 256;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Declare pthreads/mutex/condvar externs if not already present.
+    /// Ensure basic C functions needed for actor codegen.
+    /// The jade_* runtime functions are declared by declare_jade_runtime().
     pub(crate) fn declare_actor_runtime(&mut self) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
 
-        // pthread_create(thread*, attr*, start_routine, arg) -> i32
-        if self.module.get_function("pthread_create").is_none() {
-            let ft = i32t.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false);
-            self.module.add_function("pthread_create", ft, Some(Linkage::External));
-        }
-        // pthread_mutex_init(mutex*, attr*) -> i32
-        if self.module.get_function("pthread_mutex_init").is_none() {
-            let ft = i32t.fn_type(&[ptr.into(), ptr.into()], false);
-            self.module.add_function("pthread_mutex_init", ft, Some(Linkage::External));
-        }
-        // pthread_mutex_lock(mutex*) -> i32
-        if self.module.get_function("pthread_mutex_lock").is_none() {
-            let ft = i32t.fn_type(&[ptr.into()], false);
-            self.module.add_function("pthread_mutex_lock", ft, Some(Linkage::External));
-        }
-        // pthread_mutex_unlock(mutex*) -> i32
-        if self.module.get_function("pthread_mutex_unlock").is_none() {
-            let ft = i32t.fn_type(&[ptr.into()], false);
-            self.module.add_function("pthread_mutex_unlock", ft, Some(Linkage::External));
-        }
-        // pthread_cond_init(cond*, attr*) -> i32
-        if self.module.get_function("pthread_cond_init").is_none() {
-            let ft = i32t.fn_type(&[ptr.into(), ptr.into()], false);
-            self.module.add_function("pthread_cond_init", ft, Some(Linkage::External));
-        }
-        // pthread_cond_wait(cond*, mutex*) -> i32
-        if self.module.get_function("pthread_cond_wait").is_none() {
-            let ft = i32t.fn_type(&[ptr.into(), ptr.into()], false);
-            self.module.add_function("pthread_cond_wait", ft, Some(Linkage::External));
-        }
-        // pthread_cond_signal(cond*) -> i32
-        if self.module.get_function("pthread_cond_signal").is_none() {
-            let ft = i32t.fn_type(&[ptr.into()], false);
-            self.module.add_function("pthread_cond_signal", ft, Some(Linkage::External));
-        }
-        // pthread_detach(thread) -> i32
-        if self.module.get_function("pthread_detach").is_none() {
-            let ft = i32t.fn_type(&[i64t.into()], false);
-            self.module.add_function("pthread_detach", ft, Some(Linkage::External));
-        }
         // malloc
         if self.module.get_function("malloc").is_none() {
             let ft = ptr.fn_type(&[i64t.into()], false);
@@ -89,8 +54,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Create the LLVM struct types for an actor:
     /// - `{ActorName}_state`: actor fields
     /// - `{ActorName}_msg`: { i32 tag, [payload_size x i8] }
-    /// - `{ActorName}_mailbox`: { [40 x i8] mutex, [48 x i8] cond_ne, [48 x i8] cond_nf,
-    ///      ptr buf, i64 cap, i64 head, i64 tail, i64 count, i32 alive, state_struct }
+    /// - `{ActorName}_mailbox`: { ptr channel, i32 alive, state_struct }
     pub(crate) fn declare_actor(&mut self, ad: &hir::ActorDef) -> Result<(), String> {
         let name = &ad.name;
 
@@ -127,34 +91,17 @@ impl<'ctx> Compiler<'ctx> {
         msg_st.set_body(&[i32t.into(), payload_ty.into()], false);
 
         // Mailbox struct:
-        //   [40 x i8]  mutex        (pthread_mutex_t — opaque, 40 bytes on Linux x86_64)
-        //   [48 x i8]  cond_notempty
-        //   [48 x i8]  cond_notfull
-        //   ptr         buf          (pointer to msg array)
-        //   i64         cap
-        //   i64         head
-        //   i64         tail
-        //   i64         count
-        //   i32         alive        (1 = running, 0 = stopped)
+        //   ptr          channel     (jade_chan_t*)
+        //   i32          alive       (1 = running, 0 = stopped)
         //   state_struct state       (actor fields inline)
         let mb_name = format!("{name}_mailbox");
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let i64t = self.ctx.i64_type();
-        let mutex_ty = self.ctx.i8_type().array_type(40);
-        let cond_ty = self.ctx.i8_type().array_type(48);
         let mb_st = self.ctx.opaque_struct_type(&mb_name);
         mb_st.set_body(
             &[
-                mutex_ty.into(),  // 0: mutex
-                cond_ty.into(),   // 1: cond_notempty
-                cond_ty.into(),   // 2: cond_notfull
-                ptr_ty.into(),    // 3: buf
-                i64t.into(),      // 4: cap
-                i64t.into(),      // 5: head
-                i64t.into(),      // 6: tail
-                i64t.into(),      // 7: count
-                i32t.into(),      // 8: alive
-                state_st.into(),  // 9: state
+                ptr_ty.into(),    // 0: channel
+                i32t.into(),      // 1: alive
+                state_st.into(),  // 2: state
             ],
             false,
         );
@@ -163,7 +110,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Generate the actor loop function: `void {name}_loop(ptr mailbox_arg)`
-    /// This runs on the spawned thread and loops: dequeue → dispatch → repeat.
+    /// This runs as a coroutine, receiving messages from the channel.
     pub(crate) fn compile_actor_loop(
         &mut self,
         ad: &hir::ActorDef,
@@ -175,17 +122,17 @@ impl<'ctx> Compiler<'ctx> {
 
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
-        let i64t = self.ctx.i64_type();
 
         let mb_st = self.module.get_struct_type(&mb_name).unwrap();
         let msg_st = self.module.get_struct_type(&msg_name).unwrap();
 
-        // Declare the loop function: ptr -> ptr (pthread start_routine signature)
-        let ft = ptr_ty.fn_type(&[ptr_ty.into()], false);
+        // Coroutine entry signature: void (ptr)
+        let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
         let fv = self.module.add_function(&loop_name, ft, Some(Linkage::Internal));
 
         let entry = self.ctx.append_basic_block(fv, "entry");
         let loop_bb = self.ctx.append_basic_block(fv, "loop");
+        let dispatch_bb = self.ctx.append_basic_block(fv, "dispatch");
         let exit_bb = self.ctx.append_basic_block(fv, "exit");
 
         // Save and set state
@@ -194,115 +141,46 @@ impl<'ctx> Compiler<'ctx> {
 
         let mb_ptr = fv.get_nth_param(0).unwrap().into_pointer_value();
 
-        // Entry: compute all struct GEPs once (invariant), then jump to loop
+        // Entry: compute GEPs, alloca for message buffer, jump to loop
         self.bld.position_at_end(entry);
-        let mutex_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "mutex_ptr"));
-        let cond_ne_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 1, "cond_ne_ptr"));
-        let cond_nf_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 2, "cond_nf_ptr"));
-        let buf_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 3, "buf_ptr_ptr"));
-        let head_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 5, "head_ptr"));
-        let count_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 7, "count_ptr"));
-        let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 8, "alive_ptr"));
-        let state_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 9, "state_ptr"));
+        let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
+        let ch_ptr = b!(self.bld.build_load(ptr_ty, ch_ptr_ptr, "ch_ptr")).into_pointer_value();
+        let state_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 2, "state_ptr"));
+
+        // Allocate stack space for one message
+        let msg_alloca = self.entry_alloca(msg_st.into(), "msg_buf");
+
         b!(self.bld.build_unconditional_branch(loop_bb));
 
-        // Loop header: lock, wait if empty, dequeue
+        // Loop: receive message from channel
         self.bld.position_at_end(loop_bb);
-        // Lock
-        let lock_fn = self.module.get_function("pthread_mutex_lock").unwrap();
-        b!(self.bld.build_call(lock_fn, &[mutex_ptr.into()], ""));
+        let chan_recv = self.module.get_function("jade_chan_recv").unwrap();
+        let recv_ok = b!(self.bld.build_call(
+            chan_recv,
+            &[ch_ptr.into(), msg_alloca.into()],
+            "recv_ok"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_int_value();
 
-        // While count == 0 && alive, wait on cond_notempty
-        let wait_bb = self.ctx.append_basic_block(fv, "wait");
-        let dequeue_bb = self.ctx.append_basic_block(fv, "dequeue");
-        b!(self.bld.build_unconditional_branch(wait_bb));
-
-        self.bld.position_at_end(wait_bb);
-        let count_val = b!(self.bld.build_load(i64t, count_ptr, "count"));
-        let has_msg = b!(self.bld.build_int_compare(
+        // If recv returns 0 (channel closed), exit
+        let ok = b!(self.bld.build_int_compare(
             IntPredicate::NE,
-            count_val.into_int_value(),
-            i64t.const_int(0, false),
-            "has_msg"
-        ));
-        // If messages available, dequeue immediately
-        let check_alive_bb = self.ctx.append_basic_block(fv, "check_alive");
-        b!(self.bld.build_conditional_branch(has_msg, dequeue_bb, check_alive_bb));
-
-        // Check alive — if dead and empty, exit; if dead but has msgs, drain first
-        self.bld.position_at_end(check_alive_bb);
-        let alive_val = b!(self.bld.build_load(i32t, alive_ptr, "alive"));
-        let is_dead = b!(self.bld.build_int_compare(
-            IntPredicate::EQ,
-            alive_val.into_int_value(),
+            recv_ok,
             i32t.const_int(0, false),
-            "is_dead"
+            "ok"
         ));
-        let do_wait = self.ctx.append_basic_block(fv, "do_wait");
-        let exit_unlock_bb = self.ctx.append_basic_block(fv, "exit_unlock");
-        b!(self.bld.build_conditional_branch(is_dead, exit_unlock_bb, do_wait));
+        b!(self.bld.build_conditional_branch(ok, dispatch_bb, exit_bb));
 
-        // do_wait: call pthread_cond_wait, then re-check
-        self.bld.position_at_end(do_wait);
-        let cond_wait_fn = self.module.get_function("pthread_cond_wait").unwrap();
-        b!(self.bld.build_call(cond_wait_fn, &[cond_ne_ptr.into(), mutex_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(wait_bb));
-
-        // exit_unlock: unlock and exit
-        self.bld.position_at_end(exit_unlock_bb);
-        let unlock_fn = self.module.get_function("pthread_mutex_unlock").unwrap();
-        b!(self.bld.build_call(unlock_fn, &[mutex_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(exit_bb));
-
-        // Dequeue: read msg at head, advance head, decrement count
-        self.bld.position_at_end(dequeue_bb);
-        let buf_ptr = b!(self.bld.build_load(ptr_ty, buf_ptr_ptr, "buf_ptr"));
-        let head_val = b!(self.bld.build_load(i64t, head_ptr, "head"));
-
-        // msg_ptr = buf + head * sizeof(msg)
-        let msg_size = self.type_store_size(msg_st.into());
-        let msg_size_val = i64t.const_int(msg_size, false);
-        let offset = b!(self.bld.build_int_mul(head_val.into_int_value(), msg_size_val, "offset"));
-
-        let msg_ptr = unsafe {
-            b!(self.bld.build_gep(
-                self.ctx.i8_type(),
-                buf_ptr.into_pointer_value(),
-                &[offset.into()],
-                "msg_ptr"
-            ))
-        };
-
-        // Copy tag
-        let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_ptr, 0, "tag_ptr"));
+        // Dispatch: read tag, switch to handlers
+        self.bld.position_at_end(dispatch_bb);
+        let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
         let tag_val = b!(self.bld.build_load(i32t, tag_ptr, "tag"));
-
-        // Advance head = (head + 1) & (CAP - 1)  [power-of-2 ring buffer]
-        let one = i64t.const_int(1, false);
-        let cap_mask = i64t.const_int(MAILBOX_CAP - 1, false);
-        let new_head = b!(self.bld.build_int_add(head_val.into_int_value(), one, "new_head_raw"));
-        let new_head = b!(self.bld.build_and(new_head, cap_mask, "new_head"));
-        b!(self.bld.build_store(head_ptr, new_head));
-
-        // Decrement count
-        let count_val2 = b!(self.bld.build_load(i64t, count_ptr, "count2"));
-        let new_count = b!(self.bld.build_int_sub(count_val2.into_int_value(), one, "new_count"));
-        b!(self.bld.build_store(count_ptr, new_count));
-
-        // Unlock BEFORE signal — avoids "hurry up and wait" (woken thread
-        // can grab the mutex immediately instead of blocking on it)
-        let unlock_fn = self.module.get_function("pthread_mutex_unlock").unwrap();
-        b!(self.bld.build_call(unlock_fn, &[mutex_ptr.into()], ""));
-
-        // Signal notfull (after unlock — reduces contention)
-        let cond_signal_fn = self.module.get_function("pthread_cond_signal").unwrap();
-        b!(self.bld.build_call(cond_signal_fn, &[cond_nf_ptr.into()], ""));
-
-        // Switch on tag → handler blocks
-        let payload_ptr = b!(self.bld.build_struct_gep(msg_st, msg_ptr, 1, "payload_ptr"));
+        let payload_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 1, "payload_ptr"));
 
         if ad.handlers.is_empty() {
-            // No handlers, just loop
             b!(self.bld.build_unconditional_branch(loop_bb));
         } else {
             let mut handler_bbs = Vec::new();
@@ -315,9 +193,7 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(default_bb);
             b!(self.bld.build_unconditional_branch(loop_bb));
 
-            self.bld.position_at_end(dequeue_bb);
-            // Reposition — we were at dequeue_bb, but we need to add switch at end
-            // Actually we just continue from where we are
+            self.bld.position_at_end(dispatch_bb);
             let _switch = b!(self.bld.build_switch(
                 tag_val.into_int_value(),
                 default_bb,
@@ -332,7 +208,6 @@ impl<'ctx> Compiler<'ctx> {
                 let bb = handler_bbs[i].1;
                 self.bld.position_at_end(bb);
 
-                // Save current vars and set up handler scope
                 self.vars.push(std::collections::HashMap::new());
 
                 // Bind state fields as variables
@@ -347,11 +222,11 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 // Extract handler params from payload
+                let i64t = self.ctx.i64_type();
                 let mut param_offset: u64 = 0;
                 for p in &h.params {
                     let pty = self.llvm_ty(&p.ty);
                     let psize = self.type_store_size(pty);
-                    // GEP into payload at offset
                     let offset_val = i64t.const_int(param_offset, false);
                     let param_ptr = unsafe {
                         b!(self.bld.build_gep(
@@ -363,7 +238,6 @@ impl<'ctx> Compiler<'ctx> {
                     };
                     let param_val = b!(self.bld.build_load(pty, param_ptr, &p.name));
 
-                    // Store in a local alloca
                     let alloca = self.entry_alloca(pty, &p.name);
                     b!(self.bld.build_store(alloca, param_val));
                     self.set_var(&p.name, alloca, p.ty.clone());
@@ -383,22 +257,23 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Exit block
+        // Exit: return void (coroutine trampoline marks it DONE)
         self.bld.position_at_end(exit_bb);
-        let null = ptr_ty.const_null();
-        b!(self.bld.build_return(Some(&null)));
+        b!(self.bld.build_return(None));
 
         self.cur_fn = old_fn;
         Ok(())
     }
 
-    /// Compile a `spawn ActorName` expression → returns ActorRef (pointer to mailbox)
+    /// Compile a `spawn ActorName` expression → returns ActorRef (pointer to mailbox).
+    /// Creates a channel, mallocs the mailbox, creates a daemon coroutine, and
+    /// spawns it on the scheduler.
     pub(crate) fn compile_spawn(&mut self, actor_name: &str) -> Result<BasicValueEnum<'ctx>, String> {
         let mb_name = format!("{actor_name}_mailbox");
         let msg_name = format!("{actor_name}_msg");
         let loop_name = format!("{actor_name}_loop");
 
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let _ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
 
@@ -427,92 +302,52 @@ impl<'ctx> Compiler<'ctx> {
 
         let mb_ptr_v = mb_ptr.into_pointer_value();
 
-        // Init mutex
-        let mutex_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 0, "mutex_ptr"));
-        let mutex_init_fn = self.module.get_function("pthread_mutex_init").unwrap();
-        b!(self.bld.build_call(
-            mutex_init_fn,
-            &[mutex_ptr.into(), ptr_ty.const_null().into()],
-            ""
-        ));
-
-        // Init cond_notempty
-        let cond_ne_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "cond_ne_ptr"));
-        let cond_init_fn = self.module.get_function("pthread_cond_init").unwrap();
-        b!(self.bld.build_call(
-            cond_init_fn,
-            &[cond_ne_ptr.into(), ptr_ty.const_null().into()],
-            ""
-        ));
-
-        // Init cond_notfull
-        let cond_nf_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 2, "cond_nf_ptr"));
-        b!(self.bld.build_call(
-            cond_init_fn,
-            &[cond_nf_ptr.into(), ptr_ty.const_null().into()],
-            ""
-        ));
-
-        // Allocate message buffer: malloc(cap * sizeof(msg))
-        let cap = MAILBOX_CAP;
-        let buf_bytes = cap * msg_size;
-        let buf_ptr = b!(self.bld.build_call(
-            malloc_fn,
-            &[i64t.const_int(buf_bytes, false).into()],
-            "buf_raw"
+        // Create channel: jade_chan_create(msg_size, MAILBOX_CAP)
+        let chan_create = self.module.get_function("jade_chan_create").unwrap();
+        let ch = b!(self.bld.build_call(
+            chan_create,
+            &[
+                i64t.const_int(msg_size, false).into(),
+                i64t.const_int(MAILBOX_CAP, false).into(),
+            ],
+            "actor_ch"
         )).try_as_basic_value().basic().unwrap();
 
-        // Store buf pointer
-        let buf_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 3, "buf_ptr_ptr"));
-        b!(self.bld.build_store(buf_ptr_ptr, buf_ptr));
+        // Store channel pointer in mailbox (field 0)
+        let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 0, "ch_ptr_ptr"));
+        b!(self.bld.build_store(ch_ptr_ptr, ch));
 
-        // Store cap
-        let cap_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 4, "cap_ptr"));
-        b!(self.bld.build_store(cap_ptr, i64t.const_int(cap, false)));
-
-        // head, tail, count already 0 from memset
-
-        // Set alive = 1
-        let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 8, "alive_ptr"));
+        // Set alive = 1 (field 1)
+        let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
 
-        // Initialize state fields to defaults
-        let state_name = format!("{actor_name}_state");
-        let _state_st = self.module.get_struct_type(&state_name).unwrap();
-        // State fields are already zero-init from memset — defaults would need
-        // to be compiled into the init section in a production impl
-
-        // Create thread
-        let thread_alloca = self.entry_alloca(i64t.into(), "thread_id");
+        // Create coroutine: jade_coro_create(loop_fn, mb_ptr)
         let loop_fn = self.module.get_function(&loop_name)
             .ok_or_else(|| format!("actor loop fn '{loop_name}' not found"))?;
-        let pthread_create_fn = self.module.get_function("pthread_create").unwrap();
-        b!(self.bld.build_call(
-            pthread_create_fn,
+        let coro_create = self.module.get_function("jade_coro_create").unwrap();
+        let coro = b!(self.bld.build_call(
+            coro_create,
             &[
-                thread_alloca.into(),
-                ptr_ty.const_null().into(),
                 loop_fn.as_global_value().as_pointer_value().into(),
                 mb_ptr_v.into(),
             ],
-            ""
-        ));
+            "actor_coro"
+        )).try_as_basic_value().basic().unwrap();
 
-        // Detach thread (fire and forget)
-        let thread_id = b!(self.bld.build_load(i64t, thread_alloca, "tid"));
-        let pthread_detach_fn = self.module.get_function("pthread_detach").unwrap();
-        b!(self.bld.build_call(
-            pthread_detach_fn,
-            &[thread_id.into()],
-            ""
-        ));
+        // Mark as daemon (actor coroutine doesn't block jade_sched_run)
+        let set_daemon = self.module.get_function("jade_coro_set_daemon").unwrap();
+        b!(self.bld.build_call(set_daemon, &[coro.into()], ""));
+
+        // Spawn on scheduler
+        let sched_spawn = self.module.get_function("jade_sched_spawn").unwrap();
+        b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
 
         // Return the mailbox pointer as ActorRef
         Ok(mb_ptr_v.into())
     }
 
     /// Compile a `send target, @handler(args)` expression.
-    /// Locks the mailbox, waits if full, writes the message, signals, unlocks.
+    /// Writes the message to stack and sends it through the actor's channel.
     pub(crate) fn compile_send(
         &mut self,
         target: &hir::Expr,
@@ -529,69 +364,26 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
 
         let mb_st = self.module.get_struct_type(&mb_name)
-            .ok_or_else(|| format!("actor mailbox type '{mb_name}' not found"))?;
-        let msg_st = self.module.get_struct_type(&msg_name).unwrap();
+            .ok_or_else(|| format!("mailbox type '{mb_name}' not found"))?;
+        let msg_st = self.module.get_struct_type(&msg_name)
+            .ok_or_else(|| format!("message type '{msg_name}' not found"))?;
 
+        // Compile target to get mailbox pointer
         let mb_ptr = self.compile_expr(target)?.into_pointer_value();
 
-        // Lock
-        let mutex_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "mutex_ptr"));
-        let lock_fn = self.module.get_function("pthread_mutex_lock").unwrap();
-        b!(self.bld.build_call(lock_fn, &[mutex_ptr.into()], ""));
+        // Load channel pointer from mailbox field 0
+        let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
+        let ch_ptr = b!(self.bld.build_load(ptr_ty, ch_ptr_ptr, "ch_ptr"));
 
-        // Wait while full
-        let fv = self.cur_fn.unwrap();
-        let wait_bb = self.ctx.append_basic_block(fv, "send_wait");
-        let do_wait_bb = self.ctx.append_basic_block(fv, "send_do_wait");
-        let enqueue_bb = self.ctx.append_basic_block(fv, "send_enqueue");
+        // Allocate message on stack
+        let msg_alloca = self.entry_alloca(msg_st.into(), "send_msg");
 
-        b!(self.bld.build_unconditional_branch(wait_bb));
-        self.bld.position_at_end(wait_bb);
-
-        let count_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 7, "count_ptr"));
-        let count_val = b!(self.bld.build_load(i64t, count_ptr, "count"));
-        let cap_const = i64t.const_int(MAILBOX_CAP, false);
-        let is_full = b!(self.bld.build_int_compare(
-            IntPredicate::EQ,
-            count_val.into_int_value(),
-            cap_const,
-            "is_full"
-        ));
-        b!(self.bld.build_conditional_branch(is_full, do_wait_bb, enqueue_bb));
-
-        // Do wait on cond_notfull
-        self.bld.position_at_end(do_wait_bb);
-        let cond_nf_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 2, "cond_nf_ptr"));
-        let cond_wait_fn = self.module.get_function("pthread_cond_wait").unwrap();
-        b!(self.bld.build_call(cond_wait_fn, &[cond_nf_ptr.into(), mutex_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(wait_bb));
-
-        // Enqueue: write msg at tail
-        self.bld.position_at_end(enqueue_bb);
-        let buf_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 3, "buf_ptr_ptr"));
-        let buf_ptr = b!(self.bld.build_load(ptr_ty, buf_ptr_ptr, "buf_ptr"));
-        let tail_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 6, "tail_ptr"));
-        let tail_val = b!(self.bld.build_load(i64t, tail_ptr, "tail"));
-
-        let msg_size = self.type_store_size(msg_st.into());
-        let msg_size_val = i64t.const_int(msg_size, false);
-        let offset = b!(self.bld.build_int_mul(tail_val.into_int_value(), msg_size_val, "offset"));
-
-        let msg_ptr = unsafe {
-            b!(self.bld.build_gep(
-                self.ctx.i8_type(),
-                buf_ptr.into_pointer_value(),
-                &[offset.into()],
-                "msg_ptr"
-            ))
-        };
-
-        // Write tag
-        let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_ptr, 0, "tag_ptr"));
+        // Write tag (field 0)
+        let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
         b!(self.bld.build_store(tag_ptr, i32t.const_int(tag as u64, false)));
 
-        // Write payload (args packed sequentially)
-        let payload_ptr = b!(self.bld.build_struct_gep(msg_st, msg_ptr, 1, "payload_ptr"));
+        // Write payload args (field 1)
+        let payload_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 1, "payload_ptr"));
         let mut arg_offset: u64 = 0;
         for arg in args {
             let val = self.compile_expr(arg)?;
@@ -610,26 +402,13 @@ impl<'ctx> Compiler<'ctx> {
             arg_offset += psize;
         }
 
-        // Advance tail = (tail + 1) & (CAP - 1)  [power-of-2 ring buffer]
-        let one = i64t.const_int(1, false);
-        let cap_mask = i64t.const_int(MAILBOX_CAP - 1, false);
-        let new_tail = b!(self.bld.build_int_add(tail_val.into_int_value(), one, "new_tail_raw"));
-        let new_tail = b!(self.bld.build_and(new_tail, cap_mask, "new_tail"));
-        b!(self.bld.build_store(tail_ptr, new_tail));
-
-        // Increment count
-        let count_val2 = b!(self.bld.build_load(i64t, count_ptr, "count2"));
-        let new_count = b!(self.bld.build_int_add(count_val2.into_int_value(), one, "new_count"));
-        b!(self.bld.build_store(count_ptr, new_count));
-
-        // Unlock BEFORE signal — avoids "hurry up and wait"
-        let unlock_fn = self.module.get_function("pthread_mutex_unlock").unwrap();
-        b!(self.bld.build_call(unlock_fn, &[mutex_ptr.into()], ""));
-
-        // Signal notempty (after unlock — reduces contention)
-        let cond_ne_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 1, "cond_ne_ptr"));
-        let cond_signal_fn = self.module.get_function("pthread_cond_signal").unwrap();
-        b!(self.bld.build_call(cond_signal_fn, &[cond_ne_ptr.into()], ""));
+        // Send message through channel
+        let chan_send = self.module.get_function("jade_chan_send").unwrap();
+        b!(self.bld.build_call(
+            chan_send,
+            &[ch_ptr.into(), msg_alloca.into()],
+            ""
+        ));
 
         Ok(i64t.const_int(0, false).into())
     }
@@ -683,15 +462,26 @@ impl<'ctx> Compiler<'ctx> {
         name: &str,
         body: &[hir::Stmt],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.declare_actor_runtime(); // ensures pthread externs exist
+        self.declare_actor_runtime(); // ensures malloc/memset/free
 
-        // Also declare pthread_join if needed
+        // Declare pthread functions needed by dispatch coroutines
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
-        if self.module.get_function("pthread_join").is_none() {
-            let ft = i32t.fn_type(&[ptr.into(), ptr.into()], false);
-            self.module.add_function("pthread_join", ft, Some(Linkage::External));
+        macro_rules! ensure {
+            ($name:expr, $ft:expr) => {
+                if self.module.get_function($name).is_none() {
+                    self.module.add_function($name, $ft, Some(Linkage::External));
+                }
+            };
         }
+        ensure!("pthread_create", i32t.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false));
+        ensure!("pthread_join", i32t.fn_type(&[ptr.into(), ptr.into()], false));
+        ensure!("pthread_mutex_init", i32t.fn_type(&[ptr.into(), ptr.into()], false));
+        ensure!("pthread_mutex_lock", i32t.fn_type(&[ptr.into()], false));
+        ensure!("pthread_mutex_unlock", i32t.fn_type(&[ptr.into()], false));
+        ensure!("pthread_cond_init", i32t.fn_type(&[ptr.into(), ptr.into()], false));
+        ensure!("pthread_cond_wait", i32t.fn_type(&[ptr.into(), ptr.into()], false));
+        ensure!("pthread_cond_signal", i32t.fn_type(&[ptr.into()], false));
 
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
@@ -703,6 +493,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Save current state
         let saved_fn = self.cur_fn;
+        let saved_bb = self.bld.get_insert_block();
         let saved_vars = std::mem::replace(&mut self.vars, vec![std::collections::HashMap::new()]);
         let saved_loop_stack = std::mem::replace(&mut self.loop_stack, Vec::new());
 
@@ -751,9 +542,9 @@ impl<'ctx> Compiler<'ctx> {
         self.vars = saved_vars;
         self.loop_stack = saved_loop_stack;
 
-        // Now in the caller: malloc coro struct, init, pthread_create
+        // Reposition builder to the calling function's block
         let fv = self.cur_fn.unwrap();
-        let bb = self.bld.get_insert_block().unwrap_or_else(|| {
+        let bb = saved_bb.unwrap_or_else(|| {
             self.ctx.append_basic_block(fv, "coro.after")
         });
         self.bld.position_at_end(bb);
@@ -794,6 +585,13 @@ impl<'ctx> Compiler<'ctx> {
             coro_fn.as_global_value().as_pointer_value().into(),
             coro_mem.into(),
         ], ""));
+
+        // Register the dispatch name as a variable so bar.next() works
+        if name != "__anon" {
+            let name_alloca = self.entry_alloca(ptr.into(), name);
+            b!(self.bld.build_store(name_alloca, coro_mem));
+            self.set_var(name, name_alloca, Type::Coroutine(Box::new(Type::I64)));
+        }
 
         Ok(coro_mem.into())
     }
@@ -1199,19 +997,18 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Compile `stop actor_ref`
+    /// Compile `stop actor_ref` — close the actor's channel, causing it to exit.
     pub(crate) fn compile_stop(
         &mut self,
         actor_expr: &hir::Expr,
     ) -> Result<(), String> {
         let actor_ptr = self.compile_expr(actor_expr)?.into_pointer_value();
-        let actor_stop = self.module.get_function("jade_actor_stop")
-            .unwrap_or_else(|| {
-                // Fallback: set alive=0 directly (field 8 in mailbox struct)
-                // But we should have tile runtime stop function
-                panic!("jade_actor_stop not declared")
-            });
-        b!(self.bld.build_call(actor_stop, &[actor_ptr.into()], ""));
+        // Load channel pointer from mailbox field 0
+        // We don't know the exact mailbox type here, so use a raw ptr load
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let ch_ptr = b!(self.bld.build_load(ptr_ty, actor_ptr, "stop_ch_ptr"));
+        let chan_close = self.module.get_function("jade_chan_close").unwrap();
+        b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
         Ok(())
     }
 

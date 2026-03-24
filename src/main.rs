@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use clap::Parser as ClapParser;
+use clap::{Parser as ClapParser, Subcommand};
 use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
@@ -21,7 +21,11 @@ use jadec::typer::Typer;
 #[derive(ClapParser)]
 #[command(name = "jadec", version = "0.0.0", about = "The Jade compiler")]
 struct Cli {
-    input: PathBuf,
+    #[command(subcommand)]
+    command: Option<Cmd>,
+
+    /// Input .jade file to compile (default command)
+    input: Option<PathBuf>,
     #[arg(short, long, default_value = "a.out")]
     output: PathBuf,
     /// Dump LLVM IR to stdout
@@ -52,6 +56,19 @@ struct Cli {
     /// Run inline test blocks instead of main
     #[arg(long)]
     test: bool,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Initialize a new Jade package
+    Init {
+        /// Package name (defaults to current directory name)
+        name: Option<String>,
+    },
+    /// Fetch and cache all dependencies
+    Fetch,
+    /// Re-resolve dependencies and update jade.lock
+    Update,
 }
 
 fn die(msg: &str) -> ! {
@@ -149,10 +166,91 @@ fn resolve_modules(
     }
 }
 
+fn cmd_init(name: Option<String>) {
+    let pkg_name = name.unwrap_or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "myproject".into())
+    });
+    let pkg_path = PathBuf::from("jade.pkg");
+    if pkg_path.exists() {
+        die("jade.pkg already exists");
+    }
+    let pkg = Package {
+        name: pkg_name.clone(),
+        version: jadec::pkg::SemVer { major: 0, minor: 1, patch: 0 },
+        author: None,
+        requires: Vec::new(),
+    };
+    fs::write(&pkg_path, pkg.to_string_repr())
+        .unwrap_or_else(|e| die(&format!("cannot write jade.pkg: {e}")));
+    println!("created jade.pkg for {pkg_name}");
+}
+
+fn cmd_fetch() {
+    let pkg_path = PathBuf::from("jade.pkg");
+    if !pkg_path.exists() {
+        die("no jade.pkg found in current directory");
+    }
+    let pkg = Package::from_file(&pkg_path).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
+    if pkg.requires.is_empty() {
+        println!("no dependencies to fetch");
+        return;
+    }
+    let cache = Cache::new();
+    let lock_path = PathBuf::from("jade.lock");
+    let existing_lock = if lock_path.exists() {
+        Some(Lockfile::from_file(&lock_path).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
+    } else {
+        None
+    };
+    let resolved = cache.resolve(&pkg, existing_lock.as_ref())
+        .unwrap_or_else(|e| die(&format!("resolve: {e}")));
+    let lock_content = resolved.write();
+    fs::write(&lock_path, &lock_content)
+        .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+    println!("fetched {} dependencies", pkg.requires.len());
+}
+
+fn cmd_update() {
+    let pkg_path = PathBuf::from("jade.pkg");
+    if !pkg_path.exists() {
+        die("no jade.pkg found in current directory");
+    }
+    let pkg = Package::from_file(&pkg_path).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
+    if pkg.requires.is_empty() {
+        println!("no dependencies to update");
+        return;
+    }
+    // Delete existing lockfile to force re-resolution
+    let lock_path = PathBuf::from("jade.lock");
+    let _ = fs::remove_file(&lock_path);
+    let cache = Cache::new();
+    let resolved = cache.resolve(&pkg, None)
+        .unwrap_or_else(|e| die(&format!("resolve: {e}")));
+    let lock_content = resolved.write();
+    fs::write(&lock_path, &lock_content)
+        .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+    println!("updated {} dependencies", pkg.requires.len());
+}
+
 fn main() {
     let cli = Cli::parse();
-    let src = fs::read_to_string(&cli.input)
-        .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", cli.input.display())));
+
+    // Handle subcommands
+    if let Some(cmd) = cli.command {
+        match cmd {
+            Cmd::Init { name } => cmd_init(name),
+            Cmd::Fetch => cmd_fetch(),
+            Cmd::Update => cmd_update(),
+        }
+        return;
+    }
+
+    let input = cli.input.unwrap_or_else(|| die("no input file provided"));
+    let src = fs::read_to_string(&input)
+        .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
         .tokenize()
         .unwrap_or_else(|e| die(&format!("{e}")));
@@ -160,8 +258,7 @@ fn main() {
         .parse_program()
         .unwrap_or_else(|e| die(&format!("{e}")));
 
-    let base_dir = cli
-        .input
+    let base_dir = input
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
     let mut loaded = HashSet::new();
@@ -264,8 +361,7 @@ fn main() {
     }
 
     let ctx = Context::create();
-    let name = cli
-        .input
+    let name = input
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "main".into());
@@ -275,7 +371,7 @@ fn main() {
         comp.set_lib_mode();
     }
     if cli.debug {
-        let filename = cli.input.to_string_lossy().to_string();
+        let filename = input.to_string_lossy().to_string();
         comp.enable_debug(&filename);
     }
     if let Err(e) = comp.compile_program(&hir_prog, hints) {

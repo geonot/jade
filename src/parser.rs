@@ -58,6 +58,15 @@ impl Parser {
             Token::Store => Ok(Decl::Store(self.parse_store_def()?)),
             Token::Trait => Ok(Decl::Trait(self.parse_trait_def()?)),
             Token::Impl => Ok(Decl::Impl(self.parse_impl_block()?)),
+            // Top-level constant: NAME is EXPR
+            Token::Ident(_) => {
+                let sp = self.span();
+                let name = self.ident()?;
+                self.expect(Token::Is)?;
+                let val = self.parse_expr()?;
+                self.expect(Token::Newline)?;
+                Ok(Decl::Const(name, val, sp))
+            }
             _ => Err(self.error("expected *, type, enum, extern, use, err, test, actor, store, trait, or impl")),
         }
     }
@@ -1753,8 +1762,11 @@ impl Parser {
                         });
                     } else if self.check(Token::Receive) {
                         // receive ch as binding  OR  receive ch
+                        // Use ident + Expr::Ident instead of parse_expr to avoid
+                        // `as` being consumed as a type-cast by parse_postfix.
                         self.advance();
-                        let ch = self.parse_expr()?;
+                        let ch_name = self.ident()?;
+                        let ch = Expr::Ident(ch_name, arm_sp);
                         let binding = if self.check(Token::As) {
                             self.advance();
                             Some(self.ident()?)
@@ -1995,19 +2007,12 @@ impl Parser {
                 if self.check(Token::Of) {
                     if let Type::Struct(name) = t {
                         self.advance();
-                        let mut args = vec![self.parse_type()?];
-                        while self.check(Token::Comma) {
-                            self.advance();
-                            args.push(self.parse_type()?);
+                        let arg = self.parse_type()?;
+                        // Use built-in Vec type when possible
+                        if name == "Vec" {
+                            return Ok(Type::Vec(Box::new(arg)));
                         }
-                        let mangled = format!(
-                            "{}_{}",
-                            name,
-                            args.iter()
-                                .map(|a| format!("{a}"))
-                                .collect::<Vec<_>>()
-                                .join("_")
-                        );
+                        let mangled = format!("{name}_{arg}");
                         Ok(Type::Struct(mangled))
                     } else {
                         Ok(t)

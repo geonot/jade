@@ -123,7 +123,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn vec_len(
+    pub(crate) fn vec_len(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {

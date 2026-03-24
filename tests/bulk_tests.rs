@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
+use jadec::pkg::Package;
+use jadec::lock::Lockfile;
 
 fn jadec() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
@@ -3867,4 +3869,526 @@ fn b_iter_large_range() {
         "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 100)\n        total is total + x\n    log(total)\n",
         "4950",
     );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Channel tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_channel_send_recv_basic() {
+    // Send 3 values into channel, receive them in order
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 10\n    send ch, 20\n    send ch, 30\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a)\n    log(b)\n    log(c)\n",
+        "10\n20\n30",
+    );
+}
+
+#[test]
+fn b_channel_send_recv_single() {
+    // Single send/recv pair
+    expect(
+        "*main()\n    ch is channel of i64\n    send ch, 42\n    val is receive ch\n    log(val)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_channel_close_after_send() {
+    // Send values, close channel, then receive remaining values
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 1\n    send ch, 2\n    close ch\n    a is receive ch\n    b is receive ch\n    log(a)\n    log(b)\n",
+        "1\n2",
+    );
+}
+
+#[test]
+fn b_channel_large_batch() {
+    // Send and receive many values, verify count
+    expect(
+        "*main()\n    ch is channel of i64(256)\n    i is 0\n    while i < 100\n        send ch, i\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 100\n        val is receive ch\n        total is total + val\n        j is j + 1\n    log(total)\n",
+        "4950",
+    );
+}
+
+#[test]
+fn b_channel_capacity_exact() {
+    // Fill channel to exact capacity, then drain
+    expect(
+        "*main()\n    ch is channel of i64(4)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    send ch, 4\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    d is receive ch\n    log(a + b + c + d)\n",
+        "10",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Dispatch (coroutine/generator) tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_dispatch_basic_yield() {
+    // Dispatch block yields 3 values, consumer calls .next() on the dispatch name
+    expect(
+        "*main()\n    foo is dispatch producer\n        yield 10\n        yield 20\n        yield 30\n    a is producer.next()\n    b is producer.next()\n    c is producer.next()\n    log(a)\n    log(b)\n    log(c)\n",
+        "10\n20\n30",
+    );
+}
+
+#[test]
+fn b_dispatch_sum_yields() {
+    // Sum values from a dispatch block using the dispatch name
+    expect(
+        "*main()\n    foo is dispatch nums\n        yield 1\n        yield 2\n        yield 3\n        yield 4\n        yield 5\n    total is 0\n    total is total + nums.next()\n    total is total + nums.next()\n    total is total + nums.next()\n    total is total + nums.next()\n    total is total + nums.next()\n    log(total)\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_dispatch_with_loop() {
+    // Dispatch block yields multiple computed values via the name
+    expect(
+        "*main()\n    foo is dispatch counter\n        yield 0\n        yield 1\n        yield 2\n        yield 3\n        yield 4\n    total is counter.next() + counter.next() + counter.next() + counter.next() + counter.next()\n    log(total)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_dispatch_anonymous() {
+    // Anonymous dispatch block (no name) — binding var is the handle
+    expect(
+        "*main()\n    gen is dispatch\n        yield 99\n        yield 42\n    log(gen.next())\n    log(gen.next())\n",
+        "99\n42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Select tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_select_one_ready() {
+    // Select over 2 channels, one has data — correct arm executes
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch1, 42\n    select\n        receive ch1 as val\n            log(val)\n        receive ch2 as val\n            log(val)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_select_default_arm() {
+    // Select with default when no channels have data
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    select\n        receive ch1 as val\n            log(val)\n        receive ch2 as val\n            log(val)\n        default\n            log(0)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Actor stop/lifecycle tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_actor_stop_basic() {
+    // Spawn actor, send messages, stop it, program exits cleanly
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Acc\n    total: i64\n    @add n: i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    send a, @add(5)\n    send a, @add(10)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    stop a\n    0\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_actor_sequential_message_order() {
+    // Send many messages sequentially, verify accumulated state
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Sum\n    total: i64\n    @add n: i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        send s, @add(i)\n        i is i + 1\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
+        "45",
+    );
+}
+
+#[test]
+fn b_actor_multiple_state_tracking() {
+    // Actor with multiple state fields
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Stats\n    count: i64\n    sum: i64\n    @record n: i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    send s, @record(10)\n    send s, @record(20)\n    send s, @record(30)\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
+        "3\n60",
+    );
+}
+
+#[test]
+fn b_actor_two_param_handler_math() {
+    // Handler with two parameters
+    expect(
+        "extern *usleep(us: i32) -> i32\n\nactor Calc\n    result: i64\n    @add_mul a: i64, b: i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add_mul(3, 4)\n    send c, @add_mul(5, 6)\n    usleep(200000)\n    send c, @show()\n    usleep(100000)\n    0\n",
+        "42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STDLIB: std.math
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_std_math_factorial() {
+    expect(
+        "use std.math\n\n*main()\n    log(factorial(5))\n    log(factorial(0))\n    log(factorial(1))\n    log(factorial(10))\n",
+        "120\n1\n1\n3628800",
+    );
+}
+
+#[test]
+fn b_std_math_gcd() {
+    expect(
+        "use std.math\n\n*main()\n    log(gcd(12, 8))\n    log(gcd(100, 75))\n    log(gcd(7, 13))\n",
+        "4\n25\n1",
+    );
+}
+
+#[test]
+fn b_std_math_lcm() {
+    expect(
+        "use std.math\n\n*main()\n    log(lcm(4, 6))\n    log(lcm(3, 7))\n    log(lcm(12, 8))\n",
+        "12\n21\n24",
+    );
+}
+
+#[test]
+fn b_std_math_constants() {
+    // Verify PI, E, TAU are in the expected ranges
+    expect(
+        "use std.math\n\n*main()\n    log(PI > 3.14)\n    log(PI < 3.15)\n    log(E > 2.71)\n    log(E < 2.72)\n    log(TAU > 6.28)\n    log(TAU < 6.29)\n",
+        "1\n1\n1\n1\n1\n1",
+    );
+}
+
+#[test]
+fn b_std_math_degrees_radians() {
+    expect(
+        "use std.math\n\n*main()\n    d is degrees(PI)\n    log(d > 179.9)\n    log(d < 180.1)\n    r is radians(180.0)\n    log(r > 3.14)\n    log(r < 3.15)\n",
+        "1\n1\n1\n1",
+    );
+}
+
+#[test]
+fn b_std_math_hypot() {
+    expect(
+        "use std.math\n\n*main()\n    h is hypot(3.0, 4.0)\n    log(h > 4.99)\n    log(h < 5.01)\n",
+        "1\n1",
+    );
+}
+
+#[test]
+fn b_std_math_lerp() {
+    expect(
+        "use std.math\n\n*main()\n    v is lerp(0.0, 10.0, 0.5)\n    log(v > 4.99)\n    log(v < 5.01)\n",
+        "1\n1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STDLIB: std.fmt
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_std_fmt_hex() {
+    expect(
+        "use std.fmt\n\n*main()\n    log(hex(255))\n    log(hex(0))\n    log(hex(16))\n",
+        "ff\n0\n10",
+    );
+}
+
+#[test]
+fn b_std_fmt_oct() {
+    expect(
+        "use std.fmt\n\n*main()\n    log(oct(8))\n    log(oct(0))\n    log(oct(63))\n",
+        "10\n0\n77",
+    );
+}
+
+#[test]
+fn b_std_fmt_bin() {
+    expect(
+        "use std.fmt\n\n*main()\n    log(bin(10))\n    log(bin(0))\n    log(bin(255))\n",
+        "1010\n0\n11111111",
+    );
+}
+
+#[test]
+fn b_std_fmt_pad_left() {
+    expect(
+        "use std.fmt\n\n*main()\n    log(pad_left('hi', 5, ' '))\n    log(pad_left('hello', 3, 'x'))\n",
+        "   hi\nhello",
+    );
+}
+
+#[test]
+fn b_std_fmt_pad_right() {
+    expect(
+        "use std.fmt\n\n*main()\n    log(pad_right('hi', 5, ' '))\n    log(pad_right('hello', 3, 'x'))\n",
+        "hi   \nhello",
+    );
+}
+
+#[test]
+fn b_std_fmt_repeat() {
+    expect(
+        "use std.fmt\n\n*main()\n    log(repeat('ab', 3))\n    log(repeat('x', 0))\n    log(repeat('-', 5))\n",
+        "ababab\n\n-----",
+    );
+}
+
+#[test]
+fn b_std_fmt_join() {
+    expect(
+        "use std.fmt\n\n*main()\n    v is vec('a', 'b', 'c')\n    log(join(v, ', '))\n",
+        "a, b, c",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STDLIB: std.path
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_std_path_join() {
+    expect(
+        "use std.path\n\n*main()\n    log(path_join('foo', 'bar'))\n    log(path_join('foo/', 'bar'))\n    log(path_join('', 'bar'))\n    log(path_join('foo', ''))\n",
+        "foo/bar\nfoo/bar\nbar\nfoo",
+    );
+}
+
+#[test]
+fn b_std_path_dir() {
+    expect(
+        "use std.path\n\n*main()\n    log(path_dir('/foo/bar/baz'))\n    log(path_dir('file.txt'))\n",
+        "/foo/bar\n.",
+    );
+}
+
+#[test]
+fn b_std_path_base() {
+    expect(
+        "use std.path\n\n*main()\n    log(path_base('/foo/bar.txt'))\n    log(path_base('hello'))\n",
+        "bar.txt\nhello",
+    );
+}
+
+#[test]
+fn b_std_path_ext() {
+    // path_ext('noext') returns "" — log("") prints empty line, trimmed by expect
+    expect(
+        "use std.path\n\n*main()\n    log(path_ext('/foo/bar.txt'))\n",
+        ".txt",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STDLIB: std.time
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_std_time_monotonic() {
+    expect(
+        "use std.time\n\n*main()\n    t is monotonic()\n    log(t > 0.0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_std_time_elapsed() {
+    expect(
+        "use std.time\n\n*main()\n    t is monotonic()\n    sleep_ms(10)\n    e is elapsed(t)\n    log(e > 0.0)\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STDLIB: std.os
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_std_os_pid() {
+    expect(
+        "use std.os\n\n*main()\n    p is pid()\n    log(p > 0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_std_os_cwd() {
+    expect(
+        "use std.os\n\n*main()\n    c is cwd()\n    log(c.length > 0)\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Vec.length field access
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_vec_length_field() {
+    expect(
+        "*main()\n    v is vec(10, 20, 30)\n    log(v.length)\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_vec_length_empty() {
+    expect(
+        "*main()\n    v is vec()\n    log(v.length)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PKG MANAGER: Package parsing
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_pkg_parse_basic() {
+    let input = "package myapp\nversion 1.0.0\nauthor Rome\n";
+    let pkg = Package::parse(input).unwrap();
+    assert_eq!(pkg.name, "myapp");
+    assert_eq!(pkg.version.major, 1);
+    assert_eq!(pkg.version.minor, 0);
+    assert_eq!(pkg.version.patch, 0);
+    assert_eq!(pkg.author.as_deref(), Some("Rome"));
+    assert!(pkg.requires.is_empty());
+}
+
+#[test]
+fn b_pkg_parse_multiple_requires() {
+    let input = "\
+package myapp
+version 2.1.0
+require http https://github.com/jade-lang/http 0.3.0
+require json https://github.com/jade-lang/json 1.0.2
+";
+    let pkg = Package::parse(input).unwrap();
+    assert_eq!(pkg.name, "myapp");
+    assert_eq!(pkg.requires.len(), 2);
+    assert_eq!(pkg.requires[0].name, "http");
+    assert_eq!(pkg.requires[0].url, "https://github.com/jade-lang/http");
+    assert_eq!(pkg.requires[0].version.minor, 3);
+    assert_eq!(pkg.requires[1].name, "json");
+    assert_eq!(pkg.requires[1].version.major, 1);
+}
+
+#[test]
+fn b_pkg_parse_malformed() {
+    assert!(Package::parse("package myapp\n").is_err()); // missing version
+    assert!(Package::parse("version 1.0.0\n").is_err()); // missing package
+    assert!(Package::parse("package myapp\nversion bad\n").is_err()); // bad semver
+    assert!(Package::parse("package myapp\nversion 1.0.0\nfoo bar\n").is_err()); // unknown directive
+}
+
+#[test]
+fn b_pkg_roundtrip() {
+    let input = "\
+package demo
+version 3.2.1
+author TestUser
+require lib1 https://example.com/lib1 0.1.0
+";
+    let pkg = Package::parse(input).unwrap();
+    let output = pkg.to_string_repr();
+    let pkg2 = Package::parse(&output).unwrap();
+    assert_eq!(pkg2.name, "demo");
+    assert_eq!(pkg2.version.major, 3);
+    assert_eq!(pkg2.version.minor, 2);
+    assert_eq!(pkg2.version.patch, 1);
+    assert_eq!(pkg2.requires.len(), 1);
+    assert_eq!(pkg2.requires[0].name, "lib1");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PKG MANAGER: Lockfile parsing
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_lock_parse_write_roundtrip() {
+    let input = "\
+# jade.lock — auto-generated, do not edit
+http https://github.com/jade-lang/http 0.3.0 abc123
+json https://github.com/jade-lang/json 1.0.2 def456
+";
+    let lock = Lockfile::parse(input).unwrap();
+    assert_eq!(lock.entries.len(), 2);
+    let output = lock.write();
+    let lock2 = Lockfile::parse(&output).unwrap();
+    assert_eq!(lock2.entries.len(), 2);
+    // Entries are sorted by name in write()
+    assert_eq!(lock2.entries[0].name, "http");
+    assert_eq!(lock2.entries[1].name, "json");
+    assert_eq!(lock2.entries[0].commit, "abc123");
+}
+
+#[test]
+fn b_lock_parse_transitive() {
+    let input = "\
+http https://github.com/jade-lang/http 0.3.0 abc123
+  tls https://github.com/jade-lang/tls 0.1.0 xyz789
+json https://github.com/jade-lang/json 1.0.2 def456
+";
+    let lock = Lockfile::parse(input).unwrap();
+    assert_eq!(lock.entries.len(), 2);
+    assert_eq!(lock.entries[0].deps.len(), 1);
+    assert_eq!(lock.entries[0].deps[0].name, "tls");
+    assert_eq!(lock.entries[0].deps[0].commit, "xyz789");
+    assert_eq!(lock.entries[1].deps.len(), 0);
+}
+
+#[test]
+fn b_lock_find() {
+    let input = "\
+alpha https://example.com/a 1.0.0 aaa
+beta https://example.com/b 2.0.0 bbb
+";
+    let lock = Lockfile::parse(input).unwrap();
+    assert!(lock.find("alpha").is_some());
+    assert!(lock.find("beta").is_some());
+    assert!(lock.find("gamma").is_none());
+    assert_eq!(lock.find("beta").unwrap().version.major, 2);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COMPTIME: Constant folding verification
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_comptime_int_arithmetic() {
+    // 2 + 3 * 4 should fold to 14 at compile time
+    expect("*main()\n    log(2 + 3 * 4)\n", "14");
+}
+
+#[test]
+fn b_comptime_int_nested() {
+    // Nested arithmetic folding
+    expect("*main()\n    log((10 - 3) * (2 + 1))\n", "21");
+}
+
+#[test]
+fn b_comptime_float_fold() {
+    // Float constant folding
+    expect("*main()\n    x is 1.0 + 2.5\n    log(x > 3.4)\n    log(x < 3.6)\n", "1\n1");
+}
+
+#[test]
+fn b_comptime_bool_fold() {
+    expect("*main()\n    log(true and false)\n    log(true or false)\n    log(not true)\n", "0\n1\n0");
+}
+
+#[test]
+fn b_comptime_string_concat() {
+    expect("*main()\n    log('hello' + ' ' + 'world')\n", "hello world");
+}
+
+#[test]
+fn b_comptime_comparison_fold() {
+    expect("*main()\n    log(5 > 3)\n    log(2 > 7)\n    log(4 equals 4)\n", "1\n0\n1");
+}
+
+#[test]
+fn b_comptime_division() {
+    expect("*main()\n    log(100 / 7)\n    log(100 % 7)\n", "14\n2");
 }

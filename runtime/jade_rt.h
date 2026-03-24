@@ -73,6 +73,7 @@ struct jade_coro {
     void              *wait_chan;      /* channel blocked on, or NULL */
     uint32_t           id;
     int                select_ready;  /* which select case fired (-1 = none) */
+    uint8_t            daemon;        /* 1 = daemon coro (actor), doesn't block sched_run */
 };
 
 #define JADE_STACK_SIZE  (64 * 1024)   /* 64KB per coroutine */
@@ -81,6 +82,7 @@ struct jade_coro {
 jade_coro_t *jade_coro_create(void (*entry)(void*), void *arg);
 void         jade_coro_destroy(jade_coro_t *c);
 void         jade_coro_yield(void);
+void         jade_coro_set_daemon(jade_coro_t *c);
 
 /* ── Context switch (defined in assembly or fallback) ────────────── */
 

@@ -1,0 +1,18 @@
+# Select latency benchmark
+# Select over 2 channels in tight loop
+
+*main()
+    ch1 is channel of i64(16)
+    ch2 is channel of i64(16)
+    n is 100000
+    total is 0
+    i is 0
+    while i < n
+        send ch1, i
+        select
+            receive ch1 as val
+                total is total + val
+            receive ch2 as val
+                total is total + val
+        i is i + 1
+    log(total)

@@ -12,25 +12,25 @@
 *bin(n: i64) -> String
     __fmt_bin(n)
 
-*pad_left(s: String, width: i64, ch: i64) -> String
+*pad_left(s: String, width: i64, fill: String) -> String
     if s.length >= width
         return s
     padding is width - s.length
     result is ""
     i is 0
     while i < padding
-        result is result + char(ch)
+        result is result + fill
         i is i + 1
     result + s
 
-*pad_right(s: String, width: i64, ch: i64) -> String
+*pad_right(s: String, width: i64, fill: String) -> String
     if s.length >= width
         return s
     padding is width - s.length
     result is s
     i is 0
     while i < padding
-        result is result + char(ch)
+        result is result + fill
         i is i + 1
     result
 

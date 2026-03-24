@@ -21,7 +21,7 @@ type File
     mode: String
 
 *read_file(path: String) -> String
-    fp is fopen(&path, "r")
+    fp is fopen(%path, "r")
     if fp as i64 equals 0
         return ""
     fseek(fp, 0, 2)
@@ -33,18 +33,18 @@ type File
     __string_from_raw(buf, size, size + 1)
 
 *write_file(path: String, content: String) -> bool
-    fp is fopen(&path, "w")
+    fp is fopen(%path, "w")
     if fp as i64 equals 0
         return false
-    fwrite(&content, 1, content.length, fp)
+    fwrite(%content, 1, content.length, fp)
     fclose(fp)
     true
 
 *append_file(path: String, content: String) -> bool
-    fp is fopen(&path, "a")
+    fp is fopen(%path, "a")
     if fp as i64 equals 0
         return false
-    fwrite(&content, 1, content.length, fp)
+    fwrite(%content, 1, content.length, fp)
     fclose(fp)
     true
 

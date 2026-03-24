@@ -1,0 +1,13 @@
+# Coroutine spawn benchmark
+# Spawn 100K dispatch blocks, each yields a value
+
+*main()
+    n is 100000
+    total is 0
+    i is 0
+    while i < n
+        g is dispatch
+            yield 1
+        total is total + g.next()
+        i is i + 1
+    log(total)

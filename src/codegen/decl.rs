@@ -78,9 +78,13 @@ impl<'ctx> Compiler<'ctx> {
             // Call user's main
             let call_result = b!(self.bld.build_call(user_fv, &[], "user_main"));
 
-            // Run scheduler to completion (waits for all coroutines/actors)
+            // Run scheduler to completion (waits for all non-daemon coroutines)
             if let Some(sched_run) = self.module.get_function("jade_sched_run") {
                 b!(self.bld.build_call(sched_run, &[], ""));
+            }
+            // Shutdown scheduler (joins worker threads, cleans up)
+            if let Some(sched_shutdown) = self.module.get_function("jade_sched_shutdown") {
+                b!(self.bld.build_call(sched_shutdown, &[], ""));
             }
             if let Some(rv) = call_result.try_as_basic_value().basic() {
                 let ret_i32 = if rv.is_int_value() {

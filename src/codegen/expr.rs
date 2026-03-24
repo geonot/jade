@@ -714,6 +714,15 @@ impl<'ctx> Compiler<'ctx> {
             ))
             .into());
         }
+        // ptr as i64 (ptrtoint)
+        if matches!(src, Type::Ptr(_)) && target.is_int() {
+            return Ok(b!(self.bld.build_ptr_to_int(
+                val.into_pointer_value(),
+                dst.into_int_type(),
+                "ptrtoint"
+            ))
+            .into());
+        }
         Err(format!("unsupported cast: {src} as {target}"))
     }
 
@@ -883,6 +892,10 @@ impl<'ctx> Compiler<'ctx> {
         if matches!(obj_ty, Type::String) && field == "length" {
             let sv = self.compile_expr(obj)?;
             return self.string_len(sv);
+        }
+        if matches!(obj_ty, Type::Vec(_)) && field == "length" {
+            let v = self.compile_expr(obj)?;
+            return self.vec_len(v.into_pointer_value());
         }
         let (ty_name, is_ptr) = match obj_ty {
             Type::Struct(n) => (n.as_str(), false),

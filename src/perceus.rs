@@ -443,7 +443,38 @@ impl PerceusPass {
                     self.collect_refs_block(body, refs);
                 }
             }
-            _ => {}
+            // Actor/coroutine expressions with sub-expressions
+            ExprKind::Send(obj, _, _, _, args) => {
+                self.collect_refs_expr(obj, refs);
+                for a in args {
+                    self.collect_refs_expr(a, refs);
+                }
+            }
+            ExprKind::CoroutineCreate(_, body) => {
+                for s in body {
+                    self.collect_refs_stmt(s, refs);
+                }
+            }
+            ExprKind::CoroutineNext(e) | ExprKind::Yield(e) | ExprKind::DynCoerce(e, _, _) => {
+                self.collect_refs_expr(e, refs);
+            }
+            ExprKind::DynDispatch(obj, _, _, args) => {
+                self.collect_refs_expr(obj, refs);
+                for a in args {
+                    self.collect_refs_expr(a, refs);
+                }
+            }
+            ExprKind::StoreQuery(_, filter) => {
+                self.collect_refs_expr(&filter.value, refs);
+                for (_, cond) in &filter.extra {
+                    self.collect_refs_expr(&cond.value, refs);
+                }
+            }
+            // Leaf expressions with no sub-expressions
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Str(_) | ExprKind::Bool(_)
+            | ExprKind::None | ExprKind::Void | ExprKind::VariantRef(_, _, _)
+            | ExprKind::Spawn(_) | ExprKind::StoreCount(_) | ExprKind::StoreAll(_)
+            | ExprKind::IterNext(_, _, _) => {}
         }
     }
 
@@ -810,7 +841,13 @@ impl PerceusPass {
             Stmt::For(f) => self.analyze_reuse(&f.body, uses),
             Stmt::While(w) => self.analyze_reuse(&w.body, uses),
             Stmt::Loop(l) => self.analyze_reuse(&l.body, uses),
-            _ => {}
+            Stmt::Transaction(body, _) => self.analyze_reuse(body, uses),
+            Stmt::Bind(_) | Stmt::TupleBind(_, _, _) | Stmt::Assign(_, _, _)
+            | Stmt::Expr(_) | Stmt::Ret(_, _, _) | Stmt::Break(_, _)
+            | Stmt::Continue(_) | Stmt::Asm(_) | Stmt::Drop(_, _, _, _)
+            | Stmt::ErrReturn(_, _, _) | Stmt::StoreInsert(_, _, _)
+            | Stmt::StoreDelete(_, _, _) | Stmt::StoreSet(_, _, _, _)
+            | Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) => {}
         }
     }
 
@@ -924,10 +961,21 @@ impl PerceusPass {
                         self.analyze_fbip(els, uses);
                     }
                 }
+                Stmt::Match(m) => {
+                    for arm in &m.arms {
+                        self.analyze_fbip(&arm.body, uses);
+                    }
+                }
                 Stmt::For(f) => self.analyze_fbip(&f.body, uses),
                 Stmt::While(w) => self.analyze_fbip(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_fbip(&l.body, uses),
-                _ => {}
+                Stmt::Transaction(body, _) => self.analyze_fbip(body, uses),
+                Stmt::Bind(_) | Stmt::TupleBind(_, _, _) | Stmt::Assign(_, _, _)
+                | Stmt::Expr(_) | Stmt::Ret(_, _, _) | Stmt::Break(_, _)
+                | Stmt::Continue(_) | Stmt::Asm(_) | Stmt::Drop(_, _, _, _)
+                | Stmt::ErrReturn(_, _, _) | Stmt::StoreInsert(_, _, _)
+                | Stmt::StoreDelete(_, _, _) | Stmt::StoreSet(_, _, _, _)
+                | Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) => {}
             }
         }
     }
@@ -1057,7 +1105,13 @@ impl PerceusPass {
                 Stmt::For(f) => self.analyze_drop_fusion(&f.body, uses),
                 Stmt::While(w) => self.analyze_drop_fusion(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_drop_fusion(&l.body, uses),
-                _ => {}
+                Stmt::Transaction(body, _) => self.analyze_drop_fusion(body, uses),
+                Stmt::Bind(_) | Stmt::TupleBind(_, _, _) | Stmt::Assign(_, _, _)
+                | Stmt::Expr(_) | Stmt::Ret(_, _, _) | Stmt::Break(_, _)
+                | Stmt::Continue(_) | Stmt::Asm(_) | Stmt::Drop(_, _, _, _)
+                | Stmt::ErrReturn(_, _, _) | Stmt::StoreInsert(_, _, _)
+                | Stmt::StoreDelete(_, _, _) | Stmt::StoreSet(_, _, _, _)
+                | Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) => {}
             }
         }
     }
@@ -1109,7 +1163,13 @@ impl PerceusPass {
                 Stmt::For(f) => self.analyze_speculative_reuse(&f.body, uses),
                 Stmt::While(w) => self.analyze_speculative_reuse(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_speculative_reuse(&l.body, uses),
-                _ => {}
+                Stmt::Transaction(body, _) => self.analyze_speculative_reuse(body, uses),
+                Stmt::Bind(_) | Stmt::TupleBind(_, _, _) | Stmt::Assign(_, _, _)
+                | Stmt::Expr(_) | Stmt::Ret(_, _, _) | Stmt::Break(_, _)
+                | Stmt::Continue(_) | Stmt::Asm(_) | Stmt::Drop(_, _, _, _)
+                | Stmt::ErrReturn(_, _, _) | Stmt::StoreInsert(_, _, _)
+                | Stmt::StoreDelete(_, _, _) | Stmt::StoreSet(_, _, _, _)
+                | Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) => {}
             }
         }
     }

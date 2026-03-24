@@ -1,0 +1,12 @@
+# Channel throughput benchmark
+# Send/recv 1M i64 values through a buffered channel
+
+*main()
+    ch is channel of i64(1024)
+    n is 1000000
+    i is 0
+    while i < n
+        send ch, i
+        val is receive ch
+        i is i + 1
+    log(0)

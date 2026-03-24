@@ -12,13 +12,13 @@ extern *free(ptr: %i8)
 extern *strlen(s: %i8) -> i64
 
 *env(name: String) -> String
-    ptr is getenv(&name)
+    ptr is getenv(%name)
     if ptr as i64 equals 0
         return ""
     __string_from_ptr(ptr)
 
 *set_env(name: String, value: String)
-    setenv(&name, &value, 1)
+    setenv(%name, %value, 1)
 
 *cwd() -> String
     buf is malloc(4096)

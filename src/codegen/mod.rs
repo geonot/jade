@@ -677,13 +677,15 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         // Coroutine
-        decl!("jade_coro_create", ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false));
+        decl!("jade_coro_create", ptr.fn_type(&[ptr.into(), ptr.into()], false));
         decl!("jade_coro_destroy", void.fn_type(&[ptr.into()], false));
+        decl!("jade_coro_set_daemon", void.fn_type(&[ptr.into()], false));
 
         // Scheduler
         decl!("jade_sched_init", void.fn_type(&[i32t.into()], false));
         decl!("jade_sched_run", void.fn_type(&[], false));
         decl!("jade_sched_shutdown", void.fn_type(&[], false));
+        decl!("jade_sched_spawn", void.fn_type(&[ptr.into()], false));
         decl!("jade_sched_enqueue", void.fn_type(&[ptr.into()], false));
         decl!("jade_sched_yield", void.fn_type(&[], false));
         decl!("jade_sched_park", void.fn_type(&[], false));

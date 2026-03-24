@@ -37,6 +37,7 @@ jade_coro_t *jade_coro_create(void (*entry)(void*), void *arg) {
     c->next        = NULL;
     c->wait_chan   = NULL;
     c->select_ready = -1;
+    c->daemon      = 0;
 
     /*
      * Set up the initial stack so that jade_context_swap's `ret`
@@ -133,4 +134,8 @@ jade_coro_t *jade_current_coro(void) {
 
 jade_worker_t *jade_current_worker(void) {
     return tl_worker;
+}
+
+void jade_coro_set_daemon(jade_coro_t *c) {
+    if (c) c->daemon = 1;
 }

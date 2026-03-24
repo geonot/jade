@@ -52,6 +52,7 @@ pub struct Typer {
     pub(crate) trait_impl_type_args: HashMap<(String, String), Vec<Type>>,
     pub(crate) assoc_types: HashMap<(String, String), Type>,
     pub(crate) trait_assoc_types: HashMap<String, Vec<String>>,
+    pub(crate) consts: HashMap<String, ast::Expr>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,7 @@ impl Typer {
             trait_impl_type_args: HashMap::new(),
             assoc_types: HashMap::new(),
             trait_assoc_types: HashMap::new(),
+            consts: HashMap::new(),
         }
     }
 
@@ -591,6 +593,9 @@ impl Typer {
                     self.declare_trait_def(td);
                 }
                 ast::Decl::Impl(_) => {}
+                ast::Decl::Const(name, expr, _) => {
+                    self.consts.insert(name.clone(), expr.clone());
+                }
             }
         }
 
@@ -2008,6 +2013,10 @@ impl Typer {
                         span: *span,
                     });
                 }
+                // Top-level constant: inline the expression
+                if let Some(const_expr) = self.consts.get(name).cloned() {
+                    return self.lower_expr(&const_expr);
+                }
                 if let Some((id, ptys, ret)) = self.fns.get(name).cloned() {
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::FnRef(id, name.clone()),
@@ -2409,9 +2418,19 @@ impl Typer {
                 let hbody = self.lower_block_no_scope(body, &Type::Void)?;
                 // Infer yield type from the body
                 let yield_ty = self.infer_coroutine_yield_type(&hbody);
+                let coro_ty = Type::Coroutine(Box::new(yield_ty));
+                // Register the dispatch name as a coroutine handle variable
+                if name != "__anon" {
+                    let id = self.fresh_id();
+                    self.define_var(name, VarInfo {
+                        def_id: id,
+                        ty: coro_ty.clone(),
+                        ownership: crate::hir::Ownership::Owned,
+                    });
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::CoroutineCreate(name.clone(), hbody),
-                    ty: Type::Coroutine(Box::new(yield_ty)),
+                    ty: coro_ty,
                     span: *span,
                 })
             }

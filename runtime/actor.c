@@ -1,17 +1,16 @@
 /*
- * Jade Runtime — Actor helpers for scheduler integration.
+ * Jade Runtime — Actor helpers.
  *
- * Actors run as coroutines. The mailbox uses scheduler-aware parking
- * instead of pthread condvars.
+ * Actors are coroutines that receive messages via a typed channel.
+ * The mailbox layout is: { ptr channel, i32 alive, ... state fields }.
+ * The compiler generates actor loop, spawn, and send inline.
+ * These helpers handle park/wake for the (unused) legacy path.
  */
 #include "jade_rt.h"
-#include <stdlib.h>
 
 /*
- * jade_actor_park: park the current coroutine on a mailbox.
- * Called from actor loop when mailbox is empty.
- * The mailbox has a pointer to the actor coroutine at a known offset.
- * We just suspend the current coroutine.
+ * jade_actor_park: park the current coroutine (legacy, unused by channel path).
+ * Kept for ABI stability.
  */
 void jade_actor_park(void *mailbox_ptr) {
     (void)mailbox_ptr;
@@ -21,17 +20,22 @@ void jade_actor_park(void *mailbox_ptr) {
     self->state = JADE_CORO_SUSPENDED;
     self->wait_chan = mailbox_ptr;
     jade_context_swap(&self->ctx, &w->sched_ctx);
-    /* Resumed when a message is sent to this actor */
 }
 
 /*
- * jade_actor_wake: wake a coroutine parked on a mailbox.
- * Called from the send path after enqueuing a message.
- * The coroutine pointer is stored in the mailbox struct.
+ * jade_actor_wake: wake a coroutine parked on a mailbox (legacy, unused).
  */
 void jade_actor_wake(void *mailbox_ptr) {
     (void)mailbox_ptr;
-    /* The actual wake logic is in the generated code since it knows
-     * the mailbox layout. This function is a hook for the runtime
-     * if needed. For now, the compiler emits the wake inline. */
+}
+
+/*
+ * jade_actor_stop: stop an actor by closing its channel.
+ * The channel pointer is at offset 0 of the mailbox struct.
+ */
+void jade_actor_stop(void *mailbox_ptr) {
+    jade_chan_t *ch = *(jade_chan_t **)mailbox_ptr;
+    if (ch) {
+        jade_chan_close(ch);
+    }
 }

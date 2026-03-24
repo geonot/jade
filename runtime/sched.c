@@ -132,7 +132,9 @@ static void *jade_worker_loop(void *arg) {
         w->current = NULL;
 
         if (c->state == JADE_CORO_DONE) {
-            atomic_fetch_sub(&g_sched.active_coros, 1);
+            if (!c->daemon) {
+                atomic_fetch_sub(&g_sched.active_coros, 1);
+            }
             jade_coro_destroy(c);
         } else if (c->state == JADE_CORO_SUSPENDED) {
             /* Parked on channel/actor wait queue; don't re-enqueue */
@@ -185,7 +187,9 @@ static void jade_sched_start_workers(void) {
 }
 
 void jade_sched_spawn(jade_coro_t *c) {
-    atomic_fetch_add(&g_sched.active_coros, 1);
+    if (!c->daemon) {
+        atomic_fetch_add(&g_sched.active_coros, 1);
+    }
 
     /* Start worker threads lazily on first spawn */
     jade_sched_start_workers();
