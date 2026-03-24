@@ -10,6 +10,7 @@
 //! The typer does NOT emit LLVM IR. It produces a fully typed HIR
 //! that codegen can read without re-discovering types.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -48,6 +49,7 @@ pub struct Typer {
     pub(crate) mono_depth: u32,
     pub(crate) traits: HashMap<String, Vec<TraitMethodSig>>,
     pub(crate) trait_impls: HashMap<String, Vec<String>>,
+    infer_depth: Cell<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +82,7 @@ impl Typer {
             mono_depth: 0,
             traits: HashMap::new(),
             trait_impls: HashMap::new(),
+            infer_depth: Cell::new(0),
         }
     }
 
@@ -200,6 +203,10 @@ impl Typer {
                     if let Some((_, _, r)) = self.fns.get(n.as_str()) {
                         return r.clone();
                     }
+                    // Builtin return types (not in self.fns)
+                    if let Some(ty) = Self::builtin_ret_ty(n) {
+                        return ty;
+                    }
                     if let Some(gf) = self.generic_fns.get(n.as_str()) {
                         let gf = gf.clone();
                         let arg_tys: Vec<Type> = args.iter().map(|e| self.expr_ty_ast(e)).collect();
@@ -217,6 +224,18 @@ impl Typer {
                         }
                         if let Some(ret) = &gf.ret {
                             return Self::substitute_type(ret, &type_map);
+                        }
+                        // No explicit return — infer from body with substituted param types
+                        // Guard against infinite recursion (e.g. fact(n) calling fact(n-1))
+                        let depth = self.infer_depth.get();
+                        if depth < 4 {
+                            self.infer_depth.set(depth + 1);
+                            let inferred = self.infer_ret_ast(&gf);
+                            self.infer_depth.set(depth);
+                            let subst = Self::substitute_type(&inferred, &type_map);
+                            if subst != Type::I64 {
+                                return subst;
+                            }
                         }
                     }
                 }
@@ -342,6 +361,34 @@ impl Typer {
         }
     }
 
+    /// Re-infer return type after param types have been resolved.
+    /// Temporarily binds params in scope so expr_ty_ast can see them.
+    fn infer_ret_ast_with_params(&mut self, f: &ast::Fn, lookup_name: &str) -> Type {
+        let ptys = if let Some((_, ptys, _)) = self.fns.get(lookup_name) {
+            ptys.clone()
+        } else {
+            return self.infer_ret_ast(f);
+        };
+
+        // Methods have self prepended; skip it when binding param names
+        let offset = if ptys.len() > f.params.len() { ptys.len() - f.params.len() } else { 0 };
+
+        self.push_scope();
+        for (i, p) in f.params.iter().enumerate() {
+            if offset + i < ptys.len() {
+                let info = VarInfo {
+                    def_id: self.fresh_id(),
+                    ty: ptys[offset + i].clone(),
+                    ownership: Ownership::Owned,
+                };
+                self.define_var(&p.name, info);
+            }
+        }
+        let ret = self.infer_ret_ast(f);
+        self.pop_scope();
+        ret
+    }
+
     fn infer_coroutine_yield_type(&self, body: &[hir::Stmt]) -> Type {
         // Walk the HIR body to find yield statements and infer the type
         for stmt in body {
@@ -399,6 +446,35 @@ impl Typer {
             .as_ref()
             .map(|e| self.expr_ty_ast(e))
             .unwrap_or(Type::I64)
+    }
+
+    /// Return type for builtin functions (not registered in self.fns).
+    fn builtin_ret_ty(name: &str) -> Option<Type> {
+        match name {
+            "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" | "__powf"
+            | "__copysign" | "__fma" | "__time_monotonic" => Some(Type::F64),
+            "__fmt_float" | "__fmt_hex" | "__fmt_oct" | "__fmt_bin"
+            | "__string_from_raw" | "__string_from_ptr" => Some(Type::String),
+            "__get_args" => Some(Type::Vec(Box::new(Type::String))),
+            "__file_exists" => Some(Type::Bool),
+            "__sleep_ms" => Some(Type::Void),
+            _ => None,
+        }
+    }
+
+    /// Parameter types for builtin functions, for body-driven inference.
+    fn builtin_param_tys(name: &str) -> Option<Vec<Type>> {
+        match name {
+            "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" => Some(vec![Type::F64]),
+            "__powf" | "__copysign" => Some(vec![Type::F64, Type::F64]),
+            "__fma" => Some(vec![Type::F64, Type::F64, Type::F64]),
+            "__fmt_float" => Some(vec![Type::F64, Type::I64]),
+            "__fmt_hex" | "__fmt_oct" | "__fmt_bin" | "__sleep_ms" => Some(vec![Type::I64]),
+            "__string_from_ptr" => Some(vec![Type::Ptr(Box::new(Type::I8))]),
+            "__string_from_raw" => Some(vec![Type::Ptr(Box::new(Type::I8)), Type::I64, Type::I64]),
+            "__file_exists" => Some(vec![Type::String]),
+            _ => None,
+        }
     }
 
     fn needs_int_coercion(from: &Type, to: &Type) -> Option<CoercionKind> {
@@ -589,6 +665,10 @@ impl Typer {
                 self.declare_impl_block(ib)?;
             }
         }
+
+        // Bidirectional param type inference: refine Type::Inferred slots
+        // by analyzing function bodies and call sites.
+        self.infer_param_types(prog);
 
         let mut hir_fns = Vec::new();
         let mut hir_types = Vec::new();

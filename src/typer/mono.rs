@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::ast;
-use crate::hir::{self, DefId};
+use crate::hir::{self, DefId, Ownership};
 use crate::types::Type;
 
 use super::{Typer, VarInfo};
@@ -145,6 +145,21 @@ impl Typer {
                 Self::substitute_type(&base, type_map)
             })
             .collect();
+        // Bind params in scope so infer_ret_ast can see their types
+        self.push_scope();
+        for (i, p) in gf.params.iter().enumerate() {
+            if i < ptys.len() {
+                let id = self.fresh_id();
+                self.define_var(
+                    &p.name,
+                    VarInfo {
+                        def_id: id,
+                        ty: ptys[i].clone(),
+                        ownership: Ownership::Owned,
+                    },
+                );
+            }
+        }
         let ret = gf
             .ret
             .clone()
@@ -153,6 +168,7 @@ impl Typer {
                 let inferred = self.infer_ret_ast(&gf);
                 Self::substitute_type(&inferred, type_map)
             });
+        self.pop_scope();
         let id = self.fresh_id();
         self.fns
             .insert(mangled.clone(), (id, ptys.clone(), ret.clone()));
