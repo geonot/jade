@@ -49,17 +49,29 @@ impl Typer {
         }
 
         match expr {
-            ast::Expr::Int(n, span) => Ok(hir::Expr {
-                kind: hir::ExprKind::Int(*n),
-                ty: Type::I64,
-                span: *span,
-            }),
+            ast::Expr::Int(n, span) => {
+                let ty = match expected {
+                    Some(t) if t.is_int() => t.clone(),
+                    _ => self.infer_ctx.fresh_integer_var(),
+                };
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Int(*n),
+                    ty,
+                    span: *span,
+                })
+            }
 
-            ast::Expr::Float(n, span) => Ok(hir::Expr {
-                kind: hir::ExprKind::Float(*n),
-                ty: Type::F64,
-                span: *span,
-            }),
+            ast::Expr::Float(n, span) => {
+                let ty = match expected {
+                    Some(t) if t.is_float() => t.clone(),
+                    _ => self.infer_ctx.fresh_float_var(),
+                };
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Float(*n),
+                    ty,
+                    span: *span,
+                })
+            }
 
             ast::Expr::Str(s, span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Str(s.clone()),
@@ -147,7 +159,9 @@ impl Typer {
 
             ast::Expr::BinOp(lhs, op, rhs, span) => {
                 let hl = self.lower_expr(lhs)?;
-                let hr = self.lower_expr(rhs)?;
+                let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
+                // Unify operand types for numeric consistency
+                let _ = self.infer_ctx.unify_at(&hl.ty, &hr.ty, *span, "binary operands");
                 let (hl, hr) = self.coerce_binop_operands(hl, hr);
                 let result_ty = match op {
                     BinOp::Eq
@@ -170,7 +184,15 @@ impl Typer {
             ast::Expr::UnaryOp(op, inner, span) => {
                 let hi = self.lower_expr(inner)?;
                 let ty = match op {
-                    UnaryOp::Not => Type::Bool,
+                    UnaryOp::Not => {
+                        // Logical not for Bool, bitwise not for integers
+                        let resolved = self.infer_ctx.resolve(&hi.ty);
+                        if resolved.is_int() {
+                            hi.ty.clone()
+                        } else {
+                            Type::Bool
+                        }
+                    }
                     _ => hi.ty.clone(),
                 };
                 Ok(hir::Expr {
@@ -303,10 +325,7 @@ impl Typer {
             }
 
             ast::Expr::IfExpr(i) => {
-                let result_ty = expected.cloned().unwrap_or_else(|| match i.then.last() {
-                    Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
-                    _ => Type::Void,
-                });
+                let result_ty = expected.cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
                 let hi = self.lower_if(i, &result_ty)?;
                 let ty = match hi.then.last() {
                     Some(hir::Stmt::Expr(e)) => e.ty.clone(),
@@ -1155,7 +1174,12 @@ impl Typer {
             }
 
             if let Some(gf) = self.generic_fns.get(name).cloned() {
-                let arg_tys: Vec<Type> = args.iter().map(|e| self.expr_ty_ast(e)).collect();
+                // Phase 1.2: Lower args first, then use their HIR types for specialization
+                let hargs: Vec<hir::Expr> = args
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<_, _>>()?;
+                let arg_tys: Vec<Type> = hargs.iter().map(|e| self.infer_ctx.resolve(&e.ty)).collect();
                 let mut type_map = HashMap::new();
                 for (i, p) in gf.params.iter().enumerate() {
                     if let Some(Type::Param(tp)) = &p.ty {
@@ -1169,10 +1193,6 @@ impl Typer {
                 }
                 let mangled = self.monomorphize_fn(name, &type_map)?;
                 let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap();
-                let hargs: Vec<hir::Expr> = args
-                    .iter()
-                    .map(|e| self.lower_expr(e))
-                    .collect::<Result<_, _>>()?;
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Call(id, mangled, hargs),
                     ty: ret,
@@ -1250,14 +1270,22 @@ impl Typer {
         }
 
         let hcallee = self.lower_expr(callee)?;
-        let ret = match &hcallee.ty {
-            Type::Fn(_, ret) => *ret.clone(),
-            _ => self.infer_ctx.fresh_var(),
+        let (ptys, ret) = match &hcallee.ty {
+            Type::Fn(ptys, ret) => (ptys.clone(), *ret.clone()),
+            _ => (vec![], self.infer_ctx.fresh_var()),
         };
-        let hargs: Vec<hir::Expr> = args
-            .iter()
-            .map(|e| self.lower_expr(e))
-            .collect::<Result<_, _>>()?;
+        let mut hargs: Vec<hir::Expr> = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            let expected = ptys.get(i);
+            hargs.push(self.lower_expr_expected(arg, expected)?);
+        }
+        for (i, ha) in hargs.iter().enumerate() {
+            if let Some(pt) = ptys.get(i) {
+                let _ = self
+                    .infer_ctx
+                    .unify_at(pt, &ha.ty, span, "indirect call argument");
+            }
+        }
         Ok(hir::Expr {
             kind: hir::ExprKind::IndirectCall(Box::new(hcallee), hargs),
             ty: ret,
@@ -1272,10 +1300,11 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
-        let obj_ty = self.expr_ty_ast(obj);
+        // Phase 1.2: Lower object FIRST, then dispatch on its resolved HIR type.
+        let hobj = self.lower_expr(obj)?;
+        let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
         if matches!(obj_ty, Type::String) {
-            let hobj = self.lower_expr(obj)?;
             let hargs: Vec<hir::Expr> = args
                 .iter()
                 .map(|e| self.lower_expr(e))
@@ -1296,7 +1325,6 @@ impl Typer {
         }
 
         if let Type::Vec(ref elem_ty) = obj_ty {
-            let hobj = self.lower_expr(obj)?;
             let hargs: Vec<hir::Expr> = args
                 .iter()
                 .map(|e| self.lower_expr(e))
@@ -1316,7 +1344,6 @@ impl Typer {
         }
 
         if let Type::Map(ref key_ty, ref val_ty) = obj_ty {
-            let hobj = self.lower_expr(obj)?;
             let hargs: Vec<hir::Expr> = args
                 .iter()
                 .map(|e| self.lower_expr(e))
@@ -1339,7 +1366,6 @@ impl Typer {
 
         if let Type::Coroutine(ref yield_ty) = obj_ty {
             if method == "next" {
-                let hobj = self.lower_expr(obj)?;
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::CoroutineNext(Box::new(hobj)),
                     ty: *yield_ty.clone(),
@@ -1350,7 +1376,6 @@ impl Typer {
         }
 
         if let Type::DynTrait(ref trait_name) = obj_ty {
-            let hobj = self.lower_expr(obj)?;
             let hargs: Vec<hir::Expr> = args
                 .iter()
                 .map(|e| self.lower_expr(e))
@@ -1371,7 +1396,6 @@ impl Typer {
         if let Type::Struct(ref type_name) = obj_ty {
             let method_name = format!("{type_name}_{method}");
             if let Some((_, _, ret)) = self.fns.get(&method_name).cloned() {
-                let hobj = self.lower_expr(obj)?;
                 let hargs: Vec<hir::Expr> = args
                     .iter()
                     .map(|e| self.lower_expr(e))
@@ -1389,7 +1413,6 @@ impl Typer {
             }
         }
 
-        let hobj = self.lower_expr(obj)?;
         let hargs: Vec<hir::Expr> = args
             .iter()
             .map(|e| self.lower_expr(e))
@@ -1430,6 +1453,7 @@ impl Typer {
                 .get(name)
                 .cloned()
                 .unwrap_or((mangled.clone(), 0));
+            // Phase 1.2: Lower inits once and reuse (instead of lowering separately)
             let hinits: Vec<hir::FieldInit> = inits
                 .iter()
                 .map(|fi| {
@@ -1659,10 +1683,8 @@ impl Typer {
             if let Some(eret) = expected_ret {
                 eret.clone()
             } else {
-                match body.last() {
-                    Some(ast::Stmt::Expr(e)) => self.expr_ty_ast(e),
-                    _ => Type::Void,
-                }
+                // Phase 1.2: Use fresh TypeVar instead of AST heuristic
+                self.infer_ctx.fresh_var()
             }
         });
 

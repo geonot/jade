@@ -59,6 +59,26 @@ impl InferCtx {
         Type::TypeVar(id)
     }
 
+    pub(crate) fn fresh_integer_var(&mut self) -> Type {
+        let id = self.parent.len() as u32;
+        self.parent.push(id);
+        self.rank.push(0);
+        self.types.push(None);
+        self.origins.push(None);
+        self.constraints.push(TypeConstraint::Integer);
+        Type::TypeVar(id)
+    }
+
+    pub(crate) fn fresh_float_var(&mut self) -> Type {
+        let id = self.parent.len() as u32;
+        self.parent.push(id);
+        self.rank.push(0);
+        self.types.push(None);
+        self.origins.push(None);
+        self.constraints.push(TypeConstraint::Float);
+        Type::TypeVar(id)
+    }
+
     fn find(&mut self, v: u32) -> u32 {
         let p = self.parent[v as usize];
         if p != v {
@@ -99,7 +119,7 @@ impl InferCtx {
                 self.origins[root as usize] = Some(ConstraintOrigin { span, reason });
             }
         }
-        self.unify(a, b)
+        self.unify(a, b).map_err(|e| format!("line {}:{}: {} ({})", span.line, span.col, e, reason))
     }
 
     #[allow(dead_code)]
@@ -113,8 +133,11 @@ impl InferCtx {
     }
 
     pub(crate) fn unify(&mut self, a: &Type, b: &Type) -> Result<(), String> {
-        let a = self.shallow_resolve(a);
-        let b = self.shallow_resolve(b);
+        // Convert any lingering Inferred to fresh TypeVars
+        let a = if matches!(a, Type::Inferred) { self.fresh_var() } else { a.clone() };
+        let b = if matches!(b, Type::Inferred) { self.fresh_var() } else { b.clone() };
+        let a = self.shallow_resolve(&a);
+        let b = self.shallow_resolve(&b);
 
         if a == b {
             return Ok(());
@@ -147,6 +170,19 @@ impl InferCtx {
                 let root = self.find(*v);
                 if self.occurs_in(root, concrete) {
                     return Err(format!("infinite type: ?{root} occurs in {concrete}"));
+                }
+                // Validate type constraint
+                match &self.constraints[root as usize] {
+                    TypeConstraint::Integer if !concrete.is_int() && !matches!(concrete, Type::TypeVar(_)) => {
+                        return Err(format!("type mismatch: expected integer type, found `{concrete}`"));
+                    }
+                    TypeConstraint::Float if !concrete.is_float() && !matches!(concrete, Type::TypeVar(_)) => {
+                        return Err(format!("type mismatch: expected float type, found `{concrete}`"));
+                    }
+                    TypeConstraint::Numeric if !concrete.is_num() && !matches!(concrete, Type::TypeVar(_)) => {
+                        return Err(format!("type mismatch: expected numeric type, found `{concrete}`"));
+                    }
+                    _ => {}
                 }
                 if let Some(existing) = self.types[root as usize].clone() {
                     self.unify(&existing, concrete)?;
@@ -197,7 +233,6 @@ impl InferCtx {
             (Type::Weak(a), Type::Weak(b)) => self.unify(a, b),
             (Type::Channel(a), Type::Channel(b)) => self.unify(a, b),
             (Type::Coroutine(a), Type::Coroutine(b)) => self.unify(a, b),
-            (Type::Inferred, _) | (_, Type::Inferred) => Ok(()),
             _ => Err(format!("type mismatch: expected `{a}`, found `{b}`")),
         }
     }
@@ -268,11 +303,21 @@ impl InferCtx {
     }
 
     pub(crate) fn resolve(&mut self, ty: &Type) -> Type {
+        self.resolve_inner(ty, false)
+    }
+
+    /// Resolve with optional warning for unsolved TypeVars that default.
+    #[allow(dead_code)]
+    pub(crate) fn resolve_with_warnings(&mut self, ty: &Type, warnings: &mut Vec<String>) -> Type {
+        self.resolve_inner_warn(ty, warnings)
+    }
+
+    fn resolve_inner(&mut self, ty: &Type, _tracking: bool) -> Type {
         match ty {
             Type::TypeVar(v) => {
                 let root = self.find(*v);
                 if let Some(resolved) = self.types[root as usize].clone() {
-                    self.resolve(&resolved)
+                    self.resolve_inner(&resolved, _tracking)
                 } else {
                     // Constraint-aware defaulting
                     match &self.constraints[root as usize] {
@@ -281,19 +326,63 @@ impl InferCtx {
                     }
                 }
             }
-            Type::Array(inner, len) => Type::Array(Box::new(self.resolve(inner)), *len),
-            Type::Vec(inner) => Type::Vec(Box::new(self.resolve(inner))),
-            Type::Map(k, v) => Type::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
-            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.resolve(t)).collect()),
+            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_inner(inner, _tracking)), *len),
+            Type::Vec(inner) => Type::Vec(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Map(k, v) => Type::Map(Box::new(self.resolve_inner(k, _tracking)), Box::new(self.resolve_inner(v, _tracking))),
+            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.resolve_inner(t, _tracking)).collect()),
             Type::Fn(params, ret) => Type::Fn(
-                params.iter().map(|t| self.resolve(t)).collect(),
-                Box::new(self.resolve(ret)),
+                params.iter().map(|t| self.resolve_inner(t, _tracking)).collect(),
+                Box::new(self.resolve_inner(ret, _tracking)),
             ),
-            Type::Ptr(inner) => Type::Ptr(Box::new(self.resolve(inner))),
-            Type::Rc(inner) => Type::Rc(Box::new(self.resolve(inner))),
-            Type::Weak(inner) => Type::Weak(Box::new(self.resolve(inner))),
-            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve(inner))),
-            Type::Channel(inner) => Type::Channel(Box::new(self.resolve(inner))),
+            Type::Ptr(inner) => Type::Ptr(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Rc(inner) => Type::Rc(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Inferred => Type::I64, // legacy: treat as unsolved
+            _ => ty.clone(),
+        }
+    }
+
+    fn resolve_inner_warn(&mut self, ty: &Type, warnings: &mut Vec<String>) -> Type {
+        match ty {
+            Type::TypeVar(v) => {
+                let root = self.find(*v);
+                if let Some(resolved) = self.types[root as usize].clone() {
+                    self.resolve_inner_warn(&resolved, warnings)
+                } else {
+                    // Unsolved TypeVar — emit warning with origin info
+                    let default_ty = match &self.constraints[root as usize] {
+                        TypeConstraint::Float => Type::F64,
+                        _ => Type::I64,
+                    };
+                    if let Some(origin) = &self.origins[root as usize] {
+                        if matches!(self.constraints[root as usize], TypeConstraint::None) {
+                            warnings.push(format!(
+                                "line {}:{}: unsolved type variable defaulted to i64 ({})",
+                                origin.span.line, origin.span.col, origin.reason
+                            ));
+                        }
+                    }
+                    default_ty
+                }
+            }
+            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_inner_warn(inner, warnings)), *len),
+            Type::Vec(inner) => Type::Vec(Box::new(self.resolve_inner_warn(inner, warnings))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.resolve_inner_warn(k, warnings)),
+                Box::new(self.resolve_inner_warn(v, warnings)),
+            ),
+            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.resolve_inner_warn(t, warnings)).collect()),
+            Type::Fn(params, ret) => Type::Fn(
+                params.iter().map(|t| self.resolve_inner_warn(t, warnings)).collect(),
+                Box::new(self.resolve_inner_warn(ret, warnings)),
+            ),
+            Type::Ptr(inner) => Type::Ptr(Box::new(self.resolve_inner_warn(inner, warnings))),
+            Type::Rc(inner) => Type::Rc(Box::new(self.resolve_inner_warn(inner, warnings))),
+            Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner_warn(inner, warnings))),
+            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner_warn(inner, warnings))),
+            Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Inferred => Type::I64,
             _ => ty.clone(),
         }
@@ -310,7 +399,7 @@ impl InferCtx {
                     None
                 }
             }
-            Type::Inferred => None,
+            Type::Inferred => None, // legacy: treat as unsolved
             _ => Some(ty.clone()),
         }
     }

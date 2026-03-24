@@ -725,6 +725,26 @@ impl Typer {
         })
     }
 
+    /// Extract the effective tail type from a block, recursing into trailing
+    /// If/Match statements that serve as implicit return values.
+    pub(crate) fn hir_tail_type(&self, body: &[hir::Stmt]) -> Option<Type> {
+        // Find the last meaningful statement, skipping trailing Drops
+        let last = body.iter().rev().find(|s| !matches!(s, hir::Stmt::Drop(..)))?;
+        match last {
+            hir::Stmt::Expr(e) if e.ty != Type::Void => Some(e.ty.clone()),
+            hir::Stmt::If(i) => {
+                // Only extract a tail type if there's an else branch (all paths covered)
+                if i.els.is_some() {
+                    self.hir_tail_type(&i.then)
+                } else {
+                    None
+                }
+            }
+            hir::Stmt::Ret(Some(e), _, _) => Some(e.ty.clone()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let (id, ptys, ret) = self
             .fns
@@ -758,20 +778,13 @@ impl Typer {
         self.pop_scope();
 
         let ret = if f.ret.is_none() && f.name != "main" {
-            // Phase 2: Unify tail expression type with ret TypeVar
-            if let Some(hir::Stmt::Expr(tail)) = body.last() {
-                if tail.ty != Type::Void {
-                    let _ = self.infer_ctx.unify_at(&ret, &tail.ty, f.span, "function tail expression");
-                }
+            // Phase 2.2: Unify tail expression type with ret TypeVar.
+            // Recurse into trailing If/Match to find implicit return values.
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
+                let _ = self.infer_ctx.unify_at(&ret, &tail_ty, f.span, "function tail expression");
             }
-            // Resolve to see if unification solved it
-            let resolved = self.infer_ctx.shallow_resolve(&ret);
-            if matches!(resolved, Type::TypeVar(_)) {
-                // Still unsolved — fall back to heuristic refinement
-                self.refine_ret_from_body(&ret, &body)
-            } else {
-                resolved
-            }
+            // Resolve the return type (TypeVar → concrete after unification)
+            self.infer_ctx.resolve(&ret)
         } else {
             ret
         };
@@ -954,6 +967,16 @@ impl Typer {
         let body = self.lower_block(&m.body, &ret)?;
         self.pop_scope();
 
+        // Phase 2.2: Unify tail expression with return TypeVar for methods
+        let ret = if m.ret.is_none() {
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
+                let _ = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "method tail expression");
+            }
+            self.infer_ctx.resolve(&ret)
+        } else {
+            ret
+        };
+
         Ok(hir::Fn {
             def_id: id,
             name: method_name,
@@ -1021,6 +1044,16 @@ impl Typer {
 
         let body = self.lower_block(&m.body, &ret)?;
         self.pop_scope();
+
+        // Phase 2.2: Unify tail expression with return TypeVar for ptr methods
+        let ret = if m.ret.is_none() {
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
+                let _ = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "ptr method tail expression");
+            }
+            self.infer_ctx.resolve(&ret)
+        } else {
+            ret
+        };
 
         Ok(hir::Fn {
             def_id: id,

@@ -135,7 +135,9 @@ impl Typer {
         if let Some(bounds) = self.generic_bounds.get(name).cloned() {
             for (param, required_traits) in &bounds {
                 if let Some(concrete_ty) = type_map.get(param) {
-                    let type_name = Self::type_name_for_bound_check(concrete_ty);
+                    // Resolve TypeVars before checking trait bounds
+                    let resolved = self.infer_ctx.resolve(concrete_ty);
+                    let type_name = Self::type_name_for_bound_check(&resolved);
                     for trait_name in required_traits {
                         if !self.type_satisfies_trait(&type_name, trait_name) {
                             return Err(format!(
@@ -179,8 +181,8 @@ impl Typer {
             .clone()
             .map(|r| Self::substitute_type(&r, type_map))
             .unwrap_or_else(|| {
-                let inferred = self.infer_ret_ast(&gf);
-                Self::substitute_type(&inferred, type_map)
+                // Phase 1.3: Use fresh TypeVar instead of AST heuristic
+                self.infer_ctx.fresh_var()
             });
         self.pop_scope();
         let id = self.fresh_id();
@@ -228,6 +230,18 @@ impl Typer {
 
         let body = self.lower_block(&gf.body, ret)?;
 
+        // Phase 2.2: Unify tail expression with return TypeVar (recurse into If/Match)
+        if gf.ret.is_none() {
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
+                let _ = self.infer_ctx.unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
+            }
+        }
+        let resolved_ret = self.infer_ctx.resolve(ret);
+        // Update the function signature with the resolved return type
+        if let Some(entry) = self.fns.get_mut(mangled) {
+            entry.2 = resolved_ret.clone();
+        }
+
         self.pop_scope();
         self.scopes = saved_scopes;
 
@@ -235,7 +249,7 @@ impl Typer {
             def_id,
             name: mangled.to_string(),
             params,
-            ret: ret.clone(),
+            ret: resolved_ret,
             body,
             span: gf.span,
             generic_origin: Some(origin.to_string()),
@@ -349,8 +363,8 @@ impl Typer {
 
     fn type_name_for_bound_check(ty: &Type) -> String {
         match ty {
-            Type::I64 => "i64".into(),
-            Type::F64 => "f64".into(),
+            Type::I64 | Type::I8 | Type::I16 | Type::I32 => "i64".into(),
+            Type::F64 | Type::F32 => "f64".into(),
             Type::Bool => "bool".into(),
             Type::String => "String".into(),
             Type::Struct(n) => n.clone(),

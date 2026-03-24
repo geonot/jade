@@ -75,15 +75,9 @@ impl Typer {
         } else if let Some(ref explicit) = f.ret {
             explicit.clone()
         } else {
-            // Phase 2: Use a TypeVar for unannotated returns. 
-            // The lowering pass will solve it via unify_at on return stmts and tail exprs.
-            // Fall back to AST heuristic only to seed a better initial guess.
-            let heuristic = self.infer_ret_ast(f);
-            if heuristic != Type::I64 && heuristic != Type::Void {
-                heuristic
-            } else {
-                self.infer_ctx.fresh_var()
-            }
+            // Phase 1.3: Pure TypeVar for unannotated return types.
+            // Solved by unify_at on return stmts and tail exprs during lowering.
+            self.infer_ctx.fresh_var()
         };
         let id = self.fresh_id();
         if self.debug_types {
@@ -108,12 +102,8 @@ impl Typer {
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
         let ret = m.ret.clone().unwrap_or_else(|| {
-            let heuristic = self.infer_ret_ast(m);
-            if heuristic != Type::I64 && heuristic != Type::Void {
-                heuristic
-            } else {
-                self.infer_ctx.fresh_var()
-            }
+            // Phase 1.3: Pure TypeVar for unannotated return types
+            self.infer_ctx.fresh_var()
         });
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
@@ -130,12 +120,8 @@ impl Typer {
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
         let ret = m.ret.clone().unwrap_or_else(|| {
-            let heuristic = self.infer_ret_ast(m);
-            if heuristic != Type::I64 && heuristic != Type::Void {
-                heuristic
-            } else {
-                self.infer_ctx.fresh_var()
-            }
+            // Phase 1.3: Pure TypeVar for unannotated return types
+            self.infer_ctx.fresh_var()
         });
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
@@ -315,64 +301,15 @@ impl Typer {
         Ok(())
     }
 
-    pub(crate) fn infer_param_types(&mut self, prog: &ast::Program) {
+    pub(crate) fn infer_param_types(&mut self, _prog: &ast::Program) {
         // Phase 3: Eliminate the dual inference system.
         // The iterative body-driven and call-site heuristic loops are removed.
         // TypeVars in function signatures survive into the lowering pass where
         // proper unification via unify_at() at call sites will solve them.
         //
-        // We retain only:
-        // 1. Return type refinement via AST heuristic (seeds non-trivial types)
-        // 2. TypeVar normalization (shallow resolve + Inferred→TypeVar conversion)
-
-        // Return type refinement pass: use AST heuristic to seed TypeVars
-        for d in &prog.decls {
-            if let ast::Decl::Fn(f) = d {
-                if Self::is_generic_fn(f) {
-                    continue;
-                }
-                if f.ret.is_some() || f.name == "main" {
-                    continue;
-                }
-                let ret = self.infer_ret_ast_with_params(f, &f.name.clone());
-                if let Some(entry) = self.fns.get_mut(&f.name) {
-                    if ret != Type::I64 && ret != Type::Void {
-                        let _ = self.infer_ctx.unify_at(&entry.2, &ret, f.span, "return type heuristic");
-                    }
-                }
-            }
-            if let ast::Decl::Type(td) = d {
-                if !td.type_params.is_empty() {
-                    continue;
-                }
-                for m in &td.methods {
-                    if m.ret.is_some() {
-                        continue;
-                    }
-                    let method_name = format!("{}_{}", td.name, m.name);
-                    let ret = self.infer_ret_ast_with_params(m, &method_name);
-                    if let Some(entry) = self.fns.get_mut(&method_name) {
-                        if ret != Type::I64 && ret != Type::Void {
-                            let _ = self.infer_ctx.unify_at(&entry.2, &ret, m.span, "method return type heuristic");
-                        }
-                    }
-                }
-            }
-            if let ast::Decl::Impl(ib) = d {
-                for m in &ib.methods {
-                    if m.ret.is_some() {
-                        continue;
-                    }
-                    let method_name = format!("{}_{}", ib.type_name, m.name);
-                    let ret = self.infer_ret_ast_with_params(m, &method_name);
-                    if let Some(entry) = self.fns.get_mut(&method_name) {
-                        if ret != Type::I64 && ret != Type::Void {
-                            let _ = self.infer_ctx.unify_at(&entry.2, &ret, m.span, "impl method return type heuristic");
-                        }
-                    }
-                }
-            }
-        }
+        // Phase 1.3: Removed AST heuristic return type refinement pass.
+        // Return types are now solved through unification during lowering.
+        // We retain only TypeVar normalization (shallow resolve + Inferred→TypeVar conversion).
 
         // Normalize: shallow-resolve solved chains, convert Inferred→TypeVar
         let keys: Vec<String> = self.fns.keys().cloned().collect();

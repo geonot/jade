@@ -15,6 +15,8 @@ impl Typer {
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?
+                } else if let Some(existing) = self.find_var(&b.name) {
+                    self.lower_expr_expected(&b.value, Some(&existing.ty.clone()))?
                 } else {
                     self.lower_expr(&b.value)?
                 };
@@ -97,7 +99,7 @@ impl Typer {
 
             ast::Stmt::Assign(target, value, span) => {
                 let ht = self.lower_expr(target)?;
-                let hv = self.lower_expr(value)?;
+                let hv = self.lower_expr_expected(value, Some(&ht.ty))?;
                 let _ = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
                 Ok(hir::Stmt::Assign(ht, hv, *span))
@@ -394,6 +396,8 @@ impl Typer {
                 span: a.span,
             });
         }
+        // Resolve TypeVars in subject type before exhaustiveness check
+        let resolved_subj_ty = self.infer_ctx.resolve(&subj_ty);
         let result = hir::Match {
             subject,
             arms,
@@ -401,7 +405,7 @@ impl Typer {
             span: m.span,
         };
 
-        self.check_exhaustiveness(&subj_ty, &result.arms, m.span)?;
+        self.check_exhaustiveness(&resolved_subj_ty, &result.arms, m.span)?;
 
         Ok(result)
     }

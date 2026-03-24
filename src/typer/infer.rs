@@ -47,7 +47,10 @@ impl Typer {
                     }
                 }
             },
-            ast::Expr::UnaryOp(UnaryOp::Not, _, _) => Type::Bool,
+            ast::Expr::UnaryOp(UnaryOp::Not, inner, _) => {
+                let inner_ty = self.expr_ty_ast(inner);
+                if inner_ty.is_int() { inner_ty } else { Type::Bool }
+            }
             ast::Expr::UnaryOp(_, e, _) => self.expr_ty_ast(e),
             ast::Expr::Call(callee, args, _) => {
                 if let ast::Expr::Ident(n, _) = callee.as_ref() {
@@ -334,81 +337,6 @@ impl Typer {
             || (*current == Type::I64 && *candidate != Type::I64 && *candidate != Type::Void)
         {
             *current = candidate.clone();
-        }
-    }
-
-    pub(crate) fn infer_ret_ast_with_params(&mut self, f: &ast::Fn, lookup_name: &str) -> Type {
-        let ptys = if let Some((_, ptys, _)) = self.fns.get(lookup_name) {
-            ptys.clone()
-        } else {
-            return self.infer_ret_ast(f);
-        };
-
-        let offset = if ptys.len() > f.params.len() {
-            ptys.len() - f.params.len()
-        } else {
-            0
-        };
-
-        self.push_scope();
-        for (i, p) in f.params.iter().enumerate() {
-            if offset + i < ptys.len() {
-                let info = super::VarInfo {
-                    def_id: self.fresh_id(),
-                    ty: ptys[offset + i].clone(),
-                    ownership: crate::hir::Ownership::Owned,
-                };
-                self.define_var(&p.name, info);
-            }
-        }
-        let ret = self.infer_ret_ast(f);
-        self.pop_scope();
-        ret
-    }
-
-    pub(crate) fn refine_ret_from_body(&self, declared: &Type, body: &[hir::Stmt]) -> Type {
-        if *declared != Type::Void && *declared != Type::I64 {
-            return declared.clone();
-        }
-        let mut best = declared.clone();
-        self.collect_hir_ret_types(body, &mut best);
-        if let Some(hir::Stmt::Expr(e)) = body.last() {
-            if e.ty != Type::Void && e.ty != Type::I64 {
-                if best == Type::Void || best == Type::I64 {
-                    best = e.ty.clone();
-                }
-            }
-        }
-        best
-    }
-
-    fn collect_hir_ret_types(&self, body: &[hir::Stmt], best: &mut Type) {
-        for stmt in body {
-            match stmt {
-                hir::Stmt::Ret(Some(e), _, _) => {
-                    if *best == Type::Void || (*best == Type::I64 && e.ty != Type::I64) {
-                        *best = e.ty.clone();
-                    }
-                }
-                hir::Stmt::If(i) => {
-                    self.collect_hir_ret_types(&i.then, best);
-                    for (_, blk) in &i.elifs {
-                        self.collect_hir_ret_types(blk, best);
-                    }
-                    if let Some(els) = &i.els {
-                        self.collect_hir_ret_types(els, best);
-                    }
-                }
-                hir::Stmt::While(w) => self.collect_hir_ret_types(&w.body, best),
-                hir::Stmt::For(f) => self.collect_hir_ret_types(&f.body, best),
-                hir::Stmt::Loop(l) => self.collect_hir_ret_types(&l.body, best),
-                hir::Stmt::Match(m) => {
-                    for arm in &m.arms {
-                        self.collect_hir_ret_types(&arm.body, best);
-                    }
-                }
-                _ => {}
-            }
         }
     }
 

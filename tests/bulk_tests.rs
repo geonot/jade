@@ -3578,12 +3578,16 @@ fn b_struct_neq() {
 
 #[test]
 fn b_dispatch_keyword_parses() {
-    // dispatch is an alias for send — verify it compiles
-    // We can't easily test actor behavior without threads,
-    // but we test that the parser accepts `dispatch` syntax
-    expect(
+    // dispatch is an alias for send — verify it compiles and runs.
+    // The actor may or may not process the message before main exits
+    // (daemon coroutine race), so accept either "" or "0".
+    let out = compile_and_run(
         "actor Counter\n    count: i64\n    @show\n        log(count)\n\n*main()\n    c is spawn Counter\n    dispatch c, @show()\n",
-        "",
+    );
+    let trimmed = out.trim_end();
+    assert!(
+        trimmed.is_empty() || trimmed == "0",
+        "unexpected output: {trimmed:?}",
     );
 }
 
