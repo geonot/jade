@@ -1,10 +1,9 @@
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::ast;
+use crate::ast::{self, Span};
 use crate::hir::{self, DefId, Ownership};
-use crate::types::Type;
+use crate::types::{Type, Scheme};
 
 #[derive(Debug, Clone)]
 pub(crate) struct VarInfo {
@@ -12,6 +11,28 @@ pub(crate) struct VarInfo {
     pub(crate) ty: Type,
     #[allow(dead_code)]
     pub(crate) ownership: Ownership,
+    pub(crate) scheme: Option<Scheme>,
+}
+
+/// A method call whose receiver was a TypeVar at lowering time.
+/// After lowering completes, the TypeVar may have been solved, so we
+/// re-check the method, unify arg/return types, and re-classify the HIR node.
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredMethod {
+    pub(crate) receiver_ty: Type,   // the TypeVar (or whatever) receiver had
+    pub(crate) method: String,
+    pub(crate) arg_tys: Vec<Type>,  // types of the already-lowered args
+    pub(crate) ret_ty: Type,        // the fresh_var assigned as return type
+    pub(crate) span: Span,
+}
+
+/// A field access whose receiver was a TypeVar at lowering time.
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredField {
+    pub(crate) receiver_ty: Type,
+    pub(crate) field_name: String,
+    pub(crate) field_ty: Type,      // the fresh_var assigned as field type
+    pub(crate) span: Span,
 }
 
 mod mono;
@@ -43,9 +64,11 @@ pub struct Typer {
     pub(crate) assoc_types: HashMap<(String, String), Type>,
     pub(crate) trait_assoc_types: HashMap<String, Vec<String>>,
     pub(crate) consts: HashMap<String, ast::Expr>,
-    infer_depth: Cell<u8>,
     pub(crate) infer_ctx: unify::InferCtx,
     pub(crate) debug_types: bool,
+    pub(crate) warnings: Vec<String>,
+    pub(crate) deferred_methods: Vec<DeferredMethod>,
+    pub(crate) deferred_fields: Vec<DeferredField>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,9 +106,11 @@ impl Typer {
             assoc_types: HashMap::new(),
             trait_assoc_types: HashMap::new(),
             consts: HashMap::new(),
-            infer_depth: Cell::new(0),
             infer_ctx: unify::InferCtx::new(),
             debug_types: false,
+            warnings: Vec::new(),
+            deferred_methods: Vec::new(),
+            deferred_fields: Vec::new(),
         }
     }
 
@@ -155,6 +180,37 @@ impl Typer {
             Type::Rc(_) => Ownership::Rc,
             Type::Ptr(_) => Ownership::Raw,
             _ => Ownership::Owned,
+        }
+    }
+
+    /// Collect all free TypeVars in the current environment (all scopes).
+    fn free_type_vars_in_env(&mut self) -> std::collections::HashSet<u32> {
+        let mut ftvs = std::collections::HashSet::new();
+        for scope in &self.scopes {
+            for info in scope.values() {
+                let resolved = self.infer_ctx.shallow_resolve(&info.ty);
+                resolved.free_type_vars(&mut ftvs);
+            }
+        }
+        ftvs
+    }
+
+    /// Generalize a type into a Scheme by quantifying TypeVars that are free
+    /// in the type but NOT free in the environment. This is the Gen(Γ, τ) step
+    /// of Algorithm J / Hindley-Milner.
+    fn generalize(&mut self, ty: &Type) -> Scheme {
+        let resolved = self.infer_ctx.shallow_resolve(ty);
+        if !resolved.has_type_var() {
+            return Scheme::mono(resolved);
+        }
+        let env_ftvs = self.free_type_vars_in_env();
+        let mut ty_ftvs = std::collections::HashSet::new();
+        resolved.free_type_vars(&mut ty_ftvs);
+        let quantified: Vec<u32> = ty_ftvs.difference(&env_ftvs).copied().collect();
+        if quantified.is_empty() {
+            Scheme::mono(resolved)
+        } else {
+            Scheme { quantified, ty: resolved }
         }
     }
 }

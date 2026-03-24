@@ -85,11 +85,14 @@ impl Typer {
                 span: *span,
             }),
 
-            ast::Expr::None(span) => Ok(hir::Expr {
-                kind: hir::ExprKind::None,
-                ty: Type::I64,
-                span: *span,
-            }),
+            ast::Expr::None(span) => {
+                let ty = expected.cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::None,
+                    ty,
+                    span: *span,
+                })
+            }
 
             ast::Expr::Void(span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Void,
@@ -134,9 +137,19 @@ impl Typer {
                     }
                 }
                 if let Some(v) = self.find_var(name) {
+                    let def_id = v.def_id;
+                    let mono_ty = v.ty.clone();
+                    let scheme_clone = v.scheme.clone();
+                    // Drop v borrow before calling instantiate
+                    let ty = match scheme_clone {
+                        Some(ref scheme) if scheme.is_poly() => {
+                            self.infer_ctx.instantiate(scheme)
+                        }
+                        _ => mono_ty,
+                    };
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::Var(v.def_id, name.clone()),
-                        ty: v.ty.clone(),
+                        kind: hir::ExprKind::Var(def_id, name.clone()),
+                        ty,
                         span: *span,
                     });
                 }
@@ -150,9 +163,17 @@ impl Typer {
                         span: *span,
                     });
                 }
+                // Check generic fns so ident references to them don't error
+                if self.generic_fns.contains_key(name) {
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Var(DefId::BUILTIN, name.clone()),
+                        ty: self.infer_ctx.fresh_var(),
+                        span: *span,
+                    });
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Var(DefId::BUILTIN, name.clone()),
-                    ty: Type::I64,
+                    ty: self.infer_ctx.fresh_var(),
                     span: *span,
                 })
             }
@@ -236,6 +257,52 @@ impl Typer {
                     }
                 } else if matches!(resolved_ty, Type::String) && field == "length" {
                     (Type::I64, 0)
+                } else if let Type::Tuple(ref tys) = resolved_ty {
+                    // Tuple field access: .0, .1, etc.
+                    if let Ok(idx) = field.parse::<usize>() {
+                        if idx < tys.len() {
+                            (tys[idx].clone(), idx)
+                        } else {
+                            return Err(format!(
+                                "line {}:{}: tuple index {} out of range (tuple has {} elements)",
+                                span.line, span.col, idx, tys.len()
+                            ));
+                        }
+                    } else {
+                        (self.infer_ctx.fresh_var(), 0)
+                    }
+                } else if matches!(resolved_ty, Type::TypeVar(_)) {
+                    // Row polymorphism: try to infer struct type from field access.
+                    // Search all known structs for one that has this field.
+                    let candidates: Vec<(String, Type, usize)> = self.structs.iter()
+                        .filter_map(|(sname, fields)| {
+                            fields.iter().enumerate()
+                                .find(|(_, (fname, _))| fname == field)
+                                .map(|(idx, (_, fty))| (sname.clone(), fty.clone(), idx))
+                        })
+                        .collect();
+
+                    if candidates.len() == 1 {
+                        // Unique match — constrain the TypeVar to this struct
+                        let (sname, fty, idx) = &candidates[0];
+                        let struct_ty = Type::Struct(sname.clone());
+                        let _ = self.infer_ctx.unify_at(
+                            &resolved_ty, &struct_ty, *span,
+                            "field access implies struct type",
+                        );
+                        let fty = self.infer_ctx.shallow_resolve(fty);
+                        (fty, *idx)
+                    } else {
+                        // Ambiguous or no match — defer
+                        let fty = self.infer_ctx.fresh_var();
+                        self.deferred_fields.push(super::DeferredField {
+                            receiver_ty: resolved_ty.clone(),
+                            field_name: field.clone(),
+                            field_ty: fty.clone(),
+                            span: *span,
+                        });
+                        (fty, 0)
+                    }
                 } else {
                     (self.infer_ctx.fresh_var(), 0)
                 };
@@ -394,7 +461,7 @@ impl Typer {
 
             ast::Expr::Placeholder(span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Void,
-                ty: Type::I64,
+                ty: expected.cloned().unwrap_or_else(|| self.infer_ctx.fresh_var()),
                 span: *span,
             }),
 
@@ -410,9 +477,22 @@ impl Typer {
 
             ast::Expr::Deref(inner, span) => {
                 let hi = self.lower_expr(inner)?;
-                let ty = match &hi.ty {
+                let resolved = self.infer_ctx.shallow_resolve(&hi.ty);
+                let ty = match &resolved {
                     Type::Ptr(inner_ty) | Type::Rc(inner_ty) => *inner_ty.clone(),
-                    _ => Type::I64,
+                    Type::TypeVar(_) => {
+                        // Deref on unsolved type: create inner TypeVar, constrain outer as Ptr
+                        let inner_var = self.infer_ctx.fresh_var();
+                        let ptr_ty = Type::Ptr(Box::new(inner_var.clone()));
+                        let _ = self.infer_ctx.unify_at(&resolved, &ptr_ty, *span, "dereference");
+                        inner_var
+                    }
+                    other => {
+                        return Err(format!(
+                            "line {}:{}: cannot dereference type `{}`",
+                            span.line, span.col, other
+                        ));
+                    }
                 };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Deref(Box::new(hi)),
@@ -426,7 +506,8 @@ impl Typer {
 
                 let bind_ty = match &hiter.ty {
                     Type::Array(et, _) | Type::Ptr(et) => *et.clone(),
-                    _ => Type::I64,
+                    Type::Vec(et) => *et.clone(),
+                    _ => self.infer_ctx.fresh_var(),
                 };
                 let bind_id = self.fresh_id();
                 self.push_scope();
@@ -436,10 +517,11 @@ impl Typer {
                         def_id: bind_id,
                         ty: bind_ty,
                         ownership: Ownership::Owned,
+                        scheme: None,
                     },
                 );
                 let hbody = self.lower_expr(body_expr)?;
-                let hcond = cond.as_ref().map(|c| self.lower_expr(c)).transpose()?;
+                let hcond = cond.as_ref().map(|c| self.lower_expr_expected(c, Some(&Type::Bool))).transpose()?;
                 let hmap = map_expr.as_ref().map(|m| self.lower_expr(m)).transpose()?;
                 self.pop_scope();
 
@@ -608,6 +690,7 @@ impl Typer {
                             def_id: id,
                             ty: coro_ty.clone(),
                             ownership: crate::hir::Ownership::Owned,
+                            scheme: None,
                         },
                     );
                 }
@@ -690,6 +773,7 @@ impl Typer {
                                 def_id: id,
                                 ty: elem_ty.clone(),
                                 ownership: hir::Ownership::Owned,
+                                scheme: None,
                             },
                         );
                     }
@@ -712,7 +796,7 @@ impl Typer {
                 };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Select(harms, hdefault),
-                    ty: Type::I64,
+                    ty: Type::Void,
                     span: *span,
                 })
             }
@@ -1329,9 +1413,16 @@ impl Typer {
         }
 
         if let Type::Vec(ref elem_ty) = obj_ty {
+            let expected_arg_tys: Vec<Option<&Type>> = match method {
+                "push" => vec![Some(elem_ty.as_ref())],
+                "set" => vec![Some(&Type::I64), Some(elem_ty.as_ref())],
+                "get" | "remove" => vec![Some(&Type::I64)],
+                _ => vec![],
+            };
             let hargs: Vec<hir::Expr> = args
                 .iter()
-                .map(|e| self.lower_expr(e))
+                .enumerate()
+                .map(|(i, e)| self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten()))
                 .collect::<Result<_, _>>()?;
             let ret_ty = match method {
                 "push" | "clear" => Type::Void,
@@ -1348,9 +1439,15 @@ impl Typer {
         }
 
         if let Type::Map(ref key_ty, ref val_ty) = obj_ty {
+            let expected_arg_tys: Vec<Option<&Type>> = match method {
+                "set" => vec![Some(key_ty.as_ref()), Some(val_ty.as_ref())],
+                "get" | "has" | "remove" => vec![Some(key_ty.as_ref())],
+                _ => vec![],
+            };
             let hargs: Vec<hir::Expr> = args
                 .iter()
-                .map(|e| self.lower_expr(e))
+                .enumerate()
+                .map(|(i, e)| self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten()))
                 .collect::<Result<_, _>>()?;
             let ret_ty = match method {
                 "set" | "remove" | "clear" => Type::Void,
@@ -1399,10 +1496,15 @@ impl Typer {
 
         if let Type::Struct(ref type_name) = obj_ty {
             let method_name = format!("{type_name}_{method}");
-            if let Some((_, _, ret)) = self.fns.get(&method_name).cloned() {
+            if let Some((_, param_tys, ret)) = self.fns.get(&method_name).cloned() {
+                // param_tys[0] is self, actual args start at [1]
                 let hargs: Vec<hir::Expr> = args
                     .iter()
-                    .map(|e| self.lower_expr(e))
+                    .enumerate()
+                    .map(|(i, e)| {
+                        let expected = param_tys.get(i + 1);
+                        self.lower_expr_expected(e, expected)
+                    })
                     .collect::<Result<_, _>>()?;
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Method(
@@ -1417,13 +1519,66 @@ impl Typer {
             }
         }
 
+        // Fallback: if receiver is a TypeVar, try row polymorphism.
+        // Search for struct methods matching `_method` suffix to infer struct type.
+        if matches!(obj_ty, Type::TypeVar(_)) {
+            let suffix = format!("_{method}");
+            let candidates: Vec<(String, Vec<Type>, Type)> = self.fns.iter()
+                .filter(|(name, _)| name.ends_with(&suffix))
+                .map(|(name, (_, ptys, ret))| {
+                    let type_name = name[..name.len() - suffix.len()].to_string();
+                    (type_name, ptys.clone(), ret.clone())
+                })
+                .filter(|(type_name, _, _)| self.structs.contains_key(type_name))
+                .collect();
+
+            if candidates.len() == 1 {
+                let (type_name, param_tys, ret) = &candidates[0];
+                let struct_ty = Type::Struct(type_name.clone());
+                let _ = self.infer_ctx.unify_at(
+                    &obj_ty, &struct_ty, span,
+                    "method call implies struct type",
+                );
+                let method_name = format!("{}_{}", type_name, method);
+                let hargs: Vec<hir::Expr> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        let expected = param_tys.get(i + 1);
+                        self.lower_expr_expected(e, expected)
+                    })
+                    .collect::<Result<_, _>>()?;
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Method(
+                        Box::new(hobj),
+                        method_name,
+                        method.to_string(),
+                        hargs,
+                    ),
+                    ty: ret.clone(),
+                    span,
+                });
+            }
+        }
+
         let hargs: Vec<hir::Expr> = args
             .iter()
             .map(|e| self.lower_expr(e))
             .collect::<Result<_, _>>()?;
+        let ret_ty = self.infer_ctx.fresh_var();
+        if matches!(obj_ty, Type::TypeVar(_)) {
+            let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
+            self.deferred_methods.push(super::DeferredMethod {
+                receiver_ty: obj_ty.clone(),
+                method: method.to_string(),
+                arg_tys,
+                ret_ty: ret_ty.clone(),
+                span,
+            });
+        }
         Ok(hir::Expr {
             kind: hir::ExprKind::StringMethod(Box::new(hobj), method.to_string(), hargs),
-            ty: self.infer_ctx.fresh_var(),
+            ty: ret_ty,
             span,
         })
     }
@@ -1435,12 +1590,19 @@ impl Typer {
         span: Span,
     ) -> Result<hir::Expr, String> {
         if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
+            // Look up variant field types from enum definition
+            let variant_fields: Vec<Type> = self.enums.get(&enum_name)
+                .and_then(|vs| vs.iter().find(|(vn, _)| vn == name))
+                .map(|(_, ftys)| ftys.clone())
+                .unwrap_or_default();
             let hinits: Vec<hir::FieldInit> = inits
                 .iter()
-                .map(|fi| {
+                .enumerate()
+                .map(|(i, fi)| {
+                    let expected = variant_fields.get(i);
                     Ok(hir::FieldInit {
                         name: fi.name.clone(),
-                        value: self.lower_expr(&fi.value)?,
+                        value: self.lower_expr_expected(&fi.value, expected)?,
                     })
                 })
                 .collect::<Result<_, String>>()?;
@@ -1451,13 +1613,19 @@ impl Typer {
             });
         }
 
-        // Lower inits once upfront — used by both generic variant and struct paths
+        // Lower inits with expected types from struct definition when available
+        let struct_fields = self.structs.get(name).cloned();
         let hinits: Vec<hir::FieldInit> = inits
             .iter()
             .map(|fi| {
+                let expected = struct_fields.as_ref().and_then(|fields| {
+                    fi.name.as_ref()
+                        .and_then(|fname| fields.iter().find(|(n, _)| n == fname))
+                        .map(|(_, ty)| ty.clone())
+                });
                 Ok(hir::FieldInit {
                     name: fi.name.clone(),
-                    value: self.lower_expr(&fi.value)?,
+                    value: self.lower_expr_expected(&fi.value, expected.as_ref())?,
                 })
             })
             .collect::<Result<_, String>>()?;
@@ -1664,6 +1832,7 @@ impl Typer {
                     def_id: pid,
                     ty: ty.clone(),
                     ownership,
+                    scheme: None,
                 },
             );
             hparams.push(hir::Param {

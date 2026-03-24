@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
-use crate::types::Type;
+use crate::types::{Type, Scheme};
 
 use super::{Typer, VarInfo};
 
@@ -41,6 +41,7 @@ impl Typer {
                             def_id: id,
                             ty: existing_ty.clone(),
                             ownership,
+                            scheme: None,
                         },
                     );
                     Ok(hir::Stmt::Bind(hir::Bind {
@@ -52,12 +53,20 @@ impl Typer {
                         span: b.span,
                     }))
                 } else {
+                    // Let-generalization: only generalize function types (lambdas/fn refs)
+                    // to avoid prematurely quantifying constrained type variables
+                    let scheme = if matches!(ty, Type::Fn(_, _)) {
+                        self.generalize(&ty)
+                    } else {
+                        Scheme::mono(ty.clone())
+                    };
                     self.define_var(
                         &b.name,
                         VarInfo {
                             def_id: id,
                             ty: ty.clone(),
                             ownership,
+                            scheme: Some(scheme),
                         },
                     );
                     Ok(hir::Stmt::Bind(hir::Bind {
@@ -89,6 +98,7 @@ impl Typer {
                                 def_id: id,
                                 ty: ty.clone(),
                                 ownership: Self::ownership_for_type(&ty),
+                                scheme: None,
                             },
                         );
                         (id, n.clone(), ty)
@@ -116,7 +126,7 @@ impl Typer {
             }
 
             ast::Stmt::While(w) => {
-                let cond = self.lower_expr(&w.cond)?;
+                let cond = self.lower_expr_expected(&w.cond, Some(&Type::Bool))?;
                 let body = self.lower_block(&w.body, ret_ty)?;
                 Ok(hir::Stmt::While(hir::While {
                     cond,
@@ -145,7 +155,7 @@ impl Typer {
                                     return self.desugar_for_iter(f, iter, tn, elem_ty, ret_ty);
                                 }
                             }
-                            Type::I64
+                            self.infer_ctx.fresh_var()
                         }
                     }
                 };
@@ -157,6 +167,7 @@ impl Typer {
                         def_id: bind_id,
                         ty: bind_ty.clone(),
                         ownership: Ownership::Owned,
+                        scheme: None,
                     },
                 );
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
@@ -238,8 +249,8 @@ impl Typer {
                     ));
                 }
                 let mut hvalues = Vec::new();
-                for (v, (_fname, _fty)) in values.iter().zip(schema.iter()) {
-                    hvalues.push(self.lower_expr(v)?);
+                for (v, (_fname, fty)) in values.iter().zip(schema.iter()) {
+                    hvalues.push(self.lower_expr_expected(v, Some(fty))?);
                 }
                 Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span))
             }
@@ -267,10 +278,11 @@ impl Typer {
                 let hfilter = self.lower_store_filter(filter, &schema, store)?;
                 let mut hassigns = Vec::new();
                 for (fname, fval) in assignments {
-                    if !schema.iter().any(|(n, _)| n == fname) {
+                    if let Some((_, fty)) = schema.iter().find(|(n, _)| n == fname) {
+                        hassigns.push((fname.clone(), self.lower_expr_expected(fval, Some(fty))?));
+                    } else {
                         return Err(format!("store '{store}' has no field '{fname}'"));
                     }
-                    hassigns.push((fname.clone(), self.lower_expr(fval)?));
                 }
                 Ok(hir::Stmt::StoreSet(
                     store.clone(),
@@ -312,16 +324,18 @@ impl Typer {
         schema: &[(String, Type)],
         store: &str,
     ) -> Result<hir::StoreFilter, String> {
-        if !schema.iter().any(|(n, _)| n == &filter.field) {
+        let field_ty = schema.iter().find(|(n, _)| n == &filter.field).map(|(_, t)| t);
+        if field_ty.is_none() {
             return Err(format!("store '{store}' has no field '{}'", filter.field));
         }
-        let hvalue = self.lower_expr(&filter.value)?;
+        let hvalue = self.lower_expr_expected(&filter.value, field_ty)?;
         let mut hextra = Vec::new();
         for (lop, cond) in &filter.extra {
-            if !schema.iter().any(|(n, _)| n == &cond.field) {
+            let cond_field_ty = schema.iter().find(|(n, _)| n == &cond.field).map(|(_, t)| t);
+            if cond_field_ty.is_none() {
                 return Err(format!("store '{store}' has no field '{}'", cond.field));
             }
-            let hv = self.lower_expr(&cond.value)?;
+            let hv = self.lower_expr_expected(&cond.value, cond_field_ty)?;
             hextra.push((
                 *lop,
                 hir::StoreFilterCond {
@@ -353,11 +367,11 @@ impl Typer {
     }
 
     pub(crate) fn lower_if(&mut self, i: &ast::If, ret_ty: &Type) -> Result<hir::If, String> {
-        let cond = self.lower_expr(&i.cond)?;
+        let cond = self.lower_expr_expected(&i.cond, Some(&Type::Bool))?;
         let then = self.lower_block(&i.then, ret_ty)?;
         let mut elifs = Vec::new();
         for (ec, eb) in &i.elifs {
-            let hc = self.lower_expr(ec)?;
+            let hc = self.lower_expr_expected(ec, Some(&Type::Bool))?;
             let hb = self.lower_block(eb, ret_ty)?;
             elifs.push((hc, hb));
         }
@@ -386,7 +400,7 @@ impl Typer {
         for a in &m.arms {
             self.push_scope();
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
-            let guard = a.guard.as_ref().map(|g| self.lower_expr(g)).transpose()?;
+            let guard = a.guard.as_ref().map(|g| self.lower_expr_expected(g, Some(&Type::Bool))).transpose()?;
             let body = self.lower_block_no_scope(&a.body, ret_ty)?;
             self.pop_scope();
             arms.push(hir::Arm {
@@ -429,6 +443,7 @@ impl Typer {
                         def_id: id,
                         ty: ty.clone(),
                         ownership: Self::ownership_for_type(&ty),
+                        scheme: None,
                     },
                 );
                 Ok(hir::Pat::Bind(id, name.clone(), ty, *span))

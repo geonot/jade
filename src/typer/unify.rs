@@ -119,7 +119,23 @@ impl InferCtx {
                 self.origins[root as usize] = Some(ConstraintOrigin { span, reason });
             }
         }
-        self.unify(a, b).map_err(|e| format!("line {}:{}: {} ({})", span.line, span.col, e, reason))
+        self.unify(a, b).map_err(|e| {
+            // Enrich error with origin context when both sides have origins
+            let a_origin = self.origin_of(a);
+            let b_origin = self.origin_of(b);
+            let mut msg = format!("line {}:{}: {} ({})", span.line, span.col, e, reason);
+            if let Some(origin) = a_origin {
+                if origin.span.line != span.line {
+                    msg.push_str(&format!("\n  note: first type established at line {} ({})", origin.span.line, origin.reason));
+                }
+            }
+            if let Some(origin) = b_origin {
+                if origin.span.line != span.line {
+                    msg.push_str(&format!("\n  note: second type established at line {} ({})", origin.span.line, origin.reason));
+                }
+            }
+            msg
+        })
     }
 
     #[allow(dead_code)]
@@ -174,13 +190,13 @@ impl InferCtx {
                 // Validate type constraint
                 match &self.constraints[root as usize] {
                     TypeConstraint::Integer if !concrete.is_int() && !matches!(concrete, Type::TypeVar(_)) => {
-                        return Err(format!("type mismatch: expected integer type, found `{concrete}`"));
+                        return Err(format!("type mismatch: expected integer type (i8..u64), found `{concrete}`"));
                     }
                     TypeConstraint::Float if !concrete.is_float() && !matches!(concrete, Type::TypeVar(_)) => {
-                        return Err(format!("type mismatch: expected float type, found `{concrete}`"));
+                        return Err(format!("type mismatch: expected float type (f32/f64), found `{concrete}`"));
                     }
                     TypeConstraint::Numeric if !concrete.is_num() && !matches!(concrete, Type::TypeVar(_)) => {
-                        return Err(format!("type mismatch: expected numeric type, found `{concrete}`"));
+                        return Err(format!("type mismatch: expected numeric type, found `{concrete}`; consider using a conversion function"));
                     }
                     _ => {}
                 }
@@ -339,7 +355,12 @@ impl InferCtx {
             Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner(inner, _tracking))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner(inner, _tracking))),
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner(inner, _tracking))),
-            Type::Inferred => Type::I64, // legacy: treat as unsolved
+            Type::Inferred => {
+                // Legacy: treat as unconstrained — default like an unsolved TypeVar
+                match &self.constraints.get(0) {
+                    _ => Type::I64,
+                }
+            }
             _ => ty.clone(),
         }
     }
@@ -384,6 +405,48 @@ impl InferCtx {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Inferred => Type::I64,
+            _ => ty.clone(),
+        }
+    }
+
+    /// Instantiate a type scheme: create fresh TypeVars for each quantified variable
+    /// and substitute them into the type. Returns the instantiated type.
+    pub(crate) fn instantiate(&mut self, scheme: &crate::types::Scheme) -> Type {
+        if scheme.quantified.is_empty() {
+            return scheme.ty.clone();
+        }
+        let subst: std::collections::HashMap<u32, Type> = scheme.quantified.iter()
+            .map(|&v| (v, self.fresh_var()))
+            .collect();
+        self.substitute(&scheme.ty, &subst)
+    }
+
+    /// Substitute TypeVars according to a mapping.
+    fn substitute(&self, ty: &Type, subst: &std::collections::HashMap<u32, Type>) -> Type {
+        match ty {
+            Type::TypeVar(v) => {
+                if let Some(replacement) = subst.get(v) {
+                    replacement.clone()
+                } else {
+                    ty.clone()
+                }
+            }
+            Type::Array(inner, len) => Type::Array(Box::new(self.substitute(inner, subst)), *len),
+            Type::Vec(inner) => Type::Vec(Box::new(self.substitute(inner, subst))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.substitute(k, subst)),
+                Box::new(self.substitute(v, subst)),
+            ),
+            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.substitute(t, subst)).collect()),
+            Type::Fn(params, ret) => Type::Fn(
+                params.iter().map(|t| self.substitute(t, subst)).collect(),
+                Box::new(self.substitute(ret, subst)),
+            ),
+            Type::Ptr(inner) => Type::Ptr(Box::new(self.substitute(inner, subst))),
+            Type::Rc(inner) => Type::Rc(Box::new(self.substitute(inner, subst))),
+            Type::Weak(inner) => Type::Weak(Box::new(self.substitute(inner, subst))),
+            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.substitute(inner, subst))),
+            Type::Channel(inner) => Type::Channel(Box::new(self.substitute(inner, subst))),
             _ => ty.clone(),
         }
     }

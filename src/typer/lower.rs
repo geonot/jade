@@ -181,7 +181,13 @@ impl Typer {
             stores: hir_stores,
             trait_impls: hir_trait_impls,
         };
+        self.resolve_deferred_methods();
+        self.resolve_deferred_fields();
         self.resolve_all_types(&mut program);
+        // Emit type inference warnings
+        for w in &self.warnings {
+            eprintln!("warning: {w}");
+        }
         if self.debug_types {
             eprintln!(
                 "[type:pipeline] complete: {} fns, {} types, {} enums",
@@ -191,6 +197,176 @@ impl Typer {
             );
         }
         Ok(program)
+    }
+
+    /// After all lowering, resolve deferred method constraints.
+    /// When a method call had a TypeVar receiver, the TypeVar may now be solved.
+    /// Re-check the method and unify arg/return types properly.
+    fn resolve_deferred_methods(&mut self) {
+        let deferred = std::mem::take(&mut self.deferred_methods);
+        for dm in &deferred {
+            let recv_ty = self.infer_ctx.shallow_resolve(&dm.receiver_ty);
+            match &recv_ty {
+                Type::Vec(elem_ty) => {
+                    let elem = elem_ty.as_ref().clone();
+                    let actual_ret = match dm.method.as_str() {
+                        "push" | "clear" | "set" => {
+                            // push(elem), set(i64, elem)
+                            if dm.method == "push" {
+                                if let Some(arg_ty) = dm.arg_tys.first() {
+                                    let _ = self.infer_ctx.unify_at(&elem, arg_ty, dm.span, "vec.push arg");
+                                }
+                            } else if dm.method == "set" {
+                                if let Some(idx_ty) = dm.arg_tys.first() {
+                                    let _ = self.infer_ctx.unify_at(&Type::I64, idx_ty, dm.span, "vec.set index");
+                                }
+                                if let Some(val_ty) = dm.arg_tys.get(1) {
+                                    let _ = self.infer_ctx.unify_at(&elem, val_ty, dm.span, "vec.set value");
+                                }
+                            }
+                            Type::Void
+                        }
+                        "pop" | "get" | "remove" => elem.clone(),
+                        "len" => Type::I64,
+                        _ => continue,
+                    };
+                    let _ = self.infer_ctx.unify_at(&dm.ret_ty, &actual_ret, dm.span, "deferred vec method return");
+                }
+                Type::Map(key_ty, val_ty) => {
+                    let key = key_ty.as_ref().clone();
+                    let val = val_ty.as_ref().clone();
+                    let actual_ret = match dm.method.as_str() {
+                        "set" => {
+                            if let Some(k) = dm.arg_tys.first() {
+                                let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.set key");
+                            }
+                            if let Some(v) = dm.arg_tys.get(1) {
+                                let _ = self.infer_ctx.unify_at(&val, v, dm.span, "map.set value");
+                            }
+                            Type::Void
+                        }
+                        "get" => {
+                            if let Some(k) = dm.arg_tys.first() {
+                                let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.get key");
+                            }
+                            val.clone()
+                        }
+                        "has" => {
+                            if let Some(k) = dm.arg_tys.first() {
+                                let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.has key");
+                            }
+                            Type::Bool
+                        }
+                        "remove" | "clear" => Type::Void,
+                        "len" => Type::I64,
+                        "keys" => Type::Vec(Box::new(key.clone())),
+                        "values" => Type::Vec(Box::new(val.clone())),
+                        _ => continue,
+                    };
+                    let _ = self.infer_ctx.unify_at(&dm.ret_ty, &actual_ret, dm.span, "deferred map method return");
+                }
+                Type::String => {
+                    let actual_ret = match dm.method.as_str() {
+                        "contains" | "starts_with" | "ends_with" => Type::Bool,
+                        "char_at" | "len" | "find" => Type::I64,
+                        "slice" | "trim" | "trim_left" | "trim_right" | "replace"
+                        | "to_upper" | "to_lower" => Type::String,
+                        "split" => Type::Vec(Box::new(Type::String)),
+                        _ => continue,
+                    };
+                    let _ = self.infer_ctx.unify_at(&dm.ret_ty, &actual_ret, dm.span, "deferred string method return");
+                }
+                Type::Struct(type_name) => {
+                    let method_name = format!("{}_{}", type_name, dm.method);
+                    if let Some((_, param_tys, ret)) = self.fns.get(&method_name).cloned() {
+                        // param_tys[0] is self, actual args start at [1]
+                        for (i, arg_ty) in dm.arg_tys.iter().enumerate() {
+                            if let Some(expected) = param_tys.get(i + 1) {
+                                let _ = self.infer_ctx.unify_at(expected, arg_ty, dm.span, "deferred struct method arg");
+                            }
+                        }
+                        let _ = self.infer_ctx.unify_at(&dm.ret_ty, &ret, dm.span, "deferred struct method return");
+                    }
+                }
+                Type::Coroutine(yield_ty) => {
+                    if dm.method == "next" {
+                        let _ = self.infer_ctx.unify_at(&dm.ret_ty, yield_ty, dm.span, "deferred coroutine.next return");
+                    }
+                }
+                _ => {
+                    // Still unresolved or unknown type — leave as-is
+                }
+            }
+        }
+    }
+
+    /// After all lowering, resolve deferred field access constraints.
+    /// When a field access had a TypeVar receiver, the TypeVar may now be solved.
+    fn resolve_deferred_fields(&mut self) {
+        let deferred = std::mem::take(&mut self.deferred_fields);
+        for df in &deferred {
+            let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
+            if let Type::Struct(ref name) = recv_ty {
+                if let Some(fields) = self.structs.get(name) {
+                    if let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name) {
+                        let fty = fty.clone();
+                        let _ = self.infer_ctx.unify_at(&df.field_ty, &fty, df.span, "deferred field access");
+                    }
+                }
+            } else if matches!(recv_ty, Type::String) && df.field_name == "length" {
+                let _ = self.infer_ctx.unify_at(&df.field_ty, &Type::I64, df.span, "deferred string.length");
+            }
+        }
+    }
+
+    /// During resolve, re-classify a StringMethod placeholder if its receiver
+    /// resolved to Vec, Map, Struct, or Coroutine.
+    fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
+        // Extract info from current StringMethod
+        let (recv_ty, method) = match &expr.kind {
+            hir::ExprKind::StringMethod(recv, m, _) => {
+                (recv.ty.clone(), m.clone())
+            }
+            _ => return,
+        };
+        // Check if receiver resolved to something other than String
+        match &recv_ty {
+            Type::Vec(_) => {
+                // Re-classify StringMethod → VecMethod
+                if let hir::ExprKind::StringMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::VecMethod(recv, method, args);
+                }
+            }
+            Type::Map(_, _) => {
+                if let hir::ExprKind::StringMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::MapMethod(recv, method, args);
+                }
+            }
+            Type::Struct(type_name) => {
+                let method_name = format!("{}_{}", type_name, method);
+                if self.fns.contains_key(&method_name) {
+                    if let hir::ExprKind::StringMethod(recv, _method_str, args) =
+                        std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                    {
+                        expr.kind = hir::ExprKind::Method(recv, method_name, method, args);
+                    }
+                }
+            }
+            Type::Coroutine(_) if method == "next" => {
+                if let hir::ExprKind::StringMethod(recv, _, _) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::CoroutineNext(recv);
+                }
+            }
+            _ => {
+                // String or still unresolved — keep as StringMethod
+            }
+        }
     }
 
     fn resolve_all_types(&mut self, prog: &mut hir::Program) {
@@ -417,8 +593,15 @@ impl Typer {
                     self.resolve_expr(a);
                 }
             }
-            hir::ExprKind::StringMethod(recv, _, args)
-            | hir::ExprKind::VecMethod(recv, _, args)
+            hir::ExprKind::StringMethod(recv, _, args) => {
+                self.resolve_expr(recv);
+                for a in args {
+                    self.resolve_expr(a);
+                }
+                // Re-classify deferred method placeholders based on resolved receiver type
+                self.reclassify_method_call(expr);
+            }
+            hir::ExprKind::VecMethod(recv, _, args)
             | hir::ExprKind::MapMethod(recv, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {
@@ -430,7 +613,20 @@ impl Typer {
                     self.resolve_expr(a);
                 }
             }
-            hir::ExprKind::Field(e, _, _) => self.resolve_expr(e),
+            hir::ExprKind::Field(e, _field_name, _idx) => {
+                self.resolve_expr(e);
+                // Fix up field index for deferred field accesses on formerly-TypeVar receivers
+                if let hir::ExprKind::Field(ref inner, ref fname, ref mut field_idx) = expr.kind {
+                    let recv_ty = &inner.ty;
+                    if let Type::Struct(name) = recv_ty {
+                        if let Some(fields) = self.structs.get(name) {
+                            if let Some((i, _)) = fields.iter().enumerate().find(|(_, (n, _))| n == fname) {
+                                *field_idx = i;
+                            }
+                        }
+                    }
+                }
+            }
             hir::ExprKind::Index(arr, idx) => {
                 self.resolve_expr(arr);
                 self.resolve_expr(idx);
@@ -614,7 +810,7 @@ impl Typer {
                     .map(|(_, t)| t.clone())
                     .unwrap_or_else(|| f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)));
                 let default = f.default.as_ref().map(|e| {
-                    self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
+                    self.lower_expr_expected(e, Some(&ty)).unwrap_or_else(|_| hir::Expr {
                         kind: hir::ExprKind::Int(0),
                         ty: Type::I64,
                         span: e.span(),
@@ -640,6 +836,7 @@ impl Typer {
                         def_id: fid,
                         ty: f.ty.clone(),
                         ownership: Ownership::Owned,
+                        scheme: None,
                     },
                 );
             }
@@ -660,6 +857,7 @@ impl Typer {
                         def_id: pid,
                         ty: ty.clone(),
                         ownership,
+                        scheme: None,
                     },
                 );
                 params.push(hir::Param {
@@ -772,6 +970,7 @@ impl Typer {
                     def_id: pid,
                     ty: ty.clone(),
                     ownership,
+                    scheme: None,
                 },
             );
             params.push(hir::Param {
@@ -884,7 +1083,7 @@ impl Typer {
                     .map(|(_, t)| t.clone())
                     .unwrap_or_else(|| f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)));
                 let default = f.default.as_ref().map(|e| {
-                    let lowered = self.lower_expr(e).unwrap_or_else(|_| hir::Expr {
+                    let lowered = self.lower_expr_expected(e, Some(&ty)).unwrap_or_else(|_| hir::Expr {
                         kind: hir::ExprKind::Int(0),
                         ty: Type::I64,
                         span: e.span(),
@@ -941,6 +1140,7 @@ impl Typer {
                 def_id: self_id,
                 ty: self_ty.clone(),
                 ownership: Ownership::Borrowed,
+                scheme: None,
             },
         );
         params.push(hir::Param {
@@ -961,6 +1161,7 @@ impl Typer {
                     def_id: pid,
                     ty: ty.clone(),
                     ownership,
+                    scheme: None,
                 },
             );
             params.push(hir::Param {
@@ -1019,6 +1220,7 @@ impl Typer {
                 def_id: self_id,
                 ty: self_ty.clone(),
                 ownership: Ownership::Borrowed,
+                scheme: None,
             },
         );
         params.push(hir::Param {
@@ -1039,6 +1241,7 @@ impl Typer {
                     def_id: pid,
                     ty: ty.clone(),
                     ownership,
+                    scheme: None,
                 },
             );
             params.push(hir::Param {
@@ -1202,6 +1405,7 @@ impl Typer {
                 def_id: iter_bind_id,
                 ty: iter_expr.ty.clone(),
                 ownership: Ownership::Owned,
+                scheme: None,
             },
         );
 
@@ -1247,6 +1451,7 @@ impl Typer {
                 def_id: bind_id,
                 ty: elem_ty.clone(),
                 ownership: Ownership::Owned,
+                scheme: None,
             },
         );
         let body = self.lower_block_no_scope(&f.body, ret_ty)?;

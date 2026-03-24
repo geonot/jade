@@ -172,6 +172,7 @@ impl Typer {
                         def_id: id,
                         ty: ptys[i].clone(),
                         ownership: Ownership::Owned,
+                        scheme: None,
                     },
                 );
             }
@@ -217,6 +218,7 @@ impl Typer {
                     def_id: pid,
                     ty: ty.clone(),
                     ownership,
+                    scheme: None,
                 },
             );
             params.push(hir::Param {
