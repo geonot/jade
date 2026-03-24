@@ -11,6 +11,7 @@ pub mod ownership;
 pub mod parser;
 pub mod perceus;
 pub mod pkg;
+pub mod lsp;
 pub mod typer;
 pub mod types;
 

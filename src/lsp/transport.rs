@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 
 /// Reads a single LSP JSON-RPC message from stdin (Content-Length framing).
 pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
