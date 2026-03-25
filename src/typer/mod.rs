@@ -73,6 +73,11 @@ pub struct Typer {
     /// When called with incompatible types (e.g., multiple struct types), we fall back
     /// to monomorphization. Otherwise, TypeVars are solved by unification.
     pub(crate) inferable_fns: HashMap<String, ast::Fn>,
+    /// Phase 3 (P4): Generalized function schemes for inferable functions.
+    /// After lowering, the function's type (params + return) is generalized into
+    /// a Scheme. At each call site, the scheme is instantiated with fresh TypeVars
+    /// so that calling identity(42) and identity("hello") get independent type solutions.
+    pub(crate) fn_schemes: HashMap<String, (Vec<u32>, Vec<Type>, Type)>,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +121,7 @@ impl Typer {
             deferred_methods: Vec::new(),
             deferred_fields: Vec::new(),
             inferable_fns: HashMap::new(),
+            fn_schemes: HashMap::new(),
         }
     }
 
@@ -135,6 +141,12 @@ impl Typer {
     pub fn set_warn_inferred_defaults(&mut self, enabled: bool) {
         if enabled {
             self.infer_ctx.enable_default_warnings();
+        }
+    }
+
+    pub fn set_strict_types(&mut self, enabled: bool) {
+        if enabled {
+            self.infer_ctx.enable_strict_types();
         }
     }
 
@@ -362,14 +374,12 @@ mod tests {
     }
 
     #[test]
-    fn test_untyped_param_not_generic() {
-        // With unannotated params (no explicit type param), fn is NOT generic.
-        // TypeVars are solved by unification, not monomorphization.
+    fn test_untyped_param_is_implicit_generic() {
+        // Phase 3 (P4): All-untyped-param functions are treated as implicit generics.
+        // Each call site gets a monomorphized copy with concrete types.
         let hir = type_check("*identity(x)\n    x\n*main()\n    log(identity(42))\n");
-        let identity = hir.fns.iter().find(|f| f.name == "identity").unwrap();
-        assert!(identity.generic_origin.is_none(),
-            "unannotated-param fn should NOT be treated as generic");
-        // Param type should be resolved to I64 via call-site unification
+        let identity = hir.fns.iter().find(|f| f.name.starts_with("identity")).unwrap();
+        // Should be monomorphized with I64 param
         assert_eq!(identity.params[0].ty, Type::I64);
     }
 
@@ -814,5 +824,354 @@ mod tests {
         // Call site expects F64 — should resolve numeric ambiguity
         ctx.unify(&Type::F64, &ret_var).unwrap();
         assert_eq!(ctx.resolve(&ret_var), Type::F64);
+    }
+
+    // ── Phase 1 (P0): Strict type checking tests ──
+
+    #[test]
+    fn test_strict_types_errors_on_unconstrained_typevar() {
+        let mut ctx = unify::InferCtx::new();
+        ctx.enable_strict_types();
+        let span = crate::ast::Span { start: 0, end: 0, line: 5, col: 3 };
+        let v = ctx.fresh_var();
+        // Set origin so we get a meaningful error message
+        let v2 = ctx.fresh_var();
+        let _ = ctx.unify_at(&v, &v2, span, "test binding");
+        let resolved = ctx.resolve(&v);
+        // Should still produce I64 (for codegen), but collect an error
+        assert_eq!(resolved, Type::I64);
+        let errors = ctx.drain_strict_errors();
+        assert!(!errors.is_empty(), "strict mode should produce errors for unconstrained TypeVar");
+        assert!(errors[0].contains("ambiguous type"), "error should mention ambiguity: {}", errors[0]);
+    }
+
+    #[test]
+    fn test_strict_types_allows_integer_default() {
+        let mut ctx = unify::InferCtx::new();
+        ctx.enable_strict_types();
+        let v = ctx.fresh_integer_var();
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::I64);
+        let errors = ctx.drain_strict_errors();
+        assert!(errors.is_empty(), "Integer→I64 should be allowed in strict mode");
+    }
+
+    #[test]
+    fn test_strict_types_allows_float_default() {
+        let mut ctx = unify::InferCtx::new();
+        ctx.enable_strict_types();
+        let v = ctx.fresh_float_var();
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::F64);
+        let errors = ctx.drain_strict_errors();
+        assert!(errors.is_empty(), "Float→F64 should be allowed in strict mode");
+    }
+
+    #[test]
+    fn test_strict_types_errors_on_ambiguous_numeric() {
+        let mut ctx = unify::InferCtx::new();
+        ctx.enable_strict_types();
+        let span = crate::ast::Span { start: 0, end: 0, line: 10, col: 1 };
+        let v = ctx.fresh_numeric_var();
+        let v2 = ctx.fresh_var();
+        let _ = ctx.unify_at(&v, &v2, span, "numeric op");
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::I64);
+        let errors = ctx.drain_strict_errors();
+        assert!(!errors.is_empty(), "Numeric (ambiguous int/float) should error in strict mode");
+        assert!(errors[0].contains("ambiguous numeric type"), "error: {}", errors[0]);
+    }
+
+    #[test]
+    fn test_strict_types_no_error_for_solved_vars() {
+        let mut ctx = unify::InferCtx::new();
+        ctx.enable_strict_types();
+        let v = ctx.fresh_var();
+        ctx.unify(&v, &Type::String).unwrap();
+        let resolved = ctx.resolve(&v);
+        assert_eq!(resolved, Type::String);
+        let errors = ctx.drain_strict_errors();
+        assert!(errors.is_empty(), "solved TypeVars should not produce errors");
+    }
+
+    #[test]
+    fn test_strict_types_integration_well_typed_program() {
+        // A well-typed program should compile fine even in strict mode
+        let src = "*main()\n    x is 42\n    log(x)\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        typer.set_strict_types(true);
+        let result = typer.lower_program(&prog);
+        assert!(result.is_ok(), "well-typed program should succeed in strict mode: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_strict_types_integration_annotated_fn() {
+        // Functions with annotations should always pass strict mode
+        let src = "*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        typer.set_strict_types(true);
+        let result = typer.lower_program(&prog);
+        assert!(result.is_ok(), "annotated function should succeed in strict mode: {:?}", result.err());
+    }
+
+    // ── Phase 7 (P1): Enhanced error message tests ──
+
+    #[test]
+    fn test_error_message_type_mismatch_has_provenance() {
+        let mut ctx = unify::InferCtx::new();
+        let v = ctx.fresh_var();
+        let span1 = crate::ast::Span { start: 0, end: 0, line: 3, col: 5 };
+        let span2 = crate::ast::Span { start: 0, end: 0, line: 7, col: 10 };
+        // First: establish TypeVar as String
+        ctx.unify_at(&v, &Type::String, span1, "bind annotation").unwrap();
+        // Then: try to unify with I64 — should produce a rich error
+        let err = ctx.unify_at(&v, &Type::I64, span2, "function argument").unwrap_err();
+        // Error should contain line info and provenance
+        assert!(err.contains("line 7:10"), "error should contain error span: {err}");
+        assert!(err.contains("function argument"), "error should contain reason: {err}");
+    }
+
+    #[test]
+    fn test_error_message_suggests_cast_for_int_float() {
+        let mut ctx = unify::InferCtx::new();
+        let span = crate::ast::Span { start: 0, end: 0, line: 5, col: 1 };
+        let err = ctx.unify_at(&Type::I64, &Type::F64, span, "binary operands").unwrap_err();
+        assert!(err.contains("as"), "error should suggest a cast: {err}");
+    }
+
+    #[test]
+    fn test_error_message_suggests_to_string() {
+        let mut ctx = unify::InferCtx::new();
+        let span = crate::ast::Span { start: 0, end: 0, line: 5, col: 1 };
+        let err = ctx.unify_at(&Type::String, &Type::I64, span, "function argument").unwrap_err();
+        assert!(
+            err.contains("to_string") || err.contains("check that the argument"),
+            "error should suggest conversion: {err}"
+        );
+    }
+
+    #[test]
+    fn test_error_message_binary_operand_help() {
+        let mut ctx = unify::InferCtx::new();
+        let span = crate::ast::Span { start: 0, end: 0, line: 3, col: 1 };
+        let err = ctx.unify_at(&Type::String, &Type::Bool, span, "binary operands").unwrap_err();
+        assert!(err.contains("help:"), "error should have help text: {err}");
+    }
+
+    // ── Phase 4 (P2): Operator Constraint Propagation tests ──
+
+    #[test]
+    fn test_constrain_typevar_to_numeric() {
+        let mut ctx = unify::InferCtx::new();
+        let v = ctx.fresh_var();
+        let span = crate::ast::Span { start: 0, end: 0, line: 1, col: 1 };
+        ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic").unwrap();
+        // Now trying to unify with String should fail
+        let err = ctx.unify(&v, &Type::String);
+        assert!(err.is_err(), "Numeric-constrained TypeVar should reject String");
+        // But unifying with I64 should succeed
+        let mut ctx2 = unify::InferCtx::new();
+        let v2 = ctx2.fresh_var();
+        ctx2.constrain(&v2, unify::TypeConstraint::Numeric, span, "arithmetic").unwrap();
+        assert!(ctx2.unify(&v2, &Type::I64).is_ok());
+    }
+
+    #[test]
+    fn test_constrain_typevar_to_integer() {
+        let mut ctx = unify::InferCtx::new();
+        let v = ctx.fresh_var();
+        let span = crate::ast::Span { start: 0, end: 0, line: 1, col: 1 };
+        ctx.constrain(&v, unify::TypeConstraint::Integer, span, "bitwise").unwrap();
+        // Reject float
+        assert!(ctx.unify(&v, &Type::F64).is_err());
+        // Accept integer
+        let mut ctx2 = unify::InferCtx::new();
+        let v2 = ctx2.fresh_var();
+        ctx2.constrain(&v2, unify::TypeConstraint::Integer, span, "bitwise").unwrap();
+        assert!(ctx2.unify(&v2, &Type::I64).is_ok());
+    }
+
+    #[test]
+    fn test_constrain_already_solved_validates() {
+        let mut ctx = unify::InferCtx::new();
+        let v = ctx.fresh_var();
+        let span = crate::ast::Span { start: 0, end: 0, line: 1, col: 1 };
+        ctx.unify(&v, &Type::String).unwrap();
+        // Constraining a String-solved TypeVar to Numeric should error
+        let err = ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic");
+        assert!(err.is_err(), "should reject String for Numeric constraint");
+    }
+
+    #[test]
+    fn test_arithmetic_operators_constrain_typevar_params() {
+        // *add(a, b) should constrain a and b to Numeric via the + operator
+        let src = "*add(a, b)\n    a + b\n*main()\n    log(add(3, 4))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        let hir = typer.lower_program(&prog).unwrap();
+        let add_fn = hir.fns.iter().find(|f| f.name.starts_with("add")).unwrap();
+        assert!(add_fn.params[0].ty.is_num(), "add param 'a' should be numeric: {:?}", add_fn.params[0].ty);
+    }
+
+    #[test]
+    fn test_operator_constraints_allow_float_arithmetic() {
+        let src = "*mul(a, b)\n    a * b\n*main()\n    log(mul(2.5, 3.0))\n";
+        let hir = type_check(src);
+        let mul_fn = hir.fns.iter().find(|f| f.name.starts_with("mul")).unwrap();
+        assert!(mul_fn.params[0].ty.is_float(), "param should be float: {:?}", mul_fn.params[0].ty);
+    }
+
+    #[test]
+    fn test_string_concat_not_broken_by_constraints() {
+        // String + String is concat — operator constraints should not break it
+        let src = "*main()\n    s is \"hello\" + \" world\"\n    log(s)\n";
+        let hir = type_check(src);
+        let main = &hir.fns[0];
+        if let hir::Stmt::Bind(b) = &main.body[0] {
+            assert_eq!(b.ty, Type::String, "string concat should produce String");
+        }
+    }
+
+    #[test]
+    fn test_bitwise_ops_constrain_to_integer() {
+        let src = "*bitop(a, b)\n    a & b\n*main()\n    log(bitop(0xFF, 0x0F))\n";
+        let hir = type_check(src);
+        let bitop = hir.fns.iter().find(|f| f.name.starts_with("bitop")).unwrap();
+        assert!(bitop.params[0].ty.is_int(), "bitwise param should be integer: {:?}", bitop.params[0].ty);
+    }
+
+    // ── Phase 2 (P3): SCC Mutual Recursion tests ──
+
+    #[test]
+    fn test_mutual_recursion_is_even_is_odd() {
+        let src = "*is_even(n)\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n";
+        let hir = type_check(src);
+        let is_even = hir.fns.iter().find(|f| f.name.starts_with("is_even")).unwrap();
+        let is_odd = hir.fns.iter().find(|f| f.name.starts_with("is_odd")).unwrap();
+        // Both should have I64 param and I64 return
+        assert_eq!(is_even.params[0].ty, Type::I64, "is_even param type: {:?}", is_even.params[0].ty);
+        assert_eq!(is_even.ret, Type::I64, "is_even return type: {:?}", is_even.ret);
+        assert_eq!(is_odd.params[0].ty, Type::I64, "is_odd param type: {:?}", is_odd.params[0].ty);
+        assert_eq!(is_odd.ret, Type::I64, "is_odd return type: {:?}", is_odd.ret);
+    }
+
+    #[test]
+    fn test_mutual_recursion_no_typevars_remain() {
+        let src = "*ping(n)\n    if n equals 0\n        return 0\n    pong(n - 1)\n\n*pong(n)\n    if n equals 0\n        return 0\n    ping(n - 1)\n\n*main()\n    log(ping(5))\n";
+        let hir = type_check(src);
+        for f in &hir.fns {
+            assert!(!f.ret.has_type_var(), "{} has TypeVar in return: {:?}", f.name, f.ret);
+            for p in &f.params {
+                assert!(!p.ty.has_type_var(), "{} param {} has TypeVar: {:?}", f.name, p.name, p.ty);
+            }
+        }
+    }
+
+    #[test]
+    fn test_scc_three_way_mutual_recursion() {
+        let src = "*f1(n)\n    if n equals 0\n        return 0\n    f2(n - 1)\n\n*f2(n)\n    if n equals 0\n        return 0\n    f3(n - 1)\n\n*f3(n)\n    if n equals 0\n        return 0\n    f1(n - 1)\n\n*main()\n    log(f1(9))\n";
+        let hir = type_check(src);
+        let f1 = hir.fns.iter().find(|f| f.name.starts_with("f1")).unwrap();
+        let f2 = hir.fns.iter().find(|f| f.name.starts_with("f2")).unwrap();
+        let f3 = hir.fns.iter().find(|f| f.name.starts_with("f3")).unwrap();
+        // All three should resolve to I64 params and return
+        assert_eq!(f1.ret, Type::I64);
+        assert_eq!(f2.ret, Type::I64);
+        assert_eq!(f3.ret, Type::I64);
+        assert_eq!(f1.params[0].ty, Type::I64);
+        assert_eq!(f2.params[0].ty, Type::I64);
+        assert_eq!(f3.params[0].ty, Type::I64);
+    }
+
+    // ── Phase 3 (P4): Function Generalization tests ──
+
+    #[test]
+    fn test_implicit_generic_identity_multi_type() {
+        // identity(42) and identity("hello") should produce separate monomorphized versions
+        let src = "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
+        let hir = type_check(src);
+        // Should have two monomorphized identity functions
+        let id_fns: Vec<_> = hir.fns.iter().filter(|f| f.name.starts_with("identity")).collect();
+        assert!(id_fns.len() >= 2, "expected at least 2 identity monomorphizations, got {}: {:?}",
+            id_fns.len(), id_fns.iter().map(|f| &f.name).collect::<Vec<_>>());
+        // One should have I64 param, another String param
+        let has_i64 = id_fns.iter().any(|f| f.params[0].ty == Type::I64);
+        let has_string = id_fns.iter().any(|f| f.params[0].ty == Type::String);
+        assert!(has_i64, "expected I64-specialized identity");
+        assert!(has_string, "expected String-specialized identity");
+    }
+
+    #[test]
+    fn test_implicit_generic_single_type() {
+        // When called with only one type, there should be exactly one version
+        let src = "*double(x)\n    x + x\n*main()\n    log(double(21))\n";
+        let hir = type_check(src);
+        let dbl_fns: Vec<_> = hir.fns.iter().filter(|f| f.name.starts_with("double")).collect();
+        assert_eq!(dbl_fns.len(), 1, "should have exactly one monomorphized version");
+        assert_eq!(dbl_fns[0].params[0].ty, Type::I64);
+    }
+
+    #[test]
+    fn test_implicit_generic_no_typevars_in_output() {
+        // Monomorphized functions should have no remaining TypeVars
+        let src = "*swap(a, b)\n    b\n*main()\n    log(swap(1, 2))\n";
+        let hir = type_check(src);
+        for f in &hir.fns {
+            assert!(!f.ret.has_type_var(), "{} has TypeVar in return: {:?}", f.name, f.ret);
+            for p in &f.params {
+                assert!(!p.ty.has_type_var(), "{} param {} has TypeVar: {:?}", f.name, p.name, p.ty);
+            }
+        }
+    }
+
+    // ── Phase 6 (P5): Higher-Order Inference ──────────────────────────
+
+    #[test]
+    fn test_hof_apply_infers_fn_param() {
+        // *apply(f, x) with body f(x) should work as implicit generic
+        let src = "*add1(x: i64) -> i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(add1, 42))\n";
+        let hir = type_check(src);
+        let apply_fn = hir.fns.iter().find(|f| f.name.starts_with("apply")).unwrap();
+        // f param should be Fn type, x should be i64
+        assert!(matches!(&apply_fn.params[0].ty, Type::Fn(_, _)), "f should be Fn type, got {:?}", apply_fn.params[0].ty);
+        assert_eq!(apply_fn.params[1].ty, Type::I64);
+        assert_eq!(apply_fn.ret, Type::I64);
+    }
+
+    #[test]
+    fn test_hof_compose_infers_two_fn_params() {
+        // *compose(f, g, x) with body f(g(x)) should monomorphize both f and g as Fn types
+        let src = "*inc(x: i64) -> i64\n    x + 1\n*dbl(x: i64) -> i64\n    x * 2\n*compose(f, g, x)\n    f(g(x))\n*main()\n    log(compose(inc, dbl, 20))\n";
+        let hir = type_check(src);
+        let compose_fn = hir.fns.iter().find(|f| f.name.starts_with("compose")).unwrap();
+        assert!(matches!(&compose_fn.params[0].ty, Type::Fn(_, _)), "f should be Fn, got {:?}", compose_fn.params[0].ty);
+        assert!(matches!(&compose_fn.params[1].ty, Type::Fn(_, _)), "g should be Fn, got {:?}", compose_fn.params[1].ty);
+        assert_eq!(compose_fn.params[2].ty, Type::I64);
+        assert_eq!(compose_fn.ret, Type::I64);
+    }
+
+    #[test]
+    fn test_hof_apply_twice() {
+        // *apply_twice(f, x) with body f(f(x)) should correctly infer Fn type for f
+        let src = "*inc(x: i64) -> i64\n    x + 1\n*apply_twice(f, x)\n    f(f(x))\n*main()\n    log(apply_twice(inc, 40))\n";
+        let hir = type_check(src);
+        let at_fn = hir.fns.iter().find(|f| f.name.starts_with("apply_twice")).unwrap();
+        assert!(matches!(&at_fn.params[0].ty, Type::Fn(_, _)));
+        assert_eq!(at_fn.ret, Type::I64);
+    }
+
+    #[test]
+    fn test_hof_no_typevars_remain() {
+        // HOF monomorphized output should have no remaining TypeVars
+        let src = "*inc(x: i64) -> i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(inc, 42))\n";
+        let hir = type_check(src);
+        for f in &hir.fns {
+            assert!(!f.ret.has_type_var(), "{} has TypeVar in return: {:?}", f.name, f.ret);
+            for p in &f.params {
+                assert!(!p.ty.has_type_var(), "{} param {} has TypeVar: {:?}", f.name, p.name, p.ty);
+            }
+        }
     }
 }

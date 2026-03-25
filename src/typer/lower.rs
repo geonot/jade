@@ -24,13 +24,22 @@ impl Typer {
                         .insert(f.name.clone(), Self::normalize_generic_fn(f));
                 }
                 ast::Decl::Fn(f) => {
-                    // Store AST for functions with unannotated params — enables
-                    // auto-monomorphization fallback when called with incompatible types
+                    // Phase 3 (P4): Functions with ALL params unannotated are treated
+                    // as implicit generics — each call site gets a monomorphized copy.
+                    // Functions with at least one annotated param use TypeVar inference
+                    // and the auto-mono fallback for incompatible types.
                     let has_untyped_params = f.params.iter().any(|p| p.ty.is_none());
+                    let all_untyped = !f.params.is_empty() && f.params.iter().all(|p| p.ty.is_none());
                     if has_untyped_params {
                         self.inferable_fns.insert(f.name.clone(), f.clone());
                     }
-                    self.declare_fn_sig(f);
+                    if all_untyped && !f.params.is_empty() {
+                        // Treat as implicit generic — monomorphize at each call site
+                        let normalized = Self::normalize_inferable_fn(f);
+                        self.generic_fns.insert(f.name.clone(), normalized);
+                    } else {
+                        self.declare_fn_sig(f);
+                    }
                 }
                 ast::Decl::Type(td) if !td.type_params.is_empty() => {
                     self.generic_types.insert(td.name.clone(), td.clone());
@@ -108,10 +117,15 @@ impl Typer {
         let mut test_fns: Vec<(String, String)> = Vec::new();
 
         // Collect non-generic functions for SCC ordering
+        // (excludes explicit generics and implicit generics — all-untyped-param functions)
         let non_generic_fns: Vec<&ast::Fn> = prog.decls.iter().filter_map(|d| {
             if let ast::Decl::Fn(f) = d {
                 if !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
-                    return Some(f);
+                    // Skip all-untyped-param functions — they're implicit generics
+                    let all_untyped = !f.params.is_empty() && f.params.iter().all(|p| p.ty.is_none());
+                    if !all_untyped {
+                        return Some(f);
+                    }
                 }
             }
             None
@@ -130,11 +144,35 @@ impl Typer {
         // Lower functions in SCC topological order
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {
-            for name in scc {
-                if let Some(f) = fn_lookup.get(name.as_str()) {
-                    let hfn = self.lower_fn(f)?;
-                    hir_fns.push(hfn);
-                    lowered_fn_names.insert(name.clone());
+            if scc.len() > 1 {
+                // Phase 2 (P3): SCC-aware mutual recursion.
+                // For multi-member SCCs, lower ALL bodies before resolving any
+                // return types. This allows mutual peers to constrain each
+                // other's return TypeVars via call-site unification before
+                // premature resolution freezes them.
+                let mut scc_fns = Vec::new();
+                for name in scc {
+                    if let Some(f) = fn_lookup.get(name.as_str()) {
+                        let hfn = self.lower_fn_deferred(f)?;
+                        scc_fns.push((f.ret.is_none() && f.name != "main", f.span, hfn));
+                        lowered_fn_names.insert(name.clone());
+                    }
+                }
+                // Now resolve return types for deferred functions
+                for (needs_resolve, _span, hfn) in &mut scc_fns {
+                    if *needs_resolve {
+                        hfn.ret = self.infer_ctx.resolve(&hfn.ret);
+                    }
+                }
+                hir_fns.extend(scc_fns.into_iter().map(|(_, _, f)| f));
+            } else {
+                // Single-member SCC: lower normally (may be self-recursive or leaf)
+                for name in scc {
+                    if let Some(f) = fn_lookup.get(name.as_str()) {
+                        let hfn = self.lower_fn(f)?;
+                        hir_fns.push(hfn);
+                        lowered_fn_names.insert(name.clone());
+                    }
                 }
             }
         }
@@ -228,6 +266,19 @@ impl Typer {
         // Collect defaulting warnings from InferCtx
         let default_warnings = self.infer_ctx.drain_default_warnings();
         self.warnings.extend(default_warnings);
+        // Collect strict-mode type errors
+        let strict_errors = self.infer_ctx.drain_strict_errors();
+        if !strict_errors.is_empty() {
+            // Deduplicate errors (same TypeVar root can be resolved multiple times)
+            let mut unique_errors: Vec<String> = Vec::new();
+            for e in &strict_errors {
+                if !unique_errors.contains(e) {
+                    unique_errors.push(e.clone());
+                }
+            }
+            let combined = unique_errors.join("\n");
+            return Err(format!("strict type checking failed:\n{combined}"));
+        }
         // Emit type inference warnings
         for w in &self.warnings {
             eprintln!("warning: {w}");
@@ -1004,6 +1055,17 @@ impl Typer {
     }
 
     pub(crate) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
+        let mut hfn = self.lower_fn_deferred(f)?;
+        if f.ret.is_none() && f.name != "main" {
+            hfn.ret = self.infer_ctx.resolve(&hfn.ret);
+        }
+        Ok(hfn)
+    }
+
+    /// Lower a function body, unifying the tail expression with the return
+    /// TypeVar, but WITHOUT resolving the return type. Used by SCC-aware mutual
+    /// recursion to let all peer functions constrain each other before resolution.
+    fn lower_fn_deferred(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let (id, ptys, ret) = self
             .fns
             .get(&f.name)
@@ -1036,17 +1098,12 @@ impl Typer {
         let body = self.lower_block(&f.body, &ret)?;
         self.pop_scope();
 
-        let ret = if f.ret.is_none() && f.name != "main" {
-            // Phase 2.2: Unify tail expression type with ret TypeVar.
-            // Recurse into trailing If/Match to find implicit return values.
+        // Unify tail expression with the return TypeVar but do NOT resolve yet.
+        if f.ret.is_none() && f.name != "main" {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
                 let _ = self.infer_ctx.unify_at(&ret, &tail_ty, f.span, "function tail expression");
             }
-            // Resolve the return type (TypeVar → concrete after unification)
-            self.infer_ctx.resolve(&ret)
-        } else {
-            ret
-        };
+        }
 
         Ok(hir::Fn {
             def_id: id,

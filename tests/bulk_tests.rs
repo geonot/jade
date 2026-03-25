@@ -54,6 +54,50 @@ fn expect_compile_fail(src: &str) -> String {
     String::from_utf8(output.stderr).unwrap()
 }
 
+fn compile_with_strict(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let status = Command::new(jadec())
+        .arg("--strict-types")
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec --strict-types compilation failed for:\n{src}");
+    let output = Command::new(&out)
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "binary exited with {:?}\nstderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn expect_strict_fail(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let output = Command::new(jadec())
+        .arg("--strict-types")
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("jadec failed to start");
+    assert!(
+        !output.status.success(),
+        "expected --strict-types compilation to fail for:\n{src}"
+    );
+    String::from_utf8(output.stderr).unwrap()
+}
+
 fn compile_and_run_test_mode(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let jade = dir.path().join("test.jade");
@@ -4613,4 +4657,320 @@ fn b_row_poly_missing_field_error() {
         err.contains("no field 'x'") || err.contains("has no field"),
         "expected missing-field error, got: {err}"
     );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Phase 1 (P0): Strict Type Checking — Error on Ambiguity
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn strict_types_well_typed_program() {
+    // A well-typed program with no ambiguity should pass strict mode
+    let out = compile_with_strict("*main()\n    x is 42\n    log(x)\n");
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn strict_types_annotated_functions() {
+    let out = compile_with_strict(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(3, 4))\n",
+    );
+    assert_eq!(out.trim(), "7");
+}
+
+#[test]
+fn strict_types_string_operations() {
+    let out = compile_with_strict(
+        "*main()\n    s is \"hello\"\n    log(s)\n",
+    );
+    assert_eq!(out.trim(), "hello");
+}
+
+#[test]
+fn strict_types_bool_operations() {
+    let out = compile_with_strict(
+        "*main()\n    x is true\n    if x\n        log(1)\n    else\n        log(0)\n",
+    );
+    assert_eq!(out.trim(), "1");
+}
+
+#[test]
+fn strict_types_inferred_param_types() {
+    // Params inferred from call site should pass strict mode
+    let out = compile_with_strict(
+        "*double(x)\n    x * 2\n*main()\n    log(double(21))\n",
+    );
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn strict_types_integer_literal_default() {
+    // Integer-constrained TypeVars should default safely
+    let out = compile_with_strict(
+        "*main()\n    x is 100\n    log(x)\n",
+    );
+    assert_eq!(out.trim(), "100");
+}
+
+#[test]
+fn strict_types_float_literal_default() {
+    // Float-constrained TypeVars should default safely
+    let out = compile_with_strict(
+        "*main()\n    x is 3.14\n    log(x)\n",
+    );
+    assert!(out.trim().starts_with("3.14"));
+}
+
+#[test]
+fn strict_types_struct_inference() {
+    let out = compile_with_strict(
+        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    log(p.x)\n",
+    );
+    assert_eq!(out.trim(), "10");
+}
+
+#[test]
+fn strict_types_enum_inference() {
+    let out = compile_with_strict(
+        "enum Dir\n    Up\n    Down\n\n*main()\n    d is Up\n    match d\n        Up ? log(1)\n        Down ? log(2)\n",
+    );
+    assert_eq!(out.trim(), "1");
+}
+
+// ── Phase 4 (P2): Operator Constraint Propagation Bulk Tests ──
+
+#[test]
+fn operator_constraint_arithmetic_params() {
+    // Unannotated params used in arithmetic should resolve to numeric types
+    let out = compile_and_run(
+        "*add(a, b)\n    a + b\n*main()\n    log(add(10, 20))\n",
+    );
+    assert_eq!(out.trim(), "30");
+}
+
+#[test]
+fn operator_constraint_float_arithmetic() {
+    // Float arithmetic inline (cross-function float param inference requires generalization)
+    let out = compile_and_run(
+        "*main()\n    a is 2.5\n    b is 3.0\n    log(a * b)\n",
+    );
+    assert!(out.trim().starts_with("7.5"));
+}
+
+#[test]
+fn operator_constraint_string_concat_preserved() {
+    // String concat via + should still work (not broken by Numeric constraint)
+    let out = compile_and_run(
+        "*main()\n    s is \"hello\" + \" world\"\n    log(s)\n",
+    );
+    assert_eq!(out.trim(), "hello world");
+}
+
+#[test]
+fn operator_constraint_comparison_ops() {
+    let out = compile_and_run(
+        "*max(a, b)\n    if a > b\n        a\n    else\n        b\n*main()\n    log(max(10, 20))\n",
+    );
+    assert_eq!(out.trim(), "20");
+}
+
+#[test]
+fn operator_constraint_bitwise_ops() {
+    let out = compile_and_run(
+        "*mask(a, b)\n    a & b\n*main()\n    log(mask(255, 15))\n",
+    );
+    assert_eq!(out.trim(), "15");
+}
+
+#[test]
+fn operator_constraint_unary_neg() {
+    let out = compile_and_run(
+        "*negate(x)\n    -x\n*main()\n    log(negate(42))\n",
+    );
+    assert_eq!(out.trim(), "-42");
+}
+
+#[test]
+fn operator_constraint_chained_arithmetic() {
+    // Multiple arithmetic ops should all constrain consistently
+    let out = compile_and_run(
+        "*compute(a, b, c)\n    a * b + c\n*main()\n    log(compute(3, 4, 5))\n",
+    );
+    assert_eq!(out.trim(), "17");
+}
+
+#[test]
+fn operator_constraint_modulo() {
+    let out = compile_and_run(
+        "*rem(a, b)\n    a % b\n*main()\n    log(rem(17, 5))\n",
+    );
+    assert_eq!(out.trim(), "2");
+}
+
+// ── Phase 2 (P3): SCC Mutual Recursion Bulk Tests ──
+
+#[test]
+fn scc_mutual_recursion_unannotated() {
+    // is_even/is_odd without type annotations — SCC-aware lowering
+    let out = compile_and_run(
+        "*is_even(n)\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(7))\n",
+    );
+    assert_eq!(out.trim(), "1\n1");
+}
+
+#[test]
+fn scc_three_way_mutual() {
+    // Three mutually recursive functions in a cycle: f1→f2→f3→f1
+    let out = compile_and_run(
+        "*f1(n)\n    if n equals 0\n        return 0\n    f2(n - 1)\n\n*f2(n)\n    if n equals 0\n        return 0\n    f3(n - 1)\n\n*f3(n)\n    if n equals 0\n        return 0\n    f1(n - 1)\n\n*main()\n    log(f1(9))\n",
+    );
+    assert_eq!(out.trim(), "0");
+}
+
+#[test]
+fn scc_mutual_with_arithmetic() {
+    // Mutual recursion where both functions do arithmetic
+    let out = compile_and_run(
+        "*count_down_even(n)\n    if n <= 0\n        return 0\n    n + count_down_odd(n - 1)\n\n*count_down_odd(n)\n    if n <= 0\n        return 0\n    n + count_down_even(n - 1)\n\n*main()\n    log(count_down_even(6))\n",
+    );
+    assert_eq!(out.trim(), "21");
+}
+
+#[test]
+fn scc_self_recursive_unannotated() {
+    // Self-recursion (single-member SCC) remains correct
+    let out = compile_and_run(
+        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main()\n    log(fact(5))\n",
+    );
+    assert_eq!(out.trim(), "120");
+}
+
+// ── Phase 3 (P4): Function Generalization ──────────────────────────
+
+#[test]
+fn implicit_generic_identity_two_types() {
+    // identity called with i64 and string produces correct output for both
+    let out = compile_and_run(
+        "*identity(x)\n    x\n\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n",
+    );
+    assert_eq!(out.trim(), "42\nhello");
+}
+
+#[test]
+fn implicit_generic_with_arithmetic() {
+    // Implicit generic function that does arithmetic - called with i64
+    let out = compile_and_run(
+        "*double(x)\n    x + x\n\n*main()\n    log(double(21))\n",
+    );
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn implicit_generic_multiple_params() {
+    // Function with multiple untyped params
+    let out = compile_and_run(
+        "*pick_first(a, b)\n    a\n\n*main()\n    log(pick_first(10, 20))\n    log(pick_first(\"yes\", \"no\"))\n",
+    );
+    assert_eq!(out.trim(), "10\nyes");
+}
+
+#[test]
+fn implicit_generic_same_type_multiple_calls() {
+    // Multiple calls with same type should all work
+    let out = compile_and_run(
+        "*wrap(x)\n    x\n\n*main()\n    log(wrap(1))\n    log(wrap(2))\n    log(wrap(3))\n",
+    );
+    assert_eq!(out.trim(), "1\n2\n3");
+}
+
+#[test]
+fn annotated_fn_still_works() {
+    // Annotated functions should not be affected by implicit generic changes
+    let out = compile_and_run(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(10, 32))\n",
+    );
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn implicit_generic_with_conditional() {
+    // Implicit generic with a conditional
+    let out = compile_and_run(
+        "*abs_val(x)\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs_val(-5))\n    log(abs_val(3))\n",
+    );
+    assert_eq!(out.trim(), "5\n3");
+}
+
+#[test]
+fn implicit_generic_chained_calls() {
+    // Chained implicit generic calls
+    let out = compile_and_run(
+        "*id(x)\n    x\n\n*add1(x)\n    x + 1\n\n*main()\n    log(add1(id(41)))\n",
+    );
+    assert_eq!(out.trim(), "42");
+}
+
+// ── Phase 6 (P5): Higher-Order Inference ───────────────────────────
+
+#[test]
+fn hof_apply_named_fn() {
+    // *apply(f, x) → f(x) with a named function
+    let out = compile_and_run(
+        "*add1(x: i64) -> i64\n    x + 1\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 42))\n",
+    );
+    assert_eq!(out.trim(), "43");
+}
+
+#[test]
+fn hof_apply_with_lambda() {
+    // apply with a lambda argument
+    let out = compile_and_run(
+        "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(*fn(x: i64) x + 10, 32))\n",
+    );
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn hof_compose_two_functions() {
+    // compose(f, g, x) = f(g(x))
+    let out = compile_and_run(
+        "*inc(x: i64) -> i64\n    x + 1\n\n*dbl(x: i64) -> i64\n    x * 2\n\n*compose(f, g, x)\n    f(g(x))\n\n*main()\n    log(compose(inc, dbl, 20))\n",
+    );
+    assert_eq!(out.trim(), "41");
+}
+
+#[test]
+fn hof_apply_twice() {
+    // apply_twice(f, x) = f(f(x))
+    let out = compile_and_run(
+        "*apply_twice(f, x)\n    f(f(x))\n\n*main()\n    log(apply_twice(*fn(x: i64) x + 1, 40))\n",
+    );
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn hof_transform_and_add() {
+    // Higher-order fn calling f twice with different args and combining results
+    let out = compile_and_run(
+        "*transform_and_add(f, x, y)\n    f(x) + f(y)\n\n*main()\n    log(transform_and_add(*fn(x: i64) x * x, 3, 4))\n",
+    );
+    assert_eq!(out.trim(), "25");
+}
+
+#[test]
+fn hof_apply_different_fns() {
+    // Same apply function used with different function arguments (monomorphized separately)
+    let out = compile_and_run(
+        "*add1(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 41))\n    log(apply(double, 21))\n",
+    );
+    assert_eq!(out.trim(), "42\n42");
+}
+
+#[test]
+fn hof_pipeline_with_untyped_functions() {
+    // Pipeline operator with typed functions
+    let out = compile_and_run(
+        "*add1(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*main()\n    result is 20 ~ double ~ add1\n    log(result)\n",
+    );
+    assert_eq!(out.trim(), "41");
 }

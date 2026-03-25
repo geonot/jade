@@ -183,6 +183,64 @@ impl Typer {
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
                 // Unify operand types for numeric consistency
                 let _ = self.infer_ctx.unify_at(&hl.ty, &hr.ty, *span, "binary operands");
+
+                // Phase 4 (P2): Add type constraints based on operator kind.
+                // Arithmetic ops require numeric types, bitwise ops require integer types.
+                // Skip constraint if operand is already resolved to String (concat) or
+                // Struct (operator overloading) — only constrain unsolved TypeVars.
+                match op {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Exp => {
+                        let resolved_l = self.infer_ctx.shallow_resolve(&hl.ty);
+                        // Only add Numeric constraint if the operand type is still a TypeVar
+                        // (unresolved). String+ is concat, Struct+ is overloaded — don't constrain those.
+                        if matches!(resolved_l, Type::TypeVar(_)) {
+                            let _ = self.infer_ctx.constrain(
+                                &hl.ty,
+                                super::unify::TypeConstraint::Numeric,
+                                *span,
+                                "arithmetic operator requires numeric type",
+                            );
+                        }
+                        let resolved_r = self.infer_ctx.shallow_resolve(&hr.ty);
+                        if matches!(resolved_r, Type::TypeVar(_)) {
+                            let _ = self.infer_ctx.constrain(
+                                &hr.ty,
+                                super::unify::TypeConstraint::Numeric,
+                                *span,
+                                "arithmetic operator requires numeric type",
+                            );
+                        }
+                    }
+                    BinOp::Shl | BinOp::Shr | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                        let _ = self.infer_ctx.constrain(
+                            &hl.ty,
+                            super::unify::TypeConstraint::Integer,
+                            *span,
+                            "bitwise operator requires integer type",
+                        );
+                        let _ = self.infer_ctx.constrain(
+                            &hr.ty,
+                            super::unify::TypeConstraint::Integer,
+                            *span,
+                            "bitwise operator requires integer type",
+                        );
+                    }
+                    BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+                        // Comparison requires numeric operands (Jade has no non-numeric Ord)
+                        let resolved_l = self.infer_ctx.shallow_resolve(&hl.ty);
+                        if matches!(resolved_l, Type::TypeVar(_)) {
+                            let _ = self.infer_ctx.constrain(
+                                &hl.ty,
+                                super::unify::TypeConstraint::Numeric,
+                                *span,
+                                "comparison operator requires numeric type",
+                            );
+                        }
+                    }
+                    // Eq/Ne work on all types, And/Or work on bools — no constraint needed
+                    _ => {}
+                }
+
                 let (hl, hr) = self.coerce_binop_operands(hl, hr);
                 let result_ty = match op {
                     BinOp::Eq
@@ -214,7 +272,26 @@ impl Typer {
                             Type::Bool
                         }
                     }
-                    _ => hi.ty.clone(),
+                    UnaryOp::Neg => {
+                        // Negation requires numeric type
+                        let _ = self.infer_ctx.constrain(
+                            &hi.ty,
+                            super::unify::TypeConstraint::Numeric,
+                            *span,
+                            "negation requires numeric type",
+                        );
+                        hi.ty.clone()
+                    }
+                    UnaryOp::BitNot => {
+                        // Bitwise not requires integer type
+                        let _ = self.infer_ctx.constrain(
+                            &hi.ty,
+                            super::unify::TypeConstraint::Integer,
+                            *span,
+                            "bitwise not requires integer type",
+                        );
+                        hi.ty.clone()
+                    }
                 };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::UnaryOp(*op, Box::new(hi)),
@@ -1380,13 +1457,14 @@ impl Typer {
                 });
             }
 
-            if let Some(v) = self.find_var(name) {
-                if let Type::Fn(ptys, ret) = &v.ty {
+            if let Some(v) = self.find_var(name).cloned() {
+                let resolved_ty = self.infer_ctx.shallow_resolve(&v.ty);
+                if let Type::Fn(ptys, ret) = &resolved_ty {
                     let ret = *ret.clone();
                     let ptys = ptys.clone();
                     let fn_expr = hir::Expr {
                         kind: hir::ExprKind::Var(v.def_id, name.clone()),
-                        ty: v.ty.clone(),
+                        ty: resolved_ty.clone(),
                         span,
                     };
                     let mut hargs = Vec::new();
@@ -1407,6 +1485,28 @@ impl Typer {
                         span,
                     });
                 }
+                // Phase 6: Higher-order inference — when a variable with TypeVar
+                // type is called, unify it with Fn(arg_tys) -> fresh_ret
+                if matches!(resolved_ty, Type::TypeVar(_) | Type::Param(_)) {
+                    let mut hargs = Vec::new();
+                    for arg in args.iter() {
+                        hargs.push(self.lower_expr(arg)?);
+                    }
+                    let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
+                    let ret = self.infer_ctx.fresh_var();
+                    let fn_ty = Type::Fn(arg_tys, Box::new(ret.clone()));
+                    let _ = self.infer_ctx.unify_at(&v.ty, &fn_ty, span, "higher-order call");
+                    let fn_expr = hir::Expr {
+                        kind: hir::ExprKind::Var(v.def_id, name.clone()),
+                        ty: fn_ty,
+                        span,
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::IndirectCall(Box::new(fn_expr), hargs),
+                        ty: ret,
+                        span,
+                    });
+                }
             }
 
             let _hargs: Vec<hir::Expr> = args
@@ -1417,9 +1517,29 @@ impl Typer {
         }
 
         let hcallee = self.lower_expr(callee)?;
-        let (ptys, ret) = match &hcallee.ty {
+        let callee_resolved = self.infer_ctx.shallow_resolve(&hcallee.ty);
+        let (ptys, ret) = match &callee_resolved {
             Type::Fn(ptys, ret) => (ptys.clone(), *ret.clone()),
-            _ => (vec![], self.infer_ctx.fresh_var()),
+            _ => {
+                // Phase 6: Higher-order inference — construct Fn type from args
+                // and unify with the callee's TypeVar
+                let mut hargs: Vec<hir::Expr> = Vec::new();
+                for arg in args.iter() {
+                    hargs.push(self.lower_expr(arg)?);
+                }
+                let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
+                let ret = self.infer_ctx.fresh_var();
+                let fn_ty = Type::Fn(arg_tys, Box::new(ret.clone()));
+                let _ = self.infer_ctx.unify_at(&hcallee.ty, &fn_ty, span, "higher-order call");
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::IndirectCall(Box::new(hir::Expr {
+                        ty: fn_ty,
+                        ..hcallee
+                    }), hargs),
+                    ty: ret,
+                    span,
+                });
+            }
         };
         let mut hargs: Vec<hir::Expr> = Vec::new();
         for (i, arg) in args.iter().enumerate() {

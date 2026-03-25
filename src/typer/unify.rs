@@ -1,11 +1,22 @@
 use crate::ast::Span;
 use crate::types::Type;
 
+/// Describes why a particular type constraint was established.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ConstraintOrigin {
     pub span: Span,
     pub reason: &'static str,
+}
+
+/// Extended error context: tracks the full chain of "expected X because of Y".
+#[derive(Debug, Clone)]
+pub(crate) struct TypeMismatchInfo {
+    pub expected: Type,
+    pub found: Type,
+    pub span: Span,
+    pub reason: &'static str,
+    pub notes: Vec<String>,
+    pub suggestion: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +37,12 @@ pub(crate) struct InferCtx {
     pub(crate) debug: bool,
     collect_default_warnings: bool,
     default_warnings: Vec<String>,
+    /// When true, unsolved TypeVars with TypeConstraint::None produce errors
+    /// instead of silently defaulting to I64. Integer→I64 and Float→F64
+    /// defaults are always allowed (principled defaulting).
+    strict_types: bool,
+    /// Errors collected during strict-mode resolution.
+    strict_errors: Vec<String>,
 }
 
 impl InferCtx {
@@ -39,6 +56,8 @@ impl InferCtx {
             debug: false,
             collect_default_warnings: false,
             default_warnings: Vec::new(),
+            strict_types: false,
+            strict_errors: Vec::new(),
         }
     }
 
@@ -48,6 +67,18 @@ impl InferCtx {
 
     pub(crate) fn drain_default_warnings(&mut self) -> Vec<String> {
         std::mem::take(&mut self.default_warnings)
+    }
+
+    pub(crate) fn enable_strict_types(&mut self) {
+        self.strict_types = true;
+    }
+
+    pub(crate) fn drain_strict_errors(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.strict_errors)
+    }
+
+    pub(crate) fn is_strict(&self) -> bool {
+        self.strict_types
     }
 
     pub(crate) fn fresh_var(&mut self) -> Type {
@@ -91,6 +122,58 @@ impl InferCtx {
         Type::TypeVar(id)
     }
 
+    /// Add a constraint to an existing TypeVar. If the TypeVar is already solved
+    /// to a concrete type, validates the constraint against it. If still unsolved,
+    /// narrows the constraint (e.g., None→Numeric, Numeric→Integer).
+    /// Returns Err if the constraint conflicts with an already-solved concrete type.
+    pub(crate) fn constrain(&mut self, ty: &Type, constraint: TypeConstraint, span: Span, reason: &'static str) -> Result<(), String> {
+        let resolved = self.shallow_resolve(ty);
+        match resolved {
+            Type::TypeVar(v) => {
+                let root = self.find(v);
+                let existing = &self.constraints[root as usize];
+                // Merge: more specific wins
+                let merged = match (existing, &constraint) {
+                    (TypeConstraint::None, c) => c.clone(),
+                    (c, TypeConstraint::None) => c.clone(),
+                    (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => TypeConstraint::Integer,
+                    (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => TypeConstraint::Float,
+                    (TypeConstraint::Numeric, TypeConstraint::Numeric) => TypeConstraint::Numeric,
+                };
+                self.constraints[root as usize] = merged;
+                // Record origin if not already set
+                if self.origins[root as usize].is_none() {
+                    self.origins[root as usize] = Some(ConstraintOrigin { span, reason });
+                }
+                Ok(())
+            }
+            // Already solved to concrete — validate
+            ref concrete => {
+                match constraint {
+                    TypeConstraint::Integer if !concrete.is_int() => {
+                        Err(format!(
+                            "line {}:{}: expected integer type for {}, found `{concrete}`",
+                            span.line, span.col, reason
+                        ))
+                    }
+                    TypeConstraint::Float if !concrete.is_float() => {
+                        Err(format!(
+                            "line {}:{}: expected float type for {}, found `{concrete}`",
+                            span.line, span.col, reason
+                        ))
+                    }
+                    TypeConstraint::Numeric if !concrete.is_num() => {
+                        Err(format!(
+                            "line {}:{}: expected numeric type for {}, found `{concrete}`",
+                            span.line, span.col, reason
+                        ))
+                    }
+                    _ => Ok(()),
+                }
+            }
+        }
+    }
+
     fn find(&mut self, v: u32) -> u32 {
         let p = self.parent[v as usize];
         if p != v {
@@ -132,25 +215,80 @@ impl InferCtx {
             }
         }
         self.unify(a, b).map_err(|e| {
-            // Enrich error with origin context when both sides have origins
+            let ra = self.shallow_resolve(a);
+            let rb = self.shallow_resolve(b);
             let a_origin = self.origin_of(a);
             let b_origin = self.origin_of(b);
+
             let mut msg = format!("line {}:{}: {} ({})", span.line, span.col, e, reason);
-            if let Some(origin) = a_origin {
+
+            // Build provenance chain: show user exactly where each type was established
+            if let Some(origin) = &a_origin {
                 if origin.span.line != span.line {
-                    msg.push_str(&format!("\n  note: first type established at line {} ({})", origin.span.line, origin.reason));
+                    msg.push_str(&format!(
+                        "\n  note: expected `{}` because of line {} ({})",
+                        ra, origin.span.line, origin.reason
+                    ));
                 }
             }
-            if let Some(origin) = b_origin {
+            if let Some(origin) = &b_origin {
                 if origin.span.line != span.line {
-                    msg.push_str(&format!("\n  note: second type established at line {} ({})", origin.span.line, origin.reason));
+                    msg.push_str(&format!(
+                        "\n  note: found `{}` because of line {} ({})",
+                        rb, origin.span.line, origin.reason
+                    ));
                 }
             }
+
+            // Context-specific suggestions
+            let suggestion = self.suggest_fix(reason, &ra, &rb);
+            if let Some(s) = suggestion {
+                msg.push_str(&format!("\n  help: {s}"));
+            }
+
             msg
         })
     }
 
-    #[allow(dead_code)]
+    /// Generate context-specific fix suggestions based on the error kind.
+    fn suggest_fix(&self, reason: &str, expected: &Type, found: &Type) -> Option<String> {
+        // Numeric type mismatch — suggest cast
+        if expected.is_int() && found.is_float() {
+            return Some(format!("use `{found} as {expected}` to convert float to integer"));
+        }
+        if expected.is_float() && found.is_int() {
+            return Some(format!("use `{found} as {expected}` to convert integer to float"));
+        }
+        // Integer size mismatch — suggest cast
+        if expected.is_int() && found.is_int() && expected != found {
+            return Some(format!("use `{found} as {expected}` to convert between integer types"));
+        }
+        // String vs numeric — common beginner mistake
+        if matches!(expected, Type::String) && found.is_num() {
+            return Some("use `to_string(value)` to convert a number to a string".into());
+        }
+        if expected.is_num() && matches!(found, Type::String) {
+            return Some("strings cannot be used as numbers directly".into());
+        }
+        // Function argument hints
+        if reason.contains("argument") {
+            return Some("check that the argument type matches the parameter type".into());
+        }
+        // Return type hints
+        if reason.contains("return") || reason.contains("tail") {
+            return Some("ensure all return paths produce the same type".into());
+        }
+        // Binary operand hints
+        if reason.contains("binary operand") || reason.contains("operands") {
+            return Some("binary operators require both operands to have the same type".into());
+        }
+        // Assignment hints
+        if reason.contains("assign") {
+            return Some("the assigned value must match the variable's type".into());
+        }
+        None
+    }
+
     pub(crate) fn origin_of(&mut self, ty: &Type) -> Option<ConstraintOrigin> {
         if let Type::TypeVar(v) = ty {
             let root = self.find(*v);
@@ -352,10 +490,41 @@ impl InferCtx {
                 if let Some(resolved) = self.types[root as usize].clone() {
                     self.resolve_inner(&resolved, _tracking)
                 } else {
-                    // Constraint-aware defaulting
-                    match &self.constraints[root as usize] {
+                    let constraint = &self.constraints[root as usize];
+                    // In strict mode, unconstrained TypeVars are ambiguity errors
+                    if self.strict_types {
+                        match constraint {
+                            TypeConstraint::None => {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                    format!(
+                                        "line {}:{}: ambiguous type: cannot infer type for this expression ({}); add a type annotation",
+                                        origin.span.line, origin.span.col, origin.reason
+                                    )
+                                } else {
+                                    format!("ambiguous type: unsolved type variable ?{root}; add a type annotation")
+                                };
+                                self.strict_errors.push(origin_msg);
+                            }
+                            TypeConstraint::Numeric => {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                    format!(
+                                        "line {}:{}: ambiguous numeric type: could be integer or float ({}); add a type annotation",
+                                        origin.span.line, origin.span.col, origin.reason
+                                    )
+                                } else {
+                                    format!("ambiguous numeric type: unsolved type variable ?{root}; add a type annotation")
+                                };
+                                self.strict_errors.push(origin_msg);
+                            }
+                            // Integer→I64 and Float→F64 are principled defaults, no error
+                            _ => {}
+                        }
+                    }
+                    // Still produce a concrete type for codegen (even in strict mode,
+                    // we report the error but continue to enable batch error reporting)
+                    match constraint {
                         TypeConstraint::Float => Type::F64,
-                        _ => Type::I64, // Numeric, Integer, None all → I64
+                        _ => Type::I64,
                     }
                 }
             }

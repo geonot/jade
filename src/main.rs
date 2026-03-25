@@ -50,6 +50,8 @@ struct Cli {
     #[arg(long)]
     warn_inferred_defaults: bool,
     #[arg(long)]
+    strict_types: bool,
+    #[arg(long)]
     test: bool,
 }
 
@@ -288,6 +290,9 @@ fn main() {
     }
     if cli.warn_inferred_defaults {
         typer.set_warn_inferred_defaults(true);
+    }
+    if cli.strict_types {
+        typer.set_strict_types(true);
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,
