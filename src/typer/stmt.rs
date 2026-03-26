@@ -67,6 +67,16 @@ impl Typer {
                     // to String). We default remaining unsolved vars at block end.
                     if scheme.is_poly() {
                         self.deferred_quantified_vars.extend(scheme.quantified.iter().copied());
+                        // Store the lambda AST for poly-scheme let-bound lambdas so
+                        // we can re-lower (monomorphize) at each call site with the
+                        // resolved concrete types. This fixes polymorphic multi-use
+                        // at codegen: id(42) and id("hello") each get separate copies.
+                        if let ast::Expr::Lambda(params, ret, body, lspan) = &b.value {
+                            self.poly_lambda_asts.insert(
+                                b.name.clone(),
+                                (params.clone(), ret.clone(), body.clone(), *lspan),
+                            );
+                        }
                     }
                     self.define_var(
                         &b.name,
@@ -119,7 +129,8 @@ impl Typer {
             ast::Stmt::Assign(target, value, span) => {
                 let ht = self.lower_expr(target)?;
                 let hv = self.lower_expr_expected(value, Some(&ht.ty))?;
-                let _ = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
+                let r = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
+                self.collect_unify_error(r);
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
@@ -316,7 +327,8 @@ impl Typer {
 
             ast::Stmt::ChannelClose(ch, span) => {
                 let hch = self.lower_expr(ch)?;
-                if !matches!(&hch.ty, Type::Channel(_)) {
+                let resolved = self.infer_ctx.shallow_resolve(&hch.ty);
+                if !matches!(&resolved, Type::Channel(_) | Type::TypeVar(_)) {
                     return Err(format!("close: target must be a Channel, got {}", hch.ty));
                 }
                 Ok(hir::Stmt::ChannelClose(hch, *span))
@@ -429,11 +441,24 @@ impl Typer {
         let subject = self.lower_expr(&m.subject)?;
         let subj_ty = subject.ty.clone();
         let mut arms = Vec::new();
+        // R2.3: Unify all arm tail expression types so match arms produce
+        // consistent types. Only track if arms actually have tail expressions.
+        let mut first_arm_ty: Option<Type> = None;
         for a in &m.arms {
             self.push_scope();
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
             let guard = a.guard.as_ref().map(|g| self.lower_expr_expected(g, Some(&Type::Bool))).transpose()?;
             let body = self.lower_block_no_scope(&a.body, ret_ty)?;
+            // Unify each arm's tail expression type with other arms
+            if let Some(hir::Stmt::Expr(tail_expr)) = body.last() {
+                if let Some(ref first_ty) = first_arm_ty {
+                    let _ = self.infer_ctx.unify_at(
+                        first_ty, &tail_expr.ty, a.span, "match arm result type"
+                    );
+                } else {
+                    first_arm_ty = Some(tail_expr.ty.clone());
+                }
+            }
             self.pop_scope();
             arms.push(hir::Arm {
                 pat,
@@ -444,10 +469,14 @@ impl Typer {
         }
         // Resolve TypeVars in subject type before exhaustiveness check
         let resolved_subj_ty = self.infer_ctx.resolve(&subj_ty);
+        // Use the unified arm type if available, otherwise the subject type
+        let result_ty = first_arm_ty
+            .map(|t| self.infer_ctx.shallow_resolve(&t))
+            .unwrap_or_else(|| subj_ty.clone());
         let result = hir::Match {
             subject,
             arms,
-            ty: subj_ty.clone(),
+            ty: result_ty,
             span: m.span,
         };
 

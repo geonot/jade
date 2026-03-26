@@ -120,6 +120,16 @@ pub struct Typer {
     /// a Scheme. At each call site, the scheme is instantiated with fresh TypeVars
     /// so that calling identity(42) and identity("hello") get independent type solutions.
     pub(crate) fn_schemes: HashMap<String, (Vec<u32>, Vec<Type>, Type)>,
+    /// R1.2: Track unannotated struct fields (struct_name, field_name, TypeVar, span)
+    /// for strict-mode enforcement. After all lowering, unsolved TypeVars here
+    /// indicate fields that were never constrained by constructors or usage.
+    pub(crate) unannotated_struct_fields: Vec<(String, String, Type, Span)>,
+    /// Poly-lambda ASTs: stores the original AST of let-bound lambdas that were
+    /// generalized to poly schemes, enabling monomorphization at each call site.
+    /// Maps local variable name → (params, optional return type, body, span).
+    pub(crate) poly_lambda_asts: HashMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
+    /// Type errors collected during lowering for batch reporting.
+    pub(crate) type_errors: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +176,9 @@ impl Typer {
             field_constraints: HashMap::new(),
             inferable_fns: HashMap::new(),
             fn_schemes: HashMap::new(),
+            unannotated_struct_fields: Vec::new(),
+            poly_lambda_asts: HashMap::new(),
+            type_errors: Vec::new(),
         }
     }
 
@@ -199,6 +212,13 @@ impl Typer {
     pub fn set_lenient(&mut self, enabled: bool) {
         if enabled {
             self.infer_ctx.disable_strict_types();
+        }
+    }
+
+    /// Enable pedantic mode — also reject Integer→I64 and Float→F64 defaults.
+    pub fn set_pedantic(&mut self, enabled: bool) {
+        if enabled {
+            self.infer_ctx.set_pedantic(true);
         }
     }
 
@@ -247,6 +267,13 @@ impl Typer {
         match &ty {
             Type::Struct(n) if self.enums.contains_key(n) => Type::Enum(n.clone()),
             _ => ty,
+        }
+    }
+
+    /// Collect a unification error for batch reporting instead of silently dropping it.
+    fn collect_unify_error(&mut self, result: Result<(), String>) {
+        if let Err(e) = result {
+            self.type_errors.push(e);
         }
     }
 

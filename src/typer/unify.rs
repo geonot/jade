@@ -36,6 +36,8 @@ pub(crate) struct InferCtx {
     strict_types: bool,
     /// Errors collected during strict-mode resolution.
     strict_errors: Vec<String>,
+    /// When true, Integer→I64 and Float→F64 defaults also produce errors.
+    pedantic: bool,
 }
 
 impl InferCtx {
@@ -51,6 +53,7 @@ impl InferCtx {
             default_warnings: Vec::new(),
             strict_types: true,  // strict is now the default
             strict_errors: Vec::new(),
+            pedantic: false,
         }
     }
 
@@ -101,6 +104,18 @@ impl InferCtx {
 
     pub(crate) fn set_strict(&mut self, strict: bool) {
         self.strict_types = strict;
+    }
+
+    pub(crate) fn set_pedantic(&mut self, pedantic: bool) {
+        self.pedantic = pedantic;
+        if pedantic {
+            self.strict_types = true;
+        }
+    }
+
+    /// Returns the total number of TypeVars allocated.
+    pub(crate) fn num_vars(&self) -> u32 {
+        self.parent.len() as u32
     }
 
     pub(crate) fn fresh_var(&mut self) -> Type {
@@ -609,22 +624,22 @@ impl InferCtx {
                             TypeConstraint::None => {
                                 let origin_msg = if let Some(origin) = &self.origins[root as usize] {
                                     format!(
-                                        "line {}:{}: ambiguous type: cannot infer type for this expression ({}); add a type annotation",
+                                        "line {}:{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("ambiguous type: unsolved type variable ?{root}; add a type annotation")
+                                    format!("ambiguous type: unsolved type variable ?{root}\n  help: add a type annotation to resolve the ambiguity")
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
                             TypeConstraint::Numeric => {
                                 let origin_msg = if let Some(origin) = &self.origins[root as usize] {
                                     format!(
-                                        "line {}:{}: ambiguous numeric type: could be integer or float ({}); add a type annotation",
+                                        "line {}:{}: ambiguous numeric type: could be integer or float ({})\n  help: add `: i64` for integer or `: f64` for float",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("ambiguous numeric type: unsolved type variable ?{root}; add a type annotation")
+                                    format!("ambiguous numeric type: unsolved type variable ?{root}\n  help: add `: i64` for integer or `: f64` for float")
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
@@ -634,11 +649,33 @@ impl InferCtx {
                                 let traits_str = traits.join(", ");
                                 let origin_msg = if let Some(origin) = &self.origins[root as usize] {
                                     format!(
-                                        "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}); add a type annotation ({})",
-                                        origin.span.line, origin.span.col, traits_str, origin.reason
+                                        "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}) ({})\n  help: add a type annotation for a type that implements {}",
+                                        origin.span.line, origin.span.col, traits_str, origin.reason, traits_str
                                     )
                                 } else {
-                                    format!("ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]; add a type annotation")
+                                    format!("ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]\n  help: add a type annotation for a type that implements {traits_str}")
+                                };
+                                self.strict_errors.push(origin_msg);
+                            }
+                            TypeConstraint::Integer if self.pedantic => {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                    format!(
+                                        "line {}:{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `: i64` or `: i32`",
+                                        origin.span.line, origin.span.col, origin.reason
+                                    )
+                                } else {
+                                    format!("pedantic: unsolved integer type variable ?{root} defaults to i64\n  help: add an explicit annotation, e.g. `: i64` or `: i32`")
+                                };
+                                self.strict_errors.push(origin_msg);
+                            }
+                            TypeConstraint::Float if self.pedantic => {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                    format!(
+                                        "line {}:{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `: f64` or `: f32`",
+                                        origin.span.line, origin.span.col, origin.reason
+                                    )
+                                } else {
+                                    format!("pedantic: unsolved float type variable ?{root} defaults to f64\n  help: add an explicit annotation, e.g. `: f64` or `: f32`")
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
@@ -687,13 +724,13 @@ impl InferCtx {
                         match constraint {
                             TypeConstraint::None => {
                                 warnings.push(format!(
-                                    "line {}:{}: unsolved type variable defaulted to i64 ({})",
+                                    "line {}:{}: unsolved type variable defaulted to i64 ({}). Consider adding `: i64` or the appropriate type annotation.",
                                     origin.span.line, origin.span.col, origin.reason
                                 ));
                             }
                             TypeConstraint::Numeric => {
                                 warnings.push(format!(
-                                    "line {}:{}: ambiguous numeric type defaulted to i64 ({})",
+                                    "line {}:{}: ambiguous numeric type defaulted to i64 ({}). Add `: i64` for integer or `: f64` for float.",
                                     origin.span.line, origin.span.col, origin.reason
                                 ));
                             }

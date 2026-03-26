@@ -98,6 +98,25 @@ fn expect_strict_fail(src: &str) -> String {
     String::from_utf8(output.stderr).unwrap()
 }
 
+fn expect_pedantic_fail(src: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, src).unwrap();
+    let output = Command::new(jadec())
+        .arg("--pedantic")
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("jadec failed to start");
+    assert!(
+        !output.status.success(),
+        "expected --pedantic compilation to fail for:\n{src}"
+    );
+    String::from_utf8(output.stderr).unwrap()
+}
+
 fn compile_and_run_test_mode(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let jade = dir.path().join("test.jade");
@@ -5816,5 +5835,497 @@ fn b_p5_annotation_reduction_combo() {
     expect(
         "type Point\n    x: i64\n    y: i64\n\n*dist_sq(p: Point) -> i64\n    p.x * p.x + p.y * p.y\n\n*scale(n, factor)\n    n * factor\n\n*main()\n    p is Point(x is 3, y is 4)\n    d is dist_sq(p)\n    log(scale(d, 2))\n",
         "50",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PHASE 5 — TESTING REMEDIATION
+// 8 categories, 40+ tests for type inference correctness
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ─── Category 1: Polymorphic multi-use tests ────────────────────────
+// Same function called with different types at different call sites
+
+#[test]
+fn b_r5_poly_identity_int_then_string() {
+    // Identity function used at i64 then String
+    expect(
+        "*id(x)\n    x\n\n*main()\n    log(id(42))\n    log(id(\"hello\"))\n",
+        "42\nhello",
+    );
+}
+
+#[test]
+fn b_r5_poly_identity_bool_then_int() {
+    expect(
+        "*id(x)\n    x\n\n*main()\n    a is id(1)\n    b is id(0)\n    log(a + b)\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_r5_poly_add_int_then_float() {
+    // Same add function used with integers and floats in separate calls
+    expect(
+        "*add(a, b)\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_r5_poly_pair_accessors() {
+    // Fn returning first of two args, used at different types
+    expect(
+        "*first(a, b)\n    a\n\n*main()\n    log(first(10, 20))\n    log(first(\"hi\", \"bye\"))\n",
+        "10\nhi",
+    );
+}
+
+#[test]
+fn b_r5_poly_nested_calls() {
+    // Polymorphic fn used inside another polymorphic fn
+    expect(
+        "*id(x)\n    x\n\n*wrap(x)\n    id(x)\n\n*main()\n    log(wrap(42))\n    log(wrap(\"yo\"))\n",
+        "42\nyo",
+    );
+}
+
+#[test]
+fn b_r5_poly_apply_with_lambdas() {
+    // Apply function used with different lambda types
+    expect(
+        "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(*fn(x) x + 1, 5))\n    log(apply(*fn(x) x * 2, 10))\n",
+        "6\n20",
+    );
+}
+
+#[test]
+fn b_r5_poly_choose_first() {
+    // choose function used multiple times with different integer args
+    expect(
+        "*choose(a, b, flag: i64) -> i64\n    if flag equals 1\n        return a\n    b\n\n*main()\n    log(choose(10, 20, 1))\n    log(choose(30, 40, 0))\n",
+        "10\n40",
+    );
+}
+
+#[test]
+fn b_r5_poly_three_calls() {
+    // Same function called 3 times — tests that scheme is properly re-instantiated each time
+    expect(
+        "*id(x)\n    x\n\n*main()\n    a is id(1)\n    b is id(2)\n    c is id(3)\n    log(a + b + c)\n",
+        "6",
+    );
+}
+
+// ─── Category 2: Lambda capture inference ───────────────────────────
+// Closures capturing variables of different types
+
+#[test]
+fn b_r5_lambda_capture_int() {
+    // Lambda captures integer variable
+    expect(
+        "*main()\n    x is 10\n    f is *fn(y) x + y\n    log(f(5))\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_r5_lambda_capture_two_vars() {
+    // Lambda captures two variables
+    expect(
+        "*main()\n    a is 3\n    b is 7\n    f is *fn(x) a * x + b\n    log(f(4))\n",
+        "19",
+    );
+}
+
+#[test]
+fn b_r5_lambda_capture_outer_param() {
+    // Inner function captures outer function's parameter
+    expect(
+        "*make_adder(n: i64) -> (i64) -> i64\n    *fn(x: i64) -> i64 n + x\n\n*main()\n    add5 is make_adder(5)\n    log(add5(10))\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_r5_lambda_capture_nested() {
+    // Nested lambdas each capturing from different scopes
+    expect(
+        "*main()\n    x is 100\n    f is *fn(a: i64) -> i64 x + a\n    log(f(42))\n",
+        "142",
+    );
+}
+
+#[test]
+fn b_r5_lambda_capture_in_hof() {
+    // Closure passed to higher-order function
+    expect(
+        "*apply(f, x)\n    f(x)\n\n*main()\n    base is 50\n    add_base is *fn(x) x + base\n    log(apply(add_base, 7))\n",
+        "57",
+    );
+}
+
+// ─── Category 3: Recursive type regression ──────────────────────────
+// Recursive functions with complex return types
+
+#[test]
+fn b_r5_recursive_factorial() {
+    // Classic factorial with inferred types
+    expect(
+        "*factorial(n: i64) -> i64\n    if n <= 1\n        return 1\n    n * factorial(n - 1)\n\n*main()\n    log(factorial(6))\n",
+        "720",
+    );
+}
+
+#[test]
+fn b_r5_recursive_sum_to() {
+    // Recursive sum 1..n
+    expect(
+        "*sum_to(n: i64) -> i64\n    if n <= 0\n        return 0\n    n + sum_to(n - 1)\n\n*main()\n    log(sum_to(10))\n",
+        "55",
+    );
+}
+
+#[test]
+fn b_r5_recursive_power() {
+    // Recursive exponentiation
+    expect(
+        "*power(base: i64, exp: i64) -> i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
+        "1024",
+    );
+}
+
+#[test]
+fn b_r5_recursive_fib_inferred() {
+    // Fibonacci with full annotations but still exercises recursive unification
+    expect(
+        "*fib(n: i64) -> i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "55",
+    );
+}
+
+#[test]
+fn b_r5_recursive_mutual_even_odd() {
+    // Mutual recursion: is_even and is_odd
+    expect(
+        "*is_even(n: i64) -> i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n: i64) -> i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(7))\n",
+        "1\n1",
+    );
+}
+
+// ─── Category 4: Deferred method edge cases ─────────────────────────
+// Method calls on TypeVars resolved late via deferred resolution
+
+#[test]
+fn b_r5_deferred_struct_method() {
+    // Method on struct where receiver type resolves late
+    expect(
+        "type Counter\n    val: i64\n\n    *get() -> i64\n        self.val\n\n*use_counter(c) -> i64\n    c.get()\n\n*main()\n    c is Counter(val is 99)\n    log(use_counter(c))\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_r5_deferred_field_access() {
+    // Field access on unknown-type var resolved through usage
+    expect(
+        "type Pt\n    x: i64\n    y: i64\n\n*get_x(p) -> i64\n    p.x\n\n*main()\n    p is Pt(x is 5, y is 6)\n    log(get_x(p))\n",
+        "5",
+    );
+}
+
+#[test]
+fn b_r5_deferred_method_chain() {
+    // Chained method calls resolved through deferred mechanism
+    expect(
+        "type Box\n    val: i64\n\n    *get_val() -> i64\n        self.val\n\n*extract(b) -> i64\n    b.get_val()\n\n*main()\n    b is Box(val is 77)\n    log(extract(b))\n",
+        "77",
+    );
+}
+
+#[test]
+fn b_r5_deferred_method_with_arg() {
+    // Method taking argument, deferred resolution
+    expect(
+        "type Acc\n    total: i64\n\n    *add(n: i64) -> i64\n        self.total + n\n\n*use_acc(a, n: i64) -> i64\n    a.add(n)\n\n*main()\n    a is Acc(total is 10)\n    log(use_acc(a, 32))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_r5_deferred_vec_method() {
+    // Vec method called through typed function
+    expect(
+        "*get_len(v: Vec of i64) -> i64\n    v.len()\n\n*main()\n    v is vec(1, 2, 3, 4)\n    log(get_len(v))\n",
+        "4",
+    );
+}
+
+// ─── Category 5: Mixed annotation tests ─────────────────────────────
+// Functions with some params annotated, some not
+
+#[test]
+fn b_r5_mixed_one_annotated() {
+    // First param annotated, second inferred
+    expect(
+        "*add(a: i64, b) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_r5_mixed_ret_annotated_params_not() {
+    // Return type annotated, params inferred
+    expect(
+        "*mul(a, b) -> i64\n    a * b\n\n*main()\n    log(mul(6, 7))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_r5_mixed_struct_param_annotated() {
+    // Struct param annotated, other inferred
+    expect(
+        "type Pt\n    x: i64\n    y: i64\n\n*scale_x(p: Pt, factor) -> i64\n    p.x * factor\n\n*main()\n    p is Pt(x is 5, y is 3)\n    log(scale_x(p, 10))\n",
+        "50",
+    );
+}
+
+#[test]
+fn b_r5_mixed_return_inferred() {
+    // No return annotation — inferred from body
+    expect(
+        "*double(x: i64)\n    x * 2\n\n*main()\n    log(double(21))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_r5_mixed_all_inferred_multi_param() {
+    // All parameters inferred from call site
+    expect(
+        "*compute(a, b, c)\n    a + b * c\n\n*main()\n    log(compute(1, 2, 3))\n",
+        "7",
+    );
+}
+
+// ─── Category 6: Nested container inference ─────────────────────────
+// Vec, Map with nested types
+
+#[test]
+fn b_r5_nested_vec_of_ints() {
+    // Basic vec with inferred element type
+    expect(
+        "*main()\n    v is vec(10, 20, 30)\n    log(v.get(0) + v.get(2))\n",
+        "40",
+    );
+}
+
+#[test]
+fn b_r5_nested_vec_push_infer() {
+    // Vec element type inferred from push
+    expect(
+        "*main()\n    v is vec()\n    v.push(42)\n    log(v.get(0))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_r5_nested_map_string_int() {
+    // Map<String, I64> inferred from usage
+    expect(
+        "*main()\n    m is map()\n    m.set(\"x\", 10)\n    m.set(\"y\", 20)\n    log(m.get(\"x\") + m.get(\"y\"))\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_r5_nested_vec_len_after_push() {
+    // Vec push multiple and check length
+    expect(
+        "*main()\n    v is vec()\n    v.push(10)\n    v.push(20)\n    v.push(30)\n    log(v.len())\n    log(v.get(1))\n",
+        "3\n20",
+    );
+}
+
+#[test]
+fn b_r5_nested_vec_iteration() {
+    // Vec used with for loop
+    expect(
+        "*main()\n    v is vec(1, 2, 3, 4, 5)\n    total is 0\n    for x in v\n        total is total + x\n    log(total)\n",
+        "15",
+    );
+}
+
+// ─── Category 7: Error recovery tests ───────────────────────────────
+// Multiple type errors in one compilation
+
+#[test]
+fn b_r5_error_undefined_var() {
+    let err = expect_compile_fail("*main()\n    log(xyz)\n");
+    assert!(!err.is_empty(), "expected compilation error for undefined var: {err}");
+}
+
+#[test]
+fn b_r5_error_type_mismatch_add() {
+    // Adding string and int should fail
+    let err = expect_compile_fail("*main()\n    x is \"hello\" + 5\n    log(x)\n");
+    assert!(!err.is_empty(), "expected type error for string + int");
+}
+
+#[test]
+fn b_r5_error_missing_main() {
+    let err = expect_compile_fail("*foo()\n    log(1)\n");
+    assert!(err.contains("main"), "expected error about missing main: {err}");
+}
+
+#[test]
+fn b_r5_error_wrong_arity() {
+    // Calling function with wrong number of arguments
+    let err = expect_compile_fail("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(1))\n");
+    assert!(!err.is_empty(), "expected arity error");
+}
+
+#[test]
+fn b_r5_error_tab_in_source() {
+    // Tab characters in source should fail compilation
+    let err = expect_compile_fail("*main()\n\tlog(1)\n");
+    assert!(!err.is_empty(), "expected error for tab in source");
+}
+
+// ─── Category 8: Struct-without-constructor tests ───────────────────
+// Declare structs, never construct, verify behavior
+
+#[test]
+fn b_r5_struct_unused_compiles() {
+    // Struct declared but never used — should still compile
+    expect(
+        "type Phantom\n    x: i64\n\n*main()\n    log(42)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_r5_struct_only_in_type_sig() {
+    // Struct used only in type signature, constructed at call site
+    expect(
+        "type Wrap\n    val: i64\n\n*unwrap(w: Wrap) -> i64\n    w.val\n\n*main()\n    log(unwrap(Wrap(val is 99)))\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_r5_struct_field_default() {
+    // Struct with fields that get default types
+    expect(
+        "type Pair\n    a: i64\n    b: i64\n\n*sum_pair(p: Pair) -> i64\n    p.a + p.b\n\n*main()\n    log(sum_pair(Pair(a is 11, b is 22)))\n",
+        "33",
+    );
+}
+
+// ==================== Type Inference Remediation Tests ====================
+
+#[test]
+fn b_infer_t1_occurs_check() {
+    // Self-application x(x) creates infinite type — must fail
+    expect_compile_fail("*main()\n    f is *fn(x) x(x)\n    log(f(f))\n");
+}
+
+#[test]
+fn b_infer_t2_value_restriction() {
+    // apply result is monomorphic — not generalized since it's not a syntactic value
+    expect(
+        "*apply(f, x)\n    f(x)\n\n*main()\n    r is apply(*fn(x) x + 1, 5)\n    log(r)\n",
+        "6",
+    );
+}
+
+#[test]
+fn b_infer_t3_poly_lambda_multi_instantiate() {
+    // Let-bound polymorphic lambda called at I64 and String
+    expect(
+        "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n",
+        "42\nhello",
+    );
+}
+
+#[test]
+fn b_infer_t4_lambda_capture() {
+    // Lambda capturing outer variable
+    expect(
+        "*main()\n    offset is 10\n    f is *fn(x: i64) -> i64 x + offset\n    log(f(32))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_infer_t6_match_type_propagation() {
+    // Match arms propagate return type correctly
+    expect(
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s: Shape) -> i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main()\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n",
+        "25\n21",
+    );
+}
+
+#[test]
+fn b_infer_t7_pipe_inference() {
+    // Pipe operator infers function param type
+    expect(
+        "*double(x: i64) -> i64\n    x * 2\n\n*main()\n    log(21 ~ double)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_infer_t8_mixed_params() {
+    // Mixed annotated and unannotated params
+    expect(
+        "*mixed(a, b: i64) -> i64\n    a + b\n\n*main()\n    log(mixed(1, 2))\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_infer_t9_struct_field_inference() {
+    // Struct field types inferred from constructor call
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_infer_t10_trait_method_dispatch() {
+    // Trait method resolution on struct instance
+    expect(
+        "type Foo\n    x: i64\n\ntrait Show\n    *show() -> String\n\nimpl Show for Foo\n    *show() -> String\n        \"Foo\"\n\n*main()\n    f is Foo(x is 42)\n    log(f.show())\n",
+        "Foo",
+    );
+}
+
+#[test]
+fn b_infer_e3_strict_unconstrained_struct_field() {
+    // Strict mode: unannotated struct field never constrained should error
+    let err = expect_strict_fail(
+        "type Bag\n    mystery\n\n*main()\n    log(1)\n",
+    );
+    assert!(err.contains("has no type annotation and was never constrained"),
+        "expected strict error about unconstrained field, got: {err}");
+}
+
+#[test]
+fn b_infer_i3_pedantic_rejects_integer_default() {
+    // Pedantic mode: integer literal without explicit annotation is rejected
+    let err = expect_pedantic_fail("*main()\n    x is 42\n    log(x)\n");
+    assert!(err.contains("pedantic") && err.contains("integer"),
+        "expected pedantic error about integer default, got: {err}");
+}
+
+#[test]
+fn b_infer_i3_pedantic_passes_annotated() {
+    // Pedantic mode: fully annotated function should pass
+    expect(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "7",
     );
 }

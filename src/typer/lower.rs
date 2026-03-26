@@ -155,7 +155,19 @@ impl Typer {
                 let mut scc_fn_names = Vec::new();
                 for name in scc {
                     if let Some(f) = fn_lookup.get(name.as_str()) {
-                        let hfn = self.lower_fn_deferred(f)?;
+                        let hfn = self.lower_fn_deferred(f).map_err(|e| {
+                            // R3.2: Enhance error with mutual recursion context
+                            if scc.len() > 1 {
+                                let peers = scc.iter()
+                                    .filter(|n| n.as_str() != f.name)
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!("{e}\n  note: in mutually recursive group with: {peers}")
+                            } else {
+                                e
+                            }
+                        })?;
                         scc_fns.push((f.ret.is_none() && f.name != "main", f.span, hfn, f.name.clone()));
                         scc_fn_names.push(f.name.clone());
                         lowered_fn_names.insert(name.clone());
@@ -295,6 +307,32 @@ impl Typer {
         };
         self.resolve_deferred_methods();
         self.resolve_deferred_fields();
+        // R4.1: Trait-guided type selection — for any remaining unsolved TypeVar
+        // with a Trait constraint, if exactly one type implements all required
+        // traits, resolve the TypeVar to that type.
+        self.resolve_trait_constrained_vars();
+        // R1.2: Strict-mode struct field enforcement — check for unannotated
+        // struct fields that were never constrained by constructors or usage.
+        if self.infer_ctx.is_strict() {
+            let mut struct_field_errors = Vec::new();
+            for (struct_name, field_name, ty, span) in &self.unannotated_struct_fields {
+                let resolved = self.infer_ctx.shallow_resolve(ty);
+                if let Type::TypeVar(v) = resolved {
+                    let root = self.infer_ctx.find(v);
+                    let constraint = self.infer_ctx.constraint(root);
+                    if matches!(constraint, super::unify::TypeConstraint::None) {
+                        struct_field_errors.push(format!(
+                            "line {}:{}: struct `{}` field `{}` has no type annotation and was never constrained",
+                            span.line, span.col, struct_name, field_name
+                        ));
+                    }
+                }
+            }
+            if !struct_field_errors.is_empty() {
+                let combined = struct_field_errors.join("\n");
+                return Err(format!("strict type checking failed:\n{combined}"));
+            }
+        }
         self.resolve_all_types(&mut program);
         // Collect defaulting warnings from InferCtx
         let default_warnings = self.infer_ctx.drain_default_warnings();
@@ -307,6 +345,18 @@ impl Typer {
             for e in &strict_errors {
                 if !unique_errors.contains(e) {
                     unique_errors.push(e.clone());
+                }
+            }
+            // Append collected type errors as additional context
+            if !self.type_errors.is_empty() {
+                let mut unique_type_errs: Vec<String> = Vec::new();
+                for e in &self.type_errors {
+                    if !unique_type_errs.contains(e) {
+                        unique_type_errs.push(e.clone());
+                    }
+                }
+                for te in &unique_type_errs {
+                    unique_errors.push(format!("  caused by: {te}"));
                 }
             }
             let combined = unique_errors.join("\n");
@@ -565,6 +615,54 @@ impl Typer {
                             let _ = self.infer_ctx.unify_at(&df.field_ty, fty, df.span, "deferred field access");
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// R4.1: For any remaining unsolved TypeVar with a Trait constraint, check
+    /// whether exactly one concrete type in trait_impls satisfies all required
+    /// traits. If so, unify the TypeVar with that type.
+    fn resolve_trait_constrained_vars(&mut self) {
+        let n = self.infer_ctx.num_vars();
+        for v in 0..n {
+            let root = self.infer_ctx.find(v);
+            if root != v {
+                continue; // only process roots
+            }
+            let resolved = self.infer_ctx.shallow_resolve(&Type::TypeVar(root));
+            if !matches!(resolved, Type::TypeVar(_)) {
+                continue; // already solved
+            }
+            let constraint = self.infer_ctx.constraint(root);
+            if let super::unify::TypeConstraint::Trait(ref required_traits) = constraint {
+                if required_traits.is_empty() {
+                    continue;
+                }
+                // Find all types that implement ALL required traits
+                let mut candidates: Vec<String> = Vec::new();
+                for (type_name, impl_traits) in &self.trait_impls {
+                    if required_traits.iter().all(|rt| impl_traits.contains(rt)) {
+                        candidates.push(type_name.clone());
+                    }
+                }
+                if candidates.len() == 1 {
+                    let ty = match candidates[0].as_str() {
+                        "i8" => Type::I8,
+                        "i16" => Type::I16,
+                        "i32" => Type::I32,
+                        "i64" => Type::I64,
+                        "u8" => Type::U8,
+                        "u16" => Type::U16,
+                        "u32" => Type::U32,
+                        "u64" => Type::U64,
+                        "f32" => Type::F32,
+                        "f64" => Type::F64,
+                        "bool" => Type::Bool,
+                        "String" => Type::String,
+                        name => Type::Struct(name.to_string()),
+                    };
+                    let _ = self.infer_ctx.unify(&Type::TypeVar(root), &ty);
                 }
             }
         }
@@ -1296,7 +1394,8 @@ impl Typer {
         // Unify tail expression with the return TypeVar but do NOT resolve yet.
         if f.ret.is_none() && f.name != "main" {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let _ = self.infer_ctx.unify_at(&ret, &tail_ty, f.span, "function tail expression");
+                let r = self.infer_ctx.unify_at(&ret, &tail_ty, f.span, "function tail expression");
+                self.collect_unify_error(r);
             } else {
                 // No meaningful tail expression (e.g., body ends with void
                 // expr like log()) — return type is Void.
@@ -1489,7 +1588,8 @@ impl Typer {
         // Phase 2.2: Unify tail expression with return TypeVar for methods
         let ret = if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let _ = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "method tail expression");
+                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "method tail expression");
+                self.collect_unify_error(r);
             }
             self.infer_ctx.resolve(&ret)
         } else {
@@ -1569,7 +1669,8 @@ impl Typer {
         // Phase 2.2: Unify tail expression with return TypeVar for ptr methods
         let ret = if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let _ = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "ptr method tail expression");
+                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "ptr method tail expression");
+                self.collect_unify_error(r);
             }
             self.infer_ctx.resolve(&ret)
         } else {

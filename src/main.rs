@@ -55,6 +55,9 @@ struct Cli {
     /// Disable strict type checking — unsolved type variables silently default to i64
     #[arg(long)]
     lenient: bool,
+    /// Pedantic mode: also reject Integer→I64 and Float→F64 defaults (require explicit annotations)
+    #[arg(long)]
+    pedantic: bool,
     #[arg(long)]
     test: bool,
 }
@@ -300,6 +303,9 @@ fn main() {
     }
     if cli.lenient {
         typer.set_lenient(true);
+    }
+    if cli.pedantic {
+        typer.set_pedantic(true);
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,

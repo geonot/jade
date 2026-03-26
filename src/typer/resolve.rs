@@ -132,10 +132,17 @@ impl Typer {
             .fields
             .iter()
             .map(|f| {
-                (
-                    f.name.clone(),
-                    f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)),
-                )
+                let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
+                // R1.2: Track unannotated fields for strict-mode enforcement
+                if f.ty.is_none() {
+                    self.unannotated_struct_fields.push((
+                        td.name.clone(),
+                        f.name.clone(),
+                        ty.clone(),
+                        f.span,
+                    ));
+                }
+                (f.name.clone(), ty)
             })
             .collect();
         self.structs.insert(td.name.clone(), fields);

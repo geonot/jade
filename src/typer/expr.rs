@@ -154,13 +154,18 @@ impl Typer {
                     let scheme_clone = v.scheme.clone();
                     // Drop v borrow before calling instantiate
                     let ty = match (&scheme_clone, expected) {
-                        // When there's an expected type and a poly scheme, unify the
-                        // expected type with the ORIGINAL mono type. This solves the
-                        // original TypeVars through the union-find, so the lambda body
-                        // gets the correct types from usage context.
+                        // R1.1 FIX: Always instantiate poly schemes — never unify
+                        // with the original mono type. The original body's TypeVars
+                        // were defaulted by default_quantified_vars() after
+                        // generalization. Each use site gets fresh TypeVars via
+                        // instantiation, which are then unified with the expected
+                        // type. This fixes the "first-call-wins" bug where the
+                        // first call site would permanently commit the original
+                        // TypeVars, preventing polymorphic multi-use.
                         (Some(scheme), Some(exp)) if scheme.is_poly() => {
-                            let _ = self.infer_ctx.unify(&mono_ty, exp);
-                            mono_ty
+                            let inst = self.infer_ctx.instantiate(scheme);
+                            let _ = self.infer_ctx.unify(&inst, exp);
+                            inst
                         }
                         (Some(scheme), _) if scheme.is_poly() => {
                             self.infer_ctx.instantiate(scheme)
@@ -217,7 +222,8 @@ impl Typer {
                 let hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
                 // Unify operand types for numeric consistency
-                let _ = self.infer_ctx.unify_at(&hl.ty, &hr.ty, *span, "binary operands");
+                let r = self.infer_ctx.unify_at(&hl.ty, &hr.ty, *span, "binary operands");
+                self.collect_unify_error(r);
 
                 // Phase 4 (P2): Add type constraints based on operator kind.
                 // Arithmetic ops require numeric types, bitwise ops require integer types.
@@ -568,14 +574,15 @@ impl Typer {
                 };
                 if let Some(ref els) = hi.els {
                     if let Some(hir::Stmt::Expr(e)) = els.last() {
-                        let _ =
-                            self.infer_ctx
-                                .unify_at(&ty, &e.ty, i.span, "if-expression branches");
+                        let r = self.infer_ctx
+                            .unify_at(&ty, &e.ty, i.span, "if-expression branches");
+                        self.collect_unify_error(r);
                     }
                 }
                 for (_, branch) in &hi.elifs {
                     if let Some(hir::Stmt::Expr(e)) = branch.last() {
-                        let _ = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");
+                        let r = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");
+                        self.collect_unify_error(r);
                     }
                 }
                 Ok(hir::Expr {
@@ -888,8 +895,17 @@ impl Typer {
 
             ast::Expr::ChannelSend(ch, val, span) => {
                 let hch = self.lower_expr(ch)?;
-                let elem_ty = match &hch.ty {
+                let resolved_ch_ty = self.infer_ctx.shallow_resolve(&hch.ty);
+                let elem_ty = match &resolved_ch_ty {
                     Type::Channel(t) => (**t).clone(),
+                    Type::TypeVar(_) => {
+                        // R2.2: Channel type not yet known — create a fresh elem
+                        // TypeVar and constrain the channel to Channel<elem_ty>
+                        let elem_var = self.infer_ctx.fresh_var();
+                        let chan_ty = Type::Channel(Box::new(elem_var.clone()));
+                        let _ = self.infer_ctx.unify_at(&resolved_ch_ty, &chan_ty, *span, "channel send infers channel type");
+                        elem_var
+                    }
                     _ => return Err(format!("send: target must be a Channel, got {}", hch.ty)),
                 };
                 let hval = self.lower_expr(val)?;
@@ -906,8 +922,17 @@ impl Typer {
 
             ast::Expr::ChannelRecv(ch, span) => {
                 let hch = self.lower_expr(ch)?;
-                let elem_ty = match &hch.ty {
+                let resolved_ch_ty = self.infer_ctx.shallow_resolve(&hch.ty);
+                let elem_ty = match &resolved_ch_ty {
                     Type::Channel(t) => (**t).clone(),
+                    Type::TypeVar(_) => {
+                        // R2.2: Channel type not yet known — create a fresh elem
+                        // TypeVar and constrain the channel to Channel<elem_ty>
+                        let elem_var = self.infer_ctx.fresh_var();
+                        let chan_ty = Type::Channel(Box::new(elem_var.clone()));
+                        let _ = self.infer_ctx.unify_at(&resolved_ch_ty, &chan_ty, *span, "channel recv infers channel type");
+                        elem_var
+                    }
                     _ => return Err(format!("receive: target must be a Channel, got {}", hch.ty)),
                 };
                 Ok(hir::Expr {
@@ -921,8 +946,15 @@ impl Typer {
                 let mut harms = Vec::new();
                 for arm in arms {
                     let hch = self.lower_expr(&arm.chan)?;
-                    let elem_ty = match &hch.ty {
+                    let resolved_sel_ch = self.infer_ctx.shallow_resolve(&hch.ty);
+                    let elem_ty = match &resolved_sel_ch {
                         Type::Channel(t) => (**t).clone(),
+                        Type::TypeVar(_) => {
+                            let elem_var = self.infer_ctx.fresh_var();
+                            let chan_ty = Type::Channel(Box::new(elem_var.clone()));
+                            let _ = self.infer_ctx.unify_at(&resolved_sel_ch, &chan_ty, arm.span, "select infers channel type");
+                            elem_var
+                        }
                         _ => {
                             return Err(format!(
                                 "select: channel must be a Channel type, got {}",
@@ -1463,7 +1495,8 @@ impl Typer {
                     // Unify each arg with the instantiated param type
                     for (i, ha) in hargs.iter().enumerate() {
                         if let Some(pt) = inst_params.get(i) {
-                            let _ = self.infer_ctx.unify_at(pt, &ha.ty, span, "function argument");
+                            let r = self.infer_ctx.unify_at(pt, &ha.ty, span, "function argument");
+                            self.collect_unify_error(r);
                         }
                     }
 
@@ -1642,6 +1675,125 @@ impl Typer {
             }
 
             if let Some(v) = self.find_var(name).cloned() {
+                // Poly-lambda monomorphization: when a let-bound lambda has a poly
+                // scheme AND we have its AST stored, re-lower it with the concrete
+                // types from this call site. This produces a separate specialized
+                // function for each type combination (like top-level inferable fns).
+                if let Some(scheme) = &v.scheme {
+                    if scheme.is_poly() {
+                        if let Some((lparams, lret, lbody, lspan)) = self.poly_lambda_asts.get(name).cloned() {
+                            let inst = self.infer_ctx.instantiate(scheme);
+                            let (inst_params, inst_ret) = match &inst {
+                                Type::Fn(p, r) => (p.clone(), *r.clone()),
+                                _ => (vec![], inst.clone()),
+                            };
+
+                            // Lower args with expected types from instantiated scheme
+                            let mut hargs = Vec::new();
+                            for (i, arg) in args.iter().enumerate() {
+                                let expected = inst_params.get(i);
+                                hargs.push(self.lower_expr_expected(arg, expected)?);
+                            }
+                            for (i, ha) in hargs.iter().enumerate() {
+                                if let Some(pt) = inst_params.get(i) {
+                                    let _ = self.infer_ctx.unify_at(pt, &ha.ty, span, "poly lambda argument");
+                                }
+                            }
+
+                            // Resolve the instantiated types to concrete types
+                            let was_strict = self.infer_ctx.is_strict();
+                            self.infer_ctx.set_strict(false);
+                            let resolved_params: Vec<Type> = inst_params.iter()
+                                .map(|t| self.infer_ctx.resolve(t))
+                                .collect();
+                            let resolved_ret = self.infer_ctx.resolve(&inst_ret);
+                            self.infer_ctx.set_strict(was_strict);
+
+                            // Generate mangled name for this specialization
+                            let type_suffix: Vec<String> = resolved_params.iter()
+                                .map(|t| format!("{t}"))
+                                .collect();
+                            let mangled = format!("__poly_{name}_{}", type_suffix.join("_"));
+
+                            // Check if already monomorphized
+                            if let Some((id, _, ret)) = self.fns.get(&mangled).cloned() {
+                                return Ok(hir::Expr {
+                                    kind: hir::ExprKind::Call(id, mangled, hargs),
+                                    ty: ret,
+                                    span,
+                                });
+                            }
+
+                            // Re-lower the lambda body within current scope (captures work)
+                            let fn_id = self.fresh_id();
+                            self.fns.insert(mangled.clone(), (fn_id, resolved_params.clone(), resolved_ret.clone()));
+
+                            self.push_scope();
+                            let mut fn_params = Vec::new();
+                            for (i, p) in lparams.iter().enumerate() {
+                                let pid = self.fresh_id();
+                                let ty = resolved_params.get(i).cloned().unwrap_or(Type::I64);
+                                let ownership = Self::ownership_for_type(&ty);
+                                self.define_var(
+                                    &p.name,
+                                    VarInfo {
+                                        def_id: pid,
+                                        ty: ty.clone(),
+                                        ownership,
+                                        scheme: None,
+                                    },
+                                );
+                                fn_params.push(hir::Param {
+                                    def_id: pid,
+                                    name: p.name.clone(),
+                                    ty,
+                                    ownership,
+                                    span: p.span,
+                                });
+                            }
+
+                            let hbody = self.lower_block_no_scope(&lbody, &resolved_ret)?;
+                            self.pop_scope();
+
+                            // Resolve return type from body tail expression
+                            let final_ret = if lret.is_some() {
+                                resolved_ret.clone()
+                            } else if let Some(crate::hir::Stmt::Expr(e)) = hbody.last() {
+                                if e.ty != Type::Void {
+                                    let _ = self.infer_ctx.unify(&resolved_ret, &e.ty);
+                                    self.infer_ctx.resolve(&resolved_ret)
+                                } else {
+                                    resolved_ret.clone()
+                                }
+                            } else {
+                                resolved_ret.clone()
+                            };
+
+                            // Update fn signature with resolved return
+                            if let Some(entry) = self.fns.get_mut(&mangled) {
+                                entry.2 = final_ret.clone();
+                            }
+
+                            let mono_fn = hir::Fn {
+                                def_id: fn_id,
+                                name: mangled.clone(),
+                                params: fn_params,
+                                ret: final_ret.clone(),
+                                body: hbody,
+                                span: lspan,
+                                generic_origin: Some(name.to_string()),
+                            };
+                            self.mono_fns.push(mono_fn);
+
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::Call(fn_id, mangled, hargs),
+                                ty: final_ret,
+                                span,
+                            });
+                        }
+                    }
+                }
+
                 let resolved_ty = self.infer_ctx.shallow_resolve(&v.ty);
                 if let Type::Fn(ptys, ret) = &resolved_ty {
                     let ret = *ret.clone();
@@ -2140,7 +2292,14 @@ impl Typer {
             }
             let hright = self.lower_expr(right)?;
             let ret = match &hright.ty {
-                Type::Fn(_, r) => *r.clone(),
+                Type::Fn(params, r) => {
+                    // R4.3: Unify pipe left type with function's first param
+                    if let Some(first_param) = params.first() {
+                        let r = self.infer_ctx.unify_at(&hleft.ty, first_param, span, "pipe argument");
+                        self.collect_unify_error(r);
+                    }
+                    *r.clone()
+                }
                 _ => self.infer_ctx.fresh_var(),
             };
             let mut all_args = vec![hleft];
@@ -2210,7 +2369,13 @@ impl Typer {
 
         let hright = self.lower_expr(right)?;
         let ret = match &hright.ty {
-            Type::Fn(_, r) => *r.clone(),
+            Type::Fn(params, r) => {
+                // R4.3: Unify pipe left type with function's first param
+                if let Some(first_param) = params.first() {
+                    let _ = self.infer_ctx.unify_at(&hleft.ty, first_param, span, "pipe argument");
+                }
+                *r.clone()
+            }
             _ => self.infer_ctx.fresh_var(),
         };
         let mut all_args = vec![hleft];
