@@ -119,34 +119,6 @@ impl Typer {
         }
     }
 
-    pub(crate) fn builtin_ret_ty(name: &str) -> Option<Type> {
-        match name {
-            "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" | "__powf" | "__copysign"
-            | "__fma" | "__time_monotonic" => Some(Type::F64),
-            "__fmt_float" | "__fmt_hex" | "__fmt_oct" | "__fmt_bin" | "__string_from_raw"
-            | "__string_from_ptr" => Some(Type::String),
-            "__get_args" => Some(Type::Vec(Box::new(Type::String))),
-            "__file_exists" => Some(Type::Bool),
-            "__sleep_ms" => Some(Type::Void),
-            _ => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn builtin_param_tys(name: &str) -> Option<Vec<Type>> {
-        match name {
-            "__ln" | "__log2" | "__log10" | "__exp" | "__exp2" => Some(vec![Type::F64]),
-            "__powf" | "__copysign" => Some(vec![Type::F64, Type::F64]),
-            "__fma" => Some(vec![Type::F64, Type::F64, Type::F64]),
-            "__fmt_float" => Some(vec![Type::F64, Type::I64]),
-            "__fmt_hex" | "__fmt_oct" | "__fmt_bin" | "__sleep_ms" => Some(vec![Type::I64]),
-            "__string_from_ptr" => Some(vec![Type::Ptr(Box::new(Type::I8))]),
-            "__string_from_raw" => Some(vec![Type::Ptr(Box::new(Type::I8)), Type::I64, Type::I64]),
-            "__file_exists" => Some(vec![Type::String]),
-            _ => None,
-        }
-    }
-
     pub(crate) fn needs_int_coercion(from: &Type, to: &Type) -> Option<CoercionKind> {
         if !from.is_int() || !to.is_int() {
             return None;

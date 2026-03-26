@@ -149,7 +149,11 @@ impl Typer {
             for (param, required_traits) in &bounds {
                 if let Some(concrete_ty) = type_map.get(param) {
                     // Resolve TypeVars before checking trait bounds
+                    // Disable strict — monomorphization TypeVars are internal
+                    let was_strict = self.infer_ctx.is_strict();
+                    self.infer_ctx.set_strict(false);
                     let resolved = self.infer_ctx.resolve(concrete_ty);
+                    self.infer_ctx.set_strict(was_strict);
                     let type_name = Self::type_name_for_bound_check(&resolved);
                     for trait_name in required_traits {
                         if !self.type_satisfies_trait(&type_name, trait_name) {
@@ -251,7 +255,12 @@ impl Typer {
                 let _ = self.infer_ctx.unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
             }
         }
+        // Disable strict for monomorphized function resolution — these are
+        // internal TypeVars created during re-lowering, not user-visible ambiguities.
+        let was_strict = self.infer_ctx.is_strict();
+        self.infer_ctx.set_strict(false);
         let resolved_ret = self.infer_ctx.resolve(ret);
+        self.infer_ctx.set_strict(was_strict);
         // Update the function signature with the resolved return type
         if let Some(entry) = self.fns.get_mut(mangled) {
             entry.2 = resolved_ret.clone();

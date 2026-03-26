@@ -8,17 +8,6 @@ pub(crate) struct ConstraintOrigin {
     pub reason: &'static str,
 }
 
-/// Extended error context: tracks the full chain of "expected X because of Y".
-#[derive(Debug, Clone)]
-pub(crate) struct TypeMismatchInfo {
-    pub expected: Type,
-    pub found: Type,
-    pub span: Span,
-    pub reason: &'static str,
-    pub notes: Vec<String>,
-    pub suggestion: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum TypeConstraint {
@@ -37,9 +26,10 @@ pub(crate) struct InferCtx {
     pub(crate) debug: bool,
     collect_default_warnings: bool,
     default_warnings: Vec<String>,
-    /// When true, unsolved TypeVars with TypeConstraint::None produce errors
-    /// instead of silently defaulting to I64. Integer→I64 and Float→F64
+    /// When true, unsolved TypeVars with TypeConstraint::None or Numeric produce
+    /// errors instead of silently defaulting to I64. Integer→I64 and Float→F64
     /// defaults are always allowed (principled defaulting).
+    /// This is ON by default. Use `--lenient` to disable.
     strict_types: bool,
     /// Errors collected during strict-mode resolution.
     strict_errors: Vec<String>,
@@ -56,7 +46,7 @@ impl InferCtx {
             debug: false,
             collect_default_warnings: false,
             default_warnings: Vec::new(),
-            strict_types: false,
+            strict_types: true,  // strict is now the default
             strict_errors: Vec::new(),
         }
     }
@@ -73,12 +63,41 @@ impl InferCtx {
         self.strict_types = true;
     }
 
+    /// Disable strict type checking — reverts to lenient mode where unsolved
+    /// TypeVars silently default to I64. Used with `--lenient` CLI flag.
+    pub(crate) fn disable_strict_types(&mut self) {
+        self.strict_types = false;
+    }
+
+    /// Default quantified TypeVars to concrete types.
+    /// After let-generalization creates a poly scheme, the *original* TypeVars
+    /// remain in the lambda/value's HIR body. They need concrete types for
+    /// codegen, but the scheme template is separate (substitution-based), so
+    /// binding them here doesn't affect future instantiations.
+    pub(crate) fn default_quantified_vars(&mut self, quantified: &[u32]) {
+        for &v in quantified {
+            let root = self.find(v);
+            if self.types[root as usize].is_some() {
+                continue; // already bound
+            }
+            let default_ty = match self.constraints[root as usize] {
+                TypeConstraint::Float => Type::F64,
+                _ => Type::I64,
+            };
+            self.types[root as usize] = Some(default_ty);
+        }
+    }
+
     pub(crate) fn drain_strict_errors(&mut self) -> Vec<String> {
         std::mem::take(&mut self.strict_errors)
     }
 
     pub(crate) fn is_strict(&self) -> bool {
         self.strict_types
+    }
+
+    pub(crate) fn set_strict(&mut self, strict: bool) {
+        self.strict_types = strict;
     }
 
     pub(crate) fn fresh_var(&mut self) -> Type {
@@ -120,6 +139,13 @@ impl InferCtx {
         self.origins.push(None);
         self.constraints.push(TypeConstraint::Float);
         Type::TypeVar(id)
+    }
+
+    /// Get the constraint on a TypeVar (by its raw id). Returns None constraint for
+    /// unknown ids.
+    pub(crate) fn constraint(&mut self, id: u32) -> TypeConstraint {
+        let root = self.find(id);
+        self.constraints.get(root as usize).cloned().unwrap_or(TypeConstraint::None)
     }
 
     /// Add a constraint to an existing TypeVar. If the TypeVar is already solved
@@ -412,6 +438,7 @@ impl InferCtx {
             (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => TypeConstraint::Float,
             (TypeConstraint::Numeric, TypeConstraint::Numeric) => TypeConstraint::Numeric,
         };
+
         if ra < rb {
             self.parent[a as usize] = b;
             self.constraints[b as usize] = merged;
@@ -453,6 +480,40 @@ impl InferCtx {
         }
     }
 
+    /// Canonicalize a type by replacing all TypeVars with their union-find roots.
+    /// If a TypeVar has been unified with a concrete type, the concrete type is used;
+    /// if it's still a free TypeVar, the root representative is used.
+    /// This ensures that unified TypeVars share the same ID in the output type.
+    pub(crate) fn canonicalize_type(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::TypeVar(v) => {
+                let root = self.find(*v);
+                if let Some(resolved) = self.types[root as usize].clone() {
+                    self.canonicalize_type(&resolved)
+                } else {
+                    Type::TypeVar(root)
+                }
+            }
+            Type::Array(inner, len) => Type::Array(Box::new(self.canonicalize_type(inner)), *len),
+            Type::Vec(inner) => Type::Vec(Box::new(self.canonicalize_type(inner))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.canonicalize_type(k)),
+                Box::new(self.canonicalize_type(v)),
+            ),
+            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.canonicalize_type(t)).collect()),
+            Type::Fn(params, ret) => Type::Fn(
+                params.iter().map(|t| self.canonicalize_type(t)).collect(),
+                Box::new(self.canonicalize_type(ret)),
+            ),
+            Type::Ptr(inner) => Type::Ptr(Box::new(self.canonicalize_type(inner))),
+            Type::Rc(inner) => Type::Rc(Box::new(self.canonicalize_type(inner))),
+            Type::Weak(inner) => Type::Weak(Box::new(self.canonicalize_type(inner))),
+            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.canonicalize_type(inner))),
+            Type::Channel(inner) => Type::Channel(Box::new(self.canonicalize_type(inner))),
+            _ => ty.clone(),
+        }
+    }
+
     pub(crate) fn shallow_resolve(&mut self, ty: &Type) -> Type {
         match ty {
             Type::TypeVar(v) => {
@@ -476,11 +537,6 @@ impl InferCtx {
         } else {
             self.resolve_inner(ty, false)
         }
-    }
-
-    /// Resolve with optional warning for unsolved TypeVars that default.
-    pub(crate) fn resolve_with_warnings(&mut self, ty: &Type, warnings: &mut Vec<String>) -> Type {
-        self.resolve_inner_warn(ty, warnings)
     }
 
     fn resolve_inner(&mut self, ty: &Type, _tracking: bool) -> Type {
@@ -602,12 +658,25 @@ impl InferCtx {
 
     /// Instantiate a type scheme: create fresh TypeVars for each quantified variable
     /// and substitute them into the type. Returns the instantiated type.
+    /// Preserves type constraints (Integer, Float, Numeric) from the original
+    /// quantified variables so that the instantiated types carry the same
+    /// restrictions (e.g., a Numeric-constrained param can't unify with String).
     pub(crate) fn instantiate(&mut self, scheme: &crate::types::Scheme) -> Type {
         if scheme.quantified.is_empty() {
             return scheme.ty.clone();
         }
         let subst: std::collections::HashMap<u32, Type> = scheme.quantified.iter()
-            .map(|&v| (v, self.fresh_var()))
+            .map(|&v| {
+                let root = self.find(v);
+                let constraint = self.constraints[root as usize].clone();
+                let fresh = match constraint {
+                    TypeConstraint::Integer => self.fresh_integer_var(),
+                    TypeConstraint::Float => self.fresh_float_var(),
+                    TypeConstraint::Numeric => self.fresh_numeric_var(),
+                    TypeConstraint::None => self.fresh_var(),
+                };
+                (v, fresh)
+            })
             .collect();
         self.substitute(&scheme.ty, &subst)
     }
@@ -712,6 +781,7 @@ mod tests {
     #[test]
     fn test_unsolved_defaults_to_i64() {
         let mut ctx = InferCtx::new();
+        ctx.disable_strict_types(); // lenient mode for this test
         let v = ctx.fresh_var();
         assert_eq!(ctx.resolve(&v), Type::I64);
     }
@@ -865,6 +935,7 @@ mod tests {
     #[test]
     fn test_default_warnings_disabled_by_default() {
         let mut ctx = InferCtx::new();
+        ctx.disable_strict_types(); // lenient mode
         let v = ctx.fresh_var();
         let _ = ctx.resolve(&v);
         let warnings = ctx.drain_default_warnings();
@@ -874,6 +945,7 @@ mod tests {
     #[test]
     fn test_default_warnings_collected_when_enabled() {
         let mut ctx = InferCtx::new();
+        ctx.disable_strict_types(); // lenient + warnings mode
         ctx.enable_default_warnings();
         let span = Span { start: 0, end: 0, line: 5, col: 3 };
         let v = ctx.fresh_var();
@@ -891,6 +963,7 @@ mod tests {
     #[test]
     fn test_default_warnings_not_emitted_for_solved_vars() {
         let mut ctx = InferCtx::new();
+        ctx.disable_strict_types();
         ctx.enable_default_warnings();
         let v = ctx.fresh_var();
         ctx.unify(&v, &Type::String).unwrap();
@@ -902,6 +975,7 @@ mod tests {
     #[test]
     fn test_default_warnings_not_emitted_for_constrained_numeric() {
         let mut ctx = InferCtx::new();
+        ctx.disable_strict_types();
         ctx.enable_default_warnings();
         let v = ctx.fresh_integer_var();
         let resolved = ctx.resolve(&v);
@@ -914,6 +988,7 @@ mod tests {
     #[test]
     fn test_default_warnings_float_constraint_no_warning() {
         let mut ctx = InferCtx::new();
+        ctx.disable_strict_types();
         ctx.enable_default_warnings();
         let v = ctx.fresh_float_var();
         let resolved = ctx.resolve(&v);

@@ -3977,6 +3977,25 @@ fn b_channel_capacity_exact() {
     );
 }
 
+// Phase 2B: Channel type inference from usage
+#[test]
+fn b_channel_infer_from_send() {
+    // Channel without type annotation — type inferred from send
+    expect(
+        "*main()\n    ch is channel(16)\n    send ch, 42\n    val is receive ch\n    log(val)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_channel_infer_multiple_sends() {
+    // Channel type inferred, multiple values
+    expect(
+        "*main()\n    ch is channel(16)\n    send ch, 10\n    send ch, 20\n    a is receive ch\n    b is receive ch\n    log(a + b)\n",
+        "30",
+    );
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH: Dispatch (coroutine/generator) tests
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4620,6 +4639,25 @@ fn b_row_poly_computation() {
     );
 }
 
+// Phase 2C: Positional struct constructor with inferred fields
+#[test]
+fn b_struct_field_infer_positional() {
+    // Unannotated struct fields inferred from positional constructor
+    expect(
+        "type Pair\n    a\n    b\n\n*main() -> i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
+        "20",
+    );
+}
+
+#[test]
+fn b_struct_field_infer_positional_string() {
+    // Positional constructor with string type inference
+    expect(
+        "type Name\n    first\n    last\n\n*main() -> i32\n    n is Name('John', 'Doe')\n    log(n.first)\n    log(n.last)\n    0\n",
+        "John\nDoe",
+    );
+}
+
 #[test]
 fn b_row_poly_with_defaults() {
     // Row poly on struct with defaults
@@ -4973,4 +5011,334 @@ fn hof_pipeline_with_untyped_functions() {
         "*add1(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*main()\n    result is 20 ~ double ~ add1\n    log(result)\n",
     );
     assert_eq!(out.trim(), "41");
+}
+
+// ── Phase 4A: Comprehensive Type Inference Tests ──────────────────────────
+
+// 4A.1 Function-level generalization: *id(x) x used at two types
+#[test]
+fn b_hm_identity_two_types() {
+    expect(
+        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    log(id(99))\n    0\n",
+        "42\n99",
+    );
+}
+
+#[test]
+fn b_hm_identity_int_and_string() {
+    // Same untyped function called with int and string
+    expect(
+        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    log(id(\"hello\"))\n    0\n",
+        "42\nhello",
+    );
+}
+
+#[test]
+fn b_hm_identity_bool_and_int() {
+    // Bools are printed as 1/0 in Jade
+    expect(
+        "*id(x)\n    x\n\n*main() -> i32\n    log(id(true))\n    log(id(7))\n    0\n",
+        "1\n7",
+    );
+}
+
+// 4A.2 Lambda without context
+#[test]
+fn b_hm_lambda_standalone() {
+    // Lambda with no expected-type context — inline syntax
+    expect(
+        "*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(41))\n    0\n",
+        "42",
+    );
+}
+
+// 4A.5 Mixed annotated/unannotated params
+#[test]
+fn b_hm_mixed_params() {
+    // *f(a: i64, b) where b inferred from usage
+    expect(
+        "*f(a: i64, b)\n    a + b\n\n*main() -> i32\n    log(f(10, 32))\n    0\n",
+        "42",
+    );
+}
+
+// 4A.7 Map value type inference from set/get
+#[test]
+fn b_hm_map_value_type() {
+    expect(
+        "*main() -> i32\n    m is map()\n    m.set('x', 42)\n    log(m.get('x'))\n    0\n",
+        "42",
+    );
+}
+
+// 4A.9 Ambiguity error programs — polymorphic identity should compile
+#[test]
+fn b_hm_poly_compile_ok() {
+    // Polymorphic function called at two types should compile fine
+    expect(
+        "*f(x)\n    x\n\n*main() -> i32\n    log(f(42))\n    log(f(\"hello\"))\n    0\n",
+        "42\nhello",
+    );
+}
+
+// 4A.10 Cross-function constraint propagation
+#[test]
+fn b_hm_cross_fn_constraint() {
+    // *f(x) calls g(x), g has known type → f's param constrained
+    expect(
+        "*g(x: i64) -> i64\n    x * 2\n\n*f(x)\n    g(x)\n\n*main() -> i32\n    log(f(21))\n    0\n",
+        "42",
+    );
+}
+
+// Phase 2A: Deep cross-function chain: f -> g -> h
+#[test]
+fn b_cross_fn_deep_chain() {
+    expect(
+        "*h(x: i64) -> i64\n    x + 100\n\n*g(x)\n    h(x)\n\n*f(x)\n    g(x)\n\n*main() -> i32\n    log(f(5))\n    0\n",
+        "105",
+    );
+}
+
+// 4A.11 Recursive function return type with branches
+#[test]
+fn b_hm_recursive_branches() {
+    expect(
+        "*fib(n)\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main() -> i32\n    log(fib(10))\n    0\n",
+        "55",
+    );
+}
+
+#[test]
+fn b_hm_recursive_factorial() {
+    expect(
+        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main() -> i32\n    log(fact(10))\n    0\n",
+        "3628800",
+    );
+}
+
+// 4A.12 Generic enum instantiation from variant constructors (built-in Option)
+#[test]
+fn b_hm_generic_enum_variant() {
+    expect(
+        "*main() -> i32\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n    0\n",
+        "42",
+    );
+}
+
+// 4A.14 Higher-order passing of inferred-type functions
+#[test]
+fn b_hm_higher_order_inferred() {
+    expect(
+        "*apply(f, x)\n    f(x)\n\n*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    log(apply(double, 21))\n    0\n",
+        "42",
+    );
+}
+
+// 4A.15 Nested function calls: f(g(h(x))) with all inferred
+#[test]
+fn b_hm_nested_calls() {
+    expect(
+        "*h(x)\n    x + 1\n\n*g(x)\n    x * 2\n\n*f(x)\n    x + 10\n\n*main() -> i32\n    log(f(g(h(5))))\n    0\n",
+        "22",
+    );
+}
+
+// Additional edge cases for scheme-based generalization
+#[test]
+fn b_hm_identity_called_once() {
+    // Scheme works even with single call site
+    expect(
+        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_hm_mutual_recursion_untyped() {
+    // Mutual recursion with both functions untyped — bools print as 1/0
+    expect(
+        "*is_even(n)\n    if n equals 0\n        return true\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return false\n    is_even(n - 1)\n\n*main() -> i32\n    log(is_even(10))\n    log(is_odd(7))\n    0\n",
+        "1\n1",
+    );
+}
+
+#[test]
+fn b_hm_gcd_untyped() {
+    // Classic GCD — recursive with untyped params
+    expect(
+        "*gcd(a, b)\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main() -> i32\n    log(gcd(48, 18))\n    0\n",
+        "6",
+    );
+}
+
+#[test]
+fn b_hm_poly_pair_functions() {
+    // Two different functions using the same polymorphic helper
+    expect(
+        "*first(a, b)\n    a\n\n*main() -> i32\n    log(first(1, 2))\n    log(first(\"a\", \"b\"))\n    0\n",
+        "1\na",
+    );
+}
+
+#[test]
+fn b_hm_untyped_with_comparison() {
+    // Untyped function that uses comparison operators
+    expect(
+        "*max_val(a, b)\n    if a > b\n        return a\n    b\n\n*main() -> i32\n    log(max_val(3, 7))\n    log(max_val(9, 2))\n    0\n",
+        "7\n9",
+    );
+}
+
+#[test]
+fn b_hm_listcomp_range_typed() {
+    // List comprehension with range: bind type should be I64
+    expect(
+        "*main() -> i32\n    arr is [x * x for x in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[3])\n    0\n",
+        "0\n1\n9",
+    );
+}
+
+#[test]
+fn b_hm_ptr_index() {
+    // Ptr indexing should properly extract element type
+    expect(
+        "*main() -> i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[2])\n    0\n",
+        "10\n12",
+    );
+}
+
+// Strict mode tests (now default — these should compile successfully)
+#[test]
+fn b_strict_integer_literal_defaults() {
+    // Integer literals with no context should get Integer constraint → I64 default (no error)
+    expect(
+        "*main() -> i32\n    x is 42\n    log(x)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_strict_float_literal_defaults() {
+    // Float literals should get Float constraint → F64 default (no error)
+    expect(
+        "*main() -> i32\n    x is 3.14\n    log(x)\n    0\n",
+        "3.140000",
+    );
+}
+
+// Strict mode should now be default; --lenient should suppress errors
+#[test]
+fn b_lenient_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let jade = dir.path().join("test.jade");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jade, "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n").unwrap();
+    let status = Command::new(jadec())
+        .arg("--lenient")
+        .arg(&jade)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jadec failed to start");
+    assert!(status.success(), "jadec --lenient compilation failed");
+}
+
+// Phase 3A: standalone method function with inferred self type
+#[test]
+fn b_standalone_method_self_infer() {
+    expect(
+        "type Cat\n    name: str\n\n*Cat_speak(self) -> i64\n    1\n\n*main()\n    c is Cat(\"kitty\")\n    log(c.speak())\n",
+        "1",
+    );
+}
+
+// Phase 3A: standalone method called via inferred parameter
+#[test]
+fn b_standalone_method_via_inferred_param() {
+    expect(
+        "type Cat\n    name: str\n\n*Cat_speak(self) -> i64\n    1\n\n*make_sound(x) -> i64\n    x.speak()\n\n*main()\n    c is Cat(\"kitty\")\n    log(make_sound(c))\n",
+        "1",
+    );
+}
+
+// Phase 3A: multi-candidate row poly with monomorphization
+#[test]
+fn b_multi_candidate_row_poly() {
+    expect(
+        "type Cat\n    name: str\n\n*Cat_speak(self) -> i64\n    1\n\ntype Dog\n    name: str\n\n*Dog_speak(self) -> i64\n    2\n\n*make_sound(x) -> i64\n    x.speak()\n\n*main()\n    c is Cat(\"kitty\")\n    d is Dog(\"rex\")\n    log(make_sound(c))\n    log(make_sound(d))\n",
+        "1\n2",
+    );
+}
+
+// Phase 3A: trait-based candidate narrowing (2 structs, 1 with trait impl for method)
+#[test]
+fn b_trait_narrows_candidates() {
+    expect(
+        "type Alpha\n    x: i64\n\ntype Beta\n    x: i64\n\ntrait Doable\n    *do_thing() -> i64\n\nimpl Doable for Alpha\n    *do_thing() -> i64\n        self.x\n\n*Beta_do_thing(self) -> i64\n    self.x * 2\n\n*main()\n    a is Alpha(x is 5)\n    log(a.do_thing())\n",
+        "5",
+    );
+}
+
+// Phase 3B: lambda passed to higher-order function (strict mode)
+#[test]
+fn b_lambda_hof_apply() {
+    expect(
+        "*apply(f, x)\n    f(x)\n\n*main()\n    double is *fn(x) x + x\n    log(apply(double, 5))\n",
+        "10",
+    );
+}
+
+// Phase 3B: function composition via HOF
+#[test]
+fn b_lambda_hof_compose() {
+    expect(
+        "*compose(f, g, x)\n    f(g(x))\n\n*main()\n    inc is *fn(x) x + 1\n    dbl is *fn(x) x * 2\n    log(compose(inc, dbl, 3))\n",
+        "7",
+    );
+}
+
+// Phase 3B: apply-twice HOF
+#[test]
+fn b_lambda_hof_twice() {
+    expect(
+        "*twice(f, x)\n    f(f(x))\n\n*main()\n    add3 is *fn(n) n + 3\n    log(twice(add3, 10))\n",
+        "16",
+    );
+}
+
+// Phase 3B: lambda with closure capture passed to HOF
+#[test]
+fn b_lambda_hof_closure() {
+    expect(
+        "*apply(f, x)\n    f(x)\n\n*main()\n    offset is 100\n    add_offset is *fn(x) x + offset\n    log(apply(add_offset, 42))\n",
+        "142",
+    );
+}
+
+// Phase 3C: constrained polymorphism — sum at integer type
+#[test]
+fn b_constrained_poly_sum_int() {
+    expect(
+        "*sum(a, b)\n    a + b\n\n*main()\n    log(sum(3, 4))\n",
+        "7",
+    );
+}
+
+// Phase 3C: constrained polymorphism — sum at multiple types
+#[test]
+fn b_constrained_poly_sum_multi() {
+    expect(
+        "*sum(a, b)\n    a + b\n\n*main()\n    log(sum(3, 4))\n    log(sum(10, 20))\n",
+        "7\n30",
+    );
+}
+
+// Phase 3C: constrained polymorphism — inferred mul at integer type
+#[test]
+fn b_constrained_poly_mul() {
+    expect(
+        "*product(a, b)\n    a * b\n\n*main()\n    log(product(6, 7))\n",
+        "42",
+    );
 }

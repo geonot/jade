@@ -49,8 +49,12 @@ struct Cli {
     debug_types: bool,
     #[arg(long)]
     warn_inferred_defaults: bool,
+    /// (Deprecated — strict types are now the default)
     #[arg(long)]
     strict_types: bool,
+    /// Disable strict type checking — unsolved type variables silently default to i64
+    #[arg(long)]
+    lenient: bool,
     #[arg(long)]
     test: bool,
 }
@@ -293,6 +297,9 @@ fn main() {
     }
     if cli.strict_types {
         typer.set_strict_types(true);
+    }
+    if cli.lenient {
+        typer.set_lenient(true);
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,

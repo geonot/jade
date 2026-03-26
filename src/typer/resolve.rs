@@ -302,11 +302,33 @@ impl Typer {
     }
 
     pub(crate) fn infer_param_types(&mut self, _prog: &ast::Program) {
-        // Phase 3: Eliminate the dual inference system.
-        // TypeVars in function signatures survive into the lowering pass where
-        // proper unification via unify_at() at call sites will solve them.
-        //
-        // We retain only TypeVar normalization (shallow resolve of solved chains).
+        // Phase 3A: Infer `self` param type for standalone method functions.
+        // When a function is named `TypeName_method` and has a `self` param with
+        // a TypeVar type, unify the TypeVar with Type::Struct(TypeName). This
+        // ensures the function is not overly polymorphic and can be emitted
+        // directly without monomorphization.
+        let struct_names: Vec<String> = self.structs.keys().cloned().collect();
+        let fn_keys: Vec<String> = self.fns.keys().cloned().collect();
+        for fname in &fn_keys {
+            for sname in &struct_names {
+                let prefix = format!("{}_", sname);
+                if fname.starts_with(&prefix) && fname.len() > prefix.len() {
+                    // Check if first param is a TypeVar (unannotated self)
+                    if let Some((_, ptys, _)) = self.fns.get(fname) {
+                        if let Some(Type::TypeVar(_)) = ptys.first() {
+                            // Verify the AST param is named "self"
+                            if let Some(ast_fn) = self.inferable_fns.get(fname) {
+                                if ast_fn.params.first().map_or(false, |p| p.name == "self") {
+                                    let self_ty = Type::Struct(sname.clone());
+                                    let tv = ptys[0].clone();
+                                    let _ = self.infer_ctx.unify(&tv, &self_ty);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Normalize: shallow-resolve solved TypeVar chains
         let keys: Vec<String> = self.fns.keys().cloned().collect();

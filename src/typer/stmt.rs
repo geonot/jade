@@ -60,6 +60,13 @@ impl Typer {
                     } else {
                         Scheme::mono(ty.clone())
                     };
+                    // After let-generalization, default the quantified TypeVars to
+                    // concrete types so the original lambda/value body has concrete
+                    // types for codegen. The scheme template is substitution-based,
+                    // so this doesn't affect future instantiations.
+                    if scheme.is_poly() {
+                        self.infer_ctx.default_quantified_vars(&scheme.quantified);
+                    }
                     self.define_var(
                         &b.name,
                         VarInfo {
@@ -82,7 +89,8 @@ impl Typer {
 
             ast::Stmt::TupleBind(names, value, span) => {
                 let hval = self.lower_expr(value)?;
-                let tys = match &hval.ty {
+                let resolved_ty = self.infer_ctx.shallow_resolve(&hval.ty);
+                let tys = match &resolved_ty {
                     Type::Tuple(ts) => ts.clone(),
                     _ => (0..names.len()).map(|_| self.infer_ctx.fresh_var()).collect(),
                 };
@@ -139,7 +147,15 @@ impl Typer {
                 let iter = self.lower_expr(&f.iter)?;
                 let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
-                let bind_ty = if end.is_some() || matches!(iter.ty, Type::I64) {
+                let resolved_iter_ty = self.infer_ctx.shallow_resolve(&iter.ty);
+                let iter_is_int = resolved_iter_ty.is_int()
+                    || if let Type::TypeVar(id) = &resolved_iter_ty {
+                        let c = self.infer_ctx.constraint(*id);
+                        matches!(c, super::unify::TypeConstraint::Integer | super::unify::TypeConstraint::Numeric)
+                    } else {
+                        false
+                    };
+                let bind_ty = if end.is_some() || iter_is_int {
                     Type::I64
                 } else {
                     match &iter.ty {

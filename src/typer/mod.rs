@@ -1,3 +1,37 @@
+// ── Type Inference Invariants ──
+//
+// Monomorphization vs. Scheme Instantiation:
+//   - Top-level functions with unannotated params are stored in `inferable_fns`
+//     and get generalized into poly schemes (`fn_schemes`) after lowering.
+//   - Functions with poly schemes are SKIPPED from direct HIR emission (lower.rs)
+//     — only monomorphized copies reach codegen.
+//   - At call sites, poly schemes are instantiated with fresh TypeVars. After
+//     arg unification resolves these vars, the function is monomorphized with
+//     the concrete type_map and the copy is emitted to HIR.
+//   - Let-bound lambdas also get let-generalized (via `generalize()` in stmt.rs).
+//     Their quantified TypeVars are defaulted to I64/F64 in the union-find so the
+//     original body has concrete types for codegen, while the scheme template
+//     remains for future instantiations (substitution-based, not union-find-based).
+//
+// Value Restriction (syntactic values for let-generalization):
+//   - Only syntactic values can be safely generalized: Lambda, Ident, Struct,
+//     Array/Tuple of syntactic values, Ref of syntactic value.
+//   - Literals (Int, Float, Bool, Str) are NOT syntactic values — generalizing
+//     them would discard constraint information.
+//   - Non-values (function calls, etc.) get monomorphic schemes.
+//
+// Defaulting Hierarchy (TypeConstraint → concrete type):
+//   - Integer → I64  (principled: programmer wrote an int literal)
+//   - Float → F64    (principled: programmer wrote a float literal)
+//   - Numeric → I64  (ambiguous in strict mode: could be int or float)
+//   - None → I64     (ambiguous in strict mode: completely unconstrained)
+//   In strict mode (default), Numeric and None produce errors. Integer and Float
+//   default silently.
+//
+// Constraint Merging (union-find `union()`):
+//   Integer > Numeric > None; Float > Numeric > None; Integer + Float = error.
+//   The more specific constraint always wins in the merged equivalence class.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -150,6 +184,14 @@ impl Typer {
         }
     }
 
+    /// Enable lenient mode — disables strict type checking. Unsolved TypeVars
+    /// silently default to I64 instead of producing errors.
+    pub fn set_lenient(&mut self, enabled: bool) {
+        if enabled {
+            self.infer_ctx.disable_strict_types();
+        }
+    }
+
     fn fresh_id(&mut self) -> DefId {
         let id = DefId(self.next_id);
         self.next_id += 1;
@@ -222,7 +264,8 @@ impl Typer {
     /// in the type but NOT free in the environment. This is the Gen(Γ, τ) step
     /// of Algorithm J / Hindley-Milner.
     fn generalize(&mut self, ty: &Type) -> Scheme {
-        let resolved = self.infer_ctx.shallow_resolve(ty);
+        // Canonicalize through union-find so all TypeVars are root representatives
+        let resolved = self.infer_ctx.canonicalize_type(ty);
         if !resolved.has_type_var() {
             return Scheme::mono(resolved);
         }
