@@ -435,6 +435,24 @@ impl Typer {
                             .filter(|(type_name, _, _)| self.structs.contains_key(type_name))
                             .collect();
 
+                        // Use trait constraints from the TypeVar to narrow candidates
+                        if let Type::TypeVar(v) = recv_ty {
+                            let constraint = self.infer_ctx.constraint(v);
+                            if let super::unify::TypeConstraint::Trait(ref required_traits) = constraint {
+                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates.iter()
+                                    .filter(|(type_name, _, _)| {
+                                        self.trait_impls.get(type_name).map_or(false, |impls| {
+                                            required_traits.iter().all(|rt| impls.contains(rt))
+                                        })
+                                    })
+                                    .cloned()
+                                    .collect();
+                                if !narrowed.is_empty() {
+                                    candidates = narrowed;
+                                }
+                            }
+                        }
+
                         if candidates.len() > 1 {
                             let defining_traits: Vec<&String> = self.traits.iter()
                                 .filter(|(_, sigs)| sigs.iter().any(|s| s.name == dm.method))
@@ -476,7 +494,23 @@ impl Typer {
     /// When a field access had a TypeVar receiver, the TypeVar may now be solved.
     fn resolve_deferred_fields(&mut self) {
         let deferred = std::mem::take(&mut self.deferred_fields);
+
+        // Group deferred fields by receiver TypeVar root for combined resolution
+        let mut by_receiver: HashMap<u32, Vec<&super::DeferredField>> = HashMap::new();
+        let mut resolved_concrete: Vec<&super::DeferredField> = Vec::new();
         for df in &deferred {
+            let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
+            match recv_ty {
+                Type::TypeVar(v) => {
+                    let root = self.infer_ctx.find(v);
+                    by_receiver.entry(root).or_default().push(df);
+                }
+                _ => resolved_concrete.push(df),
+            }
+        }
+
+        // Resolve concrete receivers directly
+        for df in resolved_concrete {
             let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
             if let Type::Struct(ref name) = recv_ty {
                 if let Some(fields) = self.structs.get(name) {
@@ -487,6 +521,51 @@ impl Typer {
                 }
             } else if matches!(recv_ty, Type::String) && df.field_name == "length" {
                 let _ = self.infer_ctx.unify_at(&df.field_ty, &Type::I64, df.span, "deferred string.length");
+            }
+        }
+
+        // Resolve TypeVar receivers using combined field constraints
+        for (_root, fields) in by_receiver {
+            let required_fields: Vec<(&str, &Type)> = fields.iter()
+                .map(|df| (df.field_name.as_str(), &df.field_ty))
+                .collect();
+
+            // Also include field_constraints from the Typer
+            let extra_constraints: Vec<(String, Type)> = self.field_constraints
+                .get(&_root)
+                .cloned()
+                .unwrap_or_default();
+
+            // Find structs satisfying ALL required fields
+            let candidates: Vec<String> = self.structs.iter()
+                .filter(|(_, struct_fields)| {
+                    required_fields.iter().all(|(req, _)| {
+                        struct_fields.iter().any(|(n, _)| n == req)
+                    }) &&
+                    extra_constraints.iter().all(|(req, _)| {
+                        struct_fields.iter().any(|(n, _)| n == req)
+                    })
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+
+            if candidates.len() == 1 {
+                let sname = &candidates[0];
+                let struct_ty = Type::Struct(sname.clone());
+                let span = fields[0].span;
+                // Unify receiver with the struct
+                let _ = self.infer_ctx.unify_at(
+                    &fields[0].receiver_ty, &struct_ty, span,
+                    "deferred field constraints imply struct type",
+                );
+                // Unify field types
+                if let Some(struct_fields) = self.structs.get(sname).cloned() {
+                    for df in &fields {
+                        if let Some((_, fty)) = struct_fields.iter().find(|(n, _)| n == &df.field_name) {
+                            let _ = self.infer_ctx.unify_at(&df.field_ty, fty, df.span, "deferred field access");
+                        }
+                    }
+                }
             }
         }
     }
@@ -1726,10 +1805,30 @@ impl Typer {
         ret_ty: &Type,
     ) -> Result<hir::Block, String> {
         self.push_scope();
+        // Snapshot deferred quantified vars so we can default vars from THIS block
+        let deferred_snapshot = self.deferred_quantified_vars.len();
         let mut stmts = Vec::new();
-        for s in block {
+        let block_len = block.len();
+        for (idx, s) in block.iter().enumerate() {
+            // For the last statement in a block, propagate the expected type
+            // (ret_ty) into tail expressions. This enables bidirectional type
+            // propagation through if/match branches and block expressions.
+            if idx == block_len - 1 {
+                if let crate::ast::Stmt::Expr(e) = s {
+                    let he = self.lower_expr_expected(e, Some(ret_ty))?;
+                    stmts.push(hir::Stmt::Expr(he));
+                    continue;
+                }
+            }
             let hs = self.lower_stmt(s, ret_ty)?;
             stmts.push(hs);
+        }
+        // Default any quantified TypeVars that were deferred during this block
+        // and remain unsolved. By this point, later statements have had a chance
+        // to solve them through unification.
+        if self.deferred_quantified_vars.len() > deferred_snapshot {
+            let vars_to_default: Vec<u32> = self.deferred_quantified_vars.drain(deferred_snapshot..).collect();
+            self.infer_ctx.default_quantified_vars(&vars_to_default);
         }
         let ends_with_jump = stmts.last().map_or(false, |s| {
             matches!(

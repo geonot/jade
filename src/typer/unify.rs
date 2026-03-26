@@ -15,6 +15,9 @@ pub(crate) enum TypeConstraint {
     Numeric,  // I8-U64, F32-F64
     Integer,  // I8-U64 only
     Float,    // F32-F64 only
+    /// The TypeVar must implement the named trait(s).
+    /// When multiple traits are required, all must be satisfied.
+    Trait(Vec<String>),
 }
 
 pub(crate) struct InferCtx {
@@ -158,10 +161,39 @@ impl InferCtx {
             Type::TypeVar(v) => {
                 let root = self.find(v);
                 let existing = &self.constraints[root as usize];
-                // Merge: more specific wins
+                // Merge: more specific wins, but Integer + Float is a conflict
                 let merged = match (existing, &constraint) {
                     (TypeConstraint::None, c) => c.clone(),
                     (c, TypeConstraint::None) => c.clone(),
+                    (TypeConstraint::Integer, TypeConstraint::Float)
+                    | (TypeConstraint::Float, TypeConstraint::Integer) => {
+                        return Err(format!(
+                            "line {}:{}: conflicting constraints for {}: integer and float are mutually exclusive",
+                            span.line, span.col, reason
+                        ));
+                    }
+                    // Trait + Numeric/Integer/Float is a conflict (traits aren't numeric)
+                    (TypeConstraint::Trait(_), TypeConstraint::Numeric)
+                    | (TypeConstraint::Trait(_), TypeConstraint::Integer)
+                    | (TypeConstraint::Trait(_), TypeConstraint::Float)
+                    | (TypeConstraint::Numeric, TypeConstraint::Trait(_))
+                    | (TypeConstraint::Integer, TypeConstraint::Trait(_))
+                    | (TypeConstraint::Float, TypeConstraint::Trait(_)) => {
+                        return Err(format!(
+                            "line {}:{}: conflicting constraints for {}: trait bound and numeric constraint are mutually exclusive",
+                            span.line, span.col, reason
+                        ));
+                    }
+                    // Merge trait bounds: union the trait lists
+                    (TypeConstraint::Trait(existing_traits), TypeConstraint::Trait(new_traits)) => {
+                        let mut merged_traits = existing_traits.clone();
+                        for t in new_traits {
+                            if !merged_traits.contains(t) {
+                                merged_traits.push(t.clone());
+                            }
+                        }
+                        TypeConstraint::Trait(merged_traits)
+                    }
                     (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => TypeConstraint::Integer,
                     (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => TypeConstraint::Float,
                     (TypeConstraint::Numeric, TypeConstraint::Numeric) => TypeConstraint::Numeric,
@@ -200,7 +232,7 @@ impl InferCtx {
         }
     }
 
-    fn find(&mut self, v: u32) -> u32 {
+    pub(crate) fn find(&mut self, v: u32) -> u32 {
         let p = self.parent[v as usize];
         if p != v {
             let root = self.find(p);
@@ -343,7 +375,7 @@ impl InferCtx {
                 }
                 let ta = self.types[ra as usize].clone();
                 let tb = self.types[rb as usize].clone();
-                self.union(ra, rb);
+                self.union(ra, rb)?;
                 let root = self.find(ra);
                 match (ta, tb) {
                     (Some(ta), Some(tb)) => {
@@ -428,12 +460,35 @@ impl InferCtx {
         }
     }
 
-    fn union(&mut self, a: u32, b: u32) {
+    fn union(&mut self, a: u32, b: u32) -> Result<(), String> {
         let ra = self.rank[a as usize];
         let rb = self.rank[b as usize];
-        // Merge constraints: more specific wins
+        // Merge constraints: more specific wins, but Integer + Float is a conflict
         let merged = match (&self.constraints[a as usize], &self.constraints[b as usize]) {
             (TypeConstraint::None, c) | (c, TypeConstraint::None) => c.clone(),
+            (TypeConstraint::Integer, TypeConstraint::Float)
+            | (TypeConstraint::Float, TypeConstraint::Integer) => {
+                return Err("type mismatch: integer and float constraints are mutually exclusive".into());
+            }
+            // Trait + Numeric/Integer/Float is a conflict
+            (TypeConstraint::Trait(_), TypeConstraint::Numeric)
+            | (TypeConstraint::Trait(_), TypeConstraint::Integer)
+            | (TypeConstraint::Trait(_), TypeConstraint::Float)
+            | (TypeConstraint::Numeric, TypeConstraint::Trait(_))
+            | (TypeConstraint::Integer, TypeConstraint::Trait(_))
+            | (TypeConstraint::Float, TypeConstraint::Trait(_)) => {
+                return Err("type mismatch: trait bound and numeric constraint are mutually exclusive".into());
+            }
+            // Merge trait bounds: union the trait lists
+            (TypeConstraint::Trait(ta), TypeConstraint::Trait(tb)) => {
+                let mut merged_traits = ta.clone();
+                for t in tb {
+                    if !merged_traits.contains(t) {
+                        merged_traits.push(t.clone());
+                    }
+                }
+                TypeConstraint::Trait(merged_traits)
+            }
             (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => TypeConstraint::Integer,
             (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => TypeConstraint::Float,
             (TypeConstraint::Numeric, TypeConstraint::Numeric) => TypeConstraint::Numeric,
@@ -450,6 +505,7 @@ impl InferCtx {
             self.rank[a as usize] += 1;
             self.constraints[a as usize] = merged;
         }
+        Ok(())
     }
 
     fn occurs_in(&mut self, v: u32, ty: &Type) -> bool {
@@ -573,6 +629,19 @@ impl InferCtx {
                                 self.strict_errors.push(origin_msg);
                             }
                             // Integer→I64 and Float→F64 are principled defaults, no error
+                            // Trait constraints produce an error (no default exists)
+                            TypeConstraint::Trait(traits) => {
+                                let traits_str = traits.join(", ");
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                    format!(
+                                        "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}); add a type annotation ({})",
+                                        origin.span.line, origin.span.col, traits_str, origin.reason
+                                    )
+                                } else {
+                                    format!("ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]; add a type annotation")
+                                };
+                                self.strict_errors.push(origin_msg);
+                            }
                             _ => {}
                         }
                     }
@@ -673,6 +742,14 @@ impl InferCtx {
                     TypeConstraint::Integer => self.fresh_integer_var(),
                     TypeConstraint::Float => self.fresh_float_var(),
                     TypeConstraint::Numeric => self.fresh_numeric_var(),
+                    TypeConstraint::Trait(ref traits) => {
+                        let var = self.fresh_var();
+                        if let Type::TypeVar(id) = var {
+                            let root = self.find(id);
+                            self.constraints[root as usize] = TypeConstraint::Trait(traits.clone());
+                        }
+                        var
+                    }
                     TypeConstraint::None => self.fresh_var(),
                 };
                 (v, fresh)

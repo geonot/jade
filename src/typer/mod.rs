@@ -103,6 +103,14 @@ pub struct Typer {
     pub(crate) warnings: Vec<String>,
     pub(crate) deferred_methods: Vec<DeferredMethod>,
     pub(crate) deferred_fields: Vec<DeferredField>,
+    /// Deferred quantified TypeVars from let-generalized local lambdas.
+    /// Instead of defaulting immediately, we collect them here and default
+    /// at end-of-block so that later statements can solve them via unification.
+    pub(crate) deferred_quantified_vars: Vec<u32>,
+    /// Structural field constraints: TypeVar id → list of (field_name, field_type).
+    /// When multiple fields are accessed on the same TypeVar, we intersect the
+    /// candidates at resolution time to find the unique struct.
+    pub(crate) field_constraints: HashMap<u32, Vec<(String, Type)>>,
     /// Functions with unannotated params stored for auto-monomorphization fallback.
     /// When called with incompatible types (e.g., multiple struct types), we fall back
     /// to monomorphization. Otherwise, TypeVars are solved by unification.
@@ -154,6 +162,8 @@ impl Typer {
             warnings: Vec::new(),
             deferred_methods: Vec::new(),
             deferred_fields: Vec::new(),
+            deferred_quantified_vars: Vec::new(),
+            field_constraints: HashMap::new(),
             inferable_fns: HashMap::new(),
             fn_schemes: HashMap::new(),
         }

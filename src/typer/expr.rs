@@ -153,8 +153,16 @@ impl Typer {
                     let mono_ty = v.ty.clone();
                     let scheme_clone = v.scheme.clone();
                     // Drop v borrow before calling instantiate
-                    let ty = match scheme_clone {
-                        Some(ref scheme) if scheme.is_poly() => {
+                    let ty = match (&scheme_clone, expected) {
+                        // When there's an expected type and a poly scheme, unify the
+                        // expected type with the ORIGINAL mono type. This solves the
+                        // original TypeVars through the union-find, so the lambda body
+                        // gets the correct types from usage context.
+                        (Some(scheme), Some(exp)) if scheme.is_poly() => {
+                            let _ = self.infer_ctx.unify(&mono_ty, exp);
+                            mono_ty
+                        }
+                        (Some(scheme), _) if scheme.is_poly() => {
                             self.infer_ctx.instantiate(scheme)
                         }
                         _ => mono_ty,
@@ -390,36 +398,73 @@ impl Typer {
                         (self.infer_ctx.fresh_var(), 0)
                     }
                 } else if matches!(resolved_ty, Type::TypeVar(_)) {
-                    // Row polymorphism: try to infer struct type from field access.
-                    // Search all known structs for one that has this field.
-                    let candidates: Vec<(String, Type, usize)> = self.structs.iter()
+                    // Structural field constraint: record field access on this TypeVar.
+                    // Search all known structs that have this field, and filter by
+                    // any previously-recorded field constraints on the same TypeVar.
+                    let var_id = if let Type::TypeVar(v) = resolved_ty { self.infer_ctx.find(v) } else { 0 };
+
+                    // Record this field constraint
+                    let fty_placeholder = self.infer_ctx.fresh_var();
+                    self.field_constraints
+                        .entry(var_id)
+                        .or_default()
+                        .push((field.clone(), fty_placeholder.clone()));
+
+                    // Collect ALL field constraints on this TypeVar
+                    let all_required_fields: Vec<(String, Type)> = self.field_constraints
+                        .get(&var_id)
+                        .cloned()
+                        .unwrap_or_default();
+
+                    // Find structs satisfying ALL field constraints
+                    let candidates: Vec<(String, Vec<(String, Type, usize)>)> = self.structs.iter()
                         .filter_map(|(sname, fields)| {
-                            fields.iter().enumerate()
-                                .find(|(_, (fname, _))| fname == field)
-                                .map(|(idx, (_, fty))| (sname.clone(), fty.clone(), idx))
+                            let mut matched = Vec::new();
+                            for (req_name, _) in &all_required_fields {
+                                if let Some((idx, (_, fty))) = fields.iter().enumerate()
+                                    .find(|(_, (fname, _))| fname == req_name)
+                                {
+                                    matched.push((req_name.clone(), fty.clone(), idx));
+                                } else {
+                                    return None; // struct missing a required field
+                                }
+                            }
+                            Some((sname.clone(), matched))
                         })
                         .collect();
 
                     if candidates.len() == 1 {
                         // Unique match — constrain the TypeVar to this struct
-                        let (sname, fty, idx) = &candidates[0];
+                        let (sname, matched_fields) = &candidates[0];
                         let struct_ty = Type::Struct(sname.clone());
                         let _ = self.infer_ctx.unify_at(
                             &resolved_ty, &struct_ty, *span,
                             "field access implies struct type",
                         );
-                        let fty = self.infer_ctx.shallow_resolve(fty);
-                        (fty, *idx)
+                        // Unify all recorded field TypeVars with actual field types
+                        for (req_name, req_ty) in &all_required_fields {
+                            if let Some((_, actual_ty, _)) = matched_fields.iter()
+                                .find(|(n, _, _)| n == req_name)
+                            {
+                                let actual_resolved = self.infer_ctx.shallow_resolve(actual_ty);
+                                let _ = self.infer_ctx.unify_at(req_ty, &actual_resolved, *span, "struct field type");
+                            }
+                        }
+                        // Find the index for the current field
+                        let (fty, idx) = matched_fields.iter()
+                            .find(|(n, _, _)| n == field)
+                            .map(|(_, t, i)| (self.infer_ctx.shallow_resolve(t), *i))
+                            .unwrap_or_else(|| (fty_placeholder, 0));
+                        (fty, idx)
                     } else {
                         // Ambiguous or no match — defer
-                        let fty = self.infer_ctx.fresh_var();
                         self.deferred_fields.push(super::DeferredField {
                             receiver_ty: resolved_ty.clone(),
                             field_name: field.clone(),
-                            field_ty: fty.clone(),
+                            field_ty: fty_placeholder.clone(),
                             span: *span,
                         });
-                        (fty, 0)
+                        (fty_placeholder, 0)
                     }
                 } else {
                     (self.infer_ctx.fresh_var(), 0)
@@ -1911,10 +1956,13 @@ impl Typer {
             let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
 
             // Trait-guided inference: if a trait defines this method,
-            // use the return type from the trait signature as a constraint
-            for (_, sigs) in &self.traits {
+            // (1) add a Trait constraint on the receiver TypeVar
+            // (2) use the return type from the trait signature as a constraint
+            let mut defining_trait_names: Vec<String> = Vec::new();
+            for (trait_name, sigs) in &self.traits {
                 for sig in sigs {
                     if sig.name == method {
+                        defining_trait_names.push(trait_name.clone());
                         if let Some(ref trait_ret) = sig._ret {
                             let _ = self.infer_ctx.unify_at(
                                 &ret_ty, trait_ret, span,
@@ -1923,6 +1971,15 @@ impl Typer {
                         }
                     }
                 }
+            }
+            // Add trait constraint on the receiver TypeVar
+            if !defining_trait_names.is_empty() {
+                let _ = self.infer_ctx.constrain(
+                    &obj_ty,
+                    super::unify::TypeConstraint::Trait(defining_trait_names),
+                    span,
+                    "method call requires trait",
+                );
             }
 
             self.deferred_methods.push(super::DeferredMethod {

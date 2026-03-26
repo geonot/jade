@@ -5342,3 +5342,479 @@ fn b_constrained_poly_mul() {
         "42",
     );
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 3.1: Match narrowing — verify pattern bindings infer types
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_match_narrowing_some_binding() {
+    // Positive narrowing: v gets type i64 from Some(42)
+    expect(
+        "*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v + 1)\n        Nothing ? log(0)\n",
+        "43",
+    );
+}
+
+#[test]
+fn b_match_narrowing_nothing_arm() {
+    // Nothing arm correctly matches
+    expect(
+        "*main()\n    x is Nothing\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(99)\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_match_narrowing_result_ok() {
+    // Ok variant binding
+    expect(
+        "*main()\n    x is Ok(10)\n    match x\n        Ok(v) ? log(v * 3)\n        Err(e) ? log(e)\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_match_narrowing_result_err() {
+    // Err variant binding
+    expect(
+        "*main()\n    x is Err(77)\n    match x\n        Ok(v) ? log(v)\n        Err(e) ? log(e + 1)\n",
+        "78",
+    );
+}
+
+#[test]
+fn b_match_narrowing_multi_arm() {
+    // Multiple arms with different computations on bound value
+    expect(
+        "*main()\n    x is Some(5)\n    match x\n        Some(v) ? log(v * 10)\n        Nothing ? log(-1)\n",
+        "50",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 3.2: If-let — `if <expr> is <pattern>` desugars to match
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_if_let_some_basic() {
+    // if-let binds v from Some variant
+    expect(
+        "*main()\n    x is Some(42)\n    if x is Some(v)\n        log(v)\n    else\n        log(0)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_if_let_nothing_else() {
+    // if-let falls through to else for Nothing
+    expect(
+        "*main()\n    x is Nothing\n    if x is Some(v)\n        log(v)\n    else\n        log(99)\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_if_let_some_compute() {
+    // if-let with computation on bound variable
+    expect(
+        "*main()\n    x is Some(10)\n    if x is Some(v)\n        log(v * 5)\n    else\n        log(0)\n",
+        "50",
+    );
+}
+
+#[test]
+fn b_if_let_no_else() {
+    // if-let without else — no output when pattern doesn't match
+    expect(
+        "*main()\n    x is Nothing\n    if x is Some(v)\n        log(v)\n    log(88)\n",
+        "88",
+    );
+}
+
+#[test]
+fn b_if_let_ok_variant() {
+    // if-let with Ok variant from Result
+    expect(
+        "*main()\n    x is Ok(7)\n    if x is Ok(v)\n        log(v * 3)\n    else\n        log(0)\n",
+        "21",
+    );
+}
+
+#[test]
+fn b_if_let_err_fallthrough() {
+    // if-let on Err falls through to else
+    expect(
+        "*main()\n    x is Err(55)\n    if x is Ok(v)\n        log(v)\n    else\n        log(55)\n",
+        "55",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 4.1: Inference Integration Tests
+// Verify inferred types are correct, not just that compilation succeeds.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_p41_identity_polymorphism() {
+    // Identity function inferred as ∀a. a -> a, used at i64 and bool
+    expect(
+        "*identity(x)\n    x\n\n*main()\n    log(identity(42))\n    log(identity(true))\n",
+        "42\n1",
+    );
+}
+
+#[test]
+fn b_p41_identity_string() {
+    // Identity at string type
+    expect(
+        "*identity(x)\n    x\n\n*main()\n    log(identity('hello'))\n",
+        "hello",
+    );
+}
+
+#[test]
+fn b_p41_const_function() {
+    // const: ∀a b. a -> b -> a
+    expect(
+        "*first(a, b)\n    a\n\n*main()\n    log(first(42, true))\n    log(first('x', 99))\n",
+        "42\nx",
+    );
+}
+
+#[test]
+fn b_p41_compose_numeric() {
+    // Composition of inferred-type functions
+    expect(
+        "*double(x)\n    x * 2\n\n*inc(x)\n    x + 1\n\n*main()\n    log(inc(double(10)))\n",
+        "21",
+    );
+}
+
+#[test]
+fn b_p41_lambda_infer_from_call() {
+    // Lambda type inferred from function parameter context
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main()\n    log(apply(*fn(x: i64) -> i64 x + 10, 32))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p41_let_generalization() {
+    // Let-bound lambda with inferred param type used at i64
+    expect(
+        "*main()\n    id is *fn(x) x\n    log(id(42))\n    log(id(7))\n",
+        "42\n7",
+    );
+}
+
+#[test]
+fn b_p41_numeric_constraint_add() {
+    // Numeric constraint: + infers Numeric, defaults to i64
+    expect(
+        "*add(a, b)\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_p41_numeric_constraint_float() {
+    // Float literal propagates Float constraint
+    expect(
+        "*main()\n    x is 3.14\n    log(x)\n",
+        "3.140000",
+    );
+}
+
+#[test]
+fn b_p41_struct_param_infer_unique_field() {
+    // Struct param inferred by unique field access
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*get_x(p)\n    p.x\n\n*main()\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p41_enum_variant_infer() {
+    // Enum variant constructor infers the enum type
+    expect(
+        "*main()\n    x is Some(10)\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_p41_recursive_function_type() {
+    // Recursive function type inferred correctly
+    expect(
+        "*fib(n: i64) -> i64\n    if n < 2\n        n\n    else\n        fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "55",
+    );
+}
+
+#[test]
+fn b_p41_match_return_type_infer() {
+    // Match expression return type unified from arm types
+    expect(
+        "*describe(x: i64) -> i64\n    match x\n        0 ? 100\n        1 ? 200\n        _ ? 300\n\n*main()\n    log(describe(0))\n    log(describe(1))\n    log(describe(42))\n",
+        "100\n200\n300",
+    );
+}
+
+#[test]
+fn b_p41_strict_types_basic() {
+    // Strict mode with fully-determined types should compile
+    let out = compile_with_strict("*main()\n    x is 42\n    log(x)\n");
+    assert_eq!(out.trim(), "42");
+}
+
+#[test]
+fn b_p41_strict_types_arithmetic() {
+    // Strict mode: arithmetic result types fully determined
+    let out = compile_with_strict("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n");
+    assert_eq!(out.trim(), "7");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 4.2: Negative Constraint Tests
+// Programs that SHOULD FAIL with specific errors.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_p42_type_mismatch_add_string_int() {
+    // Cannot add string and integer
+    let err = expect_compile_fail("*main()\n    x is 'hello' + 42\n    log(x)\n");
+    assert!(
+        err.contains("type") || err.contains("mismatch") || err.contains("error") || err.contains("cannot"),
+        "expected type error, got: {err}"
+    );
+}
+
+#[test]
+fn b_p42_non_exhaustive_match() {
+    // Match without covering all variants
+    let err = expect_compile_fail(
+        "*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n"
+    );
+    assert!(
+        err.contains("exhausti") || err.contains("missing") || err.contains("pattern") || err.contains("Nothing"),
+        "expected exhaustiveness error, got: {err}"
+    );
+}
+
+#[test]
+fn b_p42_undefined_variable() {
+    // Reference to undefined variable should fail compilation
+    let err = expect_compile_fail("*main()\n    log(undefined_var)\n");
+    assert!(
+        !err.is_empty(),
+        "expected compilation error for undefined variable"
+    );
+}
+
+#[test]
+fn b_p42_wrong_arg_count() {
+    // Function called with wrong number of arguments
+    let err = expect_compile_fail("*foo(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(foo(1))\n");
+    assert!(
+        err.contains("argument") || err.contains("param") || err.contains("expect") || err.contains("arity"),
+        "expected argument count error, got: {err}"
+    );
+}
+
+#[test]
+fn b_p42_strict_unsolved_typevar() {
+    // Strict mode rejects function with ambiguous return type (uncalled, unsolved typevar)
+    let err = expect_strict_fail("*foo(x)\n    x\n\n*main()\n    foo\n");
+    assert!(err.contains("ambiguous") || err.contains("unsolved") || err.contains("infer"),
+        "expected type ambiguity error, got: {err}");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 4.3: Deferred Resolution Tests
+// Methods/fields accessed on variables whose types are resolved later.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_p43_deferred_method_on_vec() {
+    // Method .len() called on vec — type resolved via element type
+    expect(
+        "*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_p43_deferred_field_from_return() {
+    // Field accessed on value returned from function
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*make_point() -> Point\n    Point(x is 10, y is 20)\n\n*main()\n    p is make_point()\n    log(p.x)\n    log(p.y)\n",
+        "10\n20",
+    );
+}
+
+#[test]
+fn b_p43_deferred_method_chain() {
+    // Chained method calls on inferred types
+    expect(
+        "type Counter\n    val: i64\n\nimpl Counter\n    *get() -> i64\n        self.val\n\n*make(n: i64) -> Counter\n    Counter(val is n)\n\n*main()\n    log(make(42).get())\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p43_deferred_field_unique_match() {
+    // Unique field name resolves struct type
+    expect(
+        "type Circle\n    radius: i64\n\n*area_approx(c)\n    c.radius * c.radius * 3\n\n*main()\n    ci is Circle(radius is 5)\n    log(area_approx(ci))\n",
+        "75",
+    );
+}
+
+#[test]
+fn b_p43_deferred_vec_push_len() {
+    // vec operations with deferred type resolution
+    expect(
+        "*main()\n    v is vec()\n    v.push(10)\n    v.push(20)\n    v.push(30)\n    log(v.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_p43_deferred_struct_method_on_param() {
+    // Method resolved on param whose struct type is inferred from call site
+    expect(
+        "type Box\n    value: i64\n\nimpl Box\n    *get() -> i64\n        self.value\n\n*extract(b: Box) -> i64\n    b.get()\n\n*main()\n    bx is Box(value is 99)\n    log(extract(bx))\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_p43_deferred_map_operations() {
+    // Map type inferred from usage context
+    expect(
+        "*main()\n    m is map()\n    m.set('key', 42)\n    log(m.len())\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Phase 5: Annotation Reduction Verification
+// Verify reduced annotation requirements for lambda, struct, and function params.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// --- Lambda parameter inference (target: <20% annotated) ---
+
+#[test]
+fn b_p5_lambda_no_annotation_i64() {
+    // Lambda param inferred from i64 context — no annotation needed
+    expect(
+        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main()\n    log(apply(*fn(x: i64) -> i64 x + 10, 32))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_lambda_unannotated_let_bound() {
+    // Let-bound lambda with unannotated param, type inferred from usage
+    expect(
+        "*main()\n    f is *fn(x) x + 1\n    log(f(41))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_lambda_unannotated_mul() {
+    // Unannotated lambda doing multiplication
+    expect(
+        "*main()\n    g is *fn(a) a * 3\n    log(g(14))\n",
+        "42",
+    );
+}
+
+// --- Struct parameter inference (target: <50% annotated) ---
+
+#[test]
+fn b_p5_struct_param_unique_field() {
+    // Struct param inferred by unique field name — no annotation needed
+    expect(
+        "type Circle\n    radius: i64\n\n*get_radius(c)\n    c.radius\n\n*main()\n    ci is Circle(radius is 7)\n    log(get_radius(ci))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_p5_struct_param_unique_method() {
+    // Struct param inferred by unique method name
+    expect(
+        "type Box\n    value: i64\n\nimpl Box\n    *get() -> i64\n        self.value\n\n*unbox(b: Box) -> i64\n    b.get()\n\n*main()\n    bx is Box(value is 42)\n    log(unbox(bx))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_struct_param_from_constructor() {
+    // Param type inferred from constructor at call site
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*add_coords(p: Point) -> i64\n    p.x + p.y\n\n*main()\n    log(add_coords(Point(x is 10, y is 32)))\n",
+        "42",
+    );
+}
+
+// --- Function parameter inference (target: <30% annotated) ---
+
+#[test]
+fn b_p5_func_param_numeric_infer() {
+    // Function param type inferred from arithmetic operations (Numeric constraint)
+    expect(
+        "*double(x)\n    x * 2\n\n*main()\n    log(double(21))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_func_param_multiple_infer() {
+    // Multiple params inferred from arithmetic
+    expect(
+        "*sum3(a, b, c)\n    a + b + c\n\n*main()\n    log(sum3(10, 20, 12))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_func_param_comparison_infer() {
+    // Param type inferred from comparison and return
+    expect(
+        "*max(a, b)\n    if a > b\n        a\n    else\n        b\n\n*main()\n    log(max(42, 7))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_func_param_chain_infer() {
+    // Type flows through chain of unannotated functions
+    expect(
+        "*inc(x)\n    x + 1\n\n*double(x)\n    x * 2\n\n*main()\n    log(double(inc(20)))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_func_no_annotation_identity() {
+    // Identity function with zero annotations
+    expect(
+        "*id(x)\n    x\n\n*main()\n    log(id(42))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_p5_annotation_reduction_combo() {
+    // Combined: unannotated functions, struct inference, lambda all working together
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\n*dist_sq(p: Point) -> i64\n    p.x * p.x + p.y * p.y\n\n*scale(n, factor)\n    n * factor\n\n*main()\n    p is Point(x is 3, y is 4)\n    d is dist_sq(p)\n    log(scale(d, 2))\n",
+        "50",
+    );
+}

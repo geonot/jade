@@ -60,12 +60,13 @@ impl Typer {
                     } else {
                         Scheme::mono(ty.clone())
                     };
-                    // After let-generalization, default the quantified TypeVars to
-                    // concrete types so the original lambda/value body has concrete
-                    // types for codegen. The scheme template is substitution-based,
-                    // so this doesn't affect future instantiations.
+                    // After let-generalization, defer defaulting of quantified TypeVars
+                    // so that later statements in the same block can solve them via
+                    // unification (e.g., `let f = *fn(x) x; greet(f, 'hello')` where
+                    // greet expects (String) -> String — the call solves f's TypeVar
+                    // to String). We default remaining unsolved vars at block end.
                     if scheme.is_poly() {
-                        self.infer_ctx.default_quantified_vars(&scheme.quantified);
+                        self.deferred_quantified_vars.extend(scheme.quantified.iter().copied());
                     }
                     self.define_var(
                         &b.name,
@@ -375,9 +376,24 @@ impl Typer {
         block: &ast::Block,
         ret_ty: &Type,
     ) -> Result<hir::Block, String> {
+        let deferred_snapshot = self.deferred_quantified_vars.len();
         let mut stmts = Vec::new();
-        for s in block {
+        let block_len = block.len();
+        for (idx, s) in block.iter().enumerate() {
+            // Propagate expected type into tail expressions
+            if idx == block_len - 1 {
+                if let crate::ast::Stmt::Expr(e) = s {
+                    let he = self.lower_expr_expected(e, Some(ret_ty))?;
+                    stmts.push(hir::Stmt::Expr(he));
+                    continue;
+                }
+            }
             stmts.push(self.lower_stmt(s, ret_ty)?);
+        }
+        // Default deferred quantified vars from this block scope
+        if self.deferred_quantified_vars.len() > deferred_snapshot {
+            let vars_to_default: Vec<u32> = self.deferred_quantified_vars.drain(deferred_snapshot..).collect();
+            self.infer_ctx.default_quantified_vars(&vars_to_default);
         }
         Ok(stmts)
     }

@@ -24,8 +24,48 @@ impl Parser {
     pub(super) fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek() {
             Token::If => {
-                let i = self.parse_if()?;
-                Ok(Stmt::If(i))
+                // Check for if-let pattern: `if <expr> is <pattern>`
+                // Desugars to match with pattern arm + wildcard fallback
+                let sp = self.span();
+                self.advance(); // consume 'if'
+                let subject = self.parse_expr()?;
+                if self.check(Token::Is) {
+                    self.advance(); // consume 'is'
+                    let pat = self.parse_pat()?;
+                    self.expect(Token::Newline)?;
+                    let then_body = self.parse_block()?;
+                    let else_body = if self.check(Token::Else) {
+                        self.advance();
+                        self.expect(Token::Newline)?;
+                        self.parse_block()?
+                    } else {
+                        vec![]
+                    };
+                    let arms = vec![
+                        Arm { pat, guard: None, body: then_body, span: sp },
+                        Arm { pat: Pat::Wild(sp), guard: None, body: else_body, span: sp },
+                    ];
+                    Ok(Stmt::Match(Match { subject, arms, span: sp }))
+                } else {
+                    // Normal if — continue parsing inline
+                    self.expect(Token::Newline)?;
+                    let then = self.parse_block()?;
+                    let mut elifs = Vec::new();
+                    while self.check(Token::Elif) {
+                        self.advance();
+                        let c = self.parse_expr()?;
+                        self.expect(Token::Newline)?;
+                        elifs.push((c, self.parse_block()?));
+                    }
+                    let els = if self.check(Token::Else) {
+                        self.advance();
+                        self.expect(Token::Newline)?;
+                        Some(self.parse_block()?)
+                    } else {
+                        None
+                    };
+                    Ok(Stmt::If(If { cond: subject, then, elifs, els, span: sp }))
+                }
             }
             Token::While => self.parse_while(),
             Token::For => self.parse_for(),
