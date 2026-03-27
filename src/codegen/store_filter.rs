@@ -1,12 +1,12 @@
-use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use inkwell::IntPredicate;
+use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 
 use crate::ast::BinOp;
 use crate::hir;
 use crate::types::Type;
 
-use super::b;
 use super::Compiler;
+use super::b;
 
 use super::stores::STRING_BUF_SIZE;
 

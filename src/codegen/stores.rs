@@ -1,7 +1,7 @@
+use inkwell::AddressSpace;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{FunctionValue, PointerValue};
-use inkwell::AddressSpace;
 
 use crate::hir;
 use crate::types::Type;
@@ -305,4 +305,3 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 }
-

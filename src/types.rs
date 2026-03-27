@@ -182,7 +182,9 @@ impl Type {
     /// Collect all TypeVar ids that appear in this type.
     pub fn free_type_vars(&self, out: &mut std::collections::HashSet<u32>) {
         match self {
-            Self::TypeVar(v) => { out.insert(*v); }
+            Self::TypeVar(v) => {
+                out.insert(*v);
+            }
             Self::Array(inner, _)
             | Self::Vec(inner)
             | Self::Ptr(inner)
@@ -190,10 +192,19 @@ impl Type {
             | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.free_type_vars(out),
-            Self::Map(k, v) => { k.free_type_vars(out); v.free_type_vars(out); }
-            Self::Tuple(tys) => { for t in tys { t.free_type_vars(out); } }
+            Self::Map(k, v) => {
+                k.free_type_vars(out);
+                v.free_type_vars(out);
+            }
+            Self::Tuple(tys) => {
+                for t in tys {
+                    t.free_type_vars(out);
+                }
+            }
             Self::Fn(params, ret) => {
-                for t in params { t.free_type_vars(out); }
+                for t in params {
+                    t.free_type_vars(out);
+                }
                 ret.free_type_vars(out);
             }
             _ => {}
@@ -214,7 +225,10 @@ pub struct Scheme {
 impl Scheme {
     /// A monomorphic scheme (no quantified variables).
     pub fn mono(ty: Type) -> Self {
-        Scheme { quantified: vec![], ty }
+        Scheme {
+            quantified: vec![],
+            ty,
+        }
     }
 
     /// Whether this scheme is polymorphic (has quantified variables).

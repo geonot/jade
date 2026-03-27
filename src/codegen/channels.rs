@@ -1,5 +1,5 @@
-use inkwell::values::BasicValueEnum;
 use inkwell::AddressSpace;
+use inkwell::values::BasicValueEnum;
 
 use crate::hir;
 use crate::types::Type;

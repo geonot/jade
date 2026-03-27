@@ -1,8 +1,8 @@
-use inkwell::values::BasicValueEnum;
 use inkwell::IntPredicate;
+use inkwell::values::BasicValueEnum;
 
-use super::b;
 use super::Compiler;
+use super::b;
 
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn string_eq(

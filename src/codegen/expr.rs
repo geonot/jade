@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use inkwell::IntPredicate;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
-use inkwell::IntPredicate;
 
 use crate::ast::UnaryOp;
 use crate::hir;
@@ -147,7 +147,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
     }
-
 
     pub(crate) fn compile_short_circuit(
         &mut self,

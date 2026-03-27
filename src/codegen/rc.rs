@@ -4,8 +4,8 @@ use inkwell::{AddressSpace, IntPredicate};
 
 use crate::types::Type;
 
-use super::b;
 use super::Compiler;
+use super::b;
 
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn rc_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {

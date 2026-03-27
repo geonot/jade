@@ -22,7 +22,9 @@ impl Typer {
             // If the function has a generalized scheme in fn_schemes, instantiate
             // it with fresh TypeVars so each call site gets independent type
             // solutions. Then monomorphize for codegen with the resolved types.
-            if let Some((ref quantified, ref scheme_params, ref scheme_ret)) = self.fn_schemes.get(name).cloned() {
+            if let Some((ref quantified, ref scheme_params, ref scheme_ret)) =
+                self.fn_schemes.get(name).cloned()
+            {
                 if !quantified.is_empty() {
                     let scheme = crate::types::Scheme {
                         quantified: quantified.clone(),
@@ -44,7 +46,9 @@ impl Typer {
                     // Unify each arg with the instantiated param type
                     for (i, ha) in hargs.iter().enumerate() {
                         if let Some(pt) = inst_params.get(i) {
-                            let r = self.infer_ctx.unify_at(pt, &ha.ty, span, "function argument");
+                            let r = self
+                                .infer_ctx
+                                .unify_at(pt, &ha.ty, span, "function argument");
                             self.collect_unify_error(r);
                         }
                     }
@@ -55,12 +59,16 @@ impl Typer {
                     // (e.g., integer literal `40` → Integer constraint → I64 default).
                     let was_strict = self.infer_ctx.is_strict();
                     self.infer_ctx.set_strict(false);
-                    let arg_tys: Vec<Type> = inst_params.iter()
+                    let arg_tys: Vec<Type> = inst_params
+                        .iter()
                         .map(|t| self.infer_ctx.resolve(t))
                         .collect();
                     self.infer_ctx.set_strict(was_strict);
 
-                    let inf_fn = self.inferable_fns.get(name).cloned()
+                    let inf_fn = self
+                        .inferable_fns
+                        .get(name)
+                        .cloned()
                         .expect("fn_schemes should have corresponding inferable_fn");
                     let normalized = Self::normalize_inferable_fn(&inf_fn);
                     let type_map = self.build_type_map(name, &normalized, &arg_tys);
@@ -76,13 +84,17 @@ impl Typer {
                 // fall through to self.fns path for proper arg/param unification
                 let has_poly_scheme = self.fn_schemes.get(name).map_or(false, |s| !s.0.is_empty());
                 let is_inferable = self.inferable_fns.contains_key(name);
-                let is_inferable_without_scheme = is_inferable && !self.fn_schemes.contains_key(name);
+                let is_inferable_without_scheme =
+                    is_inferable && !self.fn_schemes.contains_key(name);
                 if !has_poly_scheme && !is_inferable_without_scheme && !is_inferable {
                     let hargs: Vec<hir::Expr> = args
                         .iter()
                         .map(|e| self.lower_expr(e))
                         .collect::<Result<_, _>>()?;
-                    let arg_tys: Vec<Type> = hargs.iter().map(|e| self.infer_ctx.resolve(&e.ty)).collect();
+                    let arg_tys: Vec<Type> = hargs
+                        .iter()
+                        .map(|e| self.infer_ctx.resolve(&e.ty))
+                        .collect();
                     let type_map = self.build_type_map(name, &gf, &arg_tys);
                     return self.monomorphize_call(name, &type_map, hargs, span, false);
                 }
@@ -98,7 +110,8 @@ impl Typer {
                 // Skip if already handled by scheme-based path above
                 // Also skip if scheme hasn't been built yet (self-recursive lowering)
                 if !self.fn_schemes.get(name).map_or(false, |s| !s.0.is_empty())
-                    && self.fn_schemes.contains_key(name) {
+                    && self.fn_schemes.contains_key(name)
+                {
                     if let Some((_, param_tys, _)) = self.fns.get(name).cloned() {
                         let hargs: Vec<hir::Expr> = args
                             .iter()
@@ -107,11 +120,20 @@ impl Typer {
                         // Use shallow_resolve (not resolve) to avoid triggering
                         // strict errors on TypeVars that will be resolved via
                         // unification in the needs_mono check below
-                        let arg_tys: Vec<Type> = hargs.iter().map(|e| self.infer_ctx.shallow_resolve(&e.ty)).collect();
-                        let resolved_params: Vec<Type> = param_tys.iter().map(|t| self.infer_ctx.shallow_resolve(t)).collect();
-                        let needs_mono = resolved_params.iter().zip(arg_tys.iter()).any(|(pt, at)| {
-                            !matches!(pt, Type::TypeVar(_)) && pt != at && self.infer_ctx.unify(pt, at).is_err()
-                        });
+                        let arg_tys: Vec<Type> = hargs
+                            .iter()
+                            .map(|e| self.infer_ctx.shallow_resolve(&e.ty))
+                            .collect();
+                        let resolved_params: Vec<Type> = param_tys
+                            .iter()
+                            .map(|t| self.infer_ctx.shallow_resolve(t))
+                            .collect();
+                        let needs_mono =
+                            resolved_params.iter().zip(arg_tys.iter()).any(|(pt, at)| {
+                                !matches!(pt, Type::TypeVar(_))
+                                    && pt != at
+                                    && self.infer_ctx.unify(pt, at).is_err()
+                            });
                         if needs_mono {
                             let normalized = Self::normalize_inferable_fn(&inf_fn);
                             let type_map = self.build_type_map(name, &normalized, &arg_tys);
@@ -161,7 +183,9 @@ impl Typer {
                 // function for each type combination (like top-level inferable fns).
                 if let Some(scheme) = &v.scheme {
                     if scheme.is_poly() {
-                        if let Some((lparams, lret, lbody, lspan)) = self.poly_lambda_asts.get(name).cloned() {
+                        if let Some((lparams, lret, lbody, lspan)) =
+                            self.poly_lambda_asts.get(name).cloned()
+                        {
                             let inst = self.infer_ctx.instantiate(scheme);
                             let (inst_params, inst_ret) = match &inst {
                                 Type::Fn(p, r) => (p.clone(), *r.clone()),
@@ -176,23 +200,28 @@ impl Typer {
                             }
                             for (i, ha) in hargs.iter().enumerate() {
                                 if let Some(pt) = inst_params.get(i) {
-                                    let _ = self.infer_ctx.unify_at(pt, &ha.ty, span, "poly lambda argument");
+                                    let _ = self.infer_ctx.unify_at(
+                                        pt,
+                                        &ha.ty,
+                                        span,
+                                        "poly lambda argument",
+                                    );
                                 }
                             }
 
                             // Resolve the instantiated types to concrete types
                             let was_strict = self.infer_ctx.is_strict();
                             self.infer_ctx.set_strict(false);
-                            let resolved_params: Vec<Type> = inst_params.iter()
+                            let resolved_params: Vec<Type> = inst_params
+                                .iter()
                                 .map(|t| self.infer_ctx.resolve(t))
                                 .collect();
                             let resolved_ret = self.infer_ctx.resolve(&inst_ret);
                             self.infer_ctx.set_strict(was_strict);
 
                             // Generate mangled name for this specialization
-                            let type_suffix: Vec<String> = resolved_params.iter()
-                                .map(|t| format!("{t}"))
-                                .collect();
+                            let type_suffix: Vec<String> =
+                                resolved_params.iter().map(|t| format!("{t}")).collect();
                             let mangled = format!("__poly_{name}_{}", type_suffix.join("_"));
 
                             // Check if already monomorphized
@@ -206,7 +235,10 @@ impl Typer {
 
                             // Re-lower the lambda body within current scope (captures work)
                             let fn_id = self.fresh_id();
-                            self.fns.insert(mangled.clone(), (fn_id, resolved_params.clone(), resolved_ret.clone()));
+                            self.fns.insert(
+                                mangled.clone(),
+                                (fn_id, resolved_params.clone(), resolved_ret.clone()),
+                            );
 
                             self.push_scope();
                             let mut fn_params = Vec::new();
@@ -311,7 +343,9 @@ impl Typer {
                     let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
                     let ret = self.infer_ctx.fresh_var();
                     let fn_ty = Type::Fn(arg_tys, Box::new(ret.clone()));
-                    let _ = self.infer_ctx.unify_at(&v.ty, &fn_ty, span, "higher-order call");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&v.ty, &fn_ty, span, "higher-order call");
                     let fn_expr = hir::Expr {
                         kind: hir::ExprKind::Var(v.def_id, name.clone()),
                         ty: fn_ty,
@@ -346,12 +380,17 @@ impl Typer {
                 let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
                 let ret = self.infer_ctx.fresh_var();
                 let fn_ty = Type::Fn(arg_tys, Box::new(ret.clone()));
-                let _ = self.infer_ctx.unify_at(&hcallee.ty, &fn_ty, span, "higher-order call");
+                let _ = self
+                    .infer_ctx
+                    .unify_at(&hcallee.ty, &fn_ty, span, "higher-order call");
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::IndirectCall(Box::new(hir::Expr {
-                        ty: fn_ty,
-                        ..hcallee
-                    }), hargs),
+                    kind: hir::ExprKind::IndirectCall(
+                        Box::new(hir::Expr {
+                            ty: fn_ty,
+                            ..hcallee
+                        }),
+                        hargs,
+                    ),
                     ty: ret,
                     span,
                 });
@@ -417,7 +456,9 @@ impl Typer {
             let hargs: Vec<hir::Expr> = args
                 .iter()
                 .enumerate()
-                .map(|(i, e)| self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten()))
+                .map(|(i, e)| {
+                    self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
+                })
                 .collect::<Result<_, _>>()?;
             let ret_ty = match method {
                 "push" | "clear" => Type::Void,
@@ -442,7 +483,9 @@ impl Typer {
             let hargs: Vec<hir::Expr> = args
                 .iter()
                 .enumerate()
-                .map(|(i, e)| self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten()))
+                .map(|(i, e)| {
+                    self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
+                })
                 .collect::<Result<_, _>>()?;
             let ret_ty = match method {
                 "set" | "remove" | "clear" => Type::Void,
@@ -518,7 +561,9 @@ impl Typer {
         // Search for struct methods matching `_method` suffix to infer struct type.
         if matches!(obj_ty, Type::TypeVar(_)) {
             let suffix = format!("_{method}");
-            let mut candidates: Vec<(String, Vec<Type>, Type)> = self.fns.iter()
+            let mut candidates: Vec<(String, Vec<Type>, Type)> = self
+                .fns
+                .iter()
                 .filter(|(name, _)| name.ends_with(&suffix))
                 .map(|(name, (_, ptys, ret))| {
                     let type_name = name[..name.len() - suffix.len()].to_string();
@@ -531,12 +576,15 @@ impl Typer {
             // Find traits that define this method, then keep only candidates whose
             // type implements at least one such trait.
             if candidates.len() > 1 {
-                let defining_traits: Vec<&String> = self.traits.iter()
+                let defining_traits: Vec<&String> = self
+                    .traits
+                    .iter()
                     .filter(|(_, sigs)| sigs.iter().any(|s| s.name == method))
                     .map(|(tname, _)| tname)
                     .collect();
                 if !defining_traits.is_empty() {
-                    let narrowed: Vec<(String, Vec<Type>, Type)> = candidates.iter()
+                    let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
+                        .iter()
                         .filter(|(type_name, _, _)| {
                             self.trait_impls.get(type_name).map_or(false, |impls| {
                                 impls.iter().any(|i| defining_traits.contains(&i))
@@ -554,7 +602,9 @@ impl Typer {
                 let (type_name, param_tys, ret) = &candidates[0];
                 let struct_ty = Type::Struct(type_name.clone());
                 let _ = self.infer_ctx.unify_at(
-                    &obj_ty, &struct_ty, span,
+                    &obj_ty,
+                    &struct_ty,
+                    span,
                     "method call implies struct type",
                 );
                 let method_name = format!("{}_{}", type_name, method);
@@ -597,7 +647,9 @@ impl Typer {
                         defining_trait_names.push(trait_name.clone());
                         if let Some(ref trait_ret) = sig._ret {
                             let _ = self.infer_ctx.unify_at(
-                                &ret_ty, trait_ret, span,
+                                &ret_ty,
+                                trait_ret,
+                                span,
                                 "trait method return type",
                             );
                         }
@@ -682,7 +734,9 @@ impl Typer {
                 Type::Fn(params, r) => {
                     // R4.3: Unify pipe left type with function's first param
                     if let Some(first_param) = params.first() {
-                        let r = self.infer_ctx.unify_at(&hleft.ty, first_param, span, "pipe argument");
+                        let r =
+                            self.infer_ctx
+                                .unify_at(&hleft.ty, first_param, span, "pipe argument");
                         self.collect_unify_error(r);
                     }
                     *r.clone()
@@ -759,7 +813,9 @@ impl Typer {
             Type::Fn(params, r) => {
                 // R4.3: Unify pipe left type with function's first param
                 if let Some(first_param) = params.first() {
-                    let _ = self.infer_ctx.unify_at(&hleft.ty, first_param, span, "pipe argument");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&hleft.ty, first_param, span, "pipe argument");
                 }
                 *r.clone()
             }
@@ -785,7 +841,8 @@ impl Typer {
         arg_tys: &[Type],
     ) -> HashMap<String, Type> {
         if !self.generic_fns.contains_key(name) {
-            self.generic_fns.insert(name.to_string(), generic_fn.clone());
+            self.generic_fns
+                .insert(name.to_string(), generic_fn.clone());
         }
         let mut type_map = HashMap::new();
         for (i, p) in generic_fn.params.iter().enumerate() {
@@ -818,7 +875,11 @@ impl Typer {
                 if let Some(pt) = mono_param_tys.get(i) {
                     let taken = std::mem::replace(
                         ha,
-                        hir::Expr { kind: hir::ExprKind::Int(0), ty: Type::I64, span },
+                        hir::Expr {
+                            kind: hir::ExprKind::Int(0),
+                            ty: Type::I64,
+                            span,
+                        },
                     );
                     *ha = self.maybe_coerce_to(taken, pt);
                 }

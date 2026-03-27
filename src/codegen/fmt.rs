@@ -4,11 +4,14 @@ use inkwell::{AddressSpace, IntPredicate};
 
 use crate::hir;
 
-use super::b;
 use super::Compiler;
+use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn compile_fmt_float(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_fmt_float(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let x = self.compile_expr(&args[0])?.into_float_value();
         let decimals = self.compile_expr(&args[1])?.into_int_value();
         let i64t = self.ctx.i64_type();
@@ -105,7 +108,10 @@ impl<'ctx> Compiler<'ctx> {
         self.build_string(buf, len64, size, "fh.s")
     }
 
-    pub(crate) fn compile_fmt_bin(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_fmt_bin(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let val = self.compile_expr(&args[0])?.into_int_value();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
@@ -255,7 +261,10 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_float_add(sec_f, ns_part, "mono")).into())
     }
 
-    pub(crate) fn compile_sleep_ms(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_sleep_ms(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let ms = self.compile_expr(&args[0])?.into_int_value();
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
@@ -289,7 +298,10 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
-    pub(crate) fn compile_file_exists(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_file_exists(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let s = self.compile_expr(&args[0])?;
         let data = self.string_data(s)?;
         let i32t = self.ctx.i32_type();

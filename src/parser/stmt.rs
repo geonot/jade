@@ -42,10 +42,24 @@ impl Parser {
                         vec![]
                     };
                     let arms = vec![
-                        Arm { pat, guard: None, body: then_body, span: sp },
-                        Arm { pat: Pat::Wild(sp), guard: None, body: else_body, span: sp },
+                        Arm {
+                            pat,
+                            guard: None,
+                            body: then_body,
+                            span: sp,
+                        },
+                        Arm {
+                            pat: Pat::Wild(sp),
+                            guard: None,
+                            body: else_body,
+                            span: sp,
+                        },
                     ];
-                    Ok(Stmt::Match(Match { subject, arms, span: sp }))
+                    Ok(Stmt::Match(Match {
+                        subject,
+                        arms,
+                        span: sp,
+                    }))
                 } else {
                     // Normal if — continue parsing inline
                     self.expect(Token::Newline)?;
@@ -64,7 +78,13 @@ impl Parser {
                     } else {
                         None
                     };
-                    Ok(Stmt::If(If { cond: subject, then, elifs, els, span: sp }))
+                    Ok(Stmt::If(If {
+                        cond: subject,
+                        then,
+                        elifs,
+                        els,
+                        span: sp,
+                    }))
                 }
             }
             Token::While => self.parse_while(),

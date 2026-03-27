@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use crate::ast;
+use std::collections::{HashMap, HashSet};
 
 /// Extract direct call targets from an AST expression.
 fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
@@ -34,8 +34,7 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
                 collect_calls_expr(a, calls);
             }
         }
-        ast::Expr::Index(a, b, _)
-        | ast::Expr::ChannelSend(a, b, _) => {
+        ast::Expr::Index(a, b, _) | ast::Expr::ChannelSend(a, b, _) => {
             collect_calls_expr(a, calls);
             collect_calls_expr(b, calls);
         }
@@ -70,16 +69,24 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
         ast::Expr::ListComp(body, _, iter, cond, map, _) => {
             collect_calls_expr(body, calls);
             collect_calls_expr(iter, calls);
-            if let Some(c) = cond { collect_calls_expr(c, calls); }
-            if let Some(m) = map { collect_calls_expr(m, calls); }
+            if let Some(c) = cond {
+                collect_calls_expr(c, calls);
+            }
+            if let Some(m) = map {
+                collect_calls_expr(m, calls);
+            }
         }
         ast::Expr::Select(arms, default, _) => {
             for arm in arms {
                 collect_calls_expr(&arm.chan, calls);
-                if let Some(v) = &arm.value { collect_calls_expr(v, calls); }
+                if let Some(v) = &arm.value {
+                    collect_calls_expr(v, calls);
+                }
                 collect_calls_block(&arm.body, calls);
             }
-            if let Some(b) = default { collect_calls_block(b, calls); }
+            if let Some(b) = default {
+                collect_calls_block(b, calls);
+            }
         }
         ast::Expr::ChannelCreate(_, cap, _) => collect_calls_expr(cap, calls),
         _ => {}
@@ -95,7 +102,9 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<String>) {
         ast::Stmt::Assign(_, e, _) => collect_calls_expr(e, calls),
         ast::Stmt::Expr(e) => collect_calls_expr(e, calls),
         ast::Stmt::Ret(v, _) => {
-            if let Some(e) = v { collect_calls_expr(e, calls); }
+            if let Some(e) = v {
+                collect_calls_expr(e, calls);
+            }
         }
         ast::Stmt::If(i) => {
             collect_calls_expr(&i.cond, calls);
@@ -114,18 +123,26 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<String>) {
         }
         ast::Stmt::For(f) => {
             collect_calls_expr(&f.iter, calls);
-            if let Some(e) = &f.end { collect_calls_expr(e, calls); }
-            if let Some(s) = &f.step { collect_calls_expr(s, calls); }
+            if let Some(e) = &f.end {
+                collect_calls_expr(e, calls);
+            }
+            if let Some(s) = &f.step {
+                collect_calls_expr(s, calls);
+            }
             collect_calls_block(&f.body, calls);
         }
         ast::Stmt::Loop(l) => collect_calls_block(&l.body, calls),
         ast::Stmt::Break(v, _) => {
-            if let Some(e) = v { collect_calls_expr(e, calls); }
+            if let Some(e) = v {
+                collect_calls_expr(e, calls);
+            }
         }
         ast::Stmt::Match(m) => {
             collect_calls_expr(&m.subject, calls);
             for arm in &m.arms {
-                if let Some(g) = &arm.guard { collect_calls_expr(g, calls); }
+                if let Some(g) = &arm.guard {
+                    collect_calls_expr(g, calls);
+                }
                 collect_calls_block(&arm.body, calls);
             }
         }
@@ -200,7 +217,9 @@ pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<St
                 let w = state.stack.pop().unwrap();
                 state.on_stack.remove(&w);
                 component.push(w.clone());
-                if w == v { break; }
+                if w == v {
+                    break;
+                }
             }
             state.result.push(component);
         }

@@ -34,7 +34,8 @@ impl Typer {
                     // generic_fns for monomorphization at codegen time (codegenneeds
                     // concrete types for LLVM IR).
                     let has_untyped_params = f.params.iter().any(|p| p.ty.is_none());
-                    let all_untyped = !f.params.is_empty() && f.params.iter().all(|p| p.ty.is_none());
+                    let all_untyped =
+                        !f.params.is_empty() && f.params.iter().all(|p| p.ty.is_none());
                     if has_untyped_params {
                         self.inferable_fns.insert(f.name.clone(), f.clone());
                     }
@@ -125,14 +126,18 @@ impl Typer {
         // Collect non-generic functions for SCC ordering.
         // Includes all-untyped-param functions — they now participate in scheme
         // inference (lowered for type constraints, then generalized).
-        let non_generic_fns: Vec<&ast::Fn> = prog.decls.iter().filter_map(|d| {
-            if let ast::Decl::Fn(f) = d {
-                if !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
-                    return Some(f);
+        let non_generic_fns: Vec<&ast::Fn> = prog
+            .decls
+            .iter()
+            .filter_map(|d| {
+                if let ast::Decl::Fn(f) = d {
+                    if !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
+                        return Some(f);
+                    }
                 }
-            }
-            None
-        }).collect();
+                None
+            })
+            .collect();
 
         // Build call graph and compute SCCs for topological ordering
         let call_graph = super::scc::build_call_graph(&non_generic_fns);
@@ -158,7 +163,8 @@ impl Typer {
                         let hfn = self.lower_fn_deferred(f).map_err(|e| {
                             // R3.2: Enhance error with mutual recursion context
                             if scc.len() > 1 {
-                                let peers = scc.iter()
+                                let peers = scc
+                                    .iter()
                                     .filter(|n| n.as_str() != f.name)
                                     .cloned()
                                     .collect::<Vec<_>>()
@@ -168,7 +174,12 @@ impl Typer {
                                 e
                             }
                         })?;
-                        scc_fns.push((f.ret.is_none() && f.name != "main", f.span, hfn, f.name.clone()));
+                        scc_fns.push((
+                            f.ret.is_none() && f.name != "main",
+                            f.span,
+                            hfn,
+                            f.name.clone(),
+                        ));
                         scc_fn_names.push(f.name.clone());
                         lowered_fn_names.insert(name.clone());
                     }
@@ -189,7 +200,11 @@ impl Typer {
                 for (_, _, hfn, fname) in scc_fns {
                     // Skip emitting all-untyped functions to hir_fns — only
                     // monomorphized copies go to codegen
-                    if self.fn_schemes.get(&fname).map_or(false, |s| !s.0.is_empty()) {
+                    if self
+                        .fn_schemes
+                        .get(&fname)
+                        .map_or(false, |s| !s.0.is_empty())
+                    {
                         continue;
                     }
                     hir_fns.push(hfn);
@@ -204,7 +219,11 @@ impl Typer {
                             self.build_fn_scheme(&f.name, &hfn);
                         }
                         // Skip emitting all-untyped functions with poly schemes
-                        if self.fn_schemes.get(&f.name).map_or(false, |s| !s.0.is_empty()) {
+                        if self
+                            .fn_schemes
+                            .get(&f.name)
+                            .map_or(false, |s| !s.0.is_empty())
+                        {
                             lowered_fn_names.insert(name.clone());
                             continue;
                         }
@@ -223,7 +242,11 @@ impl Typer {
                     self.build_fn_scheme(&f.name, &hfn);
                 }
                 // Skip all-untyped functions with poly schemes
-                if self.fn_schemes.get(&f.name).map_or(false, |s| !s.0.is_empty()) {
+                if self
+                    .fn_schemes
+                    .get(&f.name)
+                    .map_or(false, |s| !s.0.is_empty())
+                {
                     continue;
                 }
                 hir_fns.push(hfn);
@@ -392,14 +415,29 @@ impl Typer {
                             // push(elem), set(i64, elem)
                             if dm.method == "push" {
                                 if let Some(arg_ty) = dm.arg_tys.first() {
-                                    let _ = self.infer_ctx.unify_at(&elem, arg_ty, dm.span, "vec.push arg");
+                                    let _ = self.infer_ctx.unify_at(
+                                        &elem,
+                                        arg_ty,
+                                        dm.span,
+                                        "vec.push arg",
+                                    );
                                 }
                             } else if dm.method == "set" {
                                 if let Some(idx_ty) = dm.arg_tys.first() {
-                                    let _ = self.infer_ctx.unify_at(&Type::I64, idx_ty, dm.span, "vec.set index");
+                                    let _ = self.infer_ctx.unify_at(
+                                        &Type::I64,
+                                        idx_ty,
+                                        dm.span,
+                                        "vec.set index",
+                                    );
                                 }
                                 if let Some(val_ty) = dm.arg_tys.get(1) {
-                                    let _ = self.infer_ctx.unify_at(&elem, val_ty, dm.span, "vec.set value");
+                                    let _ = self.infer_ctx.unify_at(
+                                        &elem,
+                                        val_ty,
+                                        dm.span,
+                                        "vec.set value",
+                                    );
                                 }
                             }
                             Type::Void
@@ -408,7 +446,12 @@ impl Typer {
                         "len" => Type::I64,
                         _ => continue,
                     };
-                    let _ = self.infer_ctx.unify_at(&dm.ret_ty, &actual_ret, dm.span, "deferred vec method return");
+                    let _ = self.infer_ctx.unify_at(
+                        &dm.ret_ty,
+                        &actual_ret,
+                        dm.span,
+                        "deferred vec method return",
+                    );
                 }
                 Type::Map(key_ty, val_ty) => {
                     let key = key_ty.as_ref().clone();
@@ -441,18 +484,28 @@ impl Typer {
                         "values" => Type::Vec(Box::new(val.clone())),
                         _ => continue,
                     };
-                    let _ = self.infer_ctx.unify_at(&dm.ret_ty, &actual_ret, dm.span, "deferred map method return");
+                    let _ = self.infer_ctx.unify_at(
+                        &dm.ret_ty,
+                        &actual_ret,
+                        dm.span,
+                        "deferred map method return",
+                    );
                 }
                 Type::String => {
                     let actual_ret = match dm.method.as_str() {
                         "contains" | "starts_with" | "ends_with" => Type::Bool,
                         "char_at" | "len" | "find" => Type::I64,
-                        "slice" | "trim" | "trim_left" | "trim_right" | "replace"
-                        | "to_upper" | "to_lower" => Type::String,
+                        "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper"
+                        | "to_lower" => Type::String,
                         "split" => Type::Vec(Box::new(Type::String)),
                         _ => continue,
                     };
-                    let _ = self.infer_ctx.unify_at(&dm.ret_ty, &actual_ret, dm.span, "deferred string method return");
+                    let _ = self.infer_ctx.unify_at(
+                        &dm.ret_ty,
+                        &actual_ret,
+                        dm.span,
+                        "deferred string method return",
+                    );
                 }
                 Type::Struct(type_name) => {
                     let method_name = format!("{}_{}", type_name, dm.method);
@@ -460,15 +513,30 @@ impl Typer {
                         // param_tys[0] is self, actual args start at [1]
                         for (i, arg_ty) in dm.arg_tys.iter().enumerate() {
                             if let Some(expected) = param_tys.get(i + 1) {
-                                let _ = self.infer_ctx.unify_at(expected, arg_ty, dm.span, "deferred struct method arg");
+                                let _ = self.infer_ctx.unify_at(
+                                    expected,
+                                    arg_ty,
+                                    dm.span,
+                                    "deferred struct method arg",
+                                );
                             }
                         }
-                        let _ = self.infer_ctx.unify_at(&dm.ret_ty, &ret, dm.span, "deferred struct method return");
+                        let _ = self.infer_ctx.unify_at(
+                            &dm.ret_ty,
+                            &ret,
+                            dm.span,
+                            "deferred struct method return",
+                        );
                     }
                 }
                 Type::Coroutine(yield_ty) => {
                     if dm.method == "next" {
-                        let _ = self.infer_ctx.unify_at(&dm.ret_ty, yield_ty, dm.span, "deferred coroutine.next return");
+                        let _ = self.infer_ctx.unify_at(
+                            &dm.ret_ty,
+                            yield_ty,
+                            dm.span,
+                            "deferred coroutine.next return",
+                        );
                     }
                 }
                 _ => {
@@ -476,7 +544,9 @@ impl Typer {
                     // try candidate search with trait-based narrowing.
                     if matches!(recv_ty, Type::TypeVar(_)) {
                         let suffix = format!("_{}", dm.method);
-                        let mut candidates: Vec<(String, Vec<Type>, Type)> = self.fns.iter()
+                        let mut candidates: Vec<(String, Vec<Type>, Type)> = self
+                            .fns
+                            .iter()
                             .filter(|(name, _)| name.ends_with(&suffix))
                             .map(|(name, (_, ptys, ret))| {
                                 let type_name = name[..name.len() - suffix.len()].to_string();
@@ -488,8 +558,11 @@ impl Typer {
                         // Use trait constraints from the TypeVar to narrow candidates
                         if let Type::TypeVar(v) = recv_ty {
                             let constraint = self.infer_ctx.constraint(v);
-                            if let super::unify::TypeConstraint::Trait(ref required_traits) = constraint {
-                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates.iter()
+                            if let super::unify::TypeConstraint::Trait(ref required_traits) =
+                                constraint
+                            {
+                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
+                                    .iter()
                                     .filter(|(type_name, _, _)| {
                                         self.trait_impls.get(type_name).map_or(false, |impls| {
                                             required_traits.iter().all(|rt| impls.contains(rt))
@@ -504,12 +577,15 @@ impl Typer {
                         }
 
                         if candidates.len() > 1 {
-                            let defining_traits: Vec<&String> = self.traits.iter()
+                            let defining_traits: Vec<&String> = self
+                                .traits
+                                .iter()
                                 .filter(|(_, sigs)| sigs.iter().any(|s| s.name == dm.method))
                                 .map(|(tname, _)| tname)
                                 .collect();
                             if !defining_traits.is_empty() {
-                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates.iter()
+                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
+                                    .iter()
                                     .filter(|(type_name, _, _)| {
                                         self.trait_impls.get(type_name).map_or(false, |impls| {
                                             impls.iter().any(|i| defining_traits.contains(&i))
@@ -526,13 +602,28 @@ impl Typer {
                         if candidates.len() == 1 {
                             let (type_name, param_tys, ret) = &candidates[0];
                             let struct_ty = Type::Struct(type_name.clone());
-                            let _ = self.infer_ctx.unify_at(&recv_ty, &struct_ty, dm.span, "deferred method candidate");
+                            let _ = self.infer_ctx.unify_at(
+                                &recv_ty,
+                                &struct_ty,
+                                dm.span,
+                                "deferred method candidate",
+                            );
                             for (i, arg_ty) in dm.arg_tys.iter().enumerate() {
                                 if let Some(expected) = param_tys.get(i + 1) {
-                                    let _ = self.infer_ctx.unify_at(expected, arg_ty, dm.span, "deferred method arg");
+                                    let _ = self.infer_ctx.unify_at(
+                                        expected,
+                                        arg_ty,
+                                        dm.span,
+                                        "deferred method arg",
+                                    );
                                 }
                             }
-                            let _ = self.infer_ctx.unify_at(&dm.ret_ty, &ret, dm.span, "deferred method return");
+                            let _ = self.infer_ctx.unify_at(
+                                &dm.ret_ty,
+                                &ret,
+                                dm.span,
+                                "deferred method return",
+                            );
                         }
                     }
                 }
@@ -566,35 +657,49 @@ impl Typer {
                 if let Some(fields) = self.structs.get(name) {
                     if let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name) {
                         let fty = fty.clone();
-                        let _ = self.infer_ctx.unify_at(&df.field_ty, &fty, df.span, "deferred field access");
+                        let _ = self.infer_ctx.unify_at(
+                            &df.field_ty,
+                            &fty,
+                            df.span,
+                            "deferred field access",
+                        );
                     }
                 }
             } else if matches!(recv_ty, Type::String) && df.field_name == "length" {
-                let _ = self.infer_ctx.unify_at(&df.field_ty, &Type::I64, df.span, "deferred string.length");
+                let _ = self.infer_ctx.unify_at(
+                    &df.field_ty,
+                    &Type::I64,
+                    df.span,
+                    "deferred string.length",
+                );
             }
         }
 
         // Resolve TypeVar receivers using combined field constraints
         for (_root, fields) in by_receiver {
-            let required_fields: Vec<(&str, &Type)> = fields.iter()
+            let required_fields: Vec<(&str, &Type)> = fields
+                .iter()
                 .map(|df| (df.field_name.as_str(), &df.field_ty))
                 .collect();
 
             // Also include field_constraints from the Typer
-            let extra_constraints: Vec<(String, Type)> = self.field_constraints
+            let extra_constraints: Vec<(String, Type)> = self
+                .field_constraints
                 .get(&_root)
                 .cloned()
                 .unwrap_or_default();
 
             // Find structs satisfying ALL required fields
-            let candidates: Vec<String> = self.structs.iter()
+            let candidates: Vec<String> = self
+                .structs
+                .iter()
                 .filter(|(_, struct_fields)| {
-                    required_fields.iter().all(|(req, _)| {
-                        struct_fields.iter().any(|(n, _)| n == req)
-                    }) &&
-                    extra_constraints.iter().all(|(req, _)| {
-                        struct_fields.iter().any(|(n, _)| n == req)
-                    })
+                    required_fields
+                        .iter()
+                        .all(|(req, _)| struct_fields.iter().any(|(n, _)| n == req))
+                        && extra_constraints
+                            .iter()
+                            .all(|(req, _)| struct_fields.iter().any(|(n, _)| n == req))
                 })
                 .map(|(name, _)| name.clone())
                 .collect();
@@ -605,14 +710,23 @@ impl Typer {
                 let span = fields[0].span;
                 // Unify receiver with the struct
                 let _ = self.infer_ctx.unify_at(
-                    &fields[0].receiver_ty, &struct_ty, span,
+                    &fields[0].receiver_ty,
+                    &struct_ty,
+                    span,
                     "deferred field constraints imply struct type",
                 );
                 // Unify field types
                 if let Some(struct_fields) = self.structs.get(sname).cloned() {
                     for df in &fields {
-                        if let Some((_, fty)) = struct_fields.iter().find(|(n, _)| n == &df.field_name) {
-                            let _ = self.infer_ctx.unify_at(&df.field_ty, fty, df.span, "deferred field access");
+                        if let Some((_, fty)) =
+                            struct_fields.iter().find(|(n, _)| n == &df.field_name)
+                        {
+                            let _ = self.infer_ctx.unify_at(
+                                &df.field_ty,
+                                fty,
+                                df.span,
+                                "deferred field access",
+                            );
                         }
                     }
                 }
@@ -673,9 +787,7 @@ impl Typer {
     fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
         // Extract info from current StringMethod
         let (recv_ty, method) = match &expr.kind {
-            hir::ExprKind::StringMethod(recv, m, _) => {
-                (recv.ty.clone(), m.clone())
-            }
+            hir::ExprKind::StringMethod(recv, m, _) => (recv.ty.clone(), m.clone()),
             _ => return,
         };
         // Check if receiver resolved to something other than String
@@ -950,8 +1062,7 @@ impl Typer {
                 // Re-classify deferred method placeholders based on resolved receiver type
                 self.reclassify_method_call(expr);
             }
-            hir::ExprKind::VecMethod(recv, _, args)
-            | hir::ExprKind::MapMethod(recv, _, args) => {
+            hir::ExprKind::VecMethod(recv, _, args) | hir::ExprKind::MapMethod(recv, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {
                     self.resolve_expr(a);
@@ -969,7 +1080,9 @@ impl Typer {
                     let recv_ty = &inner.ty;
                     if let Type::Struct(name) = recv_ty {
                         if let Some(fields) = self.structs.get(name) {
-                            if let Some((i, _)) = fields.iter().enumerate().find(|(_, (n, _))| n == fname) {
+                            if let Some((i, _)) =
+                                fields.iter().enumerate().find(|(_, (n, _))| n == fname)
+                            {
                                 *field_idx = i;
                             }
                         }
@@ -1159,11 +1272,12 @@ impl Typer {
                     .map(|(_, t)| t.clone())
                     .unwrap_or_else(|| f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)));
                 let default = f.default.as_ref().map(|e| {
-                    self.lower_expr_expected(e, Some(&ty)).unwrap_or_else(|_| hir::Expr {
-                        kind: hir::ExprKind::Int(0),
-                        ty: Type::I64,
-                        span: e.span(),
-                    })
+                    self.lower_expr_expected(e, Some(&ty))
+                        .unwrap_or_else(|_| hir::Expr {
+                            kind: hir::ExprKind::Int(0),
+                            ty: Type::I64,
+                            span: e.span(),
+                        })
                 });
                 hir::Field {
                     name: f.name.clone(),
@@ -1284,7 +1398,10 @@ impl Typer {
     /// If/Match statements that serve as implicit return values.
     pub(crate) fn hir_tail_type(&self, body: &[hir::Stmt]) -> Option<Type> {
         // Find the last meaningful statement, skipping trailing Drops
-        let last = body.iter().rev().find(|s| !matches!(s, hir::Stmt::Drop(..)))?;
+        let last = body
+            .iter()
+            .rev()
+            .find(|s| !matches!(s, hir::Stmt::Drop(..)))?;
         match last {
             hir::Stmt::Expr(e) if e.ty != Type::Void => Some(e.ty.clone()),
             hir::Stmt::If(i) => {
@@ -1320,7 +1437,9 @@ impl Typer {
         // Canonicalize types through union-find to ensure unified TypeVars
         // share the same representative ID. This prevents the scheme from
         // having two "different" quantified vars that are actually the same.
-        let param_tys: Vec<crate::types::Type> = hfn.params.iter()
+        let param_tys: Vec<crate::types::Type> = hfn
+            .params
+            .iter()
             .map(|p| self.infer_ctx.canonicalize_type(&p.ty))
             .collect();
         let ret_ty = self.infer_ctx.canonicalize_type(&hfn.ret);
@@ -1338,15 +1457,17 @@ impl Typer {
                     "[type:scheme] {} :: ∀{:?}. ({}) -> {}",
                     name,
                     scheme.quantified,
-                    param_tys.iter().map(|t| format!("{t}")).collect::<Vec<_>>().join(", "),
+                    param_tys
+                        .iter()
+                        .map(|t| format!("{t}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     ret_ty
                 );
             }
         }
-        self.fn_schemes.insert(
-            name.to_string(),
-            (scheme.quantified, param_tys, ret_ty),
-        );
+        self.fn_schemes
+            .insert(name.to_string(), (scheme.quantified, param_tys, ret_ty));
     }
 
     pub(crate) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
@@ -1400,7 +1521,9 @@ impl Typer {
         // Unify tail expression with the return TypeVar but do NOT resolve yet.
         if f.ret.is_none() && f.name != "main" {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let r = self.infer_ctx.unify_at(&ret, &tail_ty, f.span, "function tail expression");
+                let r = self
+                    .infer_ctx
+                    .unify_at(&ret, &tail_ty, f.span, "function tail expression");
                 self.collect_unify_error(r);
             } else {
                 // No meaningful tail expression (e.g., body ends with void
@@ -1498,11 +1621,13 @@ impl Typer {
                 // Resolve the TypeVar — constructor unification may have filled it
                 let ty = self.infer_ctx.resolve(&raw_ty);
                 let default = f.default.as_ref().map(|e| {
-                    let lowered = self.lower_expr_expected(e, Some(&ty)).unwrap_or_else(|_| hir::Expr {
-                        kind: hir::ExprKind::Int(0),
-                        ty: Type::I64,
-                        span: e.span(),
-                    });
+                    let lowered =
+                        self.lower_expr_expected(e, Some(&ty))
+                            .unwrap_or_else(|_| hir::Expr {
+                                kind: hir::ExprKind::Int(0),
+                                ty: Type::I64,
+                                span: e.span(),
+                            });
                     let _ =
                         self.infer_ctx
                             .unify_at(&ty, &lowered.ty, f.span, "field default value");
@@ -1594,7 +1719,9 @@ impl Typer {
         // Phase 2.2: Unify tail expression with return TypeVar for methods
         let ret = if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "method tail expression");
+                let r = self
+                    .infer_ctx
+                    .unify_at(&ret, &tail_ty, m.span, "method tail expression");
                 self.collect_unify_error(r);
             }
             self.infer_ctx.resolve(&ret)
@@ -1675,7 +1802,9 @@ impl Typer {
         // Phase 2.2: Unify tail expression with return TypeVar for ptr methods
         let ret = if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "ptr method tail expression");
+                let r =
+                    self.infer_ctx
+                        .unify_at(&ret, &tail_ty, m.span, "ptr method tail expression");
                 self.collect_unify_error(r);
             }
             self.infer_ctx.resolve(&ret)
@@ -1934,7 +2063,10 @@ impl Typer {
         // and remain unsolved. By this point, later statements have had a chance
         // to solve them through unification.
         if self.deferred_quantified_vars.len() > deferred_snapshot {
-            let vars_to_default: Vec<u32> = self.deferred_quantified_vars.drain(deferred_snapshot..).collect();
+            let vars_to_default: Vec<u32> = self
+                .deferred_quantified_vars
+                .drain(deferred_snapshot..)
+                .collect();
             self.infer_ctx.default_quantified_vars(&vars_to_default);
         }
         let ends_with_jump = stmts.last().map_or(false, |s| {

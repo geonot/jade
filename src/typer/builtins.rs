@@ -107,10 +107,12 @@ impl Typer {
                 };
                 let inner_ty = match &harg.ty {
                     Type::Weak(inner) => inner.as_ref().clone(),
-                    _ => return Some(Err(format!(
-                        "weak_upgrade() requires a weak value, got {}",
-                        harg.ty
-                    ))),
+                    _ => {
+                        return Some(Err(format!(
+                            "weak_upgrade() requires a weak value, got {}",
+                            harg.ty
+                        )));
+                    }
                 };
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::WeakUpgrade, vec![harg]),
@@ -125,10 +127,12 @@ impl Typer {
                 };
                 let inner_ty = match &harg.ty {
                     Type::Ptr(inner) => inner.as_ref().clone(),
-                    _ => return Some(Err(format!(
-                        "volatile_load() requires a pointer, got {}",
-                        harg.ty
-                    ))),
+                    _ => {
+                        return Some(Err(format!(
+                            "volatile_load() requires a pointer, got {}",
+                            harg.ty
+                        )));
+                    }
                 };
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::VolatileLoad, vec![harg]),
@@ -152,10 +156,7 @@ impl Typer {
                     )));
                 }
                 Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(
-                        hir::BuiltinFn::VolatileStore,
-                        vec![hptr, hval],
-                    ),
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::VolatileStore, vec![hptr, hval]),
                     ty: Type::Void,
                     span,
                 }))
@@ -292,12 +293,12 @@ impl Typer {
                     span,
                 }))
             }
-            "__string_from_raw" if args.len() == 3 && !self.fns.contains_key(name) => {
-                Some(self.lower_simple_builtin(args, hir::BuiltinFn::StringFromRaw, Type::String, span))
-            }
-            "__string_from_ptr" if args.len() == 1 && !self.fns.contains_key(name) => {
-                Some(self.lower_simple_builtin(args, hir::BuiltinFn::StringFromPtr, Type::String, span))
-            }
+            "__string_from_raw" if args.len() == 3 && !self.fns.contains_key(name) => Some(
+                self.lower_simple_builtin(args, hir::BuiltinFn::StringFromRaw, Type::String, span),
+            ),
+            "__string_from_ptr" if args.len() == 1 && !self.fns.contains_key(name) => Some(
+                self.lower_simple_builtin(args, hir::BuiltinFn::StringFromPtr, Type::String, span),
+            ),
             "__get_args" if args.is_empty() && !self.fns.contains_key(name) => {
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::GetArgs, vec![]),
@@ -374,13 +375,14 @@ impl Typer {
                     span,
                 }))
             }
-            "map" if !self.fns.contains_key(name) => {
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::MapNew,
-                    ty: Type::Map(Box::new(Type::String), Box::new(self.infer_ctx.fresh_integer_var())),
-                    span,
-                }))
-            }
+            "map" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
+                kind: hir::ExprKind::MapNew,
+                ty: Type::Map(
+                    Box::new(Type::String),
+                    Box::new(self.infer_ctx.fresh_integer_var()),
+                ),
+                span,
+            })),
             _ => None,
         }
     }

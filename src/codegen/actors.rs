@@ -371,5 +371,4 @@ impl<'ctx> Compiler<'ctx> {
 
         Ok(i64t.const_int(0, false).into())
     }
-
 }

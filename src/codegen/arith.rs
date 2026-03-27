@@ -6,8 +6,8 @@ use crate::ast::BinOp;
 use crate::hir;
 use crate::types::Type;
 
-use super::b;
 use super::Compiler;
+use super::b;
 
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn compile_binop(

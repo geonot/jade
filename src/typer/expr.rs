@@ -97,7 +97,9 @@ impl Typer {
             }),
 
             ast::Expr::None(span) => {
-                let ty = expected.cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
+                let ty = expected
+                    .cloned()
+                    .unwrap_or_else(|| self.infer_ctx.fresh_var());
                 Ok(hir::Expr {
                     kind: hir::ExprKind::None,
                     ty,
@@ -166,9 +168,7 @@ impl Typer {
                             let _ = self.infer_ctx.unify(&inst, exp);
                             inst
                         }
-                        (Some(scheme), _) if scheme.is_poly() => {
-                            self.infer_ctx.instantiate(scheme)
-                        }
+                        (Some(scheme), _) if scheme.is_poly() => self.infer_ctx.instantiate(scheme),
                         _ => mono_ty,
                     };
                     return Ok(hir::Expr {
@@ -183,19 +183,20 @@ impl Typer {
                 if let Some((id, ptys, ret)) = self.fns.get(name).cloned() {
                     // If the function has a poly scheme, instantiate it when used
                     // as a value so that the TypeVars are fresh for this usage site
-                    let fn_ty = if let Some((ref q, ref sp, ref sr)) = self.fn_schemes.get(name).cloned() {
-                        if !q.is_empty() {
-                            let scheme = crate::types::Scheme {
-                                quantified: q.clone(),
-                                ty: Type::Fn(sp.clone(), Box::new(sr.clone())),
-                            };
-                            self.infer_ctx.instantiate(&scheme)
+                    let fn_ty =
+                        if let Some((ref q, ref sp, ref sr)) = self.fn_schemes.get(name).cloned() {
+                            if !q.is_empty() {
+                                let scheme = crate::types::Scheme {
+                                    quantified: q.clone(),
+                                    ty: Type::Fn(sp.clone(), Box::new(sr.clone())),
+                                };
+                                self.infer_ctx.instantiate(&scheme)
+                            } else {
+                                Type::Fn(ptys, Box::new(ret))
+                            }
                         } else {
                             Type::Fn(ptys, Box::new(ret))
-                        }
-                    } else {
-                        Type::Fn(ptys, Box::new(ret))
-                    };
+                        };
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::FnRef(id, name.clone()),
                         ty: fn_ty,
@@ -221,7 +222,9 @@ impl Typer {
                 let hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
                 // Unify operand types for numeric consistency
-                let r = self.infer_ctx.unify_at(&hl.ty, &hr.ty, *span, "binary operands");
+                let r = self
+                    .infer_ctx
+                    .unify_at(&hl.ty, &hr.ty, *span, "binary operands");
                 self.collect_unify_error(r);
 
                 // Phase 4 (P2): Add type constraints based on operator kind.
@@ -343,7 +346,9 @@ impl Typer {
             ast::Expr::Call(callee, args, span) => {
                 let result = self.lower_call(callee, args, *span)?;
                 if let Some(exp) = expected {
-                    let _ = self.infer_ctx.unify_at(exp, &result.ty, *span, "call result");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(exp, &result.ty, *span, "call result");
                 }
                 Ok(result)
             }
@@ -351,7 +356,9 @@ impl Typer {
             ast::Expr::Method(obj, method, args, span) => {
                 let result = self.lower_method_call(obj, method, args, *span)?;
                 if let Some(exp) = expected {
-                    let _ = self.infer_ctx.unify_at(exp, &result.ty, *span, "method call result");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(exp, &result.ty, *span, "method call result");
                 }
                 Ok(result)
             }
@@ -384,9 +391,13 @@ impl Typer {
                     }
                 } else if matches!(resolved_ty, Type::String) && field == "length" {
                     (Type::I64, 0)
-                } else if matches!(&resolved_ty, Type::Vec(_)) && (field == "length" || field == "len") {
+                } else if matches!(&resolved_ty, Type::Vec(_))
+                    && (field == "length" || field == "len")
+                {
                     (Type::I64, 0)
-                } else if matches!(&resolved_ty, Type::Map(_, _)) && (field == "length" || field == "len") {
+                } else if matches!(&resolved_ty, Type::Map(_, _))
+                    && (field == "length" || field == "len")
+                {
                     (Type::I64, 0)
                 } else if let Type::Tuple(ref tys) = resolved_ty {
                     // Tuple field access: .0, .1, etc.
@@ -396,7 +407,10 @@ impl Typer {
                         } else {
                             return Err(format!(
                                 "line {}:{}: tuple index {} out of range (tuple has {} elements)",
-                                span.line, span.col, idx, tys.len()
+                                span.line,
+                                span.col,
+                                idx,
+                                tys.len()
                             ));
                         }
                     } else {
@@ -406,7 +420,11 @@ impl Typer {
                     // Structural field constraint: record field access on this TypeVar.
                     // Search all known structs that have this field, and filter by
                     // any previously-recorded field constraints on the same TypeVar.
-                    let var_id = if let Type::TypeVar(v) = resolved_ty { self.infer_ctx.find(v) } else { 0 };
+                    let var_id = if let Type::TypeVar(v) = resolved_ty {
+                        self.infer_ctx.find(v)
+                    } else {
+                        0
+                    };
 
                     // Record this field constraint
                     let fty_placeholder = self.infer_ctx.fresh_var();
@@ -416,17 +434,22 @@ impl Typer {
                         .push((field.clone(), fty_placeholder.clone()));
 
                     // Collect ALL field constraints on this TypeVar
-                    let all_required_fields: Vec<(String, Type)> = self.field_constraints
+                    let all_required_fields: Vec<(String, Type)> = self
+                        .field_constraints
                         .get(&var_id)
                         .cloned()
                         .unwrap_or_default();
 
                     // Find structs satisfying ALL field constraints
-                    let candidates: Vec<(String, Vec<(String, Type, usize)>)> = self.structs.iter()
+                    let candidates: Vec<(String, Vec<(String, Type, usize)>)> = self
+                        .structs
+                        .iter()
                         .filter_map(|(sname, fields)| {
                             let mut matched = Vec::new();
                             for (req_name, _) in &all_required_fields {
-                                if let Some((idx, (_, fty))) = fields.iter().enumerate()
+                                if let Some((idx, (_, fty))) = fields
+                                    .iter()
+                                    .enumerate()
                                     .find(|(_, (fname, _))| fname == req_name)
                                 {
                                     matched.push((req_name.clone(), fty.clone(), idx));
@@ -443,20 +466,28 @@ impl Typer {
                         let (sname, matched_fields) = &candidates[0];
                         let struct_ty = Type::Struct(sname.clone());
                         let _ = self.infer_ctx.unify_at(
-                            &resolved_ty, &struct_ty, *span,
+                            &resolved_ty,
+                            &struct_ty,
+                            *span,
                             "field access implies struct type",
                         );
                         // Unify all recorded field TypeVars with actual field types
                         for (req_name, req_ty) in &all_required_fields {
-                            if let Some((_, actual_ty, _)) = matched_fields.iter()
-                                .find(|(n, _, _)| n == req_name)
+                            if let Some((_, actual_ty, _)) =
+                                matched_fields.iter().find(|(n, _, _)| n == req_name)
                             {
                                 let actual_resolved = self.infer_ctx.shallow_resolve(actual_ty);
-                                let _ = self.infer_ctx.unify_at(req_ty, &actual_resolved, *span, "struct field type");
+                                let _ = self.infer_ctx.unify_at(
+                                    req_ty,
+                                    &actual_resolved,
+                                    *span,
+                                    "struct field type",
+                                );
                             }
                         }
                         // Find the index for the current field
-                        let (fty, idx) = matched_fields.iter()
+                        let (fty, idx) = matched_fields
+                            .iter()
                             .find(|(n, _, _)| n == field)
                             .map(|(_, t, i)| (self.infer_ctx.shallow_resolve(t), *i))
                             .unwrap_or_else(|| (fty_placeholder, 0));
@@ -489,7 +520,10 @@ impl Typer {
                     Type::Vec(et) => *et.clone(),
                     Type::Ptr(et) => *et.clone(),
                     Type::Map(_, vt) => *vt.clone(),
-                    Type::Tuple(tys) => tys.first().cloned().unwrap_or_else(|| self.infer_ctx.fresh_var()),
+                    Type::Tuple(tys) => tys
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| self.infer_ctx.fresh_var()),
                     _ => self.infer_ctx.fresh_var(),
                 };
                 Ok(hir::Expr {
@@ -565,7 +599,9 @@ impl Typer {
             }
 
             ast::Expr::IfExpr(i) => {
-                let result_ty = expected.cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
+                let result_ty = expected
+                    .cloned()
+                    .unwrap_or_else(|| self.infer_ctx.fresh_var());
                 let hi = self.lower_if(i, &result_ty)?;
                 let ty = match hi.then.last() {
                     Some(hir::Stmt::Expr(e)) => e.ty.clone(),
@@ -573,8 +609,9 @@ impl Typer {
                 };
                 if let Some(ref els) = hi.els {
                     if let Some(hir::Stmt::Expr(e)) = els.last() {
-                        let r = self.infer_ctx
-                            .unify_at(&ty, &e.ty, i.span, "if-expression branches");
+                        let r =
+                            self.infer_ctx
+                                .unify_at(&ty, &e.ty, i.span, "if-expression branches");
                         self.collect_unify_error(r);
                     }
                 }
@@ -631,7 +668,9 @@ impl Typer {
 
             ast::Expr::Placeholder(span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Void,
-                ty: expected.cloned().unwrap_or_else(|| self.infer_ctx.fresh_var()),
+                ty: expected
+                    .cloned()
+                    .unwrap_or_else(|| self.infer_ctx.fresh_var()),
                 span: *span,
             }),
 
@@ -654,7 +693,9 @@ impl Typer {
                         // Deref on unsolved type: create inner TypeVar, constrain outer as Ptr
                         let inner_var = self.infer_ctx.fresh_var();
                         let ptr_ty = Type::Ptr(Box::new(inner_var.clone()));
-                        let _ = self.infer_ctx.unify_at(&resolved, &ptr_ty, *span, "dereference");
+                        let _ = self
+                            .infer_ctx
+                            .unify_at(&resolved, &ptr_ty, *span, "dereference");
                         inner_var
                     }
                     other => {
@@ -700,7 +741,10 @@ impl Typer {
                 let hbody = self.lower_expr(body_expr)?;
                 // iter_end is the range end (e.g., `5` in `0 to 5`)
                 let hend = iter_end.as_ref().map(|c| self.lower_expr(c)).transpose()?;
-                let hcond = cond.as_ref().map(|m| self.lower_expr_expected(m, Some(&Type::Bool))).transpose()?;
+                let hcond = cond
+                    .as_ref()
+                    .map(|m| self.lower_expr_expected(m, Some(&Type::Bool)))
+                    .transpose()?;
                 self.pop_scope();
 
                 let ty = Type::Ptr(Box::new(hbody.ty.clone()));
@@ -902,7 +946,12 @@ impl Typer {
                         // TypeVar and constrain the channel to Channel<elem_ty>
                         let elem_var = self.infer_ctx.fresh_var();
                         let chan_ty = Type::Channel(Box::new(elem_var.clone()));
-                        let _ = self.infer_ctx.unify_at(&resolved_ch_ty, &chan_ty, *span, "channel send infers channel type");
+                        let _ = self.infer_ctx.unify_at(
+                            &resolved_ch_ty,
+                            &chan_ty,
+                            *span,
+                            "channel send infers channel type",
+                        );
                         elem_var
                     }
                     _ => return Err(format!("send: target must be a Channel, got {}", hch.ty)),
@@ -929,7 +978,12 @@ impl Typer {
                         // TypeVar and constrain the channel to Channel<elem_ty>
                         let elem_var = self.infer_ctx.fresh_var();
                         let chan_ty = Type::Channel(Box::new(elem_var.clone()));
-                        let _ = self.infer_ctx.unify_at(&resolved_ch_ty, &chan_ty, *span, "channel recv infers channel type");
+                        let _ = self.infer_ctx.unify_at(
+                            &resolved_ch_ty,
+                            &chan_ty,
+                            *span,
+                            "channel recv infers channel type",
+                        );
                         elem_var
                     }
                     _ => return Err(format!("receive: target must be a Channel, got {}", hch.ty)),
@@ -951,7 +1005,12 @@ impl Typer {
                         Type::TypeVar(_) => {
                             let elem_var = self.infer_ctx.fresh_var();
                             let chan_ty = Type::Channel(Box::new(elem_var.clone()));
-                            let _ = self.infer_ctx.unify_at(&resolved_sel_ch, &chan_ty, arm.span, "select infers channel type");
+                            let _ = self.infer_ctx.unify_at(
+                                &resolved_sel_ch,
+                                &chan_ty,
+                                arm.span,
+                                "select infers channel type",
+                            );
                             elem_var
                         }
                         _ => {
@@ -1018,7 +1077,9 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
             // Look up variant field types from enum definition
-            let variant_fields: Vec<Type> = self.enums.get(&enum_name)
+            let variant_fields: Vec<Type> = self
+                .enums
+                .get(&enum_name)
                 .and_then(|vs| vs.iter().find(|(vn, _)| vn == name))
                 .map(|(_, ftys)| ftys.clone())
                 .unwrap_or_default();
@@ -1049,7 +1110,10 @@ impl Typer {
                 let expected = struct_fields.as_ref().and_then(|fields| {
                     if let Some(fname) = fi.name.as_ref() {
                         // Named field: look up by name
-                        fields.iter().find(|(n, _)| n == fname).map(|(_, ty)| ty.clone())
+                        fields
+                            .iter()
+                            .find(|(n, _)| n == fname)
+                            .map(|(_, ty)| ty.clone())
                     } else {
                         // Positional field: look up by index
                         fields.get(i).map(|(_, ty)| ty.clone())
@@ -1092,11 +1156,14 @@ impl Typer {
                         span,
                         "struct literal field",
                     );
-                    let taken = std::mem::replace(&mut fi.value, hir::Expr {
-                        kind: hir::ExprKind::Void,
-                        ty: Type::Void,
-                        span,
-                    });
+                    let taken = std::mem::replace(
+                        &mut fi.value,
+                        hir::Expr {
+                            kind: hir::ExprKind::Void,
+                            ty: Type::Void,
+                            span,
+                        },
+                    );
                     fi.value = self.maybe_coerce_to(taken, declared_ty);
                 }
             }

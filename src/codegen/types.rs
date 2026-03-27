@@ -187,7 +187,11 @@ impl<'ctx> Compiler<'ctx> {
                 if fv.get_type().get_bit_width() < ft.get_bit_width() {
                     return self.bld.build_float_ext(fv, ft, "fpext").unwrap().into();
                 } else {
-                    return self.bld.build_float_trunc(fv, ft, "fptrunc").unwrap().into();
+                    return self
+                        .bld
+                        .build_float_trunc(fv, ft, "fptrunc")
+                        .unwrap()
+                        .into();
                 }
             }
         }

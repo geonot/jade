@@ -252,7 +252,9 @@ impl Typer {
         // Phase 2.2: Unify tail expression with return TypeVar (recurse into If/Match)
         if gf.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let _ = self.infer_ctx.unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
+                let _ =
+                    self.infer_ctx
+                        .unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
             }
         }
         // Disable strict for monomorphized function resolution — these are

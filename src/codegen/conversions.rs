@@ -1,14 +1,17 @@
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 use inkwell::AddressSpace;
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 
 use crate::hir;
 use crate::types::Type;
 
-use super::b;
 use super::Compiler;
+use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn compile_log(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_log(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         if args.is_empty() {
             return Err("log() requires an argument".into());
         }
@@ -73,7 +76,10 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    pub(crate) fn compile_to_string(&mut self, expr: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_to_string(
+        &mut self,
+        expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let val = self.compile_expr(expr)?;
         let ty = self.resolve_ty(expr.ty.clone());
         match &ty {

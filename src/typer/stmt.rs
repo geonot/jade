@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
-use crate::types::{Type, Scheme};
+use crate::types::{Scheme, Type};
 
 use super::{Typer, VarInfo};
 
@@ -69,7 +69,8 @@ impl Typer {
                         // R3.1: Mark quantified vars so they don't trigger strict-mode
                         // errors at the definition site (polymorphic — solved at call site).
                         self.infer_ctx.mark_quantified(&scheme.quantified);
-                        self.deferred_quantified_vars.extend(scheme.quantified.iter().copied());
+                        self.deferred_quantified_vars
+                            .extend(scheme.quantified.iter().copied());
                         // Store the lambda AST for poly-scheme let-bound lambdas so
                         // we can re-lower (monomorphize) at each call site with the
                         // resolved concrete types. This fixes polymorphic multi-use
@@ -106,13 +107,18 @@ impl Typer {
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hval.ty);
                 let tys = match &resolved_ty {
                     Type::Tuple(ts) => ts.clone(),
-                    _ => (0..names.len()).map(|_| self.infer_ctx.fresh_var()).collect(),
+                    _ => (0..names.len())
+                        .map(|_| self.infer_ctx.fresh_var())
+                        .collect(),
                 };
                 let bindings: Vec<(DefId, String, Type)> = names
                     .iter()
                     .enumerate()
                     .map(|(i, n)| {
-                        let ty = tys.get(i).cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
+                        let ty = tys
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| self.infer_ctx.fresh_var());
                         let id = self.fresh_id();
                         self.define_var(
                             n,
@@ -166,7 +172,11 @@ impl Typer {
                 let iter_is_int = resolved_iter_ty.is_int()
                     || if let Type::TypeVar(id) = &resolved_iter_ty {
                         let c = self.infer_ctx.constraint(*id);
-                        matches!(c, super::unify::TypeConstraint::Integer | super::unify::TypeConstraint::Numeric)
+                        matches!(
+                            c,
+                            super::unify::TypeConstraint::Integer
+                                | super::unify::TypeConstraint::Numeric
+                        )
                     } else {
                         false
                     };
@@ -356,14 +366,20 @@ impl Typer {
         schema: &[(String, Type)],
         store: &str,
     ) -> Result<hir::StoreFilter, String> {
-        let field_ty = schema.iter().find(|(n, _)| n == &filter.field).map(|(_, t)| t);
+        let field_ty = schema
+            .iter()
+            .find(|(n, _)| n == &filter.field)
+            .map(|(_, t)| t);
         if field_ty.is_none() {
             return Err(format!("store '{store}' has no field '{}'", filter.field));
         }
         let hvalue = self.lower_expr_expected(&filter.value, field_ty)?;
         let mut hextra = Vec::new();
         for (lop, cond) in &filter.extra {
-            let cond_field_ty = schema.iter().find(|(n, _)| n == &cond.field).map(|(_, t)| t);
+            let cond_field_ty = schema
+                .iter()
+                .find(|(n, _)| n == &cond.field)
+                .map(|(_, t)| t);
             if cond_field_ty.is_none() {
                 return Err(format!("store '{store}' has no field '{}'", cond.field));
             }
@@ -407,7 +423,10 @@ impl Typer {
         }
         // Default deferred quantified vars from this block scope
         if self.deferred_quantified_vars.len() > deferred_snapshot {
-            let vars_to_default: Vec<u32> = self.deferred_quantified_vars.drain(deferred_snapshot..).collect();
+            let vars_to_default: Vec<u32> = self
+                .deferred_quantified_vars
+                .drain(deferred_snapshot..)
+                .collect();
             self.infer_ctx.default_quantified_vars(&vars_to_default);
         }
         Ok(stmts)
@@ -450,13 +469,20 @@ impl Typer {
         for a in &m.arms {
             self.push_scope();
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
-            let guard = a.guard.as_ref().map(|g| self.lower_expr_expected(g, Some(&Type::Bool))).transpose()?;
+            let guard = a
+                .guard
+                .as_ref()
+                .map(|g| self.lower_expr_expected(g, Some(&Type::Bool)))
+                .transpose()?;
             let body = self.lower_block_no_scope(&a.body, ret_ty)?;
             // Unify each arm's tail expression type with other arms
             if let Some(hir::Stmt::Expr(tail_expr)) = body.last() {
                 if let Some(ref first_ty) = first_arm_ty {
                     let _ = self.infer_ctx.unify_at(
-                        first_ty, &tail_expr.ty, a.span, "match arm result type"
+                        first_ty,
+                        &tail_expr.ty,
+                        a.span,
+                        "match arm result type",
                     );
                 } else {
                     first_arm_ty = Some(tail_expr.ty.clone());
@@ -499,7 +525,12 @@ impl Typer {
                 if let Some((en, tag)) = self.variant_tags.get(name).cloned() {
                     // S6: Unify expected type with the enum type for zero-arg variants
                     let enum_ty = Type::Enum(en.clone());
-                    let _ = self.infer_ctx.unify_at(expected_ty, &enum_ty, *span, "match pattern implies enum type");
+                    let _ = self.infer_ctx.unify_at(
+                        expected_ty,
+                        &enum_ty,
+                        *span,
+                        "match pattern implies enum type",
+                    );
                     return Ok(hir::Pat::Ctor(name.clone(), tag, vec![], *span));
                 }
                 let id = self.fresh_id();
@@ -528,7 +559,12 @@ impl Typer {
                 // so that unannotated function params get their type from match patterns.
                 if let Some(ref en) = enum_name {
                     let enum_ty = Type::Enum(en.clone());
-                    let _ = self.infer_ctx.unify_at(expected_ty, &enum_ty, *span, "match pattern implies enum type");
+                    let _ = self.infer_ctx.unify_at(
+                        expected_ty,
+                        &enum_ty,
+                        *span,
+                        "match pattern implies enum type",
+                    );
                 }
 
                 let field_tys: Vec<Type> = if let Some(ref en) = enum_name {
@@ -547,7 +583,10 @@ impl Typer {
 
                 let mut hpats = Vec::new();
                 for (i, sp) in sub_pats.iter().enumerate() {
-                    let ft = field_tys.get(i).cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
+                    let ft = field_tys
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| self.infer_ctx.fresh_var());
                     hpats.push(self.lower_pat(sp, &ft)?);
                 }
                 Ok(hir::Pat::Ctor(name.clone(), tag, hpats, *span))
@@ -567,11 +606,16 @@ impl Typer {
             ast::Pat::Tuple(pats, span) => {
                 let tys = match expected_ty {
                     Type::Tuple(ts) => ts.clone(),
-                    _ => (0..pats.len()).map(|_| self.infer_ctx.fresh_var()).collect(),
+                    _ => (0..pats.len())
+                        .map(|_| self.infer_ctx.fresh_var())
+                        .collect(),
                 };
                 let mut hpats = Vec::new();
                 for (i, p) in pats.iter().enumerate() {
-                    let ety = tys.get(i).cloned().unwrap_or_else(|| self.infer_ctx.fresh_var());
+                    let ety = tys
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| self.infer_ctx.fresh_var());
                     hpats.push(self.lower_pat(p, &ety)?);
                 }
                 Ok(hir::Pat::Tuple(hpats, *span))

@@ -66,7 +66,10 @@ fn compile_with_strict(src: &str) -> String {
         .arg(&out)
         .status()
         .expect("jadec failed to start");
-    assert!(status.success(), "jadec --strict-types compilation failed for:\n{src}");
+    assert!(
+        status.success(),
+        "jadec --strict-types compilation failed for:\n{src}"
+    );
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -4737,9 +4740,7 @@ fn strict_types_annotated_functions() {
 
 #[test]
 fn strict_types_string_operations() {
-    let out = compile_with_strict(
-        "*main()\n    s is \"hello\"\n    log(s)\n",
-    );
+    let out = compile_with_strict("*main()\n    s is \"hello\"\n    log(s)\n");
     assert_eq!(out.trim(), "hello");
 }
 
@@ -4754,27 +4755,21 @@ fn strict_types_bool_operations() {
 #[test]
 fn strict_types_inferred_param_types() {
     // Params inferred from call site should pass strict mode
-    let out = compile_with_strict(
-        "*double(x)\n    x * 2\n*main()\n    log(double(21))\n",
-    );
+    let out = compile_with_strict("*double(x)\n    x * 2\n*main()\n    log(double(21))\n");
     assert_eq!(out.trim(), "42");
 }
 
 #[test]
 fn strict_types_integer_literal_default() {
     // Integer-constrained TypeVars should default safely
-    let out = compile_with_strict(
-        "*main()\n    x is 100\n    log(x)\n",
-    );
+    let out = compile_with_strict("*main()\n    x is 100\n    log(x)\n");
     assert_eq!(out.trim(), "100");
 }
 
 #[test]
 fn strict_types_float_literal_default() {
     // Float-constrained TypeVars should default safely
-    let out = compile_with_strict(
-        "*main()\n    x is 3.14\n    log(x)\n",
-    );
+    let out = compile_with_strict("*main()\n    x is 3.14\n    log(x)\n");
     assert!(out.trim().starts_with("3.14"));
 }
 
@@ -4799,27 +4794,21 @@ fn strict_types_enum_inference() {
 #[test]
 fn operator_constraint_arithmetic_params() {
     // Unannotated params used in arithmetic should resolve to numeric types
-    let out = compile_and_run(
-        "*add(a, b)\n    a + b\n*main()\n    log(add(10, 20))\n",
-    );
+    let out = compile_and_run("*add(a, b)\n    a + b\n*main()\n    log(add(10, 20))\n");
     assert_eq!(out.trim(), "30");
 }
 
 #[test]
 fn operator_constraint_float_arithmetic() {
     // Float arithmetic inline (cross-function float param inference requires generalization)
-    let out = compile_and_run(
-        "*main()\n    a is 2.5\n    b is 3.0\n    log(a * b)\n",
-    );
+    let out = compile_and_run("*main()\n    a is 2.5\n    b is 3.0\n    log(a * b)\n");
     assert!(out.trim().starts_with("7.5"));
 }
 
 #[test]
 fn operator_constraint_string_concat_preserved() {
     // String concat via + should still work (not broken by Numeric constraint)
-    let out = compile_and_run(
-        "*main()\n    s is \"hello\" + \" world\"\n    log(s)\n",
-    );
+    let out = compile_and_run("*main()\n    s is \"hello\" + \" world\"\n    log(s)\n");
     assert_eq!(out.trim(), "hello world");
 }
 
@@ -4833,34 +4822,27 @@ fn operator_constraint_comparison_ops() {
 
 #[test]
 fn operator_constraint_bitwise_ops() {
-    let out = compile_and_run(
-        "*mask(a, b)\n    a & b\n*main()\n    log(mask(255, 15))\n",
-    );
+    let out = compile_and_run("*mask(a, b)\n    a & b\n*main()\n    log(mask(255, 15))\n");
     assert_eq!(out.trim(), "15");
 }
 
 #[test]
 fn operator_constraint_unary_neg() {
-    let out = compile_and_run(
-        "*negate(x)\n    -x\n*main()\n    log(negate(42))\n",
-    );
+    let out = compile_and_run("*negate(x)\n    -x\n*main()\n    log(negate(42))\n");
     assert_eq!(out.trim(), "-42");
 }
 
 #[test]
 fn operator_constraint_chained_arithmetic() {
     // Multiple arithmetic ops should all constrain consistently
-    let out = compile_and_run(
-        "*compute(a, b, c)\n    a * b + c\n*main()\n    log(compute(3, 4, 5))\n",
-    );
+    let out =
+        compile_and_run("*compute(a, b, c)\n    a * b + c\n*main()\n    log(compute(3, 4, 5))\n");
     assert_eq!(out.trim(), "17");
 }
 
 #[test]
 fn operator_constraint_modulo() {
-    let out = compile_and_run(
-        "*rem(a, b)\n    a % b\n*main()\n    log(rem(17, 5))\n",
-    );
+    let out = compile_and_run("*rem(a, b)\n    a % b\n*main()\n    log(rem(17, 5))\n");
     assert_eq!(out.trim(), "2");
 }
 
@@ -4916,9 +4898,7 @@ fn implicit_generic_identity_two_types() {
 #[test]
 fn implicit_generic_with_arithmetic() {
     // Implicit generic function that does arithmetic - called with i64
-    let out = compile_and_run(
-        "*double(x)\n    x + x\n\n*main()\n    log(double(21))\n",
-    );
+    let out = compile_and_run("*double(x)\n    x + x\n\n*main()\n    log(double(21))\n");
     assert_eq!(out.trim(), "42");
 }
 
@@ -4961,9 +4941,8 @@ fn implicit_generic_with_conditional() {
 #[test]
 fn implicit_generic_chained_calls() {
     // Chained implicit generic calls
-    let out = compile_and_run(
-        "*id(x)\n    x\n\n*add1(x)\n    x + 1\n\n*main()\n    log(add1(id(41)))\n",
-    );
+    let out =
+        compile_and_run("*id(x)\n    x\n\n*add1(x)\n    x + 1\n\n*main()\n    log(add1(id(41)))\n");
     assert_eq!(out.trim(), "42");
 }
 
@@ -5231,10 +5210,7 @@ fn b_hm_ptr_index() {
 #[test]
 fn b_strict_integer_literal_defaults() {
     // Integer literals with no context should get Integer constraint → I64 default (no error)
-    expect(
-        "*main() -> i32\n    x is 42\n    log(x)\n    0\n",
-        "42",
-    );
+    expect("*main() -> i32\n    x is 42\n    log(x)\n    0\n", "42");
 }
 
 #[test]
@@ -5252,7 +5228,11 @@ fn b_lenient_flag() {
     let dir = tempfile::tempdir().unwrap();
     let jade = dir.path().join("test.jade");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n").unwrap();
+    std::fs::write(
+        &jade,
+        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n",
+    )
+    .unwrap();
     let status = Command::new(jadec())
         .arg("--lenient")
         .arg(&jade)
@@ -5540,10 +5520,7 @@ fn b_p41_numeric_constraint_add() {
 #[test]
 fn b_p41_numeric_constraint_float() {
     // Float literal propagates Float constraint
-    expect(
-        "*main()\n    x is 3.14\n    log(x)\n",
-        "3.140000",
-    );
+    expect("*main()\n    x is 3.14\n    log(x)\n", "3.140000");
 }
 
 #[test]
@@ -5592,7 +5569,9 @@ fn b_p41_strict_types_basic() {
 #[test]
 fn b_p41_strict_types_arithmetic() {
     // Strict mode: arithmetic result types fully determined
-    let out = compile_with_strict("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n");
+    let out = compile_with_strict(
+        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+    );
     assert_eq!(out.trim(), "7");
 }
 
@@ -5606,7 +5585,10 @@ fn b_p42_type_mismatch_add_string_int() {
     // Cannot add string and integer
     let err = expect_compile_fail("*main()\n    x is 'hello' + 42\n    log(x)\n");
     assert!(
-        err.contains("type") || err.contains("mismatch") || err.contains("error") || err.contains("cannot"),
+        err.contains("type")
+            || err.contains("mismatch")
+            || err.contains("error")
+            || err.contains("cannot"),
         "expected type error, got: {err}"
     );
 }
@@ -5614,11 +5596,13 @@ fn b_p42_type_mismatch_add_string_int() {
 #[test]
 fn b_p42_non_exhaustive_match() {
     // Match without covering all variants
-    let err = expect_compile_fail(
-        "*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n"
-    );
+    let err =
+        expect_compile_fail("*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n");
     assert!(
-        err.contains("exhausti") || err.contains("missing") || err.contains("pattern") || err.contains("Nothing"),
+        err.contains("exhausti")
+            || err.contains("missing")
+            || err.contains("pattern")
+            || err.contains("Nothing"),
         "expected exhaustiveness error, got: {err}"
     );
 }
@@ -5636,9 +5620,13 @@ fn b_p42_undefined_variable() {
 #[test]
 fn b_p42_wrong_arg_count() {
     // Function called with wrong number of arguments
-    let err = expect_compile_fail("*foo(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(foo(1))\n");
+    let err =
+        expect_compile_fail("*foo(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(foo(1))\n");
     assert!(
-        err.contains("argument") || err.contains("param") || err.contains("expect") || err.contains("arity"),
+        err.contains("argument")
+            || err.contains("param")
+            || err.contains("expect")
+            || err.contains("arity"),
         "expected argument count error, got: {err}"
     );
 }
@@ -5650,9 +5638,13 @@ fn b_p42_strict_unsolved_typevar() {
     // foo is referenced but never called, so monomorphization can't produce a
     // concrete version. The error is now at codegen, not type checking.
     let err = expect_strict_fail("*foo(x)\n    x\n\n*main()\n    foo\n");
-    assert!(err.contains("ambiguous") || err.contains("unsolved") || err.contains("infer")
-        || err.contains("undefined"),
-        "expected type/codegen error, got: {err}");
+    assert!(
+        err.contains("ambiguous")
+            || err.contains("unsolved")
+            || err.contains("infer")
+            || err.contains("undefined"),
+        "expected type/codegen error, got: {err}"
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -5663,10 +5655,7 @@ fn b_p42_strict_unsolved_typevar() {
 #[test]
 fn b_p43_deferred_method_on_vec() {
     // Method .len() called on vec — type resolved via element type
-    expect(
-        "*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n",
-        "3",
-    );
+    expect("*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n", "3");
 }
 
 #[test]
@@ -5742,19 +5731,13 @@ fn b_p5_lambda_no_annotation_i64() {
 #[test]
 fn b_p5_lambda_unannotated_let_bound() {
     // Let-bound lambda with unannotated param, type inferred from usage
-    expect(
-        "*main()\n    f is *fn(x) x + 1\n    log(f(41))\n",
-        "42",
-    );
+    expect("*main()\n    f is *fn(x) x + 1\n    log(f(41))\n", "42");
 }
 
 #[test]
 fn b_p5_lambda_unannotated_mul() {
     // Unannotated lambda doing multiplication
-    expect(
-        "*main()\n    g is *fn(a) a * 3\n    log(g(14))\n",
-        "42",
-    );
+    expect("*main()\n    g is *fn(a) a * 3\n    log(g(14))\n", "42");
 }
 
 // --- Struct parameter inference (target: <50% annotated) ---
@@ -5827,10 +5810,7 @@ fn b_p5_func_param_chain_infer() {
 #[test]
 fn b_p5_func_no_annotation_identity() {
     // Identity function with zero annotations
-    expect(
-        "*id(x)\n    x\n\n*main()\n    log(id(42))\n",
-        "42",
-    );
+    expect("*id(x)\n    x\n\n*main()\n    log(id(42))\n", "42");
 }
 
 #[test]
@@ -6167,7 +6147,10 @@ fn b_r5_nested_vec_iteration() {
 #[test]
 fn b_r5_error_undefined_var() {
     let err = expect_compile_fail("*main()\n    log(xyz)\n");
-    assert!(!err.is_empty(), "expected compilation error for undefined var: {err}");
+    assert!(
+        !err.is_empty(),
+        "expected compilation error for undefined var: {err}"
+    );
 }
 
 #[test]
@@ -6180,13 +6163,17 @@ fn b_r5_error_type_mismatch_add() {
 #[test]
 fn b_r5_error_missing_main() {
     let err = expect_compile_fail("*foo()\n    log(1)\n");
-    assert!(err.contains("main"), "expected error about missing main: {err}");
+    assert!(
+        err.contains("main"),
+        "expected error about missing main: {err}"
+    );
 }
 
 #[test]
 fn b_r5_error_wrong_arity() {
     // Calling function with wrong number of arguments
-    let err = expect_compile_fail("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(1))\n");
+    let err =
+        expect_compile_fail("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(1))\n");
     assert!(!err.is_empty(), "expected arity error");
 }
 
@@ -6203,10 +6190,7 @@ fn b_r5_error_tab_in_source() {
 #[test]
 fn b_r5_struct_unused_compiles() {
     // Struct declared but never used — should still compile
-    expect(
-        "type Phantom\n    x: i64\n\n*main()\n    log(42)\n",
-        "42",
-    );
+    expect("type Phantom\n    x: i64\n\n*main()\n    log(42)\n", "42");
 }
 
 #[test]
@@ -6310,19 +6294,21 @@ fn b_infer_t10_trait_method_dispatch() {
 #[test]
 fn b_infer_e3_strict_unconstrained_struct_field() {
     // Strict mode: unannotated struct field never constrained should error
-    let err = expect_strict_fail(
-        "type Bag\n    mystery\n\n*main()\n    log(1)\n",
+    let err = expect_strict_fail("type Bag\n    mystery\n\n*main()\n    log(1)\n");
+    assert!(
+        err.contains("has no type annotation and was never constrained"),
+        "expected strict error about unconstrained field, got: {err}"
     );
-    assert!(err.contains("has no type annotation and was never constrained"),
-        "expected strict error about unconstrained field, got: {err}");
 }
 
 #[test]
 fn b_infer_i3_pedantic_rejects_integer_default() {
     // Pedantic mode: integer literal without explicit annotation is rejected
     let err = expect_pedantic_fail("*main()\n    x is 42\n    log(x)\n");
-    assert!(err.contains("pedantic") && err.contains("integer"),
-        "expected pedantic error about integer default, got: {err}");
+    assert!(
+        err.contains("pedantic") && err.contains("integer"),
+        "expected pedantic error about integer default, got: {err}"
+    );
 }
 
 #[test]

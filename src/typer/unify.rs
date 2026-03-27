@@ -12,9 +12,9 @@ pub(crate) struct ConstraintOrigin {
 #[allow(dead_code)]
 pub(crate) enum TypeConstraint {
     None,
-    Numeric,  // I8-U64, F32-F64
-    Integer,  // I8-U64 only
-    Float,    // F32-F64 only
+    Numeric, // I8-U64, F32-F64
+    Integer, // I8-U64 only
+    Float,   // F32-F64 only
     /// The TypeVar must implement the named trait(s).
     /// When multiple traits are required, all must be satisfied.
     Trait(Vec<String>),
@@ -56,7 +56,7 @@ impl InferCtx {
             debug: false,
             collect_default_warnings: false,
             default_warnings: Vec::new(),
-            strict_types: true,  // strict is now the default
+            strict_types: true, // strict is now the default
             strict_errors: Vec::new(),
             pedantic: false,
             quantified_vars: std::collections::HashSet::new(),
@@ -179,14 +179,23 @@ impl InferCtx {
     /// unknown ids.
     pub(crate) fn constraint(&mut self, id: u32) -> TypeConstraint {
         let root = self.find(id);
-        self.constraints.get(root as usize).cloned().unwrap_or(TypeConstraint::None)
+        self.constraints
+            .get(root as usize)
+            .cloned()
+            .unwrap_or(TypeConstraint::None)
     }
 
     /// Add a constraint to an existing TypeVar. If the TypeVar is already solved
     /// to a concrete type, validates the constraint against it. If still unsolved,
     /// narrows the constraint (e.g., None→Numeric, Numeric→Integer).
     /// Returns Err if the constraint conflicts with an already-solved concrete type.
-    pub(crate) fn constrain(&mut self, ty: &Type, constraint: TypeConstraint, span: Span, reason: &'static str) -> Result<(), String> {
+    pub(crate) fn constrain(
+        &mut self,
+        ty: &Type,
+        constraint: TypeConstraint,
+        span: Span,
+        reason: &'static str,
+    ) -> Result<(), String> {
         let resolved = self.shallow_resolve(ty);
         match resolved {
             Type::TypeVar(v) => {
@@ -225,8 +234,12 @@ impl InferCtx {
                         }
                         TypeConstraint::Trait(merged_traits)
                     }
-                    (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => TypeConstraint::Integer,
-                    (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => TypeConstraint::Float,
+                    (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => {
+                        TypeConstraint::Integer
+                    }
+                    (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => {
+                        TypeConstraint::Float
+                    }
                     (TypeConstraint::Numeric, TypeConstraint::Numeric) => TypeConstraint::Numeric,
                 };
                 self.constraints[root as usize] = merged;
@@ -237,29 +250,21 @@ impl InferCtx {
                 Ok(())
             }
             // Already solved to concrete — validate
-            ref concrete => {
-                match constraint {
-                    TypeConstraint::Integer if !concrete.is_int() => {
-                        Err(format!(
-                            "line {}:{}: expected integer type for {}, found `{concrete}`",
-                            span.line, span.col, reason
-                        ))
-                    }
-                    TypeConstraint::Float if !concrete.is_float() => {
-                        Err(format!(
-                            "line {}:{}: expected float type for {}, found `{concrete}`",
-                            span.line, span.col, reason
-                        ))
-                    }
-                    TypeConstraint::Numeric if !concrete.is_num() => {
-                        Err(format!(
-                            "line {}:{}: expected numeric type for {}, found `{concrete}`",
-                            span.line, span.col, reason
-                        ))
-                    }
-                    _ => Ok(()),
-                }
-            }
+            ref concrete => match constraint {
+                TypeConstraint::Integer if !concrete.is_int() => Err(format!(
+                    "line {}:{}: expected integer type for {}, found `{concrete}`",
+                    span.line, span.col, reason
+                )),
+                TypeConstraint::Float if !concrete.is_float() => Err(format!(
+                    "line {}:{}: expected float type for {}, found `{concrete}`",
+                    span.line, span.col, reason
+                )),
+                TypeConstraint::Numeric if !concrete.is_num() => Err(format!(
+                    "line {}:{}: expected numeric type for {}, found `{concrete}`",
+                    span.line, span.col, reason
+                )),
+                _ => Ok(()),
+            },
         }
     }
 
@@ -343,14 +348,20 @@ impl InferCtx {
     fn suggest_fix(&self, reason: &str, expected: &Type, found: &Type) -> Option<String> {
         // Numeric type mismatch — suggest cast
         if expected.is_int() && found.is_float() {
-            return Some(format!("use `{found} as {expected}` to convert float to integer"));
+            return Some(format!(
+                "use `{found} as {expected}` to convert float to integer"
+            ));
         }
         if expected.is_float() && found.is_int() {
-            return Some(format!("use `{found} as {expected}` to convert integer to float"));
+            return Some(format!(
+                "use `{found} as {expected}` to convert integer to float"
+            ));
         }
         // Integer size mismatch — suggest cast
         if expected.is_int() && found.is_int() && expected != found {
-            return Some(format!("use `{found} as {expected}` to convert between integer types"));
+            return Some(format!(
+                "use `{found} as {expected}` to convert between integer types"
+            ));
         }
         // String vs numeric — common beginner mistake
         if matches!(expected, Type::String) && found.is_num() {
@@ -427,14 +438,26 @@ impl InferCtx {
                 }
                 // Validate type constraint
                 match &self.constraints[root as usize] {
-                    TypeConstraint::Integer if !concrete.is_int() && !matches!(concrete, Type::TypeVar(_)) => {
-                        return Err(format!("type mismatch: expected integer type (i8..u64), found `{concrete}`"));
+                    TypeConstraint::Integer
+                        if !concrete.is_int() && !matches!(concrete, Type::TypeVar(_)) =>
+                    {
+                        return Err(format!(
+                            "type mismatch: expected integer type (i8..u64), found `{concrete}`"
+                        ));
                     }
-                    TypeConstraint::Float if !concrete.is_float() && !matches!(concrete, Type::TypeVar(_)) => {
-                        return Err(format!("type mismatch: expected float type (f32/f64), found `{concrete}`"));
+                    TypeConstraint::Float
+                        if !concrete.is_float() && !matches!(concrete, Type::TypeVar(_)) =>
+                    {
+                        return Err(format!(
+                            "type mismatch: expected float type (f32/f64), found `{concrete}`"
+                        ));
                     }
-                    TypeConstraint::Numeric if !concrete.is_num() && !matches!(concrete, Type::TypeVar(_)) => {
-                        return Err(format!("type mismatch: expected numeric type, found `{concrete}`; consider using a conversion function"));
+                    TypeConstraint::Numeric
+                        if !concrete.is_num() && !matches!(concrete, Type::TypeVar(_)) =>
+                    {
+                        return Err(format!(
+                            "type mismatch: expected numeric type, found `{concrete}`; consider using a conversion function"
+                        ));
                     }
                     _ => {}
                 }
@@ -499,7 +522,9 @@ impl InferCtx {
             (TypeConstraint::None, c) | (c, TypeConstraint::None) => c.clone(),
             (TypeConstraint::Integer, TypeConstraint::Float)
             | (TypeConstraint::Float, TypeConstraint::Integer) => {
-                return Err("type mismatch: integer and float constraints are mutually exclusive".into());
+                return Err(
+                    "type mismatch: integer and float constraints are mutually exclusive".into(),
+                );
             }
             // Trait + Numeric/Integer/Float is a conflict
             (TypeConstraint::Trait(_), TypeConstraint::Numeric)
@@ -508,7 +533,10 @@ impl InferCtx {
             | (TypeConstraint::Numeric, TypeConstraint::Trait(_))
             | (TypeConstraint::Integer, TypeConstraint::Trait(_))
             | (TypeConstraint::Float, TypeConstraint::Trait(_)) => {
-                return Err("type mismatch: trait bound and numeric constraint are mutually exclusive".into());
+                return Err(
+                    "type mismatch: trait bound and numeric constraint are mutually exclusive"
+                        .into(),
+                );
             }
             // Merge trait bounds: union the trait lists
             (TypeConstraint::Trait(ta), TypeConstraint::Trait(tb)) => {
@@ -587,7 +615,9 @@ impl InferCtx {
                 Box::new(self.canonicalize_type(k)),
                 Box::new(self.canonicalize_type(v)),
             ),
-            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.canonicalize_type(t)).collect()),
+            Type::Tuple(tys) => {
+                Type::Tuple(tys.iter().map(|t| self.canonicalize_type(t)).collect())
+            }
             Type::Fn(params, ret) => Type::Fn(
                 params.iter().map(|t| self.canonicalize_type(t)).collect(),
                 Box::new(self.canonicalize_type(ret)),
@@ -639,13 +669,16 @@ impl InferCtx {
                     if self.strict_types && !self.quantified_vars.contains(&root) {
                         match constraint {
                             TypeConstraint::None => {
-                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize]
+                                {
                                     format!(
                                         "line {}:{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("ambiguous type: unsolved type variable ?{root}\n  help: add a type annotation to resolve the ambiguity")
+                                    format!(
+                                        "ambiguous type: unsolved type variable ?{root}\n  help: add a type annotation to resolve the ambiguity"
+                                    )
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
@@ -653,13 +686,16 @@ impl InferCtx {
                                 // R1.2: Numeric→I64 is now a principled default (warning, not error).
                                 // Arithmetic operators naturally produce Numeric constraints;
                                 // defaulting to I64 is safe and matches integer-biased semantics.
-                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize]
+                                {
                                     format!(
                                         "line {}:{}: numeric type defaults to i64 ({})\n  help: add `: i64` for integer or `: f64` for float",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("numeric type defaults to i64 for ?{root}\n  help: add `: i64` for integer or `: f64` for float")
+                                    format!(
+                                        "numeric type defaults to i64 for ?{root}\n  help: add `: i64` for integer or `: f64` for float"
+                                    )
                                 };
                                 self.default_warnings.push(origin_msg);
                             }
@@ -667,35 +703,48 @@ impl InferCtx {
                             // Trait constraints produce an error (no default exists)
                             TypeConstraint::Trait(traits) => {
                                 let traits_str = traits.join(", ");
-                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize]
+                                {
                                     format!(
                                         "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}) ({})\n  help: add a type annotation for a type that implements {}",
-                                        origin.span.line, origin.span.col, traits_str, origin.reason, traits_str
+                                        origin.span.line,
+                                        origin.span.col,
+                                        traits_str,
+                                        origin.reason,
+                                        traits_str
                                     )
                                 } else {
-                                    format!("ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]\n  help: add a type annotation for a type that implements {traits_str}")
+                                    format!(
+                                        "ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]\n  help: add a type annotation for a type that implements {traits_str}"
+                                    )
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
                             TypeConstraint::Integer if self.pedantic => {
-                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize]
+                                {
                                     format!(
                                         "line {}:{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `: i64` or `: i32`",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("pedantic: unsolved integer type variable ?{root} defaults to i64\n  help: add an explicit annotation, e.g. `: i64` or `: i32`")
+                                    format!(
+                                        "pedantic: unsolved integer type variable ?{root} defaults to i64\n  help: add an explicit annotation, e.g. `: i64` or `: i32`"
+                                    )
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
                             TypeConstraint::Float if self.pedantic => {
-                                let origin_msg = if let Some(origin) = &self.origins[root as usize] {
+                                let origin_msg = if let Some(origin) = &self.origins[root as usize]
+                                {
                                     format!(
                                         "line {}:{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `: f64` or `: f32`",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("pedantic: unsolved float type variable ?{root} defaults to f64\n  help: add an explicit annotation, e.g. `: f64` or `: f32`")
+                                    format!(
+                                        "pedantic: unsolved float type variable ?{root} defaults to f64\n  help: add an explicit annotation, e.g. `: f64` or `: f32`"
+                                    )
                                 };
                                 self.strict_errors.push(origin_msg);
                             }
@@ -710,18 +759,32 @@ impl InferCtx {
                     }
                 }
             }
-            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_inner(inner, _tracking)), *len),
+            Type::Array(inner, len) => {
+                Type::Array(Box::new(self.resolve_inner(inner, _tracking)), *len)
+            }
             Type::Vec(inner) => Type::Vec(Box::new(self.resolve_inner(inner, _tracking))),
-            Type::Map(k, v) => Type::Map(Box::new(self.resolve_inner(k, _tracking)), Box::new(self.resolve_inner(v, _tracking))),
-            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.resolve_inner(t, _tracking)).collect()),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.resolve_inner(k, _tracking)),
+                Box::new(self.resolve_inner(v, _tracking)),
+            ),
+            Type::Tuple(tys) => Type::Tuple(
+                tys.iter()
+                    .map(|t| self.resolve_inner(t, _tracking))
+                    .collect(),
+            ),
             Type::Fn(params, ret) => Type::Fn(
-                params.iter().map(|t| self.resolve_inner(t, _tracking)).collect(),
+                params
+                    .iter()
+                    .map(|t| self.resolve_inner(t, _tracking))
+                    .collect(),
                 Box::new(self.resolve_inner(ret, _tracking)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.resolve_inner(inner, _tracking))),
             Type::Rc(inner) => Type::Rc(Box::new(self.resolve_inner(inner, _tracking))),
             Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner(inner, _tracking))),
-            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner(inner, _tracking))),
+            Type::Coroutine(inner) => {
+                Type::Coroutine(Box::new(self.resolve_inner(inner, _tracking)))
+            }
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner(inner, _tracking))),
 
             _ => ty.clone(),
@@ -761,22 +824,35 @@ impl InferCtx {
                     default_ty
                 }
             }
-            Type::Array(inner, len) => Type::Array(Box::new(self.resolve_inner_warn(inner, warnings)), *len),
+            Type::Array(inner, len) => {
+                Type::Array(Box::new(self.resolve_inner_warn(inner, warnings)), *len)
+            }
             Type::Vec(inner) => Type::Vec(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Map(k, v) => Type::Map(
                 Box::new(self.resolve_inner_warn(k, warnings)),
                 Box::new(self.resolve_inner_warn(v, warnings)),
             ),
-            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.resolve_inner_warn(t, warnings)).collect()),
+            Type::Tuple(tys) => Type::Tuple(
+                tys.iter()
+                    .map(|t| self.resolve_inner_warn(t, warnings))
+                    .collect(),
+            ),
             Type::Fn(params, ret) => Type::Fn(
-                params.iter().map(|t| self.resolve_inner_warn(t, warnings)).collect(),
+                params
+                    .iter()
+                    .map(|t| self.resolve_inner_warn(t, warnings))
+                    .collect(),
                 Box::new(self.resolve_inner_warn(ret, warnings)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Rc(inner) => Type::Rc(Box::new(self.resolve_inner_warn(inner, warnings))),
             Type::Weak(inner) => Type::Weak(Box::new(self.resolve_inner_warn(inner, warnings))),
-            Type::Coroutine(inner) => Type::Coroutine(Box::new(self.resolve_inner_warn(inner, warnings))),
-            Type::Channel(inner) => Type::Channel(Box::new(self.resolve_inner_warn(inner, warnings))),
+            Type::Coroutine(inner) => {
+                Type::Coroutine(Box::new(self.resolve_inner_warn(inner, warnings)))
+            }
+            Type::Channel(inner) => {
+                Type::Channel(Box::new(self.resolve_inner_warn(inner, warnings)))
+            }
 
             _ => ty.clone(),
         }
@@ -791,7 +867,9 @@ impl InferCtx {
         if scheme.quantified.is_empty() {
             return scheme.ty.clone();
         }
-        let subst: std::collections::HashMap<u32, Type> = scheme.quantified.iter()
+        let subst: std::collections::HashMap<u32, Type> = scheme
+            .quantified
+            .iter()
             .map(|&v| {
                 let root = self.find(v);
                 let constraint = self.constraints[root as usize].clone();
@@ -831,7 +909,9 @@ impl InferCtx {
                 Box::new(self.substitute(k, subst)),
                 Box::new(self.substitute(v, subst)),
             ),
-            Type::Tuple(tys) => Type::Tuple(tys.iter().map(|t| self.substitute(t, subst)).collect()),
+            Type::Tuple(tys) => {
+                Type::Tuple(tys.iter().map(|t| self.substitute(t, subst)).collect())
+            }
             Type::Fn(params, ret) => Type::Fn(
                 params.iter().map(|t| self.substitute(t, subst)).collect(),
                 Box::new(self.substitute(ret, subst)),
@@ -1081,7 +1161,12 @@ mod tests {
         let mut ctx = InferCtx::new();
         ctx.disable_strict_types(); // lenient + warnings mode
         ctx.enable_default_warnings();
-        let span = Span { start: 0, end: 0, line: 5, col: 3 };
+        let span = Span {
+            start: 0,
+            end: 0,
+            line: 5,
+            col: 3,
+        };
         let v = ctx.fresh_var();
         let v2 = ctx.fresh_var();
         // Set origin by unifying two vars at a span
