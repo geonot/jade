@@ -16,13 +16,15 @@ impl Cache {
     }
 
     pub fn package_path(&self, dep: &Dependency) -> PathBuf {
-        let url_path = url_to_dir(&dep.url);
-        self.root.join(url_path).join(dep.version.to_string())
+        self.make_path(&dep.url, &dep.version)
     }
 
     pub fn package_path_from_entry(&self, entry: &LockEntry) -> PathBuf {
-        let url_path = url_to_dir(&entry.url);
-        self.root.join(url_path).join(entry.version.to_string())
+        self.make_path(&entry.url, &entry.version)
+    }
+
+    fn make_path(&self, url: &str, version: &crate::pkg::SemVer) -> PathBuf {
+        self.root.join(url_to_dir(url)).join(version.to_string())
     }
 
     pub fn is_cached(&self, dep: &Dependency) -> bool {

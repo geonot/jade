@@ -4,6 +4,11 @@ use crate::types::Type;
 
 use super::{ParseError, Parser};
 
+enum Either<A, B> {
+    Field(A),
+    Method(B),
+}
+
 impl Parser {
     pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match self.peek() {
@@ -35,37 +40,33 @@ impl Parser {
     fn parse_type_params(&mut self) -> (Vec<String>, Vec<(String, Vec<String>)>) {
         let mut tp = Vec::new();
         let mut bounds = Vec::new();
-        if self.check(Token::Of) {
-            self.advance();
-            if let Token::Ident(_) = self.peek() {
-                let name = self.ident().unwrap();
-                if self.check(Token::Colon) {
-                    self.advance();
-                    let mut bs = vec![self.ident().unwrap_or_default()];
-                    while self.check(Token::Plus) {
-                        self.advance();
-                        bs.push(self.ident().unwrap_or_default());
-                    }
-                    bounds.push((name.clone(), bs));
+        if !self.check(Token::Of) {
+            return (tp, bounds);
+        }
+        self.advance();
+        while let Token::Ident(_) = self.peek() {
+            let name = self.ident().unwrap();
+            if self.check(Token::Colon) {
+                self.advance();
+                let mut bs = Vec::new();
+                match self.ident() {
+                    Ok(b) => bs.push(b),
+                    Err(_) => break,
                 }
-                tp.push(name);
-                while self.check(Token::Comma) {
+                while self.check(Token::Plus) {
                     self.advance();
-                    if let Token::Ident(_) = self.peek() {
-                        let name = self.ident().unwrap();
-                        if self.check(Token::Colon) {
-                            self.advance();
-                            let mut bs = vec![self.ident().unwrap_or_default()];
-                            while self.check(Token::Plus) {
-                                self.advance();
-                                bs.push(self.ident().unwrap_or_default());
-                            }
-                            bounds.push((name.clone(), bs));
-                        }
-                        tp.push(name);
+                    match self.ident() {
+                        Ok(b) => bs.push(b),
+                        Err(_) => break,
                     }
                 }
+                bounds.push((name.clone(), bs));
             }
+            tp.push(name);
+            if !self.check(Token::Comma) {
+                break;
+            }
+            self.advance();
         }
         (tp, bounds)
     }
@@ -120,40 +121,8 @@ impl Parser {
 
         if self.check(Token::LParen) {
             self.advance();
-            let mut arg_idx = 0u32;
             while !self.check(Token::RParen) && !self.eof() {
-                match self.peek() {
-                    Token::Int(_)
-                    | Token::Float(_)
-                    | Token::True
-                    | Token::False
-                    | Token::Str(_) => {
-                        let lit_sp = self.span();
-                        let lit_expr = self.parse_literal_token()?;
-                        params.push(Param {
-                            name: format!("__arg{arg_idx}"),
-                            ty: None,
-                            default: None,
-                            literal: Some(lit_expr),
-                            span: lit_sp,
-                        });
-                    }
-                    Token::Minus => {
-                        let lit_sp = self.span();
-                        let lit_expr = self.parse_unary()?;
-                        params.push(Param {
-                            name: format!("__arg{arg_idx}"),
-                            ty: None,
-                            default: None,
-                            literal: Some(lit_expr),
-                            span: lit_sp,
-                        });
-                    }
-                    _ => {
-                        params.push(self.parse_param(true)?);
-                    }
-                }
-                arg_idx += 1;
+                params.push(self.parse_fn_param(params.len(), true)?);
                 if !self.check(Token::RParen) {
                     self.expect(Token::Comma)?;
                 }
@@ -165,37 +134,7 @@ impl Parser {
                 && !self.check(Token::Is)
                 && !self.eof()
             {
-                match self.peek() {
-                    Token::Int(_)
-                    | Token::Float(_)
-                    | Token::True
-                    | Token::False
-                    | Token::Str(_) => {
-                        let lit_sp = self.span();
-                        let lit_expr = self.parse_literal_token()?;
-                        params.push(Param {
-                            name: format!("__arg{}", params.len()),
-                            ty: None,
-                            default: None,
-                            literal: Some(lit_expr),
-                            span: lit_sp,
-                        });
-                    }
-                    Token::Minus => {
-                        let lit_sp = self.span();
-                        let lit_expr = self.parse_unary()?;
-                        params.push(Param {
-                            name: format!("__arg{}", params.len()),
-                            ty: None,
-                            default: None,
-                            literal: Some(lit_expr),
-                            span: lit_sp,
-                        });
-                    }
-                    _ => {
-                        params.push(self.parse_param(false)?);
-                    }
-                }
+                params.push(self.parse_fn_param(params.len(), false)?);
                 if self.check(Token::Comma) {
                     self.advance();
                 }
@@ -209,14 +148,7 @@ impl Parser {
             None
         };
 
-        let body = if self.check(Token::Is) {
-            self.advance();
-            let expr = self.parse_expr()?;
-            vec![Stmt::Expr(expr)]
-        } else {
-            self.expect(Token::Newline)?;
-            self.parse_block()?
-        };
+        let body = self.parse_body()?;
 
         Ok(Fn {
             name,
@@ -227,6 +159,34 @@ impl Parser {
             body,
             span: sp,
         })
+    }
+
+    fn parse_fn_param(&mut self, idx: usize, typed: bool) -> Result<Param, ParseError> {
+        match self.peek() {
+            Token::Int(_) | Token::Float(_) | Token::True | Token::False | Token::Str(_) => {
+                let lit_sp = self.span();
+                let lit_expr = self.parse_literal_token()?;
+                Ok(Param {
+                    name: format!("__arg{idx}"),
+                    ty: None,
+                    default: None,
+                    literal: Some(lit_expr),
+                    span: lit_sp,
+                })
+            }
+            Token::Minus => {
+                let lit_sp = self.span();
+                let lit_expr = self.parse_unary()?;
+                Ok(Param {
+                    name: format!("__arg{idx}"),
+                    ty: None,
+                    default: None,
+                    literal: Some(lit_expr),
+                    span: lit_sp,
+                })
+            }
+            _ => self.parse_param(typed),
+        }
     }
 
     pub(super) fn parse_param(&mut self, typed: bool) -> Result<Param, ParseError> {
@@ -265,21 +225,18 @@ impl Parser {
         self.expect(Token::Newline)?;
         let (mut fields, mut methods) = (Vec::new(), Vec::new());
         if self.check(Token::Indent) {
-            self.advance();
-            while !self.check(Token::Dedent) && !self.eof() {
-                self.skip_nl();
-                if self.check(Token::Dedent) || self.eof() {
-                    break;
-                }
-                if self.check(Token::Star) {
-                    methods.push(self.parse_fn()?);
+            let items = self.parse_indented(|p| {
+                if p.check(Token::Star) {
+                    Ok(Either::Method(p.parse_fn()?))
                 } else {
-                    fields.push(self.parse_field()?);
-                    self.skip_nl();
+                    Ok(Either::Field(p.parse_field()?))
                 }
-            }
-            if self.check(Token::Dedent) {
-                self.advance();
+            })?;
+            for item in items {
+                match item {
+                    Either::Field(f) => fields.push(f),
+                    Either::Method(m) => methods.push(m),
+                }
             }
         }
         Ok(TypeDef {
@@ -351,21 +308,11 @@ impl Parser {
         let name = self.ident()?;
         let (type_params, _) = self.parse_type_params();
         self.expect(Token::Newline)?;
-        let mut variants = Vec::new();
-        if self.check(Token::Indent) {
-            self.advance();
-            while !self.check(Token::Dedent) && !self.eof() {
-                self.skip_nl();
-                if self.check(Token::Dedent) || self.eof() {
-                    break;
-                }
-                variants.push(self.parse_variant()?);
-                self.skip_nl();
-            }
-            if self.check(Token::Dedent) {
-                self.advance();
-            }
-        }
+        let variants = if self.check(Token::Indent) {
+            self.parse_indented(Self::parse_variant)?
+        } else {
+            Vec::new()
+        };
         Ok(EnumDef {
             name,
             type_params,
@@ -427,36 +374,26 @@ impl Parser {
         self.expect(Token::Err)?;
         let name = self.ident()?;
         self.expect(Token::Newline)?;
-        self.expect(Token::Indent)?;
-        let mut variants = Vec::new();
-        while !self.check(Token::Dedent) && !self.eof() {
-            self.skip_nl();
-            if self.check(Token::Dedent) || self.eof() {
-                break;
-            }
-            let vsp = self.span();
-            let vname = self.ident()?;
+        let variants = self.parse_indented(|p| {
+            let vsp = p.span();
+            let vname = p.ident()?;
             let mut fields = Vec::new();
-            if self.check(Token::LParen) {
-                self.advance();
-                while !self.check(Token::RParen) && !self.eof() {
-                    fields.push(self.parse_type()?);
-                    if !self.check(Token::RParen) {
-                        self.expect(Token::Comma)?;
+            if p.check(Token::LParen) {
+                p.advance();
+                while !p.check(Token::RParen) && !p.eof() {
+                    fields.push(p.parse_type()?);
+                    if !p.check(Token::RParen) {
+                        p.expect(Token::Comma)?;
                     }
                 }
-                self.expect(Token::RParen)?;
+                p.expect(Token::RParen)?;
             }
-            variants.push(ErrVariant {
+            Ok(ErrVariant {
                 name: vname,
                 fields,
                 span: vsp,
-            });
-            self.skip_nl();
-        }
-        if self.check(Token::Dedent) {
-            self.advance();
-        }
+            })
+        })?;
         Ok(ErrDef {
             name,
             variants,
@@ -489,24 +426,20 @@ impl Parser {
         self.expect(Token::Actor)?;
         let name = self.ident()?;
         self.expect(Token::Newline)?;
-        let mut fields = Vec::new();
-        let mut handlers = Vec::new();
+        let (mut fields, mut handlers) = (Vec::new(), Vec::new());
         if self.check(Token::Indent) {
-            self.advance();
-            while !self.check(Token::Dedent) && !self.eof() {
-                self.skip_nl();
-                if self.check(Token::Dedent) || self.eof() {
-                    break;
-                }
-                if self.check(Token::At) {
-                    handlers.push(self.parse_handler()?);
+            let items = self.parse_indented(|p| {
+                if p.check(Token::At) {
+                    Ok(Either::Method(p.parse_handler()?))
                 } else {
-                    fields.push(self.parse_field()?);
-                    self.skip_nl();
+                    Ok(Either::Field(p.parse_field()?))
                 }
-            }
-            if self.check(Token::Dedent) {
-                self.advance();
+            })?;
+            for item in items {
+                match item {
+                    Either::Field(f) => fields.push(f),
+                    Either::Method(h) => handlers.push(h),
+                }
             }
         }
         Ok(ActorDef {
@@ -528,14 +461,7 @@ impl Parser {
                 self.advance();
             }
         }
-        let body = if self.check(Token::Is) {
-            self.advance();
-            let expr = self.parse_expr()?;
-            vec![Stmt::Expr(expr)]
-        } else {
-            self.expect(Token::Newline)?;
-            self.parse_block()?
-        };
+        let body = self.parse_body()?;
         Ok(Handler {
             name,
             params,
@@ -549,21 +475,11 @@ impl Parser {
         self.expect(Token::Store)?;
         let name = self.ident()?;
         self.expect(Token::Newline)?;
-        let mut fields = Vec::new();
-        if self.check(Token::Indent) {
-            self.advance();
-            while !self.check(Token::Dedent) && !self.eof() {
-                self.skip_nl();
-                if self.check(Token::Dedent) || self.eof() {
-                    break;
-                }
-                fields.push(self.parse_field()?);
-                self.skip_nl();
-            }
-            if self.check(Token::Dedent) {
-                self.advance();
-            }
-        }
+        let fields = if self.check(Token::Indent) {
+            self.parse_indented(Self::parse_field)?
+        } else {
+            Vec::new()
+        };
         Ok(StoreDef {
             name,
             fields,
@@ -577,25 +493,22 @@ impl Parser {
         let name = self.ident()?;
         let (type_params, _) = self.parse_type_params();
         self.expect(Token::Newline)?;
-        let mut methods = Vec::new();
-        let mut assoc_types = Vec::new();
+        let (mut methods, mut assoc_types) = (Vec::new(), Vec::new());
         if self.check(Token::Indent) {
-            self.advance();
-            while !self.check(Token::Dedent) && !self.eof() {
-                self.skip_nl();
-                if self.check(Token::Dedent) || self.eof() {
-                    break;
-                }
-                if self.check(Token::Type) {
-                    self.advance();
-                    assoc_types.push(self.ident()?);
-                    self.skip_nl();
+            let items = self.parse_indented(|p| {
+                if p.check(Token::Type) {
+                    p.advance();
+                    let aname = p.ident()?;
+                    Ok(Either::Field(aname))
                 } else {
-                    methods.push(self.parse_trait_method()?);
+                    Ok(Either::Method(p.parse_trait_method()?))
                 }
-            }
-            if self.check(Token::Dedent) {
-                self.advance();
+            })?;
+            for item in items {
+                match item {
+                    Either::Field(name) => assoc_types.push(name),
+                    Either::Method(m) => methods.push(m),
+                }
             }
         }
         Ok(TraitDef {
@@ -679,38 +592,32 @@ impl Parser {
                 type_args.push(self.parse_type()?);
             }
             self.expect(Token::For)?;
-            let tn = self.ident()?;
-            (Some(first_name), type_args, tn)
+            (Some(first_name), type_args, self.ident()?)
         } else if self.check(Token::For) {
             self.advance();
-            let tn = self.ident()?;
-            (Some(first_name), Vec::new(), tn)
+            (Some(first_name), Vec::new(), self.ident()?)
         } else {
             (None, Vec::new(), first_name)
         };
         self.expect(Token::Newline)?;
-        let mut methods = Vec::new();
-        let mut assoc_type_bindings = Vec::new();
+        let (mut methods, mut assoc_type_bindings) = (Vec::new(), Vec::new());
         if self.check(Token::Indent) {
-            self.advance();
-            while !self.check(Token::Dedent) && !self.eof() {
-                self.skip_nl();
-                if self.check(Token::Dedent) || self.eof() {
-                    break;
-                }
-                if self.check(Token::Type) {
-                    self.advance();
-                    let aname = self.ident()?;
-                    self.expect(Token::Is)?;
-                    let aty = self.parse_type()?;
-                    assoc_type_bindings.push((aname, aty));
-                    self.skip_nl();
+            let items = self.parse_indented(|p| {
+                if p.check(Token::Type) {
+                    p.advance();
+                    let aname = p.ident()?;
+                    p.expect(Token::Is)?;
+                    let aty = p.parse_type()?;
+                    Ok(Either::Field((aname, aty)))
                 } else {
-                    methods.push(self.parse_fn()?);
+                    Ok(Either::Method(p.parse_fn()?))
                 }
-            }
-            if self.check(Token::Dedent) {
-                self.advance();
+            })?;
+            for item in items {
+                match item {
+                    Either::Field(binding) => assoc_type_bindings.push(binding),
+                    Either::Method(m) => methods.push(m),
+                }
             }
         }
         Ok(ImplBlock {

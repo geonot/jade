@@ -148,20 +148,12 @@ impl<'ctx> Compiler<'ctx> {
                 self.set_var(name, a, subject_ty.clone());
             }
             if let Some(ref guard) = arm.guard {
-                let guard_val = self.compile_expr(guard)?;
-                let gv = guard_val.into_int_value();
-                let guard_pass = self
-                    .ctx
-                    .append_basic_block(fv, &format!("match.guard_pass{i}"));
-                let guard_fail = if i + 1 < arm_bbs.len() {
+                let fail_bb = if i + 1 < arm_bbs.len() {
                     arm_bbs[i + 1]
                 } else {
                     merge_bb
                 };
-                b!(self
-                    .bld
-                    .build_conditional_branch(gv, guard_pass, guard_fail));
-                self.bld.position_at_end(guard_pass);
+                self.compile_guard(guard, fail_bb, i)?;
             }
             let arm_val = self.compile_block(&arm.body)?;
             self.vars.pop();
@@ -311,13 +303,7 @@ impl<'ctx> Compiler<'ctx> {
                     self.bind_array_pat(pats, subject_val, subject_ty)?;
                 }
                 if let Some(ref guard) = arm.guard {
-                    let guard_val = self.compile_expr(guard)?;
-                    let gv = guard_val.into_int_value();
-                    let guard_pass = self
-                        .ctx
-                        .append_basic_block(fv, &format!("match.guard_pass{i}"));
-                    b!(self.bld.build_conditional_branch(gv, guard_pass, next_bb));
-                    self.bld.position_at_end(guard_pass);
+                    self.compile_guard(guard, next_bb, i)?;
                 }
                 let arm_val = self.compile_block(&arm.body)?;
                 self.vars.pop();
@@ -376,20 +362,12 @@ impl<'ctx> Compiler<'ctx> {
                 self.set_var(name, a, subject_ty.clone());
             }
             if let Some(ref guard) = arm.guard {
-                let guard_val = self.compile_expr(guard)?;
-                let gv = guard_val.into_int_value();
-                let guard_pass = self
-                    .ctx
-                    .append_basic_block(fv, &format!("match.guard_pass{i}"));
-                let guard_fail = if i + 1 < arm_bbs.len() {
+                let fail_bb = if i + 1 < arm_bbs.len() {
                     arm_bbs[i + 1]
                 } else {
                     merge_bb
                 };
-                b!(self
-                    .bld
-                    .build_conditional_branch(gv, guard_pass, guard_fail));
-                self.bld.position_at_end(guard_pass);
+                self.compile_guard(guard, fail_bb, i)?;
             }
             let arm_val = self.compile_block(&arm.body)?;
             let cur_bb = self.bld.get_insert_block().unwrap();
@@ -419,5 +397,22 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             Ok(None)
         }
+    }
+
+    fn compile_guard(
+        &mut self,
+        guard: &hir::Expr,
+        fail_bb: BasicBlock<'ctx>,
+        i: usize,
+    ) -> Result<(), String> {
+        let fv = self.cur_fn.unwrap();
+        let guard_val = self.compile_expr(guard)?;
+        let gv = guard_val.into_int_value();
+        let guard_pass = self
+            .ctx
+            .append_basic_block(fv, &format!("match.guard_pass{i}"));
+        b!(self.bld.build_conditional_branch(gv, guard_pass, fail_bb));
+        self.bld.position_at_end(guard_pass);
+        Ok(())
     }
 }

@@ -1,7 +1,6 @@
 use crate::ast;
 use std::collections::{HashMap, HashSet};
 
-/// Extract direct call targets from an AST expression.
 fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
     match expr {
         ast::Expr::Call(callee, args, _) => {
@@ -26,10 +25,15 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
         | ast::Expr::Field(e, _, _) => {
             collect_calls_expr(e, calls);
         }
-        ast::Expr::Method(recv, _, args, _)
-        | ast::Expr::Pipe(recv, _, args, _)
-        | ast::Expr::Send(recv, _, args, _) => {
+        ast::Expr::Method(recv, _, args, _) | ast::Expr::Send(recv, _, args, _) => {
             collect_calls_expr(recv, calls);
+            for a in args {
+                collect_calls_expr(a, calls);
+            }
+        }
+        ast::Expr::Pipe(recv, func, args, _) => {
+            collect_calls_expr(recv, calls);
+            collect_calls_expr(func, calls);
             for a in args {
                 collect_calls_expr(a, calls);
             }
@@ -146,6 +150,22 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<String>) {
                 collect_calls_block(&arm.body, calls);
             }
         }
+        ast::Stmt::ErrReturn(e, _) | ast::Stmt::ChannelClose(e, _) | ast::Stmt::Stop(e, _) => {
+            collect_calls_expr(e, calls);
+        }
+        ast::Stmt::StoreInsert(_, exprs, _) => {
+            for e in exprs {
+                collect_calls_expr(e, calls);
+            }
+        }
+        ast::Stmt::StoreSet(_, updates, _, _) => {
+            for (_, e) in updates {
+                collect_calls_expr(e, calls);
+            }
+        }
+        ast::Stmt::Transaction(block, _) => {
+            collect_calls_block(block, calls);
+        }
         _ => {}
     }
 }
@@ -156,22 +176,18 @@ fn collect_calls_block(block: &[ast::Stmt], calls: &mut HashSet<String>) {
     }
 }
 
-/// Build a call graph: map from function name to set of called function names.
 pub(crate) fn build_call_graph(fns: &[&ast::Fn]) -> HashMap<String, HashSet<String>> {
     let fn_names: HashSet<&str> = fns.iter().map(|f| f.name.as_str()).collect();
     let mut graph = HashMap::new();
     for f in fns {
         let mut calls = HashSet::new();
         collect_calls_block(&f.body, &mut calls);
-        // Only keep edges to known functions
         calls.retain(|c| fn_names.contains(c.as_str()));
         graph.insert(f.name.clone(), calls);
     }
     graph
 }
 
-/// Tarjan's SCC algorithm. Returns SCCs in reverse topological order
-/// (dependencies before dependents).
 pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
     struct State {
         index_counter: usize,
@@ -240,7 +256,6 @@ pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<St
         }
     }
 
-    // Tarjan's naturally produces SCCs in topological order (sinks first)
     state.result
 }
 

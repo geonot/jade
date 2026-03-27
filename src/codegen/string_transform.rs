@@ -220,7 +220,6 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let st = self.string_type();
         let data = self.string_data(s)?.into_pointer_value();
         let len = self.string_len(s)?.into_int_value();
 
@@ -265,11 +264,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let in_range = b!(self.bld.build_and(in_range_lo, in_range_hi, "sc.ir"));
 
-        let diff = if upper {
-            i8t.const_int((b'a' - b'A') as u64, false)
-        } else {
-            i8t.const_int((b'a' - b'A') as u64, false)
-        };
+        let diff = i8t.const_int((b'a' - b'A') as u64, false);
         let converted = if upper {
             b!(self.bld.build_int_nsw_sub(byte, diff, "sc.cv"))
         } else {
@@ -285,37 +280,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(done_bb);
-        let fits = b!(self.bld.build_int_compare(
-            IntPredicate::ULE,
-            len,
-            i64t.const_int(23, false),
-            "sc.fits"
-        ));
-        let sso_bb = self.ctx.append_basic_block(fv, "sc.sso");
-        let heap_bb = self.ctx.append_basic_block(fv, "sc.heap");
-        let merge_bb = self.ctx.append_basic_block(fv, "sc.merge");
-        b!(self.bld.build_conditional_branch(fits, sso_bb, heap_bb));
-
-        self.bld.position_at_end(sso_bb);
-        let sso_out = self.entry_alloca(st.into(), "sc.sso");
-        b!(self.bld.build_store(sso_out, st.const_zero()));
-        let memcpy = self.ensure_memcpy();
-        b!(self
-            .bld
-            .build_call(memcpy, &[sso_out.into(), buf.into(), len.into()], ""));
-        let free = self.ensure_free();
-        b!(self.bld.build_call(free, &[buf.into()], ""));
-        let (sso_val, sso_exit) = self.build_sso_result(sso_out, len, merge_bb, "sc")?;
-
-        self.bld.position_at_end(heap_bb);
-        let heap_val = self.build_string(buf, len, len, "sc.hv")?;
-        let heap_exit = self.bld.get_insert_block().unwrap();
-        b!(self.bld.build_unconditional_branch(merge_bb));
-
-        self.bld.position_at_end(merge_bb);
-        let phi = b!(self.bld.build_phi(st, "sc.v"));
-        phi.add_incoming(&[(&sso_val, sso_exit), (&heap_val, heap_exit)]);
-        Ok(phi.as_basic_value())
+        self.finalize_string_sso(buf, len, true, "sc")
     }
 
     pub(crate) fn string_replace(
@@ -327,7 +292,6 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let st = self.string_type();
         let sdata = self.string_data(s)?.into_pointer_value();
         let slen = self.string_len(s)?.into_int_value();
         let odata = self.string_data(old)?.into_pointer_value();
@@ -465,38 +429,7 @@ impl<'ctx> Compiler<'ctx> {
             "rep.fb"
         ))
         .into_pointer_value();
-        let fits = b!(self.bld.build_int_compare(
-            IntPredicate::ULE,
-            out_len,
-            i64t.const_int(23, false),
-            "rep.fits"
-        ));
-        let sso_bb = self.ctx.append_basic_block(fv, "rep.sso");
-        let heap_bb = self.ctx.append_basic_block(fv, "rep.heap");
-        let merge_bb = self.ctx.append_basic_block(fv, "rep.merge");
-        b!(self.bld.build_conditional_branch(fits, sso_bb, heap_bb));
-
-        self.bld.position_at_end(sso_bb);
-        let sso_out = self.entry_alloca(st.into(), "rep.sso");
-        b!(self.bld.build_store(sso_out, st.const_zero()));
-        b!(self.bld.build_call(
-            memcpy,
-            &[sso_out.into(), final_buf.into(), out_len.into()],
-            ""
-        ));
-        let free = self.ensure_free();
-        b!(self.bld.build_call(free, &[final_buf.into()], ""));
-        let (sso_val, sso_exit) = self.build_sso_result(sso_out, out_len, merge_bb, "rep")?;
-
-        self.bld.position_at_end(heap_bb);
-        let heap_val = self.build_string(final_buf, out_len, out_len, "rep.hv")?;
-        let heap_exit = self.bld.get_insert_block().unwrap();
-        b!(self.bld.build_unconditional_branch(merge_bb));
-
-        self.bld.position_at_end(merge_bb);
-        let phi = b!(self.bld.build_phi(st, "rep.v"));
-        phi.add_incoming(&[(&sso_val, sso_exit), (&heap_val, heap_exit)]);
-        Ok(phi.as_basic_value())
+        self.finalize_string_sso(final_buf, out_len, true, "rep")
     }
 
     pub(crate) fn string_split(

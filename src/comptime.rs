@@ -285,99 +285,59 @@ fn try_fold(expr: &Expr) -> Option<Expr> {
 }
 
 fn fold_binop(l: &Expr, op: BinOp, r: &Expr, ty: Type, span: Span) -> Option<Expr> {
-    match (&l.kind, op, &r.kind) {
-        (ExprKind::Int(a), BinOp::Add, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Int(a.wrapping_add(*b)), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Sub, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Int(a.wrapping_sub(*b)), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Mul, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Int(a.wrapping_mul(*b)), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Div, ExprKind::Int(b)) if *b != 0 => {
-            Some(make(ExprKind::Int(a / b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Mod, ExprKind::Int(b)) if *b != 0 => {
-            Some(make(ExprKind::Int(a % b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Shl, ExprKind::Int(b)) if *b >= 0 && *b < 64 => {
-            Some(make(ExprKind::Int(a.wrapping_shl(*b as u32)), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Shr, ExprKind::Int(b)) if *b >= 0 && *b < 64 => {
-            Some(make(ExprKind::Int(a.wrapping_shr(*b as u32)), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::BitAnd, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Int(a & b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::BitOr, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Int(a | b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::BitXor, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Int(a ^ b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Eq, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Bool(a == b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Ne, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Bool(a != b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Lt, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Bool(a < b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Gt, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Bool(a > b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Le, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Bool(a <= b), ty, span))
-        }
-        (ExprKind::Int(a), BinOp::Ge, ExprKind::Int(b)) => {
-            Some(make(ExprKind::Bool(a >= b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Add, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Float(a + b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Sub, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Float(a - b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Mul, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Float(a * b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Div, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Float(a / b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Eq, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Bool(a == b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Lt, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Bool(a < b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Gt, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Bool(a > b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Le, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Bool(a <= b), ty, span))
-        }
-        (ExprKind::Float(a), BinOp::Ge, ExprKind::Float(b)) => {
-            Some(make(ExprKind::Bool(a >= b), ty, span))
-        }
-        (ExprKind::Bool(a), BinOp::And, ExprKind::Bool(b)) => {
-            Some(make(ExprKind::Bool(*a && *b), ty, span))
-        }
-        (ExprKind::Bool(a), BinOp::Or, ExprKind::Bool(b)) => {
-            Some(make(ExprKind::Bool(*a || *b), ty, span))
-        }
-        (ExprKind::Bool(a), BinOp::Eq, ExprKind::Bool(b)) => {
-            Some(make(ExprKind::Bool(a == b), ty, span))
-        }
-        (ExprKind::Bool(a), BinOp::Ne, ExprKind::Bool(b)) => {
-            Some(make(ExprKind::Bool(a != b), ty, span))
-        }
-        (ExprKind::Str(a), BinOp::Add, ExprKind::Str(b)) => {
+    let kind = match (&l.kind, &r.kind) {
+        (ExprKind::Int(a), ExprKind::Int(b)) => fold_int_op(*a, op, *b)?,
+        (ExprKind::Float(a), ExprKind::Float(b)) => fold_float_op(*a, op, *b)?,
+        (ExprKind::Bool(a), ExprKind::Bool(b)) => match op {
+            BinOp::And => ExprKind::Bool(*a && *b),
+            BinOp::Or => ExprKind::Bool(*a || *b),
+            BinOp::Eq => ExprKind::Bool(a == b),
+            BinOp::Ne => ExprKind::Bool(a != b),
+            _ => return None,
+        },
+        (ExprKind::Str(a), ExprKind::Str(b)) if op == BinOp::Add => {
             let mut s = a.clone();
             s.push_str(b);
-            Some(make(ExprKind::Str(s), ty, span))
+            ExprKind::Str(s)
         }
+        _ => return None,
+    };
+    Some(make(kind, ty, span))
+}
+
+fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
+    match op {
+        BinOp::Add => Some(ExprKind::Int(a.wrapping_add(b))),
+        BinOp::Sub => Some(ExprKind::Int(a.wrapping_sub(b))),
+        BinOp::Mul => Some(ExprKind::Int(a.wrapping_mul(b))),
+        BinOp::Div if b != 0 => Some(ExprKind::Int(a / b)),
+        BinOp::Mod if b != 0 => Some(ExprKind::Int(a % b)),
+        BinOp::Shl if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shl(b as u32))),
+        BinOp::Shr if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shr(b as u32))),
+        BinOp::BitAnd => Some(ExprKind::Int(a & b)),
+        BinOp::BitOr => Some(ExprKind::Int(a | b)),
+        BinOp::BitXor => Some(ExprKind::Int(a ^ b)),
+        BinOp::Eq => Some(ExprKind::Bool(a == b)),
+        BinOp::Ne => Some(ExprKind::Bool(a != b)),
+        BinOp::Lt => Some(ExprKind::Bool(a < b)),
+        BinOp::Gt => Some(ExprKind::Bool(a > b)),
+        BinOp::Le => Some(ExprKind::Bool(a <= b)),
+        BinOp::Ge => Some(ExprKind::Bool(a >= b)),
+        _ => None,
+    }
+}
+
+fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
+    match op {
+        BinOp::Add => Some(ExprKind::Float(a + b)),
+        BinOp::Sub => Some(ExprKind::Float(a - b)),
+        BinOp::Mul => Some(ExprKind::Float(a * b)),
+        BinOp::Div => Some(ExprKind::Float(a / b)),
+        BinOp::Eq => Some(ExprKind::Bool(a == b)),
+        BinOp::Lt => Some(ExprKind::Bool(a < b)),
+        BinOp::Gt => Some(ExprKind::Bool(a > b)),
+        BinOp::Le => Some(ExprKind::Bool(a <= b)),
+        BinOp::Ge => Some(ExprKind::Bool(a >= b)),
         _ => None,
     }
 }
@@ -438,52 +398,42 @@ fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
 }
 
 fn fold_builtin(builtin: &hir::BuiltinFn, args: &[Expr], ty: Type, span: Span) -> Option<Expr> {
-    match builtin {
-        hir::BuiltinFn::Ln => {
-            if let ExprKind::Float(x) = &args[0].kind {
-                return Some(make(ExprKind::Float(x.ln()), ty, span));
+    use hir::BuiltinFn::*;
+    let kind = match builtin {
+        Ln | Log2 | Log10 | Exp | Exp2 => {
+            let ExprKind::Float(x) = &args[0].kind else {
+                return None;
+            };
+            let f: fn(f64) -> f64 = match builtin {
+                Ln => f64::ln,
+                Log2 => f64::log2,
+                Log10 => f64::log10,
+                Exp => f64::exp,
+                Exp2 => f64::exp2,
+                _ => unreachable!(),
+            };
+            ExprKind::Float(f(*x))
+        }
+        PowF | Copysign => {
+            let (ExprKind::Float(x), ExprKind::Float(y)) = (&args[0].kind, &args[1].kind) else {
+                return None;
+            };
+            match builtin {
+                PowF => ExprKind::Float(x.powf(*y)),
+                _ => ExprKind::Float(x.copysign(*y)),
             }
         }
-        hir::BuiltinFn::Log2 => {
-            if let ExprKind::Float(x) = &args[0].kind {
-                return Some(make(ExprKind::Float(x.log2()), ty, span));
-            }
-        }
-        hir::BuiltinFn::Log10 => {
-            if let ExprKind::Float(x) = &args[0].kind {
-                return Some(make(ExprKind::Float(x.log10()), ty, span));
-            }
-        }
-        hir::BuiltinFn::Exp => {
-            if let ExprKind::Float(x) = &args[0].kind {
-                return Some(make(ExprKind::Float(x.exp()), ty, span));
-            }
-        }
-        hir::BuiltinFn::Exp2 => {
-            if let ExprKind::Float(x) = &args[0].kind {
-                return Some(make(ExprKind::Float(x.exp2()), ty, span));
-            }
-        }
-        hir::BuiltinFn::PowF => {
-            if let (ExprKind::Float(x), ExprKind::Float(y)) = (&args[0].kind, &args[1].kind) {
-                return Some(make(ExprKind::Float(x.powf(*y)), ty, span));
-            }
-        }
-        hir::BuiltinFn::Copysign => {
-            if let (ExprKind::Float(x), ExprKind::Float(y)) = (&args[0].kind, &args[1].kind) {
-                return Some(make(ExprKind::Float(x.copysign(*y)), ty, span));
-            }
-        }
-        hir::BuiltinFn::Fma => {
-            if let (ExprKind::Float(a), ExprKind::Float(b), ExprKind::Float(c)) =
+        Fma => {
+            let (ExprKind::Float(a), ExprKind::Float(b), ExprKind::Float(c)) =
                 (&args[0].kind, &args[1].kind, &args[2].kind)
-            {
-                return Some(make(ExprKind::Float(a.mul_add(*b, *c)), ty, span));
-            }
+            else {
+                return None;
+            };
+            ExprKind::Float(a.mul_add(*b, *c))
         }
-        _ => {}
-    }
-    None
+        _ => return None,
+    };
+    Some(make(kind, ty, span))
 }
 
 fn make(kind: ExprKind, ty: Type, span: Span) -> Expr {

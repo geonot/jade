@@ -75,8 +75,6 @@ impl Typer {
         } else if let Some(ref explicit) = f.ret {
             explicit.clone()
         } else {
-            // Phase 1.3: Pure TypeVar for unannotated return types.
-            // Solved by unify_at on return stmts and tail exprs during lowering.
             self.infer_ctx.fresh_var()
         };
         let id = self.fresh_id();
@@ -95,34 +93,28 @@ impl Typer {
     }
 
     pub(crate) fn declare_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
-        let method_name = format!("{type_name}_{}", m.name);
-        let self_ty = Type::Struct(type_name.to_string());
-        let mut ptys = vec![self_ty];
-        for p in &m.params {
-            ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
-        }
-        let ret = m.ret.clone().unwrap_or_else(|| {
-            // Phase 1.3: Pure TypeVar for unannotated return types
-            self.infer_ctx.fresh_var()
-        });
-        let id = self.fresh_id();
-        self.fns.insert(method_name, (id, ptys, ret));
+        self.declare_method_sig_impl(type_name, m, false);
     }
 
     pub(crate) fn declare_method_sig_by_ptr(&mut self, type_name: &str, m: &ast::Fn) {
+        self.declare_method_sig_impl(type_name, m, true);
+    }
+
+    fn declare_method_sig_impl(&mut self, type_name: &str, m: &ast::Fn, by_ptr: bool) {
         let method_name = format!("{type_name}_{}", m.name);
-        let self_ty = Type::Ptr(Box::new(Type::Struct(type_name.to_string())));
+        let self_ty = if by_ptr {
+            Type::Ptr(Box::new(Type::Struct(type_name.to_string())))
+        } else {
+            Type::Struct(type_name.to_string())
+        };
         let mut ptys = vec![self_ty];
         for p in &m.params {
-            if p.name == "self" {
+            if by_ptr && p.name == "self" {
                 continue;
             }
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
-        let ret = m.ret.clone().unwrap_or_else(|| {
-            // Phase 1.3: Pure TypeVar for unannotated return types
-            self.infer_ctx.fresh_var()
-        });
+        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
     }
@@ -133,7 +125,6 @@ impl Typer {
             .iter()
             .map(|f| {
                 let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
-                // R1.2: Track unannotated fields for strict-mode enforcement
                 if f.ty.is_none() {
                     self.unannotated_struct_fields.push((
                         td.name.clone(),
@@ -309,21 +300,14 @@ impl Typer {
     }
 
     pub(crate) fn infer_param_types(&mut self, _prog: &ast::Program) {
-        // Phase 3A: Infer `self` param type for standalone method functions.
-        // When a function is named `TypeName_method` and has a `self` param with
-        // a TypeVar type, unify the TypeVar with Type::Struct(TypeName). This
-        // ensures the function is not overly polymorphic and can be emitted
-        // directly without monomorphization.
         let struct_names: Vec<String> = self.structs.keys().cloned().collect();
         let fn_keys: Vec<String> = self.fns.keys().cloned().collect();
         for fname in &fn_keys {
             for sname in &struct_names {
                 let prefix = format!("{}_", sname);
                 if fname.starts_with(&prefix) && fname.len() > prefix.len() {
-                    // Check if first param is a TypeVar (unannotated self)
                     if let Some((_, ptys, _)) = self.fns.get(fname) {
                         if let Some(Type::TypeVar(_)) = ptys.first() {
-                            // Verify the AST param is named "self"
                             if let Some(ast_fn) = self.inferable_fns.get(fname) {
                                 if ast_fn.params.first().map_or(false, |p| p.name == "self") {
                                     let self_ty = Type::Struct(sname.clone());
@@ -337,7 +321,6 @@ impl Typer {
             }
         }
 
-        // Normalize: shallow-resolve solved TypeVar chains
         let keys: Vec<String> = self.fns.keys().cloned().collect();
         for k in keys {
             let entry = self.fns.get_mut(&k).unwrap();

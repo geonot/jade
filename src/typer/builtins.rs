@@ -5,9 +5,6 @@ use crate::types::Type;
 use super::Typer;
 
 impl Typer {
-    /// Try to lower a named call as a builtin function.
-    /// Returns `Some(Ok(expr))` if the name matches a builtin,
-    /// `Some(Err(..))` if it matches but has an error, or `None` to fall through.
     pub(crate) fn try_lower_builtin_call(
         &mut self,
         name: &str,
@@ -29,27 +26,9 @@ impl Typer {
                     span,
                 }))
             }
-            "log" => {
-                let hargs = match self.lower_exprs(args) {
-                    Ok(v) => v,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::Log, hargs),
-                    ty: Type::Void,
-                    span,
-                }))
-            }
+            "log" => Some(self.lower_simple_builtin(args, hir::BuiltinFn::Log, Type::Void, span)),
             "to_string" => {
-                let hargs = match self.lower_exprs(args) {
-                    Ok(v) => v,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::ToString, hargs),
-                    ty: Type::String,
-                    span,
-                }))
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::ToString, Type::String, span))
             }
             "rc" if args.len() == 1 => {
                 let harg = match self.lower_expr(&args[0]) {
@@ -64,26 +43,10 @@ impl Typer {
                 }))
             }
             "rc_retain" => {
-                let hargs = match self.lower_exprs(args) {
-                    Ok(v) => v,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::RcRetain, hargs),
-                    ty: Type::Void,
-                    span,
-                }))
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::RcRetain, Type::Void, span))
             }
             "rc_release" => {
-                let hargs = match self.lower_exprs(args) {
-                    Ok(v) => v,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::RcRelease, hargs),
-                    ty: Type::Void,
-                    span,
-                }))
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::RcRelease, Type::Void, span))
             }
             "weak" if args.len() == 1 && !self.fns.contains_key(name) => {
                 let harg = match self.lower_expr(&args[0]) {
@@ -161,7 +124,9 @@ impl Typer {
                     span,
                 }))
             }
-            "wrapping_add" | "wrapping_sub" | "wrapping_mul"
+            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"
+            | "saturating_sub" | "saturating_mul" | "checked_add" | "checked_sub"
+            | "checked_mul"
                 if args.len() == 2 && !self.fns.contains_key(name) =>
             {
                 let lhs = match self.lower_expr(&args[0]) {
@@ -177,102 +142,34 @@ impl Typer {
                     "wrapping_add" => hir::BuiltinFn::WrappingAdd,
                     "wrapping_sub" => hir::BuiltinFn::WrappingSub,
                     "wrapping_mul" => hir::BuiltinFn::WrappingMul,
-                    _ => unreachable!(),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
-                    ty,
-                    span,
-                }))
-            }
-            "saturating_add" | "saturating_sub" | "saturating_mul"
-                if args.len() == 2 && !self.fns.contains_key(name) =>
-            {
-                let lhs = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let rhs = match self.lower_expr(&args[1]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let ty = lhs.ty.clone();
-                let builtin = match name {
                     "saturating_add" => hir::BuiltinFn::SaturatingAdd,
                     "saturating_sub" => hir::BuiltinFn::SaturatingSub,
                     "saturating_mul" => hir::BuiltinFn::SaturatingMul,
-                    _ => unreachable!(),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
-                    ty,
-                    span,
-                }))
-            }
-            "checked_add" | "checked_sub" | "checked_mul"
-                if args.len() == 2 && !self.fns.contains_key(name) =>
-            {
-                let lhs = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let rhs = match self.lower_expr(&args[1]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let ty = lhs.ty.clone();
-                let builtin = match name {
                     "checked_add" => hir::BuiltinFn::CheckedAdd,
                     "checked_sub" => hir::BuiltinFn::CheckedSub,
                     "checked_mul" => hir::BuiltinFn::CheckedMul,
                     _ => unreachable!(),
                 };
+                let ret_ty = if name.starts_with("checked_") {
+                    Type::Tuple(vec![ty, Type::Bool])
+                } else {
+                    ty
+                };
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
-                    ty: Type::Tuple(vec![ty, Type::Bool]),
+                    ty: ret_ty,
                     span,
                 }))
             }
-            "signal_handle" if args.len() == 2 && !self.fns.contains_key(name) => {
-                let hsig = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let hhandler = match self.lower_expr(&args[1]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(
-                        hir::BuiltinFn::SignalHandle,
-                        vec![hsig, hhandler],
-                    ),
-                    ty: Type::Void,
-                    span,
-                }))
-            }
+            "signal_handle" if args.len() == 2 && !self.fns.contains_key(name) => Some(
+                self.lower_simple_builtin(args, hir::BuiltinFn::SignalHandle, Type::Void, span),
+            ),
             "signal_raise" if args.len() == 1 && !self.fns.contains_key(name) => {
-                let hsig = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::SignalRaise, vec![hsig]),
-                    ty: Type::I32,
-                    span,
-                }))
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::SignalRaise, Type::I32, span))
             }
-            "signal_ignore" if args.len() == 1 && !self.fns.contains_key(name) => {
-                let hsig = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::SignalIgnore, vec![hsig]),
-                    ty: Type::Void,
-                    span,
-                }))
-            }
+            "signal_ignore" if args.len() == 1 && !self.fns.contains_key(name) => Some(
+                self.lower_simple_builtin(args, hir::BuiltinFn::SignalIgnore, Type::Void, span),
+            ),
             "popcount" | "clz" | "ctz" | "rotate_left" | "rotate_right" | "bswap" => {
                 let builtin = match name {
                     "popcount" => hir::BuiltinFn::Popcount,
@@ -283,15 +180,7 @@ impl Typer {
                     "bswap" => hir::BuiltinFn::Bswap,
                     _ => unreachable!(),
                 };
-                let hargs = match self.lower_exprs(args) {
-                    Ok(v) => v,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(builtin, hargs),
-                    ty: Type::I64,
-                    span,
-                }))
+                Some(self.lower_simple_builtin(args, builtin, Type::I64, span))
             }
             "__string_from_raw" if args.len() == 3 && !self.fns.contains_key(name) => Some(
                 self.lower_simple_builtin(args, hir::BuiltinFn::StringFromRaw, Type::String, span),
@@ -387,7 +276,6 @@ impl Typer {
         }
     }
 
-    /// Lower a simple builtin call: lower all args, produce Builtin expr with given type.
     fn lower_simple_builtin(
         &mut self,
         args: &[ast::Expr],
@@ -403,7 +291,6 @@ impl Typer {
         })
     }
 
-    /// Lower a slice of expressions.
     fn lower_exprs(&mut self, exprs: &[ast::Expr]) -> Result<Vec<hir::Expr>, String> {
         exprs.iter().map(|e| self.lower_expr(e)).collect()
     }

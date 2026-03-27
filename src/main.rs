@@ -49,13 +49,10 @@ struct Cli {
     debug_types: bool,
     #[arg(long)]
     warn_inferred_defaults: bool,
-    /// (Deprecated — strict types are now the default)
     #[arg(long)]
     strict_types: bool,
-    /// Disable strict type checking — unsolved type variables silently default to i64
     #[arg(long)]
     lenient: bool,
-    /// Pedantic mode: also reject Integer→I64 and Float→F64 defaults (require explicit annotations)
     #[arg(long)]
     pedantic: bool,
     #[arg(long)]
@@ -99,46 +96,33 @@ fn resolve_modules(
         loaded.insert(key.clone());
         let file_path = path.join("/");
         let name = path.last().unwrap();
-        let mut candidate = if let Some(pkg_path) = packages.get(&path[0]) {
+        let mut candidates = Vec::new();
+        if let Some(pkg_path) = packages.get(&path[0]) {
             if path.len() > 1 {
                 let rest = path[1..].join("/");
-                pkg_path.join("src").join(format!("{rest}.jade"))
+                candidates.push(pkg_path.join("src").join(format!("{rest}.jade")));
             } else {
-                pkg_path.join("src").join(format!("{}.jade", path[0]))
-            }
-        } else {
-            base_dir.join(format!("{file_path}.jade"))
-        };
-        if !candidate.exists() {
-            candidate = base_dir.join(format!("{file_path}.jade"));
-        }
-        if !candidate.exists() {
-            candidate = base_dir.join("std").join(format!("{name}.jade"));
-        }
-        if !candidate.exists() {
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(exe_dir) = exe.parent() {
-                    let c = exe_dir.join("std").join(format!("{name}.jade"));
-                    if c.exists() {
-                        candidate = c;
-                    }
-                }
+                candidates.push(pkg_path.join("src").join(format!("{}.jade", path[0])));
             }
         }
-        if !candidate.exists() {
-            let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-            if !manifest.is_empty() {
-                let c = PathBuf::from(&manifest)
+        candidates.push(base_dir.join(format!("{file_path}.jade")));
+        candidates.push(base_dir.join("std").join(format!("{name}.jade")));
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                candidates.push(exe_dir.join("std").join(format!("{name}.jade")));
+            }
+        }
+        if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+            candidates.push(
+                PathBuf::from(manifest)
                     .join("std")
-                    .join(format!("{name}.jade"));
-                if c.exists() {
-                    candidate = c;
-                }
-            }
+                    .join(format!("{name}.jade")),
+            );
         }
-        if !candidate.exists() {
-            die(&format!("module not found: {key}"));
-        }
+        let candidate = candidates
+            .into_iter()
+            .find(|c| c.exists())
+            .unwrap_or_else(|| die(&format!("module not found: {key}")));
         let src = fs::read_to_string(&candidate)
             .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", candidate.display())));
         let tokens = Lexer::new(&src)

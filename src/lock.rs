@@ -27,13 +27,13 @@ impl Lockfile {
                 continue;
             }
             if !line.starts_with(' ') {
-                let entry = Self::parse_entry(line, 0)?;
+                let entry = Self::parse_entry(line)?;
                 let mut top = entry;
                 i += 1;
                 while i < lines.len() && lines[i].starts_with("  ") {
                     let child_line = lines[i].trim();
                     if !child_line.is_empty() && !child_line.starts_with('#') {
-                        top.deps.push(Self::parse_entry(child_line, 2)?);
+                        top.deps.push(Self::parse_entry(child_line)?);
                     }
                     i += 1;
                 }
@@ -45,7 +45,7 @@ impl Lockfile {
         Ok(Lockfile { entries })
     }
 
-    fn parse_entry(line: &str, _indent: usize) -> Result<LockEntry, String> {
+    fn parse_entry(line: &str) -> Result<LockEntry, String> {
         let parts: Vec<&str> = line.trim().split_whitespace().collect();
         if parts.len() < 4 {
             return Err(format!("jade.lock: invalid entry: {line}"));

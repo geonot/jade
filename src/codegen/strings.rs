@@ -207,4 +207,117 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(merge_bb));
         Ok((val, exit_bb))
     }
+
+    pub(crate) fn finalize_string_sso(
+        &mut self,
+        src: inkwell::values::PointerValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+        owns_buffer: bool,
+        prefix: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let st = self.string_type();
+        let fv = self.cur_fn.unwrap();
+
+        let fits = b!(self.bld.build_int_compare(
+            IntPredicate::ULE,
+            len,
+            i64t.const_int(23, false),
+            &format!("{prefix}.fits")
+        ));
+        let sso_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.sso"));
+        let heap_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.heap"));
+        let merge_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.merge"));
+        b!(self.bld.build_conditional_branch(fits, sso_bb, heap_bb));
+
+        self.bld.position_at_end(sso_bb);
+        let sso_out = self.entry_alloca(st.into(), &format!("{prefix}.sso"));
+        b!(self.bld.build_store(sso_out, st.const_zero()));
+        let memcpy = self.ensure_memcpy();
+        b!(self
+            .bld
+            .build_call(memcpy, &[sso_out.into(), src.into(), len.into()], ""));
+        if owns_buffer {
+            let free = self.ensure_free();
+            b!(self.bld.build_call(free, &[src.into()], ""));
+        }
+        let (sso_val, sso_exit) = self.build_sso_result(sso_out, len, merge_bb, prefix)?;
+
+        self.bld.position_at_end(heap_bb);
+        let heap_buf = if owns_buffer {
+            src
+        } else {
+            let malloc = self.ensure_malloc();
+            let buf = b!(self
+                .bld
+                .build_call(malloc, &[len.into()], &format!("{prefix}.buf")))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+            b!(self
+                .bld
+                .build_call(memcpy, &[buf.into(), src.into(), len.into()], ""));
+            buf
+        };
+        let heap_val = self.build_string(heap_buf, len, len, &format!("{prefix}.hv"))?;
+        let heap_exit = self.bld.get_insert_block().unwrap();
+        b!(self.bld.build_unconditional_branch(merge_bb));
+
+        self.bld.position_at_end(merge_bb);
+        let phi = b!(self.bld.build_phi(st, &format!("{prefix}.v")));
+        phi.add_incoming(&[(&sso_val, sso_exit), (&heap_val, heap_exit)]);
+        Ok(phi.as_basic_value())
+    }
+
+    pub(crate) fn snprintf_to_string(
+        &mut self,
+        fmt_str: &str,
+        args: &[inkwell::values::BasicMetadataValueEnum<'ctx>],
+        prefix: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let snprintf = self.ensure_snprintf();
+        let fmt = b!(self
+            .bld
+            .build_global_string_ptr(fmt_str, &format!("{prefix}.fmt")));
+
+        let null = ptr_ty.const_null();
+        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = vec![
+            null.into(),
+            i64t.const_int(0, false).into(),
+            fmt.as_pointer_value().into(),
+        ];
+        call_args.extend_from_slice(args);
+
+        let len = b!(self
+            .bld
+            .build_call(snprintf, &call_args, &format!("{prefix}.len")))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_int_value();
+        let len = b!(self
+            .bld
+            .build_int_s_extend(len, i64t, &format!("{prefix}.len64")));
+        let size =
+            b!(self
+                .bld
+                .build_int_nsw_add(len, i64t.const_int(1, false), &format!("{prefix}.sz")));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self
+            .bld
+            .build_call(malloc, &[size.into()], &format!("{prefix}.buf")))
+        .try_as_basic_value()
+        .basic()
+        .unwrap();
+
+        let mut call_args2: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+            vec![buf.into(), size.into(), fmt.as_pointer_value().into()];
+        call_args2.extend_from_slice(args);
+        b!(self.bld.build_call(snprintf, &call_args2, ""));
+
+        self.build_string(buf, len, size, &format!("{prefix}.s"))
+    }
 }

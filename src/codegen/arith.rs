@@ -174,10 +174,10 @@ impl<'ctx> Compiler<'ctx> {
             BinOp::Add => b!(self.bld.build_int_add(l, r, "add")).into(),
             BinOp::Sub => b!(self.bld.build_int_sub(l, r, "sub")).into(),
             BinOp::Mul => b!(self.bld.build_int_mul(l, r, "mul")).into(),
-            BinOp::Div if s => self.checked_div(l, r, true)?,
-            BinOp::Div => self.checked_div(l, r, false)?,
-            BinOp::Mod if s => self.checked_rem(l, r, true)?,
-            BinOp::Mod => self.checked_rem(l, r, false)?,
+            BinOp::Div if s => self.checked_divmod(l, r, true, true)?,
+            BinOp::Div => self.checked_divmod(l, r, false, true)?,
+            BinOp::Mod if s => self.checked_divmod(l, r, true, false)?,
+            BinOp::Mod => self.checked_divmod(l, r, false, false)?,
             BinOp::Eq => b!(self.bld.build_int_compare(IntPredicate::EQ, l, r, "eq")).into(),
             BinOp::Ne => b!(self.bld.build_int_compare(IntPredicate::NE, l, r, "ne")).into(),
             BinOp::Lt => b!(self.bld.build_int_compare(
@@ -234,51 +234,31 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    fn checked_div(
+    fn checked_divmod(
         &mut self,
         l: inkwell::values::IntValue<'ctx>,
         r: inkwell::values::IntValue<'ctx>,
         signed: bool,
+        is_div: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let fv = self.cur_fn.unwrap();
+        let prefix = if is_div { "div" } else { "rem" };
         let zero = r.get_type().const_int(0, false);
-        let is_zero = b!(self
-            .bld
-            .build_int_compare(IntPredicate::EQ, r, zero, "div.z"));
-        let trap_bb = self.ctx.append_basic_block(fv, "div.trap");
-        let ok_bb = self.ctx.append_basic_block(fv, "div.ok");
+        let is_zero =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::EQ, r, zero, &format!("{prefix}.z")));
+        let trap_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.trap"));
+        let ok_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.ok"));
         b!(self.bld.build_conditional_branch(is_zero, trap_bb, ok_bb));
         self.bld.position_at_end(trap_bb);
         self.emit_trap("division by zero");
         self.bld.position_at_end(ok_bb);
-        Ok(if signed {
-            b!(self.bld.build_int_signed_div(l, r, "sdiv")).into()
-        } else {
-            b!(self.bld.build_int_unsigned_div(l, r, "udiv")).into()
-        })
-    }
-
-    fn checked_rem(
-        &mut self,
-        l: inkwell::values::IntValue<'ctx>,
-        r: inkwell::values::IntValue<'ctx>,
-        signed: bool,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
-        let zero = r.get_type().const_int(0, false);
-        let is_zero = b!(self
-            .bld
-            .build_int_compare(IntPredicate::EQ, r, zero, "rem.z"));
-        let trap_bb = self.ctx.append_basic_block(fv, "rem.trap");
-        let ok_bb = self.ctx.append_basic_block(fv, "rem.ok");
-        b!(self.bld.build_conditional_branch(is_zero, trap_bb, ok_bb));
-        self.bld.position_at_end(trap_bb);
-        self.emit_trap("division by zero");
-        self.bld.position_at_end(ok_bb);
-        Ok(if signed {
-            b!(self.bld.build_int_signed_rem(l, r, "srem")).into()
-        } else {
-            b!(self.bld.build_int_unsigned_rem(l, r, "urem")).into()
+        Ok(match (is_div, signed) {
+            (true, true) => b!(self.bld.build_int_signed_div(l, r, "sdiv")).into(),
+            (true, false) => b!(self.bld.build_int_unsigned_div(l, r, "udiv")).into(),
+            (false, true) => b!(self.bld.build_int_signed_rem(l, r, "srem")).into(),
+            (false, false) => b!(self.bld.build_int_unsigned_rem(l, r, "urem")).into(),
         })
     }
 

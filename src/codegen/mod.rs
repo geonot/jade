@@ -155,31 +155,17 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub fn emit_ir_optimized(&self, opt: OptimizationLevel) -> Result<String, String> {
-        let passes = match opt {
-            OptimizationLevel::None => "default<O0>",
-            OptimizationLevel::Less => "default<O1>",
-            OptimizationLevel::Default => "default<O2>",
-            OptimizationLevel::Aggressive => "default<O3>",
-        };
-        let tm = self.target_machine(opt)?;
-        let pb = PassBuilderOptions::create();
-        let o2plus = matches!(
-            opt,
-            OptimizationLevel::Default | OptimizationLevel::Aggressive
-        );
-        pb.set_loop_vectorization(o2plus);
-        pb.set_loop_slp_vectorization(o2plus);
-        pb.set_loop_unrolling(o2plus);
-        pb.set_loop_interleaving(o2plus);
-        pb.set_call_graph_profile(o2plus);
-        pb.set_merge_functions(matches!(opt, OptimizationLevel::Aggressive));
-        self.module
-            .run_passes(passes, &tm, pb)
-            .map_err(|e| e.to_string())?;
+        self.run_optimization_passes(opt)?;
         Ok(self.module.print_to_string().to_string())
     }
 
     pub fn emit_object(&self, path: &Path, opt: OptimizationLevel) -> Result<(), String> {
+        let tm = self.run_optimization_passes(opt)?;
+        tm.write_to_file(&self.module, FileType::Object, path)
+            .map_err(|e| e.to_string())
+    }
+
+    fn run_optimization_passes(&self, opt: OptimizationLevel) -> Result<TargetMachine, String> {
         let passes = match opt {
             OptimizationLevel::None => "default<O0>",
             OptimizationLevel::Less => "default<O1>",
@@ -201,8 +187,7 @@ impl<'ctx> Compiler<'ctx> {
         self.module
             .run_passes(passes, &tm, pb)
             .map_err(|e| e.to_string())?;
-        tm.write_to_file(&self.module, FileType::Object, path)
-            .map_err(|e| e.to_string())
+        Ok(tm)
     }
 
     pub fn compile_program(

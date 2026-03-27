@@ -1,37 +1,3 @@
-// ── Type Inference Invariants ──
-//
-// Monomorphization vs. Scheme Instantiation:
-//   - Top-level functions with unannotated params are stored in `inferable_fns`
-//     and get generalized into poly schemes (`fn_schemes`) after lowering.
-//   - Functions with poly schemes are SKIPPED from direct HIR emission (lower.rs)
-//     — only monomorphized copies reach codegen.
-//   - At call sites, poly schemes are instantiated with fresh TypeVars. After
-//     arg unification resolves these vars, the function is monomorphized with
-//     the concrete type_map and the copy is emitted to HIR.
-//   - Let-bound lambdas also get let-generalized (via `generalize()` in stmt.rs).
-//     Their quantified TypeVars are defaulted to I64/F64 in the union-find so the
-//     original body has concrete types for codegen, while the scheme template
-//     remains for future instantiations (substitution-based, not union-find-based).
-//
-// Value Restriction (syntactic values for let-generalization):
-//   - Only syntactic values can be safely generalized: Lambda, Ident, Struct,
-//     Array/Tuple of syntactic values, Ref of syntactic value.
-//   - Literals (Int, Float, Bool, Str) are NOT syntactic values — generalizing
-//     them would discard constraint information.
-//   - Non-values (function calls, etc.) get monomorphic schemes.
-//
-// Defaulting Hierarchy (TypeConstraint → concrete type):
-//   - Integer → I64  (principled: programmer wrote an int literal)
-//   - Float → F64    (principled: programmer wrote a float literal)
-//   - Numeric → I64  (ambiguous in strict mode: could be int or float)
-//   - None → I64     (ambiguous in strict mode: completely unconstrained)
-//   In strict mode (default), Numeric and None produce errors. Integer and Float
-//   default silently.
-//
-// Constraint Merging (union-find `union()`):
-//   Integer > Numeric > None; Float > Numeric > None; Integer + Float = error.
-//   The more specific constraint always wins in the merged equivalence class.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -48,24 +14,20 @@ pub(crate) struct VarInfo {
     pub(crate) scheme: Option<Scheme>,
 }
 
-/// A method call whose receiver was a TypeVar at lowering time.
-/// After lowering completes, the TypeVar may have been solved, so we
-/// re-check the method, unify arg/return types, and re-classify the HIR node.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredMethod {
-    pub(crate) receiver_ty: Type, // the TypeVar (or whatever) receiver had
+    pub(crate) receiver_ty: Type,
     pub(crate) method: String,
-    pub(crate) arg_tys: Vec<Type>, // types of the already-lowered args
-    pub(crate) ret_ty: Type,       // the fresh_var assigned as return type
+    pub(crate) arg_tys: Vec<Type>,
+    pub(crate) ret_ty: Type,
     pub(crate) span: Span,
 }
 
-/// A field access whose receiver was a TypeVar at lowering time.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredField {
     pub(crate) receiver_ty: Type,
     pub(crate) field_name: String,
-    pub(crate) field_ty: Type, // the fresh_var assigned as field type
+    pub(crate) field_ty: Type,
     pub(crate) span: Span,
 }
 
@@ -103,32 +65,12 @@ pub struct Typer {
     pub(crate) warnings: Vec<String>,
     pub(crate) deferred_methods: Vec<DeferredMethod>,
     pub(crate) deferred_fields: Vec<DeferredField>,
-    /// Deferred quantified TypeVars from let-generalized local lambdas.
-    /// Instead of defaulting immediately, we collect them here and default
-    /// at end-of-block so that later statements can solve them via unification.
     pub(crate) deferred_quantified_vars: Vec<u32>,
-    /// Structural field constraints: TypeVar id → list of (field_name, field_type).
-    /// When multiple fields are accessed on the same TypeVar, we intersect the
-    /// candidates at resolution time to find the unique struct.
     pub(crate) field_constraints: HashMap<u32, Vec<(String, Type)>>,
-    /// Functions with unannotated params stored for auto-monomorphization fallback.
-    /// When called with incompatible types (e.g., multiple struct types), we fall back
-    /// to monomorphization. Otherwise, TypeVars are solved by unification.
     pub(crate) inferable_fns: HashMap<String, ast::Fn>,
-    /// Phase 3 (P4): Generalized function schemes for inferable functions.
-    /// After lowering, the function's type (params + return) is generalized into
-    /// a Scheme. At each call site, the scheme is instantiated with fresh TypeVars
-    /// so that calling identity(42) and identity("hello") get independent type solutions.
     pub(crate) fn_schemes: HashMap<String, (Vec<u32>, Vec<Type>, Type)>,
-    /// R1.2: Track unannotated struct fields (struct_name, field_name, TypeVar, span)
-    /// for strict-mode enforcement. After all lowering, unsolved TypeVars here
-    /// indicate fields that were never constrained by constructors or usage.
     pub(crate) unannotated_struct_fields: Vec<(String, String, Type, Span)>,
-    /// Poly-lambda ASTs: stores the original AST of let-bound lambdas that were
-    /// generalized to poly schemes, enabling monomorphization at each call site.
-    /// Maps local variable name → (params, optional return type, body, span).
     pub(crate) poly_lambda_asts: HashMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
-    /// Type errors collected during lowering for batch reporting.
     pub(crate) type_errors: Vec<String>,
 }
 
@@ -207,15 +149,12 @@ impl Typer {
         }
     }
 
-    /// Enable lenient mode — disables strict type checking. Unsolved TypeVars
-    /// silently default to I64 instead of producing errors.
     pub fn set_lenient(&mut self, enabled: bool) {
         if enabled {
             self.infer_ctx.disable_strict_types();
         }
     }
 
-    /// Enable pedantic mode — also reject Integer→I64 and Float→F64 defaults.
     pub fn set_pedantic(&mut self, enabled: bool) {
         if enabled {
             self.infer_ctx.set_pedantic(true);
@@ -270,10 +209,22 @@ impl Typer {
         }
     }
 
-    /// Collect a unification error for batch reporting instead of silently dropping it.
     fn collect_unify_error(&mut self, result: Result<(), String>) {
         if let Err(e) = result {
             self.type_errors.push(e);
+        }
+    }
+
+    pub(crate) fn make_coerce(
+        expr: hir::Expr,
+        coercion: hir::CoercionKind,
+        target_ty: Type,
+    ) -> hir::Expr {
+        let span = expr.span;
+        hir::Expr {
+            kind: hir::ExprKind::Coerce(Box::new(expr), coercion),
+            ty: target_ty,
+            span,
         }
     }
 
@@ -285,7 +236,6 @@ impl Typer {
         }
     }
 
-    /// Collect all free TypeVars in the current environment (all scopes).
     fn free_type_vars_in_env(&mut self) -> std::collections::HashSet<u32> {
         let mut ftvs = std::collections::HashSet::new();
         for scope in &self.scopes {
@@ -297,11 +247,7 @@ impl Typer {
         ftvs
     }
 
-    /// Generalize a type into a Scheme by quantifying TypeVars that are free
-    /// in the type but NOT free in the environment. This is the Gen(Γ, τ) step
-    /// of Algorithm J / Hindley-Milner.
     fn generalize(&mut self, ty: &Type) -> Scheme {
-        // Canonicalize through union-find so all TypeVars are root representatives
         let resolved = self.infer_ctx.canonicalize_type(ty);
         if !resolved.has_type_var() {
             return Scheme::mono(resolved);
@@ -320,10 +266,6 @@ impl Typer {
         }
     }
 
-    /// Value restriction: only generalize let-bindings whose RHS is a syntactic value.
-    /// Syntactic values cannot have side effects, so polymorphic generalization is safe.
-    /// Excludes literals — they are inherently monomorphic and generalizing them
-    /// would discard constraint information (Float, Integer, etc.).
     fn is_syntactic_value(expr: &ast::Expr) -> bool {
         match expr {
             ast::Expr::Lambda(..) => true,
@@ -334,6 +276,39 @@ impl Typer {
             }
             ast::Expr::Ref(inner, _) => Self::is_syntactic_value(inner),
             _ => false,
+        }
+    }
+
+    pub(crate) fn string_method_ret_ty(method: &str) -> Option<Type> {
+        match method {
+            "contains" | "starts_with" | "ends_with" => Some(Type::Bool),
+            "char_at" | "len" | "find" => Some(Type::I64),
+            "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower" => {
+                Some(Type::String)
+            }
+            "split" => Some(Type::Vec(Box::new(Type::String))),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn vec_method_ret_ty(method: &str, elem_ty: &Type) -> Option<Type> {
+        match method {
+            "push" | "clear" | "set" => Some(Type::Void),
+            "pop" | "get" | "remove" => Some(elem_ty.clone()),
+            "len" => Some(Type::I64),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn map_method_ret_ty(method: &str, key_ty: &Type, val_ty: &Type) -> Option<Type> {
+        match method {
+            "set" | "remove" | "clear" => Some(Type::Void),
+            "get" => Some(val_ty.clone()),
+            "has" => Some(Type::Bool),
+            "len" => Some(Type::I64),
+            "keys" => Some(Type::Vec(Box::new(key_ty.clone()))),
+            "values" => Some(Type::Vec(Box::new(val_ty.clone()))),
+            _ => None,
         }
     }
 }
@@ -447,7 +422,6 @@ mod tests {
 
     #[test]
     fn test_generic_fn_monomorphized() {
-        // With explicit type param T, identity is generic and monomorphized
         let hir = type_check("*identity(x: T) -> T\n    x\n*main()\n    log(identity(42))\n");
         assert!(
             hir.fns.len() >= 2,
@@ -460,15 +434,12 @@ mod tests {
 
     #[test]
     fn test_untyped_param_is_implicit_generic() {
-        // Phase 3 (P4): All-untyped-param functions are treated as implicit generics.
-        // Each call site gets a monomorphized copy with concrete types.
         let hir = type_check("*identity(x)\n    x\n*main()\n    log(identity(42))\n");
         let identity = hir
             .fns
             .iter()
             .find(|f| f.name.starts_with("identity"))
             .unwrap();
-        // Should be monomorphized with I64 param
         assert_eq!(identity.params[0].ty, Type::I64);
     }
 
@@ -533,39 +504,24 @@ mod tests {
     }
 
     #[test]
-    fn test_type_mismatch_msg() {
-        let mut typer = Typer::new();
-        let msg = typer.type_mismatch_msg(&Type::I64, &Type::String, "argument");
-        assert!(msg.contains("expected `i64`"), "msg: {msg}");
-        assert!(msg.contains("found `String`"), "msg: {msg}");
-    }
-
-    // ── Let-Generalization Tests ──
-
-    #[test]
     fn test_let_gen_fn_scheme_is_poly() {
-        // A lambda bound via let should get a polymorphic scheme
         let prog =
             parse("*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(5))\n    0\n");
         let mut typer = Typer::new();
         let _hir = typer.lower_program(&prog).unwrap();
-        // f should be in scope as a Fn type — verify it was generalized
-        // (the scheme machinery runs, fn types get generalized)
     }
 
     #[test]
     fn test_instantiation_creates_fresh_vars() {
-        // Two uses of the same polymorphic scheme should get different TypeVars
         let mut ctx = unify::InferCtx::new();
         let a = ctx.fresh_var();
         let fn_ty = Type::Fn(vec![a.clone()], Box::new(a.clone()));
         let scheme = Scheme {
-            quantified: vec![0], // quantify over ?0
+            quantified: vec![0],
             ty: fn_ty,
         };
         let inst1 = ctx.instantiate(&scheme);
         let inst2 = ctx.instantiate(&scheme);
-        // Both should be Fn types with DIFFERENT TypeVars
         if let (Type::Fn(p1, _), Type::Fn(p2, _)) = (&inst1, &inst2) {
             assert_ne!(p1[0], p2[0], "instantiation must create distinct TypeVars");
         } else {
@@ -636,11 +592,8 @@ mod tests {
     fn test_numeric_var_defaults_i64() {
         let mut ctx = unify::InferCtx::new();
         let v = ctx.fresh_numeric_var();
-        // Numeric defaults to I64 (no Float constraint)
         assert_eq!(ctx.resolve(&v), Type::I64);
     }
-
-    // ── Return Type Inference Tests ──
 
     #[test]
     fn test_return_type_inferred_from_tail() {
@@ -660,7 +613,6 @@ mod tests {
 
     #[test]
     fn test_recursive_fn_return_type() {
-        // Fibonacci: return type must be inferred as I64
         let hir = type_check(
             "*fib(n: i64) -> i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n*main()\n    log(fib(10))\n",
         );
@@ -668,11 +620,8 @@ mod tests {
         assert_eq!(fib.ret, Type::I64);
     }
 
-    // ── Deferred Resolution Tests ──
-
     #[test]
     fn test_deferred_field_no_typevars() {
-        // After lowering, all TypeVars in struct fields should be resolved
         let hir = type_check(
             "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
         );
@@ -683,11 +632,9 @@ mod tests {
 
     #[test]
     fn test_vec_method_types_resolved() {
-        // Vec operations should have concrete types after lowering
         let hir = type_check(
             "*main() -> i32\n    v is vec(1, 2, 3)\n    v.push(4)\n    log(v.len())\n    0\n",
         );
-        // Should compile without TypeVars remaining
         let main = &hir.fns[0];
         for stmt in &main.body {
             check_no_typevars_in_stmt(stmt);
@@ -711,21 +658,16 @@ mod tests {
         }
     }
 
-    // ── Type Error (Negative) Tests ──
-
     #[test]
     fn test_type_error_add_bool_int() {
         let prog = parse("*main()\n    x is true + 1\n    log(x)\n");
         let mut typer = Typer::new();
-        // This may or may not error depending on coercion rules,
-        // but the types should be concrete
         let _ = typer.lower_program(&prog);
     }
 
     #[test]
     fn test_concrete_mismatch_fn_arg() {
         let mut ctx = unify::InferCtx::new();
-        // Fn(i64) -> bool vs Fn(String) -> bool should fail
         let fn_a = Type::Fn(vec![Type::I64], Box::new(Type::Bool));
         let fn_b = Type::Fn(vec![Type::String], Box::new(Type::Bool));
         assert!(ctx.unify(&fn_a, &fn_b).is_err());
@@ -746,8 +688,6 @@ mod tests {
         let fn_b = Type::Fn(vec![Type::I64, Type::I64], Box::new(Type::Bool));
         assert!(ctx.unify(&fn_a, &fn_b).is_err());
     }
-
-    // ── Generalize / free_type_vars Tests ──
 
     #[test]
     fn test_free_type_vars_basic() {
@@ -792,8 +732,6 @@ mod tests {
         assert!(s.is_poly());
         assert_eq!(s.quantified.len(), 2);
     }
-
-    // ── No TypeVar leak tests ──
 
     #[test]
     fn test_no_typevar_in_simple_fn() {
@@ -856,8 +794,6 @@ mod tests {
         }
     }
 
-    // ── Unification edge cases ──
-
     #[test]
     fn test_unify_rc_types() {
         let mut ctx = unify::InferCtx::new();
@@ -900,12 +836,10 @@ mod tests {
 
     #[test]
     fn test_constraint_merge_integer_wins() {
-        // When merging Integer and Numeric constraints, Integer should win
         let mut ctx = unify::InferCtx::new();
         let a = ctx.fresh_integer_var();
         let b = ctx.fresh_numeric_var();
         ctx.unify(&a, &b).unwrap();
-        // Should be constrained to Integer — reject Float
         assert!(
             ctx.unify(&a, &Type::F64).is_err(),
             "merged Integer+Numeric constraint should reject F64"
@@ -918,7 +852,6 @@ mod tests {
         let a = ctx.fresh_float_var();
         let b = ctx.fresh_numeric_var();
         ctx.unify(&a, &b).unwrap();
-        // Should be constrained to Float — reject Int
         assert!(
             ctx.unify(&a, &Type::I64).is_err(),
             "merged Float+Numeric constraint should reject I64"
@@ -927,41 +860,30 @@ mod tests {
 
     #[test]
     fn test_bidirectional_call_result_unifies_with_expected() {
-        // Phase 12: When a call site has an expected type, the return TypeVar
-        // should get unified with it.
         let mut ctx = unify::InferCtx::new();
         let ret_var = ctx.fresh_var();
         let expected = Type::I64;
-        // Simulate what lower_expr_expected does for Call: unify result with expected
         ctx.unify(&expected, &ret_var).unwrap();
         assert_eq!(ctx.resolve(&ret_var), Type::I64);
     }
 
     #[test]
     fn test_bidirectional_call_result_propagates_through_chain() {
-        // Phase 12: Expected type propagates through chained TypeVars
         let mut ctx = unify::InferCtx::new();
         let ret_var = ctx.fresh_var();
         let intermediate = ctx.fresh_var();
-        // Chain: intermediate = ret_var, then expected unifies with intermediate
         ctx.unify(&intermediate, &ret_var).unwrap();
         ctx.unify(&Type::F64, &intermediate).unwrap();
-        // ret_var should now resolve to F64
         assert_eq!(ctx.resolve(&ret_var), Type::F64);
     }
 
     #[test]
     fn test_bidirectional_numeric_var_constrained_by_expected() {
-        // Phase 12: A numeric-constrained return var gets fully resolved
-        // when the call site expects a concrete type
         let mut ctx = unify::InferCtx::new();
         let ret_var = ctx.fresh_numeric_var();
-        // Call site expects F64 — should resolve numeric ambiguity
         ctx.unify(&Type::F64, &ret_var).unwrap();
         assert_eq!(ctx.resolve(&ret_var), Type::F64);
     }
-
-    // ── Phase 1 (P0): Strict type checking tests ──
 
     #[test]
     fn test_strict_types_errors_on_unconstrained_typevar() {
@@ -974,11 +896,9 @@ mod tests {
             col: 3,
         };
         let v = ctx.fresh_var();
-        // Set origin so we get a meaningful error message
         let v2 = ctx.fresh_var();
         let _ = ctx.unify_at(&v, &v2, span, "test binding");
         let resolved = ctx.resolve(&v);
-        // Should still produce I64 (for codegen), but collect an error
         assert_eq!(resolved, Type::I64);
         let errors = ctx.drain_strict_errors();
         assert!(
@@ -1022,7 +942,6 @@ mod tests {
 
     #[test]
     fn test_strict_types_numeric_defaults_with_warning() {
-        // R1.2: Numeric→I64 is now a principled default with warning, not error.
         let mut ctx = unify::InferCtx::new();
         ctx.enable_strict_types();
         ctx.enable_default_warnings();
@@ -1072,7 +991,6 @@ mod tests {
 
     #[test]
     fn test_strict_types_integration_well_typed_program() {
-        // A well-typed program should compile fine even in strict mode
         let src = "*main()\n    x is 42\n    log(x)\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1087,7 +1005,6 @@ mod tests {
 
     #[test]
     fn test_strict_types_integration_annotated_fn() {
-        // Functions with annotations should always pass strict mode
         let src = "*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1099,8 +1016,6 @@ mod tests {
             result.err()
         );
     }
-
-    // ── Phase 7 (P1): Enhanced error message tests ──
 
     #[test]
     fn test_error_message_type_mismatch_has_provenance() {
@@ -1118,14 +1033,11 @@ mod tests {
             line: 7,
             col: 10,
         };
-        // First: establish TypeVar as String
         ctx.unify_at(&v, &Type::String, span1, "bind annotation")
             .unwrap();
-        // Then: try to unify with I64 — should produce a rich error
         let err = ctx
             .unify_at(&v, &Type::I64, span2, "function argument")
             .unwrap_err();
-        // Error should contain line info and provenance
         assert!(
             err.contains("line 7:10"),
             "error should contain error span: {err}"
@@ -1184,8 +1096,6 @@ mod tests {
         assert!(err.contains("help:"), "error should have help text: {err}");
     }
 
-    // ── Phase 4 (P2): Operator Constraint Propagation tests ──
-
     #[test]
     fn test_constrain_typevar_to_numeric() {
         let mut ctx = unify::InferCtx::new();
@@ -1198,13 +1108,11 @@ mod tests {
         };
         ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic")
             .unwrap();
-        // Now trying to unify with String should fail
         let err = ctx.unify(&v, &Type::String);
         assert!(
             err.is_err(),
             "Numeric-constrained TypeVar should reject String"
         );
-        // But unifying with I64 should succeed
         let mut ctx2 = unify::InferCtx::new();
         let v2 = ctx2.fresh_var();
         ctx2.constrain(&v2, unify::TypeConstraint::Numeric, span, "arithmetic")
@@ -1224,9 +1132,7 @@ mod tests {
         };
         ctx.constrain(&v, unify::TypeConstraint::Integer, span, "bitwise")
             .unwrap();
-        // Reject float
         assert!(ctx.unify(&v, &Type::F64).is_err());
-        // Accept integer
         let mut ctx2 = unify::InferCtx::new();
         let v2 = ctx2.fresh_var();
         ctx2.constrain(&v2, unify::TypeConstraint::Integer, span, "bitwise")
@@ -1245,14 +1151,12 @@ mod tests {
             col: 1,
         };
         ctx.unify(&v, &Type::String).unwrap();
-        // Constraining a String-solved TypeVar to Numeric should error
         let err = ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic");
         assert!(err.is_err(), "should reject String for Numeric constraint");
     }
 
     #[test]
     fn test_arithmetic_operators_constrain_typevar_params() {
-        // *add(a, b) should constrain a and b to Numeric via the + operator
         let src = "*add(a, b)\n    a + b\n*main()\n    log(add(3, 4))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1279,7 +1183,6 @@ mod tests {
 
     #[test]
     fn test_string_concat_not_broken_by_constraints() {
-        // String + String is concat — operator constraints should not break it
         let src = "*main()\n    s is \"hello\" + \" world\"\n    log(s)\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
@@ -1304,8 +1207,6 @@ mod tests {
         );
     }
 
-    // ── Phase 2 (P3): SCC Mutual Recursion tests ──
-
     #[test]
     fn test_mutual_recursion_is_even_is_odd() {
         let src = "*is_even(n)\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n";
@@ -1320,7 +1221,6 @@ mod tests {
             .iter()
             .find(|f| f.name.starts_with("is_odd"))
             .unwrap();
-        // Both should have I64 param and I64 return
         assert_eq!(
             is_even.params[0].ty,
             Type::I64,
@@ -1377,7 +1277,6 @@ mod tests {
         let f1 = hir.fns.iter().find(|f| f.name.starts_with("f1")).unwrap();
         let f2 = hir.fns.iter().find(|f| f.name.starts_with("f2")).unwrap();
         let f3 = hir.fns.iter().find(|f| f.name.starts_with("f3")).unwrap();
-        // All three should resolve to I64 params and return
         assert_eq!(f1.ret, Type::I64);
         assert_eq!(f2.ret, Type::I64);
         assert_eq!(f3.ret, Type::I64);
@@ -1386,15 +1285,11 @@ mod tests {
         assert_eq!(f3.params[0].ty, Type::I64);
     }
 
-    // ── Phase 3 (P4): Function Generalization tests ──
-
     #[test]
     fn test_implicit_generic_identity_multi_type() {
-        // identity(42) and identity("hello") should produce separate monomorphized versions
         let src =
             "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
         let hir = type_check(src);
-        // Should have two monomorphized identity functions
         let id_fns: Vec<_> = hir
             .fns
             .iter()
@@ -1406,7 +1301,6 @@ mod tests {
             id_fns.len(),
             id_fns.iter().map(|f| &f.name).collect::<Vec<_>>()
         );
-        // One should have I64 param, another String param
         let has_i64 = id_fns.iter().any(|f| f.params[0].ty == Type::I64);
         let has_string = id_fns.iter().any(|f| f.params[0].ty == Type::String);
         assert!(has_i64, "expected I64-specialized identity");
@@ -1415,7 +1309,6 @@ mod tests {
 
     #[test]
     fn test_implicit_generic_single_type() {
-        // When called with only one type, there should be exactly one version
         let src = "*double(x)\n    x + x\n*main()\n    log(double(21))\n";
         let hir = type_check(src);
         let dbl_fns: Vec<_> = hir
@@ -1433,7 +1326,6 @@ mod tests {
 
     #[test]
     fn test_implicit_generic_no_typevars_in_output() {
-        // Monomorphized functions should have no remaining TypeVars
         let src = "*swap(a, b)\n    b\n*main()\n    log(swap(1, 2))\n";
         let hir = type_check(src);
         for f in &hir.fns {
@@ -1455,11 +1347,8 @@ mod tests {
         }
     }
 
-    // ── Phase 6 (P5): Higher-Order Inference ──────────────────────────
-
     #[test]
     fn test_hof_apply_infers_fn_param() {
-        // *apply(f, x) with body f(x) should work as implicit generic
         let src = "*add1(x: i64) -> i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(add1, 42))\n";
         let hir = type_check(src);
         let apply_fn = hir
@@ -1467,7 +1356,6 @@ mod tests {
             .iter()
             .find(|f| f.name.starts_with("apply"))
             .unwrap();
-        // f param should be Fn type, x should be i64
         assert!(
             matches!(&apply_fn.params[0].ty, Type::Fn(_, _)),
             "f should be Fn type, got {:?}",
@@ -1479,7 +1367,6 @@ mod tests {
 
     #[test]
     fn test_hof_compose_infers_two_fn_params() {
-        // *compose(f, g, x) with body f(g(x)) should monomorphize both f and g as Fn types
         let src = "*inc(x: i64) -> i64\n    x + 1\n*dbl(x: i64) -> i64\n    x * 2\n*compose(f, g, x)\n    f(g(x))\n*main()\n    log(compose(inc, dbl, 20))\n";
         let hir = type_check(src);
         let compose_fn = hir
@@ -1503,7 +1390,6 @@ mod tests {
 
     #[test]
     fn test_hof_apply_twice() {
-        // *apply_twice(f, x) with body f(f(x)) should correctly infer Fn type for f
         let src = "*inc(x: i64) -> i64\n    x + 1\n*apply_twice(f, x)\n    f(f(x))\n*main()\n    log(apply_twice(inc, 40))\n";
         let hir = type_check(src);
         let at_fn = hir
@@ -1517,7 +1403,6 @@ mod tests {
 
     #[test]
     fn test_hof_no_typevars_remain() {
-        // HOF monomorphized output should have no remaining TypeVars
         let src = "*inc(x: i64) -> i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(inc, 42))\n";
         let hir = type_check(src);
         for f in &hir.fns {
@@ -1539,12 +1424,8 @@ mod tests {
         }
     }
 
-    // ── Phase 2 (R2): Lambda Parameter Inference ──────────────────────
-
     #[test]
     fn test_lambda_standalone_unannotated_param_integer() {
-        // R2.1: Lambda *fn(x) x + 1 should work without annotation.
-        // The + operator gives x an Integer constraint which defaults to I64.
         let src = "*main()\n    f is *fn(x) x + 1\n    log(f(5))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1563,7 +1444,6 @@ mod tests {
 
     #[test]
     fn test_lambda_standalone_unannotated_param_float() {
-        // Lambda with float arithmetic should infer Float constraint
         let src = "*main()\n    f is *fn(x) x + 1.0\n    log(f(2.5))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1582,11 +1462,9 @@ mod tests {
 
     #[test]
     fn test_lambda_let_bound_then_called() {
-        // R2.2: Let-bound lambda then called with concrete args
         let src = "*main()\n    f is *fn(x) x + 1\n    result is f(42)\n    log(result)\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
-        // result should be I64
         if let hir::Stmt::Bind(b) = &main.body[1] {
             assert_eq!(b.name, "result");
             assert_eq!(b.ty, Type::I64, "result should be I64, got {:?}", b.ty);
@@ -1595,19 +1473,14 @@ mod tests {
 
     #[test]
     fn test_lambda_passed_to_hof_infers_type() {
-        // Lambda passed directly to HOF with known param type
         let src = "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n*main()\n    log(apply(*fn(x) x + 1, 5))\n";
         let hir = type_check(src);
-        // Should compile without errors; lambda param inferred from HOF context
         let apply_fn = hir.fns.iter().find(|f| f.name == "apply").unwrap();
         assert_eq!(apply_fn.ret, Type::I64);
     }
 
-    // ── Phase 3 (R3): Function Type Parameter Inference ──────────────
-
     #[test]
     fn test_fn_scheme_quantified_exempt_from_strict() {
-        // R3.1: Quantified scheme vars should NOT trigger strict errors
         let src = "*identity(x)\n    x\n*main()\n    log(identity(42))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1622,7 +1495,6 @@ mod tests {
 
     #[test]
     fn test_fn_scheme_polymorphic_identity_strict() {
-        // Polymorphic function used with different types should work in strict mode
         let src =
             "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
         let prog = parse(src);
@@ -1638,8 +1510,6 @@ mod tests {
 
     #[test]
     fn test_fn_numeric_param_defaults_in_strict() {
-        // R1.2 + R3.1: *double(x) x + x should work in strict mode
-        // (Numeric constraint from + defaults to I64 with warning, not error)
         let src = "*double(x)\n    x + x\n*main()\n    log(double(21))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
@@ -1654,7 +1524,6 @@ mod tests {
 
     #[test]
     fn test_cross_function_constraint_flow() {
-        // R3.2: Calling f(x) where f: (i64) -> i64 should constrain x
         let src = "*inc(x: i64) -> i64\n    x + 1\n*apply_inc(x)\n    inc(x)\n*main()\n    log(apply_inc(5))\n";
         let hir = type_check(src);
         let apply_inc = hir
@@ -1670,16 +1539,12 @@ mod tests {
         assert_eq!(apply_inc.ret, Type::I64);
     }
 
-    // ── Phase 4 (R4): Struct Field Inference ─────────────────────────
-
     #[test]
     fn test_struct_field_inferred_from_constructor() {
-        // R4.1: Struct fields should be inferred from constructor args
         let src =
             "type Point\n    x\n    y\n\n*main()\n    p is Point(x is 1, y is 2)\n    log(p.x)\n";
         let prog = parse(src);
         let mut typer = Typer::new();
-        // Strict mode OFF for this — unannotated struct fields need constructor
         typer.set_lenient(true);
         let result = typer.lower_program(&prog);
         assert!(
@@ -1691,7 +1556,6 @@ mod tests {
 
     #[test]
     fn test_return_type_inference_no_annotation() {
-        // Return type should be inferred from tail expression
         let src = "*square(x: i64)\n    x * x\n*main()\n    log(square(5))\n";
         let hir = type_check(src);
         let square = hir.fns.iter().find(|f| f.name == "square").unwrap();
@@ -1704,7 +1568,6 @@ mod tests {
 
     #[test]
     fn test_multipath_return_type_inference() {
-        // Return type inferred across if/else branches
         let src =
             "*abs(x: i64)\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n";
         let hir = type_check(src);
@@ -1714,7 +1577,6 @@ mod tests {
 
     #[test]
     fn test_mutual_recursion_unannotated_params() {
-        // P5.2: Mutual recursion with unannotated params
         let src = "*is_even(n)\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(4))\n";
         let hir = type_check(src);
         let is_even = hir
@@ -1733,11 +1595,9 @@ mod tests {
 
     #[test]
     fn test_nested_lambda_inference() {
-        // P5.4: Nested lambdas with unannotated params
         let src = "*main()\n    f is *fn(x) *fn(y) x + y\n    g is f(10)\n    log(g(20))\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
-        // f should be Fn(I64) -> Fn(I64) -> I64
         if let hir::Stmt::Bind(b) = &main.body[0] {
             assert_eq!(b.name, "f");
             assert!(!b.ty.has_type_var(), "f type has TypeVar: {:?}", b.ty);
@@ -1746,7 +1606,6 @@ mod tests {
 
     #[test]
     fn test_scc_cycle_with_typevar_params() {
-        // P5.12: SCC cycle with TypeVar params
         let src = "*a(x)\n    if x equals 0\n        return 0\n    b(x - 1) + 1\n\n*b(x)\n    if x equals 0\n        return 0\n    a(x - 1) + 1\n\n*main()\n    log(a(5))\n";
         let hir = type_check(src);
         let a_fn = hir.fns.iter().find(|f| f.name.starts_with("a")).unwrap();
@@ -1757,11 +1616,8 @@ mod tests {
         assert_eq!(b_fn.ret, Type::I64);
     }
 
-    // ── Phase 5 additional: Missing Test Coverage from §8.2 ──────────
-
     #[test]
     fn test_poly_multi_use_identity() {
-        // P5.1: Multi-use polymorphism — id used with i64 then String
         let src = "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
@@ -1778,11 +1634,9 @@ mod tests {
 
     #[test]
     fn test_strict_vs_lenient_comparison() {
-        // P5.7: Same program should work in both strict and lenient modes
         let src = "*double(x: i64) -> i64\n    x + x\n*main()\n    log(double(21))\n";
         let prog = parse(src);
 
-        // Lenient mode
         let mut typer_lenient = Typer::new();
         let result_lenient = typer_lenient.lower_program(&prog);
         assert!(
@@ -1791,7 +1645,6 @@ mod tests {
             result_lenient.err()
         );
 
-        // Strict mode — fully annotated program should also pass
         let prog2 = parse(src);
         let mut typer_strict = Typer::new();
         typer_strict.set_strict_types(true);
@@ -1805,15 +1658,11 @@ mod tests {
 
     #[test]
     fn test_strict_rejects_completely_unconstrained() {
-        // Strict mode should reject completely unconstrained TypeVars (not in a scheme)
-        // A function with a param that is never used at all
         let src = "*unused_param(x)\n    42\n*main()\n    log(unused_param(0))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
         typer.set_strict_types(true);
         let result = typer.lower_program(&prog);
-        // x is used in the call (passed 0), so it gets Integer constraint
-        // This should work — x gets constrained via the call site
         assert!(
             result.is_ok(),
             "param constrained by call site should work: {:?}",
@@ -1823,7 +1672,6 @@ mod tests {
 
     #[test]
     fn test_scheme_instantiation_with_container() {
-        // P5.13: Scheme instantiation with container types
         let src = "*wrap(x: i64)\n    v is vec()\n    v.push(x)\n    v\n*main()\n    w is wrap(42)\n    log(w.len())\n";
         let hir = type_check(src);
         let wrap_fn = hir.fns.iter().find(|f| f.name == "wrap").unwrap();
@@ -1832,7 +1680,6 @@ mod tests {
 
     #[test]
     fn test_vec_push_constrains_element_type() {
-        // P5 addition: deferred method constraint on container
         let src = "*main()\n    v is vec()\n    v.push(42)\n    log(v.len())\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
@@ -1851,13 +1698,11 @@ mod tests {
 
     #[test]
     fn test_value_restriction_syntactic_value() {
-        // Value restriction: lambda IS a syntactic value → should generalize
         let src = "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hi\")\n    log(a)\n    log(b)\n";
         let prog = parse(src);
         let mut typer = Typer::new();
         let hir = typer.lower_program(&prog).unwrap();
         let main = &hir.fns[0];
-        // id is a lambda (syntactic value) → gets poly scheme → can be used at multiple types
         for stmt in &main.body {
             if let hir::Stmt::Bind(b) = stmt {
                 match b.name.as_str() {
@@ -1871,10 +1716,8 @@ mod tests {
 
     #[test]
     fn test_unannotated_fn_called_with_string() {
-        // Function with unannotated param, called with string
         let src = "*echo(x)\n    x\n*main()\n    log(echo(\"hello\"))\n";
         let hir = type_check(src);
-        // After monomorphization, echo should have String param
         let echo = hir.fns.iter().find(|f| f.name.starts_with("echo")).unwrap();
         assert_eq!(echo.params[0].ty, Type::String);
         assert_eq!(echo.ret, Type::String);
@@ -1882,7 +1725,6 @@ mod tests {
 
     #[test]
     fn test_unannotated_fn_called_with_bool() {
-        // Function with unannotated param, called with bool
         let src =
             "*negate(x)\n    if x\n        return 0\n    1\n*main()\n    log(negate(1 equals 1))\n";
         let hir = type_check(src);

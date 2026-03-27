@@ -1,4 +1,3 @@
-use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -64,7 +63,6 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.unwrap();
         let layout = self.rc_layout_ty(inner);
         let i64t = self.ctx.i64_type();
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let heap_ptr = ptr.into_pointer_value();
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
         let old = b!(self.bld.build_atomicrmw(
@@ -83,13 +81,7 @@ impl<'ctx> Compiler<'ctx> {
         let cont_bb = self.ctx.append_basic_block(fv, "rc.cont");
         b!(self.bld.build_conditional_branch(is_zero, free_bb, cont_bb));
         self.bld.position_at_end(free_bb);
-        let free_fn = self.module.get_function("free").unwrap_or_else(|| {
-            self.module.add_function(
-                "free",
-                self.ctx.void_type().fn_type(&[ptr_ty.into()], false),
-                Some(Linkage::External),
-            )
-        });
+        let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
         b!(self.bld.build_unconditional_branch(cont_bb));
         self.bld.position_at_end(cont_bb);
@@ -136,16 +128,12 @@ impl<'ctx> Compiler<'ctx> {
         let layout = self.weak_layout_ty(inner);
         let heap_ptr = rc_ptr.into_pointer_value();
         let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "weak.cnt"));
-        let old = b!(self
-            .bld
-            .build_load(self.ctx.i64_type(), weak_gep, "weak.old"))
-        .into_int_value();
-        let new = b!(self.bld.build_int_nuw_add(
-            old,
+        b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Add,
+            weak_gep,
             self.ctx.i64_type().const_int(1, false),
-            "weak.inc"
+            inkwell::AtomicOrdering::AcquireRelease,
         ));
-        b!(self.bld.build_store(weak_gep, new));
         Ok(heap_ptr.into())
     }
 
@@ -203,11 +191,16 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let heap_ptr = ptr.into_pointer_value();
         let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "weak.cnt"));
-        let old = b!(self.bld.build_load(i64t, weak_gep, "weak.old")).into_int_value();
-        let new = b!(self
-            .bld
-            .build_int_nsw_sub(old, i64t.const_int(1, false), "weak.dec"));
-        b!(self.bld.build_store(weak_gep, new));
+        let old_weak = b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Sub,
+            weak_gep,
+            i64t.const_int(1, false),
+            inkwell::AtomicOrdering::AcquireRelease,
+        ));
+        let new_weak =
+            b!(self
+                .bld
+                .build_int_nsw_sub(old_weak, i64t.const_int(1, false), "weak.dec"));
 
         let strong_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "strong.cnt"));
         let strong = b!(self.bld.build_load(i64t, strong_gep, "strong")).into_int_value();
@@ -219,7 +212,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let weak_zero = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
-            new,
+            new_weak,
             i64t.const_int(0, false),
             "w.zero"
         ));

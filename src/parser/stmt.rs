@@ -5,32 +5,17 @@ use super::{ParseError, Parser};
 
 impl Parser {
     pub(super) fn parse_block(&mut self) -> Result<Block, ParseError> {
-        self.expect(Token::Indent)?;
-        let mut stmts = Vec::new();
-        while !self.check(Token::Dedent) && !self.eof() {
-            self.skip_nl();
-            if self.check(Token::Dedent) || self.eof() {
-                break;
-            }
-            stmts.push(self.parse_stmt()?);
-            self.skip_nl();
-        }
-        if self.check(Token::Dedent) {
-            self.advance();
-        }
-        Ok(stmts)
+        self.parse_indented(Self::parse_stmt)
     }
 
     pub(super) fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         match self.peek() {
             Token::If => {
-                // Check for if-let pattern: `if <expr> is <pattern>`
-                // Desugars to match with pattern arm + wildcard fallback
                 let sp = self.span();
-                self.advance(); // consume 'if'
+                self.advance();
                 let subject = self.parse_expr()?;
                 if self.check(Token::Is) {
-                    self.advance(); // consume 'is'
+                    self.advance();
                     let pat = self.parse_pat()?;
                     self.expect(Token::Newline)?;
                     let then_body = self.parse_block()?;
@@ -61,7 +46,6 @@ impl Parser {
                         span: sp,
                     }))
                 } else {
-                    // Normal if — continue parsing inline
                     self.expect(Token::Newline)?;
                     let then = self.parse_block()?;
                     let mut elifs = Vec::new();
@@ -224,49 +208,21 @@ impl Parser {
     }
 
     fn aug_op(&mut self) -> Option<BinOp> {
-        match self.peek() {
-            Token::PlusEq => {
-                self.advance();
-                Some(BinOp::Add)
-            }
-            Token::MinusEq => {
-                self.advance();
-                Some(BinOp::Sub)
-            }
-            Token::StarEq => {
-                self.advance();
-                Some(BinOp::Mul)
-            }
-            Token::SlashEq => {
-                self.advance();
-                Some(BinOp::Div)
-            }
-            Token::PercentEq => {
-                self.advance();
-                Some(BinOp::Mod)
-            }
-            Token::AmpEq => {
-                self.advance();
-                Some(BinOp::BitAnd)
-            }
-            Token::PipeEq => {
-                self.advance();
-                Some(BinOp::BitOr)
-            }
-            Token::CaretEq => {
-                self.advance();
-                Some(BinOp::BitXor)
-            }
-            Token::ShlEq => {
-                self.advance();
-                Some(BinOp::Shl)
-            }
-            Token::ShrEq => {
-                self.advance();
-                Some(BinOp::Shr)
-            }
-            _ => None,
-        }
+        let op = match self.peek() {
+            Token::PlusEq => BinOp::Add,
+            Token::MinusEq => BinOp::Sub,
+            Token::StarEq => BinOp::Mul,
+            Token::SlashEq => BinOp::Div,
+            Token::PercentEq => BinOp::Mod,
+            Token::AmpEq => BinOp::BitAnd,
+            Token::PipeEq => BinOp::BitOr,
+            Token::CaretEq => BinOp::BitXor,
+            Token::ShlEq => BinOp::Shl,
+            Token::ShrEq => BinOp::Shr,
+            _ => return None,
+        };
+        self.advance();
+        Some(op)
     }
 
     fn parse_bind(&mut self) -> Result<Stmt, ParseError> {
@@ -366,19 +322,7 @@ impl Parser {
         self.expect(Token::Match)?;
         let subject = self.parse_expr()?;
         self.expect(Token::Newline)?;
-        self.expect(Token::Indent)?;
-        let mut arms = Vec::new();
-        while !self.check(Token::Dedent) && !self.eof() {
-            self.skip_nl();
-            if self.check(Token::Dedent) || self.eof() {
-                break;
-            }
-            arms.push(self.parse_arm()?);
-            self.skip_nl();
-        }
-        if self.check(Token::Dedent) {
-            self.advance();
-        }
+        let arms = self.parse_indented(Self::parse_arm)?;
         Ok(Stmt::Match(Match {
             subject,
             arms,
@@ -529,37 +473,23 @@ impl Parser {
         let value = self.parse_add()?;
         let mut extra = Vec::new();
         loop {
-            match self.peek() {
-                Token::And => {
-                    self.advance();
-                    let f = self.ident()?;
-                    let o = self.parse_filter_op()?;
-                    let v = self.parse_add()?;
-                    extra.push((
-                        LogicalOp::And,
-                        StoreFilterCond {
-                            field: f,
-                            op: o,
-                            value: v,
-                        },
-                    ));
-                }
-                Token::Or => {
-                    self.advance();
-                    let f = self.ident()?;
-                    let o = self.parse_filter_op()?;
-                    let v = self.parse_add()?;
-                    extra.push((
-                        LogicalOp::Or,
-                        StoreFilterCond {
-                            field: f,
-                            op: o,
-                            value: v,
-                        },
-                    ));
-                }
+            let logical = match self.peek() {
+                Token::And => LogicalOp::And,
+                Token::Or => LogicalOp::Or,
                 _ => break,
-            }
+            };
+            self.advance();
+            let f = self.ident()?;
+            let o = self.parse_filter_op()?;
+            let v = self.parse_add()?;
+            extra.push((
+                logical,
+                StoreFilterCond {
+                    field: f,
+                    op: o,
+                    value: v,
+                },
+            ));
         }
         Ok(StoreFilter {
             field,
@@ -571,32 +501,16 @@ impl Parser {
     }
 
     fn parse_filter_op(&mut self) -> Result<BinOp, ParseError> {
-        match self.peek() {
-            Token::Equals => {
-                self.advance();
-                Ok(BinOp::Eq)
-            }
-            Token::Isnt => {
-                self.advance();
-                Ok(BinOp::Ne)
-            }
-            Token::Lt => {
-                self.advance();
-                Ok(BinOp::Lt)
-            }
-            Token::Gt => {
-                self.advance();
-                Ok(BinOp::Gt)
-            }
-            Token::LtEq => {
-                self.advance();
-                Ok(BinOp::Le)
-            }
-            Token::GtEq => {
-                self.advance();
-                Ok(BinOp::Ge)
-            }
-            _ => Err(self.error("expected comparison operator (equals, isnt, <, >, <=, >=)")),
-        }
+        let op = match self.peek() {
+            Token::Equals => BinOp::Eq,
+            Token::Isnt => BinOp::Ne,
+            Token::Lt => BinOp::Lt,
+            Token::Gt => BinOp::Gt,
+            Token::LtEq => BinOp::Le,
+            Token::GtEq => BinOp::Ge,
+            _ => return Err(self.error("expected comparison operator")),
+        };
+        self.advance();
+        Ok(op)
     }
 }

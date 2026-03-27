@@ -13,6 +13,11 @@ impl Typer {
             Type::Array(inner, sz) => {
                 Type::Array(Box::new(Self::substitute_type(inner, type_map)), *sz)
             }
+            Type::Vec(inner) => Type::Vec(Box::new(Self::substitute_type(inner, type_map))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(Self::substitute_type(k, type_map)),
+                Box::new(Self::substitute_type(v, type_map)),
+            ),
             Type::Tuple(tys) => Type::Tuple(
                 tys.iter()
                     .map(|t| Self::substitute_type(t, type_map))
@@ -26,6 +31,11 @@ impl Typer {
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(Self::substitute_type(inner, type_map))),
             Type::Rc(inner) => Type::Rc(Box::new(Self::substitute_type(inner, type_map))),
+            Type::Weak(inner) => Type::Weak(Box::new(Self::substitute_type(inner, type_map))),
+            Type::Channel(inner) => Type::Channel(Box::new(Self::substitute_type(inner, type_map))),
+            Type::Coroutine(inner) => {
+                Type::Coroutine(Box::new(Self::substitute_type(inner, type_map)))
+            }
             _ => ty.clone(),
         }
     }
@@ -48,9 +58,6 @@ impl Typer {
         if !f.type_params.is_empty() {
             return f.type_params.clone();
         }
-        // Only count explicit Type::Param references in annotations as type params.
-        // Unannotated params are NOT implicit generics — they get TypeVars via
-        // declare_fn_sig and are solved by unification, not monomorphization.
         let mut tps = Vec::new();
         for p in &f.params {
             if let Some(ty) = &p.ty {
@@ -70,8 +77,18 @@ impl Typer {
                     out.push(n.clone());
                 }
             }
-            Type::Array(inner, _) | Type::Ptr(inner) | Type::Rc(inner) => {
+            Type::Array(inner, _)
+            | Type::Vec(inner)
+            | Type::Ptr(inner)
+            | Type::Rc(inner)
+            | Type::Weak(inner)
+            | Type::Channel(inner)
+            | Type::Coroutine(inner) => {
                 Self::collect_type_params_from(inner, out);
+            }
+            Type::Map(k, v) => {
+                Self::collect_type_params_from(k, out);
+                Self::collect_type_params_from(v, out);
             }
             Type::Tuple(tys) => {
                 for t in tys {
@@ -95,14 +112,9 @@ impl Typer {
     pub(crate) fn normalize_generic_fn(f: &ast::Fn) -> ast::Fn {
         let mut gf = f.clone();
         gf.type_params = Self::effective_type_params(f);
-        // Only explicit type params need normalization — unannotated params go
-        // through the unification path via declare_fn_sig, not monomorphization.
         gf
     }
 
-    /// Convert an inferable function (unannotated params) into a generic function
-    /// for monomorphization fallback. Assigns implicit `__i` type params to each
-    /// unannotated parameter.
     pub(crate) fn normalize_inferable_fn(f: &ast::Fn) -> ast::Fn {
         let mut gf = f.clone();
         let mut tps = Vec::new();
@@ -148,8 +160,6 @@ impl Typer {
         if let Some(bounds) = self.generic_bounds.get(name).cloned() {
             for (param, required_traits) in &bounds {
                 if let Some(concrete_ty) = type_map.get(param) {
-                    // Resolve TypeVars before checking trait bounds
-                    // Disable strict — monomorphization TypeVars are internal
                     let was_strict = self.infer_ctx.is_strict();
                     self.infer_ctx.set_strict(false);
                     let resolved = self.infer_ctx.resolve(concrete_ty);
@@ -198,10 +208,7 @@ impl Typer {
             .ret
             .clone()
             .map(|r| Self::substitute_type(&r, type_map))
-            .unwrap_or_else(|| {
-                // Phase 1.3: Use fresh TypeVar instead of AST heuristic
-                self.infer_ctx.fresh_var()
-            });
+            .unwrap_or_else(|| self.infer_ctx.fresh_var());
         self.pop_scope();
         let id = self.fresh_id();
         self.fns
@@ -249,7 +256,6 @@ impl Typer {
 
         let body = self.lower_block(&gf.body, ret)?;
 
-        // Phase 2.2: Unify tail expression with return TypeVar (recurse into If/Match)
         if gf.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
                 let _ =
@@ -257,13 +263,10 @@ impl Typer {
                         .unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
             }
         }
-        // Disable strict for monomorphized function resolution — these are
-        // internal TypeVars created during re-lowering, not user-visible ambiguities.
         let was_strict = self.infer_ctx.is_strict();
         self.infer_ctx.set_strict(false);
         let resolved_ret = self.infer_ctx.resolve(ret);
         self.infer_ctx.set_strict(was_strict);
-        // Update the function signature with the resolved return type
         if let Some(entry) = self.fns.get_mut(mangled) {
             entry.2 = resolved_ret.clone();
         }
@@ -336,7 +339,7 @@ impl Typer {
     pub(crate) fn try_monomorphize_generic_variant(
         &mut self,
         variant_name: &str,
-        arg_tys: &[Type],
+        arg_tys: Option<&[Type]>,
     ) -> Result<Option<String>, String> {
         let found = self.generic_enums.iter().find_map(|(ename, edef)| {
             edef.variants
@@ -349,10 +352,12 @@ impl Typer {
             None => return Ok(None),
         };
         let mut type_map = HashMap::new();
-        for (i, field) in variant.fields.iter().enumerate() {
-            if let Type::Param(ref p) = field.ty {
-                if let Some(ty) = arg_tys.get(i) {
-                    type_map.insert(p.clone(), ty.clone());
+        if let Some(tys) = arg_tys {
+            for (i, field) in variant.fields.iter().enumerate() {
+                if let Type::Param(ref p) = field.ty {
+                    if let Some(ty) = tys.get(i) {
+                        type_map.insert(p.clone(), ty.clone());
+                    }
                 }
             }
         }
@@ -360,28 +365,6 @@ impl Typer {
             for tp in &edef.type_params {
                 type_map.entry(tp.clone()).or_insert(Type::I64);
             }
-        }
-        let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
-        Ok(Some(mangled))
-    }
-
-    pub(crate) fn try_monomorphize_generic_variant_bare(
-        &mut self,
-        variant_name: &str,
-    ) -> Result<Option<String>, String> {
-        let found = self.generic_enums.iter().find_map(|(ename, edef)| {
-            edef.variants
-                .iter()
-                .find(|v| v.name == variant_name)
-                .map(|v| (ename.clone(), edef.clone(), v.clone()))
-        });
-        let (enum_name, edef, _variant) = match found {
-            Some(f) => f,
-            None => return Ok(None),
-        };
-        let mut type_map = HashMap::new();
-        for tp in &edef.type_params {
-            type_map.entry(tp.clone()).or_insert(Type::I64);
         }
         let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
         Ok(Some(mangled))

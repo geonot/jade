@@ -55,14 +55,21 @@ impl Parser {
             Token::Eof
         }
     }
+
     fn check(&self, t: Token) -> bool {
-        std::mem::discriminant(&self.peek()) == std::mem::discriminant(&t)
+        if self.pos < self.tok.len() {
+            std::mem::discriminant(&self.tok[self.pos].token) == std::mem::discriminant(&t)
+        } else {
+            matches!(t, Token::Eof)
+        }
     }
+
     fn advance(&mut self) {
         if self.pos < self.tok.len() {
             self.pos += 1;
         }
     }
+
     fn span(&self) -> Span {
         if self.pos < self.tok.len() {
             self.tok[self.pos].span
@@ -70,9 +77,11 @@ impl Parser {
             Span::dummy()
         }
     }
+
     fn eof(&self) -> bool {
         self.pos >= self.tok.len() || matches!(self.tok[self.pos].token, Token::Eof)
     }
+
     fn skip_nl(&mut self) {
         while self.check(Token::Newline) {
             self.advance();
@@ -80,7 +89,12 @@ impl Parser {
     }
 
     fn expect(&mut self, t: Token) -> Result<(), ParseError> {
-        if self.check(t.clone()) {
+        if self.check(Token::Eof) && !matches!(t, Token::Eof) {
+            return Err(self.error(&format!("expected {t}, got EOF")));
+        }
+        if self.pos < self.tok.len()
+            && std::mem::discriminant(&self.tok[self.pos].token) == std::mem::discriminant(&t)
+        {
             self.advance();
             Ok(())
         } else {
@@ -89,17 +103,51 @@ impl Parser {
     }
 
     fn ident(&mut self) -> Result<String, ParseError> {
-        match self.peek() {
-            Token::Ident(n) => {
-                self.advance();
-                Ok(n)
+        if self.pos < self.tok.len() {
+            match &self.tok[self.pos].token {
+                Token::Ident(n) => {
+                    let name = n.clone();
+                    self.advance();
+                    return Ok(name);
+                }
+                Token::Set => {
+                    self.advance();
+                    return Ok("set".into());
+                }
+                _ => {}
             }
-            Token::Set => {
-                self.advance();
-                Ok("set".into())
-            }
-            _ => Err(self.error(&format!("expected identifier, got {}", self.peek()))),
         }
+        Err(self.error(&format!("expected identifier, got {}", self.peek())))
+    }
+
+    fn parse_body(&mut self) -> Result<Block, ParseError> {
+        if self.check(Token::Is) {
+            self.advance();
+            Ok(vec![Stmt::Expr(self.parse_expr()?)])
+        } else {
+            self.expect(Token::Newline)?;
+            self.parse_block()
+        }
+    }
+
+    fn parse_indented<T>(
+        &mut self,
+        mut f: impl FnMut(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<Vec<T>, ParseError> {
+        self.expect(Token::Indent)?;
+        let mut items = Vec::new();
+        while !self.check(Token::Dedent) && !self.eof() {
+            self.skip_nl();
+            if self.check(Token::Dedent) || self.eof() {
+                break;
+            }
+            items.push(f(self)?);
+            self.skip_nl();
+        }
+        if self.check(Token::Dedent) {
+            self.advance();
+        }
+        Ok(items)
     }
 
     fn error(&self, msg: &str) -> ParseError {

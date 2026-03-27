@@ -14,51 +14,10 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let x = self.compile_expr(&args[0])?.into_float_value();
         let decimals = self.compile_expr(&args[1])?.into_int_value();
-        let i64t = self.ctx.i64_type();
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let snprintf = self.ensure_snprintf();
-
-        let fmt = b!(self.bld.build_global_string_ptr("%.*f", "ff.fmt"));
-        let null = ptr_ty.const_null();
         let dec_i32 = b!(self
             .bld
             .build_int_truncate(decimals, self.ctx.i32_type(), "dec32"));
-        let len = b!(self.bld.build_call(
-            snprintf,
-            &[
-                null.into(),
-                i64t.const_int(0, false).into(),
-                fmt.as_pointer_value().into(),
-                dec_i32.into(),
-                x.into()
-            ],
-            "ff.len"
-        ))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_int_value();
-        let len64 = b!(self.bld.build_int_s_extend(len, i64t, "ff.len64"));
-        let size = b!(self
-            .bld
-            .build_int_nsw_add(len64, i64t.const_int(1, false), "ff.sz"));
-        let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[size.into()], "ff.buf"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap();
-        b!(self.bld.build_call(
-            snprintf,
-            &[
-                buf.into(),
-                size.into(),
-                fmt.as_pointer_value().into(),
-                dec_i32.into(),
-                x.into()
-            ],
-            ""
-        ));
-        self.build_string(buf, len64, size, "ff.s")
+        self.snprintf_to_string("%.*f", &[dec_i32.into(), x.into()], "ff")
     }
 
     pub(crate) fn compile_fmt_snprintf(
@@ -68,44 +27,12 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let val = self.compile_expr(&args[0])?.into_int_value();
         let i64t = self.ctx.i64_type();
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let snprintf = self.ensure_snprintf();
-        let fmt = b!(self.bld.build_global_string_ptr(fmt_str, "fh.fmt"));
-        let null = ptr_ty.const_null();
         let wide = if val.get_type().get_bit_width() < 64 {
             b!(self.bld.build_int_s_extend(val, i64t, "fw")).into()
         } else {
             val.into()
         };
-        let len = b!(self.bld.build_call(
-            snprintf,
-            &[
-                null.into(),
-                i64t.const_int(0, false).into(),
-                fmt.as_pointer_value().into(),
-                wide
-            ],
-            "fh.len"
-        ))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_int_value();
-        let len64 = b!(self.bld.build_int_s_extend(len, i64t, "fh.len64"));
-        let size = b!(self
-            .bld
-            .build_int_nsw_add(len64, i64t.const_int(1, false), "fh.sz"));
-        let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[size.into()], "fh.buf"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap();
-        b!(self.bld.build_call(
-            snprintf,
-            &[buf.into(), size.into(), fmt.as_pointer_value().into(), wide],
-            ""
-        ));
-        self.build_string(buf, len64, size, "fh.s")
+        self.snprintf_to_string(fmt_str, &[wide], "fh")
     }
 
     pub(crate) fn compile_fmt_bin(

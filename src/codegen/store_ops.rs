@@ -10,6 +10,94 @@ use super::b;
 use super::stores::HEADER_SIZE;
 
 impl<'ctx> Compiler<'ctx> {
+    fn store_read_count(
+        &mut self,
+        fp: inkwell::values::PointerValue<'ctx>,
+    ) -> Result<inkwell::values::IntValue<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let fseek_fn = self.module.get_function("fseek").unwrap();
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                i64t.const_int(8, false).into(),
+                i32t.const_int(0, false).into(),
+            ],
+            ""
+        ));
+        let count_buf = self.entry_alloca(i64t.into(), "sc.count");
+        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
+        let fread_fn = self.module.get_function("fread").unwrap();
+        b!(self.bld.build_call(
+            fread_fn,
+            &[
+                count_buf.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                fp.into(),
+            ],
+            ""
+        ));
+        Ok(b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value())
+    }
+
+    fn store_load_records(
+        &mut self,
+        fp: inkwell::values::PointerValue<'ctx>,
+        count: inkwell::values::IntValue<'ctx>,
+        rec_size: u64,
+    ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let fseek_fn = self.module.get_function("fseek").unwrap();
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                i64t.const_int(HEADER_SIZE, false).into(),
+                i32t.const_int(0, false).into(),
+            ],
+            ""
+        ));
+        let total = b!(self
+            .bld
+            .build_int_mul(count, i64t.const_int(rec_size, false), "sl.total"));
+        let one = i64t.const_int(1, false);
+        let alloc_size = b!(self.bld.build_select(
+            b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                total,
+                i64t.const_int(0, false),
+                "sl.isz"
+            )),
+            one,
+            total,
+            "sl.alloc"
+        ))
+        .into_int_value();
+        let malloc_fn = self.ensure_malloc();
+        let buf = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[alloc_size.into()],
+                "sl.buf"
+            )))
+            .into_pointer_value();
+        let fread_fn = self.module.get_function("fread").unwrap();
+        b!(self.bld.build_call(
+            fread_fn,
+            &[
+                buf.into(),
+                i64t.const_int(rec_size, false).into(),
+                count.into(),
+                fp.into(),
+            ],
+            ""
+        ));
+        Ok(buf)
+    }
+
     pub(crate) fn compile_store_insert(
         &mut self,
         store_name: &str,
@@ -147,38 +235,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ensure_fn = self.gen_store_ensure_open(sd)?;
         b!(self.bld.build_call(ensure_fn, &[], ""));
-
         let fp = self.load_store_fp(store_name)?;
-        let i64t = self.ctx.i64_type();
-        let i32t = self.ctx.i32_type();
-
-        let fseek_fn = self.module.get_function("fseek").unwrap();
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into(),
-            ],
-            ""
-        ));
-
-        let count_buf = self.entry_alloca(i64t.into(), "store.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = self.module.get_function("fread").unwrap();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into(),
-            ],
-            ""
-        ));
-
-        let count = b!(self.bld.build_load(i64t, count_buf, "count"));
-        Ok(count)
+        let count = self.store_read_count(fp)?;
+        Ok(count.into())
     }
 
     pub(crate) fn compile_store_query(
@@ -200,75 +259,8 @@ impl<'ctx> Compiler<'ctx> {
 
         let (fi, ft, fv, extras) = self.precompile_filter_values(filter, sd)?;
 
-        let fseek_fn = self.module.get_function("fseek").unwrap();
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-        let count_buf = self.entry_alloca(i64t.into(), "q.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = self.module.get_function("fread").unwrap();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into()
-            ],
-            ""
-        ));
-        let count = b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value();
-
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(HEADER_SIZE, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-
-        let total = b!(self
-            .bld
-            .build_int_mul(count, i64t.const_int(rec_size, false), "q.total"));
-        let one = i64t.const_int(1, false);
-        let alloc_size = b!(self.bld.build_select(
-            b!(self.bld.build_int_compare(
-                IntPredicate::EQ,
-                total,
-                i64t.const_int(0, false),
-                "q.isz"
-            )),
-            one,
-            total,
-            "q.alloc"
-        ))
-        .into_int_value();
-        let malloc_fn = self.ensure_malloc();
-        let buf = self
-            .call_result(b!(self.bld.build_call(
-                malloc_fn,
-                &[alloc_size.into()],
-                "q.buf"
-            )))
-            .into_pointer_value();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                buf.into(),
-                i64t.const_int(rec_size, false).into(),
-                count.into(),
-                fp.into()
-            ],
-            ""
-        ));
+        let count = self.store_read_count(fp)?;
+        let buf = self.store_load_records(fp, count, rec_size)?;
 
         let result_ptr = self.entry_alloca(st.into(), "q.result");
         let memset_fn = self.module.get_function("memset").unwrap();
@@ -351,7 +343,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let fp = self.load_store_fp(store_name)?;
         let i64t = self.ctx.i64_type();
-        let i32t = self.ctx.i32_type();
 
         let rec_name = format!("__store_{store_name}_rec");
         let rec_st = self.module.get_struct_type(&rec_name).unwrap();
@@ -361,75 +352,34 @@ impl<'ctx> Compiler<'ctx> {
         let jade_st = self.module.get_struct_type(&jade_name).unwrap();
         let jade_size = self.type_store_size(jade_st.into());
 
-        let fseek_fn = self.module.get_function("fseek").unwrap();
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-        let count_buf = self.entry_alloca(i64t.into(), "all.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = self.module.get_function("fread").unwrap();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into()
-            ],
-            ""
-        ));
-        let count = b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value();
+        let count = self.store_read_count(fp)?;
+        let raw_buf = self.store_load_records(fp, count, rec_size)?;
 
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(HEADER_SIZE, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-
-        let raw_total =
-            b!(self
-                .bld
-                .build_int_mul(count, i64t.const_int(rec_size, false), "all.raw_total"));
         let jade_total =
             b!(self
                 .bld
                 .build_int_mul(count, i64t.const_int(jade_size, false), "all.jade_total"));
+        let one = i64t.const_int(1, false);
+        let jade_alloc = b!(self.bld.build_select(
+            b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                jade_total,
+                i64t.const_int(0, false),
+                "all.jade_isz"
+            )),
+            one,
+            jade_total,
+            "all.jade_alloc"
+        ))
+        .into_int_value();
         let malloc_fn = self.ensure_malloc();
-        let raw_buf = self
-            .call_result(b!(self.bld.build_call(
-                malloc_fn,
-                &[raw_total.into()],
-                "all.raw"
-            )))
-            .into_pointer_value();
         let jade_buf = self
             .call_result(b!(self.bld.build_call(
                 malloc_fn,
-                &[jade_total.into()],
+                &[jade_alloc.into()],
                 "all.jade"
             )))
             .into_pointer_value();
-
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                raw_buf.into(),
-                i64t.const_int(rec_size, false).into(),
-                count.into(),
-                fp.into()
-            ],
-            ""
-        ));
 
         let has_strings = sd.fields.iter().any(|f| matches!(f.ty, Type::String));
 
@@ -481,10 +431,14 @@ impl<'ctx> Compiler<'ctx> {
 
             self.bld.position_at_end(done_bb);
         } else {
+            let total =
+                b!(self
+                    .bld
+                    .build_int_mul(count, i64t.const_int(rec_size, false), "all.total"));
             let memcpy_fn = self.ensure_memcpy();
             b!(self.bld.build_call(
                 memcpy_fn,
-                &[jade_buf.into(), raw_buf.into(), raw_total.into()],
+                &[jade_buf.into(), raw_buf.into(), total.into()],
                 ""
             ));
         }
@@ -515,63 +469,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let (fi, ft, fval, extras) = self.precompile_filter_values(filter, sd)?;
 
+        let count = self.store_read_count(fp)?;
+        let buf = self.store_load_records(fp, count, rec_size)?;
         let fseek_fn = self.module.get_function("fseek").unwrap();
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-        let count_buf = self.entry_alloca(i64t.into(), "del.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = self.module.get_function("fread").unwrap();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into()
-            ],
-            ""
-        ));
-        let count = b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value();
-
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(HEADER_SIZE, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-
-        let total = b!(self
-            .bld
-            .build_int_mul(count, i64t.const_int(rec_size, false), "del.total"));
-        let malloc_fn = self.ensure_malloc();
-        let buf = self
-            .call_result(b!(self.bld.build_call(
-                malloc_fn,
-                &[total.into()],
-                "del.buf"
-            )))
-            .into_pointer_value();
-
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                buf.into(),
-                i64t.const_int(rec_size, false).into(),
-                count.into(),
-                fp.into()
-            ],
-            ""
-        ));
 
         let fclose_fn = self.module.get_function("fclose").unwrap();
         b!(self.bld.build_call(fclose_fn, &[fp.into()], ""));
@@ -753,61 +653,9 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let fseek_fn = self.module.get_function("fseek").unwrap();
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-        let count_buf = self.entry_alloca(i64t.into(), "set.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = self.module.get_function("fread").unwrap();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into()
-            ],
-            ""
-        ));
-        let count = b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value();
 
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(HEADER_SIZE, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-
-        let total = b!(self
-            .bld
-            .build_int_mul(count, i64t.const_int(rec_size, false), "set.total"));
-        let malloc_fn = self.ensure_malloc();
-        let buf = self
-            .call_result(b!(self.bld.build_call(
-                malloc_fn,
-                &[total.into()],
-                "set.buf"
-            )))
-            .into_pointer_value();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                buf.into(),
-                i64t.const_int(rec_size, false).into(),
-                count.into(),
-                fp.into()
-            ],
-            ""
-        ));
+        let count = self.store_read_count(fp)?;
+        let buf = self.store_load_records(fp, count, rec_size)?;
 
         let (fi, ft, fval, extras) = self.precompile_filter_values(filter, sd)?;
         let fv = self.cur_fn.unwrap();

@@ -163,9 +163,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::BuiltinFn::Log10 => self.compile_f64_intrinsic("llvm.log10.f64", args),
             hir::BuiltinFn::Exp => self.compile_f64_intrinsic("llvm.exp.f64", args),
             hir::BuiltinFn::Exp2 => self.compile_f64_intrinsic("llvm.exp2.f64", args),
-            hir::BuiltinFn::PowF => self.compile_f64_intrinsic2("llvm.pow.f64", args),
-            hir::BuiltinFn::Copysign => self.compile_f64_intrinsic2("llvm.copysign.f64", args),
-            hir::BuiltinFn::Fma => self.compile_f64_intrinsic3("llvm.fma.f64", args),
+            hir::BuiltinFn::PowF => self.compile_f64_intrinsic("llvm.pow.f64", args),
+            hir::BuiltinFn::Copysign => self.compile_f64_intrinsic("llvm.copysign.f64", args),
+            hir::BuiltinFn::Fma => self.compile_f64_intrinsic("llvm.fma.f64", args),
             hir::BuiltinFn::StringFromRaw => self.compile_string_from_raw(args),
             hir::BuiltinFn::StringFromPtr => self.compile_string_from_ptr(args),
             hir::BuiltinFn::GetArgs => self.compile_get_args(),
@@ -522,57 +522,20 @@ impl<'ctx> Compiler<'ctx> {
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let f64t = self.ctx.f64_type();
+        let param_types: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+            (0..args.len()).map(|_| f64t.into()).collect();
         let f = self.module.get_function(name).unwrap_or_else(|| {
             self.module
-                .add_function(name, f64t.fn_type(&[f64t.into()], false), None)
+                .add_function(name, f64t.fn_type(&param_types, false), None)
         });
-        let v = self.compile_expr(&args[0])?.into_float_value();
-        Ok(b!(self.bld.build_call(f, &[v.into()], ""))
+        let compiled: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args
+            .iter()
+            .map(|a| Ok(self.compile_expr(a)?.into_float_value().into()))
+            .collect::<Result<_, String>>()?;
+        Ok(b!(self.bld.build_call(f, &compiled, ""))
             .try_as_basic_value()
             .basic()
             .unwrap())
-    }
-
-    fn compile_f64_intrinsic2(
-        &mut self,
-        name: &str,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let f64t = self.ctx.f64_type();
-        let f = self.module.get_function(name).unwrap_or_else(|| {
-            self.module
-                .add_function(name, f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
-        });
-        let a = self.compile_expr(&args[0])?.into_float_value();
-        let b_val = self.compile_expr(&args[1])?.into_float_value();
-        Ok(b!(self.bld.build_call(f, &[a.into(), b_val.into()], ""))
-            .try_as_basic_value()
-            .basic()
-            .unwrap())
-    }
-
-    fn compile_f64_intrinsic3(
-        &mut self,
-        name: &str,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let f64t = self.ctx.f64_type();
-        let f = self.module.get_function(name).unwrap_or_else(|| {
-            self.module.add_function(
-                name,
-                f64t.fn_type(&[f64t.into(), f64t.into(), f64t.into()], false),
-                None,
-            )
-        });
-        let a = self.compile_expr(&args[0])?.into_float_value();
-        let b_val = self.compile_expr(&args[1])?.into_float_value();
-        let c = self.compile_expr(&args[2])?.into_float_value();
-        Ok(b!(self
-            .bld
-            .build_call(f, &[a.into(), b_val.into(), c.into()], ""))
-        .try_as_basic_value()
-        .basic()
-        .unwrap())
     }
 
     fn compile_string_from_raw(

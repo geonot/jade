@@ -53,28 +53,15 @@ impl Typer {
                         span: b.span,
                     }))
                 } else {
-                    // Let-generalization with value restriction:
-                    // generalize if the RHS is a syntactic value (no side effects)
                     let scheme = if Self::is_syntactic_value(&b.value) {
                         self.generalize(&ty)
                     } else {
                         Scheme::mono(ty.clone())
                     };
-                    // After let-generalization, defer defaulting of quantified TypeVars
-                    // so that later statements in the same block can solve them via
-                    // unification (e.g., `let f = *fn(x) x; greet(f, 'hello')` where
-                    // greet expects (String) -> String — the call solves f's TypeVar
-                    // to String). We default remaining unsolved vars at block end.
                     if scheme.is_poly() {
-                        // R3.1: Mark quantified vars so they don't trigger strict-mode
-                        // errors at the definition site (polymorphic — solved at call site).
                         self.infer_ctx.mark_quantified(&scheme.quantified);
                         self.deferred_quantified_vars
                             .extend(scheme.quantified.iter().copied());
-                        // Store the lambda AST for poly-scheme let-bound lambdas so
-                        // we can re-lower (monomorphize) at each call site with the
-                        // resolved concrete types. This fixes polymorphic multi-use
-                        // at codegen: id(42) and id("hello") each get separate copies.
                         if let ast::Expr::Lambda(params, ret, body, lspan) = &b.value {
                             self.poly_lambda_asts.insert(
                                 b.name.clone(),
@@ -411,7 +398,6 @@ impl Typer {
         let mut stmts = Vec::new();
         let block_len = block.len();
         for (idx, s) in block.iter().enumerate() {
-            // Propagate expected type into tail expressions
             if idx == block_len - 1 {
                 if let crate::ast::Stmt::Expr(e) = s {
                     let he = self.lower_expr_expected(e, Some(ret_ty))?;
@@ -421,7 +407,6 @@ impl Typer {
             }
             stmts.push(self.lower_stmt(s, ret_ty)?);
         }
-        // Default deferred quantified vars from this block scope
         if self.deferred_quantified_vars.len() > deferred_snapshot {
             let vars_to_default: Vec<u32> = self
                 .deferred_quantified_vars
@@ -463,8 +448,6 @@ impl Typer {
         let subject = self.lower_expr(&m.subject)?;
         let subj_ty = subject.ty.clone();
         let mut arms = Vec::new();
-        // R2.3: Unify all arm tail expression types so match arms produce
-        // consistent types. Only track if arms actually have tail expressions.
         let mut first_arm_ty: Option<Type> = None;
         for a in &m.arms {
             self.push_scope();
@@ -475,7 +458,6 @@ impl Typer {
                 .map(|g| self.lower_expr_expected(g, Some(&Type::Bool)))
                 .transpose()?;
             let body = self.lower_block_no_scope(&a.body, ret_ty)?;
-            // Unify each arm's tail expression type with other arms
             if let Some(hir::Stmt::Expr(tail_expr)) = body.last() {
                 if let Some(ref first_ty) = first_arm_ty {
                     let _ = self.infer_ctx.unify_at(
@@ -496,9 +478,7 @@ impl Typer {
                 span: a.span,
             });
         }
-        // Resolve TypeVars in subject type before exhaustiveness check
         let resolved_subj_ty = self.infer_ctx.resolve(&subj_ty);
-        // Use the unified arm type if available, otherwise the subject type
         let result_ty = first_arm_ty
             .map(|t| self.infer_ctx.shallow_resolve(&t))
             .unwrap_or_else(|| subj_ty.clone());
@@ -523,7 +503,6 @@ impl Typer {
             ast::Pat::Wild(span) => Ok(hir::Pat::Wild(*span)),
             ast::Pat::Ident(name, span) => {
                 if let Some((en, tag)) = self.variant_tags.get(name).cloned() {
-                    // S6: Unify expected type with the enum type for zero-arg variants
                     let enum_ty = Type::Enum(en.clone());
                     let _ = self.infer_ctx.unify_at(
                         expected_ty,
@@ -555,8 +534,6 @@ impl Typer {
 
                 let enum_name = self.variant_tags.get(name).map(|(en, _)| en.clone());
 
-                // S6: Unify the expected type (match subject) with the enum type
-                // so that unannotated function params get their type from match patterns.
                 if let Some(ref en) = enum_name {
                     let enum_ty = Type::Enum(en.clone());
                     let _ = self.infer_ctx.unify_at(

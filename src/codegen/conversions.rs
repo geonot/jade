@@ -1,4 +1,3 @@
-use inkwell::AddressSpace;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 
 use crate::hir;
@@ -110,10 +109,7 @@ impl<'ctx> Compiler<'ctx> {
         unsigned: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let fmt_str = if unsigned { "%lu" } else { "%ld" };
-        let fmt = b!(self.bld.build_global_string_ptr(fmt_str, "ts.fmt"));
-        let snprintf = self.ensure_snprintf();
         let iv = val.into_int_value();
         let wide: BasicValueEnum<'ctx> = if iv.get_type().get_bit_width() < 64 {
             if unsigned {
@@ -124,88 +120,20 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             iv.into()
         };
-        let null = ptr_ty.const_null();
-        let len = b!(self.bld.build_call(
-            snprintf,
-            &[
-                null.into(),
-                i64t.const_int(0, false).into(),
-                fmt.as_pointer_value().into(),
-                wide.into()
-            ],
-            "ts.len"
-        ))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_int_value();
-        let len = b!(self.bld.build_int_s_extend(len, i64t, "ts.len64"));
-        let size = b!(self
-            .bld
-            .build_int_nsw_add(len, i64t.const_int(1, false), "ts.sz"));
-        let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[size.into()], "ts.buf"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap();
-        b!(self.bld.build_call(
-            snprintf,
-            &[
-                buf.into(),
-                size.into(),
-                fmt.as_pointer_value().into(),
-                wide.into()
-            ],
-            ""
-        ));
-        self.build_string(buf, len, size, "ts.val")
+        self.snprintf_to_string(fmt_str, &[wide.into()], "ts")
     }
 
     pub(crate) fn float_to_string(
         &mut self,
         val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let i64t = self.ctx.i64_type();
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let fmt = b!(self.bld.build_global_string_ptr("%g", "ts.ffmt"));
-        let snprintf = self.ensure_snprintf();
         let fv = val.into_float_value();
-        let f64t = self.ctx.f64_type();
-        let wide: BasicMetadataValueEnum<'ctx> = if fv.get_type() == self.ctx.f32_type() {
-            b!(self.bld.build_float_ext(fv, f64t, "fpext")).into()
+        let wide: BasicValueEnum<'ctx> = if fv.get_type() == self.ctx.f32_type() {
+            b!(self.bld.build_float_ext(fv, self.ctx.f64_type(), "fpext")).into()
         } else {
             fv.into()
         };
-        let null = ptr_ty.const_null();
-        let len = b!(self.bld.build_call(
-            snprintf,
-            &[
-                null.into(),
-                i64t.const_int(0, false).into(),
-                fmt.as_pointer_value().into(),
-                wide
-            ],
-            "ts.len"
-        ))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_int_value();
-        let len = b!(self.bld.build_int_s_extend(len, i64t, "ts.len64"));
-        let size = b!(self
-            .bld
-            .build_int_nsw_add(len, i64t.const_int(1, false), "ts.sz"));
-        let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[size.into()], "ts.buf"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap();
-        b!(self.bld.build_call(
-            snprintf,
-            &[buf.into(), size.into(), fmt.as_pointer_value().into(), wide],
-            ""
-        ));
-        self.build_string(buf, len, size, "ts.val")
+        self.snprintf_to_string("%g", &[wide.into()], "ts")
     }
 
     pub(crate) fn bool_to_string(

@@ -471,7 +471,7 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             i64t.const_int(1, false)
         };
-        let next = b!(self.bld.build_int_add(cur, step, "next"));
+        let next = b!(self.bld.build_int_nsw_add(cur, step, "next"));
         b!(self.bld.build_store(lvar, next));
         b!(self.bld.build_unconditional_branch(cond_bb));
 
@@ -493,7 +493,8 @@ impl<'ctx> Compiler<'ctx> {
 
         b!(self.bld.build_unconditional_branch(cond_bb));
         self.bld.position_at_end(cond_bb);
-        let cond = self.compile_expr(&w.cond)?.into_int_value();
+        let cond_val = self.compile_expr(&w.cond)?;
+        let cond = self.to_bool(cond_val);
         b!(self.bld.build_conditional_branch(cond, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);

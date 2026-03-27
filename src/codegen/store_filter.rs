@@ -253,13 +253,15 @@ impl<'ctx> Compiler<'ctx> {
                 ));
 
                 match op {
-                    BinOp::Eq => {
-                        let false_bb = self.ctx.append_basic_block(fv, "cmp.false");
+                    BinOp::Eq | BinOp::Ne => {
+                        let negate = op == BinOp::Ne;
+                        let early_val = u64::from(negate);
+                        let early_bb = self.ctx.append_basic_block(fv, "cmp.early");
                         b!(self
                             .bld
-                            .build_conditional_branch(len_match, len_eq_bb, false_bb));
+                            .build_conditional_branch(len_match, len_eq_bb, early_bb));
 
-                        self.bld.position_at_end(false_bb);
+                        self.bld.position_at_end(early_bb);
                         b!(self.bld.build_unconditional_branch(result_bb));
 
                         self.bld.position_at_end(len_eq_bb);
@@ -271,11 +273,16 @@ impl<'ctx> Compiler<'ctx> {
                                 "cmp.mc"
                             )))
                             .into_int_value();
-                        let is_eq = b!(self.bld.build_int_compare(
-                            IntPredicate::EQ,
+                        let pred = if negate {
+                            IntPredicate::NE
+                        } else {
+                            IntPredicate::EQ
+                        };
+                        let is_match = b!(self.bld.build_int_compare(
+                            pred,
                             cmp_result,
                             i32t.const_int(0, false),
-                            "cmp.eq"
+                            "cmp.m"
                         ));
                         b!(self.bld.build_unconditional_branch(result_bb));
                         let len_eq_end = self.bld.get_insert_block().unwrap();
@@ -283,43 +290,8 @@ impl<'ctx> Compiler<'ctx> {
                         self.bld.position_at_end(result_bb);
                         let phi = b!(self.bld.build_phi(self.ctx.bool_type(), "cmp.str"));
                         phi.add_incoming(&[
-                            (&self.ctx.bool_type().const_int(0, false), false_bb),
-                            (&is_eq, len_eq_end),
-                        ]);
-                        Ok(phi.as_basic_value().into_int_value())
-                    }
-                    BinOp::Ne => {
-                        let true_bb = self.ctx.append_basic_block(fv, "cmp.true");
-                        b!(self
-                            .bld
-                            .build_conditional_branch(len_match, len_eq_bb, true_bb));
-
-                        self.bld.position_at_end(true_bb);
-                        b!(self.bld.build_unconditional_branch(result_bb));
-
-                        self.bld.position_at_end(len_eq_bb);
-                        let memcmp_fn = self.ensure_memcmp();
-                        let cmp_result = self
-                            .call_result(b!(self.bld.build_call(
-                                memcmp_fn,
-                                &[stored_data.into(), filter_data.into(), stored_len.into()],
-                                "cmp.mc"
-                            )))
-                            .into_int_value();
-                        let is_ne = b!(self.bld.build_int_compare(
-                            IntPredicate::NE,
-                            cmp_result,
-                            i32t.const_int(0, false),
-                            "cmp.ne"
-                        ));
-                        b!(self.bld.build_unconditional_branch(result_bb));
-                        let len_eq_end = self.bld.get_insert_block().unwrap();
-
-                        self.bld.position_at_end(result_bb);
-                        let phi = b!(self.bld.build_phi(self.ctx.bool_type(), "cmp.str"));
-                        phi.add_incoming(&[
-                            (&self.ctx.bool_type().const_int(1, false), true_bb),
-                            (&is_ne, len_eq_end),
+                            (&self.ctx.bool_type().const_int(early_val, false), early_bb),
+                            (&is_match, len_eq_end),
                         ]);
                         Ok(phi.as_basic_value().into_int_value())
                     }

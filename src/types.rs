@@ -179,7 +179,6 @@ impl Type {
         }
     }
 
-    /// Collect all TypeVar ids that appear in this type.
     pub fn free_type_vars(&self, out: &mut std::collections::HashSet<u32>) {
         match self {
             Self::TypeVar(v) => {
@@ -212,18 +211,13 @@ impl Type {
     }
 }
 
-/// A polymorphic type scheme: ∀ quantified. ty
-/// Used for let-generalization (Algorithm J).
 #[derive(Debug, Clone)]
 pub struct Scheme {
-    /// TypeVar ids that are universally quantified
     pub quantified: Vec<u32>,
-    /// The underlying type (may contain the quantified TypeVars)
     pub ty: Type,
 }
 
 impl Scheme {
-    /// A monomorphic scheme (no quantified variables).
     pub fn mono(ty: Type) -> Self {
         Scheme {
             quantified: vec![],
@@ -231,7 +225,6 @@ impl Scheme {
         }
     }
 
-    /// Whether this scheme is polymorphic (has quantified variables).
     pub fn is_poly(&self) -> bool {
         !self.quantified.is_empty()
     }

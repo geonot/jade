@@ -145,88 +145,9 @@ impl<'ctx> Compiler<'ctx> {
             return Err("push() requires an argument".into());
         }
         let val = self.compile_expr(&args[0])?;
-        let i64t = self.ctx.i64_type();
-        let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
-        let fv = self.cur_fn.unwrap();
-
-        let len_gep = b!(self
-            .bld
-            .build_struct_gep(header_ty, header_ptr, 1, "vp.lenp"));
-        let len = b!(self.bld.build_load(i64t, len_gep, "vp.len")).into_int_value();
-        let cap_gep = b!(self
-            .bld
-            .build_struct_gep(header_ty, header_ptr, 2, "vp.capp"));
-        let cap = b!(self.bld.build_load(i64t, cap_gep, "vp.cap")).into_int_value();
-
-        let needs_grow = b!(self
-            .bld
-            .build_int_compare(IntPredicate::SGE, len, cap, "vp.full"));
-        let grow_bb = self.ctx.append_basic_block(fv, "vp.grow");
-        let store_bb = self.ctx.append_basic_block(fv, "vp.store");
-        b!(self
-            .bld
-            .build_conditional_branch(needs_grow, grow_bb, store_bb));
-
-        self.bld.position_at_end(grow_bb);
-        let doubled = b!(self
-            .bld
-            .build_int_nsw_mul(cap, i64t.const_int(2, false), "vp.dbl"));
-        let new_cap_cmp = b!(self.bld.build_int_compare(
-            IntPredicate::SGT,
-            doubled,
-            i64t.const_int(4, false),
-            "vp.cmp"
-        ));
-        let new_cap =
-            b!(self
-                .bld
-                .build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "vp.nc"))
-            .into_int_value();
-        let new_size =
-            b!(self
-                .bld
-                .build_int_nsw_mul(new_cap, i64t.const_int(elem_size, false), "vp.ns"));
-        let realloc = self.ensure_realloc();
-        let ptr_gep = b!(self
-            .bld
-            .build_struct_gep(header_ty, header_ptr, 0, "vp.ptrp"));
-        let old_ptr = b!(self.bld.build_load(
-            self.ctx.ptr_type(AddressSpace::default()),
-            ptr_gep,
-            "vp.optr"
-        ));
-        let new_ptr =
-            b!(self
-                .bld
-                .build_call(realloc, &[old_ptr.into(), new_size.into()], "vp.nptr"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap();
-        b!(self.bld.build_store(ptr_gep, new_ptr));
-        b!(self.bld.build_store(cap_gep, new_cap));
-        b!(self.bld.build_unconditional_branch(store_bb));
-
-        self.bld.position_at_end(store_bb);
-        let ptr_gep2 = b!(self
-            .bld
-            .build_struct_gep(header_ty, header_ptr, 0, "vp.ptrp2"));
-        let data_ptr = b!(self.bld.build_load(
-            self.ctx.ptr_type(AddressSpace::default()),
-            ptr_gep2,
-            "vp.data"
-        ))
-        .into_pointer_value();
-        let len2 = b!(self.bld.build_load(i64t, len_gep, "vp.len2")).into_int_value();
-        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[len2], "vp.egep")) };
-        b!(self.bld.build_store(elem_gep, val));
-
-        let new_len = b!(self
-            .bld
-            .build_int_nsw_add(len2, i64t.const_int(1, false), "vp.nl"));
-        b!(self.bld.build_store(len_gep, new_len));
-
+        self.vec_push_raw(header_ptr, val, lty, elem_size)?;
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 

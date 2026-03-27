@@ -24,15 +24,6 @@ impl Typer {
                         .insert(f.name.clone(), Self::normalize_generic_fn(f));
                 }
                 ast::Decl::Fn(f) => {
-                    // Functions with unannotated params get TypeVars for those params
-                    // via declare_fn_sig. After lowering the body, unification
-                    // constrains/solves these TypeVars. The function's type is then
-                    // generalized into a Scheme stored in fn_schemes, enabling
-                    // HM-style parametric polymorphism at call sites.
-                    //
-                    // Functions with ALL params unannotated are also stored in
-                    // generic_fns for monomorphization at codegen time (codegenneeds
-                    // concrete types for LLVM IR).
                     let has_untyped_params = f.params.iter().any(|p| p.ty.is_none());
                     let all_untyped =
                         !f.params.is_empty() && f.params.iter().all(|p| p.ty.is_none());
@@ -40,12 +31,9 @@ impl Typer {
                         self.inferable_fns.insert(f.name.clone(), f.clone());
                     }
                     if all_untyped && !f.params.is_empty() {
-                        // Store normalized form for codegen monomorphization
                         let normalized = Self::normalize_inferable_fn(f);
                         self.generic_fns.insert(f.name.clone(), normalized);
                     }
-                    // Always register in fns with TypeVars for untyped params —
-                    // enables scheme-based inference for ALL functions
                     self.declare_fn_sig(f);
                 }
                 ast::Decl::Type(td) if !td.type_params.is_empty() => {
@@ -123,9 +111,6 @@ impl Typer {
         let mut hir_stores = Vec::new();
         let mut test_fns: Vec<(String, String)> = Vec::new();
 
-        // Collect non-generic functions for SCC ordering.
-        // Includes all-untyped-param functions — they now participate in scheme
-        // inference (lowered for type constraints, then generalized).
         let non_generic_fns: Vec<&ast::Fn> = prog
             .decls
             .iter()
@@ -139,29 +124,22 @@ impl Typer {
             })
             .collect();
 
-        // Build call graph and compute SCCs for topological ordering
         let call_graph = super::scc::build_call_graph(&non_generic_fns);
         let sccs = super::scc::tarjan_scc(&call_graph);
 
-        // Build lookup from name to AST function
         let fn_lookup: std::collections::HashMap<&str, &ast::Fn> = non_generic_fns
             .iter()
             .map(|f| (f.name.as_str(), *f))
             .collect();
 
-        // Lower functions in SCC topological order
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {
             if scc.len() > 1 {
-                // SCC-aware mutual recursion: lower ALL bodies before resolving
-                // return types, so mutual peers constrain each other before
-                // premature resolution freezes TypeVars.
                 let mut scc_fns = Vec::new();
                 let mut scc_fn_names = Vec::new();
                 for name in scc {
                     if let Some(f) = fn_lookup.get(name.as_str()) {
                         let hfn = self.lower_fn_deferred(f).map_err(|e| {
-                            // R3.2: Enhance error with mutual recursion context
                             if scc.len() > 1 {
                                 let peers = scc
                                     .iter()
@@ -184,22 +162,17 @@ impl Typer {
                         lowered_fn_names.insert(name.clone());
                     }
                 }
-                // Now resolve return types for deferred functions (skip inferable
-                // fns — their TypeVars are quantified by the scheme, not defaults)
                 for (needs_resolve, _span, hfn, fname) in &mut scc_fns {
                     if *needs_resolve && !self.inferable_fns.contains_key(fname.as_str()) {
                         hfn.ret = self.infer_ctx.resolve(&hfn.ret);
                     }
                 }
-                // Build schemes for inferable functions in this SCC
                 for (_, _, hfn, fname) in &scc_fns {
                     if self.inferable_fns.contains_key(fname) {
                         self.build_fn_scheme(fname, hfn);
                     }
                 }
                 for (_, _, hfn, fname) in scc_fns {
-                    // Skip emitting all-untyped functions to hir_fns — only
-                    // monomorphized copies go to codegen
                     if self
                         .fn_schemes
                         .get(&fname)
@@ -210,15 +183,12 @@ impl Typer {
                     hir_fns.push(hfn);
                 }
             } else {
-                // Single-member SCC: lower normally (may be self-recursive or leaf)
                 for name in scc {
                     if let Some(f) = fn_lookup.get(name.as_str()) {
                         let hfn = self.lower_fn(f)?;
-                        // Build scheme for inferable functions
                         if self.inferable_fns.contains_key(&f.name) {
                             self.build_fn_scheme(&f.name, &hfn);
                         }
-                        // Skip emitting all-untyped functions with poly schemes
                         if self
                             .fn_schemes
                             .get(&f.name)
@@ -234,14 +204,12 @@ impl Typer {
             }
         }
 
-        // Lower any remaining functions not in the call graph (unreachable fns)
         for f in &non_generic_fns {
             if !lowered_fn_names.contains(&f.name) {
                 let hfn = self.lower_fn(f)?;
                 if self.inferable_fns.contains_key(&f.name) {
                     self.build_fn_scheme(&f.name, &hfn);
                 }
-                // Skip all-untyped functions with poly schemes
                 if self
                     .fn_schemes
                     .get(&f.name)
@@ -253,10 +221,9 @@ impl Typer {
             }
         }
 
-        // Lower non-function declarations
         for d in &prog.decls {
             match d {
-                ast::Decl::Fn(_) => {} // already handled above
+                ast::Decl::Fn(_) => {}
                 ast::Decl::Type(td) if td.type_params.is_empty() => {
                     let htd = self.lower_type_def(td)?;
                     hir_types.push(htd);
@@ -330,12 +297,7 @@ impl Typer {
         };
         self.resolve_deferred_methods();
         self.resolve_deferred_fields();
-        // R4.1: Trait-guided type selection — for any remaining unsolved TypeVar
-        // with a Trait constraint, if exactly one type implements all required
-        // traits, resolve the TypeVar to that type.
         self.resolve_trait_constrained_vars();
-        // R1.2: Strict-mode struct field enforcement — check for unannotated
-        // struct fields that were never constrained by constructors or usage.
         if self.infer_ctx.is_strict() {
             let mut struct_field_errors = Vec::new();
             for (struct_name, field_name, ty, span) in &self.unannotated_struct_fields {
@@ -357,35 +319,32 @@ impl Typer {
             }
         }
         self.resolve_all_types(&mut program);
-        // Collect defaulting warnings from InferCtx
         let default_warnings = self.infer_ctx.drain_default_warnings();
         self.warnings.extend(default_warnings);
-        // Collect strict-mode type errors
         let strict_errors = self.infer_ctx.drain_strict_errors();
         if !strict_errors.is_empty() {
-            // Deduplicate errors (same TypeVar root can be resolved multiple times)
-            let mut unique_errors: Vec<String> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            let mut unique_errors: Vec<&String> = Vec::new();
             for e in &strict_errors {
-                if !unique_errors.contains(e) {
-                    unique_errors.push(e.clone());
+                if seen.insert(e) {
+                    unique_errors.push(e);
                 }
             }
-            // Append collected type errors as additional context
             if !self.type_errors.is_empty() {
-                let mut unique_type_errs: Vec<String> = Vec::new();
-                for e in &self.type_errors {
-                    if !unique_type_errs.contains(e) {
-                        unique_type_errs.push(e.clone());
+                let mut type_seen = std::collections::HashSet::new();
+                for te in &self.type_errors {
+                    if type_seen.insert(te) {
+                        unique_errors.push(te);
                     }
                 }
-                for te in &unique_type_errs {
-                    unique_errors.push(format!("  caused by: {te}"));
-                }
             }
-            let combined = unique_errors.join("\n");
+            let combined = unique_errors
+                .iter()
+                .map(|e| e.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             return Err(format!("strict type checking failed:\n{combined}"));
         }
-        // Emit type inference warnings
         for w in &self.warnings {
             eprintln!("warning: {w}");
         }
@@ -400,9 +359,6 @@ impl Typer {
         Ok(program)
     }
 
-    /// After all lowering, resolve deferred method constraints.
-    /// When a method call had a TypeVar receiver, the TypeVar may now be solved.
-    /// Re-check the method and unify arg/return types properly.
     fn resolve_deferred_methods(&mut self) {
         let deferred = std::mem::take(&mut self.deferred_methods);
         for dm in &deferred {
@@ -410,41 +366,30 @@ impl Typer {
             match &recv_ty {
                 Type::Vec(elem_ty) => {
                     let elem = elem_ty.as_ref().clone();
-                    let actual_ret = match dm.method.as_str() {
-                        "push" | "clear" | "set" => {
-                            // push(elem), set(i64, elem)
-                            if dm.method == "push" {
-                                if let Some(arg_ty) = dm.arg_tys.first() {
-                                    let _ = self.infer_ctx.unify_at(
-                                        &elem,
-                                        arg_ty,
-                                        dm.span,
-                                        "vec.push arg",
-                                    );
-                                }
-                            } else if dm.method == "set" {
-                                if let Some(idx_ty) = dm.arg_tys.first() {
-                                    let _ = self.infer_ctx.unify_at(
-                                        &Type::I64,
-                                        idx_ty,
-                                        dm.span,
-                                        "vec.set index",
-                                    );
-                                }
-                                if let Some(val_ty) = dm.arg_tys.get(1) {
-                                    let _ = self.infer_ctx.unify_at(
-                                        &elem,
-                                        val_ty,
-                                        dm.span,
-                                        "vec.set value",
-                                    );
-                                }
-                            }
-                            Type::Void
+                    if dm.method == "push" {
+                        if let Some(arg_ty) = dm.arg_tys.first() {
+                            let _ = self
+                                .infer_ctx
+                                .unify_at(&elem, arg_ty, dm.span, "vec.push arg");
                         }
-                        "pop" | "get" | "remove" => elem.clone(),
-                        "len" => Type::I64,
-                        _ => continue,
+                    } else if dm.method == "set" {
+                        if let Some(idx_ty) = dm.arg_tys.first() {
+                            let _ = self.infer_ctx.unify_at(
+                                &Type::I64,
+                                idx_ty,
+                                dm.span,
+                                "vec.set index",
+                            );
+                        }
+                        if let Some(val_ty) = dm.arg_tys.get(1) {
+                            let _ =
+                                self.infer_ctx
+                                    .unify_at(&elem, val_ty, dm.span, "vec.set value");
+                        }
+                    }
+                    let actual_ret = match Self::vec_method_ret_ty(&dm.method, &elem) {
+                        Some(ty) => ty,
+                        None => continue,
                     };
                     let _ = self.infer_ctx.unify_at(
                         &dm.ret_ty,
@@ -456,7 +401,7 @@ impl Typer {
                 Type::Map(key_ty, val_ty) => {
                     let key = key_ty.as_ref().clone();
                     let val = val_ty.as_ref().clone();
-                    let actual_ret = match dm.method.as_str() {
+                    match dm.method.as_str() {
                         "set" => {
                             if let Some(k) = dm.arg_tys.first() {
                                 let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.set key");
@@ -464,25 +409,22 @@ impl Typer {
                             if let Some(v) = dm.arg_tys.get(1) {
                                 let _ = self.infer_ctx.unify_at(&val, v, dm.span, "map.set value");
                             }
-                            Type::Void
                         }
-                        "get" => {
+                        "get" | "has" => {
                             if let Some(k) = dm.arg_tys.first() {
-                                let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.get key");
+                                let reason = if dm.method == "get" {
+                                    "map.get key"
+                                } else {
+                                    "map.has key"
+                                };
+                                let _ = self.infer_ctx.unify_at(&key, k, dm.span, reason);
                             }
-                            val.clone()
                         }
-                        "has" => {
-                            if let Some(k) = dm.arg_tys.first() {
-                                let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.has key");
-                            }
-                            Type::Bool
-                        }
-                        "remove" | "clear" => Type::Void,
-                        "len" => Type::I64,
-                        "keys" => Type::Vec(Box::new(key.clone())),
-                        "values" => Type::Vec(Box::new(val.clone())),
-                        _ => continue,
+                        _ => {}
+                    }
+                    let actual_ret = match Self::map_method_ret_ty(&dm.method, &key, &val) {
+                        Some(ty) => ty,
+                        None => continue,
                     };
                     let _ = self.infer_ctx.unify_at(
                         &dm.ret_ty,
@@ -492,13 +434,9 @@ impl Typer {
                     );
                 }
                 Type::String => {
-                    let actual_ret = match dm.method.as_str() {
-                        "contains" | "starts_with" | "ends_with" => Type::Bool,
-                        "char_at" | "len" | "find" => Type::I64,
-                        "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper"
-                        | "to_lower" => Type::String,
-                        "split" => Type::Vec(Box::new(Type::String)),
-                        _ => continue,
+                    let actual_ret = match Self::string_method_ret_ty(&dm.method) {
+                        Some(ty) => ty,
+                        None => continue,
                     };
                     let _ = self.infer_ctx.unify_at(
                         &dm.ret_ty,
@@ -510,7 +448,6 @@ impl Typer {
                 Type::Struct(type_name) => {
                     let method_name = format!("{}_{}", type_name, dm.method);
                     if let Some((_, param_tys, ret)) = self.fns.get(&method_name).cloned() {
-                        // param_tys[0] is self, actual args start at [1]
                         for (i, arg_ty) in dm.arg_tys.iter().enumerate() {
                             if let Some(expected) = param_tys.get(i + 1) {
                                 let _ = self.infer_ctx.unify_at(
@@ -540,8 +477,6 @@ impl Typer {
                     }
                 }
                 _ => {
-                    // Phase 3A: When receiver is still a TypeVar at deferred time,
-                    // try candidate search with trait-based narrowing.
                     if matches!(recv_ty, Type::TypeVar(_)) {
                         let suffix = format!("_{}", dm.method);
                         let mut candidates: Vec<(String, Vec<Type>, Type)> = self
@@ -555,7 +490,6 @@ impl Typer {
                             .filter(|(type_name, _, _)| self.structs.contains_key(type_name))
                             .collect();
 
-                        // Use trait constraints from the TypeVar to narrow candidates
                         if let Type::TypeVar(v) = recv_ty {
                             let constraint = self.infer_ctx.constraint(v);
                             if let super::unify::TypeConstraint::Trait(ref required_traits) =
@@ -631,12 +565,9 @@ impl Typer {
         }
     }
 
-    /// After all lowering, resolve deferred field access constraints.
-    /// When a field access had a TypeVar receiver, the TypeVar may now be solved.
     fn resolve_deferred_fields(&mut self) {
         let deferred = std::mem::take(&mut self.deferred_fields);
 
-        // Group deferred fields by receiver TypeVar root for combined resolution
         let mut by_receiver: HashMap<u32, Vec<&super::DeferredField>> = HashMap::new();
         let mut resolved_concrete: Vec<&super::DeferredField> = Vec::new();
         for df in &deferred {
@@ -650,7 +581,6 @@ impl Typer {
             }
         }
 
-        // Resolve concrete receivers directly
         for df in resolved_concrete {
             let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
             if let Type::Struct(ref name) = recv_ty {
@@ -675,21 +605,18 @@ impl Typer {
             }
         }
 
-        // Resolve TypeVar receivers using combined field constraints
         for (_root, fields) in by_receiver {
             let required_fields: Vec<(&str, &Type)> = fields
                 .iter()
                 .map(|df| (df.field_name.as_str(), &df.field_ty))
                 .collect();
 
-            // Also include field_constraints from the Typer
             let extra_constraints: Vec<(String, Type)> = self
                 .field_constraints
                 .get(&_root)
                 .cloned()
                 .unwrap_or_default();
 
-            // Find structs satisfying ALL required fields
             let candidates: Vec<String> = self
                 .structs
                 .iter()
@@ -708,14 +635,12 @@ impl Typer {
                 let sname = &candidates[0];
                 let struct_ty = Type::Struct(sname.clone());
                 let span = fields[0].span;
-                // Unify receiver with the struct
                 let _ = self.infer_ctx.unify_at(
                     &fields[0].receiver_ty,
                     &struct_ty,
                     span,
                     "deferred field constraints imply struct type",
                 );
-                // Unify field types
                 if let Some(struct_fields) = self.structs.get(sname).cloned() {
                     for df in &fields {
                         if let Some((_, fty)) =
@@ -734,26 +659,22 @@ impl Typer {
         }
     }
 
-    /// R4.1: For any remaining unsolved TypeVar with a Trait constraint, check
-    /// whether exactly one concrete type in trait_impls satisfies all required
-    /// traits. If so, unify the TypeVar with that type.
     fn resolve_trait_constrained_vars(&mut self) {
         let n = self.infer_ctx.num_vars();
         for v in 0..n {
             let root = self.infer_ctx.find(v);
             if root != v {
-                continue; // only process roots
+                continue;
             }
             let resolved = self.infer_ctx.shallow_resolve(&Type::TypeVar(root));
             if !matches!(resolved, Type::TypeVar(_)) {
-                continue; // already solved
+                continue;
             }
             let constraint = self.infer_ctx.constraint(root);
             if let super::unify::TypeConstraint::Trait(ref required_traits) = constraint {
                 if required_traits.is_empty() {
                     continue;
                 }
-                // Find all types that implement ALL required traits
                 let mut candidates: Vec<String> = Vec::new();
                 for (type_name, impl_traits) in &self.trait_impls {
                     if required_traits.iter().all(|rt| impl_traits.contains(rt)) {
@@ -782,18 +703,13 @@ impl Typer {
         }
     }
 
-    /// During resolve, re-classify a StringMethod placeholder if its receiver
-    /// resolved to Vec, Map, Struct, or Coroutine.
     fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
-        // Extract info from current StringMethod
         let (recv_ty, method) = match &expr.kind {
             hir::ExprKind::StringMethod(recv, m, _) => (recv.ty.clone(), m.clone()),
             _ => return,
         };
-        // Check if receiver resolved to something other than String
         match &recv_ty {
             Type::Vec(_) => {
-                // Re-classify StringMethod → VecMethod
                 if let hir::ExprKind::StringMethod(recv, method, args) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
@@ -824,9 +740,7 @@ impl Typer {
                     expr.kind = hir::ExprKind::CoroutineNext(recv);
                 }
             }
-            _ => {
-                // String or still unresolved — keep as StringMethod
-            }
+            _ => {}
         }
     }
 
@@ -844,7 +758,6 @@ impl Typer {
             for m in &mut td.methods {
                 self.resolve_fn(m);
             }
-            // Update struct registry with resolved field types
             if let Some(sfields) = self.structs.get_mut(&td.name) {
                 for (i, field) in td.fields.iter().enumerate() {
                     if let Some(sf) = sfields.get_mut(i) {
@@ -1059,7 +972,6 @@ impl Typer {
                 for a in args {
                     self.resolve_expr(a);
                 }
-                // Re-classify deferred method placeholders based on resolved receiver type
                 self.reclassify_method_call(expr);
             }
             hir::ExprKind::VecMethod(recv, _, args) | hir::ExprKind::MapMethod(recv, _, args) => {
@@ -1075,7 +987,6 @@ impl Typer {
             }
             hir::ExprKind::Field(e, _field_name, _idx) => {
                 self.resolve_expr(e);
-                // Fix up field index for deferred field accesses on formerly-TypeVar receivers
                 if let hir::ExprKind::Field(ref inner, ref fname, ref mut field_idx) = expr.kind {
                     let recv_ty = &inner.ty;
                     if let Type::Struct(name) = recv_ty {
@@ -1229,32 +1140,6 @@ impl Typer {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn type_mismatch_msg(
-        &mut self,
-        expected: &Type,
-        found: &Type,
-        context: &str,
-    ) -> String {
-        let expected_resolved = self.infer_ctx.resolve(expected);
-        let found_resolved = self.infer_ctx.resolve(found);
-        let mut msg =
-            format!("{context}: expected `{expected_resolved}`, found `{found_resolved}`");
-        if let Some(origin) = self.infer_ctx.origin_of(expected) {
-            msg.push_str(&format!(
-                " (expected type constrained at line {} by {})",
-                origin.span.line, origin.reason
-            ));
-        }
-        if let Some(origin) = self.infer_ctx.origin_of(found) {
-            msg.push_str(&format!(
-                " (found type constrained at line {} by {})",
-                origin.span.line, origin.reason
-            ));
-        }
-        msg
-    }
-
     pub(crate) fn lower_actor_def(&mut self, ad: &ast::ActorDef) -> Result<hir::ActorDef, String> {
         let (id, ref declared_fields, ref handler_info) = self
             .actors
@@ -1394,10 +1279,7 @@ impl Typer {
         })
     }
 
-    /// Extract the effective tail type from a block, recursing into trailing
-    /// If/Match statements that serve as implicit return values.
     pub(crate) fn hir_tail_type(&self, body: &[hir::Stmt]) -> Option<Type> {
-        // Find the last meaningful statement, skipping trailing Drops
         let last = body
             .iter()
             .rev()
@@ -1405,7 +1287,6 @@ impl Typer {
         match last {
             hir::Stmt::Expr(e) if e.ty != Type::Void => Some(e.ty.clone()),
             hir::Stmt::If(i) => {
-                // Only extract a tail type if there's an else branch (all paths covered)
                 if i.els.is_some() {
                     self.hir_tail_type(&i.then)
                 } else {
@@ -1413,7 +1294,6 @@ impl Typer {
                 }
             }
             hir::Stmt::Match(m) => {
-                // Match is exhaustive — extract tail type from first arm
                 if let Some(arm) = m.arms.first() {
                     self.hir_tail_type(&arm.body)
                 } else {
@@ -1425,18 +1305,7 @@ impl Typer {
         }
     }
 
-    /// After lowering a function body, generalize its type into a Scheme and
-    /// store in fn_schemes. This is the Gen(Γ, τ) step of Algorithm W/J
-    /// applied at the function level — the core piece completing HM inference.
-    ///
-    /// The scheme captures which TypeVars are universally quantified (free in
-    /// the function type but not in the environment). At each call site,
-    /// instantiate() creates fresh TypeVars so that calling e.g. identity(42)
-    /// and identity("hello") get independent type solutions.
     fn build_fn_scheme(&mut self, name: &str, hfn: &hir::Fn) {
-        // Canonicalize types through union-find to ensure unified TypeVars
-        // share the same representative ID. This prevents the scheme from
-        // having two "different" quantified vars that are actually the same.
         let param_tys: Vec<crate::types::Type> = hfn
             .params
             .iter()
@@ -1445,9 +1314,6 @@ impl Typer {
         let ret_ty = self.infer_ctx.canonicalize_type(&hfn.ret);
         let fn_ty = crate::types::Type::Fn(param_tys.clone(), Box::new(ret_ty.clone()));
         let scheme = self.generalize(&fn_ty);
-        // R3.1: Mark quantified vars so they don't trigger strict-mode errors
-        // at the definition site. These are polymorphic — they'll be solved
-        // at each call site via scheme instantiation.
         if scheme.is_poly() {
             self.infer_ctx.mark_quantified(&scheme.quantified);
         }
@@ -1473,8 +1339,6 @@ impl Typer {
     pub(crate) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let mut hfn = self.lower_fn_deferred(f)?;
         if f.ret.is_none() && f.name != "main" {
-            // Don't resolve return types for inferable functions that will be
-            // generalized into schemes — their TypeVars are quantified, not defaults.
             if !self.inferable_fns.contains_key(&f.name) {
                 hfn.ret = self.infer_ctx.resolve(&hfn.ret);
             }
@@ -1482,9 +1346,6 @@ impl Typer {
         Ok(hfn)
     }
 
-    /// Lower a function body, unifying the tail expression with the return
-    /// TypeVar, but WITHOUT resolving the return type. Used by SCC-aware mutual
-    /// recursion to let all peer functions constrain each other before resolution.
     fn lower_fn_deferred(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let (id, ptys, ret) = self
             .fns
@@ -1518,7 +1379,6 @@ impl Typer {
         let body = self.lower_block(&f.body, &ret)?;
         self.pop_scope();
 
-        // Unify tail expression with the return TypeVar but do NOT resolve yet.
         if f.ret.is_none() && f.name != "main" {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
                 let r = self
@@ -1526,8 +1386,6 @@ impl Typer {
                     .unify_at(&ret, &tail_ty, f.span, "function tail expression");
                 self.collect_unify_error(r);
             } else {
-                // No meaningful tail expression (e.g., body ends with void
-                // expr like log()) — return type is Void.
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
         }
@@ -1618,7 +1476,6 @@ impl Typer {
                     .find(|(n, _)| n == &f.name)
                     .map(|(_, t)| t.clone())
                     .unwrap_or_else(|| f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)));
-                // Resolve the TypeVar — constructor unification may have filled it
                 let ty = self.infer_ctx.resolve(&raw_ty);
                 let default = f.default.as_ref().map(|e| {
                     let lowered =
@@ -1662,88 +1519,22 @@ impl Typer {
     }
 
     pub(crate) fn lower_method(&mut self, type_name: &str, m: &ast::Fn) -> Result<hir::Fn, String> {
-        let method_name = format!("{type_name}_{}", m.name);
-        let (id, ptys, ret) = self
-            .fns
-            .get(&method_name)
-            .ok_or_else(|| format!("undeclared method: {method_name}"))?
-            .clone();
-
-        self.push_scope();
-        let mut params = Vec::new();
-
-        let self_id = self.fresh_id();
-        let self_ty = ptys[0].clone();
-        self.define_var(
-            "self",
-            VarInfo {
-                def_id: self_id,
-                ty: self_ty.clone(),
-                ownership: Ownership::Borrowed,
-                scheme: None,
-            },
-        );
-        params.push(hir::Param {
-            def_id: self_id,
-            name: "self".to_string(),
-            ty: self_ty,
-            ownership: Ownership::Borrowed,
-            span: m.span,
-        });
-
-        for (i, p) in m.params.iter().enumerate() {
-            let pid = self.fresh_id();
-            let ty = ptys[i + 1].clone();
-            let ownership = Self::ownership_for_type(&ty);
-            self.define_var(
-                &p.name,
-                VarInfo {
-                    def_id: pid,
-                    ty: ty.clone(),
-                    ownership,
-                    scheme: None,
-                },
-            );
-            params.push(hir::Param {
-                def_id: pid,
-                name: p.name.clone(),
-                ty,
-                ownership,
-                span: p.span,
-            });
-        }
-
-        let body = self.lower_block(&m.body, &ret)?;
-        self.pop_scope();
-
-        // Phase 2.2: Unify tail expression with return TypeVar for methods
-        let ret = if m.ret.is_none() {
-            if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let r = self
-                    .infer_ctx
-                    .unify_at(&ret, &tail_ty, m.span, "method tail expression");
-                self.collect_unify_error(r);
-            }
-            self.infer_ctx.resolve(&ret)
-        } else {
-            ret
-        };
-
-        Ok(hir::Fn {
-            def_id: id,
-            name: method_name,
-            params,
-            ret,
-            body,
-            span: m.span,
-            generic_origin: None,
-        })
+        self.lower_method_impl(type_name, m, false)
     }
 
     pub(crate) fn lower_method_by_ptr(
         &mut self,
         type_name: &str,
         m: &ast::Fn,
+    ) -> Result<hir::Fn, String> {
+        self.lower_method_impl(type_name, m, true)
+    }
+
+    fn lower_method_impl(
+        &mut self,
+        type_name: &str,
+        m: &ast::Fn,
+        by_ptr: bool,
     ) -> Result<hir::Fn, String> {
         let method_name = format!("{type_name}_{}", m.name);
         let (id, ptys, ret) = self
@@ -1774,7 +1565,12 @@ impl Typer {
             span: m.span,
         });
 
-        for (i, p) in m.params.iter().filter(|p| p.name != "self").enumerate() {
+        let param_iter: Box<dyn Iterator<Item = &ast::Param>> = if by_ptr {
+            Box::new(m.params.iter().filter(|p| p.name != "self"))
+        } else {
+            Box::new(m.params.iter())
+        };
+        for (i, p) in param_iter.enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i + 1].clone();
             let ownership = Self::ownership_for_type(&ty);
@@ -1799,12 +1595,14 @@ impl Typer {
         let body = self.lower_block(&m.body, &ret)?;
         self.pop_scope();
 
-        // Phase 2.2: Unify tail expression with return TypeVar for ptr methods
+        let reason = if by_ptr {
+            "ptr method tail expression"
+        } else {
+            "method tail expression"
+        };
         let ret = if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let r =
-                    self.infer_ctx
-                        .unify_at(&ret, &tail_ty, m.span, "ptr method tail expression");
+                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, reason);
                 self.collect_unify_error(r);
             }
             self.infer_ctx.resolve(&ret)
@@ -2041,34 +1839,7 @@ impl Typer {
         ret_ty: &Type,
     ) -> Result<hir::Block, String> {
         self.push_scope();
-        // Snapshot deferred quantified vars so we can default vars from THIS block
-        let deferred_snapshot = self.deferred_quantified_vars.len();
-        let mut stmts = Vec::new();
-        let block_len = block.len();
-        for (idx, s) in block.iter().enumerate() {
-            // For the last statement in a block, propagate the expected type
-            // (ret_ty) into tail expressions. This enables bidirectional type
-            // propagation through if/match branches and block expressions.
-            if idx == block_len - 1 {
-                if let crate::ast::Stmt::Expr(e) = s {
-                    let he = self.lower_expr_expected(e, Some(ret_ty))?;
-                    stmts.push(hir::Stmt::Expr(he));
-                    continue;
-                }
-            }
-            let hs = self.lower_stmt(s, ret_ty)?;
-            stmts.push(hs);
-        }
-        // Default any quantified TypeVars that were deferred during this block
-        // and remain unsolved. By this point, later statements have had a chance
-        // to solve them through unification.
-        if self.deferred_quantified_vars.len() > deferred_snapshot {
-            let vars_to_default: Vec<u32> = self
-                .deferred_quantified_vars
-                .drain(deferred_snapshot..)
-                .collect();
-            self.infer_ctx.default_quantified_vars(&vars_to_default);
-        }
+        let mut stmts = self.lower_block_no_scope(block, ret_ty)?;
         let ends_with_jump = stmts.last().map_or(false, |s| {
             matches!(
                 s,

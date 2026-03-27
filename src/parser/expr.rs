@@ -327,36 +327,12 @@ impl Parser {
             }
             Token::Log => {
                 self.advance();
-                let arg = if self.check(Token::LParen) {
-                    self.advance();
-                    let a = self.parse_expr()?;
-                    self.expect(Token::RParen)?;
-                    a
-                } else {
-                    self.parse_expr()?
-                };
-                Ok(Expr::Call(
-                    Box::new(Expr::Ident("log".into(), sp)),
-                    vec![arg],
-                    sp,
-                ))
+                self.parse_builtin_call("log", sp)
             }
             Token::If => Ok(Expr::IfExpr(Box::new(self.parse_if()?))),
             Token::Assert => {
                 self.advance();
-                let arg = if self.check(Token::LParen) {
-                    self.advance();
-                    let a = self.parse_expr()?;
-                    self.expect(Token::RParen)?;
-                    a
-                } else {
-                    self.parse_expr()?
-                };
-                Ok(Expr::Call(
-                    Box::new(Expr::Ident("assert".into(), sp)),
-                    vec![arg],
-                    sp,
-                ))
+                self.parse_builtin_call("assert", sp)
             }
             Token::Embed => {
                 self.advance();
@@ -680,19 +656,7 @@ impl Parser {
         let sp = source.span();
         self.expect(Token::Query)?;
         self.expect(Token::Newline)?;
-        self.expect(Token::Indent)?;
-        let mut clauses = Vec::new();
-        while !self.check(Token::Dedent) && !self.eof() {
-            self.skip_nl();
-            if self.check(Token::Dedent) || self.eof() {
-                break;
-            }
-            clauses.push(self.parse_query_clause()?);
-            self.skip_nl();
-        }
-        if self.check(Token::Dedent) {
-            self.advance();
-        }
+        let clauses = self.parse_indented(Self::parse_query_clause)?;
         Ok(Expr::Query(Box::new(source), clauses, sp))
     }
 
@@ -742,6 +706,22 @@ impl Parser {
             "delete" => Ok(QueryClause::Delete(sp)),
             _ => Err(self.error(&format!("unknown query clause: {kw}"))),
         }
+    }
+
+    fn parse_builtin_call(&mut self, name: &str, sp: Span) -> Result<Expr, ParseError> {
+        let arg = if self.check(Token::LParen) {
+            self.advance();
+            let a = self.parse_expr()?;
+            self.expect(Token::RParen)?;
+            a
+        } else {
+            self.parse_expr()?
+        };
+        Ok(Expr::Call(
+            Box::new(Expr::Ident(name.into(), sp)),
+            vec![arg],
+            sp,
+        ))
     }
 
     fn is_field_init(&self) -> bool {

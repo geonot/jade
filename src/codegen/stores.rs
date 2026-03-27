@@ -283,25 +283,25 @@ impl<'ctx> Compiler<'ctx> {
         Ok(fp.into_pointer_value())
     }
 
+    const LOCK_EX: u64 = 2;
+    const LOCK_UN: u64 = 8;
+
     pub(crate) fn store_lock(&mut self, fp: PointerValue<'ctx>) -> Result<(), String> {
-        let fileno_fn = self.module.get_function("fileno").unwrap();
-        let flock_fn = self.module.get_function("flock").unwrap();
-        let fd = self.call_result(b!(self.bld.build_call(fileno_fn, &[fp.into()], "fd")));
-        let lock_ex = self.ctx.i32_type().const_int(2, false);
-        b!(self
-            .bld
-            .build_call(flock_fn, &[fd.into(), lock_ex.into()], ""));
-        Ok(())
+        self.store_flock(fp, Self::LOCK_EX)
     }
 
     pub(crate) fn store_unlock(&mut self, fp: PointerValue<'ctx>) -> Result<(), String> {
+        self.store_flock(fp, Self::LOCK_UN)
+    }
+
+    fn store_flock(&mut self, fp: PointerValue<'ctx>, op: u64) -> Result<(), String> {
         let fileno_fn = self.module.get_function("fileno").unwrap();
         let flock_fn = self.module.get_function("flock").unwrap();
         let fd = self.call_result(b!(self.bld.build_call(fileno_fn, &[fp.into()], "fd")));
-        let lock_un = self.ctx.i32_type().const_int(8, false);
+        let lock_op = self.ctx.i32_type().const_int(op, false);
         b!(self
             .bld
-            .build_call(flock_fn, &[fd.into(), lock_un.into()], ""));
+            .build_call(flock_fn, &[fd.into(), lock_op.into()], ""));
         Ok(())
     }
 }
