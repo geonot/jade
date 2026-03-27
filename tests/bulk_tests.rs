@@ -5645,10 +5645,14 @@ fn b_p42_wrong_arg_count() {
 
 #[test]
 fn b_p42_strict_unsolved_typevar() {
-    // Strict mode rejects function with ambiguous return type (uncalled, unsolved typevar)
+    // After R1.4/R3.1: *foo(x) x is a valid polymorphic function — scheme-quantified
+    // vars are exempt from strict-mode errors. The program still fails because
+    // foo is referenced but never called, so monomorphization can't produce a
+    // concrete version. The error is now at codegen, not type checking.
     let err = expect_strict_fail("*foo(x)\n    x\n\n*main()\n    foo\n");
-    assert!(err.contains("ambiguous") || err.contains("unsolved") || err.contains("infer"),
-        "expected type ambiguity error, got: {err}");
+    assert!(err.contains("ambiguous") || err.contains("unsolved") || err.contains("infer")
+        || err.contains("undefined"),
+        "expected type/codegen error, got: {err}");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -6327,5 +6331,106 @@ fn b_infer_i3_pedantic_passes_annotated() {
     expect(
         "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
+    );
+}
+
+// ── 10.1 / 10.2 Remediation Tests ──
+
+#[test]
+fn b_s6_enum_inference_from_match_pattern() {
+    // S6: Unannotated param inferred as enum type from match variant patterns
+    expect(
+        "enum Op\n    Add(i64, i64)\n    Mul(i64, i64)\n    Neg(i64)\n\n*eval(op)\n    match op\n        Add(a, b) ? a + b\n        Mul(a, b) ? a * b\n        Neg(a) ? 0 - a\n\n*main()\n    log(eval(Add(3, 4)))\n    log(eval(Mul(5, 6)))\n    log(eval(Neg(10)))\n",
+        "7\n30\n-10",
+    );
+}
+
+#[test]
+fn b_s6_enum_inference_single_variant() {
+    // S6: Even a single variant pattern infers the enum type
+    expect(
+        "enum Color\n    Red\n    Green\n    Blue\n\n*is_red(c)\n    match c\n        Red ? 1\n        _ ? 0\n\n*main()\n    log(is_red(Red))\n    log(is_red(Blue))\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn b_r41_trait_guided_single_implementor() {
+    // R4.1: TypeVar with trait constraint resolved to single implementing type
+    expect(
+        "trait Greetable\n    *greet() -> String\n\ntype Dog\n    name: String\n\nimpl Greetable for Dog\n    *greet() -> String\n        \"Woof from \" + self.name\n\n*say_hello(x)\n    x.greet()\n\n*main()\n    d is Dog(name is \"Rex\")\n    log(say_hello(d))\n",
+        "Woof from Rex",
+    );
+}
+
+#[test]
+fn b_value_restriction_non_value_monomorphic() {
+    // Value restriction: result of function call is monomorphic, not generalized.
+    // r = wrap(42) binds r as i64; passing to process_str(String) -> String fails.
+    let _err = expect_compile_fail(
+        "*wrap(x)\n    x\n\n*process_int(n: i64) -> i64\n    n + 1\n\n*process_str(s: String) -> String\n    s + \"!\"\n\n*main()\n    r is wrap(42)\n    log(process_int(r))\n    log(process_str(r))\n",
+    );
+}
+
+#[test]
+fn b_value_restriction_lambda_is_poly() {
+    // Value restriction: let-bound lambda IS a syntactic value, so it can be polymorphic
+    expect(
+        "*main()\n    id is *fn(x) x\n    log(id(42))\n    log(id(\"hello\"))\n",
+        "42\nhello",
+    );
+}
+
+#[test]
+fn b_struct_field_inference_from_constructor() {
+    // Constructor-driven struct field inference: unannotated fields inferred from usage
+    expect(
+        "type Point\n    x\n    y\n\n*main()\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_struct_field_inference_mixed_types() {
+    // Constructor-driven: mixed String and i64 fields inferred correctly
+    expect(
+        "type Person\n    name\n    age\n\n*main()\n    p is Person(name is \"Alice\", age is 30)\n    log(p.name)\n    log(p.age)\n",
+        "Alice\n30",
+    );
+}
+
+#[test]
+fn b_width_propagation_param() {
+    // Width propagation: i32 param type propagates to untyped arg
+    expect(
+        "*add_i32(a: i32, b: i32) -> i32\n    a + b\n\n*main()\n    x is 10\n    y is 20\n    log(add_i32(x, y))\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_width_propagation_return() {
+    // Width propagation: return type propagates to body literal
+    expect(
+        "*make_u8() -> u8\n    42\n\n*main()\n    log(make_u8())\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_f32_struct_field_store_load() {
+    // f32 struct fields store and load correctly
+    expect(
+        "type Sensor\n    reading: f32\n    count: u16\n\n*main()\n    s is Sensor(reading is 3.14, count is 100)\n    log(s.reading)\n    log(s.count)\n",
+        "3.140000\n100",
+    );
+}
+
+#[test]
+fn b_f32_function_roundtrip() {
+    // f32 param and return type work correctly
+    expect(
+        "*compute(x: f32) -> f32\n    x * 2.0\n\n*main()\n    log(compute(3.14))\n",
+        "6.280000",
     );
 }

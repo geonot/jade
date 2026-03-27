@@ -29,15 +29,20 @@ pub(crate) struct InferCtx {
     pub(crate) debug: bool,
     collect_default_warnings: bool,
     default_warnings: Vec<String>,
-    /// When true, unsolved TypeVars with TypeConstraint::None or Numeric produce
-    /// errors instead of silently defaulting to I64. Integer→I64 and Float→F64
-    /// defaults are always allowed (principled defaulting).
+    /// When true, unsolved TypeVars with TypeConstraint::None produce errors
+    /// instead of silently defaulting to I64. Integer→I64, Float→F64, and
+    /// Numeric→I64 defaults are allowed (principled defaulting); Numeric
+    /// produces a warning instead of an error.
     /// This is ON by default. Use `--lenient` to disable.
     strict_types: bool,
     /// Errors collected during strict-mode resolution.
     strict_errors: Vec<String>,
     /// When true, Integer→I64 and Float→F64 defaults also produce errors.
     pedantic: bool,
+    /// TypeVar roots that are part of a generalized scheme. These are exempt
+    /// from strict-mode errors at the definition site because they represent
+    /// polymorphic parameters that will be solved at each call site.
+    quantified_vars: std::collections::HashSet<u32>,
 }
 
 impl InferCtx {
@@ -54,6 +59,7 @@ impl InferCtx {
             strict_types: true,  // strict is now the default
             strict_errors: Vec::new(),
             pedantic: false,
+            quantified_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -96,6 +102,16 @@ impl InferCtx {
 
     pub(crate) fn drain_strict_errors(&mut self) -> Vec<String> {
         std::mem::take(&mut self.strict_errors)
+    }
+
+    /// Mark TypeVar roots as scheme-quantified. These are exempt from
+    /// strict-mode errors at the definition site — they represent polymorphic
+    /// parameters that will be solved at each call site via instantiation.
+    pub(crate) fn mark_quantified(&mut self, vars: &[u32]) {
+        for &v in vars {
+            let root = self.find(v);
+            self.quantified_vars.insert(root);
+        }
     }
 
     pub(crate) fn is_strict(&self) -> bool {
@@ -619,7 +635,8 @@ impl InferCtx {
                 } else {
                     let constraint = &self.constraints[root as usize];
                     // In strict mode, unconstrained TypeVars are ambiguity errors
-                    if self.strict_types {
+                    // UNLESS they are scheme-quantified (polymorphic params solved at call site)
+                    if self.strict_types && !self.quantified_vars.contains(&root) {
                         match constraint {
                             TypeConstraint::None => {
                                 let origin_msg = if let Some(origin) = &self.origins[root as usize] {
@@ -633,15 +650,18 @@ impl InferCtx {
                                 self.strict_errors.push(origin_msg);
                             }
                             TypeConstraint::Numeric => {
+                                // R1.2: Numeric→I64 is now a principled default (warning, not error).
+                                // Arithmetic operators naturally produce Numeric constraints;
+                                // defaulting to I64 is safe and matches integer-biased semantics.
                                 let origin_msg = if let Some(origin) = &self.origins[root as usize] {
                                     format!(
-                                        "line {}:{}: ambiguous numeric type: could be integer or float ({})\n  help: add `: i64` for integer or `: f64` for float",
+                                        "line {}:{}: numeric type defaults to i64 ({})\n  help: add `: i64` for integer or `: f64` for float",
                                         origin.span.line, origin.span.col, origin.reason
                                     )
                                 } else {
-                                    format!("ambiguous numeric type: unsolved type variable ?{root}\n  help: add `: i64` for integer or `: f64` for float")
+                                    format!("numeric type defaults to i64 for ?{root}\n  help: add `: i64` for integer or `: f64` for float")
                                 };
-                                self.strict_errors.push(origin_msg);
+                                self.default_warnings.push(origin_msg);
                             }
                             // Integer→I64 and Float→F64 are principled defaults, no error
                             // Trait constraints produce an error (no default exists)
@@ -730,7 +750,7 @@ impl InferCtx {
                             }
                             TypeConstraint::Numeric => {
                                 warnings.push(format!(
-                                    "line {}:{}: ambiguous numeric type defaulted to i64 ({}). Add `: i64` for integer or `: f64` for float.",
+                                    "line {}:{}: numeric type defaults to i64 ({}). Add `: i64` for integer or `: f64` for float.",
                                     origin.span.line, origin.span.col, origin.reason
                                 ));
                             }

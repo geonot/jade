@@ -17,10 +17,10 @@ extern *strlen(s: %i8) -> i64
 
 type File
     handle: %i8
-    path: String
-    mode: String
+    path
+    mode
 
-*read_file(path: String)
+*read_file(path)
     fp is fopen(%path, "r")
     if fp as i64 equals 0
         return ""
@@ -32,7 +32,7 @@ type File
     fclose(fp)
     __string_from_raw(buf, size, size + 1)
 
-*write_file(path: String, content: String)
+*write_file(path, content)
     fp is fopen(%path, "w")
     if fp as i64 equals 0
         return false
@@ -40,7 +40,7 @@ type File
     fclose(fp)
     true
 
-*append_file(path: String, content: String)
+*append_file(path, content)
     fp is fopen(%path, "a")
     if fp as i64 equals 0
         return false
@@ -48,7 +48,7 @@ type File
     fclose(fp)
     true
 
-*open(path: String, mode: String)
+*open(path, mode)
     fp is fopen(&path, &mode)
     File(fp, path, mode)
 
@@ -57,7 +57,7 @@ type File
     n is fread(buf, 1, size, self.handle)
     __string_from_raw(buf, n, size)
 
-*File.write(self, data: String)
+*File.write(self, data)
     fwrite(&data, 1, data.length, self.handle)
 
 *File.close(self)
@@ -66,5 +66,5 @@ type File
 *File.eof(self)
     feof(self.handle) isnt 0
 
-*file_exists(path: String)
+*file_exists(path)
     __file_exists(path)

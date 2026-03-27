@@ -1,12 +1,12 @@
 # std.rand — xoshiro256** PRNG
 
 type RNG
-    s0: u64
-    s1: u64
-    s2: u64
-    s3: u64
+    s0
+    s1
+    s2
+    s3
 
-*seed(n: u64)
+*seed(n)
     z is n
     z is (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9 as u64
     s0 is z

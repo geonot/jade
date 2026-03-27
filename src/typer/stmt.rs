@@ -66,6 +66,9 @@ impl Typer {
                     // greet expects (String) -> String — the call solves f's TypeVar
                     // to String). We default remaining unsolved vars at block end.
                     if scheme.is_poly() {
+                        // R3.1: Mark quantified vars so they don't trigger strict-mode
+                        // errors at the definition site (polymorphic — solved at call site).
+                        self.infer_ctx.mark_quantified(&scheme.quantified);
                         self.deferred_quantified_vars.extend(scheme.quantified.iter().copied());
                         // Store the lambda AST for poly-scheme let-bound lambdas so
                         // we can re-lower (monomorphize) at each call site with the
@@ -493,7 +496,10 @@ impl Typer {
         match pat {
             ast::Pat::Wild(span) => Ok(hir::Pat::Wild(*span)),
             ast::Pat::Ident(name, span) => {
-                if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
+                if let Some((en, tag)) = self.variant_tags.get(name).cloned() {
+                    // S6: Unify expected type with the enum type for zero-arg variants
+                    let enum_ty = Type::Enum(en.clone());
+                    let _ = self.infer_ctx.unify_at(expected_ty, &enum_ty, *span, "match pattern implies enum type");
                     return Ok(hir::Pat::Ctor(name.clone(), tag, vec![], *span));
                 }
                 let id = self.fresh_id();
@@ -517,6 +523,14 @@ impl Typer {
                 let tag = self.variant_tags.get(name).map(|(_, t)| *t).unwrap_or(0);
 
                 let enum_name = self.variant_tags.get(name).map(|(en, _)| en.clone());
+
+                // S6: Unify the expected type (match subject) with the enum type
+                // so that unannotated function params get their type from match patterns.
+                if let Some(ref en) = enum_name {
+                    let enum_ty = Type::Enum(en.clone());
+                    let _ = self.infer_ctx.unify_at(expected_ty, &enum_ty, *span, "match pattern implies enum type");
+                }
+
                 let field_tys: Vec<Type> = if let Some(ref en) = enum_name {
                     if let Some(variants) = self.enums.get(en) {
                         variants

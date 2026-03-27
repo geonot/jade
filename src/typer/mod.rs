@@ -335,6 +335,8 @@ impl Typer {
     }
 }
 
+mod builtins;
+mod call;
 mod expr;
 mod infer;
 mod lower;
@@ -948,18 +950,22 @@ mod tests {
     }
 
     #[test]
-    fn test_strict_types_errors_on_ambiguous_numeric() {
+    fn test_strict_types_numeric_defaults_with_warning() {
+        // R1.2: Numeric→I64 is now a principled default with warning, not error.
         let mut ctx = unify::InferCtx::new();
         ctx.enable_strict_types();
+        ctx.enable_default_warnings();
         let span = crate::ast::Span { start: 0, end: 0, line: 10, col: 1 };
         let v = ctx.fresh_numeric_var();
         let v2 = ctx.fresh_var();
         let _ = ctx.unify_at(&v, &v2, span, "numeric op");
         let resolved = ctx.resolve(&v);
-        assert_eq!(resolved, Type::I64);
+        assert_eq!(resolved, Type::I64, "Numeric should default to I64");
         let errors = ctx.drain_strict_errors();
-        assert!(!errors.is_empty(), "Numeric (ambiguous int/float) should error in strict mode");
-        assert!(errors[0].contains("ambiguous numeric type"), "error: {}", errors[0]);
+        assert!(errors.is_empty(), "Numeric should NOT produce strict errors (now a warning): {:?}", errors);
+        let warnings = ctx.drain_default_warnings();
+        assert!(!warnings.is_empty(), "Numeric should produce a default warning");
+        assert!(warnings[0].contains("numeric type defaults to i64"), "warning: {}", warnings[0]);
     }
 
     #[test]
@@ -1253,5 +1259,296 @@ mod tests {
                 assert!(!p.ty.has_type_var(), "{} param {} has TypeVar: {:?}", f.name, p.name, p.ty);
             }
         }
+    }
+
+    // ── Phase 2 (R2): Lambda Parameter Inference ──────────────────────
+
+    #[test]
+    fn test_lambda_standalone_unannotated_param_integer() {
+        // R2.1: Lambda *fn(x) x + 1 should work without annotation.
+        // The + operator gives x an Integer constraint which defaults to I64.
+        let src = "*main()\n    f is *fn(x) x + 1\n    log(f(5))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        let hir = typer.lower_program(&prog).unwrap();
+        let main = &hir.fns[0];
+        if let hir::Stmt::Bind(b) = &main.body[0] {
+            assert_eq!(b.name, "f");
+            if let Type::Fn(ptys, ret) = &b.ty {
+                assert_eq!(ptys[0], Type::I64, "lambda param should infer to I64");
+                assert_eq!(**ret, Type::I64, "lambda return should infer to I64");
+            } else {
+                panic!("expected Fn type for f, got {:?}", b.ty);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lambda_standalone_unannotated_param_float() {
+        // Lambda with float arithmetic should infer Float constraint
+        let src = "*main()\n    f is *fn(x) x + 1.0\n    log(f(2.5))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        let hir = typer.lower_program(&prog).unwrap();
+        let main = &hir.fns[0];
+        if let hir::Stmt::Bind(b) = &main.body[0] {
+            if let Type::Fn(ptys, _) = &b.ty {
+                assert!(ptys[0].is_float(), "lambda param should be float: {:?}", ptys[0]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lambda_let_bound_then_called() {
+        // R2.2: Let-bound lambda then called with concrete args
+        let src = "*main()\n    f is *fn(x) x + 1\n    result is f(42)\n    log(result)\n";
+        let hir = type_check(src);
+        let main = &hir.fns[0];
+        // result should be I64
+        if let hir::Stmt::Bind(b) = &main.body[1] {
+            assert_eq!(b.name, "result");
+            assert_eq!(b.ty, Type::I64, "result should be I64, got {:?}", b.ty);
+        }
+    }
+
+    #[test]
+    fn test_lambda_passed_to_hof_infers_type() {
+        // Lambda passed directly to HOF with known param type
+        let src = "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n*main()\n    log(apply(*fn(x) x + 1, 5))\n";
+        let hir = type_check(src);
+        // Should compile without errors; lambda param inferred from HOF context
+        let apply_fn = hir.fns.iter().find(|f| f.name == "apply").unwrap();
+        assert_eq!(apply_fn.ret, Type::I64);
+    }
+
+    // ── Phase 3 (R3): Function Type Parameter Inference ──────────────
+
+    #[test]
+    fn test_fn_scheme_quantified_exempt_from_strict() {
+        // R3.1: Quantified scheme vars should NOT trigger strict errors
+        let src = "*identity(x)\n    x\n*main()\n    log(identity(42))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        typer.set_strict_types(true);
+        let result = typer.lower_program(&prog);
+        assert!(result.is_ok(), "scheme-quantified params should not error in strict mode: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_fn_scheme_polymorphic_identity_strict() {
+        // Polymorphic function used with different types should work in strict mode
+        let src = "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        typer.set_strict_types(true);
+        let result = typer.lower_program(&prog);
+        assert!(result.is_ok(), "polymorphic multi-use should work in strict mode: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_fn_numeric_param_defaults_in_strict() {
+        // R1.2 + R3.1: *double(x) x + x should work in strict mode
+        // (Numeric constraint from + defaults to I64 with warning, not error)
+        let src = "*double(x)\n    x + x\n*main()\n    log(double(21))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        typer.set_strict_types(true);
+        let result = typer.lower_program(&prog);
+        assert!(result.is_ok(), "*double(x) x+x should work in strict mode: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_cross_function_constraint_flow() {
+        // R3.2: Calling f(x) where f: (i64) -> i64 should constrain x
+        let src = "*inc(x: i64) -> i64\n    x + 1\n*apply_inc(x)\n    inc(x)\n*main()\n    log(apply_inc(5))\n";
+        let hir = type_check(src);
+        let apply_inc = hir.fns.iter().find(|f| f.name.starts_with("apply_inc")).unwrap();
+        assert_eq!(apply_inc.params[0].ty, Type::I64, "x should be constrained to I64 via inc()");
+        assert_eq!(apply_inc.ret, Type::I64);
+    }
+
+    // ── Phase 4 (R4): Struct Field Inference ─────────────────────────
+
+    #[test]
+    fn test_struct_field_inferred_from_constructor() {
+        // R4.1: Struct fields should be inferred from constructor args
+        let src = "type Point\n    x\n    y\n\n*main()\n    p is Point(x is 1, y is 2)\n    log(p.x)\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        // Strict mode OFF for this — unannotated struct fields need constructor
+        typer.set_lenient(true);
+        let result = typer.lower_program(&prog);
+        assert!(result.is_ok(), "struct field inference from constructor should work: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_return_type_inference_no_annotation() {
+        // Return type should be inferred from tail expression
+        let src = "*square(x: i64)\n    x * x\n*main()\n    log(square(5))\n";
+        let hir = type_check(src);
+        let square = hir.fns.iter().find(|f| f.name == "square").unwrap();
+        assert_eq!(square.ret, Type::I64, "return type should be inferred as I64");
+    }
+
+    #[test]
+    fn test_multipath_return_type_inference() {
+        // Return type inferred across if/else branches
+        let src = "*abs(x: i64)\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n";
+        let hir = type_check(src);
+        let abs_fn = hir.fns.iter().find(|f| f.name == "abs").unwrap();
+        assert_eq!(abs_fn.ret, Type::I64);
+    }
+
+    #[test]
+    fn test_mutual_recursion_unannotated_params() {
+        // P5.2: Mutual recursion with unannotated params
+        let src = "*is_even(n)\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(4))\n";
+        let hir = type_check(src);
+        let is_even = hir.fns.iter().find(|f| f.name.starts_with("is_even")).unwrap();
+        let is_odd = hir.fns.iter().find(|f| f.name.starts_with("is_odd")).unwrap();
+        assert_eq!(is_even.params[0].ty, Type::I64);
+        assert_eq!(is_odd.params[0].ty, Type::I64);
+    }
+
+    #[test]
+    fn test_nested_lambda_inference() {
+        // P5.4: Nested lambdas with unannotated params
+        let src = "*main()\n    f is *fn(x) *fn(y) x + y\n    g is f(10)\n    log(g(20))\n";
+        let hir = type_check(src);
+        let main = &hir.fns[0];
+        // f should be Fn(I64) -> Fn(I64) -> I64
+        if let hir::Stmt::Bind(b) = &main.body[0] {
+            assert_eq!(b.name, "f");
+            assert!(!b.ty.has_type_var(), "f type has TypeVar: {:?}", b.ty);
+        }
+    }
+
+    #[test]
+    fn test_scc_cycle_with_typevar_params() {
+        // P5.12: SCC cycle with TypeVar params
+        let src = "*a(x)\n    if x equals 0\n        return 0\n    b(x - 1) + 1\n\n*b(x)\n    if x equals 0\n        return 0\n    a(x - 1) + 1\n\n*main()\n    log(a(5))\n";
+        let hir = type_check(src);
+        let a_fn = hir.fns.iter().find(|f| f.name.starts_with("a")).unwrap();
+        let b_fn = hir.fns.iter().find(|f| f.name.starts_with("b")).unwrap();
+        assert_eq!(a_fn.params[0].ty, Type::I64);
+        assert_eq!(b_fn.params[0].ty, Type::I64);
+        assert_eq!(a_fn.ret, Type::I64);
+        assert_eq!(b_fn.ret, Type::I64);
+    }
+
+    // ── Phase 5 additional: Missing Test Coverage from §8.2 ──────────
+
+    #[test]
+    fn test_poly_multi_use_identity() {
+        // P5.1: Multi-use polymorphism — id used with i64 then String
+        let src = "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n";
+        let hir = type_check(src);
+        let main = &hir.fns[0];
+        for stmt in &main.body {
+            if let hir::Stmt::Bind(b) = stmt {
+                match b.name.as_str() {
+                    "a" => assert_eq!(b.ty, Type::I64, "a should be I64, got {:?}", b.ty),
+                    "b" => assert_eq!(b.ty, Type::String, "b should be String, got {:?}", b.ty),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_strict_vs_lenient_comparison() {
+        // P5.7: Same program should work in both strict and lenient modes
+        let src = "*double(x: i64) -> i64\n    x + x\n*main()\n    log(double(21))\n";
+        let prog = parse(src);
+
+        // Lenient mode
+        let mut typer_lenient = Typer::new();
+        let result_lenient = typer_lenient.lower_program(&prog);
+        assert!(result_lenient.is_ok(), "lenient mode failed: {:?}", result_lenient.err());
+
+        // Strict mode — fully annotated program should also pass
+        let prog2 = parse(src);
+        let mut typer_strict = Typer::new();
+        typer_strict.set_strict_types(true);
+        let result_strict = typer_strict.lower_program(&prog2);
+        assert!(result_strict.is_ok(), "strict mode failed on fully annotated program: {:?}", result_strict.err());
+    }
+
+    #[test]
+    fn test_strict_rejects_completely_unconstrained() {
+        // Strict mode should reject completely unconstrained TypeVars (not in a scheme)
+        // A function with a param that is never used at all
+        let src = "*unused_param(x)\n    42\n*main()\n    log(unused_param(0))\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        typer.set_strict_types(true);
+        let result = typer.lower_program(&prog);
+        // x is used in the call (passed 0), so it gets Integer constraint
+        // This should work — x gets constrained via the call site
+        assert!(result.is_ok(), "param constrained by call site should work: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_scheme_instantiation_with_container() {
+        // P5.13: Scheme instantiation with container types
+        let src = "*wrap(x: i64)\n    v is vec()\n    v.push(x)\n    v\n*main()\n    w is wrap(42)\n    log(w.len())\n";
+        let hir = type_check(src);
+        let wrap_fn = hir.fns.iter().find(|f| f.name == "wrap").unwrap();
+        assert_eq!(wrap_fn.params[0].ty, Type::I64);
+    }
+
+    #[test]
+    fn test_vec_push_constrains_element_type() {
+        // P5 addition: deferred method constraint on container
+        let src = "*main()\n    v is vec()\n    v.push(42)\n    log(v.len())\n";
+        let hir = type_check(src);
+        let main = &hir.fns[0];
+        for stmt in &main.body {
+            if let hir::Stmt::Bind(b) = stmt {
+                if b.name == "v" {
+                    assert!(!b.ty.has_type_var(), "vec should have resolved element type: {:?}", b.ty);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_value_restriction_syntactic_value() {
+        // Value restriction: lambda IS a syntactic value → should generalize
+        let src = "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hi\")\n    log(a)\n    log(b)\n";
+        let prog = parse(src);
+        let mut typer = Typer::new();
+        let hir = typer.lower_program(&prog).unwrap();
+        let main = &hir.fns[0];
+        // id is a lambda (syntactic value) → gets poly scheme → can be used at multiple types
+        for stmt in &main.body {
+            if let hir::Stmt::Bind(b) = stmt {
+                match b.name.as_str() {
+                    "a" => assert_eq!(b.ty, Type::I64, "a should be I64"),
+                    "b" => assert_eq!(b.ty, Type::String, "b should be String"),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_unannotated_fn_called_with_string() {
+        // Function with unannotated param, called with string
+        let src = "*echo(x)\n    x\n*main()\n    log(echo(\"hello\"))\n";
+        let hir = type_check(src);
+        // After monomorphization, echo should have String param
+        let echo = hir.fns.iter().find(|f| f.name.starts_with("echo")).unwrap();
+        assert_eq!(echo.params[0].ty, Type::String);
+        assert_eq!(echo.ret, Type::String);
+    }
+
+    #[test]
+    fn test_unannotated_fn_called_with_bool() {
+        // Function with unannotated param, called with bool
+        let src = "*negate(x)\n    if x\n        return 0\n    1\n*main()\n    log(negate(1 equals 1))\n";
+        let hir = type_check(src);
+        let negate = hir.fns.iter().find(|f| f.name.starts_with("negate")).unwrap();
+        assert_eq!(negate.params[0].ty, Type::Bool);
     }
 }

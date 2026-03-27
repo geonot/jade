@@ -1,8 +1,8 @@
 extern *usleep(us: i32) -> i32
 
 actor Worker
-    count: i64
-    @ping n: i64
+    count
+    @ping n
         count is count + n
 
 *main()

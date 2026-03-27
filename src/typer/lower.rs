@@ -1326,6 +1326,12 @@ impl Typer {
         let ret_ty = self.infer_ctx.canonicalize_type(&hfn.ret);
         let fn_ty = crate::types::Type::Fn(param_tys.clone(), Box::new(ret_ty.clone()));
         let scheme = self.generalize(&fn_ty);
+        // R3.1: Mark quantified vars so they don't trigger strict-mode errors
+        // at the definition site. These are polymorphic — they'll be solved
+        // at each call site via scheme instantiation.
+        if scheme.is_poly() {
+            self.infer_ctx.mark_quantified(&scheme.quantified);
+        }
         if self.debug_types {
             if scheme.is_poly() {
                 eprintln!(

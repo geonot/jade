@@ -180,6 +180,17 @@ impl<'ctx> Compiler<'ctx> {
                     .into();
             }
         }
+        if val.is_float_value() && target.is_float_type() {
+            let fv = val.into_float_value();
+            let ft = target.into_float_type();
+            if fv.get_type() != ft {
+                if fv.get_type().get_bit_width() < ft.get_bit_width() {
+                    return self.bld.build_float_ext(fv, ft, "fpext").unwrap().into();
+                } else {
+                    return self.bld.build_float_trunc(fv, ft, "fptrunc").unwrap().into();
+                }
+            }
+        }
         val
     }
 

@@ -27,10 +27,6 @@ fn main() {
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static=jade_rt");
     println!("cargo:rustc-link-lib=pthread");
-
-    // Expose OUT_DIR so main.rs can find libjade_rt.a at runtime
     println!("cargo:rustc-env=JADE_RT_DIR={out}");
-
-    // Rebuild if runtime changes
     println!("cargo:rerun-if-changed=runtime/");
 }

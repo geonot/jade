@@ -1,6 +1,6 @@
 # std.sort — Introsort: quicksort + heapsort fallback + insertion sort
 
-*sort(arr: Vec of i64)
+*sort(arr)
     n is arr.length
     if n <= 1
         return
@@ -11,7 +11,7 @@
         depth is depth + 1
     __introsort(arr, 0, n - 1, depth * 2)
 
-*__introsort(arr: Vec of i64, lo, hi, depth_limit)
+*__introsort(arr, lo, hi, depth_limit)
     if hi - lo < 16
         __insertion_sort(arr, lo, hi)
         return
@@ -22,7 +22,7 @@
     __introsort(arr, lo, pivot - 1, depth_limit - 1)
     __introsort(arr, pivot + 1, hi, depth_limit - 1)
 
-*__partition(arr: Vec of i64, lo, hi)
+*__partition(arr, lo, hi)
     mid is (lo + hi) / 2
     if arr.get(mid) < arr.get(lo)
         __swap(arr, lo, mid)
@@ -41,7 +41,7 @@
     __swap(arr, i + 1, hi)
     i + 1
 
-*__insertion_sort(arr: Vec of i64, lo, hi)
+*__insertion_sort(arr, lo, hi)
     i is lo + 1
     while i <= hi
         key is arr.get(i)
@@ -52,7 +52,7 @@
         arr.set(j + 1, key)
         i is i + 1
 
-*__heapsort(arr: Vec of i64, lo, hi)
+*__heapsort(arr, lo, hi)
     n is hi - lo + 1
     i is n / 2 - 1
     while i >= 0
@@ -64,7 +64,7 @@
         __sift_down(arr, lo, 0, i)
         i is i - 1
 
-*__sift_down(arr: Vec of i64, lo, root, n)
+*__sift_down(arr, lo, root, n)
     r is root
     while 2 * r + 1 < n
         child is 2 * r + 1
@@ -76,7 +76,7 @@
         else
             return
 
-*__swap(arr: Vec of i64, a, b)
+*__swap(arr, a, b)
     tmp is arr.get(a)
     arr.set(a, arr.get(b))
     arr.set(b, tmp)
