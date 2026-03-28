@@ -156,6 +156,21 @@ impl Typer {
                 let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let resolved_iter_ty = self.infer_ctx.shallow_resolve(&iter.ty);
+
+                // Map iteration: for k, v in map → desugar to keys-based iteration
+                if let (Some(val_bind), Type::Map(key_ty, val_ty)) =
+                    (&f.bind2, &resolved_iter_ty)
+                {
+                    return self.desugar_for_map(
+                        f,
+                        val_bind,
+                        iter,
+                        key_ty,
+                        val_ty,
+                        ret_ty,
+                    );
+                }
+
                 let iter_is_int = resolved_iter_ty.is_int()
                     || if let Type::TypeVar(id) = &resolved_iter_ty {
                         let c = self.infer_ctx.constraint(*id);

@@ -324,6 +324,7 @@ pub struct While {
 #[derive(Debug, Clone)]
 pub struct For {
     pub bind: String,
+    pub bind2: Option<String>,
     pub iter: Expr,
     pub end: Option<Expr>,
     pub step: Option<Expr>,

@@ -48,7 +48,7 @@ impl Typer {
                     }
                     self.declare_type_def(td);
                     for m in &td.methods {
-                        self.declare_method_sig(&td.name, m);
+                        self.declare_method_sig_by_ptr(&td.name, m);
                     }
                 }
                 ast::Decl::Enum(ed) if !ed.type_params.is_empty() => {
@@ -1284,13 +1284,8 @@ impl Typer {
         ib: &ast::ImplBlock,
     ) -> Result<hir::TraitImpl, String> {
         let mut hir_methods = Vec::new();
-        let is_iter_impl = ib.trait_name.as_deref() == Some("Iter");
         for m in &ib.methods {
-            let hm = if is_iter_impl {
-                self.lower_method_by_ptr(&ib.type_name, m)?
-            } else {
-                self.lower_method(&ib.type_name, m)?
-            };
+            let hm = self.lower_method_by_ptr(&ib.type_name, m)?;
             hir_methods.push(hm);
         }
         Ok(hir::TraitImpl {
@@ -1526,7 +1521,7 @@ impl Typer {
         for m in &td.methods {
             let method_name = format!("{}_{}", td.name, m.name);
             if self.fns.contains_key(&method_name) {
-                let hm = self.lower_method(&td.name, m)?;
+                let hm = self.lower_method_by_ptr(&td.name, m)?;
                 hir_methods.push(hm);
             }
         }
@@ -1541,6 +1536,7 @@ impl Typer {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn lower_method(&mut self, type_name: &str, m: &ast::Fn) -> Result<hir::Fn, String> {
         self.lower_method_impl(type_name, m, false)
     }
@@ -1627,6 +1623,8 @@ impl Typer {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
                 let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, reason);
                 self.collect_unify_error(r);
+            } else {
+                let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
             self.infer_ctx.resolve(&ret)
         } else {
@@ -1851,6 +1849,209 @@ impl Typer {
 
         Ok(hir::Stmt::Expr(hir::Expr {
             kind: hir::ExprKind::Block(vec![bind_stmt, loop_stmt]),
+            ty: Type::Void,
+            span,
+        }))
+    }
+
+    /// Desugar `for k, v in map` into keys-based iteration:
+    /// `__keys = map.keys(); for __i from 0 to __keys.len() { k = __keys.get(__i); v = map.get(k); ...body }`
+    pub(crate) fn desugar_for_map(
+        &mut self,
+        f: &ast::For,
+        val_bind: &str,
+        map_expr: hir::Expr,
+        key_ty: &Type,
+        val_ty: &Type,
+        ret_ty: &Type,
+    ) -> Result<hir::Stmt, String> {
+        let span = f.span;
+        let key_ty = key_ty.clone();
+        let val_ty = val_ty.clone();
+
+        // Bind the map to a temp variable
+        let map_id = self.fresh_id();
+        let map_var = "__map_iter".to_string();
+        let map_ty = map_expr.ty.clone();
+        self.define_var(
+            &map_var,
+            VarInfo {
+                def_id: map_id,
+                ty: map_ty.clone(),
+                ownership: Ownership::Owned,
+                scheme: None,
+            },
+        );
+        let map_bind = hir::Stmt::Bind(hir::Bind {
+            def_id: map_id,
+            name: map_var.clone(),
+            value: map_expr,
+            ty: map_ty.clone(),
+            ownership: Ownership::Owned,
+            span,
+        });
+
+        // __keys = map.keys()
+        let keys_id = self.fresh_id();
+        let keys_var = "__map_keys".to_string();
+        let keys_ty = Type::Vec(Box::new(key_ty.clone()));
+        let keys_call = hir::Expr {
+            kind: hir::ExprKind::MapMethod(
+                Box::new(hir::Expr {
+                    kind: hir::ExprKind::Var(map_id, map_var.clone()),
+                    ty: map_ty.clone(),
+                    span,
+                }),
+                "keys".into(),
+                vec![],
+            ),
+            ty: keys_ty.clone(),
+            span,
+        };
+        self.define_var(
+            &keys_var,
+            VarInfo {
+                def_id: keys_id,
+                ty: keys_ty.clone(),
+                ownership: Ownership::Owned,
+                scheme: None,
+            },
+        );
+        let keys_bind = hir::Stmt::Bind(hir::Bind {
+            def_id: keys_id,
+            name: keys_var.clone(),
+            value: keys_call,
+            ty: keys_ty.clone(),
+            ownership: Ownership::Owned,
+            span,
+        });
+
+        // for __i from 0 to __keys.len() { k = __keys.get(__i); v = map.get(k); ...body }
+        let i_id = self.fresh_id();
+        let i_var = "__map_i".to_string();
+        self.push_scope();
+        self.define_var(
+            &i_var,
+            VarInfo {
+                def_id: i_id,
+                ty: Type::I64,
+                ownership: Ownership::Owned,
+                scheme: None,
+            },
+        );
+
+        // k = __keys.get(__i)
+        let k_id = self.fresh_id();
+        let k_get = hir::Expr {
+            kind: hir::ExprKind::VecMethod(
+                Box::new(hir::Expr {
+                    kind: hir::ExprKind::Var(keys_id, keys_var.clone()),
+                    ty: keys_ty.clone(),
+                    span,
+                }),
+                "get".into(),
+                vec![hir::Expr {
+                    kind: hir::ExprKind::Var(i_id, i_var.clone()),
+                    ty: Type::I64,
+                    span,
+                }],
+            ),
+            ty: key_ty.clone(),
+            span,
+        };
+        self.define_var(
+            &f.bind,
+            VarInfo {
+                def_id: k_id,
+                ty: key_ty.clone(),
+                ownership: Ownership::Owned,
+                scheme: None,
+            },
+        );
+        let k_bind = hir::Stmt::Bind(hir::Bind {
+            def_id: k_id,
+            name: f.bind.clone(),
+            value: k_get,
+            ty: key_ty.clone(),
+            ownership: Ownership::Owned,
+            span,
+        });
+
+        // v = map.get(k)
+        let v_id = self.fresh_id();
+        let v_get = hir::Expr {
+            kind: hir::ExprKind::MapMethod(
+                Box::new(hir::Expr {
+                    kind: hir::ExprKind::Var(map_id, map_var.clone()),
+                    ty: map_ty,
+                    span,
+                }),
+                "get".into(),
+                vec![hir::Expr {
+                    kind: hir::ExprKind::Var(k_id, f.bind.clone()),
+                    ty: key_ty,
+                    span,
+                }],
+            ),
+            ty: val_ty.clone(),
+            span,
+        };
+        self.define_var(
+            val_bind,
+            VarInfo {
+                def_id: v_id,
+                ty: val_ty.clone(),
+                ownership: Ownership::Owned,
+                scheme: None,
+            },
+        );
+        let v_bind = hir::Stmt::Bind(hir::Bind {
+            def_id: v_id,
+            name: val_bind.to_string(),
+            value: v_get,
+            ty: val_ty,
+            ownership: Ownership::Owned,
+            span,
+        });
+
+        let user_body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        self.pop_scope();
+
+        let mut for_body = vec![k_bind, v_bind];
+        for_body.extend(user_body);
+
+        // __keys.len() as the end expression
+        let keys_len = hir::Expr {
+            kind: hir::ExprKind::VecMethod(
+                Box::new(hir::Expr {
+                    kind: hir::ExprKind::Var(keys_id, keys_var),
+                    ty: keys_ty,
+                    span,
+                }),
+                "len".into(),
+                vec![],
+            ),
+            ty: Type::I64,
+            span,
+        };
+
+        let for_stmt = hir::Stmt::For(hir::For {
+            bind_id: i_id,
+            bind: i_var,
+            bind_ty: Type::I64,
+            iter: hir::Expr {
+                kind: hir::ExprKind::Int(0),
+                ty: Type::I64,
+                span,
+            },
+            end: Some(keys_len),
+            step: None,
+            body: for_body,
+            span,
+        });
+
+        Ok(hir::Stmt::Expr(hir::Expr {
+            kind: hir::ExprKind::Block(vec![map_bind, keys_bind, for_stmt]),
             ty: Type::Void,
             span,
         }))

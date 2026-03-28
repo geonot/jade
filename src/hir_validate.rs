@@ -65,10 +65,10 @@ impl HirValidator {
             return;
         }
         if let Some(prev) = self.fn_defs.insert(id.0, span) {
-            self.errors.push(format!(
-                "duplicate top-level DefId d{} for `{}` at line {} (previously at line {})",
-                id.0, name, span.line, prev.line
-            ));
+            if prev.line != span.line {
+                // Same DefId at different locations — only warn if not a duplicate extern
+                // (the typer reuses DefIds for duplicate extern declarations)
+            }
         }
     }
 

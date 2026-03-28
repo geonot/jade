@@ -73,6 +73,8 @@ impl<'ctx> Compiler<'ctx> {
             "has" => self.map_has(header_ptr, obj, args),
             "remove" => self.map_remove(header_ptr, obj, args),
             "clear" => self.map_clear(header_ptr),
+            "keys" => self.map_keys(header_ptr),
+            "values" => self.map_values(header_ptr),
             _ => Err(format!("no method '{method}' on Map")),
         }
     }
@@ -383,6 +385,196 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
 
         Ok(self.ctx.i8_type().const_int(0, false).into())
+    }
+
+    fn map_keys(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.map_collect(header_ptr, 8) // key offset = 8
+    }
+
+    fn map_values(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.map_collect(header_ptr, 32) // value offset = 32
+    }
+
+    /// Iterate all occupied entries in the map and collect the field at
+    /// `field_offset` bytes into each entry into a new Vec.
+    fn map_collect(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        field_offset: u64,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let header_ty = self.vec_header_type();
+        let fv = self.cur_fn.unwrap();
+
+        // Read map capacity and entries pointer
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "mk.capp"));
+        let cap = b!(self.bld.build_load(i64t, cap_gep, "mk.cap")).into_int_value();
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "mk.ptrp"));
+        let entries = b!(self.bld.build_load(
+            self.ctx.ptr_type(AddressSpace::default()),
+            ptr_gep,
+            "mk.entries"
+        ))
+        .into_pointer_value();
+
+        // Read map length (number of occupied entries)
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "mk.lenp"));
+        let map_len = b!(self.bld.build_load(i64t, len_gep, "mk.len")).into_int_value();
+
+        // Allocate result Vec header
+        let result_hdr = self.compile_vec_new(&[])?;
+        let result_ptr = result_hdr.into_pointer_value();
+
+        // Pre-allocate buffer for result vec
+        let elem_size = i64t.const_int(8, false);
+        let buf_bytes = b!(self.bld.build_int_nsw_mul(map_len, elem_size, "mk.bufsz"));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self
+            .bld
+            .build_call(malloc, &[buf_bytes.into()], "mk.buf"))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
+        let r_ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_ptr, 0, "mk.rptrp"));
+        b!(self.bld.build_store(r_ptr_gep, buf));
+        let r_cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_ptr, 2, "mk.rcapp"));
+        b!(self.bld.build_store(r_cap_gep, map_len));
+
+        // Loop through all entries
+        let entry_size = i64t.const_int(48, false);
+        let idx_alloca = self.entry_alloca(i64t.into(), "mk.idx");
+        b!(self
+            .bld
+            .build_store(idx_alloca, i64t.const_int(0, false)));
+        let out_idx_alloca = self.entry_alloca(i64t.into(), "mk.oidx");
+        b!(self
+            .bld
+            .build_store(out_idx_alloca, i64t.const_int(0, false)));
+
+        let cond_bb = self.ctx.append_basic_block(fv, "mk.cond");
+        let body_bb = self.ctx.append_basic_block(fv, "mk.body");
+        let store_bb = self.ctx.append_basic_block(fv, "mk.store");
+        let inc_bb = self.ctx.append_basic_block(fv, "mk.inc");
+        let done_bb = self.ctx.append_basic_block(fv, "mk.done");
+
+        b!(self.bld.build_unconditional_branch(cond_bb));
+        self.bld.position_at_end(cond_bb);
+        let cur_idx = b!(self.bld.build_load(i64t, idx_alloca, "mk.i")).into_int_value();
+        let cmp = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, cur_idx, cap, "mk.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let byte_off = b!(self
+            .bld
+            .build_int_nsw_mul(cur_idx, entry_size, "mk.off"));
+        let ep = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "mk.ep")) };
+        let occ_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, ep, &[i64t.const_int(40, false)], "mk.occp"))
+        };
+        let occ = b!(self.bld.build_load(i8t, occ_ptr, "mk.occ")).into_int_value();
+        let is_occ = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            occ,
+            i8t.const_int(0, false),
+            "mk.isocc"
+        ));
+        b!(self.bld.build_conditional_branch(is_occ, store_bb, inc_bb));
+
+        self.bld.position_at_end(store_bb);
+        let field_ptr = unsafe {
+            b!(self.bld.build_gep(
+                i8t,
+                ep,
+                &[i64t.const_int(field_offset, false)],
+                "mk.fp"
+            ))
+        };
+        // For keys (offset 8), load 24 bytes (String SSO). For values (offset 32), load i64.
+        let field_val = if field_offset == 8 {
+            // Key is a String (24 bytes SSO) — copy into result vec as String
+            let st = self.string_type();
+            b!(self.bld.build_load(st, field_ptr, "mk.key"))
+        } else {
+            b!(self.bld.build_load(i64t, field_ptr, "mk.val"))
+        };
+
+        let out_idx = b!(self
+            .bld
+            .build_load(i64t, out_idx_alloca, "mk.oi"))
+        .into_int_value();
+        let out_off = b!(self
+            .bld
+            .build_int_nsw_mul(out_idx, elem_size, "mk.ooff"));
+        let dest = unsafe { b!(self.bld.build_gep(i8t, buf, &[out_off], "mk.dest")) };
+
+        if field_offset == 8 {
+            let memcpy = self.ensure_memcpy();
+            let tmp = self.entry_alloca(self.string_type().into(), "mk.stmp");
+            b!(self.bld.build_store(tmp, field_val));
+            b!(self.bld.build_call(
+                memcpy,
+                &[
+                    dest.into(),
+                    tmp.into(),
+                    i64t.const_int(24, false).into()
+                ],
+                ""
+            ));
+        } else {
+            b!(self.bld.build_store(dest, field_val));
+        }
+
+        let new_oi = b!(self.bld.build_int_nsw_add(
+            out_idx,
+            i64t.const_int(1, false),
+            "mk.noi"
+        ));
+        b!(self.bld.build_store(out_idx_alloca, new_oi));
+        b!(self.bld.build_unconditional_branch(inc_bb));
+
+        self.bld.position_at_end(inc_bb);
+        let next = b!(self.bld.build_int_nsw_add(
+            cur_idx,
+            i64t.const_int(1, false),
+            "mk.next"
+        ));
+        b!(self.bld.build_store(idx_alloca, next));
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(done_bb);
+        // Set result vec length
+        let r_len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_ptr, 1, "mk.rlenp"));
+        let final_oi = b!(self
+            .bld
+            .build_load(i64t, out_idx_alloca, "mk.flen"))
+        .into_int_value();
+        b!(self.bld.build_store(r_len_gep, final_oi));
+
+        Ok(result_ptr.into())
     }
 
     fn fnv_hash_string(

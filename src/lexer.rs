@@ -116,6 +116,7 @@ pub enum Token {
     CaretEq,
     ShlEq,
     ShrEq,
+    CharLit(i64),
 }
 
 impl std::fmt::Display for Token {
@@ -220,6 +221,7 @@ impl std::fmt::Display for Token {
             Self::CaretEq => f.write_str("^="),
             Self::ShlEq => f.write_str("<<="),
             Self::ShrEq => f.write_str(">>="),
+            Self::CharLit(c) => write!(f, ":{}", char::from(*c as u8)),
             Self::Actor => f.write_str("actor"),
             Self::Spawn => f.write_str("spawn"),
             Self::Send => f.write_str("send"),
@@ -557,7 +559,61 @@ impl<'s> Lexer<'s> {
             b'[' => Token::LBracket,
             b']' => Token::RBracket,
             b',' => Token::Comma,
-            b':' => Token::Colon,
+            b':' => {
+                if self.pos + 1 < self.src.len() {
+                    let next = self.src[self.pos + 1];
+                    if next == b'\\' {
+                        // Escape sequence char literal :  \n \t \r \\ \0
+                        if self.pos + 2 < self.src.len() {
+                            let esc = self.src[self.pos + 2];
+                            let val = match esc {
+                                b'n' => Some(b'\n' as i64),
+                                b't' => Some(b'\t' as i64),
+                                b'r' => Some(b'\r' as i64),
+                                b'\\' => Some(b'\\' as i64),
+                                b'0' => Some(0i64),
+                                _ => None,
+                            };
+                            if let Some(v) = val {
+                                self.advance(); // skip :
+                                self.advance(); // skip \\
+                                self.advance(); // skip escape char
+                                return Ok(Spanned {
+                                    token: Token::CharLit(v),
+                                    span: Span::new(start, self.pos, self.line, sc),
+                                });
+                            }
+                        }
+                    } else if next != b' ' && next != b'\n' && next != b'\r' {
+                        // Check for single-char literal: char after next must be
+                        // whitespace, punctuation, or EOF
+                        let after = if self.pos + 2 < self.src.len() {
+                            self.src[self.pos + 2]
+                        } else {
+                            b' ' // treat EOF as whitespace
+                        };
+                        let is_boundary = after == b' '
+                            || after == b'\n'
+                            || after == b'\r'
+                            || after == b')'
+                            || after == b']'
+                            || after == b','
+                            || after == b':'
+                            || after == b'\t'
+                            || self.pos + 2 >= self.src.len();
+                        if is_boundary {
+                            let val = next as i64;
+                            self.advance(); // skip :
+                            self.advance(); // skip char
+                            return Ok(Spanned {
+                                token: Token::CharLit(val),
+                                span: Span::new(start, self.pos, self.line, sc),
+                            });
+                        }
+                    }
+                }
+                Token::Colon
+            }
             b'.' => Token::Dot,
             b'*' => Token::Star,
             _ => return self.err(&format!("unexpected character: '{}'", ch as char)),
@@ -675,7 +731,47 @@ impl<'s> Lexer<'s> {
 
     fn lex_string(&mut self) -> Result<Spanned, LexError> {
         let (start, sc) = (self.pos, self.col);
-        self.advance();
+        self.advance(); // consume first '
+        // Check for triple-quoted string '''...'''
+        if self.pos + 1 < self.src.len()
+            && self.src[self.pos] == b'\''
+            && self.src[self.pos + 1] == b'\''
+        {
+            self.advance(); // consume second '
+            self.advance(); // consume third '
+            // Skip optional leading newline
+            if self.pos < self.src.len() && self.src[self.pos] == b'\n' {
+                self.line += 1;
+                self.col = 0;
+                self.pos += 1;
+            }
+            let mut val = String::new();
+            while self.pos < self.src.len() {
+                if self.src[self.pos] == b'\''
+                    && self.pos + 2 < self.src.len()
+                    && self.src[self.pos + 1] == b'\''
+                    && self.src[self.pos + 2] == b'\''
+                {
+                    self.advance(); // consume first '
+                    self.advance(); // consume second '
+                    self.advance(); // consume third '
+                    return Ok(Spanned {
+                        token: Token::Str(val),
+                        span: Span::new(start, self.pos, self.line, sc),
+                    });
+                }
+                if self.src[self.pos] == b'\n' {
+                    val.push('\n');
+                    self.line += 1;
+                    self.col = 0;
+                    self.pos += 1;
+                } else {
+                    val.push(self.src[self.pos] as char);
+                    self.advance();
+                }
+            }
+            return self.err("unterminated triple-quoted string");
+        }
         let mut val = String::new();
         let mut has_interp = false;
         while self.pos < self.src.len() && self.src[self.pos] != b'\'' {

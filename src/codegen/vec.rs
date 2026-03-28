@@ -409,7 +409,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    fn emit_vec_bounds_check(
+    pub(crate) fn emit_vec_bounds_check(
         &mut self,
         idx: inkwell::values::IntValue<'ctx>,
         len: inkwell::values::IntValue<'ctx>,

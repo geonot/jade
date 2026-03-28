@@ -163,7 +163,7 @@ impl Parser {
 
     fn parse_fn_param(&mut self, idx: usize, typed: bool) -> Result<Param, ParseError> {
         match self.peek() {
-            Token::Int(_) | Token::Float(_) | Token::True | Token::False | Token::Str(_) => {
+            Token::Int(_) | Token::CharLit(_) | Token::Float(_) | Token::True | Token::False | Token::Str(_) => {
                 let lit_sp = self.span();
                 let lit_expr = self.parse_literal_token()?;
                 Ok(Param {

@@ -77,7 +77,37 @@ impl<'ctx> Compiler<'ctx> {
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if let Some(fv) = self.module.get_function(resolved_name) {
-            let self_val = self.compile_expr(obj)?;
+            // Check if the method expects self by pointer (first param is ptr type)
+            let first_param_is_ptr = fv
+                .get_type()
+                .get_param_types()
+                .first()
+                .map(|t| t.is_pointer_type())
+                .unwrap_or(false);
+            let self_val = if first_param_is_ptr {
+                // By-pointer method: pass the alloca pointer directly
+                if let hir::ExprKind::Var(_, name) = &obj.kind {
+                    self.find_var(name)
+                        .ok_or_else(|| format!("undefined variable: {name}"))?
+                        .0
+                        .into()
+                } else if let hir::ExprKind::Field(inner, _, _) = &obj.kind {
+                    // Nested field access — compile and store to a temp alloca
+                    let val = self.compile_expr(obj)?;
+                    let ty = val.get_type();
+                    let tmp = self.entry_alloca(ty, "method.tmp");
+                    b!(self.bld.build_store(tmp, val));
+                    tmp.into()
+                } else {
+                    let val = self.compile_expr(obj)?;
+                    let ty = val.get_type();
+                    let tmp = self.entry_alloca(ty, "method.tmp");
+                    b!(self.bld.build_store(tmp, val));
+                    tmp.into()
+                }
+            } else {
+                self.compile_expr(obj)?
+            };
             let mut a: Vec<BasicMetadataValueEnum<'ctx>> = vec![self_val.into()];
             for arg in args {
                 a.push(self.compile_expr(arg)?.into());

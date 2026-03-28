@@ -648,7 +648,8 @@ impl Typer {
 
             ast::Expr::Ref(inner, span) => {
                 let hi = self.lower_expr(inner)?;
-                let ty = Type::Ptr(Box::new(hi.ty.clone()));
+                // % always produces a raw i8 pointer (e.g. String → C buffer ptr)
+                let ty = Type::Ptr(Box::new(Type::I8));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Ref(Box::new(hi)),
                     ty,

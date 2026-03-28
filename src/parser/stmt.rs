@@ -292,6 +292,12 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::For)?;
         let bind = self.ident()?;
+        let bind2 = if self.check(Token::Comma) {
+            self.advance();
+            Some(self.ident()?)
+        } else {
+            None
+        };
         if self.check(Token::From) {
             self.advance();
         } else {
@@ -313,6 +319,7 @@ impl Parser {
         self.expect(Token::Newline)?;
         Ok(Stmt::For(For {
             bind,
+            bind2,
             iter,
             end,
             step,

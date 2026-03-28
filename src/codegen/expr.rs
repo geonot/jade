@@ -668,6 +668,33 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 Err("tuple indexing on rvalue not supported".into())
             }
+            Type::Vec(elem_ty) => {
+                let lty = self.llvm_ty(elem_ty);
+                let header_ptr = self.compile_expr(arr)?.into_pointer_value();
+                let header_ty = self.vec_header_type();
+                let ptr_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 0, "vi.ptrp"));
+                let data_ptr = b!(self.bld.build_load(
+                    self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                    ptr_gep,
+                    "vi.data"
+                ))
+                .into_pointer_value();
+                let len_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 1, "vi.lenp"));
+                let len = b!(self.bld.build_load(
+                    self.ctx.i64_type(),
+                    len_gep,
+                    "vi.len"
+                ))
+                .into_int_value();
+                self.emit_vec_bounds_check(idx_val, len)?;
+                let elem_gep =
+                    unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx_val], "vi.egep")) };
+                Ok(b!(self.bld.build_load(lty, elem_gep, "vi.elem")))
+            }
             _ => {
                 let arr_ptr = self.compile_expr(arr)?.into_pointer_value();
                 let i64t = self.ctx.i64_type();

@@ -43,7 +43,7 @@ impl Parser {
                     Ok(Pat::Ident(name, sp))
                 }
             }
-            Token::Int(_) | Token::Float(_) | Token::Str(_) | Token::True | Token::False => {
+            Token::Int(_) | Token::CharLit(_) | Token::Float(_) | Token::Str(_) | Token::True | Token::False => {
                 let lit = self.parse_primary()?;
                 if self.check(Token::To) {
                     self.advance();
@@ -231,6 +231,10 @@ impl Parser {
         let sp = self.span();
         match self.peek() {
             Token::Int(n) => {
+                self.advance();
+                Ok(Expr::Int(n, sp))
+            }
+            Token::CharLit(n) => {
                 self.advance();
                 Ok(Expr::Int(n, sp))
             }
@@ -628,6 +632,10 @@ impl Parser {
         let sp = self.span();
         match self.peek() {
             Token::Int(n) => {
+                self.advance();
+                Ok(Expr::Int(n, sp))
+            }
+            Token::CharLit(n) => {
                 self.advance();
                 Ok(Expr::Int(n, sp))
             }

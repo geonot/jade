@@ -1,0 +1,34 @@
+# std.strings — StringBuilder for efficient string construction
+
+type StringBuilder
+    parts: Vec of String
+    total: i64
+
+    *write(s: String)
+        self.parts.push(s)
+        self.total is self.total + s.length
+
+    *write_line(s: String)
+        self.parts.push(s)
+        self.parts.push('\n')
+        self.total is self.total + s.length + 1
+
+    *to_string()
+        if self.parts.length equals 0
+            return ''
+        result is self.parts.get(0)
+        i is 1
+        while i < self.parts.length
+            result is result + self.parts.get(i)
+            i is i + 1
+        result
+
+    *length()
+        self.total
+
+    *clear()
+        self.parts is vec()
+        self.total is 0
+
+*string_builder() -> StringBuilder
+    StringBuilder(parts is vec(), total is 0)

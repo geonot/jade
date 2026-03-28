@@ -10,6 +10,8 @@ extern *system(cmd: %i8) -> i32
 extern *malloc(size: i64) -> %i8
 extern *free(ptr: %i8)
 extern *strlen(s: %i8) -> i64
+extern *mkdir(path: %i8, mode: i32) -> i32
+extern *rmdir(path: %i8) -> i32
 
 *env(name)
     ptr is getenv(%name)
@@ -32,5 +34,29 @@ extern *strlen(s: %i8) -> i64
 *args()
     __get_args()
 
+*has_flag(flag: String) -> bool
+    a is args()
+    i is 0
+    while i < a.length
+        if a[i] equals flag
+            return true
+        i += 1
+    false
+
+*get_option(flag: String) -> String
+    a is args()
+    i is 0
+    while i < a.length - 1
+        if a[i] equals flag
+            return a[i + 1]
+        i += 1
+    ""
+
 *pid()
     getpid()
+
+*make_dir(path)
+    mkdir(%path, 493)
+
+*remove_dir(path)
+    rmdir(%path)

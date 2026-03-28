@@ -14,11 +14,26 @@ extern *malloc(size: i64) -> %i8
 extern *free(ptr: %i8)
 extern *memcpy(dst: %i8, src: %i8, n: i64) -> %i8
 extern *strlen(s: %i8) -> i64
+extern *write(fd: i32, buf: %i8, count: i64) -> i64
 
 type File
     handle: %i8
-    path
-    mode
+    path: String
+    mode: String
+
+    *read(size)
+        buf is malloc(size)
+        n is fread(buf, 1, size, self.handle)
+        __string_from_raw(buf, n, size)
+
+    *write_data(data: String)
+        fwrite(%data, 1, data.length, self.handle)
+
+    *close_file()
+        fclose(self.handle)
+
+    *eof()
+        feof(self.handle) isnt 0
 
 *read_file(path)
     fp is fopen(%path, "r")
@@ -49,22 +64,15 @@ type File
     true
 
 *open(path, mode)
-    fp is fopen(&path, &mode)
+    fp is fopen(%path, %mode)
     File(fp, path, mode)
-
-*File.read(self, size)
-    buf is malloc(size)
-    n is fread(buf, 1, size, self.handle)
-    __string_from_raw(buf, n, size)
-
-*File.write(self, data)
-    fwrite(&data, 1, data.length, self.handle)
-
-*File.close(self)
-    fclose(self.handle)
-
-*File.eof(self)
-    feof(self.handle) isnt 0
 
 *file_exists(path)
     __file_exists(path)
+
+*eprint(s: String)
+    write(2, %s, s.length)
+
+*eprintln(s: String)
+    msg is s + '\n'
+    write(2, %msg, msg.length)

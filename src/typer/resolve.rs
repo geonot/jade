@@ -92,6 +92,7 @@ impl Typer {
         self.fns.insert(f.name.clone(), (id, ptys, ret));
     }
 
+    #[allow(dead_code)]
     pub(crate) fn declare_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
         self.declare_method_sig_impl(type_name, m, false);
     }
@@ -228,8 +229,6 @@ impl Typer {
             ));
         }
 
-        let is_iter_impl;
-
         if let Some(ref trait_name) = ib.trait_name {
             if !self.traits.contains_key(trait_name) {
                 return Err(format!(
@@ -237,8 +236,6 @@ impl Typer {
                     ib.span.line, trait_name
                 ));
             }
-
-            is_iter_impl = trait_name == "Iter";
 
             if let Some(required_assocs) = self.trait_assoc_types.get(trait_name) {
                 let provided: Vec<&str> = ib
@@ -284,7 +281,7 @@ impl Typer {
                     .insert((ib.type_name.clone(), assoc_name.clone()), assoc_ty.clone());
             }
         } else {
-            is_iter_impl = false;
+            // no trait — standalone impl block
         }
 
         for m in &ib.methods {
@@ -292,11 +289,7 @@ impl Typer {
                 .entry(ib.type_name.clone())
                 .or_default()
                 .push(m.clone());
-            if is_iter_impl {
-                self.declare_method_sig_by_ptr(&ib.type_name, m);
-            } else {
-                self.declare_method_sig(&ib.type_name, m);
-            }
+            self.declare_method_sig_by_ptr(&ib.type_name, m);
         }
 
         Ok(())

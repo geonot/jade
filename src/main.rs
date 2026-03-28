@@ -59,6 +59,10 @@ struct Cli {
     test: bool,
     #[arg(long)]
     emit_interface: bool,
+    #[arg(long)]
+    dump_tokens: bool,
+    #[arg(long)]
+    dump_ast: bool,
 }
 
 #[derive(Subcommand)]
@@ -260,9 +264,24 @@ fn main() {
     let tokens = Lexer::new(&src)
         .tokenize()
         .unwrap_or_else(|e| die(&format!("{e}")));
+
+    if cli.dump_tokens {
+        for tok in &tokens {
+            println!("{}:{} {}", tok.span.line, tok.span.col, tok.token);
+        }
+        return;
+    }
+
     let mut prog = Parser::new(tokens)
         .parse_program()
         .unwrap_or_else(|e| die(&format!("{e}")));
+
+    if cli.dump_ast {
+        for decl in &prog.decls {
+            println!("{decl:#?}");
+        }
+        return;
+    }
 
     let base_dir = input.parent().unwrap_or_else(|| std::path::Path::new("."));
     let mut loaded = HashSet::new();

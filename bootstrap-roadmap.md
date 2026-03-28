@@ -77,12 +77,12 @@ self-hosted compiler must choose a backend strategy (see §3.2).
 
 | # | Gap | Impact | Effort | Priority |
 |---|-----|--------|--------|----------|
-| **G1** | **No char literals** | Lexer must compare `ch equals 43` instead of `ch equals '+'`. Every character constant is a magic number. | S | P0 |
-| **G2** | **No Map iteration** | Cannot `for k, v in map`. Symbol tables, scope maps, and every compiler pass that walks a map require this. | M | P0 |
-| **G3** | **No mutable struct fields via methods** | Methods receive `self` by value. A `Parser` struct with a position cursor needs in-place mutation (advancing `pos`, pushing to `tokens`). Current pattern: return new state via tuples. | L | P1 |
+| **G1** | ~~**No char literals**~~ ✅ | Lexer must compare `ch equals 43` instead of `ch equals '+'`. Every character constant is a magic number. | S | P0 |
+| **G2** | ~~**No Map iteration**~~ ✅ | Cannot `for k, v in map`. Symbol tables, scope maps, and every compiler pass that walks a map require this. | M | P0 |
+| **G3** | ~~**No mutable struct fields via methods**~~ ✅ | Methods receive `self` by value. A `Parser` struct with a position cursor needs in-place mutation (advancing `pos`, pushing to `tokens`). Current pattern: return new state via tuples. | L | P1 |
 | **G4** | **No `while let` / `if let`** | Must write full `match` blocks for simple optional checks. Verbose when unwrapping `Maybe` values returned from map lookups. | S | P1 |
-| **G5** | **No string builder** | String concatenation is O(n²). Code generation emitting thousands of IR lines would be extremely slow with `result is result + line`. | M | P1 |
-| **G6** | **No multi-line string literals** | Emitting code blocks (IR, assembly) requires escaping or concatenating many single-line strings. | S | P2 |
+| **G5** | ~~**No string builder**~~ ✅ | String concatenation is O(n²). Code generation emitting thousands of IR lines would be extremely slow with `result is result + line`. | M | P1 |
+| **G6** | ~~**No multi-line string literals**~~ ✅ | Emitting code blocks (IR, assembly) requires escaping or concatenating many single-line strings. | S | P2 |
 | **G7** | **No Set collection** | Would be useful for visited-node tracking, scope name deduplication, etc. Workaround: `Map of String, bool`. | S | P2 |
 | **G8** | **No bitwise operations on enums / tag access** | Cannot inspect enum discriminant directly. Needed for compact IR encoding. | S | P3 |
 | **G9** | **Closures capture by value only** | State-threading patterns require explicit struct passing. Functional compiler passes are possible but verbose. | M | P2 |
@@ -93,11 +93,11 @@ self-hosted compiler must choose a backend strategy (see §3.2).
 
 | # | Gap | Needed For | Workaround |
 |---|-----|-----------|------------|
-| **L1** | `mkdir` / directory operations | Output file organization | `extern` FFI to C `mkdir()` |
-| **L2** | `args` parsing / flag handling | Compiler CLI (`--opt`, `--emit-ir`, etc.) | Build from `std/os.args` |
-| **L3** | `exit(code)` process termination | Error abort | `extern` to C `exit()` |
-| **L4** | `stderr` output | Diagnostic printing | FFI to `fprintf(stderr, ...)` |
-| **L5** | Formatted output to string | IR generation, error messages | String interpolation covers most cases |
+| **L1** | ~~`mkdir` / directory operations~~ ✅ | Output file organization | `extern` FFI to C `mkdir()` |
+| **L2** | ~~`args` parsing / flag handling~~ ✅ | Compiler CLI (`--opt`, `--emit-ir`, etc.) | Build from `std/os.args` |
+| **L3** | ~~`exit(code)` process termination~~ ✅ | Error abort | `extern` to C `exit()` |
+| **L4** | ~~`stderr` output~~ ✅ | Diagnostic printing | FFI to `fprintf(stderr, ...)` |
+| **L5** | ~~Formatted output to string~~ ✅ | IR generation, error messages | String interpolation covers most cases |
 
 ### 2.3 Architecture Decisions
 
@@ -198,7 +198,7 @@ coroutines.
 ### Phase 0: Language Prerequisites (Pre-Bootstrap)
 *Target: Enhance the Rust compiler so Jade can express a compiler*
 
-#### 0.1 — Char Literals (G1)
+#### 0.1 — Char Literals (G1) ✅
 Add `'x'` syntax producing `i64` char codes. The lexer already handles single-
 quoted strings; extend to single-character case returning `i64`.
 
@@ -209,7 +209,7 @@ if ch equals 43     # '+'
 if ch equals '+'
 ```
 
-#### 0.2 — Map Iteration (G2)
+#### 0.2 — Map Iteration (G2) ✅
 Add `for k, v in my_map` support. Requires:
 - Iterator protocol impl for Map
 - Key-value pair destructuring in for-loop desugaring
@@ -219,8 +219,8 @@ for name, ty in scope
     log("{name}: {ty}")
 ```
 
-#### 0.3 — Mutable Self in Methods (G3)
-Allow `*method self` to receive self by pointer, enabling in-place mutation:
+#### 0.3 — Mutable Self in Methods (G3) ✅
+All methods now receive self by pointer by default, enabling in-place mutation:
 
 ```jade
 type Parser
@@ -236,8 +236,8 @@ type Parser
 
 This is critical — the parser, typer, and codegen all need mutable state.
 
-#### 0.4 — StringBuilder Type (G5)
-Add a `StringBuilder` to stdlib that batches appends:
+#### 0.4 — StringBuilder Type (G5) ✅
+Added `StringBuilder` to `std/strings.jade` that batches appends:
 
 ```jade
 sb is StringBuilder()
@@ -255,7 +255,7 @@ if let Some(val) is map.get("key")
     use(val)
 ```
 
-#### 0.6 — Multi-line Strings (G6)
+#### 0.6 — Multi-line Strings (G6) ✅
 Triple-quoted strings for code generation:
 
 ```jade
@@ -691,13 +691,13 @@ This cuts ~30% of the codebase out of scope for bootstrap.
 
 These changes to the **current Rust compiler** directly enable bootstrap work:
 
-1. **Add `--dump-tokens` flag** — Serialize token stream to stdout for
+1. ~~**Add `--dump-tokens` flag**~~ ✅ — Serialize token stream to stdout for
    differential testing
-2. **Add `--dump-ast` flag** — Pretty-print AST for parser comparison
-3. **Add char literal support** (`'x'` → `i64`) — Makes lexer code readable
-4. **Add Map iteration** — Required for nearly every compiler pass
-5. **Add `*method self` by-pointer** — Required for stateful parser/typer
-6. **Create `std/strings.jade`** with `StringBuilder` type
+2. ~~**Add `--dump-ast` flag**~~ ✅ — Pretty-print AST for parser comparison
+3. ~~**Add char literal support**~~ ✅ (`'x'` → `i64`) — Makes lexer code readable
+4. ~~**Add Map iteration**~~ ✅ — Required for nearly every compiler pass
+5. ~~**Add `*method self` by-pointer**~~ ✅ — Required for stateful parser/typer
+6. ~~**Create `std/strings.jade`**~~ ✅ with `StringBuilder` type
 
 Each of these is independently valuable and moves toward self-hosting regardless
 of timeline.

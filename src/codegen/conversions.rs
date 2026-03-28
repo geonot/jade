@@ -90,7 +90,15 @@ impl<'ctx> Compiler<'ctx> {
             Type::Struct(name, _) => {
                 let fn_name = format!("{name}_display");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let result = b!(self.bld.build_call(fv, &[val.into()], "display.call"))
+                    let first_param_is_ptr = fv.get_type().get_param_types().first().map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let self_arg: BasicValueEnum = if first_param_is_ptr {
+                        let tmp = self.entry_alloca(self.llvm_ty(&ty), "display.self");
+                        b!(self.bld.build_store(tmp, val));
+                        tmp.into()
+                    } else {
+                        val
+                    };
+                    let result = b!(self.bld.build_call(fv, &[self_arg.into()], "display.call"))
                         .try_as_basic_value()
                         .basic()
                         .unwrap();
