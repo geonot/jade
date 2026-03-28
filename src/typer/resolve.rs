@@ -103,9 +103,9 @@ impl Typer {
     fn declare_method_sig_impl(&mut self, type_name: &str, m: &ast::Fn, by_ptr: bool) {
         let method_name = format!("{type_name}_{}", m.name);
         let self_ty = if by_ptr {
-            Type::Ptr(Box::new(Type::Struct(type_name.to_string())))
+            Type::Ptr(Box::new(Type::Struct(type_name.to_string(), vec![])))
         } else {
-            Type::Struct(type_name.to_string())
+            Type::Struct(type_name.to_string(), vec![])
         };
         let mut ptys = vec![self_ty];
         for p in &m.params {
@@ -136,6 +136,9 @@ impl Typer {
                 (f.name.clone(), ty)
             })
             .collect();
+        if td.fields.iter().any(|f| f.ty.is_none()) {
+            self.inferred_field_structs.insert(td.name.clone());
+        }
         self.structs.insert(td.name.clone(), fields);
     }
 
@@ -310,7 +313,7 @@ impl Typer {
                         if let Some(Type::TypeVar(_)) = ptys.first() {
                             if let Some(ast_fn) = self.inferable_fns.get(fname) {
                                 if ast_fn.params.first().map_or(false, |p| p.name == "self") {
-                                    let self_ty = Type::Struct(sname.clone());
+                                    let self_ty = Type::Struct(sname.clone(), vec![]);
                                     let tv = ptys[0].clone();
                                     let _ = self.infer_ctx.unify(&tv, &self_ty);
                                 }

@@ -14,7 +14,7 @@
 
 # ── Simple XOR cipher ──────────────────────────────────────────────────────
 
-*xor_byte(a: i64, b: i64)
+*xor_byte(a, b)
     a ^ b
 
 *xor_encrypt(data: String, key: i64)
@@ -28,7 +28,7 @@
 
 # ── Bit mixing (hash finalizer) ────────────────────────────────────────────
 
-*mix64(x: i64)
+*mix64(x)
     h is x
     h is h ^ (h >> 33)
     h is wrapping_mul(h, -49064778989728563)   # 0xff51afd7ed558ccd
@@ -53,7 +53,7 @@
 
 # ── Modular exponentiation (for RSA-like ops) ──────────────────────────────
 
-*mod_pow(base: i64, exp: i64, modulus: i64)
+*mod_pow(base, exp, modulus)
     result is 1
     b is base % modulus
     e is exp
@@ -66,7 +66,7 @@
 
 # ── Miller-Rabin primality test (simplified) ───────────────────────────────
 
-*is_probable_prime(n: i64)
+*is_probable_prime(n)
     if n < 2
         return false
     if n < 4

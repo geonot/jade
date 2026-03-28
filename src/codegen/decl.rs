@@ -323,7 +323,7 @@ impl<'ctx> Compiler<'ctx> {
                 let is_ptr_like = matches!(
                     field_ty,
                     Type::String | Type::Rc(_) | Type::Weak(_) | Type::Fn(_, _)
-                ) || matches!(field_ty, Type::Struct(_) | Type::Enum(_))
+                ) || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))
                     && !Self::is_recursive_field(field_ty, name);
                 if is_ptr_like {
                     let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());

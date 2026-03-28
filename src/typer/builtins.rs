@@ -252,7 +252,7 @@ impl Typer {
                 let elem_ty = hargs
                     .first()
                     .map(|a| a.ty.clone())
-                    .unwrap_or_else(|| self.infer_ctx.fresh_integer_var());
+                    .unwrap_or_else(|| self.infer_ctx.fresh_var());
                 for a in hargs.iter().skip(1) {
                     let _ = self
                         .infer_ctx

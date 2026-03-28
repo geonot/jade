@@ -177,7 +177,7 @@ impl Typer {
                         Type::String => Type::I64,
                         _ => {
                             let iter_ty = iter.ty.clone();
-                            if let Type::Struct(tn) = iter_ty {
+                            if let Type::Struct(tn, _) = iter_ty {
                                 if self.type_implements_trait(&tn, "Iter") {
                                     let elem_ty = self.iter_element_type(&tn);
                                     return self.desugar_for_iter(f, iter, tn, elem_ty, ret_ty);

@@ -1,5 +1,6 @@
 use crate::ast::Span;
 use crate::types::Type;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ConstraintOrigin {
@@ -12,6 +13,8 @@ pub(crate) struct ConstraintOrigin {
 pub(crate) enum TypeConstraint {
     None,
     Numeric,
+    /// Numeric OR String — used for `+` which supports both arithmetic and concatenation.
+    Addable,
     Integer,
     Float,
     Trait(Vec<String>),
@@ -23,6 +26,8 @@ pub(crate) struct InferCtx {
     types: Vec<Option<Type>>,
     origins: Vec<Option<ConstraintOrigin>>,
     constraints: Vec<TypeConstraint>,
+    /// All locations where each TypeVar was mentioned/constrained.
+    usage_sites: Vec<Vec<(Span, &'static str)>>,
     pub(crate) debug: bool,
     collect_default_warnings: bool,
     default_warnings: Vec<String>,
@@ -30,6 +35,9 @@ pub(crate) struct InferCtx {
     strict_errors: Vec<String>,
     pedantic: bool,
     quantified_vars: std::collections::HashSet<u32>,
+    /// Maps type_name -> list of trait names it implements.
+    /// Used to enforce Trait constraints during unification.
+    trait_impls: HashMap<String, Vec<String>>,
 }
 
 impl InferCtx {
@@ -40,6 +48,7 @@ impl InferCtx {
             types: Vec::new(),
             origins: Vec::new(),
             constraints: Vec::new(),
+            usage_sites: Vec::new(),
             debug: false,
             collect_default_warnings: false,
             default_warnings: Vec::new(),
@@ -47,7 +56,13 @@ impl InferCtx {
             strict_errors: Vec::new(),
             pedantic: false,
             quantified_vars: std::collections::HashSet::new(),
+            trait_impls: HashMap::new(),
         }
+    }
+
+    /// Update the trait implementation map (called from Typer after trait registration).
+    pub(crate) fn set_trait_impls(&mut self, impls: HashMap<String, Vec<String>>) {
+        self.trait_impls = impls;
     }
 
     pub(crate) fn enable_default_warnings(&mut self) {
@@ -117,6 +132,7 @@ impl InferCtx {
         self.types.push(None);
         self.origins.push(None);
         self.constraints.push(constraint);
+        self.usage_sites.push(Vec::new());
         Type::TypeVar(id)
     }
 
@@ -158,9 +174,11 @@ impl InferCtx {
             (TypeConstraint::Trait(_), TypeConstraint::Numeric)
             | (TypeConstraint::Trait(_), TypeConstraint::Integer)
             | (TypeConstraint::Trait(_), TypeConstraint::Float)
+            | (TypeConstraint::Trait(_), TypeConstraint::Addable)
             | (TypeConstraint::Numeric, TypeConstraint::Trait(_))
             | (TypeConstraint::Integer, TypeConstraint::Trait(_))
-            | (TypeConstraint::Float, TypeConstraint::Trait(_)) => {
+            | (TypeConstraint::Float, TypeConstraint::Trait(_))
+            | (TypeConstraint::Addable, TypeConstraint::Trait(_)) => {
                 Err("trait bound and numeric constraint are mutually exclusive")
             }
             (TypeConstraint::Trait(ta), TypeConstraint::Trait(tb)) => {
@@ -172,11 +190,34 @@ impl InferCtx {
                 }
                 Ok(TypeConstraint::Trait(merged))
             }
+            // Addable + Numeric/Integer/Float narrows to the stricter constraint
+            (TypeConstraint::Addable, TypeConstraint::Numeric)
+            | (TypeConstraint::Numeric, TypeConstraint::Addable) => Ok(TypeConstraint::Numeric),
+            (TypeConstraint::Addable, TypeConstraint::Integer)
+            | (TypeConstraint::Integer, TypeConstraint::Addable) => Ok(TypeConstraint::Integer),
+            (TypeConstraint::Addable, TypeConstraint::Float)
+            | (TypeConstraint::Float, TypeConstraint::Addable) => Ok(TypeConstraint::Float),
+            (TypeConstraint::Addable, TypeConstraint::Addable) => Ok(TypeConstraint::Addable),
             (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => {
                 Ok(TypeConstraint::Integer)
             }
             (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => Ok(TypeConstraint::Float),
             (TypeConstraint::Numeric, TypeConstraint::Numeric) => Ok(TypeConstraint::Numeric),
+        }
+    }
+
+    /// Check if two constraints are fundamentally incompatible (would fail merge).
+    pub(crate) fn constraints_conflict(a: &TypeConstraint, b: &TypeConstraint) -> bool {
+        Self::merge_constraints(a, b).is_err()
+    }
+
+    /// Record that a TypeVar was used at the given span/reason.
+    fn record_usage(&mut self, ty: &Type, span: Span, reason: &'static str) {
+        if let Type::TypeVar(v) = self.shallow_resolve(ty) {
+            let root = self.find(v) as usize;
+            if root < self.usage_sites.len() {
+                self.usage_sites[root].push((span, reason));
+            }
         }
     }
 
@@ -187,6 +228,7 @@ impl InferCtx {
         span: Span,
         reason: &'static str,
     ) -> Result<(), String> {
+        self.record_usage(ty, span, reason);
         let resolved = self.shallow_resolve(ty);
         match resolved {
             Type::TypeVar(v) => {
@@ -255,12 +297,14 @@ impl InferCtx {
             if self.origins[root as usize].is_none() {
                 self.origins[root as usize] = Some(ConstraintOrigin { span, reason });
             }
+            self.usage_sites[root as usize].push((span, reason));
         }
         if let Type::TypeVar(v) = self.shallow_resolve(b) {
             let root = self.find(v);
             if self.origins[root as usize].is_none() {
                 self.origins[root as usize] = Some(ConstraintOrigin { span, reason });
             }
+            self.usage_sites[root as usize].push((span, reason));
         }
         self.unify(a, b).map_err(|e| {
             let ra = self.shallow_resolve(a);
@@ -402,6 +446,40 @@ impl InferCtx {
                             "type mismatch: expected numeric type, found `{concrete}`; consider using a conversion function"
                         ));
                     }
+                    TypeConstraint::Addable
+                        if !concrete.is_num()
+                            && !matches!(concrete, Type::String | Type::TypeVar(_)) =>
+                    {
+                        return Err(format!(
+                            "type mismatch: expected numeric or String type for `+`, found `{concrete}`"
+                        ));
+                    }
+                    TypeConstraint::Trait(required_traits)
+                        if !matches!(concrete, Type::TypeVar(_))
+                            && !required_traits.is_empty()
+                            && !self.trait_impls.is_empty() =>
+                    {
+                        let type_name = Self::type_to_impl_name(concrete);
+                        if let Some(name) = type_name {
+                            let impl_traits = self.trait_impls.get(&name);
+                            let missing: Vec<&String> = required_traits
+                                .iter()
+                                .filter(|rt| {
+                                    impl_traits.map_or(true, |impls| !impls.contains(rt))
+                                })
+                                .collect();
+                            if !missing.is_empty() {
+                                let missing_str = missing
+                                    .iter()
+                                    .map(|s| s.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                return Err(format!(
+                                    "type mismatch: `{concrete}` does not implement required trait(s): {missing_str}"
+                                ));
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 if let Some(existing) = self.types[root as usize].clone() {
@@ -476,6 +554,26 @@ impl InferCtx {
             self.constraints[a as usize] = merged;
         }
         Ok(())
+    }
+
+    /// Convert a concrete Type to the name used in trait_impls lookups.
+    fn type_to_impl_name(ty: &Type) -> Option<String> {
+        match ty {
+            Type::I8 => Some("i8".into()),
+            Type::I16 => Some("i16".into()),
+            Type::I32 => Some("i32".into()),
+            Type::I64 => Some("i64".into()),
+            Type::U8 => Some("u8".into()),
+            Type::U16 => Some("u16".into()),
+            Type::U32 => Some("u32".into()),
+            Type::U64 => Some("u64".into()),
+            Type::F32 => Some("f32".into()),
+            Type::F64 => Some("f64".into()),
+            Type::Bool => Some("bool".into()),
+            Type::String => Some("String".into()),
+            Type::Struct(name, _) => Some(name.clone()),
+            _ => None,
+        }
     }
 
     fn occurs_in(&mut self, v: u32, ty: &Type) -> bool {
@@ -556,6 +654,30 @@ impl InferCtx {
         self.resolve_core(ty, self.collect_default_warnings)
     }
 
+    /// Resolve a container element type. If the element type is an unsolved TypeVar
+    /// with no constraint (e.g., from an empty `vec()`), default to I64 silently
+    /// without triggering strict-mode errors.
+    fn resolve_container_elem(&mut self, ty: &Type) -> Type {
+        if let Type::TypeVar(v) = ty {
+            let root = self.find(*v);
+            if let Some(resolved) = self.types[root as usize].clone() {
+                return self.resolve_core(&resolved, self.collect_default_warnings);
+            }
+            let constraint = &self.constraints[root as usize];
+            match constraint {
+                TypeConstraint::Float => Type::F64,
+                TypeConstraint::None | TypeConstraint::Numeric | TypeConstraint::Addable => Type::I64,
+                TypeConstraint::Integer => Type::I64,
+                TypeConstraint::Trait(_) => {
+                    // Trait-constrained container elements should still error
+                    self.resolve_core(ty, self.collect_default_warnings)
+                }
+            }
+        } else {
+            self.resolve_core(ty, self.collect_default_warnings)
+        }
+    }
+
     fn resolve_core(&mut self, ty: &Type, warn_only: bool) -> Type {
         match ty {
             Type::TypeVar(v) => {
@@ -587,16 +709,38 @@ impl InferCtx {
                         }
                     }
                 } else if self.strict_types && !self.quantified_vars.contains(&root) {
+                    // Collect usage site notes for enhanced diagnostics
+                    let usage_notes = {
+                        let sites = &self.usage_sites[root as usize];
+                        if sites.len() > 1 {
+                            let mut notes = String::new();
+                            for (site_span, site_reason) in sites.iter().take(5) {
+                                notes.push_str(&format!(
+                                    "\n  note: used at line {}:{} ({})",
+                                    site_span.line, site_span.col, site_reason
+                                ));
+                            }
+                            if sites.len() > 5 {
+                                notes.push_str(&format!(
+                                    "\n  note: ... and {} more usage(s)",
+                                    sites.len() - 5
+                                ));
+                            }
+                            notes
+                        } else {
+                            String::new()
+                        }
+                    };
                     match constraint {
                         TypeConstraint::None => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`",
-                                    origin.span.line, origin.span.col, origin.reason
+                                    "line {}:{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`{}",
+                                    origin.span.line, origin.span.col, origin.reason, usage_notes
                                 )
                             } else {
                                 format!(
-                                    "ambiguous type: unsolved type variable ?{root}\n  help: add a type annotation to resolve the ambiguity"
+                                    "ambiguous type: unsolved type variable ?{root}\n  help: add a type annotation to resolve the ambiguity{usage_notes}"
                                 )
                             };
                             self.strict_errors.push(msg);
@@ -618,16 +762,17 @@ impl InferCtx {
                             let traits_str = traits.join(", ");
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}) ({})\n  help: add a type annotation for a type that implements {}",
+                                    "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}) ({})\n  help: add a type annotation for a type that implements {}{}",
                                     origin.span.line,
                                     origin.span.col,
                                     traits_str,
                                     origin.reason,
-                                    traits_str
+                                    traits_str,
+                                    usage_notes
                                 )
                             } else {
                                 format!(
-                                    "ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]\n  help: add a type annotation for a type that implements {traits_str}"
+                                    "ambiguous type: unsolved type variable ?{root} with trait bound(s) [{traits_str}]\n  help: add a type annotation for a type that implements {traits_str}{usage_notes}"
                                 )
                             };
                             self.strict_errors.push(msg);
@@ -664,9 +809,9 @@ impl InferCtx {
                 default_ty
             }
             Type::Array(inner, len) => {
-                Type::Array(Box::new(self.resolve_core(inner, warn_only)), *len)
+                Type::Array(Box::new(self.resolve_container_elem(inner)), *len)
             }
-            Type::Vec(inner) => Type::Vec(Box::new(self.resolve_core(inner, warn_only))),
+            Type::Vec(inner) => Type::Vec(Box::new(self.resolve_container_elem(inner))),
             Type::Map(k, v) => Type::Map(
                 Box::new(self.resolve_core(k, warn_only)),
                 Box::new(self.resolve_core(v, warn_only)),
@@ -708,6 +853,14 @@ impl InferCtx {
                     TypeConstraint::Integer => self.fresh_integer_var(),
                     TypeConstraint::Float => self.fresh_float_var(),
                     TypeConstraint::Numeric => self.fresh_numeric_var(),
+                    TypeConstraint::Addable => {
+                        let var = self.fresh_var();
+                        if let Type::TypeVar(id) = var {
+                            let root = self.find(id);
+                            self.constraints[root as usize] = TypeConstraint::Addable;
+                        }
+                        var
+                    }
                     TypeConstraint::Trait(ref traits) => {
                         let var = self.fresh_var();
                         if let Type::TypeVar(id) = var {

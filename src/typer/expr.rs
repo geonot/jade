@@ -216,22 +216,52 @@ impl Typer {
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Exp => {
                         let resolved_l = self.infer_ctx.shallow_resolve(&hl.ty);
-                        if matches!(resolved_l, Type::TypeVar(_)) {
-                            let _ = self.infer_ctx.constrain(
-                                &hl.ty,
-                                super::unify::TypeConstraint::Numeric,
-                                *span,
-                                "arithmetic operator requires numeric type",
-                            );
-                        }
                         let resolved_r = self.infer_ctx.shallow_resolve(&hr.ty);
-                        if matches!(resolved_r, Type::TypeVar(_)) {
-                            let _ = self.infer_ctx.constrain(
-                                &hr.ty,
-                                super::unify::TypeConstraint::Numeric,
-                                *span,
-                                "arithmetic operator requires numeric type",
-                            );
+                        // For Add: if either side is String, this is string concatenation
+                        let is_string_concat = matches!(op, BinOp::Add)
+                            && (matches!(resolved_l, Type::String) || matches!(resolved_r, Type::String));
+                        if is_string_concat {
+                            // Constrain the other side to String too
+                            if matches!(resolved_l, Type::TypeVar(_)) {
+                                let _ = self.infer_ctx.unify_at(
+                                    &hl.ty,
+                                    &Type::String,
+                                    *span,
+                                    "string concatenation",
+                                );
+                            }
+                            if matches!(resolved_r, Type::TypeVar(_)) {
+                                let _ = self.infer_ctx.unify_at(
+                                    &hr.ty,
+                                    &Type::String,
+                                    *span,
+                                    "string concatenation",
+                                );
+                            }
+                        } else {
+                            // For Add with unresolved operands, use Addable (numeric + String)
+                            // For all other arithmetic ops, use Numeric
+                            let arith_constraint = if matches!(op, BinOp::Add) {
+                                super::unify::TypeConstraint::Addable
+                            } else {
+                                super::unify::TypeConstraint::Numeric
+                            };
+                            if matches!(resolved_l, Type::TypeVar(_)) {
+                                let _ = self.infer_ctx.constrain(
+                                    &hl.ty,
+                                    arith_constraint.clone(),
+                                    *span,
+                                    "arithmetic operator requires numeric type",
+                                );
+                            }
+                            if matches!(resolved_r, Type::TypeVar(_)) {
+                                let _ = self.infer_ctx.constrain(
+                                    &hr.ty,
+                                    arith_constraint,
+                                    *span,
+                                    "arithmetic operator requires numeric type",
+                                );
+                            }
                         }
                     }
                     BinOp::Shl | BinOp::Shr | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
@@ -342,9 +372,9 @@ impl Typer {
                 let hobj = self.lower_expr(obj)?;
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
                 let struct_name = match &resolved_ty {
-                    Type::Struct(name) => Some(name.clone()),
+                    Type::Struct(name, _) => Some(name.clone()),
                     Type::Ptr(inner) => match inner.as_ref() {
-                        Type::Struct(name) => Some(name.clone()),
+                        Type::Struct(name, _) => Some(name.clone()),
                         _ => None,
                     },
                     _ => None,
@@ -431,7 +461,7 @@ impl Typer {
 
                     if candidates.len() == 1 {
                         let (sname, matched_fields) = &candidates[0];
-                        let struct_ty = Type::Struct(sname.clone());
+                        let struct_ty = Type::Struct(sname.clone(), vec![]);
                         let _ = self.infer_ctx.unify_at(
                             &resolved_ty,
                             &struct_ty,
@@ -742,7 +772,7 @@ impl Typer {
                 let struct_name = format!("__store_{store}");
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreQuery(store.clone(), Box::new(hfilter)),
-                    ty: Type::Struct(struct_name),
+                    ty: Type::Struct(struct_name, vec![]),
                     span: *span,
                 })
             }
@@ -765,7 +795,7 @@ impl Typer {
                 let struct_name = format!("__store_{store}");
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreAll(store.clone()),
-                    ty: Type::Ptr(Box::new(Type::Struct(struct_name))),
+                    ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
                     span: *span,
                 })
             }
@@ -1071,6 +1101,70 @@ impl Typer {
         }
 
         if let Some(fields) = self.structs.get(name).cloned() {
+            // For structs with inferred fields, check if the resolved field types
+            // conflict with the argument types. If so, create a monomorphized variant.
+            if self.inferred_field_structs.contains(name) {
+                let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
+                    let resolved = self.infer_ctx.shallow_resolve(declared_ty);
+                    let arg_ty = if let Some(fi) = hinits.iter().find(|fi| fi.name.as_deref() == Some(fname)) {
+                        Some(&fi.value.ty)
+                    } else {
+                        hinits.get(i).map(|fi| &fi.value.ty)
+                    };
+                    let arg_ty = match arg_ty {
+                        Some(t) => t,
+                        None => return false,
+                    };
+                    let arg_resolved = self.infer_ctx.shallow_resolve(arg_ty);
+
+                    match &resolved {
+                        Type::TypeVar(v) => {
+                            let root = self.infer_ctx.find(*v);
+                            let constraint = self.infer_ctx.constraint(root);
+                            match &arg_resolved {
+                                Type::TypeVar(av) => {
+                                    // Both TypeVars — check constraint compatibility
+                                    let arg_root = self.infer_ctx.find(*av);
+                                    let arg_constraint = self.infer_ctx.constraint(arg_root);
+                                    super::unify::InferCtx::constraints_conflict(&constraint, &arg_constraint)
+                                }
+                                _ => {
+                                    // Concrete arg type — check constraint compatibility
+                                    match constraint {
+                                        super::unify::TypeConstraint::Integer if !arg_resolved.is_int() => true,
+                                        super::unify::TypeConstraint::Float if !arg_resolved.is_float() => true,
+                                        super::unify::TypeConstraint::Numeric if !arg_resolved.is_num() => true,
+                                        super::unify::TypeConstraint::Addable
+                                            if !arg_resolved.is_num() && !matches!(arg_resolved, Type::String) => true,
+                                        _ => false,
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            // Already resolved to concrete type — direct comparison
+                            if matches!(arg_resolved, Type::TypeVar(_)) {
+                                return false;
+                            }
+                            resolved != arg_resolved
+                        }
+                    }
+                });
+
+                if needs_mono {
+                    let arg_tys: Vec<Type> = hinits
+                        .iter()
+                        .map(|fi| self.infer_ctx.shallow_resolve(&fi.value.ty))
+                        .collect();
+                    let mangled_name = self.monomorphize_struct(name, &fields, &arg_tys, span)?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Struct(mangled_name.clone(), hinits),
+                        ty: Type::Struct(mangled_name, vec![]),
+                        span,
+                    });
+                }
+            }
+
             for (i, fi) in hinits.iter_mut().enumerate() {
                 let declared_ty = if let Some(fname) = &fi.name {
                     fields.iter().find(|(n, _)| n == fname).map(|(_, ty)| ty)
@@ -1099,7 +1193,7 @@ impl Typer {
 
         Ok(hir::Expr {
             kind: hir::ExprKind::Struct(name.to_string(), hinits),
-            ty: Type::Struct(name.to_string()),
+            ty: Type::Struct(name.to_string(), vec![]),
             span,
         })
     }
@@ -1219,7 +1313,7 @@ impl Typer {
             return Self::make_coerce(expr, CoercionKind::BoolToInt, target.clone());
         }
         if let Type::DynTrait(trait_name) = &target {
-            if let Type::Struct(type_name) = &expr.ty {
+            if let Type::Struct(type_name, _) = &expr.ty {
                 let tn = type_name.clone();
                 let trn = trait_name.clone();
                 let span = expr.span;

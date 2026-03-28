@@ -343,9 +343,9 @@ impl<'ctx> Compiler<'ctx> {
                 let obj_ty = &obj_expr.ty;
                 let val = self.compile_expr(value)?;
                 let (sname, is_ptr) = match obj_ty {
-                    Type::Struct(n) => (n.as_str(), false),
+                    Type::Struct(n, _) => (n.as_str(), false),
                     Type::Ptr(inner) => match inner.as_ref() {
-                        Type::Struct(n) => (n.as_str(), true),
+                        Type::Struct(n, _) => (n.as_str(), true),
                         _ => return Err("field assignment only on structs".into()),
                     },
                     _ => return Err("field assignment only on structs".into()),
@@ -365,6 +365,7 @@ impl<'ctx> Compiler<'ctx> {
                             .find_var(name)
                             .map(|(ptr, _)| *ptr)
                             .ok_or_else(|| format!("undefined: {name}"))?,
+                        hir::ExprKind::Field(..) => self.compile_lvalue_ptr(obj_expr)?,
                         _ => return Err("cannot assign field on rvalue".into()),
                     };
                     let ftys: Vec<_> = fields.iter().map(|(_, t)| self.llvm_ty(t)).collect();

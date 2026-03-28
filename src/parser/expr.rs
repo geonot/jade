@@ -761,14 +761,14 @@ impl Parser {
                 let t = self.ident_to_type(n);
                 self.advance();
                 if self.check(Token::Of) {
-                    if let Type::Struct(name) = t {
+                    if let Type::Struct(name, _) = t {
                         self.advance();
                         let arg = self.parse_type()?;
                         if name == "Vec" {
                             return Ok(Type::Vec(Box::new(arg)));
                         }
                         let mangled = format!("{name}_{arg}");
-                        Ok(Type::Struct(mangled))
+                        Ok(Type::Struct(mangled, vec![]))
                     } else {
                         Ok(t)
                     }
@@ -812,7 +812,7 @@ impl Parser {
             s if s.len() == 1 && s.chars().next().map_or(false, |c| c.is_uppercase()) => {
                 Type::Param(s.to_string())
             }
-            _ => Type::Struct(n.to_string()),
+            _ => Type::Struct(n.to_string(), vec![]),
         }
     }
 

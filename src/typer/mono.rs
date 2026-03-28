@@ -109,6 +109,78 @@ impl Typer {
         !Self::effective_type_params(f).is_empty()
     }
 
+    /// Create a monomorphized copy of a struct with inferred fields.
+    /// Used when the same struct is instantiated with different concrete types.
+    pub(crate) fn monomorphize_struct(
+        &mut self,
+        base_name: &str,
+        _orig_fields: &[(String, Type)],
+        arg_tys: &[Type],
+        span: crate::ast::Span,
+    ) -> Result<String, String> {
+        use crate::hir;
+
+        // Build mangled name from the concrete argument types
+        let ty_suffix = arg_tys
+            .iter()
+            .map(|t| format!("{t}"))
+            .collect::<Vec<_>>()
+            .join("_");
+        let mangled = format!("{base_name}_{ty_suffix}");
+
+        // If already monomorphized, reuse
+        if self.structs.contains_key(&mangled) {
+            return Ok(mangled);
+        }
+
+        // Get the original AST definition for field names and layout
+        let orig_fields_from_structs = self.structs.get(base_name).cloned().unwrap_or_default();
+        let new_fields: Vec<(String, Type)> = orig_fields_from_structs
+            .iter()
+            .enumerate()
+            .map(|(i, (fname, _))| {
+                let ty = arg_tys.get(i).cloned().unwrap_or(Type::I64);
+                (fname.clone(), ty)
+            })
+            .collect();
+
+        // Register the monomorphized struct in self.structs
+        self.structs.insert(mangled.clone(), new_fields.clone());
+
+        // Build an hir::TypeDef for codegen
+        let hir_fields: Vec<hir::Field> = new_fields
+            .iter()
+            .map(|(fname, fty)| hir::Field {
+                name: fname.clone(),
+                ty: fty.clone(),
+                default: None,
+                span,
+            })
+            .collect();
+
+        let layout = self
+            .generic_types
+            .get(base_name)
+            .map(|td| td.layout.clone())
+            .or_else(|| {
+                // Try to get layout from the original AST declarations
+                None
+            })
+            .unwrap_or_default();
+
+        let htd = hir::TypeDef {
+            def_id: self.fresh_id(),
+            name: mangled.clone(),
+            fields: hir_fields,
+            methods: Vec::new(),
+            layout,
+            span,
+        };
+        self.mono_types.push(htd);
+
+        Ok(mangled)
+    }
+
     pub(crate) fn normalize_generic_fn(f: &ast::Fn) -> ast::Fn {
         let mut gf = f.clone();
         gf.type_params = Self::effective_type_params(f);
@@ -376,7 +448,7 @@ impl Typer {
             Type::F64 | Type::F32 => "f64".into(),
             Type::Bool => "bool".into(),
             Type::String => "String".into(),
-            Type::Struct(n) => n.clone(),
+            Type::Struct(n, _) => n.clone(),
             Type::Enum(n) => n.clone(),
             Type::Vec(inner) => format!("Vec_{}", Self::type_name_for_bound_check(inner)),
             Type::Fn(params, ret) => {

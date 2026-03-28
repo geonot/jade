@@ -87,7 +87,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::U64 | Type::U32 | Type::U16 | Type::U8 => self.int_to_string(val, true),
             Type::F64 | Type::F32 => self.float_to_string(val),
             Type::Bool => self.bool_to_string(val),
-            Type::Struct(name) => {
+            Type::Struct(name, _) => {
                 let fn_name = format!("{name}_display");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let result = b!(self.bld.build_call(fv, &[val.into()], "display.call"))

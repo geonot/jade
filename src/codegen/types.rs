@@ -21,7 +21,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Void => self.ctx.i8_type().into(),
             Type::String => self.string_type().into(),
             Type::TypeVar(_) => self.ctx.i64_type().into(),
-            Type::Struct(name) | Type::Enum(name) => self
+            Type::Struct(name, _) | Type::Enum(name) => self
                 .module
                 .get_struct_type(name)
                 .map(|s| s.into())
@@ -292,7 +292,7 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn resolve_ty(&self, ty: Type) -> Type {
         match &ty {
-            Type::Struct(n) if self.enums.contains_key(n) => Type::Enum(n.clone()),
+            Type::Struct(n, _) if self.enums.contains_key(n) => Type::Enum(n.clone()),
             _ => ty,
         }
     }
@@ -377,7 +377,7 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn is_recursive_field(fty: &Type, enum_name: &str) -> bool {
         match fty {
-            Type::Enum(n) | Type::Struct(n) => n == enum_name,
+            Type::Enum(n) | Type::Struct(n, _) => n == enum_name,
             _ => false,
         }
     }

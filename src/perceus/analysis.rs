@@ -145,7 +145,7 @@ impl PerceusPass {
                     (sz + 7) & !7
                 })
                 .sum(),
-            Type::Struct(_) => 0,
+            Type::Struct(_, _) => 0,
             Type::Enum(_) => 0,
             Type::Fn(_, _) => 16,
             Type::Param(_) | Type::TypeVar(_) => 0,

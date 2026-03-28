@@ -407,6 +407,14 @@ impl Typer {
                     self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
                 })
                 .collect::<Result<_, _>>()?;
+            // Explicitly unify argument types with expected types
+            for (i, ha) in hargs.iter().enumerate() {
+                if let Some(Some(expected)) = expected_arg_tys.get(i) {
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(expected, &ha.ty, span, "vec method argument");
+                }
+            }
             let ret_ty = Self::vec_method_ret_ty(method, elem_ty)
                 .ok_or_else(|| format!("no method '{method}' on Vec"))?;
             return Ok(hir::Expr {
@@ -429,6 +437,14 @@ impl Typer {
                     self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
                 })
                 .collect::<Result<_, _>>()?;
+            // Explicitly unify argument types with expected types
+            for (i, ha) in hargs.iter().enumerate() {
+                if let Some(Some(expected)) = expected_arg_tys.get(i) {
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(expected, &ha.ty, span, "map method argument");
+                }
+            }
             let ret_ty = Self::map_method_ret_ty(method, key_ty, val_ty)
                 .ok_or_else(|| format!("no method '{method}' on Map"))?;
             return Ok(hir::Expr {
@@ -467,7 +483,7 @@ impl Typer {
             });
         }
 
-        if let Type::Struct(ref type_name) = obj_ty {
+        if let Type::Struct(ref type_name, _) = obj_ty {
             let method_name = format!("{type_name}_{method}");
             if let Some((_, param_tys, ret)) = self.fns.get(&method_name).cloned() {
                 let hargs: Vec<hir::Expr> = args
@@ -492,6 +508,27 @@ impl Typer {
         }
 
         if matches!(obj_ty, Type::TypeVar(_)) {
+            // String-exclusive methods: if receiver is TypeVar and method is unique to String,
+            // immediately constrain receiver to String and dispatch.
+            if Self::is_string_exclusive_method(method) {
+                let _ = self.infer_ctx.unify_at(
+                    &obj_ty,
+                    &Type::String,
+                    span,
+                    "method call implies String type",
+                );
+                let hargs: Vec<hir::Expr> = args
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<_, _>>()?;
+                let ret_ty = Self::string_method_ret_ty(method).unwrap_or(Type::I64);
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::StringMethod(Box::new(hobj), method.to_string(), hargs),
+                    ty: ret_ty,
+                    span,
+                });
+            }
+
             let suffix = format!("_{method}");
             let mut candidates: Vec<(String, Vec<Type>, Type)> = self
                 .fns
@@ -529,7 +566,7 @@ impl Typer {
 
             if candidates.len() == 1 {
                 let (type_name, param_tys, ret) = &candidates[0];
-                let struct_ty = Type::Struct(type_name.clone());
+                let struct_ty = Type::Struct(type_name.clone(), vec![]);
                 let _ = self.infer_ctx.unify_at(
                     &obj_ty,
                     &struct_ty,

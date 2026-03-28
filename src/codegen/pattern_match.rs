@@ -20,14 +20,14 @@ impl<'ctx> Compiler<'ctx> {
         let subject_ty = self.resolve_ty(m.subject.ty.clone());
 
         let is_enum = matches!(subject_ty, Type::Enum(_))
-            || matches!(&subject_ty, Type::Struct(n) if self.enums.contains_key(n));
+            || matches!(&subject_ty, Type::Struct(n, _) if self.enums.contains_key(n));
 
         if !is_enum {
             return self.compile_value_match(m, subject_val, &subject_ty);
         }
 
         let enum_name = match &subject_ty {
-            Type::Enum(n) | Type::Struct(n) => n.clone(),
+            Type::Enum(n) | Type::Struct(n, _) => n.clone(),
             _ => unreachable!(),
         };
         let st = self

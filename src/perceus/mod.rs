@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_struct_not_trivially_droppable() {
-        assert!(!Type::Struct("Point".into()).is_trivially_droppable());
+        assert!(!Type::Struct("Point".into(), vec![]).is_trivially_droppable());
         assert!(!Type::String.is_trivially_droppable());
         assert!(!Type::Rc(Box::new(Type::I64)).is_trivially_droppable());
     }

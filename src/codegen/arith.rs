@@ -57,7 +57,7 @@ impl<'ctx> Compiler<'ctx> {
             return self.string_eq(lhs, rhs, matches!(op, BinOp::Ne));
         }
         if matches!(op, BinOp::Eq | BinOp::Ne) {
-            if let Type::Struct(name) = ety {
+            if let Type::Struct(name, _) = ety {
                 let fn_name = format!("{name}_eq");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let result = b!(self
@@ -74,7 +74,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
         }
-        if let Type::Struct(name) = ety {
+        if let Type::Struct(name, _) = ety {
             let trait_name = match op {
                 BinOp::Add => Some("add"),
                 BinOp::Sub => Some("sub"),

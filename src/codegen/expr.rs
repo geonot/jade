@@ -511,9 +511,9 @@ impl<'ctx> Compiler<'ctx> {
             return self.vec_len(v.into_pointer_value());
         }
         let (ty_name, is_ptr) = match obj_ty {
-            Type::Struct(n) => (n.as_str(), false),
+            Type::Struct(n, _) => (n.as_str(), false),
             Type::Ptr(inner) => match inner.as_ref() {
-                Type::Struct(n) => (n.as_str(), true),
+                Type::Struct(n, _) => (n.as_str(), true),
                 other => return Err(format!("field access on non-struct: {other}")),
             },
             other => return Err(format!("field access on non-struct: {other}")),
@@ -532,23 +532,90 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_struct_type(ty_name)
             .ok_or_else(|| format!("no LLVM struct: {ty_name}"))?;
-        if let hir::ExprKind::Var(_, n) = &obj.kind {
+
+        // Get a pointer to the struct, either from a variable or by spilling a value
+        let struct_ptr = if let hir::ExprKind::Var(_, n) = &obj.kind {
             if let Some((ptr, _)) = self.find_var(n).cloned() {
                 if is_ptr {
-                    let struct_ptr = b!(self.bld.build_load(
+                    b!(self.bld.build_load(
                         self.ctx.ptr_type(inkwell::AddressSpace::default()),
                         ptr,
                         "self.ptr"
                     ))
-                    .into_pointer_value();
-                    let gep = b!(self.bld.build_struct_gep(st, struct_ptr, idx as u32, field));
-                    return Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)));
+                    .into_pointer_value()
+                } else {
+                    ptr
                 }
-                let gep = b!(self.bld.build_struct_gep(st, ptr, idx as u32, field));
-                return Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)));
+            } else {
+                // Variable not found — compile and spill
+                let val = self.compile_expr(obj)?;
+                let spill = self.entry_alloca(st.into(), "field.spill");
+                b!(self.bld.build_store(spill, val));
+                spill
             }
+        } else {
+            // Non-variable object (e.g., chained field access, function return) — compile and spill
+            let val = self.compile_expr(obj)?;
+            let spill = self.entry_alloca(st.into(), "field.spill");
+            b!(self.bld.build_store(spill, val));
+            spill
+        };
+
+        let gep = b!(self.bld.build_struct_gep(st, struct_ptr, idx as u32, field));
+        Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)))
+    }
+
+    /// Return a pointer to the memory location of an lvalue expression.
+    /// Used for chained field assignment (e.g. `a.b.x = 42`).
+    pub(crate) fn compile_lvalue_ptr(
+        &mut self,
+        expr: &hir::Expr,
+    ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
+        match &expr.kind {
+            hir::ExprKind::Var(_, name) => {
+                self.find_var(name)
+                    .map(|(ptr, _)| *ptr)
+                    .ok_or_else(|| format!("undefined: {name}"))
+            }
+            hir::ExprKind::Field(obj, field, _idx) => {
+                let obj_ty = &obj.ty;
+                let (ty_name, is_ptr) = match obj_ty {
+                    Type::Struct(n, _) => (n.as_str(), false),
+                    Type::Ptr(inner) => match inner.as_ref() {
+                        Type::Struct(n, _) => (n.as_str(), true),
+                        _ => return Err("field lvalue on non-struct".into()),
+                    },
+                    _ => return Err("field lvalue on non-struct".into()),
+                };
+                let fields = self
+                    .structs
+                    .get(ty_name)
+                    .ok_or_else(|| format!("undefined type: {ty_name}"))?
+                    .clone();
+                let fi = fields
+                    .iter()
+                    .position(|(n, _)| n == field)
+                    .ok_or_else(|| format!("no field '{field}' on {ty_name}"))?;
+                let st = self
+                    .module
+                    .get_struct_type(ty_name)
+                    .ok_or_else(|| format!("no LLVM struct: {ty_name}"))?;
+                let obj_ptr = self.compile_lvalue_ptr(obj)?;
+                let struct_ptr = if is_ptr {
+                    b!(self.bld.build_load(
+                        self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                        obj_ptr,
+                        "self.ptr"
+                    ))
+                    .into_pointer_value()
+                } else {
+                    obj_ptr
+                };
+                let gep = b!(self.bld.build_struct_gep(st, struct_ptr, fi as u32, field));
+                Ok(gep)
+            }
+            _ => Err("expression is not an lvalue".into()),
         }
-        Err("cannot access field on rvalue".into())
     }
 
     fn compile_index(

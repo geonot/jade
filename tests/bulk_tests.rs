@@ -6420,3 +6420,297 @@ fn b_f32_function_roundtrip() {
         "6.280000",
     );
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.1 String Parameter Inference
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_string_param_inferred_from_contains() {
+    // Parameter type inferred as String from .contains() call
+    expect(
+        "*check(s)\n    s.contains('world')\n\n*main()\n    log(check('hello world'))\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_starts_with() {
+    expect(
+        "*check(s)\n    s.starts_with('he')\n\n*main()\n    log(check('hello'))\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_ends_with() {
+    expect(
+        "*check(s)\n    s.ends_with('lo')\n\n*main()\n    log(check('hello'))\n",
+        "1",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_slice() {
+    expect(
+        "*first3(s)\n    s.slice(0, 3)\n\n*main()\n    log(first3('hello'))\n",
+        "hel",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_trim() {
+    expect(
+        "*clean(s)\n    s.trim()\n\n*main()\n    log(clean('  hi  '))\n",
+        "hi",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_to_upper() {
+    expect(
+        "*shout(s)\n    s.to_upper()\n\n*main()\n    log(shout('hello'))\n",
+        "HELLO",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_split() {
+    expect(
+        "*count_parts(s)\n    parts is s.split(',')\n    parts.len()\n\n*main()\n    log(count_parts('a,b,c'))\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_string_param_inferred_from_concat() {
+    // When one side of + is known String, the other should be inferred as String
+    expect(
+        "*greet(name)\n    'Hello, ' + name\n\n*main()\n    log(greet('world'))\n",
+        "Hello, world",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.2 Trait Constraint Enforcement
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_trait_constraint_inferred_single_candidate() {
+    // When only one struct implements a trait method, unannotated param resolves correctly
+    expect(
+        "trait Describable\n    *describe() -> String\n\ntype Widget\n    label: String\n\nimpl Describable for Widget\n    *describe()\n        self.label\n\n*show(x)\n    log(x.describe())\n\n*main()\n    show(Widget(label is 'hello'))\n",
+        "hello",
+    );
+}
+
+#[test]
+fn b_trait_constraint_narrowing() {
+    // When multiple structs have same method but only one implements the required trait,
+    // trait constraint narrows candidates correctly
+    expect(
+        "trait Printable\n    *to_text() -> String\n\ntype Alpha\n    val: i64\n\ntype Beta\n    val: i64\n\nimpl Printable for Alpha\n    *to_text()\n        'alpha'\n\nimpl Printable for Beta\n    *to_text()\n        'beta'\n\n*main()\n    a is Alpha(val is 1)\n    b is Beta(val is 2)\n    log(a.to_text())\n    log(b.to_text())\n",
+        "alpha\nbeta",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.3 Empty Collection Inference
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_empty_vec_inferred_from_push_int() {
+    expect(
+        "*main()\n    v is vec()\n    v.push(42)\n    log(v.get(0))\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_empty_vec_inferred_from_push_string() {
+    expect(
+        "*main()\n    v is vec()\n    v.push('hello')\n    log(v.get(0))\n",
+        "hello",
+    );
+}
+
+#[test]
+fn b_empty_vec_no_context_compiles() {
+    expect(
+        "*main()\n    v is vec()\n    log(v.len())\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.4 Curried Function Inference
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_curried_add() {
+    expect(
+        "*add(a)\n    *fn(b) a + b\n\n*main()\n    add3 is add(3)\n    log(add3(4))\n",
+        "7",
+    );
+}
+
+#[test]
+fn b_curried_inline_call() {
+    expect(
+        "*add(a)\n    *fn(b) a + b\n\n*main()\n    log(add(10)(20))\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_curried_lambda() {
+    expect(
+        "*main()\n    mul is *fn(a) *fn(b) a * b\n    mul5 is mul(5)\n    log(mul5(6))\n",
+        "30",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.5 Conditional Chain Propagation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_deep_elif_return_inference() {
+    // 5-branch elif chain, return type inferred without annotations
+    expect(
+        "*pick(n)\n    if n < 0\n        'negative'\n    elif n < 10\n        'small'\n    elif n < 100\n        'medium'\n    elif n < 1000\n        'large'\n    else\n        'huge'\n\n*main()\n    log(pick(-5))\n    log(pick(7))\n    log(pick(50))\n    log(pick(500))\n    log(pick(9999))\n",
+        "negative\nsmall\nmedium\nlarge\nhuge",
+    );
+}
+
+#[test]
+fn b_if_expr_elif_unified() {
+    // If-expression: all branches unified to same type
+    expect(
+        "*main()\n    n is 42\n    result is if n < 0\n        'neg'\n    elif n < 10\n        'small'\n    else\n        'other'\n    log(result)\n",
+        "other",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.6 Improved Diagnostics for Unsolved Type Variables
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_strict_unconstrained_field_diagnostic() {
+    // Strict mode still catches unconstrained struct fields
+    let err = expect_strict_fail("type Bag\n    mystery\n\n*main()\n    log(1)\n");
+    assert!(
+        err.contains("has no type annotation and was never constrained"),
+        "expected strict error about unconstrained field, got: {err}"
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: 12.7 Struct Type Parameters
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_struct_type_params_basic() {
+    expect(
+        "type Pair\n    first\n    second\n\n*main()\n    p is Pair(42, 'hello')\n    log(p.first)\n    log(p.second)\n",
+        "42\nhello",
+    );
+}
+
+#[test]
+fn b_struct_type_params_generic() {
+    // Generic struct instantiated with different types in different calls
+    expect(
+        "type Wrapper\n    val\n\n*main()\n    a is Wrapper(42)\n    log(a.val)\n",
+        "42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUG FIX: Closure capture of non-integer types (Addable constraint)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_curried_string_concat() {
+    // Curried function that captures a String — previously caused LLVM IR type mismatch
+    expect(
+        "*concat(a: String)\n    *fn(b: String) -> String a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
+        "hello world",
+    );
+}
+
+#[test]
+fn b_curried_string_concat_inferred() {
+    // Same but with fully inferred types (the core bug)
+    expect(
+        "*concat(a)\n    *fn(b) a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
+        "hello world",
+    );
+}
+
+#[test]
+fn b_addable_still_works_numeric() {
+    // Ensure + with integers still works after Addable constraint
+    expect(
+        "*add(a)\n    *fn(b) a + b\n\n*main()\n    log(add(3)(4))\n",
+        "7",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUG FIX: Chained field access on rvalues
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_chained_field_access_two_deep() {
+    expect(
+        "type Point\n    x: i64\n    y: i64\n\ntype Line\n    a: Point\n    b: Point\n\n*main()\n    l is Line(Point(1, 2), Point(3, 4))\n    log(l.a.x)\n    log(l.b.y)\n",
+        "1\n4",
+    );
+}
+
+#[test]
+fn b_chained_field_access_three_deep() {
+    expect(
+        "type Inner\n    val: i64\n\ntype Mid\n    inner: Inner\n\ntype Outer\n    mid: Mid\n\n*main()\n    o is Outer(Mid(Inner(99)))\n    log(o.mid.inner.val)\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_chained_field_assignment() {
+    expect(
+        "type Inner\n    val: i64\n\ntype Outer\n    inner: Inner\n\n*main()\n    o is Outer(Inner(10))\n    o.inner.val is 42\n    log(o.inner.val)\n",
+        "42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUG FIX: Mixed-type generic struct monomorphization
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_struct_mono_int_and_string() {
+    expect(
+        "type Wrapper\n    val\n\n*main()\n    a is Wrapper(42)\n    b is Wrapper(\"hello\")\n    log(a.val)\n    log(b.val)\n",
+        "42\nhello",
+    );
+}
+
+#[test]
+fn b_struct_mono_int_string_float() {
+    expect(
+        "type Pair\n    first\n    second\n\n*main()\n    p1 is Pair(1, 2)\n    p2 is Pair(\"hi\", \"there\")\n    p3 is Pair(3.14, 2.71)\n    log(p1.first)\n    log(p2.first)\n    log(p3.first)\n",
+        "1\nhi\n3.140000",
+    );
+}
+
+#[test]
+fn b_struct_mono_single_type_no_mangle() {
+    // Single-type usage should not require monomorphization
+    expect(
+        "type Box\n    val\n\n*main()\n    a is Box(10)\n    b is Box(20)\n    log(a.val + b.val)\n",
+        "30",
+    );
+}

@@ -292,7 +292,11 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::For)?;
         let bind = self.ident()?;
-        self.expect(Token::In)?;
+        if self.check(Token::From) {
+            self.advance();
+        } else {
+            self.expect(Token::In)?;
+        }
         let iter = self.parse_expr()?;
         let end = if self.check(Token::To) {
             self.advance();

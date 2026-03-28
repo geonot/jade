@@ -57,6 +57,8 @@ struct Cli {
     pedantic: bool,
     #[arg(long)]
     test: bool,
+    #[arg(long)]
+    emit_interface: bool,
 }
 
 #[derive(Subcommand)]
@@ -123,6 +125,29 @@ fn resolve_modules(
             .into_iter()
             .find(|c| c.exists())
             .unwrap_or_else(|| die(&format!("module not found: {key}")));
+
+        // Check for a cached .jadei interface file
+        let jadei_path = candidate.with_extension("jadei");
+        if jadei_path.exists() {
+            // If the interface file is newer than the source, use it
+            let src_meta = fs::metadata(&candidate).ok();
+            let iface_meta = fs::metadata(&jadei_path).ok();
+            let use_cache = match (src_meta, iface_meta) {
+                (Some(sm), Some(im)) => {
+                    im.modified().ok() >= sm.modified().ok()
+                }
+                _ => false,
+            };
+            if use_cache {
+                if let Ok(iface) = jadec::interface::InterfaceFile::read_from(&jadei_path) {
+                    for d in iface.to_decls() {
+                        prog.decls.push(d);
+                    }
+                    continue;
+                }
+            }
+        }
+
         let src = fs::read_to_string(&candidate)
             .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", candidate.display())));
         let tokens = Lexer::new(&src)
@@ -295,6 +320,18 @@ fn main() {
         Ok(hir_prog) => hir_prog,
         Err(e) => die(&format!("hir: {e}")),
     };
+
+    if cli.emit_interface {
+        let mod_name = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("module");
+        let iface = jadec::interface::InterfaceFile::from_decls(mod_name, &prog.decls);
+        let iface_path = input.with_extension("jadei");
+        if let Err(e) = iface.write_to(&iface_path) {
+            die(&format!("interface: {e}"));
+        }
+    }
 
     if cli.emit_hir {
         print!("{}", jadec::hir::pretty_print(&hir_prog));

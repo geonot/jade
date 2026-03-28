@@ -48,6 +48,8 @@ pub struct Typer {
     pub(crate) methods: HashMap<String, Vec<ast::Fn>>,
     pub(crate) mono_fns: Vec<hir::Fn>,
     pub(crate) mono_enums: Vec<hir::EnumDef>,
+    pub(crate) mono_types: Vec<hir::TypeDef>,
+    pub(crate) inferred_field_structs: std::collections::HashSet<String>,
     pub(crate) source_dir: Option<PathBuf>,
     pub(crate) test_mode: bool,
     pub(crate) actors: HashMap<String, (DefId, Vec<(String, Type)>, Vec<(String, Vec<Type>, u32)>)>,
@@ -97,6 +99,8 @@ impl Typer {
             methods: HashMap::new(),
             mono_fns: Vec::new(),
             mono_enums: Vec::new(),
+            mono_types: Vec::new(),
+            inferred_field_structs: std::collections::HashSet::new(),
             source_dir: None,
             test_mode: false,
             actors: HashMap::new(),
@@ -204,7 +208,7 @@ impl Typer {
 
     fn resolve_ty(&self, ty: Type) -> Type {
         match &ty {
-            Type::Struct(n) if self.enums.contains_key(n) => Type::Enum(n.clone()),
+            Type::Struct(n, _) if self.enums.contains_key(n) => Type::Enum(n.clone()),
             _ => ty,
         }
     }
@@ -289,6 +293,27 @@ impl Typer {
             "split" => Some(Type::Vec(Box::new(Type::String))),
             _ => None,
         }
+    }
+
+    /// Returns true if the method name is exclusive to String (not shared with Vec/Map/Struct).
+    /// Used to immediately constrain TypeVar receivers to String.
+    pub(crate) fn is_string_exclusive_method(method: &str) -> bool {
+        matches!(
+            method,
+            "contains"
+                | "starts_with"
+                | "ends_with"
+                | "char_at"
+                | "find"
+                | "slice"
+                | "trim"
+                | "trim_left"
+                | "trim_right"
+                | "replace"
+                | "to_upper"
+                | "to_lower"
+                | "split"
+        )
     }
 
     pub(crate) fn vec_method_ret_ty(method: &str, elem_ty: &Type) -> Option<Type> {

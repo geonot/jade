@@ -17,7 +17,7 @@ pub enum Type {
     Vec(Box<Type>),
     Map(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
-    Struct(String),
+    Struct(String, Vec<Type>),
     Enum(String),
     Fn(Vec<Type>, Box<Type>),
     Param(String),
@@ -125,7 +125,21 @@ impl std::fmt::Display for Type {
             Self::Void => f.write_str("void"),
             Self::String => f.write_str("String"),
             Self::TypeVar(n) => write!(f, "?{n}"),
-            Self::Struct(n) | Self::Enum(n) => f.write_str(n),
+            Self::Struct(n, params) => {
+                f.write_str(n)?;
+                if !params.is_empty() {
+                    f.write_str("<")?;
+                    for (i, p) in params.iter().enumerate() {
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
+                        write!(f, "{p}")?;
+                    }
+                    f.write_str(">")?;
+                }
+                Ok(())
+            }
+            Self::Enum(n) => f.write_str(n),
             Self::Array(e, l) => write!(f, "[{e}; {l}]"),
             Self::Vec(e) => write!(f, "Vec of {e}"),
             Self::Map(k, v) => write!(f, "Map of {k}, {v}"),

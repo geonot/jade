@@ -5,6 +5,7 @@ pub mod comptime;
 pub mod diagnostic;
 pub mod hir;
 pub mod hir_validate;
+pub mod interface;
 pub mod lexer;
 pub mod lock;
 pub mod lsp;
