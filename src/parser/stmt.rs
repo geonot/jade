@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::lexer::Token;
 
+use super::expr::{contains_placeholder_in_block, replace_placeholder_in_block};
 use super::{ParseError, Parser};
 
 impl Parser {
@@ -72,10 +73,92 @@ impl Parser {
                 }
             }
             Token::While => self.parse_while(),
+            Token::Until => {
+                let sp = self.span();
+                self.advance();
+                let cond = self.parse_expr()?;
+                self.expect(Token::Newline)?;
+                Ok(Stmt::While(While {
+                    cond: Expr::UnaryOp(UnaryOp::Not, Box::new(cond), sp),
+                    body: self.parse_block()?,
+                    span: sp,
+                }))
+            }
+            Token::Unless => {
+                let sp = self.span();
+                self.advance();
+                let cond = self.parse_expr()?;
+                self.expect(Token::Newline)?;
+                let body = self.parse_block()?;
+                Ok(Stmt::If(If {
+                    cond: Expr::UnaryOp(UnaryOp::Not, Box::new(cond), sp),
+                    then: body,
+                    elifs: vec![],
+                    els: None,
+                    span: sp,
+                }))
+            }
             Token::For => self.parse_for(),
+            Token::Sim => {
+                let sp = self.span();
+                self.advance();
+                self.expect(Token::For)?;
+                let bind = self.ident()?;
+                if self.check(Token::From) {
+                    self.advance();
+                } else {
+                    self.expect(Token::In)?;
+                }
+                let iter = self.parse_expr()?;
+                let end = if self.check(Token::To) {
+                    self.advance();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                let step = if self.check(Token::By) {
+                    self.advance();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                self.expect(Token::Newline)?;
+                Ok(Stmt::SimFor(For {
+                    label: None,
+                    bind,
+                    bind2: None,
+                    iter,
+                    end,
+                    step,
+                    body: self.parse_block()?,
+                    span: sp,
+                }, sp))
+            }
             Token::Loop => {
                 let sp = self.span();
                 self.advance();
+                // `loop items` → desugar to `for __ph in items` with $ → __ph
+                if !self.check(Token::Newline) && !self.check(Token::Indent) && !self.eof() {
+                    let iter = self.parse_expr()?;
+                    self.expect(Token::Newline)?;
+                    let body = self.parse_block()?;
+                    // Replace any $ in the body with __ph
+                    let body = if contains_placeholder_in_block(&body) {
+                        replace_placeholder_in_block(&body, "__ph")
+                    } else {
+                        body
+                    };
+                    return Ok(Stmt::For(For {
+                        label: None,
+                        bind: "__ph".into(),
+                        bind2: None,
+                        iter,
+                        end: None,
+                        step: None,
+                        body,
+                        span: sp,
+                    }));
+                }
                 self.expect(Token::Newline)?;
                 Ok(Stmt::Loop(Loop {
                     body: self.parse_block()?,
@@ -136,6 +219,10 @@ impl Parser {
                 let val = self.parse_expr()?;
                 Ok(Stmt::ErrReturn(val, sp))
             }
+            Token::Use => {
+                let u = self.parse_use_decl()?;
+                Ok(Stmt::UseLocal(u))
+            }
             _ => {
                 if self.is_tuple_bind() {
                     self.parse_tuple_bind()
@@ -166,7 +253,6 @@ impl Parser {
                     | Token::MinusEq
                     | Token::StarEq
                     | Token::SlashEq
-                    | Token::PercentEq
                     | Token::AmpEq
                     | Token::PipeEq
                     | Token::CaretEq
@@ -213,7 +299,6 @@ impl Parser {
             Token::MinusEq => BinOp::Sub,
             Token::StarEq => BinOp::Mul,
             Token::SlashEq => BinOp::Div,
-            Token::PercentEq => BinOp::Mod,
             Token::AmpEq => BinOp::BitAnd,
             Token::PipeEq => BinOp::BitOr,
             Token::CaretEq => BinOp::BitXor,
@@ -239,6 +324,46 @@ impl Parser {
             }));
         }
         self.expect(Token::Is)?;
+        // Labeled loop: `outer is for i in items`
+        if self.check(Token::For) {
+            self.advance();
+            let bind = self.ident()?;
+            let bind2 = if self.check(Token::Comma) {
+                self.advance();
+                Some(self.ident()?)
+            } else {
+                None
+            };
+            if self.check(Token::From) {
+                self.advance();
+            } else {
+                self.expect(Token::In)?;
+            }
+            let iter = self.parse_expr()?;
+            let end = if self.check(Token::To) {
+                self.advance();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            let step = if self.check(Token::By) {
+                self.advance();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            self.expect(Token::Newline)?;
+            return Ok(Stmt::For(For {
+                label: Some(name),
+                bind,
+                bind2,
+                iter,
+                end,
+                step,
+                body: self.parse_block()?,
+                span: sp,
+            }));
+        }
         Ok(Stmt::Bind(Bind {
             name,
             value: self.parse_expr()?,
@@ -318,6 +443,7 @@ impl Parser {
         };
         self.expect(Token::Newline)?;
         Ok(Stmt::For(For {
+            label: None,
             bind,
             bind2,
             iter,
@@ -514,7 +640,7 @@ impl Parser {
     fn parse_filter_op(&mut self) -> Result<BinOp, ParseError> {
         let op = match self.peek() {
             Token::Equals => BinOp::Eq,
-            Token::Isnt => BinOp::Ne,
+            Token::Neq => BinOp::Ne,
             Token::Lt => BinOp::Lt,
             Token::Gt => BinOp::Gt,
             Token::LtEq => BinOp::Le,

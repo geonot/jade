@@ -15,7 +15,7 @@ enum Event
     Tick
     Stop
 
-*transition(state: State, event: Event)
+*transition(state as State, event as Event)
     match state
         Idle ?
             match event
@@ -35,21 +35,21 @@ enum Event
         Done(count) ?
             Done(count)
 
-*state_name(state: State)
+*state_name(state as State)
     match state
         Idle ? log('idle')
         Running(n) ? log('running')
         Paused(n) ? log('paused')
         Done(n) ? log('done')
 
-*state_count(state: State)
+*state_count(state as State)
     match state
         Idle ? 0
         Running(n) ? n
         Paused(n) ? n
         Done(n) ? n
 
-*main()
+*main
     # Simulate a state machine
     s is Idle
 

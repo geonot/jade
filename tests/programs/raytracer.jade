@@ -3,20 +3,20 @@
 # Demonstrates: structs, methods, math builtins, type casting, control flow
 
 type Vec3f
-    x: f64
-    y: f64
-    z: f64
+    x as f64
+    y as f64
+    z as f64
 
-    *add(self, other: Vec3f)
+    *add(self, other as Vec3f)
         Vec3f(x is self.x + other.x, y is self.y + other.y, z is self.z + other.z)
 
-    *sub(self, other: Vec3f)
+    *sub(self, other as Vec3f)
         Vec3f(x is self.x - other.x, y is self.y - other.y, z is self.z - other.z)
 
-    *scale(self, s: f64)
+    *scale(self, s as f64)
         Vec3f(x is self.x * s, y is self.y * s, z is self.z * s)
 
-    *dot(self, other: Vec3f)
+    *dot(self, other as Vec3f)
         self.x * other.x + self.y * other.y + self.z * other.z
 
     *length(self)
@@ -27,18 +27,18 @@ type Vec3f
         self.scale(1.0 / len)
 
 type Ray
-    origin: Vec3f
-    dir: Vec3f
+    origin as Vec3f
+    dir as Vec3f
 
-    *at(self, t: f64)
+    *at(self, t as f64)
         self.origin.add(self.dir.scale(t))
 
 type Sphere
-    center: Vec3f
-    radius: f64
+    center as Vec3f
+    radius as f64
 
 # Returns t of intersection, or -1.0 if no hit
-*intersect(ray: Ray, sphere: Sphere)
+*intersect(ray as Ray, sphere as Sphere)
     oc is ray.origin.sub(sphere.center)
     a is ray.dir.dot(ray.dir)
     b is 2.0 * oc.dot(ray.dir)
@@ -60,7 +60,7 @@ type Sphere
     -1.0
 
 # Compute color based on normal direction (simple diffuse)
-*shade(ray: Ray, sphere: Sphere, t: f64)
+*shade(ray as Ray, sphere as Sphere, t as f64)
     hit_point is ray.at(t)
     normal is hit_point.sub(sphere.center).normalize()
     # Map normal to 0-255 color channel
@@ -69,7 +69,7 @@ type Sphere
     b is ((normal.z + 1.0) * 0.5 * 255.0) as i64
     r * 65536 + g * 256 + b
 
-*main()
+*main
     sphere is Sphere(
         center is Vec3f(x is 0.0, y is 0.0, z is -5.0),
         radius is 1.0

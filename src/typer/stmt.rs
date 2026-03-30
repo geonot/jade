@@ -359,6 +359,42 @@ impl Typer {
                 }
                 Ok(hir::Stmt::Stop(htarget, *span))
             }
+
+            ast::Stmt::SimFor(f, span) => {
+                let iter = self.lower_expr(&f.iter)?;
+                let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;
+                let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
+                let bind_ty = match &iter.ty {
+                    Type::Array(et, _) => *et.clone(),
+                    Type::Vec(et) => *et.clone(),
+                    _ => if end.is_some() { Type::I64 } else { self.infer_ctx.fresh_var() },
+                };
+                let bind_id = self.fresh_id();
+                self.push_scope();
+                self.define_var(
+                    &f.bind,
+                    VarInfo {
+                        def_id: bind_id,
+                        ty: bind_ty.clone(),
+                        ownership: Ownership::Owned,
+                        scheme: None,
+                    },
+                );
+                let body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                self.pop_scope();
+                Ok(hir::Stmt::SimFor(
+                    hir::For { bind_id, bind: f.bind.clone(), bind_ty, iter, end, step, body, span: f.span },
+                    *span,
+                ))
+            }
+            ast::Stmt::UseLocal(u) => {
+                Ok(hir::Stmt::UseLocal(
+                    u.path.clone(),
+                    u.imports.clone(),
+                    u.alias.clone(),
+                    u.span,
+                ))
+            }
         }
     }
 

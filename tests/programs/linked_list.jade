@@ -6,17 +6,17 @@ enum List of T
     Cons(T, List of T)
     Nil
 
-*list_length of T(lst: List of T)
+*list_length of T(lst as List of T)
     match lst
         Nil ? 0
         Cons(_, rest) ? 1 + list_length(rest)
 
-*list_sum(lst: List of i64)
+*list_sum(lst as List of i64)
     match lst
         Nil ? 0
         Cons(val, rest) ? val + list_sum(rest)
 
-*list_contains(lst: List of i64, target: i64)
+*list_contains(lst as List of i64, target as i64)
     match lst
         Nil ? false
         Cons(val, rest) ?
@@ -25,15 +25,15 @@ enum List of T
             else
                 list_contains(rest, target)
 
-*list_reverse_acc(lst: List of i64, acc: List of i64)
+*list_reverse_acc(lst as List of i64, acc as List of i64)
     match lst
         Nil ? acc
         Cons(val, rest) ? list_reverse_acc(rest, Cons(val, acc))
 
-*list_reverse(lst: List of i64)
+*list_reverse(lst as List of i64)
     list_reverse_acc(lst, Nil)
 
-*main()
+*main
     # Build a list: 1, 2, 3, 4, 5
     lst is Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil)))))
 

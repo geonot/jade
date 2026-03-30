@@ -47,6 +47,9 @@ pub struct Program {
     pub actors: Vec<ActorDef>,
     pub stores: Vec<StoreDef>,
     pub trait_impls: Vec<TraitImpl>,
+    pub supervisors: Vec<SupervisorDef>,
+    pub type_aliases: Vec<(String, Type, Span)>,
+    pub newtypes: Vec<(String, Type, Span)>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +70,7 @@ pub struct Fn {
     pub body: Block,
     pub span: Span,
     pub generic_origin: Option<String>,
+    pub is_generator: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +113,7 @@ pub struct Variant {
     pub name: String,
     pub fields: Vec<VField>,
     pub tag: u32,
+    pub discriminant: Option<i64>,
     pub span: Span,
 }
 
@@ -172,6 +177,22 @@ pub struct StoreDef {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorStrategy {
+    OneForOne,
+    OneForAll,
+    RestForOne,
+}
+
+#[derive(Debug, Clone)]
+pub struct SupervisorDef {
+    pub def_id: DefId,
+    pub name: String,
+    pub strategy: SupervisorStrategy,
+    pub children: Vec<String>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoreFilter {
     pub field: String,
@@ -211,6 +232,8 @@ pub enum Stmt {
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
+    SimFor(For, Span),
+    UseLocal(Vec<String>, Option<Vec<String>>, Option<String>, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -266,6 +289,12 @@ pub enum ExprKind {
     MapMethod(Box<Expr>, String, Vec<Expr>),
     VecNew(Vec<Expr>),
     MapNew,
+    SetNew,
+    SetMethod(Box<Expr>, String, Vec<Expr>),
+    PQNew,
+    PQMethod(Box<Expr>, String, Vec<Expr>),
+    NDArrayNew(Vec<Expr>),
+    SIMDNew(Vec<Expr>),
     Field(Box<Expr>, String, usize),
     Index(Box<Expr>, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -305,6 +334,24 @@ pub enum ExprKind {
     ChannelSend(Box<Expr>, Box<Expr>),
     ChannelRecv(Box<Expr>),
     Select(Vec<SelectArm>, Option<Block>),
+    Unreachable,
+    StrictCast(Box<Expr>, Type),
+    AsFormat(Box<Expr>, String),
+    AtomicLoad(Box<Expr>),
+    AtomicStore(Box<Expr>, Box<Expr>),
+    AtomicAdd(Box<Expr>, Box<Expr>),
+    AtomicSub(Box<Expr>, Box<Expr>),
+    AtomicCas(Box<Expr>, Box<Expr>, Box<Expr>),
+    Slice(Box<Expr>, Box<Expr>, Box<Expr>),
+    DequeNew,
+    DequeMethod(Box<Expr>, String, Vec<Expr>),
+    Grad(Box<Expr>),
+    Einsum(String, Vec<Expr>),
+    Builder(String, Vec<(String, Expr)>),
+    CowWrap(Box<Expr>),
+    CowClone(Box<Expr>),
+    GeneratorCreate(DefId, String, Vec<Stmt>),
+    GeneratorNext(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -358,6 +405,28 @@ pub enum BuiltinFn {
     TimeMonotonic,
     SleepMs,
     FileExists,
+    ArenaNew,
+    ArenaAlloc,
+    ArenaReset,
+    AtomicLoad,
+    AtomicStore,
+    AtomicAdd,
+    AtomicSub,
+    AtomicCas,
+    CompTimeTypeOf,
+    CompTimeFieldsOf,
+    CompTimeSizeOf,
+    CharMethod(String),
+    Matmul,
+    RegexMatch,
+    RegexFindAll,
+    VecWithAlloc,
+    MapWithAlloc,
+    ConstantTimeEq,
+    DequeNew,
+    GradFn,
+    Einsum,
+    CowWrap,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -798,6 +867,20 @@ impl PrettyPrinter {
             Stmt::Stop(e, _) => {
                 self.line(&format!("stop {}", self.expr_str(e)));
             }
+            Stmt::SimFor(f, _) => {
+                let end = f.end.as_ref().map(|e| format!(" to {}", self.expr_str(e))).unwrap_or_default();
+                let step = f.step.as_ref().map(|e| format!(" step {}", self.expr_str(e))).unwrap_or_default();
+                self.line(&format!("sim for {} [d{}] in {}{}{}:", f.bind, f.bind_id.0, self.expr_str(&f.iter), end, step));
+                self.push();
+                self.block(&f.body);
+                self.pop();
+            }
+            Stmt::UseLocal(path, imports, alias, _) => {
+                let p = path.join(".");
+                let i = imports.as_ref().map(|is| format!(" import {}", is.join(", "))).unwrap_or_default();
+                let a = alias.as_ref().map(|a| format!(" as {a}")).unwrap_or_default();
+                self.line(&format!("use {p}{i}{a}"));
+            }
         }
     }
 
@@ -897,6 +980,22 @@ impl PrettyPrinter {
                 format!("vec[{}]", a.join(", "))
             }
             ExprKind::MapNew => "map{}".into(),
+            ExprKind::SetNew => "set{}".into(),
+            ExprKind::PQNew => "pq{}".into(),
+            ExprKind::NDArrayNew(dims) => {
+                format!("ndarray[{}]", dims.iter().map(|d| self.expr_str(d)).collect::<Vec<_>>().join(" by "))
+            }
+            ExprKind::SIMDNew(elems) => {
+                format!("simd({})", elems.iter().map(|e| self.expr_str(e)).collect::<Vec<_>>().join(", "))
+            }
+            ExprKind::SetMethod(recv, meth, args) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
+                format!("{}.set::{meth}({})", self.expr_str(recv), a.join(", "))
+            }
+            ExprKind::PQMethod(recv, meth, args) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
+                format!("{}.pq::{meth}({})", self.expr_str(recv), a.join(", "))
+            }
             ExprKind::Field(recv, name, idx) => format!("{}.{name}#{idx}", self.expr_str(recv)),
             ExprKind::Index(arr, idx) => format!("{}[{}]", self.expr_str(arr), self.expr_str(idx)),
             ExprKind::Ternary(c, t, f) => format!(
@@ -1023,6 +1122,33 @@ impl PrettyPrinter {
             ExprKind::Select(arms, _) => {
                 format!("select({} arms)", arms.len())
             }
+            ExprKind::Unreachable => "unreachable".into(),
+            ExprKind::StrictCast(e, ty) => format!("strict_cast<{ty}>({})", self.expr_str(e)),
+            ExprKind::AsFormat(e, fmt) => format!("{} as {fmt}", self.expr_str(e)),
+            ExprKind::AtomicLoad(e) => format!("atomic_load({})", self.expr_str(e)),
+            ExprKind::AtomicStore(p, v) => format!("atomic_store({}, {})", self.expr_str(p), self.expr_str(v)),
+            ExprKind::AtomicAdd(p, v) => format!("atomic_add({}, {})", self.expr_str(p), self.expr_str(v)),
+            ExprKind::AtomicSub(p, v) => format!("atomic_sub({}, {})", self.expr_str(p), self.expr_str(v)),
+            ExprKind::AtomicCas(p, e, n) => format!("atomic_cas({}, {}, {})", self.expr_str(p), self.expr_str(e), self.expr_str(n)),
+            ExprKind::Slice(obj, start, end) => format!("{}[{} .. {}]", self.expr_str(obj), self.expr_str(start), self.expr_str(end)),
+            ExprKind::DequeNew => "deque()".into(),
+            ExprKind::DequeMethod(recv, meth, args) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
+                format!("{}.deque::{meth}({})", self.expr_str(recv), a.join(", "))
+            }
+            ExprKind::Grad(e) => format!("grad({})", self.expr_str(e)),
+            ExprKind::Einsum(spec, args) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
+                format!("einsum '{spec}' ({})", a.join(", "))
+            }
+            ExprKind::Builder(name, fields) => {
+                let fs: Vec<String> = fields.iter().map(|(n, v)| format!("{n}: {}", self.expr_str(v))).collect();
+                format!("builder {name} {{ {} }}", fs.join(", "))
+            }
+            ExprKind::CowWrap(e) => format!("cow({})", self.expr_str(e)),
+            ExprKind::CowClone(e) => format!("cow_clone({})", self.expr_str(e)),
+            ExprKind::GeneratorCreate(_, name, _) => format!("generator {name}"),
+            ExprKind::GeneratorNext(e) => format!("{}.next()", self.expr_str(e)),
         }
     }
 }

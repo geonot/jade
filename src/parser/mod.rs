@@ -319,6 +319,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         params: unified_params,
         ret: first.ret.clone(),
         body,
+        is_generator: false,
         span: sp,
     }
 }

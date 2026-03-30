@@ -6,11 +6,11 @@
     # Linear congruential generator (simple PRNG)
     (seed * 1103515245 + 12345) & 0x7FFFFFFF
 
-*main()
+*main
     # Generate a "random" target between 0-99
     seed is 42
     seed is lcg_next(seed)
-    target is seed % 100
+    target is seed mod 100
 
     # Simulate guesses
     guesses is [50, 25, 75, 37, 62, 43, 48, 45, 44, 42]

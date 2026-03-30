@@ -1,10 +1,10 @@
-extern *usleep(us: i32) -> i32
+extern *usleep(us as i32) returns i32
 
 actor Printer
-    @say n: i64
+    @say n as i64
         log(n)
 
-*main()
+*main
     p is spawn Printer
     send p, @say(42)
     send p, @say(100)

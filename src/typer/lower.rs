@@ -85,6 +85,9 @@ impl Typer {
                 ast::Decl::Const(name, expr, _) => {
                     self.consts.insert(name.clone(), expr.clone());
                 }
+                ast::Decl::Supervisor(_) => {}
+                ast::Decl::TypeAlias(_, _, _) => {}
+                ast::Decl::Newtype(_, _, _) => {}
             }
         }
 
@@ -298,6 +301,9 @@ impl Typer {
             actors: hir_actors,
             stores: hir_stores,
             trait_impls: hir_trait_impls,
+            supervisors: Vec::new(),
+            type_aliases: Vec::new(),
+            newtypes: Vec::new(),
         };
         self.resolve_deferred_methods();
         self.resolve_deferred_fields();
@@ -323,6 +329,7 @@ impl Typer {
             }
         }
         self.resolve_all_types(&mut program);
+        self.auto_derive_display(&mut program);
         let default_warnings = self.infer_ctx.drain_default_warnings();
         self.warnings.extend(default_warnings);
         let strict_errors = self.infer_ctx.drain_strict_errors();
@@ -835,6 +842,237 @@ impl Typer {
         }
     }
 
+    /// Auto-derive Display for structs that are passed to log/to_string
+    /// but don't have an explicit display method.
+    fn auto_derive_display(&mut self, prog: &mut hir::Program) {
+        // Collect struct names that need Display
+        let mut needs_display: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for f in &prog.fns {
+            Self::collect_display_usage(&f.body, &mut needs_display);
+        }
+        for ti in &prog.trait_impls {
+            for m in &ti.methods {
+                Self::collect_display_usage(&m.body, &mut needs_display);
+            }
+        }
+        // Remove structs that already have a display method
+        needs_display
+            .retain(|name| !self.fns.contains_key(&format!("{name}_display")));
+
+        // Generate display methods for structs
+        for type_name in &needs_display {
+            if let Some(fields) = self.structs.get(type_name).cloned() {
+                let method_name = format!("{type_name}_display");
+                let self_id = self.fresh_id();
+                let self_ty = Type::Struct(type_name.clone(), vec![]);
+                let span = crate::ast::Span::dummy();
+
+                // Build a single nested concat expression:
+                // "TypeName(" + field1_label + to_string(field1) + ... + ")"
+                let mk_str = |s: String| hir::Expr {
+                    kind: hir::ExprKind::Str(s),
+                    ty: Type::String,
+                    span,
+                };
+                let concat = |a: hir::Expr, b: hir::Expr| hir::Expr {
+                    kind: hir::ExprKind::BinOp(
+                        Box::new(a),
+                        crate::ast::BinOp::Add,
+                        Box::new(b),
+                    ),
+                    ty: Type::String,
+                    span,
+                };
+
+                let mut result = mk_str(format!("{type_name}("));
+
+                for (i, (fname, fty)) in fields.iter().enumerate() {
+                    let label = if i == 0 {
+                        format!("{fname}: ")
+                    } else {
+                        format!(", {fname}: ")
+                    };
+                    result = concat(result, mk_str(label));
+
+                    let field_val = hir::Expr {
+                        kind: hir::ExprKind::Field(
+                            Box::new(hir::Expr {
+                                kind: hir::ExprKind::Var(self_id, "__self".into()),
+                                ty: self_ty.clone(),
+                                span,
+                            }),
+                            fname.clone(),
+                            i,
+                        ),
+                        ty: fty.clone(),
+                        span,
+                    };
+                    let to_string = hir::Expr {
+                        kind: hir::ExprKind::Builtin(
+                            hir::BuiltinFn::ToString,
+                            vec![field_val],
+                        ),
+                        ty: Type::String,
+                        span,
+                    };
+                    result = concat(result, to_string);
+                }
+
+                result = concat(result, mk_str(")".into()));
+                let body = vec![hir::Stmt::Expr(result)];
+
+                let hir_fn = hir::Fn {
+                    def_id: self.fresh_id(),
+                    name: method_name.clone(),
+                    params: vec![hir::Param {
+                        def_id: self_id,
+                        name: "__self".into(),
+                        ty: self_ty.clone(),
+                        ownership: hir::Ownership::Owned,
+                        span,
+                    }],
+                    ret: Type::String,
+                    body,
+                    span,
+                    generic_origin: None,
+                    is_generator: false,
+                };
+                self.fns.insert(
+                    method_name,
+                    (hir_fn.def_id, vec![self_ty], Type::String),
+                );
+                prog.fns.push(hir_fn);
+            }
+        }
+    }
+
+    fn collect_display_usage(block: &[hir::Stmt], needs: &mut std::collections::HashSet<String>) {
+        for stmt in block {
+            Self::collect_display_usage_stmt(stmt, needs);
+        }
+    }
+
+    fn collect_display_usage_stmt(
+        stmt: &hir::Stmt,
+        needs: &mut std::collections::HashSet<String>,
+    ) {
+        match stmt {
+            hir::Stmt::Bind(b) => Self::collect_display_usage_expr(&b.value, needs),
+            hir::Stmt::TupleBind(_, e, _) => Self::collect_display_usage_expr(e, needs),
+            hir::Stmt::Assign(l, r, _) => {
+                Self::collect_display_usage_expr(l, needs);
+                Self::collect_display_usage_expr(r, needs);
+            }
+            hir::Stmt::Expr(e) => Self::collect_display_usage_expr(e, needs),
+            hir::Stmt::If(i) => {
+                Self::collect_display_usage_expr(&i.cond, needs);
+                Self::collect_display_usage(&i.then, needs);
+                for (c, b) in &i.elifs {
+                    Self::collect_display_usage_expr(c, needs);
+                    Self::collect_display_usage(b, needs);
+                }
+                if let Some(b) = &i.els {
+                    Self::collect_display_usage(b, needs);
+                }
+            }
+            hir::Stmt::While(w) => {
+                Self::collect_display_usage_expr(&w.cond, needs);
+                Self::collect_display_usage(&w.body, needs);
+            }
+            hir::Stmt::For(f) => {
+                Self::collect_display_usage_expr(&f.iter, needs);
+                Self::collect_display_usage(&f.body, needs);
+            }
+            hir::Stmt::Loop(l) => Self::collect_display_usage(&l.body, needs),
+            hir::Stmt::Match(m) => {
+                Self::collect_display_usage_expr(&m.subject, needs);
+                for a in &m.arms {
+                    Self::collect_display_usage(&a.body, needs);
+                }
+            }
+            hir::Stmt::Ret(Some(e), _, _) => Self::collect_display_usage_expr(e, needs),
+            hir::Stmt::Break(Some(e), _) => Self::collect_display_usage_expr(e, needs),
+            hir::Stmt::ErrReturn(e, _, _) => Self::collect_display_usage_expr(e, needs),
+            _ => {}
+        }
+    }
+
+    fn collect_display_usage_expr(
+        expr: &hir::Expr,
+        needs: &mut std::collections::HashSet<String>,
+    ) {
+        match &expr.kind {
+            hir::ExprKind::Builtin(hir::BuiltinFn::Log, args) => {
+                for a in args {
+                    if let Type::Struct(name, _) = &a.ty {
+                        needs.insert(name.clone());
+                    }
+                    Self::collect_display_usage_expr(a, needs);
+                }
+            }
+            hir::ExprKind::Builtin(hir::BuiltinFn::ToString, args) => {
+                for a in args {
+                    if let Type::Struct(name, _) = &a.ty {
+                        needs.insert(name.clone());
+                    }
+                    Self::collect_display_usage_expr(a, needs);
+                }
+            }
+            hir::ExprKind::BinOp(l, _, r) => {
+                Self::collect_display_usage_expr(l, needs);
+                Self::collect_display_usage_expr(r, needs);
+            }
+            hir::ExprKind::Call(_, _, args)
+            | hir::ExprKind::Builtin(_, args)
+            | hir::ExprKind::VecNew(args)
+            | hir::ExprKind::Array(args)
+            | hir::ExprKind::Tuple(args) => {
+                for a in args {
+                    Self::collect_display_usage_expr(a, needs);
+                }
+            }
+            hir::ExprKind::IndirectCall(callee, args) => {
+                Self::collect_display_usage_expr(callee, needs);
+                for a in args {
+                    Self::collect_display_usage_expr(a, needs);
+                }
+            }
+            hir::ExprKind::Method(recv, _, _, args)
+            | hir::ExprKind::StringMethod(recv, _, args)
+            | hir::ExprKind::VecMethod(recv, _, args)
+            | hir::ExprKind::MapMethod(recv, _, args)
+            | hir::ExprKind::SetMethod(recv, _, args)
+            | hir::ExprKind::PQMethod(recv, _, args)
+            | hir::ExprKind::DynDispatch(recv, _, _, args) => {
+                Self::collect_display_usage_expr(recv, needs);
+                for a in args {
+                    Self::collect_display_usage_expr(a, needs);
+                }
+            }
+            hir::ExprKind::Pipe(l, _, _, args) => {
+                Self::collect_display_usage_expr(l, needs);
+                for a in args {
+                    Self::collect_display_usage_expr(a, needs);
+                }
+            }
+            hir::ExprKind::Lambda(_, body) | hir::ExprKind::Block(body) => {
+                Self::collect_display_usage(body, needs);
+            }
+            hir::ExprKind::IfExpr(i) => {
+                Self::collect_display_usage_expr(&i.cond, needs);
+                Self::collect_display_usage(&i.then, needs);
+                for (c, b) in &i.elifs {
+                    Self::collect_display_usage_expr(c, needs);
+                    Self::collect_display_usage(b, needs);
+                }
+                if let Some(b) = &i.els {
+                    Self::collect_display_usage(b, needs);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn resolve_fn(&mut self, f: &mut hir::Fn) {
         f.ret = self.infer_ctx.resolve(&f.ret);
         for p in &mut f.params {
@@ -945,6 +1183,14 @@ impl Typer {
             }
             hir::Stmt::ChannelClose(e, _) => self.resolve_expr(e),
             hir::Stmt::Stop(e, _) => self.resolve_expr(e),
+            hir::Stmt::SimFor(f, _) => {
+                f.bind_ty = self.infer_ctx.resolve(&f.bind_ty);
+                self.resolve_expr(&mut f.iter);
+                if let Some(end) = &mut f.end { self.resolve_expr(end); }
+                if let Some(step) = &mut f.step { self.resolve_expr(step); }
+                self.resolve_block(&mut f.body);
+            }
+            hir::Stmt::UseLocal(_, _, _, _) => {}
         }
     }
 
@@ -958,6 +1204,10 @@ impl Typer {
             | hir::ExprKind::None
             | hir::ExprKind::Void
             | hir::ExprKind::MapNew
+            | hir::ExprKind::SetNew
+            | hir::ExprKind::PQNew
+            | hir::ExprKind::NDArrayNew(_)
+            | hir::ExprKind::SIMDNew(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_) => {}
             hir::ExprKind::Var(_, _)
@@ -997,7 +1247,7 @@ impl Typer {
                 }
                 self.reclassify_method_call(expr);
             }
-            hir::ExprKind::VecMethod(recv, _, args) | hir::ExprKind::MapMethod(recv, _, args) => {
+            hir::ExprKind::VecMethod(recv, _, args) | hir::ExprKind::MapMethod(recv, _, args) | hir::ExprKind::SetMethod(recv, _, args) | hir::ExprKind::PQMethod(recv, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {
                     self.resolve_expr(a);
@@ -1118,6 +1368,26 @@ impl Typer {
                 self.resolve_expr(val);
             }
             hir::ExprKind::ChannelRecv(ch) => self.resolve_expr(ch),
+            hir::ExprKind::Unreachable => {}
+            hir::ExprKind::StrictCast(e, ty) => {
+                self.resolve_expr(e);
+                *ty = self.infer_ctx.resolve(ty);
+            }
+            hir::ExprKind::AsFormat(e, _) | hir::ExprKind::AtomicLoad(e) => self.resolve_expr(e),
+            hir::ExprKind::AtomicStore(a, b) | hir::ExprKind::AtomicAdd(a, b) | hir::ExprKind::AtomicSub(a, b) => {
+                self.resolve_expr(a);
+                self.resolve_expr(b);
+            }
+            hir::ExprKind::AtomicCas(p, e, n) => {
+                self.resolve_expr(p);
+                self.resolve_expr(e);
+                self.resolve_expr(n);
+            }
+            hir::ExprKind::Slice(obj, start, end) => {
+                self.resolve_expr(obj);
+                self.resolve_expr(start);
+                self.resolve_expr(end);
+            }
             hir::ExprKind::Select(arms, default) => {
                 for arm in arms {
                     arm.elem_ty = self.infer_ctx.resolve(&arm.elem_ty);
@@ -1130,6 +1400,23 @@ impl Typer {
                 if let Some(block) = default {
                     self.resolve_block(block);
                 }
+            }
+            hir::ExprKind::DequeNew => {}
+            hir::ExprKind::DequeMethod(obj, _, args) => {
+                self.resolve_expr(obj);
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Grad(e) | hir::ExprKind::CowWrap(e) | hir::ExprKind::CowClone(e) | hir::ExprKind::GeneratorNext(e) => {
+                self.resolve_expr(e);
+            }
+            hir::ExprKind::Einsum(_, args) => {
+                for a in args { self.resolve_expr(a); }
+            }
+            hir::ExprKind::Builder(_, fields) => {
+                for (_, v) in fields { self.resolve_expr(v); }
+            }
+            hir::ExprKind::GeneratorCreate(_, _, stmts) => {
+                for s in stmts { self.resolve_stmt(s); }
             }
         }
     }
@@ -1416,6 +1703,7 @@ impl Typer {
             body,
             span: f.span,
             generic_origin: None,
+            is_generator: f.is_generator,
         })
     }
 
@@ -1432,6 +1720,7 @@ impl Typer {
             body,
             span: tb.span,
             generic_origin: None,
+            is_generator: false,
         })
     }
 
@@ -1479,6 +1768,7 @@ impl Typer {
             body,
             span: s,
             generic_origin: None,
+            is_generator: false,
         }
     }
 
@@ -1639,6 +1929,7 @@ impl Typer {
             body,
             span: m.span,
             generic_origin: None,
+            is_generator: false,
         })
     }
 
@@ -1658,7 +1949,8 @@ impl Typer {
                         ty: f.ty.clone(),
                     })
                     .collect(),
-                tag: tag as u32,
+                tag: v.discriminant.map(|d| d as u32).unwrap_or(tag as u32),
+                discriminant: v.discriminant,
                 span: v.span,
             })
             .collect();

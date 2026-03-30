@@ -1,10 +1,68 @@
 use std::collections::HashMap;
 
-use crate::ast::{self, Span};
+use crate::ast::{self, Expr, Span};
 use crate::hir;
 use crate::types::Type;
 
 use super::{Typer, VarInfo};
+
+/// Resolve named arguments to positional order.
+/// Given param names and call-site args (which may include NamedArg nodes),
+/// reorder them to match param order. Positional args fill left-to-right,
+/// named args fill by name. Returns the reordered arg list.
+fn resolve_named_args<'a>(
+    param_names: &[String],
+    args: &'a [ast::Expr],
+    span: Span,
+) -> Result<Vec<&'a ast::Expr>, String> {
+    let has_named = args.iter().any(|a| matches!(a, Expr::NamedArg(..)));
+    if !has_named {
+        return Ok(args.iter().collect());
+    }
+
+    let mut result: Vec<Option<&ast::Expr>> = vec![None; param_names.len()];
+    let mut pos_idx = 0;
+
+    for arg in args {
+        match arg {
+            Expr::NamedArg(name, inner, _) => {
+                if let Some(idx) = param_names.iter().position(|p| p == name) {
+                    if result[idx].is_some() {
+                        return Err(format!("duplicate named argument '{name}' at line {}", span.line));
+                    }
+                    result[idx] = Some(inner.as_ref());
+                } else {
+                    return Err(format!("unknown named argument '{name}' at line {}", span.line));
+                }
+            }
+            _ => {
+                while pos_idx < result.len() && result[pos_idx].is_some() {
+                    pos_idx += 1;
+                }
+                if pos_idx >= param_names.len() {
+                    return Err(format!("too many positional arguments at line {}", span.line));
+                }
+                result[pos_idx] = Some(arg);
+                pos_idx += 1;
+            }
+        }
+    }
+
+    // Check all required slots filled
+    let mut ordered = Vec::new();
+    for (i, slot) in result.into_iter().enumerate() {
+        match slot {
+            Some(e) => ordered.push(e),
+            None => {
+                return Err(format!(
+                    "missing argument '{}' at line {}",
+                    param_names[i], span.line
+                ));
+            }
+        }
+    }
+    Ok(ordered)
+}
 
 impl Typer {
     pub(crate) fn lower_call(
@@ -13,6 +71,23 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
+        // Strip NamedArg wrappers if the callee is a known function
+        let resolved;
+        let args = if args.iter().any(|a| matches!(a, Expr::NamedArg(..))) {
+            if let ast::Expr::Ident(name, _) = callee {
+                if let Some(param_names) = self.fn_param_names.get(name).cloned() {
+                    let ordered = resolve_named_args(&param_names, args, span)?;
+                    resolved = ordered.into_iter().cloned().collect::<Vec<_>>();
+                    &resolved[..]
+                } else {
+                    args
+                }
+            } else {
+                args
+            }
+        } else {
+            args
+        };
         if let ast::Expr::Ident(name, _) = callee {
             if let Some(result) = self.try_lower_builtin_call(name, args, span) {
                 return result;
@@ -257,6 +332,7 @@ impl Typer {
                                 body: hbody,
                                 span: lspan,
                                 generic_origin: Some(name.to_string()),
+                                is_generator: false,
                             };
                             self.mono_fns.push(mono_fn);
 
@@ -393,11 +469,117 @@ impl Typer {
             });
         }
 
-        if let Type::Vec(ref elem_ty) = obj_ty {
+        let vec_elem_ty = match &obj_ty {
+            Type::Vec(et) => Some(et.clone()),
+            Type::Array(et, _) => Some(et.clone()),
+            _ => None,
+        };
+
+        if let Some(ref elem_ty) = vec_elem_ty {
+            // Iterator combinator methods that need special type handling
+            match method {
+                "map" => {
+                    if args.len() != 1 {
+                        return Err("map() requires exactly 1 argument".into());
+                    }
+                    let ret_elem = self.infer_ctx.fresh_var();
+                    let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(ret_elem.clone()));
+                    let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "map callback");
+                    let ret_ty = Type::Vec(Box::new(ret_elem));
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), "map".into(), vec![harg]),
+                        ty: ret_ty,
+                        span,
+                    });
+                }
+                "filter" => {
+                    if args.len() != 1 {
+                        return Err("filter() requires exactly 1 argument".into());
+                    }
+                    let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(Type::Bool));
+                    let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "filter callback");
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), "filter".into(), vec![harg]),
+                        ty: Type::Vec(elem_ty.clone()),
+                        span,
+                    });
+                }
+                "fold" => {
+                    if args.len() != 2 {
+                        return Err("fold() requires exactly 2 arguments (init, fn)".into());
+                    }
+                    let hinit = self.lower_expr(&args[0])?;
+                    let acc_ty = hinit.ty.clone();
+                    let fn_ty = Type::Fn(vec![acc_ty.clone(), elem_ty.as_ref().clone()], Box::new(acc_ty.clone()));
+                    let hfn = self.lower_expr_expected(&args[1], Some(&fn_ty))?;
+                    let _ = self.infer_ctx.unify_at(&fn_ty, &hfn.ty, span, "fold callback");
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), "fold".into(), vec![hinit, hfn]),
+                        ty: acc_ty,
+                        span,
+                    });
+                }
+                "any" | "all" => {
+                    if args.len() != 1 {
+                        return Err(format!("{method}() requires exactly 1 argument"));
+                    }
+                    let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(Type::Bool));
+                    let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "predicate callback");
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), method.to_string(), vec![harg]),
+                        ty: Type::Bool,
+                        span,
+                    });
+                }
+                "find" => {
+                    if args.len() != 1 {
+                        return Err("find() requires exactly 1 argument".into());
+                    }
+                    let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(Type::Bool));
+                    let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "find callback");
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), "find".into(), vec![harg]),
+                        ty: elem_ty.as_ref().clone(),
+                        span,
+                    });
+                }
+                "zip" | "chain" => {
+                    if args.len() != 1 {
+                        return Err(format!("{method}() requires exactly 1 argument"));
+                    }
+                    let harg = self.lower_expr(&args[0])?;
+                    if method == "chain" {
+                        let _ = self.infer_ctx.unify_at(&obj_ty, &harg.ty, span, "chain argument");
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::VecMethod(Box::new(hobj), "chain".into(), vec![harg]),
+                            ty: obj_ty.clone(),
+                            span,
+                        });
+                    }
+                    // zip: Vec<A>.zip(Vec<B>) -> Vec<(A, B)>
+                    let other_elem = match &harg.ty {
+                        Type::Vec(et) => et.as_ref().clone(),
+                        _ => return Err("zip() argument must be a Vec".into()),
+                    };
+                    let tuple_ty = Type::Tuple(vec![elem_ty.as_ref().clone(), other_elem]);
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), "zip".into(), vec![harg]),
+                        ty: Type::Vec(Box::new(tuple_ty)),
+                        span,
+                    });
+                }
+                _ => {}
+            }
             let expected_arg_tys: Vec<Option<&Type>> = match method {
                 "push" => vec![Some(elem_ty.as_ref())],
                 "set" => vec![Some(&Type::I64), Some(elem_ty.as_ref())],
-                "get" | "remove" => vec![Some(&Type::I64)],
+                "get" | "remove" | "take" | "skip" => vec![Some(&Type::I64)],
+                "contains" => vec![Some(elem_ty.as_ref())],
+                "join" => vec![Some(&Type::String)],
                 _ => vec![],
             };
             let hargs: Vec<hir::Expr> = args
@@ -427,7 +609,7 @@ impl Typer {
         if let Type::Map(ref key_ty, ref val_ty) = obj_ty {
             let expected_arg_tys: Vec<Option<&Type>> = match method {
                 "set" => vec![Some(key_ty.as_ref()), Some(val_ty.as_ref())],
-                "get" | "has" | "remove" => vec![Some(key_ty.as_ref())],
+                "get" | "has" | "remove" | "contains" => vec![Some(key_ty.as_ref())],
                 _ => vec![],
             };
             let hargs: Vec<hir::Expr> = args
@@ -449,6 +631,106 @@ impl Typer {
                 .ok_or_else(|| format!("no method '{method}' on Map"))?;
             return Ok(hir::Expr {
                 kind: hir::ExprKind::MapMethod(Box::new(hobj), method.to_string(), hargs),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        if let Type::Set(ref elem_ty) = obj_ty {
+            let expected_arg_tys: Vec<Option<&Type>> = match method {
+                "add" => vec![Some(elem_ty.as_ref())],
+                "contains" => vec![Some(elem_ty.as_ref())],
+                "remove" => vec![Some(elem_ty.as_ref())],
+                "union" | "difference" | "intersection" => vec![Some(&obj_ty)],
+                _ => vec![],
+            };
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
+                })
+                .collect::<Result<_, _>>()?;
+            for (i, ha) in hargs.iter().enumerate() {
+                if let Some(Some(expected)) = expected_arg_tys.get(i) {
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(expected, &ha.ty, span, "set method argument");
+                }
+            }
+            let ret_ty = Self::set_method_ret_ty(method, elem_ty)
+                .ok_or_else(|| format!("no method '{method}' on Set"))?;
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::SetMethod(Box::new(hobj), method.to_string(), hargs),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        if let Type::PriorityQueue(ref elem_ty) = obj_ty {
+            let expected_arg_tys: Vec<Option<&Type>> = match method {
+                "push" => vec![Some(elem_ty.as_ref()), Some(&Type::I64)], // value, priority
+                "pop" | "peek" => vec![],
+                "len" => vec![],
+                "is_empty" => vec![],
+                "clear" => vec![],
+                _ => vec![],
+            };
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
+                })
+                .collect::<Result<_, _>>()?;
+            let ret_ty = match method {
+                "push" | "clear" => Type::Void,
+                "pop" | "peek" => *elem_ty.clone(),
+                "len" => Type::I64,
+                "is_empty" => Type::Bool,
+                _ => return Err(format!("no method '{method}' on PriorityQueue")),
+            };
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::PQMethod(Box::new(hobj), method.to_string(), hargs),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        // Char/Unicode methods on integer types (char codepoints)
+        if matches!(obj_ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64) {
+            let char_ret = match method {
+                "is_digit" | "is_alpha" | "is_alphanumeric" | "is_upper" | "is_lower"
+                | "is_whitespace" => Some(Type::Bool),
+                "to_upper" | "to_lower" | "to_code" => Some(Type::I64),
+                _ => None,
+            };
+            if let Some(ret_ty) = char_ret {
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::CharMethod(method.to_string()), vec![hobj]),
+                    ty: ret_ty,
+                    span,
+                });
+            }
+        }
+
+        if matches!(obj_ty, Type::Arena) {
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .map(|e| self.lower_expr_expected(e, Some(&Type::I64)))
+                .collect::<Result<_, _>>()?;
+            for ha in &hargs {
+                let _ = self.infer_ctx.unify_at(&ha.ty, &Type::I64, span, "arena method argument");
+            }
+            let (builtin, ret_ty) = match method {
+                "alloc" => (hir::BuiltinFn::ArenaAlloc, Type::Ptr(Box::new(Type::I8))),
+                "reset" => (hir::BuiltinFn::ArenaReset, Type::Void),
+                _ => return Err(format!("no method '{method}' on Arena")),
+            };
+            let mut all_args = vec![hobj];
+            all_args.extend(hargs);
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Builtin(builtin, all_args),
                 ty: ret_ty,
                 span,
             });

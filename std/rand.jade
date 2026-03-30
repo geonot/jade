@@ -35,4 +35,4 @@ type RNG
 *RNG.range(self, lo, hi)
     span is (hi - lo) as u64
     r is self.next_u64()
-    lo + (r % span) as i64
+    lo + (r mod span) as i64

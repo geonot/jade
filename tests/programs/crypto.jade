@@ -4,7 +4,7 @@
 
 # ── FNV-1a Hash ─────────────────────────────────────────────────────────────
 
-*fnv1a_hash(data: String)
+*fnv1a_hash(data as String)
     hash is 14695981039346656037    # FNV offset basis (u64)
     for i from 0 to data.length
         byte is data.char_at(i)
@@ -17,7 +17,7 @@
 *xor_byte(a, b)
     a ^ b
 
-*xor_encrypt(data: String, key: i64)
+*xor_encrypt(data as String, key as i64)
     # XOR each byte with key (returns checksum for verification)
     checksum is 0
     for i from 0 to data.length
@@ -39,7 +39,7 @@
 
 # ── CRC32-like checksum ────────────────────────────────────────────────────
 
-*simple_crc(data: String)
+*simple_crc(data as String)
     crc is 0xFFFFFFFF
     for i from 0 to data.length
         byte is data.char_at(i)
@@ -55,13 +55,13 @@
 
 *mod_pow(base, exp, modulus)
     result is 1
-    b is base % modulus
+    b is base mod modulus
     e is exp
     while e > 0
-        if e % 2 equals 1
-            result is (result * b) % modulus
+        if e mod 2 equals 1
+            result is (result * b) mod modulus
         e is e / 2
-        b is (b * b) % modulus
+        b is (b * b) mod modulus
     result
 
 # ── Miller-Rabin primality test (simplified) ───────────────────────────────
@@ -71,13 +71,13 @@
         return false
     if n < 4
         return true
-    if n % 2 equals 0
+    if n mod 2 equals 0
         return false
 
     # Write n-1 as 2^r * d
     d is n - 1
     r is 0
-    while d % 2 equals 0
+    while d mod 2 equals 0
         d is d / 2
         r is r + 1
 
@@ -89,13 +89,13 @@
 
     i is 0
     while i < r - 1
-        x is (x * x) % n
+        x is (x * x) mod n
         if x equals n - 1
             return true
         i is i + 1
     false
 
-*main()
+*main
     # FNV-1a hashing
     h1 is fnv1a_hash('hello')
     h2 is fnv1a_hash('hello')
@@ -113,7 +113,7 @@
     # Bit mixing
     log(mix64(1))
     log(mix64(2))
-    log(mix64(1) isnt mix64(2))      # true (good avalanche)
+    log(mix64(1) neq mix64(2))      # true (good avalanche)
 
     # CRC32
     crc1 is simple_crc('hello')
@@ -124,7 +124,7 @@
 
     # Modular exponentiation
     log(mod_pow(2, 10, 1000))        # 24
-    log(mod_pow(3, 13, 1000))        # 1594323 % 1000 = 323
+    log(mod_pow(3, 13, 1000))        # 1594323 mod 1000 = 323
 
     # Primality testing
     log(is_probable_prime(2))        # true

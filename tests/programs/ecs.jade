@@ -5,25 +5,25 @@
 
 # Components
 type Position
-    x: f64
-    y: f64
+    x as f64
+    y as f64
 
 type Velocity
-    vx: f64
-    vy: f64
+    vx as f64
+    vy as f64
 
 type Health
-    current: i64
-    max_hp: i64
+    current as i64
+    max_hp as i64
 
     *is_alive(self)
         self.current > 0
 
-    *damage(self, amount: i64)
+    *damage(self, amount as i64)
         result is self.current - amount
         Health(current is result < 0 ? 0 ! result, max_hp is self.max_hp)
 
-    *heal(self, amount: i64)
+    *heal(self, amount as i64)
         result is self.current + amount
         Health(
             current is result > self.max_hp ? self.max_hp ! result,
@@ -41,13 +41,13 @@ enum EntityKind
 
 # An entity with optional components
 type Entity
-    id: i64
-    kind: EntityKind
-    pos: Position
-    vel: Velocity
-    hp: Health
+    id as i64
+    kind as EntityKind
+    pos as Position
+    vel as Velocity
+    hp as Health
 
-    *move_step(self, dt: f64)
+    *move_step(self, dt as f64)
         Entity(
             id is self.id,
             kind is self.kind,
@@ -59,12 +59,12 @@ type Entity
             hp is self.hp
         )
 
-*distance(a: Position, b: Position)
+*distance(a as Position, b as Position)
     dx is a.x - b.x
     dy is a.y - b.y
     (dx * dx + dy * dy).sqrt()
 
-*describe_entity(e: Entity)
+*describe_entity(e as Entity)
     match e.kind
         Player ? log('player')
         Enemy(name) ? log(name)
@@ -74,7 +74,7 @@ type Entity
     log(e.pos.y)
     log(e.hp.percent())
 
-*main()
+*main
     player is Entity(
         id is 1,
         kind is Player,

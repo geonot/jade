@@ -10,7 +10,7 @@ enum Expr
     Div(Expr, Expr)
     Neg(Expr)
 
-*eval(e: Expr)
+*eval(e as Expr)
     match e
         Num(n) ? n
         Add(a, b) ? eval(a) + eval(b)
@@ -19,7 +19,7 @@ enum Expr
         Div(a, b) ? eval(a) / eval(b)
         Neg(a) ? 0.0 - eval(a)
 
-*depth(e: Expr)
+*depth(e as Expr)
     match e
         Num(_) ? 0
         Add(a, b) ? 1 + max(depth(a), depth(b))
@@ -31,7 +31,7 @@ enum Expr
 *max(a, b)
     a > b ? a ! b
 
-*main()
+*main
     # (3 + 4) * 2 = 14
     e1 is Mul(Add(Num(3.0), Num(4.0)), Num(2.0))
     log(eval(e1))

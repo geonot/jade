@@ -349,6 +349,37 @@ impl Typer {
             }
 
             ast::Expr::Call(callee, args, span) => {
+                // Partial application: if any arg is $, wrap in a lambda
+                let has_placeholder = args
+                    .iter()
+                    .any(|a| matches!(a, ast::Expr::Placeholder(_)));
+                if has_placeholder {
+                    let param = ast::Param {
+                        name: "__ph".into(),
+                        ty: None,
+                        default: None,
+                        literal: None,
+                        span: *span,
+                    };
+                    let new_args: Vec<ast::Expr> = args
+                        .iter()
+                        .map(|a| {
+                            if matches!(a, ast::Expr::Placeholder(_)) {
+                                ast::Expr::Ident("__ph".into(), a.span())
+                            } else {
+                                a.clone()
+                            }
+                        })
+                        .collect();
+                    let call = ast::Expr::Call(callee.clone(), new_args, *span);
+                    let lambda = ast::Expr::Lambda(
+                        vec![param],
+                        None,
+                        vec![ast::Stmt::Expr(call)],
+                        *span,
+                    );
+                    return self.lower_expr_expected(&lambda, expected);
+                }
                 let result = self.lower_call(callee, args, *span)?;
                 if let Some(exp) = expected {
                     let _ = self
@@ -1031,6 +1062,131 @@ impl Typer {
                     span: *span,
                 })
             }
+
+            ast::Expr::Unreachable(span) => Ok(hir::Expr {
+                kind: hir::ExprKind::Unreachable,
+                ty: Type::Void,
+                span: *span,
+            }),
+
+            ast::Expr::AsFormat(inner, fmt, span) => {
+                let hinner = self.lower_expr(inner)?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::AsFormat(Box::new(hinner), fmt.clone()),
+                    ty: Type::String,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StrictCast(inner, target_ty, span) => {
+                let hinner = self.lower_expr(inner)?;
+                let resolved = self.resolve_ty(target_ty.clone());
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StrictCast(Box::new(hinner), resolved.clone()),
+                    ty: resolved,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::Slice(obj, start, end, span) => {
+                let hobj = self.lower_expr(obj)?;
+                let hstart = self.lower_expr_expected(start, Some(&Type::I64))?;
+                let hend = self.lower_expr_expected(end, Some(&Type::I64))?;
+                let result_ty = hobj.ty.clone();
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Slice(Box::new(hobj), Box::new(hstart), Box::new(hend)),
+                    ty: result_ty,
+                    span: *span,
+                })
+            }
+            ast::Expr::NamedArg(_, inner, _) => {
+                // NamedArg should be resolved by lower_call before reaching here;
+                // if it somehow reaches lower_expr, just lower the inner expression
+                self.lower_expr_expected(inner, expected)
+            }
+            ast::Expr::Spread(inner, span) => {
+                // Spread lowered to the inner expression — actual spreading
+                // is handled by lower_call
+                self.lower_expr(inner)
+            }
+            ast::Expr::NDArray(dims, span) => {
+                let hdims: Vec<hir::Expr> = dims
+                    .iter()
+                    .map(|d| self.lower_expr_expected(d, Some(&Type::I64)))
+                    .collect::<Result<_, _>>()?;
+                let shape: Vec<usize> = hdims.iter().map(|d| {
+                    if let hir::ExprKind::Int(n) = &d.kind { *n as usize } else { 0 }
+                }).collect();
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::NDArrayNew(hdims),
+                    ty: Type::NDArray(Box::new(Type::F64), shape),
+                    span: *span,
+                })
+            }
+            ast::Expr::SIMDLit(elem_ty, lanes, elems, span) => {
+                let helems: Vec<hir::Expr> = elems
+                    .iter()
+                    .map(|e| self.lower_expr_expected(e, Some(elem_ty)))
+                    .collect::<Result<_, _>>()?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::SIMDNew(helems),
+                    ty: Type::SIMD(Box::new(elem_ty.clone()), *lanes),
+                    span: *span,
+                })
+            }
+            ast::Expr::Grad(inner, span) => {
+                let hinner = self.lower_expr(inner)?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Grad(Box::new(hinner)),
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+            ast::Expr::Einsum(notation, operands, span) => {
+                let hops: Vec<hir::Expr> = operands
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<_, _>>()?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Einsum(notation.clone(), hops),
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+            ast::Expr::Builder(name, fields, span) => {
+                let hfields: Vec<(String, hir::Expr)> = fields
+                    .iter()
+                    .map(|f| Ok((f.name.clone(), self.lower_expr(&f.value)?)))
+                    .collect::<Result<_, String>>()?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Builder(name.clone(), hfields),
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
+            ast::Expr::Deque(elems, span) => {
+                let helems: Vec<hir::Expr> = elems
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<_, _>>()?;
+                let elem_ty = helems.first().map(|e| e.ty.clone()).unwrap_or(Type::Void);
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::DequeNew,
+                    ty: Type::Deque(Box::new(elem_ty)),
+                    span: *span,
+                })
+            }
+            ast::Expr::OfCall(func, arg, span) => {
+                // `foo of bar` desugars to `foo(bar)`
+                let hfunc = self.lower_expr(func)?;
+                let harg = self.lower_expr(arg)?;
+                let ret_ty = self.infer_ctx.fresh_var();
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::IndirectCall(Box::new(hfunc), vec![harg]),
+                    ty: ret_ty,
+                    span: *span,
+                })
+            }
         }
     }
 
@@ -1040,6 +1196,17 @@ impl Typer {
         inits: &[ast::FieldInit],
         span: Span,
     ) -> Result<hir::Expr, String> {
+        // Handle Arena(cap) as builtin
+        if name == "Arena" && inits.len() == 1 {
+            let harg = self.lower_expr_expected(&inits[0].value, Some(&Type::I64))?;
+            let _ = self.infer_ctx.unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::ArenaNew, vec![harg]),
+                ty: Type::Arena,
+                span,
+            });
+        }
+
         if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
             let variant_fields: Vec<Type> = self
                 .enums

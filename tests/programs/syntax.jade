@@ -9,15 +9,15 @@
 
 # ── 1. Primitives & Literals ────────────────────────────────────────────────
 
-*primitives()
-    # Integer types: i8, i16, i32, i64, u8, u16, u32, u64
+*primitives
+    # Integer types as i8, i16, i32, i64, u8, u16, u32, u64
     a is 42                     # inferred i64
-    b: i32 is 100               # explicit type annotation
-    c: u8 is 255
+    b as i32 is 100               # explicit type annotation
+    c as u8 is 255
 
-    # Float types: f32, f64
+    # Float types as f32, f64
     pi is 3.14159               # inferred f64
-    e: f32 is 2.718
+    e as f32 is 2.718
 
     # Boolean
     yes is true
@@ -48,7 +48,7 @@
 
 # ── 2. Bindings ─────────────────────────────────────────────────────────────
 
-*bindings()
+*bindings
     # Basic binding with `is`
     x is 10
 
@@ -56,14 +56,13 @@
     x is x + 1
 
     # Typed binding
-    count: i32 is 0
+    count as i32 is 0
 
     # Augmented assignment (desugars to rebinding)
     x += 5              # x is x + 5
     x -= 2              # x is x - 2
     x *= 3              # x is x * 3
     x /= 4              # x is x / 4
-    x %= 7              # x is x % 7
 
     # Bitwise augmented assignment
     flags is 0
@@ -78,27 +77,35 @@
 
 # ── 3. Operators ────────────────────────────────────────────────────────────
 
-*operators()
-    # Arithmetic: + - * / % **
+*operators
+    # Arithmetic: + - * / mod **
     log(2 + 3)           # 5
     log(10 - 4)          # 6
     log(6 * 7)           # 42
     log(15 / 4)          # 3 (integer division)
-    log(17 % 5)          # 2
+    log(17 mod 5)          # 2
     log(2 ** 10)         # 1024
 
     # Comparison: < > <= >=
     log(3 < 5)           # true
     log(5 >= 5)          # true
 
-    # Equality: equals, isnt (NOT == or !=)
+    # Equality: equals, neq (NOT == or !=)
     log(7 equals 7)      # true
-    log(7 isnt 8)        # true
+    log(7 neq 8)        # true
 
-    # Logical: and, or, not (NOT &&, ||, !)
+    # Logical: and, or, xor, not (NOT &&, ||, !)
     log(true and false)  # false
     log(true or false)   # true
+    log(true xor false)  # true
     log(not true)        # false
+
+    # `in` membership
+    log(3 in [1, 2, 3])  # true
+
+    # Comparison chaining
+    x is 5
+    log(0 < x < 10)     # true (both comparisons must hold)
 
     # Bitwise: & | ^ << >> ~
     log(0xFF & 0x0F)     # 15
@@ -113,6 +120,14 @@
     z is 3.99 as i64     # 3 (truncation)
     log(y)
     log(z)
+
+    # Strict (narrowing) cast — panics if value does not fit
+    big is 300
+    # small is big as strict u8  # panics: 300 > 255
+
+    # Serialisation casts
+    # data is obj as json   # convert to JSON string
+    # m is data as map      # convert back to map
 
 
 # ── 4. Functions ────────────────────────────────────────────────────────────
@@ -132,16 +147,16 @@
     return n * factorial(n - 1)
 
 # Typed parameters
-*greet name: String
+*greet name as String
     log 'hello {name}'
 
 # Default parameters
-*connect host: String, port: i64 is 8080
+*connect host as String, port as i64 is 8080
     log 'connecting to {host}:{port}'
 
 # Multiple return values (tuples)
 *divmod(a, b)
-    (a / b, a % b)
+    (a / b, a mod b)
 
 # No-arg functions — no parens needed
 *hello
@@ -157,7 +172,7 @@
 *spin
     spin
 
-*demo_functions()
+*demo_functions
     log(add(3, 4))               # 7  — parens call
     log add 3, 4                 # 7  — paren-free call
     log subtract 10, 3           # 7  — paren-free
@@ -168,23 +183,30 @@
     log(r)                       # 2
     hello                        # no-arg call
 
+    # Named arguments — `is` keyword inside call
+    connect(host is 'localhost', port is 3000)
+
+    # $ placeholder — creates anonymous lambda
+    double is $($ * 2)           # *fn(x) x * 2
+    log(double(21))              # 42
+
 
 # ── 5. Higher-Order Functions & Lambdas ─────────────────────────────────────
 
-# Function type: (ParamTypes) -> ReturnType
-*apply(f: (i64) -> i64, x: i64)
+# Function type as (ParamTypes) returns ReturnType
+*apply(f as (i64) returns i64, x as i64)
     f(x)
 
-*demo_higher_order()
+*demo_higher_order
     # Lambda: *fn(params) body
-    double is *fn(x: i64) x * 2
+    double is *fn(x as i64) x * 2
     log(apply(double, 21))       # 42
 
-    square is *fn(x: i64) x * x
+    square is *fn(x as i64) x * x
     log(apply(square, 7))        # 49
 
     # Multi-line lambda — just indent the body
-    transform is *fn(x: i64)
+    transform is *fn(x as i64)
         y is x * 2
         y + 1
     log(transform(10))           # 21
@@ -198,7 +220,7 @@
 *triple(x)
     x * 3
 
-*demo_pipelines()
+*demo_pipelines
     # ~ pipes left value as first argument to right function
     result is 10 ~ increment ~ triple ~ increment
     log(result)                  # 34 = ((10+1)*3)+1
@@ -209,7 +231,7 @@
 
 # ── 7. Control Flow ────────────────────────────────────────────────────────
 
-*demo_control_flow()
+*demo_control_flow
     x is 10
 
     # If / elif / else
@@ -234,7 +256,7 @@
         log(n)
         n is n - 1
 
-    # For loop: implicit assignment (assigns i starting from 0)
+    # For loop as implicit assignment (assigns i starting from 0)
     for i from 0 to 5
         log(i)                   # 0, 1, 2, 3, 4
 
@@ -262,30 +284,45 @@
     i is 0
     while i < 10
         i is i + 1
-        if i % 2 equals 0
+        if i mod 2 equals 0
             continue
         log(i)
+
+    # Labeled loops — binding name is the label
+    outer is for i from 0 to 5
+        for j from 0 to 5
+            if i * j > 10
+                break outer
+
+    # Parallel loop (work-stealing), iterations must be independent
+    # sim for x in [1, 2, 3, 4]
+    #     log(x)
+
+    # Range slicing
+    items is [10, 20, 30, 40, 50]
+    sub is items from 1 to 3      # [20, 30]
+    log(sub[0])
 
 
 # ── 8. Structs ──────────────────────────────────────────────────────────────
 
 type Point
-    x: i64
-    y: i64
+    x as i64
+    y as i64
 
 type Vec3
-    x: i64
-    y: i64
-    z: i64
+    x as i64
+    y as i64
+    z as i64
 
     # Methods — *name self, ... inside type body (parens optional)
     *length_squared self
         self.x * self.x + self.y * self.y + self.z * self.z
 
-    *dot self, other: Vec3
+    *dot self, other as Vec3
         self.x * other.x + self.y * other.y + self.z * other.z
 
-*demo_structs()
+*demo_structs
     # Construction: named fields
     p is Point(x is 10, y is 20)
     log p.x
@@ -309,14 +346,14 @@ enum Shape
     Rect(f64, f64)
     Triangle(f64, f64, f64)
 
-*color_value(c: Color)
+*color_value(c as Color)
     match c
         Red ? 1
         Green ? 2
         Blue ? 3
         Custom(r, g, b) ? r + g + b
 
-*demo_enums()
+*demo_enums
     log(color_value(Red))
     log(color_value(Custom(10, 20, 30)))
 
@@ -329,13 +366,13 @@ enum Shape
         1 ? log('one')
         _ ? log('other')
 
-*area(s: Shape)
+*area(s as Shape)
     match s
         Circle(r) ? 3 * r * r
         Rect(w, h) ? w * h
         Triangle(a, b, c) ? 0
 
-*demo_matching()
+*demo_matching
     describe_number(0)
     describe_number(1)
     describe_number(42)
@@ -347,20 +384,20 @@ enum Shape
 # ── 11. Generics ───────────────────────────────────────────────────────────
 
 # Generic function — `of` keyword
-*max_val of T(a: T, b: T)
+*max_val of T(a as T, b as T)
     a > b ? a ! b
 
 # Generic struct
 type Pair of A, B
-    first: A
-    second: B
+    first as A
+    second as B
 
 # Generic enum
 enum Option of T
     Some(T)
     None
 
-*demo_generics()
+*demo_generics
     log(max_val(10, 20))         # 20
     log(max_val(3.14, 2.72))     # 3.14
 
@@ -376,27 +413,27 @@ err FileError
     PermissionDenied(String)
     Corrupted(String)
 
-*read_data(path: String)
+*read_data(path as String)
     if path equals ''
         ! NotFound
     if path equals '/secret'
         ! PermissionDenied('access denied')
     42
 
-*demo_errors()
+*demo_errors
     match read_data('test.txt')
         NotFound ? log('not found')
         PermissionDenied(msg) ? log(msg)
         _ ? log('ok')
 
     match read_data('')
-        NotFound ? log('caught: not found')
+        NotFound ? log('caught as not found')
         _ ? log('ok')
 
 
 # ── 13. Tuples ──────────────────────────────────────────────────────────────
 
-*demo_tuples()
+*demo_tuples
     # Tuple literal
     point is (10, 20, 30)
 
@@ -414,7 +451,7 @@ err FileError
 
 # ── 14. Arrays ──────────────────────────────────────────────────────────────
 
-*demo_arrays()
+*demo_arrays
     # Fixed array literal
     nums is [1, 2, 3, 4, 5]
 
@@ -428,19 +465,19 @@ err FileError
 
 # ── 15. List Comprehensions ────────────────────────────────────────────────
 
-*demo_comprehensions()
+*demo_comprehensions
     # Basic comprehension
     squares is [x ** 2 for x from 0 to 10]
     log(squares[4])              # 16
 
     # Filtered comprehension
-    evens is [x for x from 0 to 20 if x % 2 equals 0]
+    evens is [x for x from 0 to 20 if x mod 2 equals 0]
     log(evens[3])                # 6
 
 
 # ── 16. String Operations ──────────────────────────────────────────────────
 
-*demo_strings()
+*demo_strings
     s is 'hello jade'
 
     # String methods
@@ -448,6 +485,25 @@ err FileError
     log(s.starts_with('hello'))   # true
     log(s.ends_with('jade'))      # true
     log(s.char_at(0))             # 104 (ascii 'h')
+    log(s.to_upper())             # HELLO JADE
+    log(s.to_lower())             # hello jade
+    log(s.trim())                 # hello jade
+    log(s.replace('jade', 'world'))  # hello world
+
+    # Split / join
+    parts is 'a,b,c'.split(',')  # ['a', 'b', 'c']
+    log(parts[1])                 # b
+    joined is parts.join('-')     # a-b-c
+    log(joined)
+
+    # Lines
+    text is 'line1\nline2\nline3'
+    for line in text.lines()
+        log(line)
+
+    # Find
+    idx is s.find('jade')         # 6
+    log(idx)
 
     # String interpolation
     name is 'world'
@@ -462,7 +518,7 @@ err FileError
 
 # ── 17. Inline Assembly ────────────────────────────────────────────────────
 
-*demo_asm()
+*demo_asm
     asm
         'mov $1, %rax'
         'mov $1, %rdi'
@@ -471,17 +527,17 @@ err FileError
 
 # ── 18. Extern / FFI ───────────────────────────────────────────────────────
 
-extern *printf(fmt: &i8, ...) -> i32
-extern *puts(s: &i8) -> i32
+extern *printf(fmt as &i8, ...) returns i32
+extern *puts(s as &i8) returns i32
 
-*demo_ffi()
+*demo_ffi
     printf('hello from C: %d\n', 42)
     puts('puts says hi')
 
 
 # ── 19. Systems Builtins ───────────────────────────────────────────────────
 
-*demo_systems()
+*demo_systems
     # Bit manipulation builtins
     log(popcount(0xFF))          # 8
     log(clz(1))                  # 63 (for i64)
@@ -504,13 +560,33 @@ extern *puts(s: &i8) -> i32
     log(rotate_left(1, 3))       # 8
     log(rotate_right(8, 3))      # 1
 
+    # Atomic operations — lock-free thread-safe primitives
+    counter is 0
+    atomic_store(&counter, 10)
+    log(atomic_load(&counter))           # 10
+    atomic_add(&counter, 5)
+    log(atomic_load(&counter))           # 15
+    old is atomic_cas(&counter, 15, 20)  # compare-and-swap
+    log(old)                             # 15
+
+    # Arena allocation — bump allocator, freed all at once
+    # arena is Arena(1024)
+    # p is arena.alloc(64)
+    # arena.reset()
+
+    # Constant-time operations — for crypto / timing-safe code
+    a is 42
+    b is 42
+    log(ct_eq(a, b))             # 1 (constant-time equality)
+    log(ct_select(1, 10, 20))    # 10 (constant-time conditional select)
+
 
 # ── 20. Signal Handling ────────────────────────────────────────────────────
 
-*sig_handler(sig: i32)
+*sig_handler(sig as i32)
     log(sig)
 
-*demo_signals()
+*demo_signals
     signal_handle(2, sig_handler)   # SIGINT → handler
     signal_ignore(13)               # SIGPIPE → ignore
     signal_raise(2)                 # raise SIGINT
@@ -520,29 +596,29 @@ extern *puts(s: &i8) -> i32
 
 # C-compatible field ordering
 type CHeader @strict
-    magic: u32
-    version: u16
-    flags: u16
+    magic as u32
+    version as u16
+    flags as u16
 
 # No padding between fields
 type Pixel @packed
-    r: u8
-    g: u8
-    b: u8
+    r as u8
+    g as u8
+    b as u8
 
 # Force alignment
 type CacheLine @align(64)
-    data: i64
+    data as i64
 
 # Combinable
 type NetPacket @packed @strict @align(4)
-    header: u32
-    payload: i64
+    header as u32
+    payload as i64
 
 
 # ── 22. Raw Pointers ───────────────────────────────────────────────────────
 
-*demo_pointers()
+*demo_pointers
     x is 42
     ptr is &x                    # address-of
     val is @ptr                  # dereference
@@ -551,7 +627,7 @@ type NetPacket @packed @strict @align(4)
 
 # ── 23. Volatile Memory ────────────────────────────────────────────────────
 
-*demo_volatile()
+*demo_volatile
     x is 42
     ptr is &x
     volatile_store(ptr, 100)     # hardware-observable write
@@ -561,7 +637,7 @@ type NetPacket @packed @strict @align(4)
 
 # ── 24. Reference Counting ─────────────────────────────────────────────────
 
-*demo_rc()
+*demo_rc
     # RC wrapping (usually inferred, explicit for clarity)
     x is rc(42)
 
@@ -572,7 +648,7 @@ type NetPacket @packed @strict @align(4)
 
 # ── 25. Float Builtins ─────────────────────────────────────────────────────
 
-*demo_float_builtins()
+*demo_float_builtins
     x is 2.0
     log(x.sqrt())                # 1.414...
     log(x.abs())
@@ -595,8 +671,8 @@ type NetPacket @packed @strict @align(4)
 
 # ── 26. Global Builtins ────────────────────────────────────────────────────
 
-*demo_globals()
-    log('printing')              # log: print to stdout
+*demo_globals
+    log('printing')              # log as print to stdout
     log(sqrt(16.0))              # 4.0
     log(abs(-7))                 # 7
     log(min(3, 5))               # 3
@@ -606,35 +682,40 @@ type NetPacket @packed @strict @align(4)
 
 # ── 27. Modules ─────────────────────────────────────────────────────────────
 
-# In separate file: math.jade
-# *add(a, b)
-#     a + b
-#
-# In main file:
+# Import entire module
 # use math
 # log(math.add(1, 2))
 
+# Selective imports — cherry-pick symbols
+# use math.{add, subtract}
+# log(add(1, 2))
 
-# ── 28. Traits (0.1.0 — planned) ───────────────────────────────────────────
+# Import alias
+# use network.http as web
+# web.get('http://example.com')
 
-# trait Printable
-#     *display(self) -> String
-#
-# impl Printable for Point
-#     *display(self)
-#         '({self.x}, {self.y})'
-#
-# trait Add of T
-#     *add(self, other: T) -> T
-#
-# impl Add for Vec3
-#     *add(self, other: Vec3)
-#         Vec3(x is self.x + other.x, y is self.y + other.y, z is self.z + other.z)
+
+# ── 28. Traits ──────────────────────────────────────────────────────────────
+
+trait Printable
+    *display(self) returns String
+
+impl Printable for Point
+    *display(self)
+        '({self.x}, {self.y})'
+
+trait Add of T
+    *add(self, other as T) returns T
+
+# Automatic derivation — compiler generates standard impls
+# type Token @derive(Eq, Hash, Clone)
+#     kind as i32
+#     value as String
 
 
 # ── 29. Async/Await (0.3.0 — planned) ──────────────────────────────────────
 
-# async *fetch(url: String)
+# async *fetch(url as String)
 #     response is await http_get(url)
 #     response.body
 #
@@ -643,16 +724,37 @@ type NetPacket @packed @strict @align(4)
 #     log(data)
 
 
-# ── 30. Actors (0.1.0 — planned) ───────────────────────────────────────────
+# ── 30. Concurrency — Actors, Channels, Select ─────────────────────────────
 
-# type Counter
-#     value: i64
-#
-#     @increment self, amount: i64
-#         self.value += amount
-#
-#     @get self
-#         self.value
+# Actor definition — message handlers prefixed with @
+actor Counter
+    value as i64
+
+    @increment self, amount as i64
+        self.value += amount
+
+    @get self
+        self.value
+
+# Supervisor — monitors child actors
+# supervisor MySupervisor
+#     strategy is one_for_one
+#     children
+#         Counter(value is 0)
+
+# Channels — typed, buffered message passing
+# ch is channel(10)              # buffered channel, capacity 10
+# ch <- 42                       # send
+# val is <-ch                    # receive
+
+# Select — wait on multiple channels
+# select
+#     msg from inbox -> handle(msg)
+#     tick from timer -> update()
+#     default -> idle()
+
+# Spawn — lightweight concurrent task
+# task is spawn compute_heavy(data)
 
 
 # ── 31. Persistent Stores (0.2.0 — planned) ────────────────────────────────
@@ -660,15 +762,15 @@ type NetPacket @packed @strict @align(4)
 # Stores are typed, transactional, and queryable — no ORM layer.
 
 # store Users
-#     name: String
-#     email: String
-#     age: i64
+#     name as String
+#     email as String
+#     age as i64
 #
 # store Posts
-#     title: String
-#     body: String
-#     author: String
-#     likes: i64
+#     title as String
+#     body as String
+#     author as String
+#     likes as i64
 #
 # *demo_stores
 #     # Insert records
@@ -697,9 +799,209 @@ type NetPacket @packed @strict @align(4)
 #         log user.name
 
 
+# ── 32. Iterator Combinators ───────────────────────────────────────────────
+
+*demo_iterators
+    nums is [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    # map / filter / fold
+    doubled is nums.map($($ * 2))
+    log(doubled[0])                      # 2
+
+    evens is nums.filter($($ mod 2 equals 0))
+    log(evens[0])                        # 2
+
+    total is nums.fold(0, *fn(acc, x) acc + x)
+    log(total)                           # 55
+
+    # zip / take / skip
+    a is [1, 2, 3]
+    b is [10, 20, 30]
+    zipped is a.zip(b)
+    log(zipped[0])                       # (1, 10)
+
+    first3 is nums.take(3)
+    log(first3[2])                       # 3
+
+    rest is nums.skip(7)
+    log(rest[0])                         # 8
+
+    # any / all / find
+    has_big is nums.any($($ > 5))
+    log(has_big)                         # true
+
+    all_pos is nums.all($($ > 0))
+    log(all_pos)                         # true
+
+    found is nums.find($($ > 7))
+    log(found)                           # 8
+
+    # chain / flatten / collect
+    c is [1, 2].chain([3, 4])
+    log(c[3])                            # 4
+
+
+# ── 33. Collections ────────────────────────────────────────────────────────
+
+*demo_collections
+    # Set — unique unordered elements
+    s is set(1, 2, 3, 2, 1)
+    log(s.contains(2))                   # true
+    log(s.len())                         # 3
+    t is set(2, 3, 4)
+    u is s.union(t)
+    i is s.intersect(t)
+
+    # Priority queue — min-heap
+    # pq is priority_queue()
+    # pq.push(5, 'low')
+    # pq.push(1, 'high')
+    # top is pq.pop()                    # 'high' (priority 1)
+
+
+# ── 34. Regex ──────────────────────────────────────────────────────────────
+
+*demo_regex
+    text is 'hello 123 world 456'
+
+    # Match test
+    log(text.matches('[0-9]+'))          # true
+
+    # Find all matches
+    nums is text.find_all('[0-9]+')
+    log(nums[0])                         # 123
+    log(nums[1])                         # 456
+
+    # Replace with regex
+    clean is text.replace_re('[0-9]+', '#')
+    log(clean)                           # hello # world #
+
+
+# ── 35. Numeric Computing ─────────────────────────────────────────────────
+
+*demo_numeric
+    # Multi-dimensional arrays
+    # m is ndarray([2, 3], 0.0)          # 2x3 matrix of zeros
+    # m[0, 1] is 3.14
+
+    # Matrix multiplication
+    # a is ndarray([2, 2], [1.0, 2.0, 3.0, 4.0])
+    # b is ndarray([2, 2], [5.0, 6.0, 7.0, 8.0])
+    # c is matmul(a, b)
+
+    # SIMD intrinsics
+    # va is simd_load_f64x4(&data, 0)
+    # vb is simd_load_f64x4(&data, 4)
+    # vc is simd_add_f64x4(va, vb)
+    # simd_store_f64x4(&result, 0, vc)
+    log('numeric section')
+
+
+# ── 36. Compile-Time Evaluation ────────────────────────────────────────────
+
+*demo_comptime
+    # Comptime reflection
+    # fs is fields_of(Point)             # [('x', 'i64'), ('y', 'i64')]
+    # t is type_of(42)                   # 'i64'
+    # s is size_of(Point)                # 16
+
+    # Rich assert — detailed failure messages with subexpression values
+    x is 10
+    assert x > 0
+    assert x < 100
+    # assert a equals b  → shows both values on failure
+
+    log('comptime section')
+
+
+# ── 37. Char & Unicode ────────────────────────────────────────────────────
+
+*demo_char
+    c is 'A' as Char
+    log(c.is_alpha())                    # true
+    log(c.is_digit())                    # false
+    log(c.is_upper())                    # true
+    log(c.to_lower())                    # a
+    log(c.to_code())                     # 65
+    d is char_from_code(0x1F600)         # 😀
+    log(d)
+
+
+# ── 38. Deque ─────────────────────────────────────────────────────────────
+
+*demo_deque
+    d is deque()
+    d.push_back(1)
+    d.push_back(2)
+    d.push_front(0)
+    log(d.pop_front())                   # 0
+    log(d.pop_back())                    # 2
+    log(d.len())                         # 1
+
+
+# ── 39. Generators ────────────────────────────────────────────────────────
+
+*counter limit: i64
+    i is 0
+    while i < limit
+        yield i
+        i is i + 1
+
+
+# ── 40. Enum Discriminants ────────────────────────────────────────────────
+
+enum Permission
+    Read is 1
+    Write is 2
+    Execute is 4
+
+
+# ── 41. Type Alias ────────────────────────────────────────────────────────
+
+alias Seconds is f64
+
+
+# ── 42. Scoped Imports ────────────────────────────────────────────────────
+
+*demo_scoped_import
+    use math [sin, cos]
+    log(sin(0.0))
+
+
+# ── 43. Einsum ────────────────────────────────────────────────────────────
+
+*demo_einsum
+    A is ndarray(2, 2)
+    B is ndarray(2, 2)
+    C is einsum 'ij,jk->ik', A, B
+
+
+# ── 44. Grad ──────────────────────────────────────────────────────────────
+
+*square(x: f64) -> f64
+    x ** 2
+
+*demo_grad
+    dsquare is grad(square)              # derivative: 2x
+
+
+# ── 45. Builder Blocks ───────────────────────────────────────────────────
+
+*demo_builder
+    cfg is build ServerConfig
+        port is 8080
+        host is 'localhost'
+
+
+# ── 46. Of-Call Syntax ────────────────────────────────────────────────────
+
+*demo_of_call
+    result is double of 5               # same as double(5)
+
+
 # ── Main: Run all demos ────────────────────────────────────────────────────
 
-*main()
+*main
     log('=== Jade Language Syntax Reference ===')
 
     log('--- primitives ---')
@@ -758,5 +1060,23 @@ type NetPacket @packed @strict @align(4)
 
     log('--- global builtins ---')
     demo_globals()
+
+    log('--- iterators ---')
+    demo_iterators()
+
+    log('--- collections ---')
+    demo_collections()
+
+    log('--- regex ---')
+    demo_regex()
+
+    log('--- numeric ---')
+    demo_numeric()
+
+    log('--- comptime ---')
+    demo_comptime()
+
+    log('--- char ---')
+    demo_char()
 
     log('=== done ===')

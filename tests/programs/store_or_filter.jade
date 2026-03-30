@@ -1,13 +1,13 @@
 store items
-    name: String
-    value: i64
+    name as String
+    value as i64
 
 *main
     insert items 'Alpha', 10
     insert items 'Beta', 20
     insert items 'Gamma', 30
 
-    # OR filter: value equals 10 or value equals 30
+    # OR filter as value equals 10 or value equals 30
     delete items where value equals 10 or value equals 30
     c is count items
     log c

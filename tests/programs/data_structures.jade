@@ -6,56 +6,56 @@
 
 type Stack
     data: [i64; 32]
-    top: i64
+    top as i64
 
-*stack_new()
+*stack_new
     Stack(
         data is [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         top is 0
     )
 
-*stack_push(s: Stack, val: i64)
+*stack_push(s as Stack, val as i64)
     s.data[s.top] is val
     Stack(data is s.data, top is s.top + 1)
 
-*stack_pop(s: Stack)
+*stack_pop(s as Stack)
     new_top is s.top - 1
     val is s.data[new_top]
     (Stack(data is s.data, top is new_top), val)
 
-*stack_peek(s: Stack)
+*stack_peek(s as Stack)
     s.data[s.top - 1]
 
-*stack_size(s: Stack)
+*stack_size(s as Stack)
     s.top
 
-*stack_is_empty(s: Stack)
+*stack_is_empty(s as Stack)
     s.top equals 0
 
 # ── Min/Max tracker ─────────────────────────────────────────────────────────
 
-*find_min(data, size: i64)
+*find_min(data, size as i64)
     result is data[0]
     for i from 1 to size
         if data[i] < result
             result is data[i]
     result
 
-*find_max(data, size: i64)
+*find_max(data, size as i64)
     result is data[0]
     for i from 1 to size
         if data[i] > result
             result is data[i]
     result
 
-*find_sum(data, size: i64)
+*find_sum(data, size as i64)
     total is 0
     for i from 0 to size
         total is total + data[i]
     total
 
-*main()
+*main
     # Stack operations
     s is stack_new()
     log(stack_is_empty(s))           # true

@@ -1,0 +1,79 @@
+# std.regex — Regular expressions via PCRE2 extern FFI
+#
+# String literal patterns are compiled at compile time.
+# Dynamic patterns are compiled at runtime.
+#
+# Usage:
+#   use regex
+#
+#   if text.matches '[0-9]+'
+#       log 'found number'
+#
+#   results is text.find_all '[a-z]+'
+#   replaced is text.replace_re '[0-9]+', 'NUM'
+
+# PCRE2 extern bindings
+extern *pcre2_compile_8(pattern as %i8, length as i64, options as i64, errcode as %i32, erroffset as %i64, ctx as %void) returns %void
+extern *pcre2_match_8(code as %void, subject as %i8, length as i64, startoffset as i64, options as i64, match_data as %void, ctx as %void) returns i32
+extern *pcre2_match_data_create_from_pattern_8(code as %void, ctx as %void) returns %void
+extern *pcre2_match_data_free_8(match_data as %void)
+extern *pcre2_code_free_8(code as %void)
+extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %i64
+
+# Compile a regex pattern, returns opaque handle
+*compile(pattern as String) returns %void
+    errcode is 0
+    erroffset is 0 as i64
+    code is pcre2_compile_8(%pattern, pattern.length, 0, %errcode, %erroffset, 0 as %void)
+    code
+
+# Test if a string matches a pattern
+*is_match(text as String, pattern as String) returns Bool
+    code is compile(pattern)
+    if code equals 0 as %void
+        return false
+    md is pcre2_match_data_create_from_pattern_8(code, 0 as %void)
+    rc is pcre2_match_8(code, %text, text.length, 0, 0, md, 0 as %void)
+    pcre2_match_data_free_8(md)
+    pcre2_code_free_8(code)
+    rc > 0
+
+# Find the first match in a string
+*find(text as String, pattern as String) returns String
+    code is compile(pattern)
+    if code equals 0 as %void
+        return ''
+    md is pcre2_match_data_create_from_pattern_8(code, 0 as %void)
+    rc is pcre2_match_8(code, %text, text.length, 0, 0, md, 0 as %void)
+    if rc < 1
+        pcre2_match_data_free_8(md)
+        pcre2_code_free_8(code)
+        return ''
+    ovector is pcre2_get_ovector_pointer_8(md)
+    start is @ovector
+    end is @(ovector + 1)
+    result is text.slice(start, end)
+    pcre2_match_data_free_8(md)
+    pcre2_code_free_8(code)
+    result
+
+# Find all non-overlapping matches
+*find_all(text as String, pattern as String) returns Vec of String
+    results is vec()
+    code is compile(pattern)
+    if code equals 0 as %void
+        return results
+    md is pcre2_match_data_create_from_pattern_8(code, 0 as %void)
+    offset is 0
+    while offset < text.length
+        rc is pcre2_match_8(code, %text, text.length, offset, 0, md, 0 as %void)
+        if rc < 1
+            break
+        ovector is pcre2_get_ovector_pointer_8(md)
+        start is @ovector
+        end is @(ovector + 1)
+        results.push text.slice(start, end)
+        offset is end
+    pcre2_match_data_free_8(md)
+    pcre2_code_free_8(code)
+    results

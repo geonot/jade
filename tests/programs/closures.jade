@@ -2,23 +2,23 @@
 # Complexity: Intermediate
 # Demonstrates: lambdas, closures capturing variables, HOFs, pipelines
 
-*make_adder(n: i64)
-    *fn(x: i64) x + n
+*make_adder(n as i64)
+    *fn(x as i64) x + n
 
-*make_multiplier(n: i64)
-    *fn(x: i64) x * n
+*make_multiplier(n as i64)
+    *fn(x as i64) x * n
 
-*apply(f: (i64) -> i64, x: i64)
+*apply(f as (i64) returns i64, x as i64)
     f(x)
 
-*apply_to_range(f: (i64) -> i64, start: i64, end_val: i64)
+*apply_to_range(f as (i64) returns i64, start as i64, end_val as i64)
     total is 0
     for i from start to end_val
         total is total + f(i)
     total
 
 # Build a pipeline of transformations
-*transform(x: i64)
+*transform(x as i64)
     add5 is make_adder(5)
     dbl is make_multiplier(2)
 
@@ -26,7 +26,7 @@
     result is dbl(add5(x))
     result
 
-*main()
+*main
     # Closure capturing
     add10 is make_adder(10)
     log(add10(5))                    # 15
@@ -48,7 +48,7 @@
     log(transform(0))                # (0+5)*2 = 10
 
     # Inline lambdas
-    sq is *fn(x: i64) x * x
+    sq is *fn(x as i64) x * x
     log(sq(9))                       # 81
 
     # Lambda in pipeline
@@ -57,5 +57,5 @@
 
     # Nested closures
     outer is 100
-    f is *fn(x: i64) x + outer
+    f is *fn(x as i64) x + outer
     log(f(42))                       # 142

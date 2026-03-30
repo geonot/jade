@@ -354,6 +354,7 @@ impl Typer {
             body,
             span: gf.span,
             generic_origin: Some(origin.to_string()),
+            is_generator: false,
         })
     }
 
@@ -392,6 +393,7 @@ impl Typer {
                     })
                     .collect(),
                 tag: tag as u32,
+                discriminant: v.discriminant,
                 span: v.span,
             };
             hir_variants.push(hv);

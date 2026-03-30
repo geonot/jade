@@ -10,8 +10,11 @@ pub enum Token {
     None,
     Ident(String),
     Is,
-    Isnt,
+    Neq,
     Equals,
+    Unless,
+    Until,
+    Returns,
     And,
     Or,
     Not,
@@ -71,6 +74,18 @@ pub enum Token {
     Stop,
     Timeout,
     Default,
+    Sim,
+    Supervisor,
+    Atomic,
+    Strict,
+    Xor,
+    Unreachable,
+    Alias,
+    Deque,
+    Grad,
+    Einsum,
+    Contract,
+    Build,
     Plus,
     Minus,
     Star,
@@ -80,6 +95,7 @@ pub enum Token {
     Caret,
     Ampersand,
     At,
+    AtKw,
     Tilde,
     Shl,
     Shr,
@@ -110,13 +126,13 @@ pub enum Token {
     MinusEq,
     StarEq,
     SlashEq,
-    PercentEq,
     AmpEq,
     PipeEq,
     CaretEq,
     ShlEq,
     ShrEq,
     CharLit(i64),
+    DotDotDot,
 }
 
 impl std::fmt::Display for Token {
@@ -130,8 +146,11 @@ impl std::fmt::Display for Token {
             Self::None => f.write_str("none"),
             Self::Ident(s) => f.write_str(s),
             Self::Is => f.write_str("is"),
-            Self::Isnt => f.write_str("isnt"),
+            Self::Neq => f.write_str("neq"),
             Self::Equals => f.write_str("equals"),
+            Self::Unless => f.write_str("unless"),
+            Self::Until => f.write_str("until"),
+            Self::Returns => f.write_str("returns"),
             Self::And => f.write_str("and"),
             Self::Or => f.write_str("or"),
             Self::Not => f.write_str("not"),
@@ -185,6 +204,7 @@ impl std::fmt::Display for Token {
             Self::Caret => f.write_str("^"),
             Self::Ampersand => f.write_str("&"),
             Self::At => f.write_str("@"),
+            Self::AtKw => f.write_str("at"),
             Self::Tilde => f.write_str("~"),
             Self::Dollar => f.write_str("$"),
             Self::Shl => f.write_str("<<"),
@@ -215,13 +235,13 @@ impl std::fmt::Display for Token {
             Self::MinusEq => f.write_str("-="),
             Self::StarEq => f.write_str("*="),
             Self::SlashEq => f.write_str("/="),
-            Self::PercentEq => f.write_str("%="),
             Self::AmpEq => f.write_str("&="),
             Self::PipeEq => f.write_str("|="),
             Self::CaretEq => f.write_str("^="),
             Self::ShlEq => f.write_str("<<="),
             Self::ShrEq => f.write_str(">>="),
             Self::CharLit(c) => write!(f, ":{}", char::from(*c as u8)),
+            Self::DotDotDot => f.write_str("..."),
             Self::Actor => f.write_str("actor"),
             Self::Spawn => f.write_str("spawn"),
             Self::Send => f.write_str("send"),
@@ -237,6 +257,18 @@ impl std::fmt::Display for Token {
             Self::Stop => f.write_str("stop"),
             Self::Timeout => f.write_str("timeout"),
             Self::Default => f.write_str("default"),
+            Self::Sim => f.write_str("sim"),
+            Self::Supervisor => f.write_str("supervisor"),
+            Self::Atomic => f.write_str("atomic"),
+            Self::Strict => f.write_str("strict"),
+            Self::Xor => f.write_str("xor"),
+            Self::Unreachable => f.write_str("unreachable"),
+            Self::Alias => f.write_str("alias"),
+            Self::Deque => f.write_str("deque"),
+            Self::Grad => f.write_str("grad"),
+            Self::Einsum => f.write_str("einsum"),
+            Self::Contract => f.write_str("contract"),
+            Self::Build => f.write_str("build"),
         }
     }
 }
@@ -268,8 +300,20 @@ pub struct Lexer<'s> {
 fn keyword(s: &str) -> Option<Token> {
     Some(match s {
         "is" => Token::Is,
-        "isnt" => Token::Isnt,
-        "equals" => Token::Equals,
+        "neq" => Token::Neq,
+        "equals" | "eq" => Token::Equals,
+        "unless" => Token::Unless,
+        "until" => Token::Until,
+        "returns" => Token::Returns,
+        "mod" => Token::Percent,
+        "lt" => Token::Lt,
+        "gt" => Token::Gt,
+        "lte" => Token::LtEq,
+        "gte" => Token::GtEq,
+        "nlt" => Token::GtEq,
+        "ngt" => Token::LtEq,
+        "ngte" => Token::Lt,
+        "nlte" => Token::Gt,
         "and" => Token::And,
         "or" => Token::Or,
         "not" => Token::Not,
@@ -291,6 +335,7 @@ fn keyword(s: &str) -> Option<Token> {
         "pub" => Token::Pub,
         "use" => Token::Use,
         "as" => Token::As,
+        "at" => Token::AtKw,
         "from" => Token::From,
         "to" => Token::To,
         "by" => Token::By,
@@ -329,6 +374,18 @@ fn keyword(s: &str) -> Option<Token> {
         "stop" => Token::Stop,
         "timeout" => Token::Timeout,
         "default" => Token::Default,
+        "sim" => Token::Sim,
+        "supervisor" => Token::Supervisor,
+        "atomic" => Token::Atomic,
+        "strict" => Token::Strict,
+        "xor" => Token::Xor,
+        "unreachable" => Token::Unreachable,
+        "alias" => Token::Alias,
+        "deque" => Token::Deque,
+        "grad" => Token::Grad,
+        "einsum" => Token::Einsum,
+        "contract" => Token::Contract,
+        "build" => Token::Build,
         "true" => Token::True,
         "false" => Token::False,
         "none" => Token::None,
@@ -523,7 +580,6 @@ impl<'s> Lexer<'s> {
                 (b'-', b'=') => Some(Token::MinusEq),
                 (b'*', b'=') => Some(Token::StarEq),
                 (b'/', b'=') => Some(Token::SlashEq),
-                (b'%', b'=') => Some(Token::PercentEq),
                 (b'&', b'=') => Some(Token::AmpEq),
                 (b'|', b'=') => Some(Token::PipeEq),
                 (b'^', b'=') => Some(Token::CaretEq),
@@ -614,7 +670,18 @@ impl<'s> Lexer<'s> {
                 }
                 Token::Colon
             }
-            b'.' => Token::Dot,
+            b'.' => {
+                if self.pos + 2 < self.src.len()
+                    && self.src[self.pos + 1] == b'.'
+                    && self.src[self.pos + 2] == b'.'
+                {
+                    self.advance();
+                    self.advance();
+                    Token::DotDotDot
+                } else {
+                    Token::Dot
+                }
+            }
             b'*' => Token::Star,
             _ => return self.err(&format!("unexpected character: '{}'", ch as char)),
         };
@@ -994,12 +1061,12 @@ mod tests {
 
     #[test]
     fn kw() {
-        let t = lex("is isnt equals and or not");
+        let t = lex("is neq equals and or not");
         assert_eq!(
             &t[..6],
             &[
                 Token::Is,
-                Token::Isnt,
+                Token::Neq,
                 Token::Equals,
                 Token::And,
                 Token::Or,

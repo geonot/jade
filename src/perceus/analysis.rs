@@ -95,6 +95,7 @@ impl PerceusPass {
                 }
             }
             Stmt::For(f) => self.analyze_reuse(&f.body, uses),
+            Stmt::SimFor(f, _) => self.analyze_reuse(&f.body, uses),
             Stmt::While(w) => self.analyze_reuse(&w.body, uses),
             Stmt::Loop(l) => self.analyze_reuse(&l.body, uses),
             Stmt::Transaction(body, _) => self.analyze_reuse(body, uses),
@@ -112,7 +113,8 @@ impl PerceusPass {
             | Stmt::StoreDelete(_, _, _)
             | Stmt::StoreSet(_, _, _, _)
             | Stmt::ChannelClose(_, _)
-            | Stmt::Stop(_, _) => {}
+            | Stmt::Stop(_, _)
+            | Stmt::UseLocal(_, _, _, _) => {}
         }
     }
 
@@ -152,8 +154,20 @@ impl PerceusPass {
             Type::ActorRef(_) => 8,
             Type::Coroutine(_) => 8,
             Type::DynTrait(_) => 16,
-            Type::Vec(_) | Type::Map(_, _) => 24,
+            Type::Vec(_) | Type::Map(_, _) | Type::Set(_) => 24,
+            Type::PriorityQueue(_) => 24,
+            Type::NDArray(inner, dims) => {
+                let elem_size = Self::type_layout_size(inner);
+                let total: u64 = dims.iter().map(|&d| d as u64).product();
+                elem_size * total
+            }
             Type::Channel(_) => 8,
+            Type::SIMD(inner, lanes) => Self::type_layout_size(inner) * (*lanes as u64),
+            Type::Arena => 24, // {ptr, cap, offset}
+            Type::Deque(_) => 24,
+            Type::Cow(inner) => Self::type_layout_size(inner),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size(inner),
+            Type::Generator(_) => 8,
         }
     }
 
@@ -229,6 +243,7 @@ impl PerceusPass {
                     }
                 }
                 Stmt::For(f) => self.analyze_fbip(&f.body, uses),
+                Stmt::SimFor(f, _) => self.analyze_fbip(&f.body, uses),
                 Stmt::While(w) => self.analyze_fbip(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_fbip(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_fbip(body, uses),
@@ -246,7 +261,8 @@ impl PerceusPass {
                 | Stmt::StoreDelete(_, _, _)
                 | Stmt::StoreSet(_, _, _, _)
                 | Stmt::ChannelClose(_, _)
-                | Stmt::Stop(_, _) => {}
+                | Stmt::Stop(_, _)
+                | Stmt::UseLocal(_, _, _, _) => {}
             }
         }
     }
@@ -374,6 +390,7 @@ impl PerceusPass {
                     }
                 }
                 Stmt::For(f) => self.analyze_drop_fusion(&f.body, uses),
+                Stmt::SimFor(f, _) => self.analyze_drop_fusion(&f.body, uses),
                 Stmt::While(w) => self.analyze_drop_fusion(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_drop_fusion(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_drop_fusion(body, uses),
@@ -391,7 +408,8 @@ impl PerceusPass {
                 | Stmt::StoreDelete(_, _, _)
                 | Stmt::StoreSet(_, _, _, _)
                 | Stmt::ChannelClose(_, _)
-                | Stmt::Stop(_, _) => {}
+                | Stmt::Stop(_, _)
+                | Stmt::UseLocal(_, _, _, _) => {}
             }
         }
     }
@@ -445,6 +463,7 @@ impl PerceusPass {
                     }
                 }
                 Stmt::For(f) => self.analyze_speculative_reuse(&f.body, uses),
+                Stmt::SimFor(f, _) => self.analyze_speculative_reuse(&f.body, uses),
                 Stmt::While(w) => self.analyze_speculative_reuse(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_speculative_reuse(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_speculative_reuse(body, uses),
@@ -462,7 +481,8 @@ impl PerceusPass {
                 | Stmt::StoreDelete(_, _, _)
                 | Stmt::StoreSet(_, _, _, _)
                 | Stmt::ChannelClose(_, _)
-                | Stmt::Stop(_, _) => {}
+                | Stmt::Stop(_, _)
+                | Stmt::UseLocal(_, _, _, _) => {}
             }
         }
     }

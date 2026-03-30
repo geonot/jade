@@ -115,6 +115,14 @@ impl PerceusPass {
             Stmt::Stop(e, _) => {
                 self.count_uses_expr(e, uses);
             }
+            Stmt::SimFor(f, _) => {
+                self.count_uses_expr(&f.iter, uses);
+                if let Some(end) = &f.end { self.count_uses_expr(end, uses); }
+                if let Some(step) = &f.step { self.count_uses_expr(step, uses); }
+                uses.insert(f.bind_id, UseInfo::new(f.bind_ty.clone(), Ownership::Owned));
+                self.count_uses_block_conservative(&f.body, uses);
+            }
+            Stmt::UseLocal(_, _, _, _) => {}
         }
     }
 
@@ -207,6 +215,11 @@ impl PerceusPass {
             Stmt::Stop(e, _) => {
                 self.collect_refs_expr(e, refs);
             }
+            Stmt::SimFor(f, _) => {
+                self.collect_refs_expr(&f.iter, refs);
+                self.collect_refs_block(&f.body, refs);
+            }
+            Stmt::UseLocal(_, _, _, _) => {}
         }
     }
 
@@ -233,7 +246,9 @@ impl PerceusPass {
             ExprKind::Method(obj, _, _, args)
             | ExprKind::StringMethod(obj, _, args)
             | ExprKind::VecMethod(obj, _, args)
-            | ExprKind::MapMethod(obj, _, args) => {
+            | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args)
+            | ExprKind::PQMethod(obj, _, args) => {
                 self.collect_refs_expr(obj, refs);
                 for a in args {
                     self.collect_refs_expr(a, refs);
@@ -255,7 +270,12 @@ impl PerceusPass {
                     self.collect_refs_expr(e, refs);
                 }
             }
-            ExprKind::MapNew => {}
+            ExprKind::MapNew | ExprKind::SetNew | ExprKind::PQNew | ExprKind::NDArrayNew(_) => {}
+            ExprKind::SIMDNew(elems) => {
+                for e in elems {
+                    self.collect_refs_expr(e, refs);
+                }
+            }
             ExprKind::Struct(_, inits) | ExprKind::VariantCtor(_, _, _, inits) => {
                 for fi in inits {
                     self.collect_refs_expr(&fi.value, refs);
@@ -355,6 +375,41 @@ impl PerceusPass {
             | ExprKind::StoreCount(_)
             | ExprKind::StoreAll(_)
             | ExprKind::IterNext(_, _, _) => {}
+            ExprKind::Unreachable => {}
+            ExprKind::StrictCast(e, _) | ExprKind::AsFormat(e, _) | ExprKind::AtomicLoad(e) => {
+                self.collect_refs_expr(e, refs);
+            }
+            ExprKind::AtomicStore(a, b) | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
+                self.collect_refs_expr(a, refs);
+                self.collect_refs_expr(b, refs);
+            }
+            ExprKind::AtomicCas(p, e, n) => {
+                self.collect_refs_expr(p, refs);
+                self.collect_refs_expr(e, refs);
+                self.collect_refs_expr(n, refs);
+            }
+            ExprKind::Slice(obj, start, end) => {
+                self.collect_refs_expr(obj, refs);
+                self.collect_refs_expr(start, refs);
+                self.collect_refs_expr(end, refs);
+            }
+            ExprKind::DequeNew => {}
+            ExprKind::DequeMethod(obj, _, args) => {
+                self.collect_refs_expr(obj, refs);
+                for a in args { self.collect_refs_expr(a, refs); }
+            }
+            ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => {
+                self.collect_refs_expr(e, refs);
+            }
+            ExprKind::Einsum(_, args) => {
+                for a in args { self.collect_refs_expr(a, refs); }
+            }
+            ExprKind::Builder(_, fields) => {
+                for (_, v) in fields { self.collect_refs_expr(v, refs); }
+            }
+            ExprKind::GeneratorCreate(_, _, stmts) => {
+                self.collect_refs_block(stmts, refs);
+            }
         }
     }
 
@@ -548,6 +603,24 @@ impl PerceusPass {
                 }
             }
             ExprKind::Spawn(_) => {}
+            ExprKind::Unreachable => {}
+            ExprKind::StrictCast(inner, _) | ExprKind::AsFormat(inner, _) | ExprKind::AtomicLoad(inner) => {
+                self.count_uses_expr(inner, uses);
+            }
+            ExprKind::AtomicStore(a, b) | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
+                self.count_uses_expr(a, uses);
+                self.count_uses_expr(b, uses);
+            }
+            ExprKind::AtomicCas(p, e, n) => {
+                self.count_uses_expr(p, uses);
+                self.count_uses_expr(e, uses);
+                self.count_uses_expr(n, uses);
+            }
+            ExprKind::Slice(obj, start, end) => {
+                self.count_uses_expr(obj, uses);
+                self.count_uses_expr(start, uses);
+                self.count_uses_expr(end, uses);
+            }
             ExprKind::Send(target, _, _, _, args) => {
                 self.count_uses_expr(target, uses);
                 for a in args {
@@ -574,9 +647,14 @@ impl PerceusPass {
                     self.count_uses_expr_escaping(a, uses);
                 }
             }
-            ExprKind::MapNew => {}
+            ExprKind::MapNew | ExprKind::SetNew | ExprKind::PQNew | ExprKind::NDArrayNew(_) => {}
+            ExprKind::SIMDNew(elems) => {
+                for e in elems {
+                    self.count_uses_expr(e, uses);
+                }
+            }
             ExprKind::IterNext(_, _, _) => {}
-            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
+            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args) => {
                 self.count_uses_expr(obj, uses);
                 for a in args {
                     self.count_uses_expr_escaping(a, uses);
@@ -611,6 +689,23 @@ impl PerceusPass {
                 if let Some(body) = default_body {
                     self.count_uses_block(body, uses);
                 }
+            }
+            ExprKind::DequeNew => {}
+            ExprKind::DequeMethod(obj, _, args) => {
+                self.count_uses_expr(obj, uses);
+                for a in args { self.count_uses_expr_escaping(a, uses); }
+            }
+            ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => {
+                self.count_uses_expr(e, uses);
+            }
+            ExprKind::Einsum(_, args) => {
+                for a in args { self.count_uses_expr(a, uses); }
+            }
+            ExprKind::Builder(_, fields) => {
+                for (_, v) in fields { self.count_uses_expr_escaping(v, uses); }
+            }
+            ExprKind::GeneratorCreate(_, _, stmts) => {
+                self.count_uses_block(stmts, uses);
             }
         }
     }

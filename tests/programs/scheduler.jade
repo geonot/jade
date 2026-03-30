@@ -15,24 +15,24 @@ enum TaskStatus
     Failed(String)
 
 type Task
-    id: i64
-    priority: Priority
-    deadline: i64
-    status: TaskStatus
+    id as i64
+    priority as Priority
+    deadline as i64
+    status as TaskStatus
 
-*priority_value(p: Priority)
+*priority_value(p as Priority)
     match p
         Critical ? 0
         High ? 1
         Normal ? 2
         Low ? 3
 
-*is_pending(task: Task)
+*is_pending(task as Task)
     match task.status
         Pending ? true
         _ ? false
 
-*task_info(task: Task)
+*task_info(task as Task)
     log(task.id)
     match task.priority
         Critical ? log('CRITICAL')
@@ -46,7 +46,7 @@ type Task
         Failed(reason) ? log(reason)
 
 # Find highest priority pending task
-*find_next(tasks, count: i64)
+*find_next(tasks, count as i64)
     best_idx is -1
     best_prio is 99
     for i from 0 to count
@@ -58,7 +58,7 @@ type Task
     best_idx
 
 # Count tasks by status
-*count_complete(tasks, count: i64)
+*count_complete(tasks, count as i64)
     total is 0
     for i from 0 to count
         match tasks[i].status
@@ -66,14 +66,14 @@ type Task
             _ ? total is total
     total
 
-*count_pending(tasks, count: i64)
+*count_pending(tasks, count as i64)
     total is 0
     for i from 0 to count
         if is_pending(tasks[i])
             total is total + 1
     total
 
-*main()
+*main
     # Create a set of tasks
     tasks is [
         Task(id is 1, priority is Low, deadline is 100, status is Pending),

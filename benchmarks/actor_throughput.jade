@@ -1,11 +1,11 @@
-extern *usleep(us: i32) -> i32
+extern *usleep(us as i32) returns i32
 
 actor Counter
     count
     @inc n
         count is count + n
 
-*main()
+*main
     w is spawn Counter
     i is 0
     while i < 5000000

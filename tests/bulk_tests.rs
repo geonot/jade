@@ -346,7 +346,7 @@ fn b_not_and() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 4: Comparisons (equals / isnt)
+// BATCH 4: Comparisons (equals / neq)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -359,11 +359,11 @@ fn b_eq_false() {
 }
 #[test]
 fn b_ne_true() {
-    expect("*main()\n    log(5 isnt 6)\n", "1");
+    expect("*main()\n    log(5 neq 6)\n", "1");
 }
 #[test]
 fn b_ne_false() {
-    expect("*main()\n    log(5 isnt 5)\n", "0");
+    expect("*main()\n    log(5 neq 5)\n", "0");
 }
 #[test]
 fn b_lt_true() {
@@ -411,7 +411,7 @@ fn b_equals_kw() {
 }
 #[test]
 fn b_isnt_kw() {
-    expect("*main()\n    log(7 isnt 8)\n", "1");
+    expect("*main()\n    log(7 neq 8)\n", "1");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1602,7 +1602,7 @@ fn b_arr_min() {
 #[test]
 fn b_collatz() {
     expect(
-        "*collatz(n: i64) -> i64\n    steps is 0\n    x is n\n    while x isnt 1\n        if x % 2 equals 0\n            x is x / 2\n        else\n            x is 3 * x + 1\n        steps is steps + 1\n    steps\n\n*main()\n    log(collatz(27))\n",
+        "*collatz(n: i64) -> i64\n    steps is 0\n    x is n\n    while x neq 1\n        if x % 2 equals 0\n            x is x / 2\n        else\n            x is 3 * x + 1\n        steps is steps + 1\n    steps\n\n*main()\n    log(collatz(27))\n",
         "111",
     );
 }
@@ -2089,7 +2089,7 @@ fn b_for_sum_odd() {
 #[test]
 fn b_while_gcd() {
     expect(
-        "*main()\n    a is 252\n    b is 105\n    while b isnt 0\n        t is b\n        b is a % b\n        a is t\n    log(a)\n",
+        "*main()\n    a is 252\n    b is 105\n    while b neq 0\n        t is b\n        b is a % b\n        a is t\n    log(a)\n",
         "21",
     );
 }
@@ -2509,10 +2509,7 @@ fn b_aug_mul() {
 fn b_aug_div() {
     expect("*main()\n    x is 100\n    x /= 4\n    log(x)\n", "25");
 }
-#[test]
-fn b_aug_mod() {
-    expect("*main()\n    x is 17\n    x %= 5\n    log(x)\n", "2");
-}
+// b_aug_mod removed: %= dropped from language
 #[test]
 fn b_aug_bitand() {
     expect("*main()\n    x is 0xFF\n    x &= 0x0F\n    log(x)\n", "15");
@@ -3509,12 +3506,12 @@ fn b_str_eq_diff() {
 
 #[test]
 fn b_str_ne_same() {
-    expect("*main()\n    log('hello' isnt 'hello')\n", "0");
+    expect("*main()\n    log('hello' neq 'hello')\n", "0");
 }
 
 #[test]
 fn b_str_ne_diff() {
-    expect("*main()\n    log('hello' isnt 'world')\n", "1");
+    expect("*main()\n    log('hello' neq 'world')\n", "1");
 }
 
 #[test]
@@ -3617,7 +3614,7 @@ fn b_or_pat_second() {
 #[test]
 fn b_struct_eq_true() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\ntrait Eq\n    *eq(other: Point) -> bool\n\nimpl Eq for Point\n    *eq(other: Point) -> bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 1, y is 2)\n    log(a equals b)\n",
+        "type Point\n    x as i64\n    y as i64\n\ntrait Eq\n    *equal(other as Point) returns bool\n\nimpl Eq for Point\n    *equal(other as Point) returns bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 1, y is 2)\n    log(a equals b)\n",
         "1",
     );
 }
@@ -3625,7 +3622,7 @@ fn b_struct_eq_true() {
 #[test]
 fn b_struct_eq_false() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\ntrait Eq\n    *eq(other: Point) -> bool\n\nimpl Eq for Point\n    *eq(other: Point) -> bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a equals b)\n",
+        "type Point\n    x as i64\n    y as i64\n\ntrait Eq\n    *equal(other as Point) returns bool\n\nimpl Eq for Point\n    *equal(other as Point) returns bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a equals b)\n",
         "0",
     );
 }
@@ -3633,7 +3630,7 @@ fn b_struct_eq_false() {
 #[test]
 fn b_struct_neq() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\ntrait Eq\n    *eq(other: Point) -> bool\n\nimpl Eq for Point\n    *eq(other: Point) -> bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a isnt b)\n",
+        "type Point\n    x as i64\n    y as i64\n\ntrait Eq\n    *equal(other as Point) returns bool\n\nimpl Eq for Point\n    *equal(other as Point) returns bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a neq b)\n",
         "1",
     );
 }

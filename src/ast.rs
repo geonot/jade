@@ -43,6 +43,9 @@ pub enum Decl {
     Trait(TraitDef),
     Impl(ImplBlock),
     Const(String, Expr, Span),
+    Supervisor(SupervisorDef),
+    TypeAlias(String, Type, Span),
+    Newtype(String, Type, Span),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,6 +100,8 @@ pub enum Stmt {
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
+    SimFor(For, Span),
+    UseLocal(UseDecl),
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +181,19 @@ pub enum Expr {
     ChannelSend(Box<Expr>, Box<Expr>, Span),
     ChannelRecv(Box<Expr>, Span),
     Select(Vec<SelectArm>, Option<Block>, Span),
+    Unreachable(Span),
+    AsFormat(Box<Expr>, String, Span),
+    StrictCast(Box<Expr>, Type, Span),
+    Slice(Box<Expr>, Box<Expr>, Box<Expr>, Span),
+    NamedArg(String, Box<Expr>, Span),
+    Spread(Box<Expr>, Span),
+    NDArray(Vec<Expr>, Span),
+    SIMDLit(Type, usize, Vec<Expr>, Span),
+    Grad(Box<Expr>, Span),
+    Einsum(String, Vec<Expr>, Span),
+    Builder(String, Vec<BuilderField>, Span),
+    Deque(Vec<Expr>, Span),
+    OfCall(Box<Expr>, Box<Expr>, Span),
 }
 
 impl Expr {
@@ -220,8 +238,21 @@ impl Expr {
             | Self::ChannelCreate(_, _, s)
             | Self::ChannelSend(_, _, s)
             | Self::ChannelRecv(_, s)
-            | Self::Select(_, _, s) => *s,
+            | Self::Select(_, _, s)
+            | Self::Unreachable(s)
+            | Self::AsFormat(_, _, s)
+            | Self::StrictCast(_, _, s)
+            | Self::Slice(_, _, _, s)
+            | Self::NamedArg(_, _, s)
+            | Self::Spread(_, s)
+            | Self::NDArray(_, s)
+            | Self::SIMDLit(_, _, _, s) => *s,
             Self::IfExpr(i) => i.span,
+            Self::Grad(_, s)
+            | Self::Einsum(_, _, s)
+            | Self::Builder(_, _, s)
+            | Self::Deque(_, s)
+            | Self::OfCall(_, _, s) => *s,
         }
     }
 }
@@ -239,6 +270,7 @@ pub struct Fn {
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub body: Block,
+    pub is_generator: bool,
     pub span: Span,
 }
 
@@ -288,6 +320,7 @@ pub struct EnumDef {
 pub struct Variant {
     pub name: String,
     pub fields: Vec<VField>,
+    pub discriminant: Option<i64>,
     pub span: Span,
 }
 
@@ -323,6 +356,7 @@ pub struct While {
 
 #[derive(Debug, Clone)]
 pub struct For {
+    pub label: Option<String>,
     pub bind: String,
     pub bind2: Option<String>,
     pub iter: Expr,
@@ -391,6 +425,8 @@ pub enum QueryClause {
 #[derive(Debug, Clone)]
 pub struct UseDecl {
     pub path: Vec<String>,
+    pub imports: Option<Vec<String>>,
+    pub alias: Option<String>,
     pub span: Span,
 }
 
@@ -488,6 +524,28 @@ pub struct ImplBlock {
 pub enum LogicalOp {
     And,
     Or,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisorStrategy {
+    OneForOne,
+    OneForAll,
+    RestForOne,
+}
+
+#[derive(Debug, Clone)]
+pub struct SupervisorDef {
+    pub name: String,
+    pub strategy: SupervisorStrategy,
+    pub children: Vec<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuilderField {
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

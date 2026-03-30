@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use inkwell::IntPredicate;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum};
 
 use crate::ast::UnaryOp;
 use crate::hir;
@@ -121,6 +121,20 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::MapMethod(obj, method, args) => {
                 self.compile_map_method(obj, method, args)
             }
+            hir::ExprKind::SetNew => self.compile_set_new(),
+            hir::ExprKind::SetMethod(obj, method, args) => {
+                self.compile_set_method(obj, method, args)
+            }
+            hir::ExprKind::PQNew => self.compile_pq_new(),
+            hir::ExprKind::PQMethod(obj, method, args) => {
+                self.compile_pq_method(obj, method, args)
+            }
+            hir::ExprKind::NDArrayNew(dims) => {
+                self.compile_ndarray_new(dims)
+            }
+            hir::ExprKind::SIMDNew(elems) => {
+                self.compile_simd_new(elems, &expr.ty)
+            }
             hir::ExprKind::CoroutineCreate(name, body) => self.compile_coroutine_create(name, body),
             hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro),
             hir::ExprKind::Yield(_inner) => {
@@ -144,6 +158,66 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::ChannelRecv(ch_expr) => self.compile_channel_recv(ch_expr, &expr.ty),
             hir::ExprKind::Select(arms, default_body) => {
                 self.compile_select(arms, default_body.as_ref())
+            }
+            hir::ExprKind::Unreachable => {
+                let fn_val = self.cur_fn.unwrap();
+                let unreachable_bb = self.ctx.append_basic_block(fn_val, "unreachable");
+                b!(self.bld.build_unconditional_branch(unreachable_bb));
+                self.bld.position_at_end(unreachable_bb);
+                b!(self.bld.build_unreachable());
+                // Return a dummy value — this code is never reached
+                Ok(self.ctx.i64_type().const_zero().into())
+            }
+            hir::ExprKind::StrictCast(inner, target_ty) => {
+                self.compile_strict_cast(inner, target_ty)
+            }
+            hir::ExprKind::AsFormat(inner, fmt) => {
+                self.compile_as_format(inner, fmt)
+            }
+            hir::ExprKind::AtomicLoad(ptr_expr) => {
+                self.compile_atomic_load(ptr_expr)
+            }
+            hir::ExprKind::AtomicStore(ptr_expr, val_expr) => {
+                self.compile_atomic_store(ptr_expr, val_expr)
+            }
+            hir::ExprKind::AtomicAdd(ptr_expr, val_expr) => {
+                self.compile_atomic_add(ptr_expr, val_expr)
+            }
+            hir::ExprKind::AtomicSub(ptr_expr, val_expr) => {
+                self.compile_atomic_sub(ptr_expr, val_expr)
+            }
+            hir::ExprKind::AtomicCas(ptr_expr, expected_expr, new_expr) => {
+                self.compile_atomic_cas(ptr_expr, expected_expr, new_expr)
+            }
+            hir::ExprKind::Slice(obj, start, end) => {
+                self.compile_slice(obj, start, end)
+            }
+            hir::ExprKind::DequeNew => {
+                Err("DequeNew not yet implemented in codegen".into())
+            }
+            hir::ExprKind::DequeMethod(_, _, _) => {
+                Err("DequeMethod not yet implemented in codegen".into())
+            }
+            hir::ExprKind::Grad(_) => {
+                Err("Grad not yet implemented in codegen".into())
+            }
+            hir::ExprKind::Einsum(_, _) => {
+                Err("Einsum not yet implemented in codegen".into())
+            }
+            hir::ExprKind::Builder(_, _) => {
+                Err("Builder not yet implemented in codegen".into())
+            }
+            hir::ExprKind::CowWrap(_) => {
+                Err("CowWrap not yet implemented in codegen".into())
+            }
+            hir::ExprKind::CowClone(_) => {
+                Err("CowClone not yet implemented in codegen".into())
+            }
+            hir::ExprKind::GeneratorCreate(_, _, _) => {
+                Err("GeneratorCreate not yet implemented in codegen".into())
+            }
+            hir::ExprKind::GeneratorNext(_) => {
+                Err("GeneratorNext not yet implemented in codegen".into())
             }
         }
     }
@@ -747,6 +821,13 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|(ptr, _)| *ptr)
                 .ok_or_else(|| format!("cannot take address of '{name}'"))
                 .map(|p| p.into()),
+            hir::ExprKind::FnRef(_, name) => {
+                if let Some(fv) = self.module.get_function(name) {
+                    Ok(fv.as_global_value().as_pointer_value().into())
+                } else {
+                    Err(format!("undefined function: {name}"))
+                }
+            }
             _ => Err("& requires a variable name".into()),
         }
     }
@@ -760,8 +841,12 @@ impl<'ctx> Compiler<'ctx> {
             return Err("cannot deref a weak reference directly — use weak_upgrade() first".into());
         }
         let ptr_val = self.compile_expr(inner)?;
+        let load_ty = match &inner.ty {
+            Type::Ptr(inner_ty) => self.llvm_ty(inner_ty),
+            _ => self.ctx.i64_type().into(),
+        };
         Ok(b!(self.bld.build_load(
-            self.ctx.i64_type(),
+            load_ty,
             ptr_val.into_pointer_value(),
             "deref"
         )))
@@ -1033,5 +1118,207 @@ impl<'ctx> Compiler<'ctx> {
             .try_as_basic_value()
             .basic()
             .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
+    }
+
+    fn compile_strict_cast(
+        &mut self,
+        expr: &hir::Expr,
+        target: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // Strict cast: same as regular cast but with runtime bounds check for narrowing
+        let val = self.compile_expr(expr)?;
+        let src = &expr.ty;
+        if src.is_int() && target.is_int() {
+            let dst = self.llvm_ty(target);
+            let (sb, db) = (src.bits(), target.bits());
+            if sb > db {
+                // Narrowing: truncate then sign-extend back and compare
+                let truncated = b!(self.bld.build_int_truncate(
+                    val.into_int_value(),
+                    dst.into_int_type(),
+                    "strict.trunc"
+                ));
+                let extended = if src.is_signed() {
+                    b!(self.bld.build_int_s_extend(
+                        truncated,
+                        val.into_int_value().get_type(),
+                        "strict.ext"
+                    ))
+                } else {
+                    b!(self.bld.build_int_z_extend(
+                        truncated,
+                        val.into_int_value().get_type(),
+                        "strict.ext"
+                    ))
+                };
+                let ok = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    val.into_int_value(),
+                    extended,
+                    "strict.ok"
+                ));
+                let fv = self.cur_fn.unwrap();
+                let pass_bb = self.ctx.append_basic_block(fv, "strict.pass");
+                let fail_bb = self.ctx.append_basic_block(fv, "strict.fail");
+                b!(self.bld.build_conditional_branch(ok, pass_bb, fail_bb));
+                self.bld.position_at_end(fail_bb);
+                self.emit_trap("strict cast: value out of range");
+                self.bld.position_at_end(pass_bb);
+                return Ok(truncated.into());
+            } else if sb < db {
+                return Ok(if src.is_signed() {
+                    b!(self.bld.build_int_s_extend(val.into_int_value(), dst.into_int_type(), "strict.sext")).into()
+                } else {
+                    b!(self.bld.build_int_z_extend(val.into_int_value(), dst.into_int_type(), "strict.zext")).into()
+                });
+            }
+            return Ok(val);
+        }
+        // For non-int-to-int casts, fall back to regular cast behavior
+        self.compile_cast(expr, target)
+    }
+
+    fn compile_as_format(
+        &mut self,
+        expr: &hir::Expr,
+        _fmt: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // as json / as map — for now, delegate to the Display/toString path
+        let val = self.compile_expr(expr)?;
+        let _ = val;
+        // Return empty string placeholder — full serialization would need runtime support
+        self.compile_str_literal("")
+    }
+
+    fn compile_atomic_load(
+        &mut self,
+        ptr_expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = self.compile_expr(ptr_expr)?;
+        let i64t = self.ctx.i64_type();
+        let load = b!(self.bld.build_load(i64t, ptr.into_pointer_value(), "atomic.load"));
+        // Set atomic ordering
+        load.as_instruction_value()
+            .unwrap()
+            .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+            .map_err(|_| "failed to set atomic ordering".to_string())?;
+        Ok(load)
+    }
+
+    fn compile_atomic_store(
+        &mut self,
+        ptr_expr: &hir::Expr,
+        val_expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = self.compile_expr(ptr_expr)?;
+        let val = self.compile_expr(val_expr)?;
+        let store = b!(self.bld.build_store(ptr.into_pointer_value(), val));
+        store
+            .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+            .map_err(|_| "failed to set atomic ordering".to_string())?;
+        Ok(self.ctx.i64_type().const_zero().into())
+    }
+
+    fn compile_atomic_add(
+        &mut self,
+        ptr_expr: &hir::Expr,
+        val_expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = self.compile_expr(ptr_expr)?;
+        let val = self.compile_expr(val_expr)?;
+        let old = b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Add,
+            ptr.into_pointer_value(),
+            val.into_int_value(),
+            inkwell::AtomicOrdering::SequentiallyConsistent,
+        ));
+        Ok(old.into())
+    }
+
+    fn compile_atomic_sub(
+        &mut self,
+        ptr_expr: &hir::Expr,
+        val_expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = self.compile_expr(ptr_expr)?;
+        let val = self.compile_expr(val_expr)?;
+        let old = b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Sub,
+            ptr.into_pointer_value(),
+            val.into_int_value(),
+            inkwell::AtomicOrdering::SequentiallyConsistent,
+        ));
+        Ok(old.into())
+    }
+
+    fn compile_atomic_cas(
+        &mut self,
+        ptr_expr: &hir::Expr,
+        expected_expr: &hir::Expr,
+        new_expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = self.compile_expr(ptr_expr)?;
+        let expected = self.compile_expr(expected_expr)?;
+        let new_val = self.compile_expr(new_expr)?;
+        let cas = b!(self.bld.build_cmpxchg(
+            ptr.into_pointer_value(),
+            expected.into_int_value(),
+            new_val.into_int_value(),
+            inkwell::AtomicOrdering::SequentiallyConsistent,
+            inkwell::AtomicOrdering::SequentiallyConsistent,
+        ));
+        // cmpxchg returns {value, success_bit}; extract the old value
+        let old = b!(self.bld.build_extract_value(cas, 0, "cas.old"));
+        Ok(old)
+    }
+
+    fn compile_slice(
+        &mut self,
+        obj: &hir::Expr,
+        start: &hir::Expr,
+        end: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // For now, compile as a runtime call to a slice helper
+        // Arrays: create a new vec from the slice range
+        // Strings: create a substring
+        let obj_val = self.compile_expr(obj)?;
+        let start_val = self.compile_expr(start)?;
+        let end_val = self.compile_expr(end)?;
+        match &obj.ty {
+            Type::Vec(_elem_ty) => {
+                // Vec slice: call jade_vec_slice(vec_ptr, start, end) → new vec
+                let slice_fn = self.module.get_function("__jade_vec_slice").unwrap_or_else(|| {
+                    let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                    let i64t = self.ctx.i64_type();
+                    let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
+                    self.module.add_function("__jade_vec_slice", ft, Some(inkwell::module::Linkage::External))
+                });
+                let result = b!(self.bld.build_call(
+                    slice_fn,
+                    &[obj_val.into(), start_val.into(), end_val.into()],
+                    "slice"
+                ));
+                Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
+            }
+            Type::String => {
+                // String slice: call jade_str_slice(str, start, end) → new str
+                let slice_fn = self.module.get_function("__jade_str_slice").unwrap_or_else(|| {
+                    let st = self.string_type();
+                    let i64t = self.ctx.i64_type();
+                    let ft = st.fn_type(&[st.into(), i64t.into(), i64t.into()], false);
+                    self.module.add_function("__jade_str_slice", ft, Some(inkwell::module::Linkage::External))
+                });
+                let result = b!(self.bld.build_call(
+                    slice_fn,
+                    &[obj_val.into(), start_val.into(), end_val.into()],
+                    "str.slice"
+                ));
+                Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
+            }
+            _ => {
+                // Fallback: treat as pointer arithmetic (array case)
+                Ok(obj_val)
+            }
+        }
     }
 }

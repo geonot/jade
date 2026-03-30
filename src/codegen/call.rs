@@ -49,7 +49,7 @@ impl<'ctx> Compiler<'ctx> {
         self.indirect_call_vals(fn_ptr, fn_ty, &vals)
     }
 
-    fn indirect_call_vals(
+    pub(crate) fn indirect_call_vals(
         &mut self,
         fn_ptr: BasicValueEnum<'ctx>,
         fn_ty: &Type,

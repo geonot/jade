@@ -82,6 +82,22 @@ enum Option of T
 
 Single uppercase letters by convention. Monomorphized at compile time — zero runtime cost.
 
+### Type Aliases & Newtypes
+
+```jade
+# Alias — transparent, interchangeable with the underlying type
+alias Seconds is f64
+alias UserId is i64
+
+# Newtype — opaque, distinct type at compile time
+type Celsius
+    value: f64
+
+type Fahrenheit
+    value: f64
+# Celsius and Fahrenheit are NOT interchangeable even though both wrap f64
+```
+
 ---
 
 ## Bindings
@@ -116,6 +132,16 @@ p is Vec3(x is 1, y is 2, z is 3)
 
 `is` is binding, not comparison. Comparison uses `equals` and `isnt`.
 
+### ALL_CAPS Constants
+
+Top-level constants use `ALL_CAPS` by convention. The formatter enforces this.
+
+```jade
+MAX_SIZE is 1024
+PI is 3.14159265
+DEFAULT_PORT is 8080
+```
+
 ---
 
 ## Functions
@@ -146,6 +172,17 @@ result is add(1, 2)
 ```
 
 Parameters infer types from usage. Return type inferred from body. Explicit annotations optional. Parentheses are always optional on both definitions and calls.
+
+### The `of` Call Syntax
+
+`of` can be used as an alternative to parentheses for single-argument calls:
+
+```jade
+*double x is x * 2
+
+result is double of 5      # same as double(5)
+log of 'hello'             # same as log('hello')
+```
 
 ### Pattern-Directed Function Clauses
 
@@ -224,6 +261,32 @@ result is value ~ double ~ add_one ~ square
 
 `~` pipes the left value as the first argument to the right function.
 
+### Named Arguments
+
+```jade
+*connect host as String, port as i64 is 8080
+    log 'connecting to {host}:{port}'
+
+connect(host is 'localhost', port is 3000)
+connect(host is 'example.com')    # port defaults to 8080
+```
+
+### `$` Placeholder
+
+Universal placeholder for inline lambdas and partial application:
+
+```jade
+# In lambdas — $ is the argument
+nums ~ map $ * 2
+nums ~ filter $ > 10
+
+# Numbered: $0, $1, $2 for multi-arg
+pairs ~ map $0 + $1
+
+# Partial application
+add5 is add(5, $)
+```
+
 ---
 
 ## Control Flow
@@ -273,6 +336,19 @@ loop
 result is loop
     if check()
         yield 42
+
+# Labeled loops — binding name IS the label
+outer is for i from 0 to 10
+    for j from 0 to 10
+        if i * j > 50
+            break outer
+
+# Parallel loop (work-stealing, all iterations must be independent)
+sim for x in items
+    process(x)
+
+# Range slicing
+sub is items from 2 to 5    # elements at indices 2, 3, 4
 ```
 
 ### Match
@@ -300,39 +376,77 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 | 1 | `~` | Pipeline |
 | 2 | `? !` | Ternary |
 | 3 | `or` | Logical OR |
-| 4 | `and` | Logical AND |
-| 5 | `equals` `isnt` | Equality |
-| 6 | `< > <= >=` | Comparison |
-| 7 | `\|` | Bitwise OR |
-| 8 | `^` | Bitwise XOR |
-| 9 | `&` | Bitwise AND |
-| 10 | `<< >>` | Shift |
-| 11 | `+ -` | Additive |
-| 12 | `* / %` | Multiplicative |
-| 13 | `**` | Exponent |
-| 14 | `- not ~` | Unary |
-| 15 | `() [] . as` | Postfix |
+| 4 | `xor` | Logical XOR |
+| 5 | `and` | Logical AND |
+| 6 | `equals` `neq` | Equality |
+| 7 | `< > <= >=` `in` | Comparison / membership |
+| 8 | `\|` | Bitwise OR |
+| 9 | `^` | Bitwise XOR |
+| 10 | `&` | Bitwise AND |
+| 11 | `<< >>` | Shift |
+| 12 | `+ -` | Additive |
+| 13 | `* / % mod` | Multiplicative |
+| 14 | `**` | Exponent |
+| 15 | `- not` | Unary |
+| 16 | `() [] . as` | Postfix |
 
 ### Comparison
 
-`equals` and `isnt` — not `==` or `!=`. Reads like language.
+`equals` and `neq` — not `==` or `!=`. Reads like language.
 
 ```jade
 if x equals 0
     log 'zero'
-if x isnt y
+if x neq y
     log 'different'
 ```
 
+### Comparison Chaining
+
+Math-style chained comparisons without double-evaluating the middle operand:
+
+```jade
+if 0 < x < 100
+    log 'in range'
+if a <= b <= c
+    log 'sorted'
+```
+
+### Membership — `in`
+
+```jade
+if x in [1, 2, 3]
+    log 'found'
+if key in my_map
+    log 'exists'
+```
+
+Desugars to `.contains()` on the collection.
+
 ### Logical
 
-`and`, `or`, `not` — not `&&`, `||`, `!`.
+`and`, `or`, `not`, `xor` — not `&&`, `||`, `!`.
+
+```jade
+if a xor b
+    log 'exactly one is true'
+```
 
 ### Type Casting
 
 ```jade
 x is 42
-y is x as f64
+y is x as f64           # widening — always safe
+z is big as strict i16   # strict narrowing — panics if value doesn't fit
+w is big as i16          # truncating — silently truncates (compiler warning)
+```
+
+### Serialization Casts
+
+```jade
+data is my_struct as json    # serialize struct to JSON string
+config is json_str as Config # deserialize JSON string to struct
+m is my_struct as map        # convert struct to Map
 ```
 
 ---
@@ -386,6 +500,22 @@ enum Color
 
 Enums compile to tagged unions. Pattern matching is the primary dispatch mechanism.
 
+### Enum Discriminant Values
+
+Explicit discriminant values for C interop and bitflags:
+
+```jade
+enum Permission
+    Read is 1
+    Write is 2
+    Execute is 4
+
+enum HttpStatus
+    Ok is 200
+    NotFound is 404
+    ServerError is 500
+```
+
 ---
 
 ## Error Handling
@@ -418,6 +548,152 @@ err FileError
 ```jade
 squares is [x ** 2 for x from 0 to 10]
 evens is [x for x from 0 to 100 if x % 2 equals 0]
+```
+
+---
+
+## Iterator Combinators
+
+Lazy iterator methods composable with `~` and `$`:
+
+```jade
+# map, filter, fold
+total is items ~ map $ * 2 ~ filter $ > 10 ~ fold 0, $ + $1
+
+# zip, take, skip
+pairs is a ~ zip b ~ take 5
+
+# any, all, find
+has_neg is nums ~ any $ < 0
+found is items ~ find $ equals target
+
+# chain, flatten, collect
+combined is a ~ chain b ~ collect
+flat is nested ~ flatten ~ collect
+```
+
+---
+
+## Generators (Lazy Sequences)
+
+A function containing `yield` is automatically a generator. Calling it returns a lazy sequence.
+
+```jade
+*fibonacci()
+    a is 0
+    b is 1
+    loop
+        yield a
+        temp is a
+        a is b
+        b is temp + b
+
+*main()
+    gen is fibonacci()
+    log gen.next()     # 0
+    log gen.next()     # 1
+    log gen.next()     # 1
+    log gen.next()     # 2
+```
+
+---
+
+## Collections
+
+### Vec (dynamic array)
+
+```jade
+v is vec()
+v.push(1)
+v.push(2)
+log v.length      # 2
+log v.pop()       # 2
+```
+
+### Map (hash map)
+
+```jade
+m is map()
+m.set('key', 42)
+log m.get('key')   # 42
+log m.has('key')   # true
+```
+
+### Set
+
+```jade
+s is set()
+s.add(1)
+s.add(2)
+s.add(1)           # no-op, already present
+log s.contains(1)  # true
+log s.len()        # 2
+s.remove(1)
+
+# Set operations
+a_set is set()
+b_set is set()
+u is a_set.union(b_set)
+d is a_set.difference(b_set)
+i is a_set.intersection(b_set)
+```
+
+### Priority Queue
+
+```jade
+pq is priority_queue()
+pq.push('urgent', 10)     # value, priority (higher = first out)
+pq.push('normal', 1)
+pq.push('critical', 100)
+
+log pq.peek()              # 'critical'
+log pq.pop()               # 'critical'
+log pq.len()               # 2
+log pq.is_empty()          # false
+pq.clear()
+```
+
+### Deque (Double-Ended Queue)
+
+```jade
+d is deque()
+d.push_back(1)
+d.push_back(2)
+d.push_front(0)
+log d.pop_front()          # 0
+log d.pop_back()           # 2
+log d.len()                # 1
+```
+
+### Allocator-Aware Collections
+
+Collections can optionally use a custom allocator:
+
+```jade
+scratch is Arena(4096)
+v is vec_with_alloc(scratch)
+m is map_with_alloc(scratch)
+# All allocations go to the arena; freed in one shot at scope exit
+```
+
+---
+
+## Regex
+
+String methods for pattern matching via PCRE2:
+
+```jade
+use regex
+
+# String methods
+log 'hello123'.matches('[0-9]+')         # true
+results is 'a1b2c3'.find_all('[0-9]+')   # ['1', '2', '3']
+cleaned is 'foo  bar'.replace_re('\\s+', ' ')  # 'foo bar'
+
+# Stdlib functions
+pat is regex.compile('[A-Z]+')
+log regex.is_match(pat, 'HELLO')         # true
+found is regex.find(pat, 'hello WORLD')  # 'WORLD'
 ```
 
 ---
@@ -455,6 +731,34 @@ use math
 ```
 
 File = module. `use` imports. Recursive module resolution.
+
+### Selective Imports
+
+```jade
+use math.{sin, cos, pi}     # import only specific symbols
+log sin(pi)
+```
+
+### Import Aliases
+
+```jade
+use long_module_name as lmn
+lmn.do_thing()
+```
+
+### Scope-Limited Imports
+
+`use` inside a function body limits visibility to that scope:
+
+```jade
+*compute()
+    use math [sin, cos]
+    log sin(3.14)          # sin/cos available here
+
+*main()
+    # sin and cos are NOT visible here
+    log 'done'
+```
 
 ---
 
@@ -582,6 +886,16 @@ type Node
     strong is weak_upgrade child_parent  # upgrade: returns rc or none
 ```
 
+### Copy-on-Write (COW)
+
+Strings and vectors use copy-on-write when reference count > 1. Shared reads are zero-copy; mutation transparently clones on first write.
+
+```jade
+a is 'hello'
+b is a              # shared — no copy
+b is b + ' world'   # COW triggers: b gets its own copy
+```
+
 ### Signal Handling
 
 POSIX signal infrastructure.
@@ -612,6 +926,235 @@ Default: trap on overflow. Explicit control via builtins:
 
 Available for `add`, `sub`, `mul` — each in `wrapping_`, `saturating_`, `checked_` variants.
 
+### Atomic Operations
+
+Lock-free atomic instructions for concurrent programming:
+
+```jade
+counter is 0
+atomic_add(&counter, 1)           # atomic increment
+val is atomic_load(&counter)      # atomic read
+atomic_store(&counter, 0)         # atomic write
+old, ok is atomic_cas(&counter, 0, 1)  # compare-and-swap
+```
+
+### Arena / Region Allocation
+
+Scope-based bulk allocation — the entire arena is freed in one shot at scope exit:
+
+```jade
+scratch is Arena(4096)
+# All allocations in this scope use the arena
+v is vec_with_alloc(scratch)
+m is map_with_alloc(scratch)
+# Arena freed when scratch goes out of scope
+```
+
+### Constant-Time Operations
+
+Prevent timing side-channel attacks:
+
+```jade
+if constant_time_eq(user_token, expected_token)
+    log 'authorized'
+```
+
+For integer args, compiles to XOR + compare. For string args, calls a constant-time comparison runtime function.
+
+### C Header Import
+
+Generate Jade extern declarations from C headers automatically:
+
+```bash
+jade bind /usr/include/sqlite3.h > std/sqlite.jade
+```
+
+Parses function declarations, structs, typedefs and generates corresponding Jade `extern` declarations with correct type mappings.
+
+---
+
+## Concurrency
+
+### Actors
+
+```jade
+actor Counter
+    count as i64 is 0
+
+    *increment self, amount as i64
+        self.count += amount
+
+    *get_count self
+        self.count
+
+*main
+    c is spawn Counter
+    send c.increment(5)
+    send c.increment(3)
+    log c.get_count()    # 8
+```
+
+Actors run on a cooperative work-stealing scheduler. Message sends are non-blocking.
+
+### Supervisor Trees
+
+Erlang/OTP-style supervision for fault-tolerant actor hierarchies:
+
+```jade
+supervisor my_system
+    strategy one_for_one    # restart only the failed child
+    children
+        spawn Worker('task-a')
+        spawn Worker('task-b')
+        spawn Logger
+```
+
+Strategies: `one_for_one`, `one_for_all`, `rest_for_one`.
+
+### Channels
+
+```jade
+ch is channel of i64(10)     # buffered channel, capacity 10
+channel_send(ch, 42)
+val is channel_recv(ch)
+channel_close(ch)
+```
+
+### Select
+
+```jade
+select
+    recv from ch1 as val
+        log 'got {val} from ch1'
+    recv from ch2 as val
+        log 'got {val} from ch2'
+    default
+        log 'no messages'
+```
+
+---
+
+## Numeric Computing
+
+### Multi-Dimensional Arrays
+
+```jade
+# 3×3 matrix
+m is ndarray(3, 3)
+
+# Access
+log m[1][2]
+
+# Element-wise arithmetic (broadcasting)
+a is ndarray(3, 3)
+b is ndarray(3, 3)
+c is a + b       # element-wise add
+d is a * 2.0     # scalar broadcast
+```
+
+### Matrix Multiplication
+
+```jade
+result is matmul(A, B)    # A and B are 2D NDArrays
+```
+
+### SIMD Intrinsics
+
+Expose LLVM vector types at the language level:
+
+```jade
+# 4-lane f32 SIMD vector
+v is SIMD of f32, 4(1.0, 2.0, 3.0, 4.0)
+w is SIMD of f32, 4(5.0, 6.0, 7.0, 8.0)
+
+# Arithmetic operates on all lanes in parallel
+sum is v + w     # (6.0, 8.0, 10.0, 12.0)
+prod is v * w    # (5.0, 12.0, 21.0, 32.0)
+```
+
+### Einsum Notation
+
+Einstein summation for tensor contractions:
+
+```jade
+# Matrix multiplication: C[i,k] = sum_j A[i,j] * B[j,k]
+C is einsum 'ij,jk->ik', A, B
+
+# Trace of a matrix: sum of diagonal
+t is einsum 'ii->', M
+
+# Dot product
+d is einsum 'i,i->', u, v
+```
+
+### Automatic Differentiation
+
+Source-to-source AD via `grad`:
+
+```jade
+*loss(x: f64) -> f64
+    x ** 2 + 3.0 * x + 1.0
+
+*main()
+    dloss is grad(loss)    # returns a function: f64 -> f64
+    log dloss(2.0)         # 7.0  (derivative: 2x + 3)
+```
+
+---
+
+## DSL Builder Blocks
+
+Builder-pattern blocks for domain-specific construction:
+
+```jade
+page is build HtmlElement
+    tag is 'div'
+    class is 'container'
+    id is 'main'
+
+config is build ServerConfig
+    port is 8080
+    host is 'localhost'
+    workers is 4
+```
+
+---
+
+## Compile-Time Evaluation
+
+### Comptime Reflection
+
+Introspect types at compile time:
+
+```jade
+fields is fields_of('Point')    # ['x', 'y'] — array of field names
+t is type_of(42)                # 'Int' — type as string
+s is size_of('Point')           # 16 — byte size
+```
+
+### Extended Comptime Inference
+
+Pure functions with constant arguments are evaluated at compile time automatically — no keyword needed:
+
+```jade
+*fib(0) is 0
+*fib(1) is 1
+*fib n is fib(n - 1) + fib(n - 2)
+
+x is fib(10)    # computed at compile time → 55
+```
+
+The compiler detects pure functions (no side effects) and evaluates them when all arguments are constants. Recursion depth limited to 100.
+
+### Rich Assert Messages
+
+The compiler auto-generates descriptive failure messages:
+
+```jade
+assert x > 0 and x < 100
+# On failure: "assertion failed: x > 0 and x < 100 where x = -5"
+```
+
 ---
 
 ## Compiler
@@ -628,6 +1171,20 @@ Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST
 
 ```
 jadec <INPUT> [-o OUTPUT] [--emit-ir] [--opt 0-3] [--lto] [-g/--debug]
+```
+
+Subcommands:
+
+```bash
+jade init [name]           # create new project with project.jade
+jade build [-o out] [--opt N] [--lto]  # compile the project
+jade run [-- args]         # compile and run
+jade test                  # run project tests
+jade check                 # type-check without codegen
+jade fmt [files]           # format Jade source files
+jade fetch                 # download dependencies
+jade update                # update dependency lock file
+jade bind header.h         # generate extern declarations from C header
 ```
 
 - `--emit-ir` — print LLVM IR instead of compiling
@@ -744,11 +1301,12 @@ postfix_expr = primary , { '(' args ')' | '[' expr ']' | '.' IDENT | 'as' type }
 ### Lexical
 
 ```
-Keywords (42): is isnt equals and or not if elif else while for from loop
+Keywords (59): is neq equals and or not xor if elif else while for from loop
                yield continue return match when type enum err pub use
-               as to by array unsafe extern fn log of query
+               as to by array unsafe extern fn log of query sim
                true false none store insert delete transaction
-               count all where
+               count all where in supervisor actor spawn send select
+               strict unreachable alias deque grad einsum contract build
 ```
 
 Indentation-based (spaces only, tabs prohibited). `#` comments. Single-quoted strings with `{interpolation}`. Double-quoted raw strings.
@@ -1012,6 +1570,19 @@ s.starts_with('pre')    # true if s starts with prefix
 s.ends_with('suf')      # true if s ends with suffix
 s.char_at(i)            # byte at index i (as i64)
 s.slice(start, end)     # substring [start, end)
+s.split(delim)          # split into array of strings
+s.join(arr)             # join array with separator
+s.trim()                # strip leading/trailing whitespace
+s.to_upper()            # uppercase copy
+s.to_lower()            # lowercase copy
+s.replace(old, new)     # replace all occurrences
+s.find(sub)             # index of first occurrence (-1 if not found)
+s.lines()               # split by newlines
+
+# Regex (requires PCRE2)
+s.matches(pattern)      # true if pattern matches anywhere in s
+s.find_all(pattern)     # all matches as array of strings
+s.replace_re(pat, rep)  # regex replace
 ```
 
 String interpolation with `{expr}` inside single-quoted strings:
@@ -1031,10 +1602,28 @@ sqrt(x)    abs(x)       # math
 min(a, b)  max(a, b)
 to_string(x)
 time_now()              # nanosecond timestamp
-assert(cond)
+assert(cond)            # rich assert with auto-generated messages
 panic(msg)
 size_of of T()          # compile-time size
 align_of of T()         # compile-time alignment
+
+# Collections
+set()                   # new empty set
+priority_queue()        # new empty priority queue
+vec_with_alloc(alloc)   # vec using custom allocator
+map_with_alloc(alloc)   # map using custom allocator
+
+# Comptime reflection
+fields_of('TypeName')   # field names as array of strings
+type_of(expr)           # type as string
+size_of('TypeName')     # byte size as i64
+
+# Matrix / SIMD
+matmul(A, B)            # matrix multiplication
+ndarray(dims...)        # N-dimensional array
+
+# Safety
+constant_time_eq(a, b)  # constant-time equality comparison
 ```
 
 ### Debug

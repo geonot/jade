@@ -27,8 +27,18 @@ pub enum Type {
     ActorRef(String),
     Coroutine(Box<Type>),
     Channel(Box<Type>),
+    Set(Box<Type>),
+    PriorityQueue(Box<Type>),
+    NDArray(Box<Type>, Vec<usize>),
+    SIMD(Box<Type>, usize),
     DynTrait(String),
+    Arena,
     TypeVar(u32),
+    Deque(Box<Type>),
+    Cow(Box<Type>),
+    Alias(String, Box<Type>),
+    Newtype(String, Box<Type>),
+    Generator(Box<Type>),
 }
 
 impl Type {
@@ -160,7 +170,15 @@ impl std::fmt::Display for Type {
             Self::ActorRef(name) => write!(f, "ActorRef<{name}>"),
             Self::Coroutine(inner) => write!(f, "Coroutine of {inner}"),
             Self::Channel(inner) => write!(f, "Channel of {inner}"),
+            Self::Set(inner) => write!(f, "Set of {inner}"),
+            Self::PriorityQueue(inner) => write!(f, "PriorityQueue of {inner}"),
+            Self::NDArray(inner, dims) => {
+                let ds: Vec<String> = dims.iter().map(|d| d.to_string()).collect();
+                write!(f, "NDArray of {inner} [{}]", ds.join(" by "))
+            }
+            Self::SIMD(inner, lanes) => write!(f, "SIMD of {inner}, {lanes}"),
             Self::DynTrait(name) => write!(f, "dyn {name}"),
+            Self::Arena => f.write_str("Arena"),
             Self::Fn(ps, r) => {
                 f.write_str("(")?;
                 for (i, p) in ps.iter().enumerate() {
@@ -171,6 +189,11 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, ") -> {r}")
             }
+            Self::Deque(inner) => write!(f, "Deque of {inner}"),
+            Self::Cow(inner) => write!(f, "cow {inner}"),
+            Self::Alias(name, inner) => write!(f, "alias {name} is {inner}"),
+            Self::Newtype(name, inner) => write!(f, "newtype {name} is {inner}"),
+            Self::Generator(inner) => write!(f, "Generator of {inner}"),
         }
     }
 }

@@ -3,10 +3,10 @@
 # Demonstrates: structs, methods, nested loops, type casting
 
 type Mat2
-    a: f64
-    b: f64
-    c: f64
-    d: f64
+    a as f64
+    b as f64
+    c as f64
+    d as f64
 
     # Determinant: ad - bc
     *det(self)
@@ -21,11 +21,11 @@ type Mat2
         Mat2(a is self.a, b is self.c, c is self.b, d is self.d)
 
     # Scalar multiply
-    *scale(self, s: f64)
+    *scale(self, s as f64)
         Mat2(a is self.a * s, b is self.b * s, c is self.c * s, d is self.d * s)
 
 # Matrix multiplication (2x2)
-*mat_mul(m1: Mat2, m2: Mat2)
+*mat_mul(m1 as Mat2, m2 as Mat2)
     Mat2(
         a is m1.a * m2.a + m1.b * m2.c,
         b is m1.a * m2.b + m1.b * m2.d,
@@ -34,7 +34,7 @@ type Mat2
     )
 
 # Matrix power (repeated multiplication)
-*mat_pow(m: Mat2, n: i64)
+*mat_pow(m as Mat2, n as i64)
     result is Mat2(a is 1.0, b is 0.0, c is 0.0, d is 1.0)
     i is 0
     while i < n
@@ -42,7 +42,7 @@ type Mat2
         i is i + 1
     result
 
-*main()
+*main
     m is Mat2(a is 1.0, b is 2.0, c is 3.0, d is 4.0)
 
     log(m.det())                     # -2.0

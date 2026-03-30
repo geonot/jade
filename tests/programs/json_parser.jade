@@ -18,7 +18,7 @@ err ParseError
     InvalidToken(String)
 
 # Skip whitespace, return new position
-*skip_ws(s: String, pos: i64)
+*skip_ws(s as String, pos as i64)
     p is pos
     while p < s.length
         ch is s.char_at(p)
@@ -29,7 +29,7 @@ err ParseError
     p
 
 # Parse a JSON number (integers only for simplicity)
-*parse_number(s: String, pos: i64)
+*parse_number(s as String, pos as i64)
     p is pos
     neg is false
     if s.char_at(p) equals 45      # '-'
@@ -47,17 +47,17 @@ err ParseError
     (JNum(val as f64), p)
 
 # Parse a JSON string (assumes well-formed, no escape handling)
-*parse_string(s: String, pos: i64)
+*parse_string(s as String, pos as i64)
     # skip opening quote
     p is pos + 1
     start is p
-    while p < s.length and s.char_at(p) isnt 34   # '"'
+    while p < s.length and s.char_at(p) neq 34   # '"'
         p is p + 1
     content is s.slice(start, p)
     p is p + 1    # skip closing quote
     (JStr(content), p)
 
-*describe(j: Json)
+*describe(j as Json)
     match j
         JNull ? log('null')
         JBool(b) ? log(b)
@@ -67,7 +67,7 @@ err ParseError
         JObject(_, _, _) ? log('object')
         JEmpty ? log('empty')
 
-*count_nodes(j: Json)
+*count_nodes(j as Json)
     match j
         JNull ? 1
         JBool(_) ? 1
@@ -77,7 +77,7 @@ err ParseError
         JObject(_, val, rest) ? 1 + count_nodes(val) + count_nodes(rest)
         JEmpty ? 0
 
-*main()
+*main
     # Build JSON values manually
     obj is JObject(
         'name', JStr('jade'),

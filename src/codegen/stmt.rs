@@ -56,6 +56,8 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::Transaction(_, s) => *s,
             hir::Stmt::ChannelClose(_, s) => *s,
             hir::Stmt::Stop(_, s) => *s,
+            hir::Stmt::SimFor(_, s) => *s,
+            hir::Stmt::UseLocal(_, _, _, s) => *s,
         };
         self.set_debug_location(span.line, span.col);
         match stmt {
@@ -182,6 +184,19 @@ impl<'ctx> Compiler<'ctx> {
                             self.weak_release(loaded, inner)?;
                         }
                     }
+                    Type::Arena => {
+                        if let Some((ptr, _)) = self.find_var(name).cloned() {
+                            let arena_ty = self.arena_type();
+                            let base_gep = b!(self.bld.build_struct_gep(arena_ty, ptr, 0, "arena.drop.base.p"));
+                            let base = b!(self.bld.build_load(
+                                self.ctx.ptr_type(inkwell::AddressSpace::default()),
+                                base_gep,
+                                "arena.drop.base"
+                            ));
+                            let free = self.ensure_free();
+                            b!(self.bld.build_call(free, &[base.into()], ""));
+                        }
+                    }
                     _ => {}
                 }
                 Ok(None)
@@ -230,6 +245,12 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_stop(actor_expr)?;
                 Ok(None)
             }
+            hir::Stmt::SimFor(f, _) => {
+                // sim for: spawn each iteration as a coroutine on the scheduler
+                self.compile_sim_for(f)?;
+                Ok(None)
+            }
+            hir::Stmt::UseLocal(_, _, _, _) => Ok(None),
         }
     }
 

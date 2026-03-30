@@ -1,22 +1,22 @@
-extern *usleep(us: i32) -> i32
+extern *usleep(us as i32) returns i32
 
 actor Adder
-    total: i64
-    @add n: i64
+    total as i64
+    @add n as i64
         total is total + n
     @show
         log(total)
 
 actor Multiplier
-    product: i64
+    product as i64
     @init
         product is 1
-    @mul n: i64
+    @mul n as i64
         product is product * n
     @show
         log(product)
 
-*main()
+*main
     a is spawn Adder
     m is spawn Multiplier
     send m, @init()

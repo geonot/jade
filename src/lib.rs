@@ -1,8 +1,10 @@
 pub mod ast;
+pub mod bind;
 pub mod cache;
 pub mod codegen;
 pub mod comptime;
 pub mod diagnostic;
+pub mod fmt;
 pub mod hir;
 pub mod hir_validate;
 pub mod interface;

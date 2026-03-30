@@ -518,4 +518,13 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(end_bb);
         Ok(None)
     }
+
+    pub(crate) fn compile_sim_for(
+        &mut self,
+        f: &hir::For,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        // sim for: currently compiled as a sequential for loop
+        // A full implementation would spawn each iteration as a coroutine
+        self.compile_for(f)
+    }
 }

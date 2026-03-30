@@ -23,13 +23,13 @@
     b is base
     e is exp
     while e > 0
-        if e % 2 equals 1
+        if e mod 2 equals 1
             result is result * b
         b is b * b
         e is e / 2
     result
 
-*main()
+*main
     # All three should give the same results
     log(power_recursive(2, 10))    # 1024
     log(power_iterative(2, 10))    # 1024

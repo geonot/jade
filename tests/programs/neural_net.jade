@@ -4,41 +4,41 @@
 # Uses fixed-size weights for a 2-input, 2-hidden, 1-output network
 
 # Activation function (ReLU)
-*relu(x: f64)
+*relu(x as f64)
     x > 0.0 ? x ! 0.0
 
 # Sigmoid approximation: 1 / (1 + e^-x)
 # Using a fast piecewise approximation
-*sigmoid(x: f64)
+*sigmoid(x as f64)
     if x > 6.0
         return 1.0
     if x < -6.0
         return 0.0
-    # Pade approximant: (x/2 + 1) / (|x| + 2) is rough but avoids exp
+    # Pade approximant as (x/2 + 1) / (|x| + 2) is rough but avoids exp
     ax is x.abs()
     (x * 0.5 + 1.0) / (ax + 2.0)
 
 # Dot product of two small arrays
-*dot2(a0: f64, a1: f64, b0: f64, b1: f64)
+*dot2(a0 as f64, a1 as f64, b0 as f64, b1 as f64)
     a0 * b0 + a1 * b1
 
 type NeuralNet
     # Input to hidden weights (2x2 = 4 weights)
-    w_ih0: f64    # input[0] -> hidden[0]
-    w_ih1: f64    # input[1] -> hidden[0]
-    w_ih2: f64    # input[0] -> hidden[1]
-    w_ih3: f64    # input[1] -> hidden[1]
+    w_ih0 as f64    # input[0] -> hidden[0]
+    w_ih1 as f64    # input[1] -> hidden[0]
+    w_ih2 as f64    # input[0] -> hidden[1]
+    w_ih3 as f64    # input[1] -> hidden[1]
     # Hidden biases
-    b_h0: f64
-    b_h1: f64
+    b_h0 as f64
+    b_h1 as f64
     # Hidden to output weights (2 weights)
-    w_ho0: f64    # hidden[0] -> output
-    w_ho1: f64    # hidden[1] -> output
+    w_ho0 as f64    # hidden[0] -> output
+    w_ho1 as f64    # hidden[1] -> output
     # Output bias
-    b_o: f64
+    b_o as f64
 
     # Forward pass
-    *forward(self, x0: f64, x1: f64)
+    *forward(self, x0 as f64, x1 as f64)
         # Hidden layer
         h0 is relu(x0 * self.w_ih0 + x1 * self.w_ih1 + self.b_h0)
         h1 is relu(x0 * self.w_ih2 + x1 * self.w_ih3 + self.b_h1)
@@ -46,11 +46,11 @@ type NeuralNet
         sigmoid(h0 * self.w_ho0 + h1 * self.w_ho1 + self.b_o)
 
 # Mean squared error
-*mse(predicted: f64, actual: f64)
+*mse(predicted as f64, actual as f64)
     diff is predicted - actual
     diff * diff
 
-*main()
+*main
     # Create a network that approximates XOR
     # (hand-tuned weights — normally learned via backprop)
     net is NeuralNet(
@@ -77,7 +77,7 @@ type NeuralNet
     total_error is mse(r00, 0.0) + mse(r01, 1.0) + mse(r10, 1.0) + mse(r11, 0.0)
     log(total_error)
 
-    # Test another network: simple AND gate
+    # Test another network as simple AND gate
     and_net is NeuralNet(
         w_ih0 is 10.0,  w_ih1 is 10.0,
         w_ih2 is 0.0,   w_ih3 is 0.0,

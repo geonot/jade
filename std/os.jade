@@ -1,17 +1,17 @@
 # std.os — Operating system interface
 
-extern *getenv(name: %i8) -> %i8
-extern *setenv(name: %i8, value: %i8, overwrite: i32) -> i32
-extern *getcwd(buf: %i8, size: i64) -> %i8
-extern *chdir(path: %i8) -> i32
-extern *exit(code: i32)
-extern *getpid() -> i32
-extern *system(cmd: %i8) -> i32
-extern *malloc(size: i64) -> %i8
-extern *free(ptr: %i8)
-extern *strlen(s: %i8) -> i64
-extern *mkdir(path: %i8, mode: i32) -> i32
-extern *rmdir(path: %i8) -> i32
+extern *getenv(name as %i8) returns %i8
+extern *setenv(name as %i8, value as %i8, overwrite as i32) returns i32
+extern *getcwd(buf as %i8, size as i64) returns %i8
+extern *chdir(path as %i8) returns i32
+extern *exit(code as i32)
+extern *getpid() returns i32
+extern *system(cmd as %i8) returns i32
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+extern *strlen(s as %i8) returns i64
+extern *mkdir(path as %i8, mode as i32) returns i32
+extern *rmdir(path as %i8) returns i32
 
 *env(name)
     ptr is getenv(%name)
@@ -22,7 +22,7 @@ extern *rmdir(path: %i8) -> i32
 *set_env(name, value)
     setenv(%name, %value, 1)
 
-*cwd()
+*cwd
     buf is malloc(4096)
     result is getcwd(buf, 4096)
     if result as i64 equals 0
@@ -31,10 +31,10 @@ extern *rmdir(path: %i8) -> i32
     len is strlen(buf)
     __string_from_raw(buf, len, 4096)
 
-*args()
+*args
     __get_args()
 
-*has_flag(flag: String) -> bool
+*has_flag(flag as String) returns bool
     a is args()
     i is 0
     while i < a.length
@@ -43,7 +43,7 @@ extern *rmdir(path: %i8) -> i32
         i += 1
     false
 
-*get_option(flag: String) -> String
+*get_option(flag as String) returns String
     a is args()
     i is 0
     while i < a.length - 1
@@ -52,7 +52,7 @@ extern *rmdir(path: %i8) -> i32
         i += 1
     ""
 
-*pid()
+*pid
     getpid()
 
 *make_dir(path)

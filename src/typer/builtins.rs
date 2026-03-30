@@ -20,8 +20,15 @@ impl Typer {
                     Ok(e) => e,
                     Err(e) => return Some(Err(e)),
                 };
+                // Generate a descriptive message from the assert expression
+                let expr_desc = Self::describe_assert_expr(&args[0]);
+                let msg_expr = hir::Expr {
+                    kind: hir::ExprKind::Str(expr_desc),
+                    ty: Type::String,
+                    span,
+                };
                 Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::Assert, vec![hcond]),
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::Assert, vec![hcond, msg_expr]),
                     ty: Type::Void,
                     span,
                 }))
@@ -272,6 +279,150 @@ impl Typer {
                 ),
                 span,
             })),
+            "set" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
+                kind: hir::ExprKind::SetNew,
+                ty: Type::Set(Box::new(self.infer_ctx.fresh_var())),
+                span,
+            })),
+            "priority_queue" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
+                kind: hir::ExprKind::PQNew,
+                ty: Type::PriorityQueue(Box::new(self.infer_ctx.fresh_var())),
+                span,
+            })),
+            "vec_with_alloc" if args.len() == 1 && !self.fns.contains_key(name) => {
+                let halloc = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::VecWithAlloc, vec![halloc]),
+                    ty: Type::Vec(Box::new(self.infer_ctx.fresh_var())),
+                    span,
+                }))
+            }
+            "map_with_alloc" if args.len() == 1 && !self.fns.contains_key(name) => {
+                let halloc = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::MapWithAlloc, vec![halloc]),
+                    ty: Type::Map(Box::new(self.infer_ctx.fresh_var()), Box::new(self.infer_ctx.fresh_var())),
+                    span,
+                }))
+            }
+            "Arena" if args.len() == 1 && !self.fns.contains_key(name) => {
+                let harg = match self.lower_expr_expected(&args[0], Some(&Type::I64)) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let _ = self.infer_ctx.unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::ArenaNew, vec![harg]),
+                    ty: Type::Arena,
+                    span,
+                }))
+            }
+            "matmul" if args.len() == 2 && !self.fns.contains_key(name) => {
+                let ha = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hb = match self.lower_expr(&args[1]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let result_ty = ha.ty.clone();
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::Matmul, vec![ha, hb]),
+                    ty: result_ty,
+                    span,
+                }))
+            }
+            // Constant-time operations (prevents timing side-channel attacks)
+            "constant_time_eq" if args.len() == 2 && !self.fns.contains_key(name) => {
+                let ha = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hb = match self.lower_expr(&args[1]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::ConstantTimeEq, vec![ha, hb]),
+                    ty: Type::Bool,
+                    span,
+                }))
+            }
+            // Comptime reflection builtins
+            "fields_of" if args.len() == 1 && !self.fns.contains_key(name) => {
+                // fields_of('StructName') → Vec of field name strings at compile time
+                let type_name = match &args[0] {
+                    ast::Expr::Str(s, _) => s.clone(),
+                    ast::Expr::Ident(s, _) => s.clone(),
+                    _ => return Some(Err("fields_of expects a type name".into())),
+                };
+                let fields = self.structs.get(&type_name).cloned().unwrap_or_default();
+                let field_exprs: Vec<hir::Expr> = fields
+                    .iter()
+                    .map(|(fname, _)| hir::Expr {
+                        kind: hir::ExprKind::Str(fname.clone()),
+                        ty: Type::String,
+                        span,
+                    })
+                    .collect();
+                let len = field_exprs.len();
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Array(field_exprs),
+                    ty: Type::Array(Box::new(Type::String), len),
+                    span,
+                }))
+            }
+            "type_of" if args.len() == 1 && !self.fns.contains_key(name) => {
+                // type_of(expr) → string representation of the type at compile time
+                let harg = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let ty_str = format!("{}", harg.ty);
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Str(ty_str),
+                    ty: Type::String,
+                    span,
+                }))
+            }
+            "size_of" if args.len() == 1 && !self.fns.contains_key(name) => {
+                // size_of('StructName') or size_of(expr) → byte size as i64
+                let size = match &args[0] {
+                    ast::Expr::Str(s, _) | ast::Expr::Ident(s, _) => {
+                        if let Some(fields) = self.structs.get(s) {
+                            fields.len() as i64 * 8 // rough estimate: 8 bytes per field
+                        } else {
+                            0
+                        }
+                    }
+                    _ => {
+                        let harg = match self.lower_expr(&args[0]) {
+                            Ok(e) => e,
+                            Err(e) => return Some(Err(e)),
+                        };
+                        match &harg.ty {
+                            Type::I8 | Type::U8 | Type::Bool => 1,
+                            Type::I16 | Type::U16 => 2,
+                            Type::I32 | Type::U32 | Type::F32 => 4,
+                            Type::I64 | Type::U64 | Type::F64 => 8,
+                            Type::String => 24,
+                            _ => 8, // pointer-sized default
+                        }
+                    }
+                };
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Int(size),
+                    ty: Type::I64,
+                    span,
+                }))
+            }
             _ => None,
         }
     }
@@ -293,5 +444,41 @@ impl Typer {
 
     fn lower_exprs(&mut self, exprs: &[ast::Expr]) -> Result<Vec<hir::Expr>, String> {
         exprs.iter().map(|e| self.lower_expr(e)).collect()
+    }
+
+    fn describe_assert_expr(expr: &ast::Expr) -> String {
+        match expr {
+            ast::Expr::BinOp(l, op, r, _) => {
+                let ls = Self::describe_assert_expr(l);
+                let rs = Self::describe_assert_expr(r);
+                let ops = match op {
+                    ast::BinOp::Eq => "equals",
+                    ast::BinOp::Ne => "not equals",
+                    ast::BinOp::Lt => "<",
+                    ast::BinOp::Le => "<=",
+                    ast::BinOp::Gt => ">",
+                    ast::BinOp::Ge => ">=",
+                    ast::BinOp::And => "and",
+                    ast::BinOp::Or => "or",
+                    _ => "op",
+                };
+                format!("{ls} {ops} {rs}")
+            }
+            ast::Expr::Ident(name, _) => name.clone(),
+            ast::Expr::Int(n, _) => n.to_string(),
+            ast::Expr::Float(f, _) => f.to_string(),
+            ast::Expr::Str(s, _) => format!("'{s}'"),
+            ast::Expr::Bool(b, _) => b.to_string(),
+            ast::Expr::Method(obj, method, _, _) => {
+                format!("{}.{method}", Self::describe_assert_expr(obj))
+            }
+            ast::Expr::Field(obj, field, _) => {
+                format!("{}.{field}", Self::describe_assert_expr(obj))
+            }
+            ast::Expr::Call(callee, _, _) => {
+                format!("{}(..)", Self::describe_assert_expr(callee))
+            }
+            _ => "expr".into(),
+        }
     }
 }

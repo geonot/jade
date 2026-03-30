@@ -1,11 +1,11 @@
-extern *usleep(us: i32) -> i32
+extern *usleep(us as i32) returns i32
 
 actor Worker
     sum
     @add n
         sum is sum + n
 
-*main()
+*main
     a is spawn Worker
     b is spawn Worker
     c is spawn Worker

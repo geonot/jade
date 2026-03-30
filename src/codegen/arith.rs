@@ -17,6 +17,25 @@ impl<'ctx> Compiler<'ctx> {
         right: &hir::Expr,
         _result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        // NDArray element-wise operations (broadcasting)
+        if let Type::NDArray(elem_ty, dims) = &left.ty {
+            return self.compile_ndarray_elementwise(left, op, right, elem_ty, dims);
+        }
+        // SIMD vector operations — LLVM vector ops work directly
+        if let Type::SIMD(_, _) = &left.ty {
+            let lhs = self.compile_expr(left)?;
+            let rhs = self.compile_expr(right)?;
+            let lv = lhs.into_vector_value();
+            let rv = rhs.into_vector_value();
+            let result = match op {
+                BinOp::Add => b!(self.bld.build_float_add(lv, rv, "simd.add")).into(),
+                BinOp::Sub => b!(self.bld.build_float_sub(lv, rv, "simd.sub")).into(),
+                BinOp::Mul => b!(self.bld.build_float_mul(lv, rv, "simd.mul")).into(),
+                BinOp::Div => b!(self.bld.build_float_div(lv, rv, "simd.div")).into(),
+                _ => return Err(format!("unsupported SIMD binop: {op:?}")),
+            };
+            return Ok(result);
+        }
         if matches!(op, BinOp::And) {
             return self.compile_short_circuit(left, right, true);
         }
@@ -58,7 +77,7 @@ impl<'ctx> Compiler<'ctx> {
         }
         if matches!(op, BinOp::Eq | BinOp::Ne) {
             if let Type::Struct(name, _) = ety {
-                let fn_name = format!("{name}_eq");
+                let fn_name = format!("{name}_equal");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let first_param_is_ptr = fv.get_type().get_param_types().first().map(|t| t.is_pointer_type()).unwrap_or(false);
                     let self_arg: BasicValueEnum = if first_param_is_ptr {
@@ -88,10 +107,10 @@ impl<'ctx> Compiler<'ctx> {
                 BinOp::Sub => Some("sub"),
                 BinOp::Mul => Some("mul"),
                 BinOp::Div => Some("div"),
-                BinOp::Lt => Some("lt"),
-                BinOp::Gt => Some("gt"),
-                BinOp::Le => Some("le"),
-                BinOp::Ge => Some("ge"),
+                BinOp::Lt => Some("less"),
+                BinOp::Gt => Some("greater"),
+                BinOp::Le => Some("less_eq"),
+                BinOp::Ge => Some("greater_eq"),
                 _ => None,
             };
             if let Some(method) = trait_name {
@@ -421,5 +440,80 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cond_bb));
         self.bld.position_at_end(end_bb);
         Ok(b!(self.bld.build_load(i64t, result_ptr, "pow.result")))
+    }
+
+    pub(crate) fn compile_ndarray_elementwise(
+        &mut self,
+        left: &hir::Expr,
+        op: BinOp,
+        right: &hir::Expr,
+        _elem_ty: &Type,
+        dims: &[usize],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let f64t = self.ctx.f64_type();
+        let malloc = self.ensure_malloc();
+
+        let lptr = self.compile_expr(left)?.into_pointer_value();
+        let rptr = self.compile_expr(right)?.into_pointer_value();
+
+        // Total elements = product of dims
+        let total: u64 = dims.iter().map(|&d| d as u64).product();
+        let total_v = i64t.const_int(total, false);
+
+        // Allocate result array
+        let elem_size = i64t.const_int(8, false);
+        let byte_size = b!(self.bld.build_int_mul(total_v, elem_size, "bcast.bytes"));
+        let result_ptr = b!(self
+            .bld
+            .build_call(malloc, &[byte_size.into()], "bcast.result"))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
+
+        // Loop over elements
+        let fn_val = self.cur_fn.unwrap();
+        let loop_bb = self.ctx.append_basic_block(fn_val, "bcast.loop");
+        let body_bb = self.ctx.append_basic_block(fn_val, "bcast.body");
+        let end_bb = self.ctx.append_basic_block(fn_val, "bcast.end");
+
+        let idx_ptr = self.entry_alloca(i64t.into(), "bcast.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_zero()));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "bcast.i")).into_int_value();
+        let cmp = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            idx,
+            total_v,
+            "bcast.cmp"
+        ));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
+
+        self.bld.position_at_end(body_bb);
+        let lep = unsafe { b!(self.bld.build_gep(f64t, lptr, &[idx.into()], "bcast.lep")) };
+        let rep = unsafe { b!(self.bld.build_gep(f64t, rptr, &[idx.into()], "bcast.rep")) };
+        let lv = b!(self.bld.build_load(f64t, lep, "bcast.lv")).into_float_value();
+        let rv = b!(self.bld.build_load(f64t, rep, "bcast.rv")).into_float_value();
+
+        let result_elem = match op {
+            BinOp::Add => b!(self.bld.build_float_add(lv, rv, "bcast.add")),
+            BinOp::Sub => b!(self.bld.build_float_sub(lv, rv, "bcast.sub")),
+            BinOp::Mul => b!(self.bld.build_float_mul(lv, rv, "bcast.mul")),
+            BinOp::Div => b!(self.bld.build_float_div(lv, rv, "bcast.div")),
+            _ => b!(self.bld.build_float_add(lv, rv, "bcast.fallback")),
+        };
+
+        let oep = unsafe { b!(self.bld.build_gep(f64t, result_ptr, &[idx.into()], "bcast.oep")) };
+        b!(self.bld.build_store(oep, result_elem));
+
+        let next = b!(self.bld.build_int_add(idx, i64t.const_int(1, false), "bcast.next"));
+        b!(self.bld.build_store(idx_ptr, next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(end_bb);
+        Ok(result_ptr.into())
     }
 }

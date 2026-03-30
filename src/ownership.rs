@@ -244,6 +244,26 @@ impl OwnershipVerifier {
             Stmt::Stop(e, _) => {
                 self.verify_expr(e);
             }
+            Stmt::SimFor(f, _) => {
+                self.verify_expr(&f.iter);
+                if let Some(end) = &f.end { self.verify_expr(end); }
+                if let Some(step) = &f.step { self.verify_expr(step); }
+                self.push_scope();
+                self.define(
+                    f.bind_id,
+                    VarState {
+                        ownership: Ownership::Owned,
+                        ty: f.bind_ty.clone(),
+                        moved: false,
+                        borrow_count: 0,
+                        mut_borrowed: false,
+                        move_span: None,
+                    },
+                );
+                self.verify_block_no_scope(&f.body);
+                self.pop_scope();
+            }
+            Stmt::UseLocal(_, _, _, _) => {}
         }
     }
 
@@ -452,8 +472,8 @@ impl OwnershipVerifier {
                     self.verify_expr(a);
                 }
             }
-            ExprKind::MapNew => {}
-            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
+            ExprKind::MapNew | ExprKind::SetNew | ExprKind::PQNew | ExprKind::NDArrayNew(_) | ExprKind::SIMDNew(_) => {}
+            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args) => {
                 self.verify_expr(obj);
                 for a in args {
                     self.verify_expr(a);
@@ -481,6 +501,41 @@ impl OwnershipVerifier {
                 if let Some(body) = default_body {
                     self.verify_block(body);
                 }
+            }
+            ExprKind::Unreachable => {}
+            ExprKind::StrictCast(inner, _) | ExprKind::AsFormat(inner, _) | ExprKind::AtomicLoad(inner) => {
+                self.verify_expr(inner);
+            }
+            ExprKind::AtomicStore(a, b) | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
+                self.verify_expr(a);
+                self.verify_expr(b);
+            }
+            ExprKind::AtomicCas(ptr, expected, new) => {
+                self.verify_expr(ptr);
+                self.verify_expr(expected);
+                self.verify_expr(new);
+            }
+            ExprKind::Slice(obj, start, end) => {
+                self.verify_expr(obj);
+                self.verify_expr(start);
+                self.verify_expr(end);
+            }
+            ExprKind::DequeNew => {}
+            ExprKind::DequeMethod(obj, _, args) => {
+                self.verify_expr(obj);
+                for a in args { self.verify_expr(a); }
+            }
+            ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => {
+                self.verify_expr(e);
+            }
+            ExprKind::Einsum(_, args) => {
+                for a in args { self.verify_expr(a); }
+            }
+            ExprKind::Builder(_, fields) => {
+                for (_, v) in fields { self.verify_expr(v); }
+            }
+            ExprKind::GeneratorCreate(_, _, stmts) => {
+                self.verify_block(stmts);
             }
         }
     }

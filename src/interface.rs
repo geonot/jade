@@ -154,8 +154,18 @@ impl From<&crate::types::Type> for IType {
             Type::ActorRef(n) => IType::ActorRef(n.clone()),
             Type::Coroutine(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
             Type::Channel(inner) => IType::Channel(Box::new(inner.as_ref().into())),
+            Type::Set(inner) => IType::Vec(Box::new(inner.as_ref().into())),
+            Type::NDArray(inner, _dims) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::DynTrait(n) => IType::DynTrait(n.clone()),
+            Type::Arena => IType::I64, // arenas not exposed in interfaces
+            Type::SIMD(inner, lanes) => IType::Array(Box::new(inner.as_ref().into()), *lanes),
+            Type::PriorityQueue(inner) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::TypeVar(_) => IType::I64, // unsolved vars default to i64
+            Type::Deque(inner) => IType::Vec(Box::new(inner.as_ref().into())),
+            Type::Cow(inner) => inner.as_ref().into(),
+            Type::Alias(_, inner) => inner.as_ref().into(),
+            Type::Newtype(_, inner) => inner.as_ref().into(),
+            Type::Generator(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
         }
     }
 }
@@ -377,6 +387,7 @@ impl InterfaceFile {
                                 ty: ft.into(),
                             })
                             .collect(),
+                        discriminant: None,
                         span: dummy,
                     })
                     .collect(),

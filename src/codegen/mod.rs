@@ -22,6 +22,7 @@ mod string_transform;
 mod strings;
 mod types;
 mod vec;
+mod set;
 
 use std::collections::HashMap;
 use std::path::Path;

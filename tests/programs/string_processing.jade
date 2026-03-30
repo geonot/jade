@@ -3,7 +3,7 @@
 # Demonstrates: string methods, char_at, loops, string interpolation
 
 # Count occurrences of a character in a string
-*count_char(s: String, ch: i64)
+*count_char(s as String, ch as i64)
     count is 0
     for i from 0 to s.length
         if s.char_at(i) equals ch
@@ -11,18 +11,18 @@
     count
 
 # Check if string is a palindrome (ASCII)
-*is_palindrome(s: String)
+*is_palindrome(s as String)
     left is 0
     right is s.length - 1
     while left < right
-        if s.char_at(left) isnt s.char_at(right)
+        if s.char_at(left) neq s.char_at(right)
             return false
         left is left + 1
         right is right - 1
     true
 
 # Count words (split by spaces, char 32)
-*count_words(s: String)
+*count_words(s as String)
     if s.length equals 0
         return 0
     words is 1
@@ -32,31 +32,31 @@
     words
 
 # Caesar cipher (shift ASCII letters)
-*caesar_shift(ch: i64, shift: i64)
+*caesar_shift(ch as i64, shift as i64)
     if ch >= 97 and ch <= 122    # a-z
-        return ((ch - 97 + shift) % 26) + 97
+        return ((ch - 97 + shift) mod 26) + 97
     if ch >= 65 and ch <= 90     # A-Z
-        return ((ch - 65 + shift) % 26) + 65
+        return ((ch - 65 + shift) mod 26) + 65
     ch
 
 # Check for substring match at position
-*matches_at(s: String, pattern: String, pos: i64)
+*matches_at(s as String, pattern as String, pos as i64)
     if pos + pattern.length > s.length
         return false
     for i from 0 to pattern.length
-        if s.char_at(pos + i) isnt pattern.char_at(i)
+        if s.char_at(pos + i) neq pattern.char_at(i)
             return false
     true
 
 # Count all substring occurrences
-*count_occurrences(s: String, pattern: String)
+*count_occurrences(s as String, pattern as String)
     count is 0
     for i from 0 to s.length
         if matches_at(s, pattern, i)
             count is count + 1
     count
 
-*main()
+*main
     msg is 'hello world'
 
     # Character counting

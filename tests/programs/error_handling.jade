@@ -17,7 +17,7 @@ err IoError
         ! DivisionByZero
     a / b
 
-*safe_sqrt(x: f64)
+*safe_sqrt(x as f64)
     if x < 0.0
         ! NegativeRoot
     x.sqrt()
@@ -32,21 +32,21 @@ err IoError
         result is result * i
     result
 
-*open_file(path: String)
+*open_file(path as String)
     if path equals ''
         ! FileNotFound('empty path')
     if path equals '/root/secret'
         ! PermissionDenied('/root/secret')
     42   # file descriptor
 
-*read_with_timeout(fd: i64, timeout_ms: i64)
+*read_with_timeout(fd as i64, timeout_ms as i64)
     if timeout_ms <= 0
         ! Timeout(0)
     if fd < 0
         ! FileNotFound('bad fd')
     'data'
 
-*main()
+*main
     # Safe division
     match safe_divide(10, 3)
         DivisionByZero ? log('div by zero')

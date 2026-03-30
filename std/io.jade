@@ -1,39 +1,39 @@
 # std.io — File I/O
 
-extern *fopen(path: %i8, mode: %i8) -> %i8
-extern *fclose(fp: %i8) -> i32
-extern *fread(buf: %i8, size: i64, count: i64, fp: %i8) -> i64
-extern *fwrite(buf: %i8, size: i64, count: i64, fp: %i8) -> i64
-extern *fseek(fp: %i8, offset: i64, whence: i32) -> i32
-extern *ftell(fp: %i8) -> i64
-extern *fgets(buf: %i8, size: i32, fp: %i8) -> %i8
-extern *feof(fp: %i8) -> i32
-extern *remove(path: %i8) -> i32
-extern *rename(old: %i8, new_name: %i8) -> i32
-extern *malloc(size: i64) -> %i8
-extern *free(ptr: %i8)
-extern *memcpy(dst: %i8, src: %i8, n: i64) -> %i8
-extern *strlen(s: %i8) -> i64
-extern *write(fd: i32, buf: %i8, count: i64) -> i64
+extern *fopen(path as %i8, mode as %i8) returns %i8
+extern *fclose(fp as %i8) returns i32
+extern *fread(buf as %i8, size as i64, count as i64, fp as %i8) returns i64
+extern *fwrite(buf as %i8, size as i64, count as i64, fp as %i8) returns i64
+extern *fseek(fp as %i8, offset as i64, whence as i32) returns i32
+extern *ftell(fp as %i8) returns i64
+extern *fgets(buf as %i8, size as i32, fp as %i8) returns %i8
+extern *feof(fp as %i8) returns i32
+extern *remove(path as %i8) returns i32
+extern *rename(old as %i8, new_name as %i8) returns i32
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
+extern *strlen(s as %i8) returns i64
+extern *write(fd as i32, buf as %i8, count as i64) returns i64
 
 type File
-    handle: %i8
-    path: String
-    mode: String
+    handle as %i8
+    path as String
+    mode as String
 
     *read(size)
         buf is malloc(size)
         n is fread(buf, 1, size, self.handle)
         __string_from_raw(buf, n, size)
 
-    *write_data(data: String)
+    *write_data(data as String)
         fwrite(%data, 1, data.length, self.handle)
 
-    *close_file()
+    *close_file
         fclose(self.handle)
 
-    *eof()
-        feof(self.handle) isnt 0
+    *eof
+        feof(self.handle) neq 0
 
 *read_file(path)
     fp is fopen(%path, "r")
@@ -70,9 +70,9 @@ type File
 *file_exists(path)
     __file_exists(path)
 
-*eprint(s: String)
+*eprint(s as String)
     write(2, %s, s.length)
 
-*eprintln(s: String)
+*eprintln(s as String)
     msg is s + '\n'
     write(2, %msg, msg.length)

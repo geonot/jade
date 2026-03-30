@@ -432,6 +432,56 @@ impl<'ctx> Compiler<'ctx> {
         self.finalize_string_sso(final_buf, out_len, true, "rep")
     }
 
+    pub(crate) fn string_repeat(
+        &mut self,
+        s: BasicValueEnum<'ctx>,
+        count: BasicValueEnum<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let fv = self.cur_fn.unwrap();
+        let i8t = self.ctx.i8_type();
+        let i64t = self.ctx.i64_type();
+
+        let sdata = self.string_data(s)?.into_pointer_value();
+        let slen = self.string_len(s)?.into_int_value();
+        let n = count.into_int_value();
+
+        let total_len = b!(self.bld.build_int_nsw_mul(slen, n, "rpt.tlen"));
+        let malloc = self.ensure_malloc();
+        let buf = b!(self
+            .bld
+            .build_call(malloc, &[total_len.into()], "rpt.buf"))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
+
+        let memcpy = self.ensure_memcpy();
+        let cond_bb = self.ctx.append_basic_block(fv, "rpt.cond");
+        let body_bb = self.ctx.append_basic_block(fv, "rpt.body");
+        let done_bb = self.ctx.append_basic_block(fv, "rpt.done");
+
+        let entry_bb = self.bld.get_insert_block().unwrap();
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(cond_bb);
+        let phi_i = b!(self.bld.build_phi(i64t, "rpt.i"));
+        phi_i.add_incoming(&[(&i64t.const_int(0, false), entry_bb)]);
+        let i = phi_i.as_basic_value().into_int_value();
+        let done = b!(self.bld.build_int_compare(IntPredicate::SGE, i, n, "rpt.done"));
+        b!(self.bld.build_conditional_branch(done, done_bb, body_bb));
+
+        self.bld.position_at_end(body_bb);
+        let offset = b!(self.bld.build_int_nsw_mul(i, slen, "rpt.off"));
+        let dst = unsafe { b!(self.bld.build_gep(i8t, buf, &[offset], "rpt.dst")) };
+        b!(self.bld.build_call(memcpy, &[dst.into(), sdata.into(), slen.into()], ""));
+        let next_i = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "rpt.ni"));
+        phi_i.add_incoming(&[(&next_i, self.bld.get_insert_block().unwrap())]);
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(done_bb);
+        self.finalize_string_sso(buf, total_len, true, "rpt")
+    }
+
     pub(crate) fn string_split(
         &mut self,
         s: BasicValueEnum<'ctx>,

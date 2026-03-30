@@ -182,6 +182,13 @@ impl HirValidator {
             hir::Stmt::Transaction(block, _) => self.validate_block(block),
             hir::Stmt::ChannelClose(e, _) => self.validate_expr(e),
             hir::Stmt::Stop(e, _) => self.validate_expr(e),
+            hir::Stmt::SimFor(f, _) => {
+                self.validate_expr(&f.iter);
+                if let Some(e) = &f.end { self.validate_expr(e); }
+                if let Some(e) = &f.step { self.validate_expr(e); }
+                self.validate_block(&f.body);
+            }
+            hir::Stmt::UseLocal(_, _, _, _) => {}
         }
     }
 
@@ -239,7 +246,9 @@ impl HirValidator {
             }
             hir::ExprKind::StringMethod(obj, _, args)
             | hir::ExprKind::VecMethod(obj, _, args)
-            | hir::ExprKind::MapMethod(obj, _, args) => {
+            | hir::ExprKind::MapMethod(obj, _, args)
+            | hir::ExprKind::SetMethod(obj, _, args)
+            | hir::ExprKind::PQMethod(obj, _, args) => {
                 self.validate_expr(obj);
                 for a in args {
                     self.validate_expr(a);
@@ -250,6 +259,7 @@ impl HirValidator {
                     self.validate_expr(e);
                 }
             }
+            hir::ExprKind::SetNew | hir::ExprKind::PQNew | hir::ExprKind::NDArrayNew(_) | hir::ExprKind::SIMDNew(_) => {}
             hir::ExprKind::Field(obj, _, _) => self.validate_expr(obj),
             hir::ExprKind::Index(arr, idx) => {
                 self.validate_expr(arr);
@@ -343,13 +353,28 @@ impl HirValidator {
             | hir::ExprKind::Spawn(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_)
-            | hir::ExprKind::IterNext(_, _, _) => {}
+            | hir::ExprKind::IterNext(_, _, _)
+            | hir::ExprKind::DequeNew => {}
             hir::ExprKind::ChannelCreate(_, cap) => self.validate_expr(cap),
             hir::ExprKind::ChannelSend(ch, val) => {
                 self.validate_expr(ch);
                 self.validate_expr(val);
             }
             hir::ExprKind::ChannelRecv(ch) => self.validate_expr(ch),
+            hir::ExprKind::Unreachable => {}
+            hir::ExprKind::StrictCast(inner, _) | hir::ExprKind::AsFormat(inner, _) | hir::ExprKind::AtomicLoad(inner) | hir::ExprKind::AtomicStore(inner, _) | hir::ExprKind::AtomicAdd(inner, _) | hir::ExprKind::AtomicSub(inner, _) => {
+                self.validate_expr(inner);
+            }
+            hir::ExprKind::AtomicCas(ptr, expected, new) => {
+                self.validate_expr(ptr);
+                self.validate_expr(expected);
+                self.validate_expr(new);
+            }
+            hir::ExprKind::Slice(obj, start, end) => {
+                self.validate_expr(obj);
+                self.validate_expr(start);
+                self.validate_expr(end);
+            }
             hir::ExprKind::Select(arms, default_body) => {
                 for arm in arms {
                     self.validate_expr(&arm.chan);
@@ -361,6 +386,22 @@ impl HirValidator {
                 if let Some(body) = default_body {
                     self.validate_block(body);
                 }
+            }
+            hir::ExprKind::DequeMethod(obj, _, args) => {
+                self.validate_expr(obj);
+                for a in args { self.validate_expr(a); }
+            }
+            hir::ExprKind::Grad(e) | hir::ExprKind::CowWrap(e) | hir::ExprKind::CowClone(e) | hir::ExprKind::GeneratorNext(e) => {
+                self.validate_expr(e);
+            }
+            hir::ExprKind::Einsum(_, args) => {
+                for a in args { self.validate_expr(a); }
+            }
+            hir::ExprKind::Builder(_, fields) => {
+                for (_, v) in fields { self.validate_expr(v); }
+            }
+            hir::ExprKind::GeneratorCreate(_, _, stmts) => {
+                self.validate_block(stmts);
             }
         }
     }
@@ -416,5 +457,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::Transaction(_, s) => *s,
         hir::Stmt::ChannelClose(_, s) => *s,
         hir::Stmt::Stop(_, s) => *s,
+        hir::Stmt::SimFor(_, s) => *s,
+        hir::Stmt::UseLocal(_, _, _, s) => *s,
     }
 }

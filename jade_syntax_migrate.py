@@ -29,9 +29,10 @@ class Rule:
     name: str
     phase: int
     pattern: re.Pattern
-    replacement: str
+    replacement: str  # str or callable
     description: str
     count: int = 0
+    use_fn: bool = False
 
     def apply(self, text: str) -> tuple[str, int]:
         new_text, n = self.pattern.subn(self.replacement, text)
@@ -53,16 +54,10 @@ def build_rules() -> list[Rule]:
         description="Return type arrow '->' → 'returns' (after closing paren)",
     ))
 
-    # Standalone fn return:  *name(...) -> Type  (handled by above since it ends with ))
-    # Function type in param:  (i64) -> i64  →  (i64) returns i64  (also handled by above)
-    # But we also need: *string_builder() -> StringBuilder  (also handled)
-
     # ── Phase 2: type annotations  :  →  as  ─────────────────────
 
     # Parameter type annotations:  name: Type  →  name as Type
     # This matches:  word: TypeName  where TypeName starts with uppercase, %, &, or (
-    # Must NOT match inside strings or comments
-    # Must NOT match after 'extern' keyword lines (those are handled separately)
     # Pattern: identifier followed by : then a type
     rules.append(Rule(
         name="param_type_colon",
@@ -71,8 +66,6 @@ def build_rules() -> list[Rule]:
         replacement=r'\1 as \2',
         description="Type annotation ':' → 'as' (param: Type → param as Type)",
     ))
-
-    # Struct field type annotations with same pattern (covered by above)
 
     # ── Phase 3: modulo  %  →  mod  ──────────────────────────────
 
@@ -86,22 +79,24 @@ def build_rules() -> list[Rule]:
         description="Modulo operator '%' → 'mod' (binary with spaces)",
     ))
 
-    # %= augmented assignment → mod=
+    # ── Phase 4: isnt  →  neq  ───────────────────────────────────
+
+    # Replace `isnt` with `neq` — word boundary match
     rules.append(Rule(
-        name="modulo_assign",
-        phase=3,
-        pattern=re.compile(r'\s%=\s'),
-        replacement=' mod= ',
-        description="Modulo assignment '%=' → 'mod='",
+        name="isnt_to_neq",
+        phase=4,
+        pattern=re.compile(r'\bisnt\b'),
+        replacement='neq',
+        description="Not-equals 'isnt' → 'neq'",
     ))
 
-    # ── Phase 4: empty parens in fn defs  *name()  → *name  ─────
+    # ── Phase 5: empty parens in fn defs  *name()  → *name  ─────
 
     # Only at start of line (function definitions)
     # *name()  →  *name  (but NOT *fn() which is lambda)
     rules.append(Rule(
         name="empty_parens_fndef",
-        phase=4,
+        phase=5,
         pattern=re.compile(r'^\*([a-zA-Z_][a-zA-Z0-9_]*)\(\)\s*$', re.MULTILINE),
         replacement=r'*\1',
         description="Remove empty parens from no-arg fn defs: *name() → *name",
@@ -110,10 +105,21 @@ def build_rules() -> list[Rule]:
     # Also inside type bodies (indented):  *name()  →  *name
     rules.append(Rule(
         name="empty_parens_method",
-        phase=4,
+        phase=5,
         pattern=re.compile(r'^(\s+)\*([a-zA-Z_][a-zA-Z0-9_]*)\(\)\s*$', re.MULTILINE),
         replacement=r'\1*\2',
         description="Remove empty parens from no-arg method defs: *name() → *name",
+    ))
+
+    # ── Phase 6: remove %= lines entirely ────────────────────────
+
+    # Remove lines containing %= (augmented modulo assignment is dropped)
+    rules.append(Rule(
+        name="remove_percent_eq",
+        phase=6,
+        pattern=re.compile(r'^.*%=.*\n', re.MULTILINE),
+        replacement='',
+        description="Remove %= augmented assignment lines (dropped from language)",
     ))
 
     return rules
@@ -158,16 +164,6 @@ def process_file(filepath: Path, rules: list[Rule], apply: bool) -> list[str]:
     return changes
 
 
-def process_line_aware(filepath: Path, apply: bool) -> list[str]:
-    """Handle replacements that need line-level context (comments, strings)."""
-    # This function handles edge cases the regex rules can't:
-    # - Don't replace inside comments
-    # - Don't replace inside string literals
-    # For now, the regex rules are good enough for most cases.
-    # Edge cases can be handled manually.
-    return []
-
-
 # ─── Reporting ────────────────────────────────────────────────────────
 
 def report_patterns():
@@ -177,8 +173,9 @@ def report_patterns():
         "colon_type_annotations": 0,
         "arrow_return_types": 0,
         "modulo_percent": 0,
+        "isnt_keyword": 0,
         "empty_paren_fndefs": 0,
-        "enum_variant_parens": 0,
+        "percent_eq_augmented": 0,
     }
 
     for f in files:
@@ -190,15 +187,17 @@ def report_patterns():
             counts["colon_type_annotations"] += len(re.findall(
                 r'\b[a-z_][a-z0-9_]*\s*:\s*[%&A-Z(]', stripped))
             # Arrow return types
-            counts["arrow_return_types"] += len(re.findall(r'->', stripped))
+            counts["arrow_return_types"] += len(re.findall(r'\)\s*->', stripped))
             # Modulo (binary, not pointer prefix)
             counts["modulo_percent"] += len(re.findall(r'\S\s+%\s+\S', stripped))
+            # isnt keyword
+            counts["isnt_keyword"] += len(re.findall(r'\bisnt\b', stripped))
             # Empty paren fn defs
             if re.match(r'\s*\*[a-zA-Z_][a-zA-Z0-9_]*\(\)\s*$', line):
                 counts["empty_paren_fndefs"] += 1
-            # Enum variant parens
-            counts["enum_variant_parens"] += len(re.findall(
-                r'^\s+[A-Z][a-zA-Z]*\(', line))
+            # %= augmented assignment
+            if '%=' in stripped:
+                counts["percent_eq_augmented"] += 1
 
     print("\n=== Pattern Occurrence Report ===\n")
     for pattern, count in counts.items():
@@ -218,7 +217,7 @@ def main():
                        help="Apply changes to files")
     group.add_argument("--report", action="store_true",
                        help="Report pattern occurrences only")
-    parser.add_argument("--phase", type=int, choices=[1, 2, 3, 4],
+    parser.add_argument("--phase", type=int, choices=[1, 2, 3, 4, 5, 6],
                         help="Only apply rules from this phase")
     parser.add_argument("--file", type=str,
                         help="Only process this specific file")
@@ -252,8 +251,6 @@ def main():
         if not filepath.exists():
             continue
 
-        # Reset rule counts for per-file tracking
-        # (we track per-rule totals separately)
         changes = process_file(filepath, rules, apply=args.apply)
 
         if changes:

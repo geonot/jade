@@ -63,6 +63,74 @@ impl<'ctx> Compiler<'ctx> {
                 let delim = self.compile_expr(&args[0])?;
                 self.string_split(sv, delim)
             }
+            "lines" => {
+                let newline = self.compile_str_literal("\n")?;
+                self.string_split(sv, newline)
+            }
+            "repeat" => {
+                if args.len() != 1 {
+                    return Err("repeat() takes 1 argument".into());
+                }
+                let count = self.compile_expr(&args[0])?;
+                self.string_repeat(sv, count)
+            }
+            "is_empty" => {
+                let len = self.string_len(sv)?.into_int_value();
+                let i64t = self.ctx.i64_type();
+                let cmp = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    len,
+                    i64t.const_int(0, false),
+                    "isempty"
+                ));
+                let i1t = self.ctx.bool_type();
+                let ext = b!(self.bld.build_int_z_extend(cmp, i1t, "isempty.ext"));
+                Ok(ext.into())
+            }
+            "matches" => {
+                if args.len() != 1 {
+                    return Err("matches() takes 1 argument (pattern)".into());
+                }
+                let pattern = self.compile_expr(&args[0])?;
+                let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+                let bool_t = self.ctx.bool_type();
+                let fn_type = bool_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
+                let func = self
+                    .module
+                    .get_function("__jade_regex_match")
+                    .unwrap_or_else(|| self.module.add_function("__jade_regex_match", fn_type, None));
+                let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into()], "re.match"));
+                Ok(result.try_as_basic_value().basic().unwrap())
+            }
+            "find_all" => {
+                if args.len() != 1 {
+                    return Err("find_all() takes 1 argument (pattern)".into());
+                }
+                let pattern = self.compile_expr(&args[0])?;
+                let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+                let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
+                let func = self
+                    .module
+                    .get_function("__jade_regex_find_all")
+                    .unwrap_or_else(|| self.module.add_function("__jade_regex_find_all", fn_type, None));
+                let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into()], "re.findall"));
+                Ok(result.try_as_basic_value().basic().unwrap())
+            }
+            "replace_re" => {
+                if args.len() != 2 {
+                    return Err("replace_re() takes 2 arguments (pattern, replacement)".into());
+                }
+                let pattern = self.compile_expr(&args[0])?;
+                let replacement = self.compile_expr(&args[1])?;
+                let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+                let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into(), ptr_t.into()], false);
+                let func = self
+                    .module
+                    .get_function("__jade_regex_replace")
+                    .unwrap_or_else(|| self.module.add_function("__jade_regex_replace", fn_type, None));
+                let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into(), replacement.into()], "re.replace"));
+                Ok(result.try_as_basic_value().basic().unwrap())
+            }
             _ => Err(format!("no method '{m}' on String")),
         }
     }

@@ -5,7 +5,7 @@ PI is 3.14159265358979323846
 E is 2.71828182845904523536
 TAU is 6.28318530717958647692
 
-extern *sqrt(x: f64) -> f64
+extern *sqrt(x as f64) returns f64
 
 # Intrinsic wrappers
 *ln(x)
@@ -59,7 +59,7 @@ extern *sqrt(x: f64) -> f64
 *gcd(a, b)
     if b equals 0
         return a
-    gcd(b, a % b)
+    gcd(b, a mod b)
 
 *lcm(a, b)
     (a / gcd(a, b)) * b

@@ -3,16 +3,16 @@
 # Demonstrates: structs, methods, loops, math, type casting
 
 type Vec2
-    x: f64
-    y: f64
+    x as f64
+    y as f64
 
-    *add(self, other: Vec2)
+    *add(self, other as Vec2)
         Vec2(x is self.x + other.x, y is self.y + other.y)
 
-    *sub(self, other: Vec2)
+    *sub(self, other as Vec2)
         Vec2(x is self.x - other.x, y is self.y - other.y)
 
-    *scale(self, s: f64)
+    *scale(self, s as f64)
         Vec2(x is self.x * s, y is self.y * s)
 
     *length(self)
@@ -24,14 +24,14 @@ type Vec2
             return Vec2(x is 0.0, y is 0.0)
         self.scale(1.0 / len)
 
-    *dot(self, other: Vec2)
+    *dot(self, other as Vec2)
         self.x * other.x + self.y * other.y
 
 type Body
-    pos: Vec2
-    vel: Vec2
-    mass: f64
-    radius: f64
+    pos as Vec2
+    vel as Vec2
+    mass as f64
+    radius as f64
 
     *kinetic_energy(self)
         speed is self.vel.length()
@@ -41,7 +41,7 @@ type Body
         self.vel.scale(self.mass)
 
 # Gravitational constant (scaled for sim)
-*gravity_force(a: Body, b: Body)
+*gravity_force(a as Body, b as Body)
     diff is b.pos.sub(a.pos)
     dist is diff.length()
     if dist < 0.1
@@ -52,7 +52,7 @@ type Body
     diff.normalize().scale(force_mag)
 
 # Euler integration step
-*step(body: Body, force: Vec2, dt: f64)
+*step(body as Body, force as Vec2, dt as f64)
     # a = F/m
     acc is force.scale(1.0 / body.mass)
     # v = v + a*dt
@@ -62,15 +62,15 @@ type Body
     Body(pos is new_pos, vel is new_vel, mass is body.mass, radius is body.radius)
 
 # Check collision between two bodies
-*collides(a: Body, b: Body)
+*collides(a as Body, b as Body)
     dist is a.pos.sub(b.pos).length()
     dist < (a.radius + b.radius)
 
 # Elastic collision response (1D simplification)
-*elastic_velocity(m1: f64, m2: f64, v1: f64, v2: f64)
+*elastic_velocity(m1 as f64, m2 as f64, v1 as f64, v2 as f64)
     ((m1 - m2) * v1 + 2.0 * m2 * v2) / (m1 + m2)
 
-*main()
+*main
     # Two-body gravitational simulation
     sun is Body(
         pos is Vec2(x is 0.0, y is 0.0),

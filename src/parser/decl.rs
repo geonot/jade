@@ -9,6 +9,31 @@ enum Either<A, B> {
     Method(B),
 }
 
+fn body_contains_yield(body: &[Stmt]) -> bool {
+    body.iter().any(|s| stmt_has_yield(s))
+}
+
+fn stmt_has_yield(s: &Stmt) -> bool {
+    match s {
+        Stmt::Expr(e) | Stmt::Ret(Some(e), _) | Stmt::Break(Some(e), _) => expr_has_yield(e),
+        Stmt::If(i) => {
+            expr_has_yield(&i.cond)
+                || body_contains_yield(&i.then)
+                || i.elifs.iter().any(|(c, b)| expr_has_yield(c) || body_contains_yield(b))
+                || i.els.as_ref().is_some_and(|b| body_contains_yield(b))
+        }
+        Stmt::While(w) => expr_has_yield(&w.cond) || body_contains_yield(&w.body),
+        Stmt::For(f) => body_contains_yield(&f.body),
+        Stmt::Loop(l) => body_contains_yield(&l.body),
+        Stmt::Match(m) => m.arms.iter().any(|a| body_contains_yield(&a.body)),
+        _ => false,
+    }
+}
+
+fn expr_has_yield(e: &Expr) -> bool {
+    matches!(e, Expr::Yield(_, _))
+}
+
 impl Parser {
     pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match self.peek() {
@@ -23,6 +48,15 @@ impl Parser {
             Token::Store => Ok(Decl::Store(self.parse_store_def()?)),
             Token::Trait => Ok(Decl::Trait(self.parse_trait_def()?)),
             Token::Impl => Ok(Decl::Impl(self.parse_impl_block()?)),
+            Token::Supervisor => Ok(Decl::Supervisor(self.parse_supervisor_def()?)),
+            Token::Alias => {
+                let sp = self.span();
+                self.advance();
+                let name = self.ident()?;
+                self.expect(Token::Is)?;
+                let ty = self.parse_type()?;
+                Ok(Decl::TypeAlias(name, ty, sp))
+            }
             Token::Ident(_) => {
                 let sp = self.span();
                 let name = self.ident()?;
@@ -88,7 +122,11 @@ impl Parser {
                 break;
             }
             let pname = self.ident()?;
-            self.expect(Token::Colon)?;
+            if self.check(Token::Colon) || self.check(Token::As) {
+                self.advance();
+            } else {
+                self.expect(Token::Colon)?;
+            }
             let pty = self.parse_type()?;
             params.push((pname, pty));
             if !self.check(Token::RParen) && !variadic {
@@ -96,7 +134,7 @@ impl Parser {
             }
         }
         self.expect(Token::RParen)?;
-        let ret = if self.check(Token::Arrow) {
+        let ret = if self.check(Token::Arrow) || self.check(Token::Returns) {
             self.advance();
             self.parse_type()?
         } else {
@@ -131,6 +169,7 @@ impl Parser {
         } else {
             while !self.check(Token::Newline)
                 && !self.check(Token::Arrow)
+                && !self.check(Token::Returns)
                 && !self.check(Token::Is)
                 && !self.eof()
             {
@@ -141,7 +180,7 @@ impl Parser {
             }
         }
 
-        let ret = if self.check(Token::Arrow) {
+        let ret = if self.check(Token::Arrow) || self.check(Token::Returns) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -149,6 +188,7 @@ impl Parser {
         };
 
         let body = self.parse_body()?;
+        let is_generator = body_contains_yield(&body);
 
         Ok(Fn {
             name,
@@ -157,6 +197,7 @@ impl Parser {
             params,
             ret,
             body,
+            is_generator,
             span: sp,
         })
     }
@@ -192,7 +233,7 @@ impl Parser {
     pub(super) fn parse_param(&mut self, typed: bool) -> Result<Param, ParseError> {
         let sp = self.span();
         let name = self.ident()?;
-        let ty = if typed && self.check(Token::Colon) {
+        let ty = if typed && (self.check(Token::Colon) || self.check(Token::As)) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -282,7 +323,7 @@ impl Parser {
     fn parse_field(&mut self) -> Result<Field, ParseError> {
         let sp = self.span();
         let name = self.ident()?;
-        let ty = if self.check(Token::Colon) {
+        let ty = if self.check(Token::Colon) || self.check(Token::As) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -335,9 +376,18 @@ impl Parser {
             }
             self.expect(Token::RParen)?;
         }
+        let mut discriminant = None;
+        if self.check(Token::Is) {
+            self.advance();
+            if let Token::Int(n) = self.peek() {
+                discriminant = Some(n);
+                self.advance();
+            }
+        }
         Ok(Variant {
             name,
             fields,
+            discriminant,
             span: sp,
         })
     }
@@ -358,7 +408,7 @@ impl Parser {
         }
     }
 
-    fn parse_use_decl(&mut self) -> Result<UseDecl, ParseError> {
+    pub(super) fn parse_use_decl(&mut self) -> Result<UseDecl, ParseError> {
         let sp = self.span();
         self.expect(Token::Use)?;
         let mut path = vec![self.ident()?];
@@ -366,7 +416,31 @@ impl Parser {
             self.advance();
             path.push(self.ident()?);
         }
-        Ok(UseDecl { path, span: sp })
+        // Selective imports: `use foo bar` or `use foo [bar, baz]`
+        let imports = if self.check(Token::LBracket) {
+            self.advance();
+            let mut names = Vec::new();
+            while !self.check(Token::RBracket) && !self.eof() {
+                names.push(self.ident()?);
+                if !self.check(Token::RBracket) {
+                    if self.check(Token::Comma) { self.advance(); }
+                }
+            }
+            self.expect(Token::RBracket)?;
+            Some(names)
+        } else if !self.check(Token::Newline) && !self.eof() && matches!(self.peek(), Token::Ident(_)) {
+            Some(vec![self.ident()?])
+        } else {
+            None
+        };
+        // Import alias: `use long_module as lmn`
+        let alias = if self.check(Token::As) {
+            self.advance();
+            Some(self.ident()?)
+        } else {
+            None
+        };
+        Ok(UseDecl { path, imports, alias, span: sp })
     }
 
     fn parse_err_def(&mut self) -> Result<ErrDef, ParseError> {
@@ -538,6 +612,7 @@ impl Parser {
         } else {
             while !self.check(Token::Newline)
                 && !self.check(Token::Arrow)
+                && !self.check(Token::Returns)
                 && !self.check(Token::Is)
                 && !self.eof()
             {
@@ -549,7 +624,7 @@ impl Parser {
             }
         }
 
-        let ret = if self.check(Token::Arrow) {
+        let ret = if self.check(Token::Arrow) || self.check(Token::Returns) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -626,6 +701,54 @@ impl Parser {
             type_name,
             assoc_type_bindings,
             methods,
+            span: sp,
+        })
+    }
+
+    fn parse_supervisor_def(&mut self) -> Result<SupervisorDef, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Supervisor)?;
+        let name = self.ident()?;
+        self.expect(Token::Newline)?;
+        let mut strategy = SupervisorStrategy::OneForOne;
+        let mut children = Vec::new();
+        self.expect(Token::Indent)?;
+        while !self.check(Token::Dedent) && !self.eof() {
+            self.skip_nl();
+            if self.check(Token::Dedent) || self.eof() {
+                break;
+            }
+            let key = self.ident()?;
+            match key.as_str() {
+                "strategy" => {
+                    self.expect(Token::Is)?;
+                    let val = self.ident()?;
+                    strategy = match val.as_str() {
+                        "one_for_one" => SupervisorStrategy::OneForOne,
+                        "one_for_all" => SupervisorStrategy::OneForAll,
+                        "rest_for_one" => SupervisorStrategy::RestForOne,
+                        _ => return Err(self.error(&format!(
+                            "unknown supervisor strategy '{val}', expected one_for_one, one_for_all, or rest_for_one"
+                        ))),
+                    };
+                }
+                "children" => {
+                    self.expect(Token::Newline)?;
+                    children = self.parse_indented(|p| p.ident())?;
+                }
+                _ => return Err(self.error(&format!(
+                    "unexpected supervisor field '{key}', expected 'strategy' or 'children'"
+                ))),
+            }
+            self.skip_nl();
+        }
+        if self.check(Token::Dedent) {
+            self.advance();
+        }
+        Ok(SupervisorDef {
+            name,
+            strategy,
+            children,
             span: sp,
         })
     }

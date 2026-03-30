@@ -3,13 +3,13 @@ enum Op
     Mul(i64, i64)
     Neg(i64)
 
-*eval(op: Op)
+*eval(op as Op)
     match op
         Add(a, b) ? a + b
         Mul(a, b) ? a * b
         Neg(a) ? 0 - a
 
-*main()
+*main
     total is 0
     i is 0
     while i < 5000000

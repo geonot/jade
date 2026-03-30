@@ -1,14 +1,14 @@
 *collatz_steps(n)
     steps is 0
-    while n isnt 1
-        if n % 2 equals 0
+    while n neq 1
+        if n mod 2 equals 0
             n is n / 2
         else
             n is 3 * n + 1
         steps is steps + 1
     return steps
 
-*main()
+*main
     max_steps is 0
     max_n is 0
     n is 1

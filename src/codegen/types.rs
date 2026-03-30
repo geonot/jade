@@ -27,7 +27,11 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|s| s.into())
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
-            Type::Vec(_) | Type::Map(_, _) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Vec(_) | Type::Map(_, _) | Type::Set(_) | Type::NDArray(_, _) | Type::PriorityQueue(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::SIMD(inner, lanes) => {
+                let elem = self.llvm_ty(inner);
+                elem.into_float_type().vec_type(*lanes as u32).into()
+            }
             Type::Tuple(tys) => self
                 .ctx
                 .struct_type(
@@ -48,13 +52,32 @@ impl<'ctx> Compiler<'ctx> {
                     .struct_type(&[ptr.into(), ptr.into()], false)
                     .into()
             }
+            Type::Arena => self.arena_type().into(),
             Type::Param(_) => self.ctx.i64_type().into(),
+            Type::Deque(_) | Type::Cow(_) | Type::Generator(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),
         }
     }
 
     pub(crate) fn string_type(&self) -> inkwell::types::StructType<'ctx> {
         self.module.get_struct_type("String").unwrap_or_else(|| {
             let st = self.ctx.opaque_struct_type("String");
+            st.set_body(
+                &[
+                    self.ctx.ptr_type(AddressSpace::default()).into(),
+                    self.ctx.i64_type().into(),
+                    self.ctx.i64_type().into(),
+                ],
+                false,
+            );
+            st
+        })
+    }
+
+    /// Arena struct: { base: ptr, cap: i64, offset: i64 }
+    pub(crate) fn arena_type(&self) -> inkwell::types::StructType<'ctx> {
+        self.module.get_struct_type("Arena").unwrap_or_else(|| {
+            let st = self.ctx.opaque_struct_type("Arena");
             st.set_body(
                 &[
                     self.ctx.ptr_type(AddressSpace::default()).into(),

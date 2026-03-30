@@ -12,7 +12,7 @@
 *bin(n)
     __fmt_bin(n)
 
-*pad_left(s: String, width, fill: String)
+*pad_left(s as String, width, fill as String)
     if s.length >= width
         return s
     padding is width - s.length
@@ -23,7 +23,7 @@
         i is i + 1
     result + s
 
-*pad_right(s: String, width, fill: String)
+*pad_right(s as String, width, fill as String)
     if s.length >= width
         return s
     padding is width - s.length
@@ -34,7 +34,7 @@
         i is i + 1
     result
 
-*join(items, sep: String)
+*join(items, sep as String)
     if items.length equals 0
         return ""
     result is items.get(0)
@@ -44,7 +44,7 @@
         i is i + 1
     result
 
-*repeat(s: String, n)
+*repeat(s as String, n)
     result is ""
     i is 0
     while i < n

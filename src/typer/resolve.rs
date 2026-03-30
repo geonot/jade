@@ -18,11 +18,13 @@ impl Typer {
                             name: None,
                             ty: Type::Param("T".into()),
                         }],
+                        discriminant: None,
                         span: s,
                     },
                     ast::Variant {
                         name: "Nothing".into(),
                         fields: vec![],
+                        discriminant: None,
                         span: s,
                     },
                 ],
@@ -40,6 +42,7 @@ impl Typer {
                             name: None,
                             ty: Type::Param("T".into()),
                         }],
+                        discriminant: None,
                         span: s,
                     },
                     ast::Variant {
@@ -48,6 +51,7 @@ impl Typer {
                             name: None,
                             ty: Type::Param("E".into()),
                         }],
+                        discriminant: None,
                         span: s,
                     },
                 ],
@@ -90,6 +94,10 @@ impl Typer {
             );
         }
         self.fns.insert(f.name.clone(), (id, ptys, ret));
+        self.fn_param_names.insert(
+            f.name.clone(),
+            f.params.iter().map(|p| p.name.clone()).collect(),
+        );
     }
 
     #[allow(dead_code)]

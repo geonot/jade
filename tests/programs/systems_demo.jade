@@ -4,11 +4,11 @@
 #               memory layout, pointers, bitwise ops
 # Note: some features may not be fully implemented yet
 
-extern *printf(fmt: &i8, ...) -> i32
+extern *printf(fmt as &i8, ...) returns i32
 
 # ── Integer Overflow Control ────────────────────────────────────────────────
 
-*overflow_demo()
+*overflow_demo
     max_i64 is 9223372036854775807
 
     # Wrapping: silently wraps around
@@ -32,7 +32,7 @@ extern *printf(fmt: &i8, ...) -> i32
 
 # ── Bit Manipulation ───────────────────────────────────────────────────────
 
-*bit_tricks()
+*bit_tricks
     x is 0xDEADBEEF
 
     # Population count (number of set bits)
@@ -71,7 +71,7 @@ extern *printf(fmt: &i8, ...) -> i32
 
 # ── Raw Pointers ───────────────────────────────────────────────────────────
 
-*pointer_demo()
+*pointer_demo
     x is 42
     ptr is &x
     val is @ptr
@@ -79,7 +79,7 @@ extern *printf(fmt: &i8, ...) -> i32
 
 # ── Volatile Memory ────────────────────────────────────────────────────────
 
-*volatile_demo()
+*volatile_demo
     x is 0
     ptr is &x
     volatile_store(ptr, 99)
@@ -89,30 +89,30 @@ extern *printf(fmt: &i8, ...) -> i32
 # ── Memory Layout ──────────────────────────────────────────────────────────
 
 type NetworkHeader @packed @strict
-    version: u8
-    msg_type: u8
-    length: u16
-    sequence: u32
+    version as u8
+    msg_type as u8
+    length as u16
+    sequence as u32
 
 type AlignedBuffer @align(64)
-    data: i64
+    data as i64
 
 # ── FFI Demo ───────────────────────────────────────────────────────────────
 
-*ffi_demo()
+*ffi_demo
     printf('hello from C FFI: %d + %d = %d\n', 3, 4, 7)
     printf('hex: 0x%x\n', 255)
 
 # ── Signal Demo ────────────────────────────────────────────────────────────
 
-*on_signal(sig: i32)
+*on_signal(sig as i32)
     log(sig)
 
-*signal_demo()
+*signal_demo
     signal_ignore(13)                    # ignore SIGPIPE
     signal_handle(2, on_signal)          # handle SIGINT
 
-*main()
+*main
     log('=== overflow ===')
     overflow_demo()
 

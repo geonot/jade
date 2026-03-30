@@ -74,6 +74,7 @@ pub struct Typer {
     pub(crate) unannotated_struct_fields: Vec<(String, String, Type, Span)>,
     pub(crate) poly_lambda_asts: HashMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
     pub(crate) type_errors: Vec<String>,
+    pub(crate) fn_param_names: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +126,7 @@ impl Typer {
             unannotated_struct_fields: Vec::new(),
             poly_lambda_asts: HashMap::new(),
             type_errors: Vec::new(),
+            fn_param_names: HashMap::new(),
         }
     }
 
@@ -286,11 +288,14 @@ impl Typer {
     pub(crate) fn string_method_ret_ty(method: &str) -> Option<Type> {
         match method {
             "contains" | "starts_with" | "ends_with" => Some(Type::Bool),
+            "matches" => Some(Type::Bool),
             "char_at" | "len" | "find" => Some(Type::I64),
-            "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower" => {
+            "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower" | "repeat" | "replace_re" => {
                 Some(Type::String)
             }
-            "split" => Some(Type::Vec(Box::new(Type::String))),
+            "split" | "lines" => Some(Type::Vec(Box::new(Type::String))),
+            "find_all" => Some(Type::Vec(Box::new(Type::String))),
+            "is_empty" => Some(Type::Bool),
             _ => None,
         }
     }
@@ -313,6 +318,12 @@ impl Typer {
                 | "to_upper"
                 | "to_lower"
                 | "split"
+                | "lines"
+                | "repeat"
+                | "is_empty"
+                | "matches"
+                | "find_all"
+                | "replace_re"
         )
     }
 
@@ -320,7 +331,16 @@ impl Typer {
         match method {
             "push" | "clear" | "set" => Some(Type::Void),
             "pop" | "get" | "remove" => Some(elem_ty.clone()),
-            "len" => Some(Type::I64),
+            "len" | "count" => Some(Type::I64),
+            "take" | "skip" | "flatten" | "collect" | "reverse" | "sort" => {
+                Some(Type::Vec(Box::new(elem_ty.clone())))
+            }
+            "sum" => Some(elem_ty.clone()),
+            "contains" => Some(Type::Bool),
+            "join" => Some(Type::String),
+            "enumerate" => {
+                Some(Type::Vec(Box::new(Type::Tuple(vec![Type::I64, elem_ty.clone()]))))
+            }
             _ => None,
         }
     }
@@ -329,10 +349,21 @@ impl Typer {
         match method {
             "set" | "remove" | "clear" => Some(Type::Void),
             "get" => Some(val_ty.clone()),
-            "has" => Some(Type::Bool),
+            "has" | "contains" => Some(Type::Bool),
             "len" => Some(Type::I64),
             "keys" => Some(Type::Vec(Box::new(key_ty.clone()))),
             "values" => Some(Type::Vec(Box::new(val_ty.clone()))),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn set_method_ret_ty(method: &str, elem_ty: &Type) -> Option<Type> {
+        match method {
+            "add" | "remove" | "clear" => Some(Type::Void),
+            "contains" => Some(Type::Bool),
+            "len" => Some(Type::I64),
+            "union" | "difference" | "intersection" => Some(Type::Set(Box::new(elem_ty.clone()))),
+            "to_vec" => Some(Type::Vec(Box::new(elem_ty.clone()))),
             _ => None,
         }
     }

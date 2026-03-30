@@ -17,12 +17,12 @@ enum Tree of T
     Leaf(T)
     Branch(Tree of T, Tree of T)
 
-*tree_sum(t: Tree of i64)
+*tree_sum(t as Tree of i64)
     match t
         Leaf(n) ? n
         Branch(left, right) ? tree_sum(left) + tree_sum(right)
 
-*tree_depth(t: Tree of i64)
+*tree_depth(t as Tree of i64)
     match t
         Leaf(_) ? 1
         Branch(left, right) ?
@@ -30,7 +30,7 @@ enum Tree of T
             r is tree_depth(right)
             1 + (l > r ? l ! r)
 
-*tree_count(t: Tree of i64)
+*tree_count(t as Tree of i64)
     match t
         Leaf(_) ? 1
         Branch(left, right) ? tree_count(left) + tree_count(right)
@@ -42,7 +42,7 @@ enum Expr
     Mul(Expr, Expr)
     IfPos(Expr, Expr, Expr)   # if first > 0 then second else third
 
-*eval_expr(e: Expr)
+*eval_expr(e as Expr)
     match e
         Lit(n) ? n
         Add(a, b) ? eval_expr(a) + eval_expr(b)
@@ -61,7 +61,7 @@ enum Command
     Resize(i64, i64)
     SetColor(i64, i64, i64)
 
-*execute(cmd: Command)
+*execute(cmd as Command)
     match cmd
         Quit ? log('quit')
         Print(msg) ? log(msg)
@@ -69,7 +69,7 @@ enum Command
         Resize(w, h) ? log(w * h)
         SetColor(r, g, b) ? log(r * 65536 + g * 256 + b)
 
-*main()
+*main
     # Maybe
     x is Just(42)
     match x

@@ -3,7 +3,7 @@
 # Demonstrates: arrays, nested loops, conditionals, functions
 
 # Grid size
-*grid_size()
+*grid_size
     10
 
 # Index into flat 10x10 array
@@ -18,8 +18,8 @@
         for dc from -1 to 2
             if dr equals 0 and dc equals 0
                 continue
-            nr is (row + dr + n) % n
-            nc is (col + dc + n) % n
+            nr is (row + dr + n) mod n
+            nc is (col + dc + n) mod n
             if grid[idx(nr, nc)] equals 1
                 count is count + 1
     count
@@ -31,7 +31,7 @@
         total is total + grid[i]
     total
 
-*main()
+*main
     n is grid_size()
     total is n * n       # 100 cells
 

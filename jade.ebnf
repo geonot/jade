@@ -1,0 +1,219 @@
+program        = { item | NEWLINE } ;
+item           = function_def | type_def | enum_def | extern_def
+               | store_def | actor_def | trait_def | impl_def
+               | err_def | use_decl | supervisor_def
+               | alias_def | const_def | statement ;
+
+alias_def      = "alias" IDENT "is" type ;
+const_def      = IDENT "is" expr ;
+
+function_def   = "*" IDENT [ "(" param_list ")" | param_list ]
+                 [ "returns" type ]
+                 ( "is" expr
+                 | NEWLINE block ) ;
+
+param_list     = param { "," param } ;
+param          = IDENT [ "as" type ] [ "is" expr ] ;
+
+extern_def     = "extern" "*" IDENT
+                 "(" param_list ")"
+                 [ "returns" type ]
+                 [ "..." ] ;
+
+type_def       = [ "pub" ] "type" IDENT [ "of" type_params ]
+                 [ layout_attrs ]
+                 NEWLINE INDENT { field_def | function_def | NEWLINE } DEDENT ;
+
+field_def      = IDENT [ "as" type ] [ "is" expr ] NEWLINE ;
+
+type_params    = IDENT { "," IDENT } ;
+
+layout_attrs   = { "@packed" | "@strict" | "@align(" INT ")" } ;
+
+enum_def       = "enum" IDENT [ "of" type_params ]
+                 NEWLINE INDENT { variant_def | NEWLINE } DEDENT ;
+
+variant_def    = IDENT [ type_list | "(" type_list ")" ] [ "is" INT ] NEWLINE ;
+type_list      = type { "," type } ;
+
+err_def        = "err" IDENT
+                 NEWLINE INDENT { IDENT [ "(" type_list ")" ] NEWLINE } DEDENT ;
+
+store_def      = "store" IDENT
+                 NEWLINE INDENT { field_def } DEDENT ;
+
+actor_def      = "actor" IDENT
+                 NEWLINE INDENT { field_def | function_def | NEWLINE } DEDENT ;
+
+supervisor_def = "supervisor" IDENT
+                 NEWLINE INDENT
+                 "strategy" ( "one_for_one" | "one_for_all" | "rest_for_one" )
+                 "children" NEWLINE INDENT { expr NEWLINE } DEDENT
+                 DEDENT ;
+
+trait_def      = "trait" IDENT [ "of" type_params ]
+                 NEWLINE INDENT { function_def | NEWLINE } DEDENT ;
+
+impl_def       = "impl" IDENT "of" type_params "for" IDENT
+                 NEWLINE INDENT { function_def | NEWLINE } DEDENT ;
+
+use_decl       = "use" IDENT { "." IDENT }
+                 [ "." "{" IDENT { "," IDENT } "}" ]
+                 [ "as" IDENT ] ;
+
+type           = "%" type
+               | IDENT [ "of" type { "," type } ]
+               | fn_type
+               | simd_type
+               | "Deque" "of" type
+               | "Cow" "of" type
+               | "Generator" "of" type ;
+
+fn_type        = "(" type_list ")" "returns" type ;
+
+simd_type      = "SIMD" "of" type "," INT ;
+
+statement      = binding
+               | if_stmt | unless_stmt
+               | while_stmt | until_stmt | for_stmt | sim_for_stmt | loop_stmt
+               | match_stmt
+               | return_stmt | break_stmt | continue_stmt
+               | transaction_stmt
+               | use_local_stmt
+               | expr_stmt ;
+
+use_local_stmt = "use" IDENT { "." IDENT }
+                 [ "[" IDENT { "," IDENT } "]" ]
+                 [ "as" IDENT ] ;
+
+binding        = IDENT [ "as" type ] "is" expr NEWLINE ;
+if_stmt        = "if" expr NEWLINE block { elif_clause } [ else_clause ] ;
+elif_clause    = "elif" expr NEWLINE block ;
+else_clause    = "else" NEWLINE block ;
+while_stmt     = "while" expr NEWLINE block ;
+until_stmt     = "until" expr NEWLINE block ;
+unless_stmt    = "unless" expr NEWLINE block [ else_clause ] ;
+for_stmt       = "for" IDENT ( "in" | "from" ) expr
+                 [ "to" expr ] [ "by" expr ]
+                 [ "if" expr ]
+                 NEWLINE block ;
+sim_for_stmt   = "sim" "for" IDENT ( "in" | "from" ) expr
+                 [ "to" expr ] [ "by" expr ]
+                 NEWLINE block ;
+loop_stmt      = "loop" NEWLINE block ;
+match_stmt     = "match" expr NEWLINE match_block ;
+match_block    = INDENT { match_arm | NEWLINE } DEDENT ;
+match_arm      = pattern [ "if" expr ] "?" ( expr NEWLINE | NEWLINE block ) ;
+return_stmt    = "return" [ expr ] NEWLINE ;
+break_stmt     = "break" [ IDENT ] [ expr ] NEWLINE ;
+continue_stmt  = "continue" [ IDENT ] NEWLINE ;
+transaction_stmt = "transaction" NEWLINE block ;
+expr_stmt      = expr NEWLINE ;
+
+block          = INDENT { statement | NEWLINE } DEDENT ;
+
+pattern        = "_"
+               | IDENT [ "(" pattern_list ")" ]
+               | literal
+               | pattern "or" pattern
+               | pattern "to" pattern ;
+
+pattern_list   = pattern { "," pattern } ;
+
+expr           = ternary_expr ;
+
+ternary_expr   = pipeline_expr [ "?" expr "!" expr ] ;
+
+pipeline_expr  = or_expr { "~" or_expr } ;
+
+or_expr        = xor_expr { "or" xor_expr } ;
+xor_expr       = and_expr { "xor" and_expr } ;
+and_expr       = eq_expr { "and" eq_expr } ;
+
+eq_expr        = cmp_expr { ( "equals" | "eq" | "neq" ) cmp_expr } ;
+
+cmp_expr       = bitor_expr { ( "<" | ">" | "<=" | ">="
+                              | "lt" | "gt" | "lte" | "gte"
+                              | "nlt" | "ngt" | "nlte" | "ngte"
+                              | "in"
+                              ) bitor_expr } ;
+
+bitor_expr     = bitxor_expr { "|" bitxor_expr } ;
+bitxor_expr    = bitand_expr { "^" bitand_expr } ;
+bitand_expr    = shift_expr { "&" shift_expr } ;
+shift_expr     = add_expr { ( "<<" | ">>" ) add_expr } ;
+
+add_expr       = mul_expr { ( "+" | "-" ) mul_expr } ;
+mul_expr       = exp_expr { ( "*" | "/" | "mod" ) exp_expr } ;
+
+exp_expr       = unary_expr [ "**" exp_expr ] ;
+
+unary_expr     = ( "-" | "not" ) unary_expr
+               | postfix_expr ;
+
+postfix_expr   = primary { call_suffix | member_suffix | index_suffix | cast_suffix | slice_suffix | of_suffix } ;
+
+call_suffix    = "(" [ arg_list ] ")" ;
+of_suffix      = "of" primary ;
+member_suffix  = "." IDENT [ "(" [ arg_list ] ")" ] ;
+index_suffix   = "[" expr "]" | "at" expr ;
+cast_suffix    = "as" [ "strict" ] type
+               | "as" "json"
+               | "as" "map" ;
+slice_suffix   = "from" expr "to" expr ;
+
+arg_list       = arg { "," arg } ;
+arg            = [ IDENT "is" ] expr ;
+
+lambda         = "*" "fn" "(" [ param_list ] ")" [ "returns" type ] expr ;
+
+primary        = INT | FLOAT | STRING | "true" | "false" | "none"
+               | IDENT
+               | "$" [ INT ]
+               | "(" expr ")"
+               | "(" expr "," [ expr_list ] ")"
+               | "[" [ expr_list ] "]"
+               | "[" expr "for" IDENT ( "in" | "from" ) expr
+                     [ "to" expr ] [ "if" expr ] "]"
+               | "log" expr
+               | "vec" [ "(" ")" ]
+               | "map" [ "(" ")" ]
+               | "set" [ "(" ")" ]
+               | "priority_queue" [ "(" ")" ]
+               | "deque" "(" [ expr_list ] ")"
+               | "grad" "(" expr ")"
+               | "einsum" STRING "," expr_list
+               | "build" IDENT NEWLINE build_block
+               | "yield" expr
+               | "ndarray" "(" expr_list ")"
+               | "SIMD" "of" type "," INT "(" expr_list ")"
+               | "spawn" IDENT
+               | "send" expr "." IDENT "(" [ arg_list ] ")"
+               | "channel" "of" type "(" expr ")"
+               | "select" NEWLINE select_block
+               | "unreachable"
+               | lambda
+               | if_expr ;
+
+select_block   = INDENT { select_arm | NEWLINE } [ "default" NEWLINE block ] DEDENT ;
+select_arm     = ( "recv" "from" expr "as" IDENT | "send" expr "to" expr )
+                 NEWLINE block ;
+
+build_block    = INDENT { IDENT "is" expr NEWLINE } DEDENT ;
+
+if_expr        = "if" expr NEWLINE block { elif_clause } [ else_clause ] ;
+
+expr_list      = expr { "," expr } ;
+
+literal        = INT | FLOAT | STRING | "true" | "false" | "none" ;
+
+INT            = digit { digit | "_" }
+               | "0x" hex_digit { hex_digit | "_" }
+               | "0b" bin_digit { bin_digit | "_" }
+               | "0o" oct_digit { oct_digit | "_" } ;
+
+FLOAT          = digit { digit } "." digit { digit }
+                 [ ( "e" | "E" ) [ "+" | "-" ] digit { digit } ] ;
+
+STRING         = "'" { char | escape | "{" expr "}" } "'"
+               | '"' { char | escape } '"' ;

@@ -391,7 +391,7 @@ impl<'ctx> Compiler<'ctx> {
                 let pred = match op {
                     BinOp::Eq => IntPredicate::EQ,
                     BinOp::Ne => IntPredicate::NE,
-                    _ => return Err("bool fields only support equals/isnt comparisons".into()),
+                    _ => return Err("bool fields only support equals/neq comparisons".into()),
                 };
                 Ok(b!(self.bld.build_int_compare(
                     pred,

@@ -1,13 +1,13 @@
-extern *usleep(us: i32) -> i32
+extern *usleep(us as i32) returns i32
 
 actor Counter
-    count: i64
+    count as i64
     @increment
         count is count + 1
-    @add n: i64
+    @add n as i64
         count is count + n
 
-*main()
+*main
     c is spawn Counter
     send c, @increment()
     send c, @add(10)

@@ -207,7 +207,7 @@ fn cmp_equals() {
 
 #[test]
 fn cmp_isnt() {
-    expect("*main()\n    log(7 isnt 8)\n", "1");
+    expect("*main()\n    log(7 neq 8)\n", "1");
 }
 
 // ── Bindings ────────────────────────────────────────────────────────
@@ -1289,7 +1289,7 @@ fn rc_retain_release() {
     );
 }
 
-// ── Equals/Isnt correctness (zext, not sext) ────────────────────────
+// ── Equals/Neq correctness (zext, not sext) ────────────────────────
 
 #[test]
 fn equals_returns_one_not_neg_one() {
@@ -1302,7 +1302,7 @@ fn equals_returns_one_not_neg_one() {
 #[test]
 fn isnt_returns_one_not_neg_one() {
     expect(
-        "*main()\n    x is 5\n    y is 6\n    z is x isnt y\n    log(z)\n",
+        "*main()\n    x is 5\n    y is 6\n    z is x neq y\n    log(z)\n",
         "1",
     );
 }
@@ -2008,7 +2008,7 @@ fn operator_overload_mul() {
 #[test]
 fn operator_overload_lt() {
     expect(
-        "type Score\n    val: i64\n\ntrait Ord\n    *lt(other: Score) -> bool\n\nimpl Ord for Score\n    *lt(other: Score) -> bool\n        self.val < other.val\n\n*main() -> i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(a < b)\n    log(b < a)\n    0\n",
+        "type Score\n    val: i64\n\ntrait Ord\n    *less(other: Score) -> bool\n\nimpl Ord for Score\n    *less(other: Score) -> bool\n        self.val < other.val\n\n*main() -> i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(a < b)\n    log(b < a)\n    0\n",
         "1\n0",
     );
 }
@@ -2016,7 +2016,7 @@ fn operator_overload_lt() {
 #[test]
 fn operator_overload_gt() {
     expect(
-        "type Score\n    val: i64\n\ntrait Ord\n    *gt(other: Score) -> bool\n\nimpl Ord for Score\n    *gt(other: Score) -> bool\n        self.val > other.val\n\n*main() -> i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(b > a)\n    log(a > b)\n    0\n",
+        "type Score\n    val: i64\n\ntrait Ord\n    *greater(other: Score) -> bool\n\nimpl Ord for Score\n    *greater(other: Score) -> bool\n        self.val > other.val\n\n*main() -> i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(b > a)\n    log(a > b)\n    0\n",
         "1\n0",
     );
 }
@@ -2024,7 +2024,7 @@ fn operator_overload_gt() {
 #[test]
 fn operator_overload_le_ge() {
     expect(
-        "type Val\n    n: i64\n\ntrait Cmp\n    *le(other: Val) -> bool\n    *ge(other: Val) -> bool\n\nimpl Cmp for Val\n    *le(other: Val) -> bool\n        self.n <= other.n\n    *ge(other: Val) -> bool\n        self.n >= other.n\n\n*main() -> i32\n    a is Val(n is 5)\n    b is Val(n is 5)\n    c is Val(n is 10)\n    log(a <= b)\n    log(a >= b)\n    log(a <= c)\n    log(c >= a)\n    0\n",
+        "type Val\n    n: i64\n\ntrait Cmp\n    *less_eq(other: Val) -> bool\n    *greater_eq(other: Val) -> bool\n\nimpl Cmp for Val\n    *less_eq(other: Val) -> bool\n        self.n <= other.n\n    *greater_eq(other: Val) -> bool\n        self.n >= other.n\n\n*main() -> i32\n    a is Val(n is 5)\n    b is Val(n is 5)\n    c is Val(n is 10)\n    log(a <= b)\n    log(a >= b)\n    log(a <= c)\n    log(c >= a)\n    0\n",
         "1\n1\n1\n1",
     );
 }

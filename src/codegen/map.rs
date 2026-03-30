@@ -70,7 +70,7 @@ impl<'ctx> Compiler<'ctx> {
             "len" => self.vec_len(header_ptr),
             "set" => self.map_set(header_ptr, obj, args),
             "get" => self.map_get(header_ptr, obj, args),
-            "has" => self.map_has(header_ptr, obj, args),
+            "has" | "contains" => self.map_has(header_ptr, obj, args),
             "remove" => self.map_remove(header_ptr, obj, args),
             "clear" => self.map_clear(header_ptr),
             "keys" => self.map_keys(header_ptr),

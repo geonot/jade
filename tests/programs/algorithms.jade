@@ -1,9 +1,9 @@
 *is_even(n)
-    n % 2 equals 0 ? true ! false
+    n mod 2 equals 0 ? true ! false
 
 *collatz(n)
     steps is 0
-    while n isnt 1
+    while n neq 1
         if is_even(n)
             n is n / 2
         else
@@ -12,13 +12,13 @@
     return steps
 
 *gcd(a, b)
-    while b isnt 0
+    while b neq 0
         t is b
-        b is a % b
+        b is a mod b
         a is t
     return a
 
-*main()
+*main
     log(collatz(27))
     log(gcd(48, 18))
     log(gcd(100, 75))

@@ -18,7 +18,7 @@
 | **A** | Type annotation syntax | `x: i32` | `x as i32` | All `.jade` + compiler + treesitter + vscode | ~238 |
 | **B** | Return type syntax | `-> Type` | `returns Type` | Extern decls, fn types, string_builder | ~53 |
 | **C** | Modulo operator | `%` (binary) | `mod` | All `.jade` + compiler + treesitter + vscode | ~35 |
-| **D** | Equality shorthand aliases | `equals` / `isnt` only | Add `eq` / `neq` as aliases | Compiler (lexer) | 0 (additive) |
+| **D** | Equality shorthand aliases | `equals` / `neq` only | `eq` alias added, `isnt` removed | Compiler (lexer) | 0 (additive) |
 | **E** | Comparison word operators | `< > <= >=` only | Add `lt gt lte gte` as aliases (keep symbols too) | Compiler (lexer) | 0 (additive) |
 | **F** | Index with `at` | `arr[4]` only | Add `arr at 4` as alias | Compiler (parser) | 0 (additive) |
 | **G** | Enum variant paren-free | `Bar(String)` | `Bar String` (parens optional) | `.jade` files + compiler + treesitter | ~156 |
@@ -176,12 +176,14 @@ result is (result * b) mod modulus
 
 ### D. Equality Shorthand — Add `eq` / `neq`
 
-`equals` and `isnt` stay as primary. Add short aliases:
+`equals` stays as primary. `isnt` removed entirely, replaced by `neq`.
+
 - `eq` → alias for `equals`
-- `neq` → alias for `isnt` (clearer than `isnt` for some contexts)
+- `neq` → not-equal (replaced `isnt`)
+- Negated comparison keywords: `nlt` (≥), `ngt` (≤), `nlte` (>), `ngte` (<)
 
 **Compiler changes only:**
-- `src/lexer.rs` — `"eq"` → `Token::Equals`, `"neq"` → `Token::Isnt`
+- `src/lexer.rs` — `"eq"` → `Token::Equals`, `"neq"` → `Token::Neq`, `isnt` removed
 
 **Tree-sitter:**
 - `grammar.js` binary_expression: add `"eq"` at `PREC.EQUALITY`, add `"neq"` at `PREC.EQUALITY`
@@ -338,7 +340,7 @@ Only in syntax.jade reference. Either:
 | Pattern | Status | Notes |
 |---------|--------|-------|
 | Pipeline `~` | ✓ Correct | No `\|>` found anywhere |
-| `equals` / `isnt` | ✓ Correct | No `==` or `!=` in active code |
+| `equals` / `neq` | ✓ Correct | `isnt` removed, `neq` is canonical |
 | `is` for binding | ✓ Correct | Universal |
 | `*` for function def | ✓ Correct | Universal |
 | `and` / `or` / `not` | ✓ Correct | No `&&` `\|\|` `!` |
@@ -389,7 +391,7 @@ Things to evaluate from other languages that fit Jade's ethos:
 - [ ] `src/lexer.rs` — Add tokens: `Returns`, keyword mappings for `eq`, `neq`, `gt`, `lt`, `gte`, `lte`, `mod`, `at` (word)
 - [ ] `src/lexer.rs` — Add `"returns"` → `Token::Returns` keyword
 - [ ] `src/lexer.rs` — Map `"mod"` → `Token::Percent` (or new Mod token, same semantics)
-- [ ] `src/lexer.rs` — Map `"eq"` → `Token::Equals`, `"neq"` → `Token::Isnt`
+- [x] `src/lexer.rs` — Map `"eq"` → `Token::Equals`, `"neq"` → `Token::Neq`, removed `isnt`
 - [ ] `src/lexer.rs` — Map `"lt"` → `Token::Lt`, `"gt"` → `Token::Gt`, `"lte"` → `Token::LtEq`, `"gte"` → `Token::GtEq`
 - [ ] `src/lexer.rs` — Add `"at"` keyword for index-by-word
 - [ ] `src/parser.rs` — Change `Token::Colon` → `Token::As` in `parse_field()` and `parse_param()`

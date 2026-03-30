@@ -1,19 +1,19 @@
 # std.strings — StringBuilder for efficient string construction
 
 type StringBuilder
-    parts: Vec of String
-    total: i64
+    parts as Vec of String
+    total as i64
 
-    *write(s: String)
+    *write(s as String)
         self.parts.push(s)
         self.total is self.total + s.length
 
-    *write_line(s: String)
+    *write_line(s as String)
         self.parts.push(s)
         self.parts.push('\n')
         self.total is self.total + s.length + 1
 
-    *to_string()
+    *to_string
         if self.parts.length equals 0
             return ''
         result is self.parts.get(0)
@@ -23,12 +23,12 @@ type StringBuilder
             i is i + 1
         result
 
-    *length()
+    *length
         self.total
 
-    *clear()
+    *clear
         self.parts is vec()
         self.total is 0
 
-*string_builder() -> StringBuilder
+*string_builder() returns StringBuilder
     StringBuilder(parts is vec(), total is 0)

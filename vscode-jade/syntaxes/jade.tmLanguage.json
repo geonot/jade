@@ -53,23 +53,23 @@
       "patterns": [
         {
           "name": "keyword.control.jade",
-          "match": "\\b(if|elif|else|while|for|in|to|by|match|return|break|continue|loop|do|end)\\b"
+          "match": "\\b(if|elif|else|while|until|unless|for|in|to|by|match|return|break|continue|loop|do|end|sim|select|default|from|yield|spawn|send|supervisor|strategy|children|build)\\b"
         },
         {
           "name": "keyword.operator.word.jade",
-          "match": "\\b(is|isnt|and|or|not|as|equals)\\b"
+          "match": "\\b(is|neq|eq|and|or|not|xor|as|equals|mod|returns|lt|gt|lte|gte|nlt|ngt|ngte|nlte|in|strict)\\b"
         },
         {
           "name": "keyword.declaration.jade",
-          "match": "\\b(type|enum|pub|fn)\\b"
+          "match": "\\b(type|enum|pub|fn|trait|impl|actor|store|extern|err|use|channel|alias)\\b"
         },
         {
           "name": "support.function.builtin.jade",
-          "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float)\\b"
+          "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float|assert|panic|time_now|popcount|clz|ctz|bswap|rotate_left|rotate_right|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul|checked_add|checked_sub|checked_mul|volatile_load|volatile_store|signal_handle|signal_ignore|signal_raise|rc|weak|weak_upgrade|atomic_load|atomic_store|atomic_add|atomic_sub|atomic_cas|vec_with_alloc|map_with_alloc|constant_time_eq|fields_of|type_of|size_of|align_of|matmul|ndarray|priority_queue|map|filter|fold|zip|take|skip|any|all|find|flatten|chain|collect|split|join|trim|to_upper|to_lower|replace|contains|starts_with|ends_with|char_at|slice|matches|find_all|replace_re|deque|grad|einsum|contract)\\b"
         },
         {
           "name": "support.type.jade",
-          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|str|void)\\b"
+          "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|str|void|String|Vec|Map|Set|PriorityQueue|NDArray|SIMD|Arena|Char|Deque|Cow|Generator)\\b"
         }
       ]
     },
@@ -87,6 +87,10 @@
         {
           "name": "constant.language.null.jade",
           "match": "\\bnone\\b"
+        },
+        {
+          "name": "constant.language.unreachable.jade",
+          "match": "\\bunreachable\\b"
         },
         {
           "name": "variable.language.placeholder.jade",
@@ -174,10 +178,7 @@
           "name": "keyword.operator.ternary.jade",
           "match": "\\?"
         },
-        {
-          "name": "keyword.operator.arrow.jade",
-          "match": "->"
-        },
+
         {
           "name": "keyword.operator.star.jade",
           "match": "\\*"
