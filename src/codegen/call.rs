@@ -51,19 +51,31 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn indirect_call_vals(
         &mut self,
-        fn_ptr: BasicValueEnum<'ctx>,
+        closure_val: BasicValueEnum<'ctx>,
         fn_ty: &Type,
         vals: &[BasicValueEnum<'ctx>],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if let Type::Fn(ptys, ret) = fn_ty {
-            let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
-                ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
+            // Extract fn_ptr and env_ptr from closure fat pointer {fn_ptr, env_ptr}
+            let sv = closure_val.into_struct_value();
+            let fn_ptr = b!(self.bld.build_extract_value(sv, 0, "cl.fn"))
+                .into_pointer_value();
+            let env_ptr = b!(self.bld.build_extract_value(sv, 1, "cl.env"));
+
+            // Build function type with env_ptr as first parameter
+            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let mut lp: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
+            lp.extend(ptys.iter().map(|t| BasicMetadataTypeEnum::from(self.llvm_ty(t))));
             let ft = self.mk_fn_type(ret.as_ref(), &lp, false);
-            let a: Vec<BasicMetadataValueEnum<'ctx>> = vals.iter().map(|v| (*v).into()).collect();
+
+            // Prepend env_ptr to argument list
+            let mut a: Vec<BasicMetadataValueEnum<'ctx>> = vec![env_ptr.into()];
+            a.extend(vals.iter().map(|v| BasicMetadataValueEnum::from(*v)));
+
             let csv =
                 b!(self
                     .bld
-                    .build_indirect_call(ft, fn_ptr.into_pointer_value(), &a, "icall"));
+                    .build_indirect_call(ft, fn_ptr, &a, "icall"));
             Ok(self.call_result(csv))
         } else {
             Err(format!("cannot call non-function type: {fn_ty}"))

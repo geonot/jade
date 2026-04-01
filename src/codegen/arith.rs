@@ -34,6 +34,7 @@ impl<'ctx> Compiler<'ctx> {
                 BinOp::Div => b!(self.bld.build_float_div(lv, rv, "simd.div")).into(),
                 _ => return Err(format!("unsupported SIMD binop: {op:?}")),
             };
+            self.tag_fast_math(result);
             return Ok(result);
         }
         if matches!(op, BinOp::And) {
@@ -150,7 +151,7 @@ impl<'ctx> Compiler<'ctx> {
         op: BinOp,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let (l, r) = (lhs.into_float_value(), rhs.into_float_value());
-        Ok(match op {
+        let result: BasicValueEnum = match op {
             BinOp::Add => b!(self.bld.build_float_add(l, r, "fadd")).into(),
             BinOp::Sub => b!(self.bld.build_float_sub(l, r, "fsub")).into(),
             BinOp::Mul => b!(self.bld.build_float_mul(l, r, "fmul")).into(),
@@ -193,7 +194,9 @@ impl<'ctx> Compiler<'ctx> {
                 .build_float_compare(FloatPredicate::OGE, l, r, "fge"))
             .into(),
             _ => return Err(format!("unsupported float op: {op:?}")),
-        })
+        };
+        self.tag_fast_math(result);
+        Ok(result)
     }
 
     fn compile_int_binop(

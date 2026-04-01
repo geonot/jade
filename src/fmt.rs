@@ -181,6 +181,9 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             indent(out, level);
             out.push_str(&format!("type {} is {}\n", name, format_type(ty)));
         }
+        Decl::TopStmt(stmt) => {
+            format_stmt(out, stmt, level);
+        }
     }
 }
 

@@ -70,7 +70,7 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self.bld.build_store(ptr, val));
                     self.set_var(&bind.name, ptr, ty.clone());
                 } else {
-                    let a = self.entry_alloca(self.llvm_ty(ty), &bind.name);
+                    let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name, ty);
                     b!(self.bld.build_store(a, val));
                     self.set_var(&bind.name, a, ty.clone());
                 }
@@ -138,66 +138,27 @@ impl<'ctx> Compiler<'ctx> {
                 if self.hints.elide_drops.contains(def_id) {
                     return Ok(None);
                 }
+                // Perceus reuse: instead of dropping, save the heap pointer
+                // as a reuse token for the next compatible allocation.
                 if self.hints.reuse_candidates.contains_key(def_id)
                     || self.hints.speculative_reuse.contains_key(def_id)
                 {
+                    if let Some((ptr, _)) = self.find_var(name).cloned() {
+                        let llty = self.llvm_ty(ty);
+                        let val = b!(self.bld.build_load(llty, ptr, "reuse.save"));
+                        self.reuse_tokens.insert(*def_id, val.into_pointer_value());
+                    }
                     return Ok(None);
                 }
                 if self.hints.borrow_to_move.contains(def_id) {
                     return Ok(None);
                 }
-                match ty {
-                    Type::String => {
-                        if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            let st = self.string_type();
-                            let val = b!(self.bld.build_load(st, ptr, "drop.str"));
-                            self.drop_string(val)?;
-                        }
+                if !ty.is_trivially_droppable() {
+                    if let Some((ptr, _)) = self.find_var(name).cloned() {
+                        let llty = self.llvm_ty(ty);
+                        let val = b!(self.bld.build_load(llty, ptr, "drop.val"));
+                        self.drop_value(val, ty)?;
                     }
-                    Type::Vec(_) => {
-                        if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            self.drop_vec(ptr)?;
-                        }
-                    }
-                    Type::Map(_, _) => {
-                        if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            self.drop_map(ptr)?;
-                        }
-                    }
-                    Type::Rc(inner) => {
-                        if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            let loaded = b!(self.bld.build_load(
-                                self.ctx.ptr_type(inkwell::AddressSpace::default()),
-                                ptr,
-                                "rc.ptr"
-                            ));
-                            self.rc_release(loaded, inner)?;
-                        }
-                    }
-                    Type::Weak(inner) => {
-                        if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            let loaded = b!(self.bld.build_load(
-                                self.ctx.ptr_type(inkwell::AddressSpace::default()),
-                                ptr,
-                                "weak.ptr"
-                            ));
-                            self.weak_release(loaded, inner)?;
-                        }
-                    }
-                    Type::Arena => {
-                        if let Some((ptr, _)) = self.find_var(name).cloned() {
-                            let arena_ty = self.arena_type();
-                            let base_gep = b!(self.bld.build_struct_gep(arena_ty, ptr, 0, "arena.drop.base.p"));
-                            let base = b!(self.bld.build_load(
-                                self.ctx.ptr_type(inkwell::AddressSpace::default()),
-                                base_gep,
-                                "arena.drop.base"
-                            ));
-                            let free = self.ensure_free();
-                            b!(self.bld.build_call(free, &[base.into()], ""));
-                        }
-                    }
-                    _ => {}
                 }
                 Ok(None)
             }

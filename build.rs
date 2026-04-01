@@ -19,6 +19,7 @@ fn main() {
         .file("runtime/actor.c")
         .file("runtime/select.c")
         .file("runtime/timer.c")
+        .file("runtime/pool.c")
         .file(asm_file)
         .opt_level(2)
         .warnings(false)

@@ -423,6 +423,27 @@ impl Typer {
                     span,
                 }))
             }
+            "likely" => {
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::Likely, Type::Bool, span))
+            }
+            "unlikely" => {
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::Unlikely, Type::Bool, span))
+            }
+            "Pool" if args.len() == 2 && !self.fns.contains_key(name) => {
+                let hsize = match self.lower_expr_expected(&args[0], Some(&Type::I64)) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hcount = match self.lower_expr_expected(&args[1], Some(&Type::I64)) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::PoolNew, vec![hsize, hcount]),
+                    ty: Type::Pool,
+                    span,
+                }))
+            }
             _ => None,
         }
     }

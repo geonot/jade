@@ -117,7 +117,9 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(v) = fv.get_nth_param(i as u32) {
                 v.set_name(&p.name);
             }
-            fv.add_attribute(AttributeLoc::Param(i as u32), self.attr("noundef"));
+            let loc = AttributeLoc::Param(i as u32);
+            fv.add_attribute(loc, self.attr("noundef"));
+            self.tag_param_ownership(fv, loc, &p.ownership, &p.ty);
         }
         self.fns.insert(f.name.clone(), (fv, ptys, ret));
         Ok(())
@@ -139,8 +141,10 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.module.add_function(&method_name, ft, None);
         self.tag_fn(fv);
         fv.set_linkage(Linkage::Internal);
-        for i in 0..ptys.len() {
-            fv.add_attribute(AttributeLoc::Param(i as u32), self.attr("noundef"));
+        for (i, p) in m.params.iter().enumerate() {
+            let loc = AttributeLoc::Param(i as u32);
+            fv.add_attribute(loc, self.attr("noundef"));
+            self.tag_param_ownership(fv, loc, &p.ownership, &p.ty);
         }
         self.fns.insert(method_name, (fv, ptys, ret));
         Ok(())
@@ -161,10 +165,67 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(entry);
         self.vars.push(HashMap::new());
         for (i, (name, ty)) in params.iter().enumerate() {
-            let a = self.entry_alloca(self.llvm_ty(ty), name);
-            b!(self.bld.build_store(a, fv.get_nth_param(i as u32).unwrap()));
+            let param_val = fv.get_nth_param(i as u32).unwrap();
+            let a = self.alloca_for_type(self.llvm_ty(ty), name, ty);
+            b!(self.bld.build_store(a, param_val));
             self.set_var(name, a, ty.clone());
         }
+        let last = self.compile_block(body)?;
+        if self.no_term() {
+            match ret {
+                Type::Void => {
+                    b!(self.bld.build_return(None));
+                }
+                _ => {
+                    let rty = self.llvm_ty(ret);
+                    let v = match last {
+                        Some(v) => self.coerce_val(v, rty),
+                        _ => self.default_val(ret),
+                    };
+                    b!(self.bld.build_return(Some(&v)));
+                }
+            }
+        }
+        self.vars.pop();
+        self.cur_fn = None;
+        self.pop_debug_scope();
+        Ok(())
+    }
+
+    /// Like emit_body but injects tail-reuse tokens after param alloca setup.
+    fn emit_body_with_tail_reuse(
+        &mut self,
+        fv: inkwell::values::FunctionValue<'ctx>,
+        params: &[(String, Type)],
+        body: &hir::Block,
+        ret: &Type,
+        name: &str,
+        line: u32,
+        tail_reuse_params: &[(String, hir::DefId)],
+    ) -> Result<(), String> {
+        self.create_debug_function(fv, name, line);
+        self.cur_fn = Some(fv);
+        let entry = self.ctx.append_basic_block(fv, "entry");
+        self.bld.position_at_end(entry);
+        self.vars.push(HashMap::new());
+        for (i, (name, ty)) in params.iter().enumerate() {
+            let param_val = fv.get_nth_param(i as u32).unwrap();
+            let a = self.alloca_for_type(self.llvm_ty(ty), name, ty);
+            b!(self.bld.build_store(a, param_val));
+            self.set_var(name, a, ty.clone());
+        }
+
+        // Inject tail-reuse tokens: save param pointers (which are Rc/struct ptrs)
+        // so rc_alloc can reuse them instead of malloc for the return value
+        for (pname, def_id) in tail_reuse_params {
+            if let Some((ptr, ty)) = self.find_var(pname).cloned() {
+                if matches!(ty, Type::Rc(_) | Type::Enum(_)) {
+                    let val = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, "tail.reuse.load"));
+                    self.reuse_tokens.insert(*def_id, val.into_pointer_value());
+                }
+            }
+        }
+
         let last = self.compile_block(body)?;
         if self.no_term() {
             match ret {
@@ -212,7 +273,17 @@ impl<'ctx> Compiler<'ctx> {
             .enumerate()
             .map(|(i, p)| (p.name.clone(), ptys[i].clone()))
             .collect();
-        self.emit_body(fv, &params, &f.body, &ret, &f.name, f.span.line)
+
+        // Save tail reuse tokens: if Perceus identified params whose allocation
+        // can be reused for the return value, register them before compiling body.
+        let tail_reuse_params: Vec<(String, hir::DefId)> = f
+            .params
+            .iter()
+            .filter(|p| self.hints.tail_reuse.contains_key(&p.def_id))
+            .map(|p| (p.name.clone(), p.def_id))
+            .collect();
+
+        self.emit_body_with_tail_reuse(fv, &params, &f.body, &ret, &f.name, f.span.line, &tail_reuse_params)
     }
 
     pub(crate) fn declare_type(&mut self, td: &hir::TypeDef) -> Result<(), String> {

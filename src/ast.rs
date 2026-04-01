@@ -46,6 +46,7 @@ pub enum Decl {
     Supervisor(SupervisorDef),
     TypeAlias(String, Type, Span),
     Newtype(String, Type, Span),
+    TopStmt(Stmt),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -102,6 +103,35 @@ pub enum Stmt {
     Stop(Expr, Span),
     SimFor(For, Span),
     UseLocal(UseDecl),
+}
+
+impl Stmt {
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Bind(b) => b.span,
+            Stmt::TupleBind(_, _, s) => *s,
+            Stmt::Assign(_, _, s) => *s,
+            Stmt::Expr(e) => e.span(),
+            Stmt::If(i) => i.span,
+            Stmt::While(w) => w.span,
+            Stmt::For(f) => f.span,
+            Stmt::Loop(l) => l.span,
+            Stmt::Ret(_, s) => *s,
+            Stmt::Break(_, s) => *s,
+            Stmt::Continue(s) => *s,
+            Stmt::Match(m) => m.span,
+            Stmt::Asm(a) => a.span,
+            Stmt::ErrReturn(_, s) => *s,
+            Stmt::StoreInsert(_, _, s) => *s,
+            Stmt::StoreDelete(_, _, s) => *s,
+            Stmt::StoreSet(_, _, _, s) => *s,
+            Stmt::Transaction(_, s) => *s,
+            Stmt::ChannelClose(_, s) => *s,
+            Stmt::Stop(_, s) => *s,
+            Stmt::SimFor(_, s) => *s,
+            Stmt::UseLocal(_) => Span::dummy(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

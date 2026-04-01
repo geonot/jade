@@ -435,10 +435,8 @@ impl Typer {
                 }
             }
         }
-        if type_map.is_empty() && !edef.type_params.is_empty() {
-            for tp in &edef.type_params {
-                type_map.entry(tp.clone()).or_insert(Type::I64);
-            }
+        for tp in &edef.type_params {
+            type_map.entry(tp.clone()).or_insert(Type::I64);
         }
         let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
         Ok(Some(mangled))

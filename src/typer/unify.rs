@@ -690,7 +690,7 @@ impl InferCtx {
                     TypeConstraint::Float => Type::F64,
                     _ => Type::I64,
                 };
-                if warn_only {
+                if warn_only && !self.pedantic {
                     if let Some(origin) = &self.origins[root as usize] {
                         match constraint {
                             TypeConstraint::None => {

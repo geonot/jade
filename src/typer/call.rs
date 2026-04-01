@@ -65,12 +65,103 @@ fn resolve_named_args<'a>(
 }
 
 impl Typer {
+    /// Expand spread arguments in a call's argument list.
+    /// `...arr` where `arr` is a fixed-size array becomes individual index expressions.
+    /// Also handles implicit spreading: if a single array arg is passed where N params expected.
+    fn expand_spread_args(
+        &mut self,
+        callee: &ast::Expr,
+        args: &[ast::Expr],
+        span: Span,
+    ) -> Option<Vec<ast::Expr>> {
+        let has_spread = args.iter().any(|a| matches!(a, ast::Expr::Spread(..)));
+        let expected_param_count = if let ast::Expr::Ident(name, _) = callee {
+            self.fns.get(name).map(|(_, ptys, _)| ptys.len())
+        } else {
+            None
+        };
+
+        if has_spread {
+            // Explicit spread: expand ...arr into individual elements
+            let mut expanded = Vec::new();
+            for arg in args {
+                if let ast::Expr::Spread(inner, sp) = arg {
+                    // Lower the inner expression to determine its type
+                    let inner_lowered = self.lower_expr(inner).ok()?;
+                    let resolved_ty = self.infer_ctx.resolve(&inner_lowered.ty);
+                    match &resolved_ty {
+                        Type::Array(_, len) => {
+                            for i in 0..*len {
+                                expanded.push(ast::Expr::Index(
+                                    Box::new((**inner).clone()),
+                                    Box::new(ast::Expr::Int(i as i64, *sp)),
+                                    *sp,
+                                ));
+                            }
+                        }
+                        Type::Tuple(tys) => {
+                            for i in 0..tys.len() {
+                                expanded.push(ast::Expr::Index(
+                                    Box::new((**inner).clone()),
+                                    Box::new(ast::Expr::Int(i as i64, *sp)),
+                                    *sp,
+                                ));
+                            }
+                        }
+                        _ => {
+                            // For Vec/other types, we can't expand at compile time
+                            // Just pass the inner expression as-is
+                            expanded.push((**inner).clone());
+                        }
+                    }
+                } else {
+                    expanded.push(arg.clone());
+                }
+            }
+            return Some(expanded);
+        }
+
+        // Implicit spreading: single array arg for multi-param function
+        if args.len() == 1 && !has_spread {
+            if let Some(expected) = expected_param_count {
+                if expected > 1 {
+                    let inner_lowered = self.lower_expr(&args[0]).ok()?;
+                    let resolved_ty = self.infer_ctx.resolve(&inner_lowered.ty);
+                    if let Type::Array(_, len) = &resolved_ty {
+                        if *len == expected {
+                            let sp = args[0].span();
+                            let mut expanded = Vec::new();
+                            for i in 0..*len {
+                                expanded.push(ast::Expr::Index(
+                                    Box::new(args[0].clone()),
+                                    Box::new(ast::Expr::Int(i as i64, sp)),
+                                    sp,
+                                ));
+                            }
+                            return Some(expanded);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     pub(crate) fn lower_call(
         &mut self,
         callee: &ast::Expr,
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
+        // Expand spread arguments (...arr) into individual element args
+        let spread_expanded;
+        let args = if let Some(expanded) = self.expand_spread_args(callee, args, span) {
+            spread_expanded = expanded;
+            &spread_expanded[..]
+        } else {
+            args
+        };
         // Strip NamedArg wrappers if the callee is a known function
         let resolved;
         let args = if args.iter().any(|a| matches!(a, Expr::NamedArg(..))) {
@@ -726,6 +817,26 @@ impl Typer {
                 "alloc" => (hir::BuiltinFn::ArenaAlloc, Type::Ptr(Box::new(Type::I8))),
                 "reset" => (hir::BuiltinFn::ArenaReset, Type::Void),
                 _ => return Err(format!("no method '{method}' on Arena")),
+            };
+            let mut all_args = vec![hobj];
+            all_args.extend(hargs);
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Builtin(builtin, all_args),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        if matches!(obj_ty, Type::Pool) {
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .map(|e| self.lower_expr(e))
+                .collect::<Result<_, _>>()?;
+            let (builtin, ret_ty) = match method {
+                "alloc" => (hir::BuiltinFn::PoolAlloc, Type::Ptr(Box::new(Type::I8))),
+                "free" => (hir::BuiltinFn::PoolFree, Type::Void),
+                "destroy" => (hir::BuiltinFn::PoolDestroy, Type::Void),
+                _ => return Err(format!("no method '{method}' on Pool")),
             };
             let mut all_args = vec![hobj];
             all_args.extend(hargs);

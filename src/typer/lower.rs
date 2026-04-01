@@ -88,6 +88,7 @@ impl Typer {
                 ast::Decl::Supervisor(_) => {}
                 ast::Decl::TypeAlias(_, _, _) => {}
                 ast::Decl::Newtype(_, _, _) => {}
+                ast::Decl::TopStmt(_) => {}
             }
         }
 
@@ -1852,6 +1853,8 @@ impl Typer {
             .ok_or_else(|| format!("undeclared method: {method_name}"))?
             .clone();
 
+        let prev_method_type = self.current_method_type.take();
+        self.current_method_type = Some(type_name.to_string());
         self.push_scope();
         let mut params = Vec::new();
 
@@ -1862,7 +1865,7 @@ impl Typer {
             VarInfo {
                 def_id: self_id,
                 ty: self_ty.clone(),
-                ownership: Ownership::Borrowed,
+                ownership: Ownership::BorrowMut,
                 scheme: None,
             },
         );
@@ -1870,7 +1873,7 @@ impl Typer {
             def_id: self_id,
             name: "self".to_string(),
             ty: self_ty,
-            ownership: Ownership::Borrowed,
+            ownership: Ownership::BorrowMut,
             span: m.span,
         });
 
@@ -1903,6 +1906,7 @@ impl Typer {
 
         let body = self.lower_block(&m.body, &ret)?;
         self.pop_scope();
+        self.current_method_type = prev_method_type;
 
         let reason = if by_ptr {
             "ptr method tail expression"

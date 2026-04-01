@@ -25,12 +25,23 @@
     },
 
     "function-definition": {
-      "match": "(\\*)(\\w+)\\s*(\\()",
-      "captures": {
-        "1": { "name": "keyword.other.function-def.jade" },
-        "2": { "name": "entity.name.function.jade" },
-        "3": { "name": "punctuation.definition.parameters.begin.jade" }
-      }
+      "patterns": [
+        {
+          "match": "(\\*)(\\w+)\\s*(\\()",
+          "captures": {
+            "1": { "name": "keyword.other.function-def.jade" },
+            "2": { "name": "entity.name.function.jade" },
+            "3": { "name": "punctuation.definition.parameters.begin.jade" }
+          }
+        },
+        {
+          "match": "(\\*)([a-zA-Z_]\\w*)(?=\\s|$)",
+          "captures": {
+            "1": { "name": "keyword.other.function-def.jade" },
+            "2": { "name": "entity.name.function.jade" }
+          }
+        }
+      ]
     },
 
     "type-definition": {
@@ -53,7 +64,7 @@
       "patterns": [
         {
           "name": "keyword.control.jade",
-          "match": "\\b(if|elif|else|while|until|unless|for|in|to|by|match|return|break|continue|loop|do|end|sim|select|default|from|yield|spawn|send|supervisor|strategy|children|build)\\b"
+          "match": "\\b(if|elif|else|while|until|unless|for|in|to|by|match|return|break|continue|loop|do|end|sim|select|default|from|yield|spawn|send|supervisor|strategy|children|build|transaction|insert|delete|query)\\b"
         },
         {
           "name": "keyword.operator.word.jade",
@@ -61,11 +72,11 @@
         },
         {
           "name": "keyword.declaration.jade",
-          "match": "\\b(type|enum|pub|fn|trait|impl|actor|store|extern|err|use|channel|alias)\\b"
+          "match": "\\b(type|enum|pub|fn|trait|impl|actor|store|extern|err|use|channel|alias|rc|weak)\\b"
         },
         {
           "name": "support.function.builtin.jade",
-          "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float|assert|panic|time_now|popcount|clz|ctz|bswap|rotate_left|rotate_right|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul|checked_add|checked_sub|checked_mul|volatile_load|volatile_store|signal_handle|signal_ignore|signal_raise|rc|weak|weak_upgrade|atomic_load|atomic_store|atomic_add|atomic_sub|atomic_cas|vec_with_alloc|map_with_alloc|constant_time_eq|fields_of|type_of|size_of|align_of|matmul|ndarray|priority_queue|map|filter|fold|zip|take|skip|any|all|find|flatten|chain|collect|split|join|trim|to_upper|to_lower|replace|contains|starts_with|ends_with|char_at|slice|matches|find_all|replace_re|deque|grad|einsum|contract)\\b"
+          "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float|assert|panic|time_now|popcount|clz|ctz|bswap|rotate_left|rotate_right|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul|checked_add|checked_sub|checked_mul|volatile_load|volatile_store|signal_handle|signal_ignore|signal_raise|weak_upgrade|atomic_load|atomic_store|atomic_add|atomic_sub|atomic_cas|vec_with_alloc|map_with_alloc|constant_time_eq|fields_of|type_of|size_of|align_of|matmul|ndarray|priority_queue|map|filter|fold|zip|take|skip|any|all|find|flatten|chain|collect|split|join|trim|to_upper|to_lower|replace|contains|starts_with|ends_with|char_at|slice|matches|find_all|replace_re|deque|grad|einsum|contract|count|where)\\b"
         },
         {
           "name": "support.type.jade",
@@ -91,6 +102,10 @@
         {
           "name": "constant.language.unreachable.jade",
           "match": "\\bunreachable\\b"
+        },
+        {
+          "name": "variable.language.self.jade",
+          "match": "\\bself\\b"
         },
         {
           "name": "variable.language.placeholder.jade",
@@ -132,6 +147,19 @@
         {
           "name": "constant.character.escape.jade",
           "match": "\\\\[nrt0\\\\']"
+        },
+        {
+          "name": "meta.embedded.line.jade",
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.jade" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.jade" } },
+          "patterns": [
+            { "include": "#operators" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#identifiers" }
+          ]
         }
       ]
     },
@@ -178,7 +206,14 @@
           "name": "keyword.operator.ternary.jade",
           "match": "\\?"
         },
-
+        {
+          "name": "keyword.operator.deref.jade",
+          "match": "@"
+        },
+        {
+          "name": "keyword.operator.ref.jade",
+          "match": "%"
+        },
         {
           "name": "keyword.operator.star.jade",
           "match": "\\*"

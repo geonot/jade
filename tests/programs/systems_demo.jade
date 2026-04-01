@@ -4,7 +4,7 @@
 #               memory layout, pointers, bitwise ops
 # Note: some features may not be fully implemented yet
 
-extern *printf(fmt as &i8, ...) returns i32
+extern *printf(fmt as %i8, ...) returns i32
 
 # ── Integer Overflow Control ────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ extern *printf(fmt as &i8, ...) returns i32
 
 *pointer_demo
     x is 42
-    ptr is &x
+    ptr is %x
     val is @ptr
     log(val)                             # 42
 
@@ -81,7 +81,7 @@ extern *printf(fmt as &i8, ...) returns i32
 
 *volatile_demo
     x is 0
-    ptr is &x
+    ptr is %x
     volatile_store(ptr, 99)
     v is volatile_load(ptr)
     log(v)                               # 99

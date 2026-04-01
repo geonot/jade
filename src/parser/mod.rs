@@ -10,6 +10,8 @@ pub enum ParseError {
 pub struct Parser {
     tok: Vec<Spanned>,
     pos: usize,
+    errors: Vec<ParseError>,
+    suppress_by: bool,
 }
 
 macro_rules! binop {
@@ -31,7 +33,7 @@ mod stmt;
 
 impl Parser {
     pub fn new(tok: Vec<Spanned>) -> Self {
-        Self { tok, pos: 0 }
+        Self { tok, pos: 0, errors: Vec::new(), suppress_by: false }
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
@@ -41,11 +43,100 @@ impl Parser {
             if self.eof() {
                 break;
             }
-            decls.push(self.parse_decl()?);
+            match self.parse_decl() {
+                Ok(d) => decls.push(d),
+                Err(e) => {
+                    self.errors.push(e);
+                    if self.errors.len() >= 20 {
+                        break;
+                    }
+                    self.synchronize();
+                }
+            }
+        }
+        if !self.errors.is_empty() {
+            let msgs: Vec<String> = self.errors.iter().map(|e| e.to_string()).collect();
+            return Err(ParseError::Error {
+                line: 0,
+                col: 0,
+                msg: format!(
+                    "{} parse error(s):\n{}",
+                    msgs.len(),
+                    msgs.join("\n")
+                ),
+            });
         }
         let mut prog = Program { decls };
+        // If there are top-level statements and no explicit *main, wrap them into an implicit *main
+        let has_explicit_main = prog.decls.iter().any(|d| matches!(d, Decl::Fn(f) if f.name == "main"));
+        let has_top_stmts = prog.decls.iter().any(|d| matches!(d, Decl::TopStmt(_) | Decl::Const(..)));
+        if has_top_stmts && !has_explicit_main {
+            let mut body_stmts: Vec<Stmt> = Vec::new();
+            let mut remaining_decls: Vec<Decl> = Vec::new();
+            let mut main_span = Span::dummy();
+            for d in prog.decls.drain(..) {
+                match d {
+                    Decl::TopStmt(stmt) => {
+                        if main_span.line == 0 { main_span = stmt.span(); }
+                        body_stmts.push(stmt);
+                    }
+                    Decl::Const(name, val, sp) => {
+                        if main_span.line == 0 { main_span = sp; }
+                        body_stmts.push(Stmt::Bind(Bind {
+                            name,
+                            value: val,
+                            ty: None,
+                            span: sp,
+                        }));
+                    }
+                    other => remaining_decls.push(other),
+                }
+            }
+            remaining_decls.push(Decl::Fn(Fn {
+                name: "main".to_string(),
+                type_params: Vec::new(),
+                type_bounds: Vec::new(),
+                params: Vec::new(),
+                ret: None,
+                body: body_stmts,
+                is_generator: false,
+                span: main_span,
+            }));
+            prog.decls = remaining_decls;
+        }
         desugar_multi_clause_fns(&mut prog);
         Ok(prog)
+    }
+
+    /// Skip tokens until the next likely declaration boundary.
+    fn synchronize(&mut self) {
+        loop {
+            if self.eof() {
+                break;
+            }
+            match self.peek() {
+                // Declaration-starting tokens
+                Token::Star | Token::Type | Token::Enum | Token::Extern
+                | Token::Use | Token::Actor | Token::Store | Token::Trait
+                | Token::Impl | Token::Test | Token::Pub | Token::Supervisor
+                | Token::Alias => break,
+                Token::Newline => {
+                    self.advance();
+                    // After newline, check if next token starts a declaration
+                    if self.eof() {
+                        break;
+                    }
+                    match self.peek() {
+                        Token::Star | Token::Type | Token::Enum | Token::Extern
+                        | Token::Use | Token::Actor | Token::Store | Token::Trait
+                        | Token::Impl | Token::Test | Token::Pub | Token::Supervisor
+                        | Token::Alias => break,
+                        _ => {}
+                    }
+                }
+                _ => { self.advance(); }
+            }
+        }
     }
 
     fn peek(&self) -> Token {
@@ -113,6 +204,10 @@ impl Parser {
                 Token::Set => {
                     self.advance();
                     return Ok("set".into());
+                }
+                Token::Build => {
+                    self.advance();
+                    return Ok("build".into());
                 }
                 _ => {}
             }

@@ -20,7 +20,14 @@ impl<'ctx> Compiler<'ctx> {
             Type::Bool => self.ctx.bool_type().into(),
             Type::Void => self.ctx.i8_type().into(),
             Type::String => self.string_type().into(),
-            Type::TypeVar(_) => self.ctx.i64_type().into(),
+            Type::TypeVar(v) => {
+                // ICE guard: TypeVars should be resolved before codegen.
+                // Falling back to i64 to avoid crashing, but this indicates
+                // a monomorphization gap in the typer.
+                debug_assert!(false, "ICE: unresolved TypeVar({v}) reached codegen");
+                eprintln!("warning: unresolved TypeVar({v}) reached codegen — defaulting to i64");
+                self.ctx.i64_type().into()
+            }
             Type::Struct(name, _) | Type::Enum(name) => self
                 .module
                 .get_struct_type(name)
@@ -39,8 +46,8 @@ impl<'ctx> Compiler<'ctx> {
                     false,
                 )
                 .into(),
-            Type::Fn(_, _)
-            | Type::Ptr(_)
+            Type::Fn(_, _) => self.closure_type().into(),
+            Type::Ptr(_)
             | Type::Rc(_)
             | Type::Weak(_)
             | Type::ActorRef(_)
@@ -53,7 +60,14 @@ impl<'ctx> Compiler<'ctx> {
                     .into()
             }
             Type::Arena => self.arena_type().into(),
-            Type::Param(_) => self.ctx.i64_type().into(),
+            Type::Pool => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Param(name) => {
+                // ICE guard: Type parameters should be monomorphized before
+                // codegen. Falling back to i64 to avoid crashing, but this
+                // masks a genuine typer/monomorphization bug.
+                eprintln!("warning: unresolved type parameter '{name}' reached codegen — defaulting to i64");
+                self.ctx.i64_type().into()
+            }
             Type::Deque(_) | Type::Cow(_) | Type::Generator(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),
         }
@@ -72,6 +86,12 @@ impl<'ctx> Compiler<'ctx> {
             );
             st
         })
+    }
+
+    /// Closure fat-pointer: { fn_ptr: ptr, env_ptr: ptr }
+    pub(crate) fn closure_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        self.ctx.struct_type(&[ptr.into(), ptr.into()], false)
     }
 
     /// Arena struct: { base: ptr, cap: i64, offset: i64 }
@@ -163,6 +183,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::F64 => self.ctx.f64_type().const_float(0.0).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::String => self.string_type().const_zero().into(),
+            Type::Fn(_, _) => self.closure_type().const_zero().into(),
             _ => self.ctx.i64_type().const_int(0, false).into(),
         }
     }

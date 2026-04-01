@@ -14,6 +14,7 @@ pub struct PerceusHints {
     pub drop_fusions: Vec<DropFusion>,
     pub fbip_sites: Vec<FbipSite>,
     pub tail_reuse: HashMap<DefId, TailReuseInfo>,
+    pub pool_hints: Vec<PoolHint>,
     pub stats: PerceusStats,
 }
 
@@ -46,6 +47,13 @@ pub struct TailReuseInfo {
     pub span: Span,
 }
 
+#[derive(Debug, Clone)]
+pub struct PoolHint {
+    pub alloc_ty: Type,
+    pub size: u64,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PerceusStats {
     pub drops_elided: u32,
@@ -57,6 +65,7 @@ pub struct PerceusStats {
     pub drops_fused: u32,
     pub last_use_tracked: u32,
     pub total_bindings_analyzed: u32,
+    pub pool_hints_found: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +136,7 @@ impl PerceusPass {
         self.analyze_tail_reuse(f, &uses);
         self.analyze_drop_fusion(&f.body, &uses);
         self.analyze_speculative_reuse(&f.body, &uses);
+        self.analyze_pool_hints(&f.body);
     }
 }
 
@@ -299,5 +309,18 @@ mod tests {
             "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*area(s: Shape) -> f64\n    match s\n        Circle(r) ? 3.14159 * r * r\n        Square(side) ? side * side\n\n*main()\n    log(area(Circle(5.0)))\n",
         );
         assert!(hints.stats.total_bindings_analyzed >= 1);
+    }
+
+    #[test]
+    fn test_pool_hints_in_loop() {
+        let hints = analyze(
+            "*main()\n    i is 0\n    while i < 100\n        x is rc(i)\n        log(@x)\n        i is i + 1\n",
+        );
+        assert!(
+            hints.stats.pool_hints_found >= 1,
+            "expected pool hint for Rc alloc in loop, got {}",
+            hints.stats.pool_hints_found
+        );
+        assert!(!hints.pool_hints.is_empty());
     }
 }

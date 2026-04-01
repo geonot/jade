@@ -16,8 +16,6 @@ Jade inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/
 
 This compiles to the same LLVM IR as equivalent C. Same speed. Zero overhead.
 
-Jade was born from Coral — a language with one of the cleanest syntaxes ever designed and one of the worst runtime performance profiles ever measured. Coral's 64-byte Value struct, NaN-boxing ABI, and cycle-detecting garbage collector made a compiled LLVM language run 3× slower than CPython. We kept the syntax. We dropped everything else.
-
 ### Principles
 
 1. **Values are their types.** An `i64` is a register. A struct is contiguous memory at known offsets. No universal wrapper. No indirection unless requested.
@@ -49,9 +47,9 @@ Integer literals infer width from context. `42` is `i64` by default, narrows to 
 ```jade
 # Structs — value types, contiguous memory
 type Vec3
-    x: i64
-    y: i64
-    z: i64
+    x as i64
+    y as i64
+    z as i64
 
 # Enums — tagged unions
 enum Shape
@@ -68,12 +66,12 @@ nums is [1, 2, 3, 4, 5]
 ### Generics — the `of` keyword
 
 ```jade
-*max of T(a: T, b: T)
+*max of T(a as T, b as T)
     a > b ? a ! b
 
 type Pair of A, B
-    first: A
-    second: B
+    first as A
+    second as B
 
 enum Option of T
     Some(T)
@@ -91,10 +89,10 @@ alias UserId is i64
 
 # Newtype — opaque, distinct type at compile time
 type Celsius
-    value: f64
+    value as f64
 
 type Fahrenheit
-    value: f64
+    value as f64
 # Celsius and Fahrenheit are NOT interchangeable even though both wrap f64
 ```
 
@@ -109,7 +107,7 @@ pi is 3.14159              # f64
 done is true               # bool
 
 # Typed binding
-count: i32 is 0
+count as i32 is 0
 
 # Reassignment (same binding, new value)
 x is x + 1
@@ -151,11 +149,11 @@ DEFAULT_PORT is 8080
 *add a, b
     a + b
 
-*greet name: String
+*greet name as String
     'hello {name}'
 
 # With defaults
-*connect host: String, port: i64 is 8080
+*connect host as String, port as i64 is 8080
     ...
 
 # No-arg functions — no parens needed
@@ -214,7 +212,7 @@ Single-expression functions use `is` instead of an indented block.
 
 ```jade
 *double x is x * 2
-*square(x: i64) is x * x
+*square(x as i64) is x * x
 *add a, b is a + b
 *neg x is 0 - x
 ```
@@ -230,11 +228,11 @@ Combines naturally with pattern clauses:
 ### Higher-Order Functions
 
 ```jade
-*apply f: (i64) -> i64, x: i64
+*apply f as (i64) returns i64, x as i64
     f x
 
 *main
-    double is *fn(x: i64) x * 2
+    double is *fn(x as i64) x * 2
     log apply(double, 21)
 ```
 
@@ -242,7 +240,7 @@ Combines naturally with pattern clauses:
 
 ```jade
 # Inline
-square is *fn(x: i64) x * x
+square is *fn(x as i64) x * x
 
 # Placeholder shorthand
 doubled is items ~ *fn(x) x * 2
@@ -455,8 +453,8 @@ m is my_struct as map        # convert struct to Map
 
 ```jade
 type Point
-    x: i64
-    y: i64
+    x as i64
+    y as i64
 
 # Constructor
 p is Point(x is 10, y is 20)
@@ -466,14 +464,14 @@ log p.x
 
 # Methods
 type Vec3
-    x: i64
-    y: i64
-    z: i64
+    x as i64
+    y as i64
+    z as i64
 
-    *length self
+    *length(self)
         ((self.x * self.x + self.y * self.y + self.z * self.z) as f64) ** 0.5
 
-    *dot self, other: Vec3
+    *dot(self, other as Vec3)
         self.x * other.x + self.y * other.y + self.z * other.z
 ```
 
@@ -490,7 +488,7 @@ enum Color
     Blue
     Custom(u8, u8, u8)
 
-*describe c: Color
+*describe c as Color
     match c
         Red ? 1
         Green ? 2
@@ -527,7 +525,7 @@ err FileError
     NotFound
     PermissionDenied(String)
 
-*read_file path: String
+*read_file path as String
     if path equals ''
         ! NotFound
     42
@@ -769,8 +767,8 @@ Stores are typed, persistent data collections that survive across program runs. 
 ```jade
 # Define a store with typed fields
 store users
-    name: String
-    age: i64
+    name as String
+    age as i64
 
 # Insert records (values match field order)
 insert users 'Alice', 30
@@ -829,7 +827,7 @@ transaction
 ### Extern Functions (C FFI)
 
 ```jade
-extern *printf(fmt: &i8, ...) -> i32
+extern *printf(fmt as %i8, ...) returns i32
 
 *main
     printf 'hello from jade\n'
@@ -854,7 +852,7 @@ asm
 ### Raw Pointers
 
 ```jade
-ptr is &value
+ptr is %value
 val is @ptr        # dereference
 ```
 
@@ -863,7 +861,7 @@ val is @ptr        # dereference
 Hardware-observable reads and writes. No compiler reordering, no elision.
 
 ```jade
-extern *mmio_base() -> &i32
+extern *mmio_base() returns %i32
 
 *poll_device
     reg is mmio_base()
@@ -877,11 +875,11 @@ Explicit cycle-breaking for reference-counted values. The compiler warns when we
 
 ```jade
 type Node
-    value: i64
-    parent: weak rc Node     # weak reference breaks the cycle
+    value as i64
+    parent as weak rc Node     # weak reference breaks the cycle
 
 *main
-    root is rc(Node { value: 1, parent: none })
+    root is rc(Node(value is 1, parent is none))
     child_parent is weak root            # downgrade to weak
     strong is weak_upgrade child_parent  # upgrade: returns rc or none
 ```
@@ -901,7 +899,7 @@ b is b + ' world'   # COW triggers: b gets its own copy
 POSIX signal infrastructure.
 
 ```jade
-*handler sig: i32
+*handler sig as i32
     log sig
 
 *main
@@ -932,10 +930,10 @@ Lock-free atomic instructions for concurrent programming:
 
 ```jade
 counter is 0
-atomic_add(&counter, 1)           # atomic increment
-val is atomic_load(&counter)      # atomic read
-atomic_store(&counter, 0)         # atomic write
-old, ok is atomic_cas(&counter, 0, 1)  # compare-and-swap
+atomic_add(%counter, 1)           # atomic increment
+val is atomic_load(%counter)      # atomic read
+atomic_store(%counter, 0)         # atomic write
+old, ok is atomic_cas(%counter, 0, 1)  # compare-and-swap
 ```
 
 ### Arena / Region Allocation
@@ -1092,11 +1090,11 @@ d is einsum 'i,i->', u, v
 Source-to-source AD via `grad`:
 
 ```jade
-*loss(x: f64) -> f64
+*loss(x as f64) returns f64
     x ** 2 + 3.0 * x + 1.0
 
 *main()
-    dloss is grad(loss)    # returns a function: f64 -> f64
+    dloss is grad(loss)    # returns a function: f64 returns f64
     log dloss(2.0)         # 7.0  (derivative: 2x + 3)
 ```
 
@@ -1203,144 +1201,35 @@ jade bind header.h         # generate extern declarations from C header
 - **Boolean results:** `zext i1` for correct 0/1 values
 - **Printf format strings:** width-correct (`%d`/`%ld`/`%u`/`%lu`)
 
-### Source Stats
-
-| Component | LOC |
-|-----------|-----|
-| codegen/ | 3,658 (builtins 904 · expr 1,181 · stmt 877 · strings 502 · mod 436 · types 360 · decl 247 · call 151) |
-| typer.rs | 2,721 |
-| parser.rs | 2,210 |
-| perceus.rs | 1,147 |
-| lexer.rs | 1,024 |
-| ownership.rs | 613 |
-| ast.rs | 360 |
-| hir.rs | 347 |
-| main.rs | 236 |
-| diagnostic.rs | 197 |
-| types.rs | 147 |
-| lib.rs | 12 |
-| **Total** | **13,672** |
-
----
-
-## EBNF Grammar
-
-### Program
-
-```ebnf
-program      = { NEWLINE | declaration } ;
-declaration  = function_def | type_def | enum_def | extern_def | use_decl | err_def | store_def ;
-```
-
-### Functions
-
-```ebnf
-function_def = '*' , IDENT , [ 'of' , type_params ] ,
-               [ '(' ] , [ param_list ] , [ ')' ] , [ '->' , type ] ,
-               ( 'is' , expression | NEWLINE , block ) ;
-param_list   = param , { ',' , param } ;
-param        = ( IDENT , [ ':' , type ] , [ 'is' , expression ] ) | literal ;
-literal      = INT | FLOAT | BOOL | STRING ;
-```
-
-Multiple definitions of the same function name with literal parameters are merged into a single function with conditional dispatch (pattern-directed clauses).
-
-### Types & Enums
-
-```ebnf
-type_def     = [ 'pub' ] , 'type' , IDENT , [ 'of' , type_params ] , NEWLINE ,
-               INDENT , { field_def | function_def } , DEDENT ;
-enum_def     = 'enum' , IDENT , [ 'of' , type_params ] , NEWLINE ,
-               INDENT , { variant_def } , DEDENT ;
-variant_def  = IDENT , [ '(' , type_list , ')' ] , NEWLINE ;
-```
-
-### Statements
-
-```ebnf
-statement    = bind_stmt | if_stmt | while_stmt | for_stmt | loop_stmt
-             | match_stmt | return_stmt | break_stmt | continue_stmt
-             | insert_stmt | delete_stmt | expr_stmt ;
-bind_stmt    = IDENT , 'is' , expression ;
-insert_stmt  = 'insert' , IDENT , expr , { ',' , expr } ;
-delete_stmt  = 'delete' , IDENT , store_filter ;
-for_stmt     = 'for' , IDENT , ( 'from' | 'is' ) , expr , 'to' , expr , [ 'by' , expr ] , NEWLINE , block ;
-match_stmt   = 'match' , expression , NEWLINE , INDENT , { pattern , '?' , body } , DEDENT ;
-```
-
-### Stores
-
-```ebnf
-store_def    = 'store' , IDENT , NEWLINE , INDENT , { field_def } , DEDENT ;
-store_filter = 'where' , IDENT , ( 'equals' | 'isnt' | '<' | '>' | '<=' | '>=' ) , expr ;
-store_query  = IDENT , store_filter ;
-store_count  = 'count' , IDENT ;
-store_all    = 'all' , IDENT ;
-```
-
-### Expressions (precedence low → high)
-
-```ebnf
-expression   = pipeline_expr , [ '?' , expression , '!' , expression ] ;
-pipeline_expr = or_expr , { '~' , or_expr } ;
-or_expr      = and_expr , { 'or' , and_expr } ;
-and_expr     = eq_expr , { 'and' , eq_expr } ;
-eq_expr      = cmp_expr , { ( 'equals' | 'isnt' ) , cmp_expr } ;
-cmp_expr     = bitor_expr , { ( '<' | '>' | '<=' | '>=' ) , bitor_expr } ;
-bitor_expr   = bitxor_expr , { '|' , bitxor_expr } ;
-bitxor_expr  = bitand_expr , { '^' , bitand_expr } ;
-bitand_expr  = shift_expr , { '&' , shift_expr } ;
-shift_expr   = add_expr , { ( '<<' | '>>' ) , add_expr } ;
-add_expr     = mul_expr , { ( '+' | '-' ) , mul_expr } ;
-mul_expr     = exp_expr , { ( '*' | '/' | '%' ) , exp_expr } ;
-exp_expr     = unary_expr , [ '**' , exp_expr ] ;
-unary_expr   = ( '-' | 'not' ) , unary_expr | postfix_expr ;
-postfix_expr = primary , { '(' args ')' | '[' expr ']' | '.' IDENT | 'as' type } ;
-```
-
-### Lexical
-
-```
-Keywords (59): is neq equals and or not xor if elif else while for from loop
-               yield continue return match when type enum err pub use
-               as to by array unsafe extern fn log of query sim
-               true false none store insert delete transaction
-               count all where in supervisor actor spawn send select
-               strict unreachable alias deque grad einsum contract build
-```
-
-Indentation-based (spaces only, tabs prohibited). `#` comments. Single-quoted strings with `{interpolation}`. Double-quoted raw strings.
-
 ---
 
 ## Performance
 
-Jade compiles to identical LLVM IR as equivalent C. Benchmark suite of 15 programs tested against C (Clang 21 -O3, same LLVM backend), Rust (rustc -C opt-level=3), and Python 3. Three runs, median reported.
+Jade compiles to identical LLVM IR as equivalent C. Benchmark suite tested against C (Clang 21 -O3, same LLVM backend). Five runs, median reported.
 
 | Benchmark | Jade | Clang | J/C |
 |-----------|------|-------|-----|
-| ackermann(3,10) | 182ms | 186ms | 0.98× |
-| fibonacci(40) | 337ms | 337ms | 1.00× |
-| collatz(1M) | 176ms | 191ms | 0.92× |
-| sieve(1M) | 144ms | 142ms | 1.02× |
-| gcd_intensive | 26ms | 24ms | 1.11× |
-| spectral_norm | 238ms | 691ms | 0.34× |
-| nbody | 137ms | 147ms | 0.93× |
-| math_compute | 373μs | 530μs | 0.70× |
-| matrix_mul | 414μs | 531μs | 0.78× |
-| struct_ops | 369μs | 497μs | 0.74× |
-| enum_dispatch | 422μs | 460μs | 0.92× |
-| hof_pipeline | 430μs | 452μs | 0.95× |
-| array_ops | 466μs | 503μs | 0.92× |
-| closure_capture | 449μs | 499μs | 0.90× |
-| tight_loop | 366μs | 528μs | 0.69× |
-| **TOTAL** | **1.24s** | **1.72s** | **0.72×** |
+| ackermann(3,10) | 186ms | 202ms | 0.92× |
+| fibonacci(40) | 339ms | 336ms | 1.01× |
+| collatz(1M) | 169ms | 172ms | 0.99× |
+| sieve(1M) | 142ms | 142ms | 1.00× |
+| gcd_intensive | 24ms | 24ms | 0.99× |
+| spectral_norm | 209ms | 232ms | 0.90× |
+| nbody | 136ms | 136ms | 0.99× |
+| math_compute | 380μs | 580μs | 0.66× |
+| matrix_mul | 370μs | 460μs | 0.80× |
+| struct_ops | 430μs | 410μs | 1.05× |
+| enum_dispatch | 380μs | 450μs | 0.84× |
+| array_ops | 390μs | 470μs | 0.83× |
+| closure_capture | 380μs | 450μs | 0.84× |
+| tight_loop | 390μs | 450μs | 0.87× |
+| **TOTAL** | **1.21s** | **1.25s** | **0.97×** |
 
-Jade is **28% faster than Clang** across the full suite. Versus Python: **84× faster**.
+Jade matches Clang across the full compute suite — **0.97× C performance**.
 
 Run benchmarks:
 ```
-python3 run_benchmarks.py --opt=3 --runs=5 --save=v0.0.0-rc1
+python3 run_benchmarks.py --opt=3 --runs=5 --save=v0.5.0
 python3 run_benchmarks.py --opt=all --runs=5    # O0–O3 sweep
 python3 run_benchmarks.py --langs=jade,c        # subset
 ```
@@ -1403,31 +1292,31 @@ Three tiers, determined at compile time:
 ```jade
 # Default — compiler may reorder fields for optimal alignment
 type Example
-    a: u8
-    b: u64
-    c: u8
+    a as u8
+    b as u64
+    c as u8
 
 # C-compatible — declaration order preserved
 type CStruct @strict
-    magic: u32
-    version: u16
-    flags: u16
-    data: u64
+    magic as u32
+    version as u16
+    flags as u16
+    data as u64
 
 # Packed — no padding
 type Pixel @packed
-    r: u8
-    g: u8
-    b: u8
+    r as u8
+    g as u8
+    b as u8
 
 # Cache-aligned
 type CacheAligned @align(64)
-    data: [u8; 64]
+    data as [u8; 64]
 
 # Combinable
 type NetPacket @packed @strict @align(4)
-    header: u32
-    payload: [u8; 1024]
+    header as u32
+    payload as [u8; 1024]
 ```
 
 ### Memory Safety Guarantees
@@ -1455,21 +1344,6 @@ Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership 
 | Monomorphization | Generics generate specialized code. No boxing, no virtual dispatch. |
 | Ownership + borrow checking | Memory safety without GC. Compile-time only — zero runtime cost. |
 | Perceus RC as fallback | For shared/graph structures, reference counting with borrow elision. |
-
-### Coral → Jade
-
-| Aspect | Coral | Jade |
-|--------|-------|------|
-| Value representation | 64-byte heap Value struct | Native LLVM types |
-| Function ABI | Universal NaN-boxed | Native typed |
-| Integer types | Single f64 | Full i8–u64 |
-| Struct layout | Runtime heap-allocated | Compile-time contiguous, stack default |
-| Array storage | `Vec<ValueHandle>` | `[N x T]` contiguous |
-| Memory management | RC + cycle detector | Ownership + borrowing + Perceus RC |
-| Generics | Type erasure | Monomorphization |
-| Builtin dispatch | String matching (~80 branches) | Inline codegen |
-| Runtime | ~24K LOC Rust | Minimal (<1K LOC) |
-| Performance | 90× behind Rust | 0.97× Clang |
 
 ### Diagnostics
 

@@ -427,6 +427,12 @@ pub enum BuiltinFn {
     GradFn,
     Einsum,
     CowWrap,
+    Likely,
+    Unlikely,
+    PoolNew,
+    PoolAlloc,
+    PoolFree,
+    PoolDestroy,
 }
 
 #[derive(Debug, Clone, PartialEq)]

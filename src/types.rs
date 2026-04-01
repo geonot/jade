@@ -33,6 +33,7 @@ pub enum Type {
     SIMD(Box<Type>, usize),
     DynTrait(String),
     Arena,
+    Pool,
     TypeVar(u32),
     Deque(Box<Type>),
     Cow(Box<Type>),
@@ -83,6 +84,27 @@ impl Type {
         matches!(self, Self::Weak(_))
     }
 
+    /// Returns true if this type is represented as an LLVM pointer at the ABI level.
+    pub fn is_ptr_represented(&self) -> bool {
+        matches!(
+            self,
+            Self::Ptr(_)
+                | Self::Rc(_)
+                | Self::Weak(_)
+                | Self::ActorRef(_)
+                | Self::Coroutine(_)
+                | Self::Channel(_)
+                | Self::Vec(_)
+                | Self::Map(_, _)
+                | Self::Set(_)
+                | Self::NDArray(_, _)
+                | Self::PriorityQueue(_)
+                | Self::Deque(_)
+                | Self::Cow(_)
+                | Self::Generator(_)
+        )
+    }
+
     pub fn is_trivially_droppable(&self) -> bool {
         match self {
             Self::I8
@@ -114,6 +136,27 @@ impl Type {
             Self::Weak(_) => crate::hir::Ownership::Weak,
             Self::Ptr(_) => crate::hir::Ownership::Raw,
             _ => crate::hir::Ownership::Owned,
+        }
+    }
+
+    /// Returns true if this type (or any nested type) involves concurrency
+    /// primitives that require atomic reference counting.
+    pub fn needs_atomic_rc(&self) -> bool {
+        match self {
+            Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,
+            Self::Rc(inner) | Self::Weak(inner) | Self::Vec(inner) | Self::Set(inner)
+            | Self::Ptr(inner) | Self::Cow(inner) | Self::Deque(inner)
+            | Self::PriorityQueue(inner) => inner.needs_atomic_rc(),
+            Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
+            Self::Array(inner, _) | Self::NDArray(inner, _) | Self::SIMD(inner, _) => {
+                inner.needs_atomic_rc()
+            }
+            Self::Tuple(tys) => tys.iter().any(|t| t.needs_atomic_rc()),
+            Self::Fn(params, ret) => {
+                params.iter().any(|t| t.needs_atomic_rc()) || ret.needs_atomic_rc()
+            }
+            Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.needs_atomic_rc(),
+            _ => false,
         }
     }
 }
@@ -179,6 +222,7 @@ impl std::fmt::Display for Type {
             Self::SIMD(inner, lanes) => write!(f, "SIMD of {inner}, {lanes}"),
             Self::DynTrait(name) => write!(f, "dyn {name}"),
             Self::Arena => f.write_str("Arena"),
+            Self::Pool => f.write_str("Pool"),
             Self::Fn(ps, r) => {
                 f.write_str("(")?;
                 for (i, p) in ps.iter().enumerate() {

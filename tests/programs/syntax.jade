@@ -527,8 +527,8 @@ err FileError
 
 # ── 18. Extern / FFI ───────────────────────────────────────────────────────
 
-extern *printf(fmt as &i8, ...) returns i32
-extern *puts(s as &i8) returns i32
+extern *printf(fmt as %i8, ...) returns i32
+extern *puts(s as %i8) returns i32
 
 *demo_ffi
     printf('hello from C: %d\n', 42)

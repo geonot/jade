@@ -2138,3 +2138,160 @@ fn drop_does_not_affect_scalars() {
         "42\n3.140000\n1",
     );
 }
+
+// ── Layout attributes (@packed, @strict, @align) ───────────────────
+
+#[test]
+fn packed_struct_field_access() {
+    // @packed struct should work correctly with no padding
+    expect(
+        "type Compact @packed\n    a: i8\n    b: i64\n    c: i8\n\n*main()\n    s is Compact(a is 1, b is 42, c is 3)\n    log(s.a)\n    log(s.b)\n    log(s.c)\n",
+        "1\n42\n3",
+    );
+}
+
+#[test]
+fn strict_struct_field_order() {
+    // @strict guarantees declaration order is preserved
+    expect(
+        "type Ordered @strict\n    x: i64\n    y: i64\n    z: i64\n\n*main()\n    s is Ordered(x is 10, y is 20, z is 30)\n    log(s.x)\n    log(s.y)\n    log(s.z)\n",
+        "10\n20\n30",
+    );
+}
+
+#[test]
+fn align_struct_field_access() {
+    // @align(64) struct should work correctly with cache-line alignment
+    expect(
+        "type Aligned @align(64)\n    val: i64\n    flag: i8\n\n*main()\n    s is Aligned(val is 99, flag is 7)\n    log(s.val)\n    log(s.flag)\n",
+        "99\n7",
+    );
+}
+
+#[test]
+fn packed_strict_combined() {
+    // @packed @strict together
+    expect(
+        "type PS @packed @strict\n    a: i8\n    b: i64\n\n*main()\n    s is PS(a is 5, b is 100)\n    log(s.a)\n    log(s.b)\n",
+        "5\n100",
+    );
+}
+
+// ── Branch hints (likely/unlikely) ─────────────────────────────────
+
+#[test]
+fn likely_builtin() {
+    expect(
+        "*main()\n    x is 10\n    if likely(x > 5)\n        log(1)\n    else\n        log(0)\n",
+        "1",
+    );
+}
+
+#[test]
+fn unlikely_builtin() {
+    expect(
+        "*main()\n    x is 10\n    if unlikely(x > 100)\n        log(1)\n    else\n        log(0)\n",
+        "0",
+    );
+}
+
+// ── Perceus reuse codegen ──────────────────────────────────────────
+
+#[test]
+fn perceus_rc_reuse_same_type() {
+    // Two sequential rc allocs of same type — second should reuse the first's memory
+    expect(
+        "*main()\n    x is rc(42)\n    log(@x)\n    y is rc(99)\n    log(@y)\n",
+        "42\n99",
+    );
+}
+
+#[test]
+fn perceus_rc_values_independent() {
+    // Ensure reused memory has correct new values
+    expect(
+        "*main()\n    a is rc(10)\n    log(@a)\n    b is rc(20)\n    log(@b)\n    c is rc(30)\n    log(@c)\n",
+        "10\n20\n30",
+    );
+}
+
+// ── FBIP (Functional But In-Place) ─────────────────────────────────
+
+#[test]
+fn fbip_match_reconstruct_enum() {
+    // Match on an enum, reconstruct a variant — should work correctly
+    // (FBIP analysis may detect reuse opportunity)
+    expect(
+        "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*double_shape(s: Shape) -> Shape\n    match s\n        Circle(r) ? Circle(r * 2.0)\n        Square(side) ? Square(side * 2.0)\n\n*main()\n    c is double_shape(Circle(5.0))\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
+        "10.000000",
+    );
+}
+
+#[test]
+fn fbip_match_transform_variant() {
+    // Transform one variant to another of the same enum
+    expect(
+        "enum Op\n    Add(i64)\n    Mul(i64)\n\n*negate(op: Op) -> Op\n    match op\n        Add(n) ? Add(0 - n)\n        Mul(n) ? Mul(0 - n)\n\n*main()\n    r is negate(Add(42))\n    match r\n        Add(n) ? log(n)\n        Mul(n) ? log(n)\n",
+        "-42",
+    );
+}
+
+// ── Pool Allocator ─────────────────────────────────────────────────
+
+#[test]
+fn pool_create_alloc_free() {
+    // Create a pool, allocate from it, free back, allocate again
+    expect(
+        "*main()\n    p is Pool(8, 16)\n    slot is p.alloc()\n    p.free(slot)\n    slot2 is p.alloc()\n    log(42)\n    p.destroy()\n",
+        "42",
+    );
+}
+
+#[test]
+fn pool_multiple_allocs() {
+    // Allocate multiple slots and verify pool works
+    expect(
+        "*main()\n    p is Pool(8, 64)\n    a is p.alloc()\n    b is p.alloc()\n    c is p.alloc()\n    p.free(b)\n    d is p.alloc()\n    log(100)\n    p.destroy()\n",
+        "100",
+    );
+}
+
+// ── Tail Reuse ─────────────────────────────────────────────────────
+
+#[test]
+fn tail_reuse_enum_transform() {
+    // Function takes owned enum, returns same enum type — Perceus should
+    // detect tail reuse opportunity. Values should be correct.
+    expect(
+        "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*scale(s: Shape, factor: f64) -> Shape\n    match s\n        Circle(r) ? Circle(r * factor)\n        Square(side) ? Square(side * factor)\n\n*main()\n    c is scale(Circle(3.0), 2.0)\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
+        "6.000000",
+    );
+}
+
+#[test]
+fn tail_reuse_rc_reconstruct() {
+    // Rc values get correct computed results in a function
+    expect(
+        "*main()\n    x is rc(7)\n    v is @x * 10\n    a is rc(v)\n    log(@a)\n",
+        "70",
+    );
+}
+
+#[test]
+fn pool_perceus_loop_alloc() {
+    // Rc allocations inside a loop should still produce correct results
+    // (Perceus pool hints detect this pattern for optimization)
+    expect(
+        "*main()\n    i is 0\n    while i < 5\n        x is rc(i * 10)\n        log(@x)\n        i is i + 1\n",
+        "0\n10\n20\n30\n40",
+    );
+}
+
+#[test]
+fn pool_perceus_nested_loop_alloc() {
+    // Nested loops with Rc allocs should work correctly
+    expect(
+        "*main()\n    i is 0\n    while i < 3\n        j is 0\n        while j < 2\n            x is rc(i + j)\n            log(@x)\n            j is j + 1\n        i is i + 1\n",
+        "0\n1\n1\n2\n2\n3",
+    );
+}

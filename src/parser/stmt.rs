@@ -431,7 +431,10 @@ impl Parser {
         let iter = self.parse_expr()?;
         let end = if self.check(Token::To) {
             self.advance();
-            Some(self.parse_expr()?)
+            self.suppress_by = true;
+            let e = self.parse_expr()?;
+            self.suppress_by = false;
+            Some(e)
         } else {
             None
         };

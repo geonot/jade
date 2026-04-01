@@ -4,7 +4,7 @@ use crate::ast::Span;
 use crate::hir::*;
 use crate::types::Type;
 
-use super::{DropFusion, FbipSite, PerceusPass, ReuseInfo, TailReuseInfo, UseInfo};
+use super::{DropFusion, FbipSite, PerceusPass, PoolHint, ReuseInfo, TailReuseInfo, UseInfo};
 
 impl PerceusPass {
     pub(super) fn analyze_drop_specialization(&mut self, uses: &HashMap<DefId, UseInfo>) {
@@ -24,9 +24,11 @@ impl PerceusPass {
     pub(super) fn analyze_reuse(&mut self, body: &Block, uses: &HashMap<DefId, UseInfo>) {
         let rc_bindings: Vec<(DefId, &Type, Span)> = self.collect_rc_bindings(body);
 
-        for i in 0..rc_bindings.len() {
-            let (released_id, released_ty, _released_span) = &rc_bindings[i];
-            let Some(info) = uses.get(released_id) else {
+        // Group Rc bindings by layout size for O(n) matching instead of O(n²)
+        let mut released_by_size: HashMap<u64, Vec<(DefId, &Type, Span)>> = HashMap::new();
+
+        for (id, ty, span) in &rc_bindings {
+            let Some(info) = uses.get(id) else {
                 continue;
             };
             if info.use_count != 1
@@ -34,31 +36,40 @@ impl PerceusPass {
                 || info.borrowed
                 || info.ownership != Ownership::Rc
             {
+                // Not a release candidate; check if it can be an allocation target
+                let size = Self::type_layout_size(match ty {
+                    Type::Rc(inner) => inner.as_ref(),
+                    _ => ty,
+                });
+                if let Some(candidates) = released_by_size.get_mut(&size) {
+                    if let Some((released_id, released_ty, _)) = candidates.pop() {
+                        self.hints.reuse_candidates.insert(
+                            released_id,
+                            ReuseInfo {
+                                released_ty: released_ty.clone(),
+                                allocated_ty: (*ty).clone(),
+                                span: *span,
+                            },
+                        );
+                        self.hints.reuse_candidates.insert(
+                            *id,
+                            ReuseInfo {
+                                released_ty: released_ty.clone(),
+                                allocated_ty: (*ty).clone(),
+                                span: *span,
+                            },
+                        );
+                        self.hints.stats.reuse_sites += 1;
+                    }
+                }
                 continue;
             }
-            for j in (i + 1)..rc_bindings.len() {
-                let (producer_id, allocated_ty, alloc_span) = &rc_bindings[j];
-                if Self::layouts_compatible(released_ty, allocated_ty) {
-                    self.hints.reuse_candidates.insert(
-                        *released_id,
-                        ReuseInfo {
-                            released_ty: (*released_ty).clone(),
-                            allocated_ty: (*allocated_ty).clone(),
-                            span: *alloc_span,
-                        },
-                    );
-                    self.hints.reuse_candidates.insert(
-                        *producer_id,
-                        ReuseInfo {
-                            released_ty: (*released_ty).clone(),
-                            allocated_ty: (*allocated_ty).clone(),
-                            span: *alloc_span,
-                        },
-                    );
-                    self.hints.stats.reuse_sites += 1;
-                    break;
-                }
-            }
+            // This is a release candidate — add to pool by layout size
+            let size = Self::type_layout_size(match ty {
+                Type::Rc(inner) => inner.as_ref(),
+                _ => ty,
+            });
+            released_by_size.entry(size).or_default().push((*id, *ty, *span));
         }
 
         for stmt in body {
@@ -131,6 +142,11 @@ impl PerceusPass {
     }
 
     fn type_layout_size(ty: &Type) -> u64 {
+        Self::type_layout_size_pub(ty)
+    }
+
+    /// Public API for layout size computation, used by codegen for reuse matching.
+    pub fn type_layout_size_pub(ty: &Type) -> u64 {
         match ty {
             Type::I8 | Type::U8 | Type::Bool => 1,
             Type::I16 | Type::U16 => 2,
@@ -139,11 +155,11 @@ impl PerceusPass {
             Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => 8,
             Type::String => 24,
             Type::Void => 0,
-            Type::Array(inner, len) => Self::type_layout_size(inner) * (*len as u64),
+            Type::Array(inner, len) => Self::type_layout_size_pub(inner) * (*len as u64),
             Type::Tuple(tys) => tys
                 .iter()
                 .map(|t| {
-                    let sz = Self::type_layout_size(t);
+                    let sz = Self::type_layout_size_pub(t);
                     (sz + 7) & !7
                 })
                 .sum(),
@@ -157,16 +173,17 @@ impl PerceusPass {
             Type::Vec(_) | Type::Map(_, _) | Type::Set(_) => 24,
             Type::PriorityQueue(_) => 24,
             Type::NDArray(inner, dims) => {
-                let elem_size = Self::type_layout_size(inner);
+                let elem_size = Self::type_layout_size_pub(inner);
                 let total: u64 = dims.iter().map(|&d| d as u64).product();
                 elem_size * total
             }
             Type::Channel(_) => 8,
-            Type::SIMD(inner, lanes) => Self::type_layout_size(inner) * (*lanes as u64),
+            Type::SIMD(inner, lanes) => Self::type_layout_size_pub(inner) * (*lanes as u64),
             Type::Arena => 24, // {ptr, cap, offset}
+            Type::Pool => 8, // opaque pointer
             Type::Deque(_) => 24,
-            Type::Cow(inner) => Self::type_layout_size(inner),
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size(inner),
+            Type::Cow(inner) => Self::type_layout_size_pub(inner),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size_pub(inner),
             Type::Generator(_) => 8,
         }
     }
@@ -484,6 +501,110 @@ impl PerceusPass {
                 | Stmt::Stop(_, _)
                 | Stmt::UseLocal(_, _, _, _) => {}
             }
+        }
+    }
+
+    /// Detect Rc/struct allocations inside loops that could benefit from pool allocation.
+    /// When a loop body allocates same-typed Rc values repeatedly, a pool pre-allocation
+    /// would eliminate per-iteration malloc overhead.
+    pub(super) fn analyze_pool_hints(&mut self, body: &Block) {
+        for stmt in body {
+            let loop_body = match stmt {
+                Stmt::While(w) => Some(&w.body),
+                Stmt::For(f) => Some(&f.body),
+                Stmt::SimFor(f, _) => Some(&f.body),
+                Stmt::Loop(l) => Some(&l.body),
+                _ => None,
+            };
+            if let Some(lb) = loop_body {
+                let mut alloc_types: HashMap<u64, (Type, Span)> = HashMap::new();
+                self.collect_alloc_types(lb, &mut alloc_types);
+                for (size, (ty, span)) in alloc_types {
+                    self.hints.pool_hints.push(PoolHint {
+                        alloc_ty: ty,
+                        size,
+                        span,
+                    });
+                    self.hints.stats.pool_hints_found += 1;
+                }
+                // Recurse into the loop body for nested loops
+                self.analyze_pool_hints(lb);
+            } else {
+                // Recurse into nested blocks
+                match stmt {
+                    Stmt::If(i) => {
+                        self.analyze_pool_hints(&i.then);
+                        for (_, eb) in &i.elifs {
+                            self.analyze_pool_hints(eb);
+                        }
+                        if let Some(els) = &i.els {
+                            self.analyze_pool_hints(els);
+                        }
+                    }
+                    Stmt::Match(m) => {
+                        for arm in &m.arms {
+                            self.analyze_pool_hints(&arm.body);
+                        }
+                    }
+                    Stmt::Transaction(body, _) => self.analyze_pool_hints(body),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Collect allocation types found in a block (Rc allocs and struct constructions).
+    fn collect_alloc_types(&self, body: &Block, found: &mut HashMap<u64, (Type, Span)>) {
+        for stmt in body {
+            match stmt {
+                Stmt::Bind(b) => {
+                    if let Some((ty, span)) = self.expr_alloc_type(&b.value, b.span) {
+                        let size = Self::type_layout_size_pub(&ty);
+                        if size > 0 {
+                            found.entry(size).or_insert((ty, span));
+                        }
+                    }
+                }
+                Stmt::Expr(e) => {
+                    if let Some((ty, span)) = self.expr_alloc_type(e, e.span) {
+                        let size = Self::type_layout_size_pub(&ty);
+                        if size > 0 {
+                            found.entry(size).or_insert((ty, span));
+                        }
+                    }
+                }
+                Stmt::If(i) => {
+                    self.collect_alloc_types(&i.then, found);
+                    for (_, eb) in &i.elifs {
+                        self.collect_alloc_types(eb, found);
+                    }
+                    if let Some(els) = &i.els {
+                        self.collect_alloc_types(els, found);
+                    }
+                }
+                Stmt::Match(m) => {
+                    for arm in &m.arms {
+                        self.collect_alloc_types(&arm.body, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Check if an expression represents a heap allocation, returning its inner type.
+    fn expr_alloc_type(&self, expr: &Expr, _fallback_span: Span) -> Option<(Type, Span)> {
+        match &expr.kind {
+            ExprKind::Builtin(BuiltinFn::RcAlloc, _) => {
+                let inner = match &expr.ty {
+                    Type::Rc(inner) => inner.as_ref().clone(),
+                    _ => expr.ty.clone(),
+                };
+                Some((inner, expr.span))
+            }
+            ExprKind::VariantCtor(_, _, _, _) => Some((expr.ty.clone(), expr.span)),
+            ExprKind::Struct(_, _) => Some((expr.ty.clone(), expr.span)),
+            _ => None,
         }
     }
 }

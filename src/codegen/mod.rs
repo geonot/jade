@@ -6,6 +6,7 @@ mod channels;
 mod conversions;
 mod coroutines;
 mod decl;
+mod drop;
 mod expr;
 mod fmt;
 mod lambda;
@@ -82,6 +83,11 @@ pub struct Compiler<'ctx> {
     pub(crate) vtables: HashMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
     pub(crate) trait_method_order: HashMap<String, Vec<String>>,
     pub needs_runtime: bool,
+    pub(crate) fast_math_flags: u32,
+    /// Reuse tokens: DefId → saved heap pointer for Perceus reuse.
+    /// When a drop is skipped for reuse, the pointer is stashed here
+    /// so the next compatible allocation can reuse it instead of malloc.
+    pub(crate) reuse_tokens: HashMap<hir::DefId, PointerValue<'ctx>>,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
@@ -116,6 +122,8 @@ impl<'ctx> Compiler<'ctx> {
             vtables: HashMap::new(),
             trait_method_order: HashMap::new(),
             needs_runtime: false,
+            fast_math_flags: 0,
+            reuse_tokens: HashMap::new(),
         }
     }
 
@@ -125,6 +133,33 @@ impl<'ctx> Compiler<'ctx> {
 
     pub fn set_lib_mode(&mut self) {
         self.lib_mode = true;
+    }
+
+    /// Enable fast-math flags on all floating-point instructions.
+    /// Flags: nnan | ninf | nsz | arcp | contract | afn | reassoc
+    pub fn set_fast_math(&mut self, enable: bool) {
+        if enable {
+            // LLVMFastMathAll = 0x7F (all 7 flags)
+            self.fast_math_flags = 0x7F;
+        } else {
+            self.fast_math_flags = 0;
+        }
+    }
+
+    /// Enable deterministic FP mode — disables all fast-math reordering.
+    /// This is the default (flags = 0), but calling this explicitly after
+    /// set_fast_math will override back to strict IEEE 754 compliance.
+    pub fn set_deterministic_fp(&mut self) {
+        self.fast_math_flags = 0;
+    }
+
+    /// Tag a float instruction with the current fast-math flags.
+    pub(crate) fn tag_fast_math(&self, val: BasicValueEnum<'ctx>) {
+        if self.fast_math_flags != 0 {
+            if let Some(inst) = val.as_instruction_value() {
+                inst.set_fast_math_flags(self.fast_math_flags);
+            }
+        }
     }
 
     pub fn enable_debug(&mut self, filename: &str) {
@@ -222,7 +257,7 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_err_def(ed)?;
         }
 
-        let needs_runtime = !prog.actors.is_empty() || Self::uses_concurrency(prog);
+        let needs_runtime = !prog.actors.is_empty() || Self::uses_concurrency(prog) || Self::uses_pool(prog);
         self.needs_runtime = needs_runtime;
         if needs_runtime {
             self.declare_jade_runtime();
@@ -471,6 +506,37 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    /// Emit LLVM parameter attributes based on Jade's ownership model.
+    ///
+    /// - Owned pointer params  → `noalias` (exclusive, no other ref exists)
+    /// - Borrowed pointer params → `noalias readonly` (shared read-only)
+    /// - BorrowMut pointer params → `noalias` (exclusive mutable borrow)
+    /// - Rc/Weak → shared refcount, no noalias
+    /// - Raw → user-managed, no assumptions
+    pub(crate) fn tag_param_ownership(
+        &self,
+        fv: FunctionValue<'ctx>,
+        loc: AttributeLoc,
+        ownership: &hir::Ownership,
+        ty: &Type,
+    ) {
+        if !ty.is_ptr_represented() {
+            return;
+        }
+        match ownership {
+            hir::Ownership::Owned | hir::Ownership::BorrowMut => {
+                fv.add_attribute(loc, self.attr("noalias"));
+            }
+            hir::Ownership::Borrowed => {
+                fv.add_attribute(loc, self.attr("noalias"));
+                fv.add_attribute(loc, self.attr("readonly"));
+            }
+            // Rc/Weak are shared-ownership — aliased by design
+            // Raw is user-managed — we make no assumptions
+            hir::Ownership::Rc | hir::Ownership::Weak | hir::Ownership::Raw => {}
+        }
+    }
+
     pub(crate) fn set_var(&mut self, name: &str, ptr: PointerValue<'ctx>, ty: Type) {
         self.vars
             .last_mut()
@@ -487,7 +553,9 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(b!(self.bld.build_load(self.llvm_ty(&ty), ptr, name)));
         }
         if let Some(fv) = self.module.get_function(name) {
-            return Ok(fv.as_global_value().as_pointer_value().into());
+            let wrapper = self.fn_ref_wrapper(fv);
+            let null_env = self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null();
+            return self.make_closure(wrapper, null_env);
         }
         Err(format!("undefined: {name}"))
     }
@@ -514,6 +582,25 @@ impl<'ctx> Compiler<'ctx> {
             .set_alignment(align)
             .unwrap();
         ptr
+    }
+
+    /// Alloca that respects @align layout attribute for struct types.
+    pub(crate) fn alloca_for_type(
+        &self,
+        llvm_ty: BasicTypeEnum<'ctx>,
+        name: &str,
+        jade_ty: &Type,
+    ) -> PointerValue<'ctx> {
+        let align = if let Type::Struct(sname, _) = jade_ty {
+            self.struct_layouts.get(sname).and_then(|l| l.align)
+        } else {
+            None
+        };
+        if let Some(a) = align {
+            self.entry_alloca_aligned(llvm_ty, name, a)
+        } else {
+            self.entry_alloca(llvm_ty, name)
+        }
     }
 
     pub(crate) fn no_term(&self) -> bool {
@@ -553,6 +640,24 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("malloc", ft, Some(Linkage::External))
         })
+    }
+
+    /// Try to find and consume a reuse token whose allocation is layout-compatible
+    /// with the requested byte size. Returns the saved pointer if found.
+    pub(crate) fn try_consume_reuse_token(&mut self, needed_size: u64) -> Option<PointerValue<'ctx>> {
+        // Find any reuse token whose released type has a compatible layout size
+        let matching_id = self.hints.reuse_candidates.iter()
+            .chain(self.hints.speculative_reuse.iter())
+            .find_map(|(def_id, info)| {
+                if self.reuse_tokens.contains_key(def_id) {
+                    let released_size = crate::perceus::PerceusPass::type_layout_size_pub(&info.released_ty);
+                    if released_size >= needed_size && released_size > 0 {
+                        return Some(*def_id);
+                    }
+                }
+                None
+            });
+        matching_id.and_then(|id| self.reuse_tokens.remove(&id))
     }
 
     pub(crate) fn ensure_free(&mut self) -> FunctionValue<'ctx> {
@@ -651,6 +756,27 @@ impl<'ctx> Compiler<'ctx> {
                 .trait_impls
                 .iter()
                 .any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
+    }
+
+    fn uses_pool(prog: &hir::Program) -> bool {
+        use crate::hir::{BuiltinFn, ExprKind, Stmt};
+        fn has_pool(e: &hir::Expr) -> bool {
+            matches!(&e.kind,
+                ExprKind::Builtin(BuiltinFn::PoolNew | BuiltinFn::PoolAlloc | BuiltinFn::PoolFree | BuiltinFn::PoolDestroy, _))
+        }
+        fn scan_block(block: &[hir::Stmt]) -> bool {
+            block.iter().any(|s| match s {
+                Stmt::Expr(e) => has_pool(e),
+                Stmt::Bind(b) => has_pool(&b.value),
+                Stmt::If(i) => scan_block(&i.then) || i.elifs.iter().any(|(_, b)| scan_block(b)) || i.els.as_ref().map_or(false, |b| scan_block(b)),
+                Stmt::While(w) => scan_block(&w.body),
+                Stmt::For(f) => scan_block(&f.body),
+                Stmt::Loop(l) => scan_block(&l.body),
+                Stmt::Match(m) => m.arms.iter().any(|a| scan_block(&a.body)),
+                _ => false,
+            })
+        }
+        prog.fns.iter().any(|f| scan_block(&f.body))
     }
 
     pub(crate) fn declare_jade_runtime(&mut self) {

@@ -12,6 +12,24 @@ impl Typer {
     ) -> Result<hir::Stmt, String> {
         match stmt {
             ast::Stmt::Bind(b) => {
+                // If inside a method body and the name matches a struct field (but not a local var),
+                // convert `field is value` to `self.field = value`
+                if self.current_method_type.is_some() && self.find_var(&b.name).is_none() {
+                    let type_name = self.current_method_type.clone().unwrap();
+                    let is_field = self.structs.get(&type_name)
+                        .map(|fields| fields.iter().any(|(n, _)| n == &b.name))
+                        .unwrap_or(false);
+                    if is_field {
+                        let self_expr = ast::Expr::Ident("self".to_string(), b.span);
+                        let field_expr = ast::Expr::Field(Box::new(self_expr), b.name.clone(), b.span);
+                        let ht = self.lower_expr(&field_expr)?;
+                        let hv = self.lower_expr_expected(&b.value, Some(&ht.ty))?;
+                        let r = self.infer_ctx.unify_at(&ht.ty, &hv.ty, b.span, "field assignment");
+                        self.collect_unify_error(r);
+                        let hv = self.maybe_coerce_to(hv, &ht.ty);
+                        return Ok(hir::Stmt::Assign(ht, hv, b.span));
+                    }
+                }
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?

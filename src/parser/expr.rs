@@ -316,7 +316,7 @@ impl Parser {
                         break;
                     }
                 }
-                Token::By => {
+                Token::By if !self.suppress_by => {
                     let sp = e.span();
                     let mut dims = vec![e.clone()];
                     while self.check(Token::By) {
@@ -503,17 +503,28 @@ impl Parser {
                 Ok(Expr::Einsum(spec, args, sp))
             }
             Token::Build => {
-                self.advance();
-                let name = self.ident()?;
-                self.expect(Token::Newline)?;
-                let fields = self.parse_indented(|p| {
-                    let fsp = p.span();
-                    let fname = p.ident()?;
-                    p.expect(Token::Is)?;
-                    let fval = p.parse_expr()?;
-                    Ok(BuilderField { name: fname, value: fval, span: fsp })
-                })?;
-                Ok(Expr::Builder(name, fields, sp))
+                // If followed by '(' treat as function call, not builder syntax
+                let next = if self.pos + 1 < self.tok.len() {
+                    &self.tok[self.pos + 1].token
+                } else {
+                    &Token::Eof
+                };
+                if matches!(next, Token::LParen) {
+                    self.advance();
+                    Ok(Expr::Ident("build".into(), sp))
+                } else {
+                    self.advance();
+                    let name = self.ident()?;
+                    self.expect(Token::Newline)?;
+                    let fields = self.parse_indented(|p| {
+                        let fsp = p.span();
+                        let fname = p.ident()?;
+                        p.expect(Token::Is)?;
+                        let fval = p.parse_expr()?;
+                        Ok(BuilderField { name: fname, value: fval, span: fsp })
+                    })?;
+                    Ok(Expr::Builder(name, fields, sp))
+                }
             }
             Token::Ident(ref name) => {
                 let name = name.clone();

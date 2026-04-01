@@ -59,15 +59,46 @@ impl Parser {
             }
             Token::Ident(_) => {
                 let sp = self.span();
-                let name = self.ident()?;
-                self.expect(Token::Is)?;
-                let val = self.parse_expr()?;
-                self.expect(Token::Newline)?;
-                Ok(Decl::Const(name, val, sp))
+                // Look ahead: if next token is `Is` and the one after the ident is directly `Is`,
+                // this is a const/binding. Otherwise it's a top-level statement (expr, method call, etc.)
+                if self.pos + 1 < self.tok.len()
+                    && matches!(self.tok[self.pos + 1].token, Token::Is)
+                {
+                    let name = self.ident()?;
+                    self.expect(Token::Is)?;
+                    let val = self.parse_expr()?;
+                    if self.check(Token::Newline) {
+                        self.advance();
+                    }
+                    Ok(Decl::Const(name, val, sp))
+                } else {
+                    // Top-level statement: expression statement, method call, assignment, etc.
+                    let stmt = self.parse_stmt()?;
+                    if self.check(Token::Newline) {
+                        self.advance();
+                    }
+                    Ok(Decl::TopStmt(stmt))
+                }
             }
-            _ => Err(self.error(
-                "expected *, type, enum, extern, use, err, test, actor, store, trait, or impl",
-            )),
+            _ => {
+                // Try to parse as a top-level expression/statement
+                // This handles keywords like `log`, `print`, `assert`, and literals
+                let save = self.pos;
+                match self.parse_stmt() {
+                    Ok(stmt) => {
+                        if self.check(Token::Newline) {
+                            self.advance();
+                        }
+                        Ok(Decl::TopStmt(stmt))
+                    }
+                    Err(_) => {
+                        self.pos = save;
+                        Err(self.error(
+                            "expected *, type, enum, extern, use, err, test, actor, store, trait, or impl",
+                        ))
+                    }
+                }
+            }
         }
     }
 
@@ -294,10 +325,15 @@ impl Parser {
         let mut layout = crate::ast::LayoutAttrs::default();
         while self.check(Token::At) {
             self.advance();
+            // Handle keywords that are also layout attribute names
+            if self.check(Token::Strict) {
+                self.advance();
+                layout.strict = true;
+                continue;
+            }
             let attr = self.ident()?;
             match attr.as_str() {
                 "packed" => layout.packed = true,
-                "strict" => layout.strict = true,
                 "align" => {
                     self.expect(Token::LParen)?;
                     let n = match self.peek() {

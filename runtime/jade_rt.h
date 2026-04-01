@@ -184,6 +184,18 @@ void     jade_timer_set(jade_timer_t *t, uint64_t deadline_ns);
 int      jade_timer_check(jade_timer_t *t);
 uint64_t jade_time_now_ns(void);
 
+/* ── Pool allocator ──────────────────────────────────────────────── */
+
+typedef struct jade_pool jade_pool_t;
+
+jade_pool_t *jade_pool_create(size_t obj_size, size_t count);
+void        *jade_pool_alloc(jade_pool_t *pool);
+void         jade_pool_free(jade_pool_t *pool, void *ptr);
+void         jade_pool_reset(jade_pool_t *pool);
+void         jade_pool_destroy(jade_pool_t *pool);
+size_t       jade_pool_count(jade_pool_t *pool);
+size_t       jade_pool_capacity(jade_pool_t *pool);
+
 /* ── Actor helpers ───────────────────────────────────────────────── */
 
 void jade_actor_park(void *mailbox_ptr);

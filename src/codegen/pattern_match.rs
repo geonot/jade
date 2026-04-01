@@ -19,6 +19,17 @@ impl<'ctx> Compiler<'ctx> {
         let subject_val = self.compile_expr(&m.subject)?;
         let subject_ty = self.resolve_ty(m.subject.ty.clone());
 
+        // FBIP: if the subject is a variable with FBIP sites,
+        // save its pointer as a reuse token for constructors in match arms.
+        if let hir::ExprKind::Var(subject_id, _) = &m.subject.kind {
+            let has_fbip = self.hints.fbip_sites.iter().any(|s| s.subject_id == *subject_id);
+            if has_fbip {
+                if let Some(ptr) = subject_val.is_pointer_value().then(|| subject_val.into_pointer_value()) {
+                    self.reuse_tokens.insert(*subject_id, ptr);
+                }
+            }
+        }
+
         let is_enum = matches!(subject_ty, Type::Enum(_))
             || matches!(&subject_ty, Type::Struct(n, _) if self.enums.contains_key(n));
 

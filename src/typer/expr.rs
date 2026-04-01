@@ -198,6 +198,17 @@ impl Typer {
                         span: *span,
                     });
                 }
+                // Implicit self.field resolution inside method bodies
+                if let Some(ref type_name) = self.current_method_type.clone() {
+                    let is_field = self.structs.get(type_name)
+                        .map(|fields| fields.iter().any(|(n, _)| n == name))
+                        .unwrap_or(false);
+                    if is_field {
+                        let self_expr = ast::Expr::Ident("self".to_string(), *span);
+                        let field_expr = ast::Expr::Field(Box::new(self_expr), name.clone(), *span);
+                        return self.lower_expr(&field_expr);
+                    }
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Var(DefId::BUILTIN, name.clone()),
                     ty: self.infer_ctx.fresh_var(),
@@ -1203,6 +1214,19 @@ impl Typer {
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::ArenaNew, vec![harg]),
                 ty: Type::Arena,
+                span,
+            });
+        }
+
+        // Handle Pool(obj_size, count) as builtin
+        if name == "Pool" && inits.len() == 2 {
+            let hsize = self.lower_expr_expected(&inits[0].value, Some(&Type::I64))?;
+            let hcount = self.lower_expr_expected(&inits[1].value, Some(&Type::I64))?;
+            let _ = self.infer_ctx.unify_at(&hsize.ty, &Type::I64, span, "Pool obj_size");
+            let _ = self.infer_ctx.unify_at(&hcount.ty, &Type::I64, span, "Pool count");
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::PoolNew, vec![hsize, hcount]),
+                ty: Type::Pool,
                 span,
             });
         }

@@ -157,7 +157,7 @@ impl From<&crate::types::Type> for IType {
             Type::Set(inner) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::NDArray(inner, _dims) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::DynTrait(n) => IType::DynTrait(n.clone()),
-            Type::Arena => IType::I64, // arenas not exposed in interfaces
+            Type::Arena | Type::Pool => IType::I64, // arenas/pools not exposed in interfaces
             Type::SIMD(inner, lanes) => IType::Array(Box::new(inner.as_ref().into()), *lanes),
             Type::PriorityQueue(inner) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::TypeVar(_) => IType::I64, // unsolved vars default to i64

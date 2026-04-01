@@ -7,7 +7,7 @@ use clap::{Parser as ClapParser, Subcommand};
 use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
-use jadec::ast::{Decl, Program};
+use jadec::ast::{Decl, Program, Stmt};
 use jadec::cache::{Cache, build_package_map};
 use jadec::codegen::Compiler;
 use jadec::lexer::Lexer;
@@ -34,6 +34,8 @@ struct Cli {
     #[arg(long)]
     emit_hir: bool,
     #[arg(long)]
+    emit_mir: bool,
+    #[arg(long)]
     emit_obj: bool,
     #[arg(long, default_value = "3")]
     opt: u8,
@@ -47,8 +49,10 @@ struct Cli {
     debug: bool,
     #[arg(long)]
     debug_types: bool,
-    #[arg(long)]
+    #[arg(long, default_value_t = true)]
     warn_inferred_defaults: bool,
+    #[arg(long)]
+    no_warn_inferred_defaults: bool,
     #[arg(long)]
     strict_types: bool,
     #[arg(long)]
@@ -63,6 +67,18 @@ struct Cli {
     dump_tokens: bool,
     #[arg(long)]
     dump_ast: bool,
+    /// Enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
+    #[arg(long)]
+    fast_math: bool,
+    /// Guarantee deterministic floating-point results (disable FP reordering)
+    #[arg(long)]
+    deterministic_fp: bool,
+    /// Enable incremental compilation (cache unchanged function artifacts)
+    #[arg(long)]
+    incremental: bool,
+    /// Number of parallel codegen threads (0 = auto-detect)
+    #[arg(long, default_value = "0")]
+    threads: usize,
 }
 
 #[derive(Subcommand)]
@@ -120,6 +136,7 @@ fn decl_name(d: &Decl) -> Option<&str> {
         Decl::Test(_) | Decl::Use(_) => None,
         Decl::Supervisor(s) => Some(&s.name),
         Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => Some(name),
+        Decl::TopStmt(_) => None,
     }
 }
 
@@ -228,7 +245,25 @@ fn resolve_modules(
             packages,
         );
         for d in mod_prog.decls {
-            if !matches!(d, Decl::Use(_)) && should_import_decl(&d, &imports) {
+            if matches!(d, Decl::Use(_)) {
+                continue;
+            }
+            // The parser wraps module-level constants into an implicit *main.
+            // Unwrap them back into Const decls so they don't shadow the user's main.
+            if let Decl::Fn(ref f) = d {
+                if f.name == "main" && f.params.is_empty() {
+                    for stmt in &f.body {
+                        if let Stmt::Bind(b) = stmt {
+                            let cd = Decl::Const(b.name.clone(), b.value.clone(), b.span);
+                            if should_import_decl(&cd, &imports) {
+                                prog.decls.push(cd);
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+            if should_import_decl(&d, &imports) {
                 prog.decls.push(d);
             }
         }
@@ -425,7 +460,7 @@ fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
     }
 }
 
-fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool) {
+fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool) {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
@@ -467,10 +502,37 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
         die("compilation aborted due to ownership errors");
     }
 
+    // ── MIR pass: HIR → MIR → optimize → (optional print) ──
+    let mir_opt_level = match opt_level {
+        0 => jadec::mir::opt::OptLevel::None,
+        1 => jadec::mir::opt::OptLevel::Basic,
+        _ => jadec::mir::opt::OptLevel::Full,
+    };
+    let mut mir_prog = jadec::mir::lower::lower_program(&hir_prog);
+    for func in &mut mir_prog.functions {
+        jadec::mir::opt::optimize(func, mir_opt_level);
+    }
+    if emit_mir {
+        print!("{}", jadec::mir::printer::print_program(&mir_prog));
+    }
+
+    // ── Incremental compilation: check and report cache status ──
+    if incremental {
+        let incr_cache = jadec::incr::ArtifactCache::new();
+        let (dirty, _keys) = jadec::incr::compute_dirty_set(&hir_prog, &incr_cache);
+        if dirty.is_empty() {
+            eprintln!("incr: all functions up to date");
+        } else {
+            eprintln!("incr: {} of {} functions need recompilation", dirty.len(), hir_prog.fns.len());
+        }
+    }
+
     let ctx = Context::create();
     let name = input.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "main".into());
     let mut comp = Compiler::new(&ctx, &name);
     comp.set_source(&src);
+    if fast_math { comp.set_fast_math(true); }
+    if deterministic_fp { comp.set_deterministic_fp(); }
     if let Err(e) = comp.compile_program(&hir_prog, hints) {
         die(&format!("codegen: {e}"));
     }
@@ -518,12 +580,12 @@ fn main() {
                 let entry = find_project_entry();
                 let out = output.unwrap_or_else(|| PathBuf::from("a.out"));
                 let opt_level = opt.unwrap_or(3);
-                compile_and_link(&entry, &out, opt_level, lto, false, false);
+                compile_and_link(&entry, &out, opt_level, lto, false, false, cli.fast_math, cli.deterministic_fp, cli.emit_mir, cli.incremental);
             }
             Cmd::Run { args } => {
                 let entry = find_project_entry();
                 let out = PathBuf::from("./.jade_run_tmp");
-                compile_and_link(&entry, &out, 2, false, false, false);
+                compile_and_link(&entry, &out, 2, false, false, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
                 let status = Command::new(&out).args(&args).status();
                 let _ = fs::remove_file(&out);
                 match status {
@@ -533,7 +595,7 @@ fn main() {
             }
             Cmd::Test => {
                 let entry = find_project_entry();
-                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false);
+                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
                 let status = Command::new("./.jade_test_tmp").status();
                 let _ = fs::remove_file("./.jade_test_tmp");
                 match status {
@@ -689,7 +751,7 @@ fn main() {
     if cli.debug_types {
         typer.set_debug_types(true);
     }
-    if cli.warn_inferred_defaults {
+    if cli.warn_inferred_defaults && !cli.no_warn_inferred_defaults {
         typer.set_warn_inferred_defaults(true);
     }
     if cli.strict_types {
@@ -741,15 +803,17 @@ fn main() {
         || hints.stats.fbip_sites > 0
         || hints.stats.tail_reuse_sites > 0
         || hints.stats.speculative_reuse_sites > 0
+        || hints.stats.pool_hints_found > 0
     {
         eprintln!(
-            "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative ({} bindings)",
+            "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative, {} pool-hints ({} bindings)",
             hints.stats.drops_elided,
             hints.stats.reuse_sites,
             hints.stats.borrows_promoted,
             hints.stats.fbip_sites,
             hints.stats.tail_reuse_sites,
             hints.stats.speculative_reuse_sites,
+            hints.stats.pool_hints_found,
             hints.stats.total_bindings_analyzed,
         );
     }
@@ -788,6 +852,32 @@ fn main() {
         die("compilation aborted due to ownership errors");
     }
 
+    // ── MIR pass: HIR → MIR → optimize → (optional print) ──
+    let mir_opt_level = match cli.opt {
+        0 => jadec::mir::opt::OptLevel::None,
+        1 => jadec::mir::opt::OptLevel::Basic,
+        _ => jadec::mir::opt::OptLevel::Full,
+    };
+    let mut mir_prog = jadec::mir::lower::lower_program(&hir_prog);
+    for func in &mut mir_prog.functions {
+        jadec::mir::opt::optimize(func, mir_opt_level);
+    }
+    if cli.emit_mir {
+        print!("{}", jadec::mir::printer::print_program(&mir_prog));
+        return;
+    }
+
+    // ── Incremental compilation: check cache status ──
+    if cli.incremental {
+        let incr_cache = jadec::incr::ArtifactCache::new();
+        let (dirty, _keys) = jadec::incr::compute_dirty_set(&hir_prog, &incr_cache);
+        if dirty.is_empty() {
+            eprintln!("incr: all functions up to date");
+        } else {
+            eprintln!("incr: {} of {} functions need recompilation", dirty.len(), hir_prog.fns.len());
+        }
+    }
+
     let ctx = Context::create();
     let name = input
         .file_stem()
@@ -801,6 +891,12 @@ fn main() {
     if cli.debug {
         let filename = input.to_string_lossy().to_string();
         comp.enable_debug(&filename);
+    }
+    if cli.fast_math {
+        comp.set_fast_math(true);
+    }
+    if cli.deterministic_fp {
+        comp.set_deterministic_fp();
     }
     if let Err(e) = comp.compile_program(&hir_prog, hints) {
         die(&format!("codegen: {e}"));

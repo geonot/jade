@@ -24,12 +24,18 @@ impl<'ctx> Compiler<'ctx> {
         let layout = self.rc_layout_ty(inner);
         let i64t = self.ctx.i64_type();
         let size = layout.size_of().unwrap();
-        let malloc = self.ensure_malloc();
-        let heap_ptr = b!(self.bld.build_call(malloc, &[size.into()], "rc.alloc"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_pointer_value();
+        let needed_bytes = size.get_zero_extended_constant().unwrap_or(8);
+        // Perceus reuse: try to reuse a saved heap pointer instead of malloc
+        let heap_ptr = if let Some(reused) = self.try_consume_reuse_token(needed_bytes) {
+            reused
+        } else {
+            let malloc = self.ensure_malloc();
+            b!(self.bld.build_call(malloc, &[size.into()], "rc.alloc"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap()
+                .into_pointer_value()
+        };
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
         b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
         let val_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.val"));
@@ -46,12 +52,19 @@ impl<'ctx> Compiler<'ctx> {
         let rc_gep = b!(self
             .bld
             .build_struct_gep(layout, ptr.into_pointer_value(), 0, "rc.cnt"));
-        b!(self.bld.build_atomicrmw(
-            inkwell::AtomicRMWBinOp::Add,
-            rc_gep,
-            self.ctx.i64_type().const_int(1, false),
-            inkwell::AtomicOrdering::AcquireRelease,
-        ));
+        if inner.needs_atomic_rc() {
+            b!(self.bld.build_atomicrmw(
+                inkwell::AtomicRMWBinOp::Add,
+                rc_gep,
+                self.ctx.i64_type().const_int(1, false),
+                inkwell::AtomicOrdering::AcquireRelease,
+            ));
+        } else {
+            let i64t = self.ctx.i64_type();
+            let old = b!(self.bld.build_load(i64t, rc_gep, "rc.cnt.ld")).into_int_value();
+            let inc = b!(self.bld.build_int_nuw_add(old, i64t.const_int(1, false), "rc.inc"));
+            b!(self.bld.build_store(rc_gep, inc));
+        }
         Ok(())
     }
 
@@ -65,12 +78,19 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let heap_ptr = ptr.into_pointer_value();
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
-        let old = b!(self.bld.build_atomicrmw(
-            inkwell::AtomicRMWBinOp::Sub,
-            rc_gep,
-            i64t.const_int(1, false),
-            inkwell::AtomicOrdering::AcquireRelease,
-        ));
+        let old = if inner.needs_atomic_rc() {
+            b!(self.bld.build_atomicrmw(
+                inkwell::AtomicRMWBinOp::Sub,
+                rc_gep,
+                i64t.const_int(1, false),
+                inkwell::AtomicOrdering::AcquireRelease,
+            ))
+        } else {
+            let loaded = b!(self.bld.build_load(i64t, rc_gep, "rc.cnt.ld")).into_int_value();
+            let dec = b!(self.bld.build_int_nsw_sub(loaded, i64t.const_int(1, false), "rc.dec"));
+            b!(self.bld.build_store(rc_gep, dec));
+            loaded
+        };
         let is_zero = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
             old,

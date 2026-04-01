@@ -243,6 +243,26 @@ impl<'ctx> Compiler<'ctx> {
             hir::BuiltinFn::CowWrap => {
                 Err("CowWrap should be handled via ExprKind".into())
             }
+            hir::BuiltinFn::Likely | hir::BuiltinFn::Unlikely => {
+                if args.len() != 1 {
+                    return Err("likely/unlikely takes exactly 1 boolean argument".into());
+                }
+                let cond = self.compile_expr(&args[0])?;
+                let i1ty = self.ctx.bool_type();
+                let ft = i1ty.fn_type(&[i1ty.into(), i1ty.into()], false);
+                let expect_fn = self.module.get_function("llvm.expect.i1")
+                    .unwrap_or_else(|| self.module.add_function("llvm.expect.i1", ft, None));
+                let expected = match builtin {
+                    hir::BuiltinFn::Likely => i1ty.const_int(1, false),
+                    _ => i1ty.const_int(0, false),
+                };
+                let result = b!(self.bld.build_call(expect_fn, &[cond.into(), expected.into()], "expect"));
+                Ok(result.try_as_basic_value().basic().unwrap())
+            }
+            hir::BuiltinFn::PoolNew => self.compile_pool_new(args),
+            hir::BuiltinFn::PoolAlloc => self.compile_pool_alloc(args),
+            hir::BuiltinFn::PoolFree => self.compile_pool_free(args),
+            hir::BuiltinFn::PoolDestroy => self.compile_pool_destroy(args),
         }
     }
 
@@ -1130,6 +1150,79 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    // ── Pool allocator builtins ─────────────────────────────────────
+
+    fn ensure_pool_fn(&self, name: &str, fn_type: inkwell::types::FunctionType<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+        self.module.get_function(name).unwrap_or_else(|| {
+            self.module.add_function(name, fn_type, Some(Linkage::External))
+        })
+    }
+
+    pub(crate) fn compile_pool_new(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if args.len() != 2 {
+            return Err("Pool() takes 2 arguments (obj_size, count)".into());
+        }
+        let obj_size = self.compile_expr(&args[0])?.into_int_value();
+        let count = self.compile_expr(&args[1])?.into_int_value();
+        let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+        let i64t = self.ctx.i64_type();
+        let ft = ptr_t.fn_type(&[i64t.into(), i64t.into()], false);
+        let func = self.ensure_pool_fn("jade_pool_create", ft);
+        let result = b!(self.bld.build_call(func, &[obj_size.into(), count.into()], "pool.new"));
+        Ok(result.try_as_basic_value().basic().unwrap())
+    }
+
+    pub(crate) fn compile_pool_alloc(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if args.is_empty() {
+            return Err("pool.alloc() requires pool receiver".into());
+        }
+        let pool_ptr = self.compile_expr(&args[0])?.into_pointer_value();
+        let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+        let ft = ptr_t.fn_type(&[ptr_t.into()], false);
+        let func = self.ensure_pool_fn("jade_pool_alloc", ft);
+        let result = b!(self.bld.build_call(func, &[pool_ptr.into()], "pool.alloc"));
+        Ok(result.try_as_basic_value().basic().unwrap())
+    }
+
+    pub(crate) fn compile_pool_free(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if args.len() != 2 {
+            return Err("pool.free() takes 1 argument (ptr)".into());
+        }
+        let pool_ptr = self.compile_expr(&args[0])?.into_pointer_value();
+        let obj_ptr = self.compile_expr(&args[1])?.into_pointer_value();
+        let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+        let void_t = self.ctx.void_type();
+        let ft = void_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
+        let func = self.ensure_pool_fn("jade_pool_free", ft);
+        b!(self.bld.build_call(func, &[pool_ptr.into(), obj_ptr.into()], ""));
+        Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    pub(crate) fn compile_pool_destroy(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if args.is_empty() {
+            return Err("pool.destroy() requires pool receiver".into());
+        }
+        let pool_ptr = self.compile_expr(&args[0])?.into_pointer_value();
+        let ptr_t = self.ctx.ptr_type(AddressSpace::default());
+        let void_t = self.ctx.void_type();
+        let ft = void_t.fn_type(&[ptr_t.into()], false);
+        let func = self.ensure_pool_fn("jade_pool_destroy", ft);
+        b!(self.bld.build_call(func, &[pool_ptr.into()], ""));
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 

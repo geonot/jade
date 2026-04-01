@@ -1,4 +1,6 @@
 use crate::ast::Span;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -294,103 +296,107 @@ pub struct Lexer<'s> {
     pending: Vec<Spanned>,
     sol: bool,
     nl: bool,
-    interp_depth: u32,
 }
 
+static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
+    let entries: &[(&str, Token)] = &[
+        ("is", Token::Is),
+        ("neq", Token::Neq),
+        ("equals", Token::Equals),
+        ("eq", Token::Equals),
+        ("unless", Token::Unless),
+        ("until", Token::Until),
+        ("returns", Token::Returns),
+        ("mod", Token::Percent),
+        ("lt", Token::Lt),
+        ("gt", Token::Gt),
+        ("lte", Token::LtEq),
+        ("gte", Token::GtEq),
+        ("nlt", Token::GtEq),
+        ("ngt", Token::LtEq),
+        ("ngte", Token::Lt),
+        ("nlte", Token::Gt),
+        ("and", Token::And),
+        ("or", Token::Or),
+        ("not", Token::Not),
+        ("if", Token::If),
+        ("elif", Token::Elif),
+        ("else", Token::Else),
+        ("while", Token::While),
+        ("for", Token::For),
+        ("in", Token::In),
+        ("loop", Token::Loop),
+        ("break", Token::Break),
+        ("continue", Token::Continue),
+        ("return", Token::Return),
+        ("match", Token::Match),
+        ("when", Token::When),
+        ("type", Token::Type),
+        ("enum", Token::Enum),
+        ("err", Token::Err),
+        ("pub", Token::Pub),
+        ("use", Token::Use),
+        ("as", Token::As),
+        ("at", Token::AtKw),
+        ("from", Token::From),
+        ("to", Token::To),
+        ("by", Token::By),
+        ("array", Token::Array),
+        ("asm", Token::Asm),
+        ("unsafe", Token::Unsafe),
+        ("volatile", Token::Volatile),
+        ("signal", Token::Signal),
+        ("weak", Token::Weak),
+        ("extern", Token::Extern),
+        ("fn", Token::Fn),
+        ("do", Token::Do),
+        ("end", Token::End),
+        ("log", Token::Log),
+        ("of", Token::Of),
+        ("test", Token::Test),
+        ("embed", Token::Embed),
+        ("assert", Token::Assert),
+        ("query", Token::Query),
+        ("store", Token::Store),
+        ("insert", Token::Insert),
+        ("delete", Token::Delete),
+        ("set", Token::Set),
+        ("transaction", Token::Transaction),
+        ("actor", Token::Actor),
+        ("spawn", Token::Spawn),
+        ("send", Token::Send),
+        ("receive", Token::Receive),
+        ("trait", Token::Trait),
+        ("impl", Token::Impl),
+        ("dispatch", Token::Dispatch),
+        ("yield", Token::Yield),
+        ("channel", Token::Channel),
+        ("close", Token::Close),
+        ("select", Token::Select),
+        ("stop", Token::Stop),
+        ("timeout", Token::Timeout),
+        ("default", Token::Default),
+        ("sim", Token::Sim),
+        ("supervisor", Token::Supervisor),
+        ("atomic", Token::Atomic),
+        ("strict", Token::Strict),
+        ("xor", Token::Xor),
+        ("unreachable", Token::Unreachable),
+        ("alias", Token::Alias),
+        ("deque", Token::Deque),
+        ("grad", Token::Grad),
+        ("einsum", Token::Einsum),
+        ("contract", Token::Contract),
+        ("build", Token::Build),
+        ("true", Token::True),
+        ("false", Token::False),
+        ("none", Token::None),
+    ];
+    entries.iter().cloned().collect()
+});
+
 fn keyword(s: &str) -> Option<Token> {
-    Some(match s {
-        "is" => Token::Is,
-        "neq" => Token::Neq,
-        "equals" | "eq" => Token::Equals,
-        "unless" => Token::Unless,
-        "until" => Token::Until,
-        "returns" => Token::Returns,
-        "mod" => Token::Percent,
-        "lt" => Token::Lt,
-        "gt" => Token::Gt,
-        "lte" => Token::LtEq,
-        "gte" => Token::GtEq,
-        "nlt" => Token::GtEq,
-        "ngt" => Token::LtEq,
-        "ngte" => Token::Lt,
-        "nlte" => Token::Gt,
-        "and" => Token::And,
-        "or" => Token::Or,
-        "not" => Token::Not,
-        "if" => Token::If,
-        "elif" => Token::Elif,
-        "else" => Token::Else,
-        "while" => Token::While,
-        "for" => Token::For,
-        "in" => Token::In,
-        "loop" => Token::Loop,
-        "break" => Token::Break,
-        "continue" => Token::Continue,
-        "return" => Token::Return,
-        "match" => Token::Match,
-        "when" => Token::When,
-        "type" => Token::Type,
-        "enum" => Token::Enum,
-        "err" => Token::Err,
-        "pub" => Token::Pub,
-        "use" => Token::Use,
-        "as" => Token::As,
-        "at" => Token::AtKw,
-        "from" => Token::From,
-        "to" => Token::To,
-        "by" => Token::By,
-        "array" => Token::Array,
-        "asm" => Token::Asm,
-        "unsafe" => Token::Unsafe,
-        "volatile" => Token::Volatile,
-        "signal" => Token::Signal,
-        "weak" => Token::Weak,
-        "extern" => Token::Extern,
-        "fn" => Token::Fn,
-        "do" => Token::Do,
-        "end" => Token::End,
-        "log" => Token::Log,
-        "of" => Token::Of,
-        "test" => Token::Test,
-        "embed" => Token::Embed,
-        "assert" => Token::Assert,
-        "query" => Token::Query,
-        "store" => Token::Store,
-        "insert" => Token::Insert,
-        "delete" => Token::Delete,
-        "set" => Token::Set,
-        "transaction" => Token::Transaction,
-        "actor" => Token::Actor,
-        "spawn" => Token::Spawn,
-        "send" => Token::Send,
-        "receive" => Token::Receive,
-        "trait" => Token::Trait,
-        "impl" => Token::Impl,
-        "dispatch" => Token::Dispatch,
-        "yield" => Token::Yield,
-        "channel" => Token::Channel,
-        "close" => Token::Close,
-        "select" => Token::Select,
-        "stop" => Token::Stop,
-        "timeout" => Token::Timeout,
-        "default" => Token::Default,
-        "sim" => Token::Sim,
-        "supervisor" => Token::Supervisor,
-        "atomic" => Token::Atomic,
-        "strict" => Token::Strict,
-        "xor" => Token::Xor,
-        "unreachable" => Token::Unreachable,
-        "alias" => Token::Alias,
-        "deque" => Token::Deque,
-        "grad" => Token::Grad,
-        "einsum" => Token::Einsum,
-        "contract" => Token::Contract,
-        "build" => Token::Build,
-        "true" => Token::True,
-        "false" => Token::False,
-        "none" => Token::None,
-        _ => return Option::None,
-    })
+    KEYWORDS.get(s).cloned()
 }
 
 impl<'s> Lexer<'s> {
@@ -404,7 +410,6 @@ impl<'s> Lexer<'s> {
             pending: Vec::new(),
             sol: true,
             nl: false,
-            interp_depth: 0,
         }
     }
 
@@ -863,42 +868,41 @@ impl<'s> Lexer<'s> {
                     token: Token::InterpStart,
                     span: sp,
                 });
-                self.advance();
+                self.advance(); // skip '{'
+                // Inline lex: lex tokens at current position tracking brace depth
                 let mut depth = 1u32;
-                let expr_start = self.pos;
                 while self.pos < self.src.len() && depth > 0 {
-                    match self.src[self.pos] {
-                        b'{' => depth += 1,
-                        b'}' => depth -= 1,
-                        b'\n' => return self.err("unterminated interpolation"),
-                        _ => {}
+                    let ch = self.src[self.pos];
+                    if ch == b'}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
                     }
-                    if depth > 0 {
+                    if ch == b'\n' {
+                        return self.err("unterminated interpolation");
+                    }
+                    if ch == b' ' {
                         self.advance();
+                        continue;
+                    }
+                    let tok = self.lex_token()?;
+                    if ch == b'{' {
+                        depth += 1;
+                    }
+                    if !matches!(tok.token, Token::Newline | Token::Eof) {
+                        self.pending.push(tok);
                     }
                 }
                 if depth > 0 {
                     return self.err("unterminated interpolation");
-                }
-                let inner_src = &self.src[expr_start..self.pos];
-                let inner_str = std::str::from_utf8(inner_src).unwrap();
-                if self.interp_depth >= 8 {
-                    return self.err("string interpolation nested too deeply (max 8)");
-                }
-                let mut inner_lexer = Lexer::new(inner_str);
-                inner_lexer.interp_depth = self.interp_depth + 1;
-                let inner_tokens = inner_lexer.lex_all()?;
-                for t in inner_tokens {
-                    if !matches!(t.token, Token::Newline | Token::Eof) {
-                        self.pending.push(t);
-                    }
                 }
                 let isp = Span::new(self.pos, self.pos + 1, self.line, self.col);
                 self.pending.push(Spanned {
                     token: Token::InterpEnd,
                     span: isp,
                 });
-                self.advance();
+                self.advance(); // skip '}'
                 continue;
             }
             if self.src[self.pos] == b'\\' {

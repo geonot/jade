@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use inkwell::IntPredicate;
+use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum};
 
@@ -34,7 +34,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::Var(_, name) => self.load_var(name),
             hir::ExprKind::FnRef(_, name) => {
                 if let Some(fv) = self.module.get_function(name) {
-                    Ok(fv.as_global_value().as_pointer_value().into())
+                    let wrapper = self.fn_ref_wrapper(fv);
+                    let null_env = self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null();
+                    self.make_closure(wrapper, null_env)
                 } else {
                     Err(format!("undefined function: {name}"))
                 }
@@ -476,7 +478,10 @@ impl<'ctx> Compiler<'ctx> {
             let val = inits
                 .iter()
                 .find(|fi| fi.name.as_deref() == Some(fname))
-                .or_else(|| inits.get(i))
+                .or_else(|| {
+                    // Only use positional fallback for unnamed (positional) inits
+                    inits.get(i).filter(|fi| fi.name.is_none())
+                })
                 .map(|fi| self.compile_expr(&fi.value))
                 .or_else(|| {
                     defaults
@@ -1174,7 +1179,54 @@ impl<'ctx> Compiler<'ctx> {
             }
             return Ok(val);
         }
-        // For non-int-to-int casts, fall back to regular cast behavior
+        // Float→int strict cast: check for NaN, infinity, and out-of-range
+        if src.is_float() && target.is_int() {
+            let fv = self.cur_fn.unwrap();
+            let float_val = val.into_float_value();
+            let dst_int_ty = self.llvm_ty(target).into_int_type();
+            let src_float_ty = float_val.get_type();
+
+            // Check NaN: float != float means NaN
+            let is_nan = b!(self.bld.build_float_compare(
+                FloatPredicate::UNO,
+                float_val,
+                float_val,
+                "strict.isnan"
+            ));
+            let nan_fail_bb = self.ctx.append_basic_block(fv, "strict.nan_fail");
+            let nan_pass_bb = self.ctx.append_basic_block(fv, "strict.nan_pass");
+            b!(self.bld.build_conditional_branch(is_nan, nan_fail_bb, nan_pass_bb));
+            self.bld.position_at_end(nan_fail_bb);
+            self.emit_trap("strict cast: cannot convert NaN to integer");
+            self.bld.position_at_end(nan_pass_bb);
+
+            // Convert float→int
+            let int_val = if target.is_signed() {
+                b!(self.bld.build_float_to_signed_int(float_val, dst_int_ty, "strict.fptosi"))
+            } else {
+                b!(self.bld.build_float_to_unsigned_int(float_val, dst_int_ty, "strict.fptoui"))
+            };
+            // Convert back int→float and compare: if not equal, value was out of range or fractional
+            let roundtrip = if target.is_signed() {
+                b!(self.bld.build_signed_int_to_float(int_val, src_float_ty, "strict.sitofp"))
+            } else {
+                b!(self.bld.build_unsigned_int_to_float(int_val, src_float_ty, "strict.uitofp"))
+            };
+            let ok = b!(self.bld.build_float_compare(
+                FloatPredicate::OEQ,
+                float_val,
+                roundtrip,
+                "strict.roundtrip_ok"
+            ));
+            let pass_bb = self.ctx.append_basic_block(fv, "strict.fti_pass");
+            let fail_bb = self.ctx.append_basic_block(fv, "strict.fti_fail");
+            b!(self.bld.build_conditional_branch(ok, pass_bb, fail_bb));
+            self.bld.position_at_end(fail_bb);
+            self.emit_trap("strict cast: float value out of integer range");
+            self.bld.position_at_end(pass_bb);
+            return Ok(int_val.into());
+        }
+        // For other casts, fall back to regular cast behavior
         self.compile_cast(expr, target)
     }
 
@@ -1316,8 +1368,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
             }
             _ => {
-                // Fallback: treat as pointer arithmetic (array case)
-                Ok(obj_val)
+                Err(format!("slice not supported for type: {}", &obj.ty))
             }
         }
     }
