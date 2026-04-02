@@ -111,6 +111,8 @@ pub struct Instruction {
     pub kind: InstKind,
     pub ty: Type,
     pub span: Span,
+    /// Optional HIR DefId for Perceus hint threading.
+    pub def_id: Option<DefId>,
 }
 
 /// MIR instruction kinds.
@@ -156,6 +158,36 @@ pub enum InstKind {
     Copy(ValueId),
 
     Slice(ValueId, ValueId, ValueId),
+
+    // ── Collections (needed for fusion/deforestation optimization) ──
+    VecNew(Vec<ValueId>),
+    VecPush(ValueId, ValueId),
+    VecLen(ValueId),
+    MapInit,
+    SetInit,
+
+    // ── Closures (needed for escape analysis) ──
+    ClosureCreate(String, Vec<ValueId>),
+    ClosureCall(ValueId, Vec<ValueId>),
+
+    // ── RC (needed for Perceus on MIR) ──
+    RcNew(ValueId, Type),
+    RcClone(ValueId),
+    WeakUpgrade(ValueId),
+
+    // ── Actors/channels (needed for actor optimization pass) ──
+    SpawnActor(String, Vec<ValueId>),
+    ChanCreate(Type),
+    ChanSend(ValueId, ValueId),
+    ChanRecv(ValueId),
+    SelectArm(Vec<ValueId>),
+
+    // ── Builtins (needed so MIR can fold/eliminate them) ──
+    Log(ValueId),
+    Assert(ValueId, String),
+
+    // ── Dynamic dispatch ──
+    DynDispatch(ValueId, String, String, Vec<ValueId>),
 }
 
 /// Binary operations.

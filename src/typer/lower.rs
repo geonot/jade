@@ -330,6 +330,15 @@ impl Typer {
             }
         }
         self.resolve_all_types(&mut program);
+        // Monomorphized functions created during resolve (e.g. FnRef resolution)
+        // need to be resolved and added to the program.
+        if !self.mono_fns.is_empty() {
+            let mut new_fns: Vec<hir::Fn> = self.mono_fns.drain(..).collect();
+            for f in &mut new_fns {
+                self.resolve_fn(f);
+            }
+            program.fns.extend(new_fns);
+        }
         self.auto_derive_display(&mut program);
         let default_warnings = self.infer_ctx.drain_default_warnings();
         self.warnings.extend(default_warnings);
@@ -736,19 +745,19 @@ impl Typer {
 
     fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
         let (recv_ty, method) = match &expr.kind {
-            hir::ExprKind::StringMethod(recv, m, _) => (recv.ty.clone(), m.clone()),
+            hir::ExprKind::DeferredMethod(recv, m, _) => (recv.ty.clone(), m.clone()),
             _ => return,
         };
         match &recv_ty {
             Type::Vec(_) => {
-                if let hir::ExprKind::StringMethod(recv, method, args) =
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
                     expr.kind = hir::ExprKind::VecMethod(recv, method, args);
                 }
             }
             Type::Map(_, _) => {
-                if let hir::ExprKind::StringMethod(recv, method, args) =
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
                     expr.kind = hir::ExprKind::MapMethod(recv, method, args);
@@ -757,21 +766,119 @@ impl Typer {
             Type::Struct(type_name, _) => {
                 let method_name = format!("{}_{}", type_name, method);
                 if self.fns.contains_key(&method_name) {
-                    if let hir::ExprKind::StringMethod(recv, _method_str, args) =
+                    if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
                         expr.kind = hir::ExprKind::Method(recv, method_name, method, args);
                     }
                 }
             }
+            Type::Ptr(inner) => {
+                if let Type::Struct(type_name, _) = inner.as_ref() {
+                    let method_name = format!("{}_{}", type_name, method);
+                    if self.fns.contains_key(&method_name) {
+                        if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                            std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                        {
+                            expr.kind = hir::ExprKind::Method(recv, method_name, method, args);
+                        }
+                    }
+                }
+            }
             Type::Coroutine(_) if method == "next" => {
-                if let hir::ExprKind::StringMethod(recv, _, _) =
+                if let hir::ExprKind::DeferredMethod(recv, _, _) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
                     expr.kind = hir::ExprKind::CoroutineNext(recv);
                 }
             }
-            _ => {}
+            Type::F64 | Type::F32 => {
+                let float_methods = [
+                    "sqrt", "abs", "floor", "ceil", "round", "trunc",
+                    "sin", "cos", "tan", "asin", "acos", "atan",
+                    "sinh", "cosh", "tanh",
+                    "exp", "exp2", "ln", "log2", "log10",
+                    "cbrt", "recip", "signum",
+                    "pow", "atan2", "copysign", "min", "max",
+                    "is_nan", "is_infinite", "is_finite", "to_int",
+                ];
+                if float_methods.contains(&method.as_str()) {
+                    if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                        std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                    {
+                        let mut all_args = vec![*recv];
+                        all_args.extend(args);
+                        let ret_ty = match method.as_str() {
+                            "is_nan" | "is_infinite" | "is_finite" => Type::Bool,
+                            "to_int" => Type::I64,
+                            _ => recv_ty.clone(),
+                        };
+                        expr.ty = ret_ty;
+                        expr.kind = hir::ExprKind::Builtin(
+                            hir::BuiltinFn::FloatMethod(method),
+                            all_args,
+                        );
+                    }
+                }
+            }
+            Type::Set(_) => {
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::SetMethod(recv, method, args);
+                }
+            }
+            Type::PriorityQueue(_) => {
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::PQMethod(recv, method, args);
+                }
+            }
+            Type::Deque(_) => {
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::DequeMethod(recv, method, args);
+                }
+            }
+            Type::Channel(_) if method == "send" || method == "recv" || method == "close" => {
+                // Channel methods handled by codegen — reclassify to StringMethod
+                // so codegen's channel dispatch works (it matches StringMethod).
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::StringMethod(recv, method, args);
+                }
+            }
+            Type::I64 | Type::I32 | Type::I16 | Type::I8 | Type::U64 | Type::U32 | Type::U16 | Type::U8 => {
+                // Integer char/numeric methods
+                let int_methods = ["abs", "to_float", "to_str", "min", "max", "clamp"];
+                if int_methods.contains(&method.as_str()) {
+                    if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                        std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                    {
+                        let mut all_args = vec![*recv];
+                        all_args.extend(args);
+                        expr.kind = hir::ExprKind::Builtin(
+                            hir::BuiltinFn::CharMethod(method),
+                            all_args,
+                        );
+                    }
+                }
+            }
+            Type::String => {
+                // Receiver resolved to String — promote to StringMethod
+                if let hir::ExprKind::DeferredMethod(recv, method, args) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::StringMethod(recv, method, args);
+                }
+            }
+            _ => {
+                // Any other resolved type — leave as DeferredMethod; codegen
+                // will report an error if it's truly unresolvable.
+            }
         }
     }
 
@@ -1040,6 +1147,7 @@ impl Typer {
             }
             hir::ExprKind::Method(recv, _, _, args)
             | hir::ExprKind::StringMethod(recv, _, args)
+            | hir::ExprKind::DeferredMethod(recv, _, args)
             | hir::ExprKind::VecMethod(recv, _, args)
             | hir::ExprKind::MapMethod(recv, _, args)
             | hir::ExprKind::SetMethod(recv, _, args)
@@ -1191,6 +1299,9 @@ impl Typer {
                 if let Some(step) = &mut f.step { self.resolve_expr(step); }
                 self.resolve_block(&mut f.body);
             }
+            hir::Stmt::SimBlock(b, _) => {
+                self.resolve_block(b);
+            }
             hir::Stmt::UseLocal(_, _, _, _) => {}
         }
     }
@@ -1212,8 +1323,35 @@ impl Typer {
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_) => {}
             hir::ExprKind::Var(_, _)
-            | hir::ExprKind::FnRef(_, _)
             | hir::ExprKind::VariantRef(_, _, _) => {}
+            hir::ExprKind::FnRef(_, _) => {
+                // If this references a polymorphic inferable function, monomorphize it
+                // now that we know the concrete types from type inference.
+                if let hir::ExprKind::FnRef(ref mut id, ref mut name) = expr.kind {
+                    let has_poly_scheme = self
+                        .fn_schemes
+                        .get(name.as_str())
+                        .map_or(false, |s| !s.0.is_empty());
+                    if has_poly_scheme {
+                        if let Type::Fn(ref param_tys, _) = expr.ty {
+                            // Only monomorphize if all types are fully resolved (no type vars)
+                            if expr.ty.has_type_var() {
+                                // Leave unresolved — codegen will emit a proper error
+                            } else if let Some(inf_fn) = self.inferable_fns.get(name.as_str()).cloned() {
+                                let normalized = Self::normalize_inferable_fn(&inf_fn);
+                                let type_map =
+                                    self.build_type_map(name, &normalized, param_tys);
+                                if let Ok(mangled) = self.monomorphize_fn(name, &type_map) {
+                                    if let Some((mid, _, _)) = self.fns.get(&mangled).cloned() {
+                                        *id = mid;
+                                        *name = mangled;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             hir::ExprKind::BinOp(l, _, r) => {
                 self.resolve_expr(l);
                 self.resolve_expr(r);
@@ -1242,6 +1380,12 @@ impl Typer {
                 }
             }
             hir::ExprKind::StringMethod(recv, _, args) => {
+                self.resolve_expr(recv);
+                for a in args {
+                    self.resolve_expr(a);
+                }
+            }
+            hir::ExprKind::DeferredMethod(recv, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {
                     self.resolve_expr(a);
@@ -2400,7 +2544,12 @@ impl Typer {
     pub(crate) fn needs_drop(ty: &Type) -> bool {
         matches!(
             ty,
-            Type::String | Type::Vec(_) | Type::Map(_, _) | Type::Rc(_) | Type::Weak(_)
+            Type::String
+                | Type::Vec(_)
+                | Type::Map(_, _)
+                | Type::Rc(_)
+                | Type::Weak(_)
+                | Type::Coroutine(_)
         )
     }
 

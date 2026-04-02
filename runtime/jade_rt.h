@@ -84,6 +84,14 @@ void         jade_coro_destroy(jade_coro_t *c);
 void         jade_coro_yield(void);
 void         jade_coro_set_daemon(jade_coro_t *c);
 
+/* ── Generator direct context-swap API ───────────────────────────── */
+
+void jade_gen_resume(void *gen_blk);
+void jade_gen_suspend(void *gen_blk);
+void jade_gen_destroy(void *gen_blk);
+
+extern _Thread_local jade_coro_t *tl_gen_coro;
+
 /* ── Context switch (defined in assembly or fallback) ────────────── */
 
 void jade_context_swap(jade_context_t *from, jade_context_t *to);
@@ -107,6 +115,11 @@ jade_coro_t *jade_deque_steal(jade_deque_t *dq);
 
 /* ── Scheduler ───────────────────────────────────────────────────── */
 
+/* Scheduler actions communicated from coroutine to scheduler across swap */
+#define SCHED_ACTION_PARK    0  /* parked on wait queue — don't touch coroutine */
+#define SCHED_ACTION_REQUEUE 1  /* voluntary yield — re-enqueue */
+#define SCHED_ACTION_DESTROY 2  /* coroutine exited — destroy it */
+
 struct jade_worker {
     pthread_t          thread;
     uint32_t           id;
@@ -114,6 +127,8 @@ struct jade_worker {
     jade_coro_t       *current;
     jade_context_t     sched_ctx;
     uint64_t           rng_state;
+    void              *held_chan_lock;  /* channel lock held across context swap */
+    int                last_action;     /* SCHED_ACTION_* set before swap */
 };
 
 struct jade_sched {
@@ -124,7 +139,6 @@ struct jade_sched {
     /* Global inject queue */
     jade_coro_t       *inject_head;
     jade_coro_t       *inject_tail;
-    pthread_mutex_t    inject_lock;
     /* Idle parking */
     pthread_mutex_t    idle_lock;
     pthread_cond_t     idle_cond;
@@ -138,6 +152,9 @@ void jade_sched_spawn(jade_coro_t *c);
 void jade_sched_run(void);
 void jade_sched_shutdown(void);
 void jade_sched_enqueue(jade_coro_t *c);
+void jade_sched_yield(void);
+void jade_sched_park(void);
+void jade_sched_unpark(jade_coro_t *c);
 
 /* Get current coroutine (thread-local) */
 jade_coro_t  *jade_current_coro(void);
@@ -154,7 +171,7 @@ struct jade_chan {
     _Atomic(int32_t)   closed;
     jade_coro_t       *send_waitq;
     jade_coro_t       *recv_waitq;
-    pthread_mutex_t    lock;
+    _Atomic(int32_t)   lock;         /* spinlock (no thread-ownership tracking) */
 };
 
 jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity);

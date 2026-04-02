@@ -1,0 +1,37 @@
+# Dispatch vs Direct - Generator overhead comparison
+# Generators use stackful coroutines (context swap per yield)
+# Compare: generating values via dispatch vs computing directly
+
+extern *jade_time_now_ns() returns i64
+
+*fib(n as i64) returns i64
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+*main
+    # --- Direct: compute fib(i) in a simple loop ---
+    t0 is jade_time_now_ns()
+    total is 0
+    for i in 20
+        total is total + fib(30 + (i % 5))
+    t1 is jade_time_now_ns()
+    log(total)
+    direct_ms is (t1 - t0) / 1000000
+    log(direct_ms)
+
+    # --- Generator: yield fib(i) values, consume with for-in ---
+    t2 is jade_time_now_ns()
+    gen is dispatch
+        for i in 20
+            yield fib(30 + (i % 5))
+    total2 is 0
+    for val in gen
+        total2 is total2 + val
+    t3 is jade_time_now_ns()
+    log(total2)
+    gen_ms is (t3 - t2) / 1000000
+    log(gen_ms)
+
+    log(0)

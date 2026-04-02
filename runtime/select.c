@@ -14,6 +14,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* ── Spinlock helpers (same as channel.c) ────────────────────────── */
+
+static inline void chan_lock(jade_chan_t *ch) {
+    while (atomic_exchange_explicit(&ch->lock, 1, memory_order_acquire) != 0) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+
+static inline void chan_unlock(jade_chan_t *ch) {
+    atomic_store_explicit(&ch->lock, 0, memory_order_release);
+}
+
 /* Fisher-Yates shuffle */
 static void shuffle(int *arr, int n, uint64_t *rng) {
     for (int i = n - 1; i > 0; i--) {
@@ -51,7 +67,7 @@ static void lock_all(jade_select_case_t *cases, int *lock_order, int n) {
         if (!ch) continue;
         uintptr_t addr = (uintptr_t)ch;
         if (addr != last) {
-            pthread_mutex_lock(&ch->lock);
+            chan_lock(ch);
             last = addr;
         }
     }
@@ -64,7 +80,7 @@ static void unlock_all(jade_select_case_t *cases, int *lock_order, int n) {
         if (!ch) continue;
         uintptr_t addr = (uintptr_t)ch;
         if (addr != last) {
-            pthread_mutex_unlock(&ch->lock);
+            chan_unlock(ch);
             last = addr;
         }
     }
@@ -211,6 +227,8 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
     unlock_all(cases, lock_order, limit);
 
     /* Park */
+    w->held_chan_lock = NULL;
+    w->last_action = SCHED_ACTION_PARK;
     jade_context_swap(&self->ctx, &w->sched_ctx);
 
     /* Woken — retry the select from the top (scan for which channel is ready) */

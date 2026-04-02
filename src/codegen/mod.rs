@@ -716,7 +716,7 @@ impl<'ctx> Compiler<'ctx> {
         }
         fn scan_stmt(s: &hir::Stmt) -> bool {
             match s {
-                Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) => true,
+                Stmt::ChannelClose(_, _) | Stmt::Stop(_, _) | Stmt::SimFor(_, _) | Stmt::SimBlock(_, _) => true,
                 _ => false,
             }
         }
@@ -810,6 +810,7 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jade_sched_yield", void.fn_type(&[], false));
         decl!("jade_sched_park", void.fn_type(&[], false));
         decl!("jade_sched_unpark", void.fn_type(&[ptr.into()], false));
+        decl!("jade_current_coro", ptr.fn_type(&[], false));
 
         decl!(
             "jade_chan_create",

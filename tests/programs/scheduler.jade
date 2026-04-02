@@ -62,8 +62,10 @@ type Task
     total is 0
     for i from 0 to count
         match tasks[i].status
-            Complete ? total is total + 1
-            _ ? total is total
+            Complete ?
+                total is total + 1
+            _ ?
+                total is total
     total
 
 *count_pending(tasks, count as i64)
@@ -75,13 +77,12 @@ type Task
 
 *main
     # Create a set of tasks
-    tasks is [
-        Task(id is 1, priority is Low, deadline is 100, status is Pending),
-        Task(id is 2, priority is Critical, deadline is 10, status is Pending),
-        Task(id is 3, priority is Normal, deadline is 50, status is Pending),
-        Task(id is 4, priority is High, deadline is 30, status is Pending),
-        Task(id is 5, priority is Normal, deadline is 60, status is Pending)
-    ]
+    t1 is Task(id is 1, priority is Low, deadline is 100, status is Pending)
+    t2 is Task(id is 2, priority is Critical, deadline is 10, status is Pending)
+    t3 is Task(id is 3, priority is Normal, deadline is 50, status is Pending)
+    t4 is Task(id is 4, priority is High, deadline is 30, status is Pending)
+    t5 is Task(id is 5, priority is Normal, deadline is 60, status is Pending)
+    tasks is [t1, t2, t3, t4, t5]
 
     count is 5
     log(count_pending(tasks, count))     # 5

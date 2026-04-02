@@ -123,6 +123,38 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::RcDec(v) => format!("rc_dec {v}"),
         InstKind::Copy(v) => format!("copy {v}"),
         InstKind::Slice(a, s, e) => format!("slice {a}[{s}..{e}]"),
+
+        // Collections
+        InstKind::VecNew(vals) => format!("vec_new [{}]", fmt_args(vals)),
+        InstKind::VecPush(vec, val) => format!("vec_push {vec} {val}"),
+        InstKind::VecLen(v) => format!("vec_len {v}"),
+        InstKind::MapInit => "map_init".into(),
+        InstKind::SetInit => "set_init".into(),
+
+        // Closures
+        InstKind::ClosureCreate(name, captures) => format!("closure_create {name}({})", fmt_args(captures)),
+        InstKind::ClosureCall(f, args) => format!("closure_call {f}({})", fmt_args(args)),
+
+        // RC
+        InstKind::RcNew(v, ty) => format!("rc_new {v} {ty:?}"),
+        InstKind::RcClone(v) => format!("rc_clone {v}"),
+        InstKind::WeakUpgrade(v) => format!("weak_upgrade {v}"),
+
+        // Actors/channels
+        InstKind::SpawnActor(name, args) => format!("spawn_actor {name}({})", fmt_args(args)),
+        InstKind::ChanCreate(ty) => format!("chan_create {ty:?}"),
+        InstKind::ChanSend(ch, val) => format!("chan_send {ch} {val}"),
+        InstKind::ChanRecv(ch) => format!("chan_recv {ch}"),
+        InstKind::SelectArm(arms) => format!("select [{}]", fmt_args(arms)),
+
+        // Builtins
+        InstKind::Log(v) => format!("log {v}"),
+        InstKind::Assert(v, msg) => format!("assert {v} {msg:?}"),
+
+        // Dynamic dispatch
+        InstKind::DynDispatch(obj, trait_name, method, args) => {
+            format!("dyn_dispatch {obj}.{trait_name}::{method}({})", fmt_args(args))
+        }
     }
 }
 

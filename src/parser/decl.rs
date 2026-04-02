@@ -448,7 +448,7 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Use)?;
         let mut path = vec![self.ident()?];
-        while self.check(Token::Dot) {
+        while self.check(Token::Slash) {
             self.advance();
             path.push(self.ident()?);
         }

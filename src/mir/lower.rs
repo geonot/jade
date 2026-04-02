@@ -20,6 +20,12 @@ pub fn lower_program(prog: &hir::Program) -> Program {
             functions.push(lower_function(m));
         }
     }
+    // Also lower trait impl methods
+    for ti in &prog.trait_impls {
+        for m in &ti.methods {
+            functions.push(lower_function(m));
+        }
+    }
     let types = prog.types.iter().map(|td| TypeDef {
         name: td.name.clone(),
         fields: td.fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect(),
@@ -82,6 +88,19 @@ impl Lowerer {
             kind,
             ty,
             span,
+            def_id: None,
+        });
+        dest
+    }
+
+    fn emit_with_def_id(&mut self, kind: InstKind, ty: Type, span: Span, def_id: crate::hir::DefId) -> ValueId {
+        let dest = self.new_value();
+        self.func.block_mut(self.current_block).insts.push(Instruction {
+            dest: Some(dest),
+            kind,
+            ty,
+            span,
+            def_id: Some(def_id),
         });
         dest
     }
@@ -92,6 +111,7 @@ impl Lowerer {
             kind,
             ty: Type::Void,
             span,
+            def_id: None,
         });
     }
 
@@ -294,14 +314,28 @@ impl Lowerer {
                 self.lower_block_expr(stmts)
             }
 
-            ExprKind::Lambda(_params, _body) => {
-                // TODO: closure lowering
-                self.emit(InstKind::Void, ty, span)
-            }
-
-            ExprKind::Builtin(_, args) => {
-                let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::Call("__builtin".into(), vals), ty, span)
+            ExprKind::Lambda(params, body) => {
+                // Create a closure: lower captured variables and the body as a
+                // named inner function. The closure name is auto-generated.
+                let lambda_name = format!("lambda.{}", self.func.next_value);
+                let captures: Vec<ValueId> = {
+                    let mut cap_vals = Vec::new();
+                    // Collect variables referenced in body that are in our var_map
+                    // but not declared as lambda parameters
+                    let param_names: std::collections::HashSet<&str> =
+                        params.iter().map(|p| p.name.as_str()).collect();
+                    let mut refs = std::collections::HashSet::new();
+                    Self::collect_expr_var_refs_block(body, &mut refs);
+                    for name in &refs {
+                        if !param_names.contains(name.as_str()) {
+                            if let Some(&val) = self.var_map.get(name) {
+                                cap_vals.push(val);
+                            }
+                        }
+                    }
+                    cap_vals
+                };
+                self.emit(InstKind::ClosureCreate(lambda_name, captures), ty, span)
             }
 
             ExprKind::Coerce(inner, _) => self.lower_expr(inner),
@@ -313,7 +347,8 @@ impl Lowerer {
             }
 
             // Collection methods — all follow the same pattern
-            ExprKind::StringMethod(obj, name, args) | ExprKind::VecMethod(obj, name, args)
+            ExprKind::StringMethod(obj, name, args) | ExprKind::DeferredMethod(obj, name, args)
+            | ExprKind::VecMethod(obj, name, args)
             | ExprKind::MapMethod(obj, name, args) | ExprKind::SetMethod(obj, name, args)
             | ExprKind::PQMethod(obj, name, args) | ExprKind::DequeMethod(obj, name, args) => {
                 let obj_val = self.lower_expr(obj);
@@ -323,38 +358,129 @@ impl Lowerer {
 
             ExprKind::VecNew(elems) | ExprKind::NDArrayNew(elems) | ExprKind::SIMDNew(elems) => {
                 let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr(e)).collect();
-                self.emit(InstKind::ArrayInit(vals), ty, span)
+                self.emit(InstKind::VecNew(vals), ty, span)
             }
 
-            ExprKind::MapNew | ExprKind::SetNew | ExprKind::PQNew | ExprKind::DequeNew => {
-                self.emit(InstKind::Void, ty, span)
+            ExprKind::MapNew => {
+                self.emit(InstKind::MapInit, ty, span)
             }
 
-            ExprKind::ListComp(_body, _def_id, _bind, _iter, _cond, _map) => {
-                // TODO: desugar into loop + append
-                self.emit(InstKind::Void, ty, span)
+            ExprKind::SetNew | ExprKind::PQNew | ExprKind::DequeNew => {
+                self.emit(InstKind::SetInit, ty, span)
             }
 
-            // Concurrency primitives — lower as opaque calls
+            ExprKind::ListComp(body_expr, _def_id, bind, iter, end, cond) => {
+                // Desugar: vec = VecNew(); for bind in iter..end { if cond { VecPush(vec, body) } }
+                let vec_val = self.emit(InstKind::VecNew(vec![]), ty.clone(), span);
+                let iter_val = self.lower_expr(iter);
+
+                let cond_bb = self.new_block("listcomp.cond");
+                let body_bb = self.new_block("listcomp.body");
+                let exit_bb = self.new_block("listcomp.exit");
+
+                // Create loop index
+                let idx = self.emit(InstKind::IntConst(0), Type::I64, span);
+                let end_val = if let Some(e) = end {
+                    self.lower_expr(e)
+                } else {
+                    self.emit(InstKind::VecLen(iter_val), Type::I64, span)
+                };
+                self.var_map.insert(bind.clone(), idx);
+
+                self.set_terminator(Terminator::Goto(cond_bb));
+                self.switch_to(cond_bb);
+                let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, end_val), Type::Bool, span);
+                self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                self.switch_to(body_bb);
+                let elem_val = self.lower_expr(body_expr);
+                if let Some(c) = cond {
+                    let filter_bb = self.new_block("listcomp.filter");
+                    let push_bb = self.new_block("listcomp.push");
+                    let cond_val = self.lower_expr(c);
+                    self.set_terminator(Terminator::Branch(cond_val, push_bb, filter_bb));
+
+                    self.switch_to(push_bb);
+                    self.emit_void(InstKind::VecPush(vec_val, elem_val), span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    self.switch_to(filter_bb);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                } else {
+                    self.emit_void(InstKind::VecPush(vec_val, elem_val), span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                }
+
+                self.switch_to(exit_bb);
+                vec_val
+            }
+
+            // Concurrency primitives — lower as dedicated MIR instructions
             ExprKind::Spawn(name) => {
-                self.emit(InstKind::Call(format!("__spawn_{name}"), vec![]), ty, span)
+                self.emit(InstKind::SpawnActor(name.clone(), vec![]), ty, span)
             }
             ExprKind::Send(target, _type_name, handler, _tag, args) => {
                 let mut all = vec![self.lower_expr(target)];
                 all.extend(args.iter().map(|a| self.lower_expr(a)));
                 self.emit(InstKind::Call(format!("__send_{handler}"), all), ty, span)
             }
-            ExprKind::ChannelCreate(_, cap) => {
-                let c = self.lower_expr(cap);
-                self.emit(InstKind::Call("__chan_create".into(), vec![c]), ty, span)
+            ExprKind::ChannelCreate(elem_ty, cap) => {
+                let _c = self.lower_expr(cap);
+                self.emit(InstKind::ChanCreate(elem_ty.clone()), ty, span)
             }
             ExprKind::ChannelSend(chan, val) => {
-                let args = vec![self.lower_expr(chan), self.lower_expr(val)];
-                self.emit(InstKind::Call("__chan_send".into(), args), ty, span)
+                let ch = self.lower_expr(chan);
+                let v = self.lower_expr(val);
+                self.emit(InstKind::ChanSend(ch, v), ty, span)
             }
             ExprKind::ChannelRecv(chan) => {
                 let c = self.lower_expr(chan);
-                self.emit(InstKind::Call("__chan_recv".into(), vec![c]), ty, span)
+                self.emit(InstKind::ChanRecv(c), ty, span)
+            }
+
+            ExprKind::Select(arms, default) => {
+                // Lower select as a SelectArm with all channel values
+                let ch_vals: Vec<ValueId> = arms.iter().map(|arm| {
+                    self.lower_expr(&arm.chan)
+                }).collect();
+                let select_val = self.emit(InstKind::SelectArm(ch_vals.clone()), ty.clone(), span);
+                // Lower bodies as a switch on the selected arm index
+                if !arms.is_empty() {
+                    let merge_bb = self.new_block("select.merge");
+                    let mut cases: Vec<(i64, BlockId)> = Vec::new();
+                    for (i, arm) in arms.iter().enumerate() {
+                        let arm_bb = self.new_block(&format!("select.arm{i}"));
+                        cases.push((i as i64, arm_bb));
+                        self.switch_to(arm_bb);
+                        if let Some(bind_name) = &arm.binding {
+                            let recv_val = self.emit(InstKind::ChanRecv(
+                                ch_vals[i]
+                            ), arm.elem_ty.clone(), span);
+                            self.var_map.insert(bind_name.clone(), recv_val);
+                        }
+                        self.lower_block_stmts(&arm.body);
+                        self.set_terminator(Terminator::Goto(merge_bb));
+                    }
+                    let default_bb = if let Some(def_body) = default {
+                        let db = self.new_block("select.default");
+                        self.switch_to(db);
+                        self.lower_block_stmts(def_body);
+                        self.set_terminator(Terminator::Goto(merge_bb));
+                        db
+                    } else {
+                        merge_bb
+                    };
+                    // We need to go back and set the switch terminator
+                    // The select_val block ended where we emitted SelectArm
+                    // Find the block that contains the select inst
+                    let select_block = self.func.blocks.iter()
+                        .find(|b| b.insts.iter().any(|i| i.dest == Some(select_val)))
+                        .map(|b| b.id)
+                        .unwrap_or(self.current_block);
+                    self.func.block_mut(select_block).terminator = Terminator::Switch(select_val, cases, default_bb);
+                    self.switch_to(merge_bb);
+                }
+                select_val
             }
 
             // Atomics — all lowered as intrinsic calls
@@ -381,8 +507,138 @@ impl Lowerer {
                 self.emit(InstKind::Call("__atomic_cas".into(), args), ty, span)
             }
 
-            // Fallback for any expression kind we don't lower specifically
-            _ => self.emit(InstKind::Void, ty, span),
+            // Builtin functions — dedicated MIR instructions for optimizable ones
+            ExprKind::Builtin(builtin, args) => {
+                use crate::hir::BuiltinFn;
+                let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
+                match builtin {
+                    BuiltinFn::Log => {
+                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::Log(v), ty, span)
+                    }
+                    BuiltinFn::Assert => {
+                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::Assert(v, "assertion failed".into()), ty, span)
+                    }
+                    BuiltinFn::RcAlloc => {
+                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::RcNew(v, ty.clone()), ty, span)
+                    }
+                    BuiltinFn::RcRetain => {
+                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::RcClone(v), ty, span)
+                    }
+                    BuiltinFn::RcRelease => {
+                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::RcDec(v), ty, span)
+                    }
+                    BuiltinFn::WeakUpgrade => {
+                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::WeakUpgrade(v), ty, span)
+                    }
+                    _ => {
+                        let name = format!("__builtin_{builtin:?}");
+                        self.emit(InstKind::Call(name, vals), ty, span)
+                    }
+                }
+            }
+
+            // Syscall — opaque call
+            ExprKind::Syscall(args) => {
+                let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
+                self.emit(InstKind::Call("__syscall".into(), vals), ty, span)
+            }
+
+            // Coroutines — opaque calls
+            ExprKind::CoroutineCreate(name, body) => {
+                self.lower_block_stmts(body);
+                self.emit(InstKind::Call(format!("__coro_create_{name}"), vec![]), ty, span)
+            }
+            ExprKind::CoroutineNext(coro) => {
+                let c = self.lower_expr(coro);
+                self.emit(InstKind::Call("__coro_next".into(), vec![c]), ty, span)
+            }
+            ExprKind::Yield(inner) => {
+                let v = self.lower_expr(inner);
+                self.emit(InstKind::Call("__yield".into(), vec![v]), ty, span)
+            }
+
+            // Dynamic dispatch
+            ExprKind::DynDispatch(obj, trait_name, method, args) => {
+                let obj_val = self.lower_expr(obj);
+                let arg_vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
+                self.emit(InstKind::DynDispatch(obj_val, trait_name.clone(), method.clone(), arg_vals), ty, span)
+            }
+            ExprKind::DynCoerce(inner, _type_name, _trait_name) => {
+                self.lower_expr(inner)
+            }
+
+            // Store operations — opaque calls
+            ExprKind::StoreQuery(store_name, _filter) => {
+                self.emit(InstKind::Call(format!("__store_query_{store_name}"), vec![]), ty, span)
+            }
+            ExprKind::StoreCount(store_name) => {
+                self.emit(InstKind::Call(format!("__store_count_{store_name}"), vec![]), ty, span)
+            }
+            ExprKind::StoreAll(store_name) => {
+                self.emit(InstKind::Call(format!("__store_all_{store_name}"), vec![]), ty, span)
+            }
+
+            // Iterator
+            ExprKind::IterNext(iter_var, type_name, method_name) => {
+                if let Some(&v) = self.var_map.get(iter_var) {
+                    self.emit(InstKind::MethodCall(v, format!("{type_name}_{method_name}"), vec![]), ty, span)
+                } else {
+                    self.emit(InstKind::Call(format!("__iter_{type_name}_{method_name}"), vec![]), ty, span)
+                }
+            }
+
+            ExprKind::Unreachable => {
+                self.set_terminator(Terminator::Unreachable);
+                let dead = self.new_block("after.unreachable");
+                self.switch_to(dead);
+                self.emit(InstKind::Void, ty, span)
+            }
+
+            ExprKind::AsFormat(inner, _fmt_str) => {
+                let v = self.lower_expr(inner);
+                self.emit(InstKind::Call("__as_format".into(), vec![v]), ty, span)
+            }
+
+            ExprKind::Builder(name, fields) => {
+                // Desugar builder into StructInit + field sets
+                let inits: Vec<(String, ValueId)> = fields.iter().map(|(n, e)| {
+                    (n.clone(), self.lower_expr(e))
+                }).collect();
+                self.emit(InstKind::StructInit(name.clone(), inits), ty, span)
+            }
+
+            ExprKind::CowWrap(inner) => {
+                let v = self.lower_expr(inner);
+                self.emit(InstKind::Call("__cow_wrap".into(), vec![v]), ty, span)
+            }
+            ExprKind::CowClone(inner) => {
+                let v = self.lower_expr(inner);
+                self.emit(InstKind::Call("__cow_clone".into(), vec![v]), ty, span)
+            }
+
+            ExprKind::GeneratorCreate(_def_id, name, body) => {
+                self.lower_block_stmts(body);
+                self.emit(InstKind::Call(format!("__gen_create_{name}"), vec![]), ty, span)
+            }
+            ExprKind::GeneratorNext(gen_expr) => {
+                let g = self.lower_expr(gen_expr);
+                self.emit(InstKind::Call("__gen_next".into(), vec![g]), ty, span)
+            }
+
+            ExprKind::Grad(inner) => {
+                let v = self.lower_expr(inner);
+                self.emit(InstKind::Call("__grad".into(), vec![v]), ty, span)
+            }
+            ExprKind::Einsum(_pattern, args) => {
+                let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
+                self.emit(InstKind::Call("__einsum".into(), vals), ty, span)
+            }
         }
     }
 
@@ -398,6 +654,14 @@ impl Lowerer {
         match stmt {
             hir::Stmt::Bind(b) => {
                 let val = self.lower_expr(&b.value);
+                // Store the DefId on the instruction that produced this value,
+                // so MIR Perceus can track binding → value relationships.
+                if let Some(inst) = self.func.block_mut(self.current_block)
+                    .insts.iter_mut().rev()
+                    .find(|i| i.dest == Some(val))
+                {
+                    inst.def_id = Some(b.def_id);
+                }
                 self.var_map.insert(b.name.clone(), val);
                 val
             }
@@ -619,13 +883,157 @@ impl Lowerer {
                 self.emit(InstKind::Call("__stop".into(), vec![v]), Type::Void, *span)
             }
 
-            _ => self.emit(InstKind::Void, Type::Void, Span::dummy()),
+            hir::Stmt::Asm(_asm) => {
+                // Inline assembly — lower as opaque call
+                self.emit(InstKind::Call("__asm".into(), vec![]), Type::Void, Span::dummy())
+            }
+
+            hir::Stmt::StoreInsert(store_name, exprs, span) => {
+                let vals: Vec<_> = exprs.iter().map(|e| self.lower_expr(e)).collect();
+                self.emit(InstKind::Call(format!("__store_insert_{store_name}"), vals), Type::Void, *span)
+            }
+
+            hir::Stmt::StoreDelete(store_name, _filter, span) => {
+                self.emit(InstKind::Call(format!("__store_delete_{store_name}"), vec![]), Type::Void, *span)
+            }
+
+            hir::Stmt::StoreSet(store_name, fields, _filter, span) => {
+                let vals: Vec<_> = fields.iter().map(|(_, e)| self.lower_expr(e)).collect();
+                self.emit(InstKind::Call(format!("__store_set_{store_name}"), vals), Type::Void, *span)
+            }
+
+            hir::Stmt::Transaction(body, span) => {
+                self.lower_block_stmts(body);
+                self.emit(InstKind::Void, Type::Void, *span)
+            }
+
+            hir::Stmt::SimFor(f, span) => {
+                // Parallel for — lower same as sequential for in MIR
+                let _iter = self.lower_expr(&f.iter);
+                let cond_bb = self.new_block("simfor.cond");
+                let body_bb = self.new_block("simfor.body");
+                let exit_bb = self.new_block("simfor.exit");
+
+                self.set_terminator(Terminator::Goto(cond_bb));
+                self.switch_to(cond_bb);
+                let cond = self.emit(InstKind::BoolConst(false), Type::Bool, *span);
+                self.set_terminator(Terminator::Branch(cond, body_bb, exit_bb));
+
+                self.loop_stack.push((cond_bb, exit_bb));
+                self.switch_to(body_bb);
+                self.lower_block_stmts(&f.body);
+                self.set_terminator(Terminator::Goto(cond_bb));
+                self.loop_stack.pop();
+
+                self.switch_to(exit_bb);
+                self.emit(InstKind::Void, Type::Void, *span)
+            }
+
+            hir::Stmt::SimBlock(body, span) => {
+                self.lower_block_stmts(body);
+                self.emit(InstKind::Void, Type::Void, *span)
+            }
+
+            hir::Stmt::UseLocal(_, _, _, _) => {
+                // No-op in MIR — use declarations are resolved at HIR level
+                self.emit(InstKind::Void, Type::Void, Span::dummy())
+            }
         }
     }
 
     fn lower_block_stmts(&mut self, stmts: &[hir::Stmt]) {
         for stmt in stmts {
             self.lower_stmt(stmt);
+        }
+    }
+
+    /// Collect variable names referenced in a block of HIR statements.
+    fn collect_expr_var_refs_block(body: &[hir::Stmt], refs: &mut std::collections::HashSet<String>) {
+        for stmt in body {
+            Self::collect_expr_var_refs_stmt(stmt, refs);
+        }
+    }
+
+    fn collect_expr_var_refs_stmt(stmt: &hir::Stmt, refs: &mut std::collections::HashSet<String>) {
+        match stmt {
+            hir::Stmt::Bind(b) => Self::collect_expr_var_refs_expr(&b.value, refs),
+            hir::Stmt::Assign(t, v, _) => {
+                Self::collect_expr_var_refs_expr(t, refs);
+                Self::collect_expr_var_refs_expr(v, refs);
+            }
+            hir::Stmt::Expr(e) => Self::collect_expr_var_refs_expr(e, refs),
+            hir::Stmt::If(i) => {
+                Self::collect_expr_var_refs_expr(&i.cond, refs);
+                Self::collect_expr_var_refs_block(&i.then, refs);
+                for (c, b) in &i.elifs {
+                    Self::collect_expr_var_refs_expr(c, refs);
+                    Self::collect_expr_var_refs_block(b, refs);
+                }
+                if let Some(els) = &i.els {
+                    Self::collect_expr_var_refs_block(els, refs);
+                }
+            }
+            hir::Stmt::While(w) => {
+                Self::collect_expr_var_refs_expr(&w.cond, refs);
+                Self::collect_expr_var_refs_block(&w.body, refs);
+            }
+            hir::Stmt::For(f) => {
+                Self::collect_expr_var_refs_expr(&f.iter, refs);
+                Self::collect_expr_var_refs_block(&f.body, refs);
+            }
+            hir::Stmt::Loop(l) => Self::collect_expr_var_refs_block(&l.body, refs),
+            hir::Stmt::Ret(Some(e), _, _) => Self::collect_expr_var_refs_expr(e, refs),
+            hir::Stmt::Match(m) => {
+                Self::collect_expr_var_refs_expr(&m.subject, refs);
+                for arm in &m.arms {
+                    Self::collect_expr_var_refs_block(&arm.body, refs);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_expr_var_refs_expr(expr: &hir::Expr, refs: &mut std::collections::HashSet<String>) {
+        match &expr.kind {
+            ExprKind::Var(_, name) => { refs.insert(name.clone()); }
+            ExprKind::BinOp(l, _, r) => {
+                Self::collect_expr_var_refs_expr(l, refs);
+                Self::collect_expr_var_refs_expr(r, refs);
+            }
+            ExprKind::UnaryOp(_, e) | ExprKind::Ref(e) | ExprKind::Deref(e)
+            | ExprKind::Cast(e, _) | ExprKind::StrictCast(e, _)
+            | ExprKind::Coerce(e, _) => {
+                Self::collect_expr_var_refs_expr(e, refs);
+            }
+            ExprKind::Call(_, _, args) | ExprKind::Array(args) | ExprKind::Tuple(args)
+            | ExprKind::VecNew(args) | ExprKind::NDArrayNew(args) | ExprKind::SIMDNew(args)
+            | ExprKind::Syscall(args) => {
+                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+            }
+            ExprKind::IndirectCall(f, args) => {
+                Self::collect_expr_var_refs_expr(f, refs);
+                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+            }
+            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args)
+            | ExprKind::DequeMethod(obj, _, args) | ExprKind::DeferredMethod(obj, _, args) => {
+                Self::collect_expr_var_refs_expr(obj, refs);
+                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+            }
+            ExprKind::Field(obj, _, _) => Self::collect_expr_var_refs_expr(obj, refs),
+            ExprKind::Index(a, i) => {
+                Self::collect_expr_var_refs_expr(a, refs);
+                Self::collect_expr_var_refs_expr(i, refs);
+            }
+            ExprKind::IfExpr(i) => {
+                Self::collect_expr_var_refs_expr(&i.cond, refs);
+                Self::collect_expr_var_refs_block(&i.then, refs);
+                if let Some(els) = &i.els { Self::collect_expr_var_refs_block(els, refs); }
+            }
+            ExprKind::Block(stmts) => Self::collect_expr_var_refs_block(stmts, refs),
+            ExprKind::Lambda(_, body) => Self::collect_expr_var_refs_block(body, refs),
+            _ => {}
         }
     }
 }

@@ -2,6 +2,8 @@
 # Complexity: Advanced
 # Demonstrates: structs, methods, math builtins, type casting, control flow
 
+extern *sqrt(x as f64) returns f64
+
 type Vec3f
     x as f64
     y as f64
@@ -16,11 +18,12 @@ type Vec3f
     *scale(self, s as f64)
         Vec3f(x is self.x * s, y is self.y * s, z is self.z * s)
 
-    *dot(self, other as Vec3f)
+    *dot(self, other as Vec3f) returns f64
         self.x * other.x + self.y * other.y + self.z * other.z
 
-    *length(self)
-        self.dot(self).sqrt()
+    *length(self) returns f64
+        d is self.dot(self)
+        sqrt(d)
 
     *normalize(self)
         len is self.length()
@@ -30,7 +33,7 @@ type Ray
     origin as Vec3f
     dir as Vec3f
 
-    *at(self, t as f64)
+    *point_at(self, t as f64)
         self.origin.add(self.dir.scale(t))
 
 type Sphere
@@ -48,7 +51,7 @@ type Sphere
     if discriminant < 0.0
         return -1.0
 
-    sqrt_disc is discriminant.sqrt()
+    sqrt_disc is sqrt(discriminant)
     t1 is (0.0 - b - sqrt_disc) / (2.0 * a)
     t2 is (0.0 - b + sqrt_disc) / (2.0 * a)
 
@@ -61,7 +64,7 @@ type Sphere
 
 # Compute color based on normal direction (simple diffuse)
 *shade(ray as Ray, sphere as Sphere, t as f64)
-    hit_point is ray.at(t)
+    hit_point is ray.point_at(t)
     normal is hit_point.sub(sphere.center).normalize()
     # Map normal to 0-255 color channel
     r is ((normal.x + 1.0) * 0.5 * 255.0) as i64
@@ -70,10 +73,8 @@ type Sphere
     r * 65536 + g * 256 + b
 
 *main
-    sphere is Sphere(
-        center is Vec3f(x is 0.0, y is 0.0, z is -5.0),
-        radius is 1.0
-    )
+    center is Vec3f(x is 0.0, y is 0.0, z is -5.0)
+    sphere is Sphere(center is center, radius is 1.0)
 
     # Shoot rays in a small grid
     hits is 0
@@ -85,29 +86,33 @@ type Sphere
             u is (px as f64) / 10.0 * 2.0 - 1.0
             v is (py as f64) / 10.0 * 2.0 - 1.0
 
-            ray is Ray(
-                origin is Vec3f(x is 0.0, y is 0.0, z is 0.0),
-                dir is Vec3f(x is u, y is v, z is -1.0).normalize()
-            )
+            origin is Vec3f(x is 0.0, y is 0.0, z is 0.0)
+            d is Vec3f(x is u, y is v, z is -1.0).normalize()
+            ray is Ray(origin is origin, dir is d)
 
             t is intersect(ray, sphere)
             if t > 0.0
-                color is shade(ray, sphere, t)
+                ray2 is Ray(origin is Vec3f(x is 0.0, y is 0.0, z is 0.0), dir is Vec3f(x is u, y is v, z is -1.0).normalize())
+                sphere2 is Sphere(center is Vec3f(x is 0.0, y is 0.0, z is -5.0), radius is 1.0)
+                color is shade(ray2, sphere2, t)
                 hits is hits + 1
             else
                 misses is misses + 1
+            sphere is Sphere(center is Vec3f(x is 0.0, y is 0.0, z is -5.0), radius is 1.0)
 
     log(hits)
     log(misses)
     log('ray tracing complete')
 
     # Test specific rays
-    center_ray is Ray(
-        origin is Vec3f(x is 0.0, y is 0.0, z is 0.0),
-        dir is Vec3f(x is 0.0, y is 0.0, z is -1.0)
-    )
-    t is intersect(center_ray, sphere)
+    cr_origin is Vec3f(x is 0.0, y is 0.0, z is 0.0)
+    cr_dir is Vec3f(x is 0.0, y is 0.0, z is -1.0)
+    center_ray is Ray(origin is cr_origin, dir is cr_dir)
+    sphere3 is Sphere(center is Vec3f(x is 0.0, y is 0.0, z is -5.0), radius is 1.0)
+    t is intersect(center_ray, sphere3)
     log(t)                          # 4.0 (distance to sphere at z=-5, r=1)
 
-    color is shade(center_ray, sphere, t)
+    cr2 is Ray(origin is Vec3f(x is 0.0, y is 0.0, z is 0.0), dir is Vec3f(x is 0.0, y is 0.0, z is -1.0))
+    sphere4 is Sphere(center is Vec3f(x is 0.0, y is 0.0, z is -5.0), radius is 1.0)
+    color is shade(cr2, sphere4, t)
     log(color)

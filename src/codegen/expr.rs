@@ -55,6 +55,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::StringMethod(obj, method, args) => {
                 self.compile_string_method(obj, method, args)
             }
+            hir::ExprKind::DeferredMethod(_obj, method, _args) => {
+                Err(format!("unresolved deferred method call '.{method}()' — type inference could not determine the receiver type"))
+            }
             hir::ExprKind::Field(obj, field, idx) => self.compile_field(obj, field, *idx),
             hir::ExprKind::Index(arr, idx) => self.compile_index(arr, idx),
             hir::ExprKind::Ternary(c, t, e) => self.compile_ternary(c, t, e),

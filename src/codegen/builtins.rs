@@ -263,6 +263,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::BuiltinFn::PoolAlloc => self.compile_pool_alloc(args),
             hir::BuiltinFn::PoolFree => self.compile_pool_free(args),
             hir::BuiltinFn::PoolDestroy => self.compile_pool_destroy(args),
+            hir::BuiltinFn::FloatMethod(method) => self.compile_float_method(method, args),
         }
     }
 
@@ -841,6 +842,195 @@ impl<'ctx> Compiler<'ctx> {
             .try_as_basic_value()
             .basic()
             .unwrap())
+    }
+
+    fn compile_float_method(
+        &mut self,
+        method: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // args[0] is the receiver (the f64 value), rest are method arguments
+        let receiver = self.compile_expr(&args[0])?.into_float_value();
+        let f64t = self.ctx.f64_type();
+        let i64t = self.ctx.i64_type();
+
+        match method {
+            // Single-argument LLVM intrinsics
+            "sqrt" => {
+                let f = self.module.get_function("llvm.sqrt.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.sqrt.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "sqrt")).try_as_basic_value().basic().unwrap())
+            }
+            "abs" => {
+                let f = self.module.get_function("llvm.fabs.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.fabs.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "abs")).try_as_basic_value().basic().unwrap())
+            }
+            "floor" => {
+                let f = self.module.get_function("llvm.floor.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.floor.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "floor")).try_as_basic_value().basic().unwrap())
+            }
+            "ceil" => {
+                let f = self.module.get_function("llvm.ceil.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.ceil.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "ceil")).try_as_basic_value().basic().unwrap())
+            }
+            "round" => {
+                let f = self.module.get_function("llvm.round.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.round.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "round")).try_as_basic_value().basic().unwrap())
+            }
+            "trunc" => {
+                let f = self.module.get_function("llvm.trunc.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.trunc.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "trunc")).try_as_basic_value().basic().unwrap())
+            }
+            // Trig via libm
+            "sin" => {
+                let f = self.module.get_function("llvm.sin.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.sin.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "sin")).try_as_basic_value().basic().unwrap())
+            }
+            "cos" => {
+                let f = self.module.get_function("llvm.cos.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.cos.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "cos")).try_as_basic_value().basic().unwrap())
+            }
+            "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "cbrt" => {
+                let f = self.module.get_function(method).unwrap_or_else(|| {
+                    self.module.add_function(method, f64t.fn_type(&[f64t.into()], false), Some(Linkage::External))
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], method)).try_as_basic_value().basic().unwrap())
+            }
+            "exp" => {
+                let f = self.module.get_function("llvm.exp.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.exp.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp")).try_as_basic_value().basic().unwrap())
+            }
+            "exp2" => {
+                let f = self.module.get_function("llvm.exp2.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.exp2.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp2")).try_as_basic_value().basic().unwrap())
+            }
+            "ln" => {
+                let f = self.module.get_function("llvm.log.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.log.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "ln")).try_as_basic_value().basic().unwrap())
+            }
+            "log2" => {
+                let f = self.module.get_function("llvm.log2.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.log2.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "log2")).try_as_basic_value().basic().unwrap())
+            }
+            "log10" => {
+                let f = self.module.get_function("llvm.log10.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.log10.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "log10")).try_as_basic_value().basic().unwrap())
+            }
+            "recip" => {
+                let one = f64t.const_float(1.0);
+                Ok(b!(self.bld.build_float_div(one, receiver, "recip")).into())
+            }
+            "signum" => {
+                // signum: returns -1.0, 0.0, or 1.0
+                let zero = f64t.const_float(0.0);
+                let neg_one = f64t.const_float(-1.0);
+                let pos_one = f64t.const_float(1.0);
+                let is_pos = b!(self.bld.build_float_compare(inkwell::FloatPredicate::OGT, receiver, zero, "pos"));
+                let is_neg = b!(self.bld.build_float_compare(inkwell::FloatPredicate::OLT, receiver, zero, "neg"));
+                let sel1 = b!(self.bld.build_select(
+                    is_neg,
+                    BasicValueEnum::FloatValue(neg_one),
+                    BasicValueEnum::FloatValue(zero),
+                    "s1",
+                ))
+                    .into_float_value();
+                Ok(b!(self.bld.build_select(is_pos, BasicValueEnum::FloatValue(pos_one), BasicValueEnum::FloatValue(sel1), "signum")).into())
+            }
+            // Two-argument methods
+            "pow" => {
+                if args.len() < 2 { return Err("pow() requires 1 argument".into()); }
+                let exp = self.compile_expr(&args[1])?.into_float_value();
+                let f = self.module.get_function("llvm.pow.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.pow.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into(), exp.into()], "pow")).try_as_basic_value().basic().unwrap())
+            }
+            "atan2" => {
+                if args.len() < 2 { return Err("atan2() requires 1 argument".into()); }
+                let other = self.compile_expr(&args[1])?.into_float_value();
+                let f = self.module.get_function("atan2").unwrap_or_else(|| {
+                    self.module.add_function("atan2", f64t.fn_type(&[f64t.into(), f64t.into()], false), Some(Linkage::External))
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into(), other.into()], "atan2")).try_as_basic_value().basic().unwrap())
+            }
+            "copysign" => {
+                if args.len() < 2 { return Err("copysign() requires 1 argument".into()); }
+                let sign = self.compile_expr(&args[1])?.into_float_value();
+                let f = self.module.get_function("llvm.copysign.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.copysign.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into(), sign.into()], "copysign")).try_as_basic_value().basic().unwrap())
+            }
+            "min" => {
+                if args.len() < 2 { return Err("min() requires 1 argument".into()); }
+                let other = self.compile_expr(&args[1])?.into_float_value();
+                let f = self.module.get_function("llvm.minnum.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.minnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into(), other.into()], "fmin")).try_as_basic_value().basic().unwrap())
+            }
+            "max" => {
+                if args.len() < 2 { return Err("max() requires 1 argument".into()); }
+                let other = self.compile_expr(&args[1])?.into_float_value();
+                let f = self.module.get_function("llvm.maxnum.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.maxnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                });
+                Ok(b!(self.bld.build_call(f, &[receiver.into(), other.into()], "fmax")).try_as_basic_value().basic().unwrap())
+            }
+            // Boolean predicates
+            "is_nan" => {
+                let result = b!(self.bld.build_float_compare(inkwell::FloatPredicate::UNO, receiver, receiver, "isnan"));
+                Ok(result.into())
+            }
+            "is_infinite" => {
+                let abs_f = self.module.get_function("llvm.fabs.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.fabs.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs")).try_as_basic_value().basic().unwrap().into_float_value();
+                let inf = f64t.const_float(f64::INFINITY);
+                let result = b!(self.bld.build_float_compare(inkwell::FloatPredicate::OEQ, abs_val, inf, "isinf"));
+                Ok(result.into())
+            }
+            "is_finite" => {
+                let abs_f = self.module.get_function("llvm.fabs.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.fabs.f64", f64t.fn_type(&[f64t.into()], false), None)
+                });
+                let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs")).try_as_basic_value().basic().unwrap().into_float_value();
+                let inf = f64t.const_float(f64::INFINITY);
+                let not_inf = b!(self.bld.build_float_compare(inkwell::FloatPredicate::ONE, abs_val, inf, "notinf"));
+                let not_nan = b!(self.bld.build_float_compare(inkwell::FloatPredicate::ORD, receiver, receiver, "notnan"));
+                Ok(b!(self.bld.build_and(not_inf, not_nan, "isfinite")).into())
+            }
+            "to_int" => {
+                Ok(b!(self.bld.build_float_to_signed_int(receiver, i64t, "ftoi")).into())
+            }
+            _ => Err(format!("unknown float method '{method}'")),
+        }
     }
 
     fn compile_string_from_raw(

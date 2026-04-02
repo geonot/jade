@@ -1,0 +1,32 @@
+# Parallel pipeline - Sequential vs Sim For with computation
+# 100 iterations of fib(28..35), comparing sequential vs parallel
+# Each iteration does real CPU work varying by index
+
+extern *jade_time_now_ns() returns i64
+
+*fib(n as i64) returns i64
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+*main
+    # --- Sequential: 100 x fib(28 + i%8) ---
+    t0 is jade_time_now_ns()
+    i is 0
+    while i < 100
+        log(fib(28 + (i % 8)))
+        i is i + 1
+    t1 is jade_time_now_ns()
+    seq_ms is (t1 - t0) / 1000000
+    log(seq_ms)
+
+    # --- Parallel: 100 x fib(28 + i%8) via sim for ---
+    t2 is jade_time_now_ns()
+    sim for i in 100
+        log(fib(28 + (i % 8)))
+    t3 is jade_time_now_ns()
+    par_ms is (t3 - t2) / 1000000
+    log(par_ms)
+
+    log(0)

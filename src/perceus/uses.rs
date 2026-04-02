@@ -122,6 +122,9 @@ impl PerceusPass {
                 uses.insert(f.bind_id, UseInfo::new(f.bind_ty.clone(), Ownership::Owned));
                 self.count_uses_block_conservative(&f.body, uses);
             }
+            Stmt::SimBlock(b, _) => {
+                self.count_uses_block(b, uses);
+            }
             Stmt::UseLocal(_, _, _, _) => {}
         }
     }
@@ -219,6 +222,9 @@ impl PerceusPass {
                 self.collect_refs_expr(&f.iter, refs);
                 self.collect_refs_block(&f.body, refs);
             }
+            Stmt::SimBlock(b, _) => {
+                self.collect_refs_block(b, refs);
+            }
             Stmt::UseLocal(_, _, _, _) => {}
         }
     }
@@ -245,6 +251,7 @@ impl PerceusPass {
             }
             ExprKind::Method(obj, _, _, args)
             | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::DeferredMethod(obj, _, args)
             | ExprKind::VecMethod(obj, _, args)
             | ExprKind::MapMethod(obj, _, args)
             | ExprKind::SetMethod(obj, _, args)
@@ -510,7 +517,8 @@ impl PerceusPass {
                     }
                 }
             }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args) => {
+            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::DeferredMethod(obj, _, args) => {
                 self.count_uses_expr(obj, uses);
                 for a in args {
                     self.count_uses_expr_escaping(a, uses);

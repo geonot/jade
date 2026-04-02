@@ -1,0 +1,72 @@
+# Monte Carlo Pi Estimation
+# Uses random sampling to estimate Pi
+# Sequential vs parallel (sim for) comparison
+#
+# Method: Generate random (x,y) in [0,1), check if x²+y² < 1
+# Pi ≈ 4 * (points inside circle / total points)
+
+extern *jade_time_now_ns() returns i64
+
+# Linear congruential generator (simple PRNG)
+# Returns next state and a value in [0, modulus)
+*lcg_next(state as i64) returns i64
+    a is 6364136223846793005
+    c is 1442695040888963407
+    state * a + c
+
+# Convert state to a "random" value 0..999999
+*rand_val(state as i64) returns i64
+    v is state
+    if v < 0
+        v is 0 - v
+    v % 1000000
+
+# Estimate pi using n samples, starting with seed
+*estimate_pi_samples(n as i64, seed as i64) returns i64
+    inside is 0
+    state is seed
+    i is 0
+    while i < n
+        state is lcg_next(state)
+        x is rand_val(state)
+        state is lcg_next(state)
+        y is rand_val(state)
+        # Check if point is inside unit circle (scaled by 1000000)
+        dist is x * x + y * y
+        if dist < 1000000000000
+            inside is inside + 1
+        i is i + 1
+    inside
+
+*main
+    n is 2000000
+    samples_per_task is 250000
+
+    # --- Sequential ---
+    t0 is jade_time_now_ns()
+    total_inside is 0
+    k is 0
+    while k < 8
+        inside is estimate_pi_samples(samples_per_task, 42 + k * 1000000)
+        total_inside is total_inside + inside
+        k is k + 1
+    t1 is jade_time_now_ns()
+    # Pi ≈ 4 * inside / total => scaled by 1000 for display
+    pi_est is (4 * total_inside * 1000) / n
+    log("=== Monte Carlo Pi Estimation ===")
+    log("Sequential pi*1000:")
+    log(pi_est)
+    seq_ms is (t1 - t0) / 1000000
+    log("Sequential ms:")
+    log(seq_ms)
+
+    # --- Parallel (sim for) ---
+    log("=== Parallel (sim for 8 tasks) ===")
+    t2 is jade_time_now_ns()
+    sim for i in 8
+        inside is estimate_pi_samples(250000, 42 + i * 1000000)
+        log(inside)
+    t3 is jade_time_now_ns()
+    par_ms is (t3 - t2) / 1000000
+    log("Parallel ms:")
+    log(par_ms)

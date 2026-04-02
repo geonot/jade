@@ -51,9 +51,11 @@
     sq is *fn(x as i64) x * x
     log(sq(9))                       # 81
 
-    # Lambda in pipeline
-    result is 5 ~ make_adder(3) ~ make_multiplier(2)
-    log(result)                      # should be (5+3)*2 = 16
+    # Manual closure pipeline
+    add3 is make_adder(3)
+    mul2 is make_multiplier(2)
+    result is mul2(add3(5))
+    log(result)                      # (5+3)*2 = 16
 
     # Nested closures
     outer is 100

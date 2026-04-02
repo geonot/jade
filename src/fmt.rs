@@ -271,6 +271,11 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             out.push('\n');
             format_block(out, &f.body, level + 1);
         }
+        Stmt::SimBlock(b, _) => {
+            indent(out, level);
+            out.push_str("sim\n");
+            format_block(out, b, level + 1);
+        }
         Stmt::Loop(l) => {
             indent(out, level);
             out.push_str("loop\n");

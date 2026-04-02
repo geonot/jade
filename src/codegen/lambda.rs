@@ -297,6 +297,7 @@ impl<'ctx> Compiler<'ctx> {
             }
             hir::ExprKind::Method(obj, _, _, args)
             | hir::ExprKind::StringMethod(obj, _, args)
+            | hir::ExprKind::DeferredMethod(obj, _, args)
             | hir::ExprKind::VecMethod(obj, _, args)
             | hir::ExprKind::MapMethod(obj, _, args) => {
                 Self::collect_var_refs_expr(obj, out);

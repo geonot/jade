@@ -1,0 +1,49 @@
+# Actor Fan-out - 8 actors processing fib(35) messages in parallel
+# Compare with actor_single.jade to see parallelism via CPU utilization
+# Run both with `time` to observe: wall time, user time, CPU%
+#
+# Single: 1 actor doing 64×fib(35) → ~100% CPU, wall ≈ user
+# Fan-out: 8 actors doing 8×fib(35) each → ~800% CPU, wall << user
+
+*fib(n as i64) returns i64
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+actor Worker
+    sum
+    @work n
+        sum is sum + fib(n)
+
+*main
+    n is 64
+    a is spawn Worker
+    b is spawn Worker
+    c is spawn Worker
+    d is spawn Worker
+    e is spawn Worker
+    f is spawn Worker
+    g is spawn Worker
+    h is spawn Worker
+    i is 0
+    while i < n
+        r is i % 8
+        if r eq 0
+            send a, @work(35)
+        if r eq 1
+            send b, @work(35)
+        if r eq 2
+            send c, @work(35)
+        if r eq 3
+            send d, @work(35)
+        if r eq 4
+            send e, @work(35)
+        if r eq 5
+            send f, @work(35)
+        if r eq 6
+            send g, @work(35)
+        if r eq 7
+            send h, @work(35)
+        i is i + 1
+    log(0)

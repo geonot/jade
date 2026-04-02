@@ -1,0 +1,11 @@
+# Dispatch yield benchmark
+# Single generator yields 1M values, consumer sums them
+
+*main
+    gen is dispatch
+        for i in 1000000
+            yield i
+    total is 0
+    for x in gen
+        total is total + x
+    log(total)

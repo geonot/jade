@@ -107,6 +107,7 @@ impl PerceusPass {
             }
             Stmt::For(f) => self.analyze_reuse(&f.body, uses),
             Stmt::SimFor(f, _) => self.analyze_reuse(&f.body, uses),
+            Stmt::SimBlock(b, _) => self.analyze_reuse(b, uses),
             Stmt::While(w) => self.analyze_reuse(&w.body, uses),
             Stmt::Loop(l) => self.analyze_reuse(&l.body, uses),
             Stmt::Transaction(body, _) => self.analyze_reuse(body, uses),
@@ -261,6 +262,7 @@ impl PerceusPass {
                 }
                 Stmt::For(f) => self.analyze_fbip(&f.body, uses),
                 Stmt::SimFor(f, _) => self.analyze_fbip(&f.body, uses),
+                Stmt::SimBlock(b, _) => self.analyze_fbip(b, uses),
                 Stmt::While(w) => self.analyze_fbip(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_fbip(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_fbip(body, uses),
@@ -408,6 +410,7 @@ impl PerceusPass {
                 }
                 Stmt::For(f) => self.analyze_drop_fusion(&f.body, uses),
                 Stmt::SimFor(f, _) => self.analyze_drop_fusion(&f.body, uses),
+                Stmt::SimBlock(b, _) => self.analyze_drop_fusion(b, uses),
                 Stmt::While(w) => self.analyze_drop_fusion(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_drop_fusion(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_drop_fusion(body, uses),
@@ -481,6 +484,7 @@ impl PerceusPass {
                 }
                 Stmt::For(f) => self.analyze_speculative_reuse(&f.body, uses),
                 Stmt::SimFor(f, _) => self.analyze_speculative_reuse(&f.body, uses),
+                Stmt::SimBlock(b, _) => self.analyze_speculative_reuse(b, uses),
                 Stmt::While(w) => self.analyze_speculative_reuse(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_speculative_reuse(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_speculative_reuse(body, uses),

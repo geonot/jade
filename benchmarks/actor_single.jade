@@ -1,0 +1,23 @@
+# Actor Single - 1 actor processing 64×fib(35) messages sequentially
+# Compare with parallel_actors.jade to see parallelism difference
+# Run both with `time` to observe wall time, user time, CPU%
+
+*fib(n as i64) returns i64
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+actor Worker
+    sum
+    @work n
+        sum is sum + fib(n)
+
+*main
+    n is 64
+    w is spawn Worker
+    i is 0
+    while i < n
+        send w, @work(35)
+        i is i + 1
+    log(0)

@@ -805,6 +805,34 @@ impl Typer {
             }
         }
 
+        // Float math methods on f64/f32 types
+        if matches!(obj_ty, Type::F64 | Type::F32) {
+            let float_ret = match method {
+                "sqrt" | "abs" | "floor" | "ceil" | "round" | "trunc"
+                | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
+                | "sinh" | "cosh" | "tanh"
+                | "exp" | "exp2" | "ln" | "log2" | "log10"
+                | "cbrt" | "recip" | "signum" => Some(obj_ty.clone()),
+                "pow" | "atan2" | "copysign" | "min" | "max" => Some(obj_ty.clone()),
+                "is_nan" | "is_infinite" | "is_finite" => Some(Type::Bool),
+                "to_int" => Some(Type::I64),
+                _ => None,
+            };
+            if let Some(ret_ty) = float_ret {
+                let hargs: Vec<hir::Expr> = args
+                    .iter()
+                    .map(|e| self.lower_expr(e))
+                    .collect::<Result<_, _>>()?;
+                let mut all_args = vec![hobj];
+                all_args.extend(hargs);
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::FloatMethod(method.to_string()), all_args),
+                    ty: ret_ty,
+                    span,
+                });
+            }
+        }
+
         if matches!(obj_ty, Type::Arena) {
             let hargs: Vec<hir::Expr> = args
                 .iter()
@@ -876,7 +904,19 @@ impl Typer {
             });
         }
 
-        if let Type::Struct(ref type_name, _) = obj_ty {
+        let struct_type_name = match &obj_ty {
+            Type::Struct(name, _) => Some(name.clone()),
+            Type::Ptr(inner) => {
+                if let Type::Struct(name, _) = inner.as_ref() {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(ref type_name) = struct_type_name {
             let method_name = format!("{type_name}_{method}");
             if let Some((_, param_tys, ret)) = self.fns.get(&method_name).cloned() {
                 let hargs: Vec<hir::Expr> = args
@@ -1030,7 +1070,7 @@ impl Typer {
             });
         }
         Ok(hir::Expr {
-            kind: hir::ExprKind::StringMethod(Box::new(hobj), method.to_string(), hargs),
+            kind: hir::ExprKind::DeferredMethod(Box::new(hobj), method.to_string(), hargs),
             ty: ret_ty,
             span,
         })
@@ -1185,7 +1225,7 @@ impl Typer {
         })
     }
 
-    fn build_type_map(
+    pub(crate) fn build_type_map(
         &mut self,
         name: &str,
         generic_fn: &ast::Fn,

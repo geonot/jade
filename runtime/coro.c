@@ -8,6 +8,64 @@
 
 static _Atomic(uint32_t) g_coro_id_counter = 0;
 
+/* ── Stack cache (avoids repeated mmap/munmap) ───────────────────── */
+
+#define STACK_CACHE_MAX 64
+
+typedef struct {
+    void   *base;
+    size_t  size;
+} cached_stack_t;
+
+static cached_stack_t g_stack_cache[STACK_CACHE_MAX];
+static _Atomic(int32_t) g_stack_cache_count = 0;
+static _Atomic(int32_t) g_stack_cache_lock = 0;
+
+static inline void stack_cache_acquire(void) {
+    while (atomic_exchange_explicit(&g_stack_cache_lock, 1, memory_order_acquire) != 0) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+
+static inline void stack_cache_release(void) {
+    atomic_store_explicit(&g_stack_cache_lock, 0, memory_order_release);
+}
+
+static void *stack_cache_pop(size_t size) {
+    stack_cache_acquire();
+    int count = atomic_load_explicit(&g_stack_cache_count, memory_order_relaxed);
+    for (int i = count - 1; i >= 0; i--) {
+        if (g_stack_cache[i].size == size) {
+            void *base = g_stack_cache[i].base;
+            /* Swap with last element */
+            g_stack_cache[i] = g_stack_cache[count - 1];
+            atomic_store_explicit(&g_stack_cache_count, count - 1, memory_order_relaxed);
+            stack_cache_release();
+            return base;
+        }
+    }
+    stack_cache_release();
+    return NULL;
+}
+
+static int stack_cache_push(void *base, size_t size) {
+    stack_cache_acquire();
+    int count = atomic_load_explicit(&g_stack_cache_count, memory_order_relaxed);
+    if (count >= STACK_CACHE_MAX) {
+        stack_cache_release();
+        return 0; /* cache full */
+    }
+    g_stack_cache[count].base = base;
+    g_stack_cache[count].size = size;
+    atomic_store_explicit(&g_stack_cache_count, count + 1, memory_order_relaxed);
+    stack_cache_release();
+    return 1;
+}
+
 /* Forward declarations */
 static void jade_coro_trampoline(void);
 static void jade_coro_exit(void);
@@ -16,17 +74,21 @@ jade_coro_t *jade_coro_create(void (*entry)(void*), void *arg) {
     jade_coro_t *c = (jade_coro_t *)calloc(1, sizeof(jade_coro_t));
     if (!c) return NULL;
 
-    /* Allocate stack with mmap for guard page support */
     size_t total = JADE_STACK_SIZE;
-    void *base = mmap(NULL, total, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (base == MAP_FAILED) {
-        free(c);
-        return NULL;
-    }
 
-    /* Guard page at the bottom (stack grows down) */
-    mprotect(base, JADE_GUARD_SIZE, PROT_NONE);
+    /* Try to reuse a cached stack */
+    void *base = stack_cache_pop(total);
+    if (!base) {
+        /* Allocate stack with mmap for guard page support */
+        base = mmap(NULL, total, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (base == MAP_FAILED) {
+            free(c);
+            return NULL;
+        }
+        /* Guard page at the bottom (stack grows down) */
+        mprotect(base, JADE_GUARD_SIZE, PROT_NONE);
+    }
 
     c->stack_base  = base;
     c->stack_size  = (uint32_t)total;
@@ -82,18 +144,40 @@ jade_coro_t *jade_coro_create(void (*entry)(void*), void *arg) {
 void jade_coro_destroy(jade_coro_t *c) {
     if (!c) return;
     if (c->stack_base) {
-        munmap(c->stack_base, c->stack_size);
+        /* Try to cache the stack for reuse */
+        if (!stack_cache_push(c->stack_base, c->stack_size)) {
+            munmap(c->stack_base, c->stack_size);
+        }
     }
     free(c);
 }
+
+/*
+ * Thread-local for generator coroutine (direct context-swap, no scheduler).
+ * Set by jade_gen_resume before swapping to the generator.
+ */
+_Thread_local jade_coro_t *tl_gen_coro = NULL;
 
 /*
  * Trampoline: first function called when a coroutine starts.
  * Reads entry and arg from callee-saved registers set during create.
  */
 static void jade_coro_trampoline(void) {
+    jade_coro_t *self;
+    jade_coro_t *gen = tl_gen_coro;
+    if (gen) {
+        /* Generator coroutine — runs via direct context swap, no scheduler */
+        tl_gen_coro = NULL;
+        self = gen;
+        self->entry(self->arg);
+        /* Generator entry should not return (codegen emits jade_gen_suspend + unreachable).
+         * If it somehow does, just spin forever to avoid stack corruption. */
+        for (;;) {}
+    }
+
+    /* Scheduler-spawned coroutine */
     jade_worker_t *w = tl_worker;
-    jade_coro_t *self = w ? w->current : NULL;
+    self = w ? w->current : NULL;
     if (!self) return;
 
     /* Call the actual coroutine entry function */
@@ -108,6 +192,8 @@ static void jade_coro_exit(void) {
     if (!w || !w->current) return;
     jade_coro_t *self = w->current;
     self->state = JADE_CORO_DONE;
+    w->held_chan_lock = NULL;
+    w->last_action = SCHED_ACTION_DESTROY;
     /* Swap back to the scheduler; this coroutine is never resumed */
     jade_context_swap(&self->ctx, &w->sched_ctx);
     /* unreachable */
@@ -123,6 +209,8 @@ void jade_coro_yield(void) {
     if (!w || !w->current) return;
     jade_coro_t *c = w->current;
     c->state = JADE_CORO_READY;
+    w->held_chan_lock = NULL;
+    w->last_action = SCHED_ACTION_REQUEUE;
     jade_context_swap(&c->ctx, &w->sched_ctx);
     /* Resumed here when re-scheduled */
 }
@@ -138,4 +226,58 @@ jade_worker_t *jade_current_worker(void) {
 
 void jade_coro_set_daemon(jade_coro_t *c) {
     if (c) c->daemon = 1;
+}
+
+/* ── Generator direct context-swap API ─────────────────────────── */
+
+/*
+ * Generator control block layout (32 bytes):
+ *   offset  0: coro_ptr       (*jade_coro_t)        — 8 bytes
+ *   offset  8: value          (i64)                  — 8 bytes
+ *   offset 16: has_value      (u8)                   — 1 byte
+ *   offset 17: done           (u8)                   — 1 byte
+ *   offset 24: caller_ctx_ptr (*jade_context_t)      — 8 bytes
+ */
+#define GEN_CORO_OFF       0
+#define GEN_CALLER_CTX_OFF 24
+#define GEN_DONE_OFF       17
+
+/*
+ * jade_gen_resume: Direct context swap from caller to generator.
+ * Saves caller context on caller's stack, stores its pointer in the gen block,
+ * and swaps to the generator coroutine.  Returns when the generator yields
+ * or finishes.
+ */
+void jade_gen_resume(void *gen_blk) {
+    /* Don't resume a finished generator */
+    uint8_t done = *((uint8_t *)gen_blk + GEN_DONE_OFF);
+    if (done) return;
+
+    jade_coro_t *c = *(jade_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
+    jade_context_t caller_ctx;
+    /* Store pointer to our stack-local context into the gen block */
+    *(jade_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF) = &caller_ctx;
+    tl_gen_coro = c;
+    jade_context_swap(&caller_ctx, &c->ctx);
+    /* Returned here: generator has yielded or finished */
+}
+
+/*
+ * jade_gen_suspend: Direct context swap from generator back to caller.
+ * Reads the caller_ctx_ptr from the gen block and swaps back.
+ */
+void jade_gen_suspend(void *gen_blk) {
+    jade_coro_t *c = *(jade_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
+    jade_context_t *caller_ctx = *(jade_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF);
+    jade_context_swap(&c->ctx, caller_ctx);
+    /* Returned here: caller called .next() again (jade_gen_resume) */
+}
+
+/*
+ * jade_gen_destroy: Free a generator's coroutine and control block.
+ */
+void jade_gen_destroy(void *gen_blk) {
+    jade_coro_t *c = *(jade_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
+    if (c) jade_coro_destroy(c);
+    free(gen_blk);
 }

@@ -103,10 +103,10 @@ impl Cache {
         };
 
         let pkg_dir = self.package_path(dep);
-        let sub_pkg_file = pkg_dir.join("jade.pkg");
+        let sub_proj_file = pkg_dir.join("project.jade");
         let mut sub_deps = Vec::new();
-        if sub_pkg_file.exists() {
-            let sub_pkg = Package::from_file(&sub_pkg_file)?;
+        if sub_proj_file.exists() {
+            let sub_pkg = Package::from_file(&sub_proj_file)?;
             for sub_dep in &sub_pkg.requires {
                 let sub_entry = self.resolve_dep(sub_dep, existing_lock, resolving)?;
                 sub_deps.push(sub_entry);

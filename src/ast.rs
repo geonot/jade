@@ -102,6 +102,7 @@ pub enum Stmt {
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     SimFor(For, Span),
+    SimBlock(Block, Span),
     UseLocal(UseDecl),
 }
 
@@ -129,6 +130,7 @@ impl Stmt {
             Stmt::ChannelClose(_, s) => *s,
             Stmt::Stop(_, s) => *s,
             Stmt::SimFor(_, s) => *s,
+            Stmt::SimBlock(_, s) => *s,
             Stmt::UseLocal(_) => Span::dummy(),
         }
     }

@@ -15,7 +15,7 @@ use jadec::lock::Lockfile;
 use jadec::ownership::OwnershipVerifier;
 use jadec::parser::Parser;
 use jadec::perceus::PerceusPass;
-use jadec::pkg::Package;
+use jadec::pkg::{Dependency, Package, SemVer};
 use jadec::typer::Typer;
 
 #[derive(ClapParser)]
@@ -179,19 +179,18 @@ fn resolve_modules(
         let file_path = path.join("/");
         let name = path.last().unwrap();
         let mut candidates = Vec::new();
-        if let Some(pkg_path) = packages.get(&path[0]) {
-            if path.len() > 1 {
-                let rest = path[1..].join("/");
-                candidates.push(pkg_path.join("src").join(format!("{rest}.jade")));
-            } else {
-                candidates.push(pkg_path.join("src").join(format!("{}.jade", path[0])));
-            }
-        }
-        candidates.push(base_dir.join(format!("{file_path}.jade")));
-        candidates.push(base_dir.join("std").join(format!("{name}.jade")));
+
+        // 1. Standard library (bundled with compiler)
         if let Ok(exe) = std::env::current_exe() {
             if let Some(exe_dir) = exe.parent() {
                 candidates.push(exe_dir.join("std").join(format!("{name}.jade")));
+                // Check parent dirs (handles target/release/ layout during development)
+                if let Some(parent) = exe_dir.parent() {
+                    candidates.push(parent.join("std").join(format!("{name}.jade")));
+                    if let Some(grandparent) = parent.parent() {
+                        candidates.push(grandparent.join("std").join(format!("{name}.jade")));
+                    }
+                }
             }
         }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
@@ -201,6 +200,35 @@ fn resolve_modules(
                     .join(format!("{name}.jade")),
             );
         }
+        candidates.push(base_dir.join("std").join(format!("{name}.jade")));
+
+        // 2. Project source directory (use foo → source/foo.jade, use foo/bar → source/foo/bar.jade)
+        candidates.push(base_dir.join(format!("{file_path}.jade")));
+        // Also check parent of base_dir in case base_dir is source/ itself
+        if let Some(project_root) = base_dir.parent() {
+            candidates.push(project_root.join("source").join(format!("{file_path}.jade")));
+        }
+
+        // 3. Packages from project.jade / lock
+        if let Some(pkg_path) = packages.get(&path[0]) {
+            if path.len() > 1 {
+                let rest = path[1..].join("/");
+                candidates.push(pkg_path.join("source").join(format!("{rest}.jade")));
+                candidates.push(pkg_path.join("src").join(format!("{rest}.jade")));
+            } else {
+                candidates.push(pkg_path.join("source").join(format!("{}.jade", path[0])));
+                candidates.push(pkg_path.join("src").join(format!("{}.jade", path[0])));
+            }
+        }
+
+        // 4. JADE_PACKAGE_PATH directories
+        if let Ok(pkg_paths) = std::env::var("JADE_PACKAGE_PATH") {
+            for pkg_dir in pkg_paths.split(':') {
+                let pkg_dir = PathBuf::from(pkg_dir);
+                candidates.push(pkg_dir.join(format!("{file_path}.jade")));
+            }
+        }
+
         let candidate = candidates
             .into_iter()
             .find(|c| c.exists())
@@ -277,6 +305,7 @@ struct ProjectConfig {
     entry: Option<String>,
     opt: Option<u8>,
     lto: Option<bool>,
+    requires: Vec<Dependency>,
 }
 
 impl ProjectConfig {
@@ -292,8 +321,28 @@ impl ProjectConfig {
         for decl in &prog.decls {
             if let Decl::Fn(f) = decl {
                 for stmt in &f.body {
-                    if let Stmt::Assign(Expr::Ident(name, _), val, _) = stmt {
-                        Self::set_field(&mut cfg, name, val);
+                    match stmt {
+                        Stmt::Assign(Expr::Ident(name, _), val, _) => {
+                            Self::set_field(&mut cfg, name, val);
+                        }
+                        // require 'name' 'url' 'version'
+                        Stmt::Expr(Expr::Call(callee, args, _))
+                            if matches!(callee.as_ref(), Expr::Ident(n, _) if n == "require")
+                            && args.len() == 3 =>
+                        {
+                            if let (Expr::Str(name, _), Expr::Str(url, _), Expr::Str(ver, _)) =
+                                (&args[0], &args[1], &args[2])
+                            {
+                                let version = SemVer::parse(ver)
+                                    .map_err(|e| format!("project.jade require: {e}"))?;
+                                cfg.requires.push(Dependency {
+                                    name: name.clone(),
+                                    url: url.clone(),
+                                    version,
+                                });
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -347,35 +396,49 @@ fn cmd_init(name: Option<String>) {
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "myproject".into())
     });
-    let pkg_path = PathBuf::from("jade.pkg");
-    if pkg_path.exists() {
-        die("jade.pkg already exists");
+    let project_path = PathBuf::from("project.jade");
+    if project_path.exists() {
+        die("project.jade already exists");
     }
-    let pkg = Package {
-        name: pkg_name.clone(),
-        version: jadec::pkg::SemVer {
-            major: 0,
-            minor: 1,
-            patch: 0,
-        },
-        author: None,
-        requires: Vec::new(),
-    };
-    fs::write(&pkg_path, pkg.to_string_repr())
-        .unwrap_or_else(|e| die(&format!("cannot write jade.pkg: {e}")));
-    println!("created jade.pkg for {pkg_name}");
+    let project_content = format!(
+        "name is '{}'\nversion is '0.1.0'\nentry is 'source/main.jade'\n",
+        pkg_name
+    );
+    fs::write(&project_path, &project_content)
+        .unwrap_or_else(|e| die(&format!("cannot write project.jade: {e}")));
+
+    // Create source directory and main.jade
+    let source_dir = PathBuf::from("source");
+    if !source_dir.exists() {
+        fs::create_dir_all(&source_dir)
+            .unwrap_or_else(|e| die(&format!("cannot create source/: {e}")));
+    }
+    let main_path = source_dir.join("main.jade");
+    if !main_path.exists() {
+        fs::write(&main_path, "*main\n    log('hello world')\n")
+            .unwrap_or_else(|e| die(&format!("cannot write source/main.jade: {e}")));
+    }
+    println!("initialized project '{pkg_name}'");
 }
 
 fn cmd_fetch() {
-    let pkg_path = PathBuf::from("jade.pkg");
-    if !pkg_path.exists() {
-        die("no jade.pkg found in current directory");
+    let project_path = PathBuf::from("project.jade");
+    if !project_path.exists() {
+        die("no project.jade found in current directory (run `jadec init` to create one)");
     }
-    let pkg = Package::from_file(&pkg_path).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
-    if pkg.requires.is_empty() {
+    let cfg = ProjectConfig::from_file(&project_path)
+        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+    if cfg.requires.is_empty() {
         println!("no dependencies to fetch");
         return;
     }
+    let pkg = Package {
+        name: cfg.name.unwrap_or_default(),
+        version: cfg.version.and_then(|v| SemVer::parse(&v).ok())
+            .unwrap_or(SemVer { major: 0, minor: 0, patch: 0 }),
+        author: None,
+        requires: cfg.requires,
+    };
     let cache = Cache::new();
     let lock_path = PathBuf::from("jade.lock");
     let existing_lock = if lock_path.exists() {
@@ -392,15 +455,23 @@ fn cmd_fetch() {
 }
 
 fn cmd_update() {
-    let pkg_path = PathBuf::from("jade.pkg");
-    if !pkg_path.exists() {
-        die("no jade.pkg found in current directory");
+    let project_path = PathBuf::from("project.jade");
+    if !project_path.exists() {
+        die("no project.jade found in current directory (run `jadec init` to create one)");
     }
-    let pkg = Package::from_file(&pkg_path).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
-    if pkg.requires.is_empty() {
+    let cfg = ProjectConfig::from_file(&project_path)
+        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+    if cfg.requires.is_empty() {
         println!("no dependencies to update");
         return;
     }
+    let pkg = Package {
+        name: cfg.name.unwrap_or_default(),
+        version: cfg.version.and_then(|v| SemVer::parse(&v).ok())
+            .unwrap_or(SemVer { major: 0, minor: 0, patch: 0 }),
+        author: None,
+        requires: cfg.requires,
+    };
     let lock_path = PathBuf::from("jade.lock");
     let _ = fs::remove_file(&lock_path);
     let cache = Cache::new();
@@ -426,38 +497,611 @@ fn find_project_entry() -> PathBuf {
             die(&format!("entry file not found: {entry}"));
         }
     }
-    let default = cwd.join("src").join("main.jade");
-    if default.exists() {
-        return default;
+    // Try source/main.jade (new convention), then src/main.jade (legacy)
+    let source_main = cwd.join("source").join("main.jade");
+    if source_main.exists() {
+        return source_main;
     }
-    die("no entry file found: create project.jade with `entry is 'src/main.jade'` or add src/main.jade");
+    let src_main = cwd.join("src").join("main.jade");
+    if src_main.exists() {
+        return src_main;
+    }
+    die("no entry file found: create project.jade with `entry is 'source/main.jade'` or add source/main.jade");
+}
+
+/// Find all .jade files in source_dir (recursively), excluding the entry file,
+/// parse them, and merge their declarations into the program.
+/// Returns the set of module keys (e.g. "math_utils", "utils.strings") for merged files.
+fn merge_source_files(prog: &mut Program, source_dir: &std::path::Path, entry_canon: &std::path::Path) -> HashSet<String> {
+    fn collect_jade_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_jade_files(&path, files);
+                } else if path.extension().map_or(false, |e| e == "jade") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+
+    let mut source_files = Vec::new();
+    collect_jade_files(source_dir, &mut source_files);
+    let mut merged_keys = HashSet::new();
+
+    for file in source_files {
+        let file_canon = file.canonicalize().unwrap_or_else(|_| file.clone());
+        if file_canon == entry_canon {
+            continue;
+        }
+        // Compute module key from relative path (e.g. source/utils/strings.jade → "utils.strings")
+        if let Ok(rel) = file.strip_prefix(source_dir) {
+            let key = rel.with_extension("")
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join(".");
+            merged_keys.insert(key);
+        }
+        let src = match fs::read_to_string(&file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("warning: cannot read {}: {e}", file.display());
+                continue;
+            }
+        };
+        let tokens = match Lexer::new(&src).tokenize() {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("warning: {}: {e}", file.display());
+                continue;
+            }
+        };
+        let mod_prog = match Parser::new(tokens).parse_program() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("warning: {}: {e}", file.display());
+                continue;
+            }
+        };
+        for d in mod_prog.decls {
+            if matches!(d, Decl::Use(_)) {
+                continue; // Use decls in source files will be resolved via the entry
+            }
+            // Skip *main from non-entry files — only include type/fn/const/enum decls
+            if let Decl::Fn(ref f) = d {
+                if f.name == "main" {
+                    // Extract any top-level constants from the implicit *main wrapper
+                    for stmt in &f.body {
+                        if let Stmt::Bind(b) = stmt {
+                            prog.decls.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
+                        }
+                    }
+                    continue;
+                }
+            }
+            prog.decls.push(d);
+        }
+    }
+    merged_keys
+}
+
+/// Entity index: maps symbol names (functions, types, enums, consts) to the
+/// file that defines them. Used for implicit (auto) module resolution.
+struct EntityIndex {
+    /// symbol_name → file_path
+    symbols: HashMap<String, PathBuf>,
+}
+
+impl EntityIndex {
+    fn new() -> Self {
+        Self { symbols: HashMap::new() }
+    }
+
+    /// Scan a directory recursively for .jade files and index their exported symbols.
+    fn scan_dir(&mut self, dir: &std::path::Path) {
+        fn collect(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        collect(&path, files);
+                    } else if path.extension().map_or(false, |e| e == "jade") {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+        let mut files = Vec::new();
+        collect(dir, &mut files);
+        for file in files {
+            self.scan_file(&file);
+        }
+    }
+
+    /// Index a single .jade file by extracting top-level declaration names.
+    fn scan_file(&mut self, path: &std::path::Path) {
+        let src = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let tokens = match Lexer::new(&src).tokenize() {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        let prog = match Parser::new(tokens).parse_program() {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        for d in &prog.decls {
+            if let Some(name) = decl_name(d) {
+                if name != "main" {
+                    self.symbols.entry(name.to_string()).or_insert_with(|| path.to_path_buf());
+                }
+            }
+            // Also index enum variant names
+            if let Decl::Enum(ed) = d {
+                for v in &ed.variants {
+                    self.symbols.entry(v.name.clone()).or_insert_with(|| path.to_path_buf());
+                }
+            }
+            // Also index method names (TypeName_method)
+            if let Decl::Fn(f) = d {
+                // Unwrap implicit main to find module-level constants
+                if f.name == "main" && f.params.is_empty() {
+                    for stmt in &f.body {
+                        if let Stmt::Bind(b) = stmt {
+                            self.symbols.entry(b.name.clone()).or_insert_with(|| path.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Build the full entity index from std lib, source dir, and package paths.
+    fn build(base_dir: &std::path::Path, packages: &HashMap<String, PathBuf>) -> Self {
+        let mut idx = Self::new();
+
+        // 1. Standard library
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                let std_dir = exe_dir.join("std");
+                if std_dir.is_dir() {
+                    idx.scan_dir(&std_dir);
+                }
+                // Check parent dirs (handles target/release/ layout during development)
+                if let Some(parent) = exe_dir.parent() {
+                    let std_dir = parent.join("std");
+                    if std_dir.is_dir() {
+                        idx.scan_dir(&std_dir);
+                    }
+                    if let Some(grandparent) = parent.parent() {
+                        let std_dir = grandparent.join("std");
+                        if std_dir.is_dir() {
+                            idx.scan_dir(&std_dir);
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+            let std_dir = PathBuf::from(manifest).join("std");
+            if std_dir.is_dir() {
+                idx.scan_dir(&std_dir);
+            }
+        }
+        let std_dir = base_dir.join("std");
+        if std_dir.is_dir() {
+            idx.scan_dir(&std_dir);
+        }
+
+        // 2. Project source directory
+        let source_dir = base_dir.join("source");
+        if source_dir.is_dir() {
+            idx.scan_dir(&source_dir);
+        }
+
+        // 3. Package directories
+        for (_, pkg_path) in packages {
+            let source = pkg_path.join("source");
+            if source.is_dir() {
+                idx.scan_dir(&source);
+            }
+            let src = pkg_path.join("src");
+            if src.is_dir() {
+                idx.scan_dir(&src);
+            }
+        }
+
+        // 4. JADE_PACKAGE_PATH directories
+        if let Ok(pkg_paths) = std::env::var("JADE_PACKAGE_PATH") {
+            for pkg_dir in pkg_paths.split(':') {
+                let pkg_dir = PathBuf::from(pkg_dir);
+                if pkg_dir.is_dir() {
+                    idx.scan_dir(&pkg_dir);
+                }
+            }
+        }
+
+        idx
+    }
+}
+
+/// Collect all identifiers referenced in the program (function calls, type refs,
+/// variable refs, struct constructors, etc.) that are not defined by the program itself.
+fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
+    let mut defined = HashSet::new();
+    let mut referenced = HashSet::new();
+
+    // Collect defined names
+    for d in &prog.decls {
+        match d {
+            Decl::Fn(f) => { defined.insert(f.name.clone()); }
+            Decl::Type(t) => { defined.insert(t.name.clone()); }
+            Decl::Enum(e) => {
+                defined.insert(e.name.clone());
+                for v in &e.variants { defined.insert(v.name.clone()); }
+            }
+            Decl::Extern(e) => { defined.insert(e.name.clone()); }
+            Decl::ErrDef(e) => { defined.insert(e.name.clone()); }
+            Decl::Actor(a) => { defined.insert(a.name.clone()); }
+            Decl::Store(s) => { defined.insert(s.name.clone()); }
+            Decl::Trait(t) => { defined.insert(t.name.clone()); }
+            Decl::Const(name, _, _) => { defined.insert(name.clone()); }
+            Decl::Impl(_) | Decl::Use(_) | Decl::Test(_) => {}
+            Decl::Supervisor(s) => { defined.insert(s.name.clone()); }
+            Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => { defined.insert(name.clone()); }
+            Decl::TopStmt(_) => {}
+        }
+    }
+
+    // Walk all expressions to find referenced identifiers
+    fn walk_expr(e: &jadec::ast::Expr, refs: &mut HashSet<String>) {
+        use jadec::ast::Expr;
+        match e {
+            Expr::Ident(name, _) => { refs.insert(name.clone()); }
+            Expr::Call(callee, args, _) => {
+                walk_expr(callee, refs);
+                for a in args { walk_expr(a, refs); }
+            }
+            Expr::Method(obj, _method, args, _) => {
+                walk_expr(obj, refs);
+                for a in args { walk_expr(a, refs); }
+            }
+            Expr::BinOp(l, _, r, _) => { walk_expr(l, refs); walk_expr(r, refs); }
+            Expr::UnaryOp(_, e, _) => walk_expr(e, refs),
+            Expr::IfExpr(if_expr) => {
+                walk_expr(&if_expr.cond, refs);
+                walk_block(&if_expr.then, refs);
+                for (c, b) in &if_expr.elifs {
+                    walk_expr(c, refs);
+                    walk_block(b, refs);
+                }
+                if let Some(eb) = &if_expr.els { walk_block(eb, refs); }
+            }
+            Expr::Array(elems, _) | Expr::Tuple(elems, _) | Expr::NDArray(elems, _)
+            | Expr::Deque(elems, _) => {
+                for e in elems { walk_expr(e, refs); }
+            }
+            Expr::Struct(name, inits, _) => {
+                refs.insert(name.clone());
+                for fi in inits { walk_expr(&fi.value, refs); }
+            }
+            Expr::Index(a, i, _) => { walk_expr(a, refs); walk_expr(i, refs); }
+            Expr::Field(obj, _, _) => walk_expr(obj, refs),
+            Expr::Lambda(_, _, body, _) => walk_block(body, refs),
+            Expr::Pipe(l, r, extra, _) => {
+                walk_expr(l, refs);
+                walk_expr(r, refs);
+                for a in extra { walk_expr(a, refs); }
+            }
+            Expr::As(e, _, _) | Expr::StrictCast(e, _, _) | Expr::AsFormat(e, _, _) => walk_expr(e, refs),
+            Expr::Block(stmts, _) => walk_block(stmts, refs),
+            Expr::Ref(e, _) | Expr::Deref(e, _) | Expr::Yield(e, _) | Expr::Grad(e, _) => walk_expr(e, refs),
+            Expr::Spawn(name, _) => { refs.insert(name.clone()); }
+            Expr::Ternary(c, t, f, _) => { walk_expr(c, refs); walk_expr(t, refs); walk_expr(f, refs); }
+            Expr::ListComp(body, _var, iter, filter, map, _) => {
+                walk_expr(body, refs);
+                walk_expr(iter, refs);
+                if let Some(f) = filter { walk_expr(f, refs); }
+                if let Some(m) = map { walk_expr(m, refs); }
+            }
+            Expr::Slice(a, lo, hi, _) => { walk_expr(a, refs); walk_expr(lo, refs); walk_expr(hi, refs); }
+            Expr::ChannelCreate(_, sz, _) => walk_expr(sz, refs),
+            Expr::ChannelSend(ch, val, _) => { walk_expr(ch, refs); walk_expr(val, refs); }
+            Expr::ChannelRecv(ch, _) => walk_expr(ch, refs),
+            Expr::Send(obj, _, args, _) => { walk_expr(obj, refs); for a in args { walk_expr(a, refs); } }
+            Expr::NamedArg(_, e, _) | Expr::Spread(e, _) => walk_expr(e, refs),
+            Expr::OfCall(a, b, _) => { walk_expr(a, refs); walk_expr(b, refs); }
+            Expr::Builder(name, fields, _) => {
+                refs.insert(name.clone());
+                for f in fields { walk_expr(&f.value, refs); }
+            }
+            Expr::Einsum(_, args, _) | Expr::Syscall(args, _) => {
+                for a in args { walk_expr(a, refs); }
+            }
+            Expr::SIMDLit(_, _, elems, _) => { for e in elems { walk_expr(e, refs); } }
+            Expr::Select(arms, default, _) => {
+                for arm in arms {
+                    walk_expr(&arm.chan, refs);
+                    if let Some(v) = &arm.value { walk_expr(v, refs); }
+                    walk_block(&arm.body, refs);
+                }
+                if let Some(d) = default { walk_block(d, refs); }
+            }
+            Expr::Receive(arms, _) => {
+                for arm in arms { walk_block(&arm.body, refs); }
+            }
+            Expr::DispatchBlock(_, body, _) => walk_block(body, refs),
+            Expr::Query(base, clauses, _) => {
+                walk_expr(base, refs);
+                for c in clauses {
+                    match c {
+                        jadec::ast::QueryClause::Where(e, _)
+                        | jadec::ast::QueryClause::Limit(e, _)
+                        | jadec::ast::QueryClause::Take(e, _)
+                        | jadec::ast::QueryClause::Skip(e, _) => walk_expr(e, refs),
+                        jadec::ast::QueryClause::Set(_, e, _) => walk_expr(e, refs),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {} // Int, Float, Str, Bool, None, Void, Embed, Placeholder, etc.
+        }
+    }
+
+    fn walk_pat(p: &jadec::ast::Pat, refs: &mut HashSet<String>) {
+        use jadec::ast::Pat;
+        match p {
+            Pat::Ctor(name, pats, _) => {
+                refs.insert(name.clone());
+                for p in pats { walk_pat(p, refs); }
+            }
+            Pat::Or(pats, _) | Pat::Tuple(pats, _) | Pat::Array(pats, _) => {
+                for p in pats { walk_pat(p, refs); }
+            }
+            Pat::Lit(e) => walk_expr(e, refs),
+            _ => {} // Wild, Ident, Range
+        }
+    }
+
+    fn walk_block(stmts: &[jadec::ast::Stmt], refs: &mut HashSet<String>) {
+        for s in stmts { walk_stmt(s, refs); }
+    }
+
+    fn walk_stmt(s: &jadec::ast::Stmt, refs: &mut HashSet<String>) {
+        use jadec::ast::Stmt;
+        match s {
+            Stmt::Expr(e) => walk_expr(e, refs),
+            Stmt::Bind(b) => {
+                walk_expr(&b.value, refs);
+                if let Some(ty) = &b.ty { walk_type(ty, refs); }
+            }
+            Stmt::Assign(l, r, _) => { walk_expr(l, refs); walk_expr(r, refs); }
+            Stmt::Ret(Some(e), _) | Stmt::ErrReturn(e, _) | Stmt::Break(Some(e), _) => walk_expr(e, refs),
+            Stmt::Ret(None, _) | Stmt::Break(None, _) | Stmt::Continue(_) => {}
+            Stmt::If(if_s) => {
+                walk_expr(&if_s.cond, refs);
+                walk_block(&if_s.then, refs);
+                for (c, b) in &if_s.elifs { walk_expr(c, refs); walk_block(b, refs); }
+                if let Some(eb) = &if_s.els { walk_block(eb, refs); }
+            }
+            Stmt::While(w) => { walk_expr(&w.cond, refs); walk_block(&w.body, refs); }
+            Stmt::For(f) => {
+                walk_expr(&f.iter, refs);
+                if let Some(end) = &f.end { walk_expr(end, refs); }
+                if let Some(step) = &f.step { walk_expr(step, refs); }
+                walk_block(&f.body, refs);
+            }
+            Stmt::Loop(l) => walk_block(&l.body, refs),
+            Stmt::Match(m) => {
+                walk_expr(&m.subject, refs);
+                for arm in &m.arms {
+                    walk_pat(&arm.pat, refs);
+                    if let Some(g) = &arm.guard { walk_expr(g, refs); }
+                    walk_block(&arm.body, refs);
+                }
+            }
+            Stmt::TupleBind(_, e, _) => walk_expr(e, refs),
+            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => walk_expr(e, refs),
+            Stmt::StoreInsert(_, exprs, _) => { for e in exprs { walk_expr(e, refs); } }
+            Stmt::Transaction(body, _) | Stmt::SimBlock(body, _) => walk_block(body, refs),
+            Stmt::SimFor(f, _) => {
+                walk_expr(&f.iter, refs);
+                walk_block(&f.body, refs);
+            }
+            _ => {} // Asm, StoreDelete, StoreSet, UseLocal
+        }
+    }
+
+    fn walk_type(ty: &jadec::types::Type, refs: &mut HashSet<String>) {
+        use jadec::types::Type;
+        match ty {
+            Type::Struct(name, args) => {
+                refs.insert(name.clone());
+                for a in args { walk_type(a, refs); }
+            }
+            Type::Enum(name) => { refs.insert(name.clone()); }
+            Type::Vec(inner) | Type::Ptr(inner) | Type::Rc(inner) | Type::Weak(inner)
+            | Type::Channel(inner) | Type::Set(inner) | Type::PriorityQueue(inner)
+            | Type::Coroutine(inner) | Type::Deque(inner) | Type::Cow(inner) | Type::Generator(inner) => {
+                walk_type(inner, refs);
+            }
+            Type::Map(k, v) => { walk_type(k, refs); walk_type(v, refs); }
+            Type::Array(inner, _) => walk_type(inner, refs),
+            Type::Tuple(elems) => { for e in elems { walk_type(e, refs); } }
+            Type::Fn(params, ret) => {
+                for p in params { walk_type(p, refs); }
+                walk_type(ret, refs);
+            }
+            Type::NDArray(inner, _) | Type::SIMD(inner, _) => walk_type(inner, refs),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => walk_type(inner, refs),
+            Type::ActorRef(name) => { refs.insert(name.clone()); }
+            Type::DynTrait(name) => { refs.insert(name.clone()); }
+            _ => {} // primitives, TypeVar, etc.
+        }
+    }
+
+    // Walk all function bodies in the program
+    for d in &prog.decls {
+        match d {
+            Decl::Fn(f) => {
+                for s in &f.body { walk_stmt(s, &mut referenced); }
+                // Check return type
+                if let Some(ret) = &f.ret { walk_type(ret, &mut referenced); }
+                // Check param types
+                for p in &f.params {
+                    if let Some(ty) = &p.ty { walk_type(ty, &mut referenced); }
+                }
+            }
+            Decl::Type(td) => {
+                for field in &td.fields {
+                    if let Some(ty) = &field.ty { walk_type(ty, &mut referenced); }
+                }
+                for m in &td.methods {
+                    for s in &m.body { walk_stmt(s, &mut referenced); }
+                }
+            }
+            Decl::Impl(ib) => {
+                for m in &ib.methods {
+                    for s in &m.body { walk_stmt(s, &mut referenced); }
+                }
+            }
+            Decl::Actor(ad) => {
+                for h in &ad.handlers {
+                    for s in &h.body { walk_stmt(s, &mut referenced); }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Built-in names that should never trigger auto-import
+    let builtins: HashSet<&str> = [
+        "log", "print", "println", "assert", "len", "push", "pop", "append",
+        "range", "input", "exit", "panic", "type_of", "size_of",
+        "true", "false", "None", "Some", "Nothing", "Ok", "Err",
+        "Vec", "Map", "Set", "String", "Array", "Channel", "Deque",
+        "int", "float", "str", "bool", "void", "i8", "i16", "i32", "i64",
+        "u8", "u16", "u32", "u64", "f32", "f64",
+        "self", "main",
+    ].iter().copied().collect();
+
+    referenced
+        .difference(&defined)
+        .filter(|name| !builtins.contains(name.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Auto-import modules based on undefined references found in the program.
+/// Uses the entity index to find which files provide the needed symbols.
+fn resolve_implicit_imports(
+    prog: &mut Program,
+    base_dir: &std::path::Path,
+    loaded: &mut HashSet<String>,
+    packages: &HashMap<String, PathBuf>,
+    entity_index: &EntityIndex,
+) {
+    let undefined = collect_undefined_refs(prog);
+    if undefined.is_empty() {
+        return;
+    }
+
+    // Find which files need to be imported
+    let mut files_to_import: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    for name in &undefined {
+        if let Some(file_path) = entity_index.symbols.get(name) {
+            files_to_import
+                .entry(file_path.clone())
+                .or_default()
+                .push(name.clone());
+        }
+    }
+
+    for (file_path, _symbols) in &files_to_import {
+        // Check if already loaded via a module key
+        let file_canon = file_path.canonicalize().unwrap_or_else(|_| file_path.clone());
+        let key = file_canon.to_string_lossy().to_string();
+        if loaded.contains(&key) {
+            continue;
+        }
+        loaded.insert(key);
+
+        let src = match fs::read_to_string(file_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let tokens = match Lexer::new(&src).tokenize() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let mut mod_prog = match Parser::new(tokens).parse_program() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Recursively resolve this module's explicit imports
+        resolve_modules(
+            &mut mod_prog,
+            file_path.parent().unwrap_or(base_dir),
+            loaded,
+            packages,
+        );
+
+        for d in mod_prog.decls {
+            if matches!(d, Decl::Use(_)) { continue; }
+            if let Decl::Fn(ref f) = d {
+                if f.name == "main" && f.params.is_empty() {
+                    // Unwrap implicit main constants
+                    for stmt in &f.body {
+                        if let Stmt::Bind(b) = stmt {
+                            prog.decls.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
+                        }
+                    }
+                    continue;
+                }
+            }
+            prog.decls.push(d);
+        }
+    }
 }
 
 fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
-    let pkg_file = base_dir.join("jade.pkg");
-    if pkg_file.exists() {
-        let pkg = Package::from_file(&pkg_file).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
-        let lock_file = base_dir.join("jade.lock");
-        let existing_lock = if lock_file.exists() {
-            Some(Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
-        } else {
-            None
-        };
-        if pkg.requires.is_empty() {
-            HashMap::new()
-        } else {
-            let cache = Cache::new();
-            let resolved = cache
-                .resolve(&pkg, existing_lock.as_ref())
-                .unwrap_or_else(|e| die(&format!("resolve: {e}")));
-            let lock_content = resolved.write();
-            fs::write(&lock_file, &lock_content)
-                .unwrap_or_else(|e| die(&format!("write lock: {e}")));
-            build_package_map(&cache, &resolved)
+    let project_jade = base_dir.join("project.jade");
+    let requires = if project_jade.exists() {
+        match ProjectConfig::from_file(&project_jade) {
+            Ok(cfg) => cfg.requires,
+            Err(_) => Vec::new(),
         }
     } else {
-        HashMap::new()
+        Vec::new()
+    };
+    if requires.is_empty() {
+        return HashMap::new();
     }
+    let pkg = Package {
+        name: String::new(),
+        version: SemVer { major: 0, minor: 0, patch: 0 },
+        author: None,
+        requires,
+    };
+    let lock_file = base_dir.join("jade.lock");
+    let existing_lock = if lock_file.exists() {
+        Some(Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
+    } else {
+        None
+    };
+    let cache = Cache::new();
+    let resolved = cache
+        .resolve(&pkg, existing_lock.as_ref())
+        .unwrap_or_else(|e| die(&format!("resolve: {e}")));
+    let lock_content = resolved.write();
+    fs::write(&lock_file, &lock_content)
+        .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+    build_package_map(&cache, &resolved)
 }
 
 fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool) {
@@ -469,10 +1113,17 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     let mut prog = Parser::new(tokens)
         .parse_program()
         .unwrap_or_else(|e| die(&format!("{e}")));
+
+    // Multi-file project: merge all .jade files from the source directory
     let base_dir = input.parent().unwrap_or(std::path::Path::new("."));
-    let mut loaded = HashSet::new();
+    let input_canon = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
+    let merged = merge_source_files(&mut prog, base_dir, &input_canon);
+
+    let mut loaded: HashSet<String> = merged;
     let packages = load_packages(base_dir);
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
+    let entity_index = EntityIndex::build(base_dir, &packages);
+    resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
@@ -615,9 +1266,13 @@ fn main() {
                     .parse_program()
                     .unwrap_or_else(|e| die(&format!("{e}")));
                 let base_dir = entry.parent().unwrap_or(std::path::Path::new("."));
-                let mut loaded = HashSet::new();
+                let input_canon = entry.canonicalize().unwrap_or_else(|_| entry.clone());
+                let merged = merge_source_files(&mut prog, base_dir, &input_canon);
+                let mut loaded: HashSet<String> = merged;
                 let packages = load_packages(base_dir);
                 resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
+                let entity_index = EntityIndex::build(base_dir, &packages);
+                resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
                 match typer.lower_program(&prog) {
@@ -714,34 +1369,11 @@ fn main() {
         None
     };
 
-    let pkg_file = base_dir.join("jade.pkg");
-    let packages = if pkg_file.exists() {
-        let pkg = Package::from_file(&pkg_file).unwrap_or_else(|e| die(&format!("jade.pkg: {e}")));
-        let lock_file = base_dir.join("jade.lock");
-        let existing_lock = if lock_file.exists() {
-            Some(
-                Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))),
-            )
-        } else {
-            None
-        };
-        if pkg.requires.is_empty() {
-            HashMap::new()
-        } else {
-            let cache = Cache::new();
-            let resolved = cache
-                .resolve(&pkg, existing_lock.as_ref())
-                .unwrap_or_else(|e| die(&format!("resolve: {e}")));
-            let lock_content = resolved.write();
-            fs::write(&lock_file, &lock_content)
-                .unwrap_or_else(|e| die(&format!("write lock: {e}")));
-            build_package_map(&cache, &resolved)
-        }
-    } else {
-        HashMap::new()
-    };
+    let packages = load_packages(base_dir);
 
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
+    let entity_index = EntityIndex::build(base_dir, &packages);
+    resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());

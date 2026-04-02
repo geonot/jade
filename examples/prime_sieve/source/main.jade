@@ -1,0 +1,166 @@
+# Prime Number Analysis
+# Uses trial division and parallel computation to study primes
+# Demonstrates: sim for, sim block, actors, functions, math
+#
+# Since sim for doesn't capture outer variables, we use
+# functions with inlined parameters for parallel work
+
+extern *jade_time_now_ns() returns i64
+
+# Trial division primality test
+*is_prime(n as i64) returns i64
+    if n < 2
+        return 0
+    if n < 4
+        return 1
+    if n % 2 eq 0
+        return 0
+    d is 3
+    while d * d < n + 1
+        if n % d eq 0
+            return 0
+        d is d + 2
+    1
+
+# Count primes in range [lo, hi)
+*count_primes_range(lo as i64, hi as i64) returns i64
+    count is 0
+    n is lo
+    # Make sure we start on an odd number (skip evens)
+    if n eq 2
+        count is 1
+        n is 3
+    if n % 2 eq 0
+        n is n + 1
+    while n < hi
+        if is_prime(n) eq 1
+            count is count + 1
+        n is n + 2
+    count
+
+# Sum primes in range [lo, hi)
+*sum_primes_range(lo as i64, hi as i64) returns i64
+    total is 0
+    n is lo
+    if n eq 2
+        total is 2
+        n is 3
+    if n % 2 eq 0
+        n is n + 1
+    while n < hi
+        if is_prime(n) eq 1
+            total is total + n
+        n is n + 2
+    total
+
+# Find largest prime below n
+*largest_prime_below(n as i64) returns i64
+    k is n - 1
+    if k % 2 eq 0
+        k is k - 1
+    while k > 1
+        if is_prime(k) eq 1
+            return k
+        k is k - 2
+    2
+
+# Count twin primes in [lo, hi) — pairs where both p and p+2 are prime
+*count_twin_primes_range(lo as i64, hi as i64) returns i64
+    count is 0
+    n is lo
+    if n < 3
+        n is 3
+    if n % 2 eq 0
+        n is n + 1
+    while n < hi
+        if is_prime(n) eq 1
+            if is_prime(n + 2) eq 1
+                count is count + 1
+        n is n + 2
+    count
+
+# Parallel worker: count primes in a chunk defined by index
+# Divides range [0, 1000000) into 8 chunks
+*count_primes_chunk(chunk_id as i64) returns i64
+    chunk_size is 125000
+    lo is chunk_id * chunk_size
+    hi is lo + chunk_size
+    if chunk_id eq 0
+        lo is 2
+    result is count_primes_range(lo, hi)
+    log(result)
+    result
+
+# Wrapper functions for sim block (must do logging inside)
+*analyze_count(lo as i64, hi as i64) returns i64
+    result is count_primes_range(lo, hi)
+    log("Prime count:")
+    log(result)
+    result
+
+*analyze_sum(lo as i64, hi as i64) returns i64
+    result is sum_primes_range(lo, hi)
+    log("Prime sum:")
+    log(result)
+    result
+
+*analyze_largest(n as i64) returns i64
+    result is largest_prime_below(n)
+    log("Largest prime:")
+    log(result)
+    result
+
+*analyze_twins(lo as i64, hi as i64) returns i64
+    result is count_twin_primes_range(lo, hi)
+    log("Twin primes:")
+    log(result)
+    result
+
+*main
+    limit is 1000000
+    log("=== Prime Number Analysis ===")
+    log("Range: 2 to 1000000")
+
+    # --- Sequential: all analyses one by one ---
+    t0 is jade_time_now_ns()
+    primes is count_primes_range(2, limit)
+    prime_sum is sum_primes_range(2, limit)
+    largest is largest_prime_below(limit)
+    twins is count_twin_primes_range(2, limit)
+    t1 is jade_time_now_ns()
+    seq_ms is (t1 - t0) / 1000000
+
+    log("Sequential results:")
+    log("Primes found:")
+    log(primes)
+    log("Sum of primes:")
+    log(prime_sum)
+    log("Largest prime < 1000000:")
+    log(largest)
+    log("Twin prime pairs:")
+    log(twins)
+    log("Sequential ms:")
+    log(seq_ms)
+
+    # --- Parallel: run 4 different analyses concurrently ---
+    log("=== Parallel Analysis (sim block) ===")
+    t2 is jade_time_now_ns()
+    sim
+        analyze_count(2, 1000000)
+        analyze_sum(2, 1000000)
+        analyze_largest(1000000)
+        analyze_twins(2, 1000000)
+    t3 is jade_time_now_ns()
+    par_ms is (t3 - t2) / 1000000
+    log("Parallel ms:")
+    log(par_ms)
+
+    # --- Parallel chunked: divide range into 8 for counting ---
+    log("=== Parallel Chunked (sim for 8) ===")
+    t4 is jade_time_now_ns()
+    sim for i in 8
+        count_primes_chunk(i)
+    t5 is jade_time_now_ns()
+    chunk_ms is (t5 - t4) / 1000000
+    log("Chunked parallel ms:")
+    log(chunk_ms)

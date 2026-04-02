@@ -233,6 +233,7 @@ pub enum Stmt {
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     SimFor(For, Span),
+    SimBlock(Block, Span),
     UseLocal(Vec<String>, Option<Vec<String>>, Option<String>, Span),
 }
 
@@ -285,6 +286,11 @@ pub enum ExprKind {
     Builtin(BuiltinFn, Vec<Expr>),
     Method(Box<Expr>, String, String, Vec<Expr>),
     StringMethod(Box<Expr>, String, Vec<Expr>),
+    /// Placeholder for method calls whose receiver type was unknown at
+    /// lowering time.  `reclassify_method_call` resolves these to the
+    /// correct variant once type inference has run.  If one survives to
+    /// codegen it is a bug.
+    DeferredMethod(Box<Expr>, String, Vec<Expr>),
     VecMethod(Box<Expr>, String, Vec<Expr>),
     MapMethod(Box<Expr>, String, Vec<Expr>),
     VecNew(Vec<Expr>),
@@ -433,6 +439,7 @@ pub enum BuiltinFn {
     PoolAlloc,
     PoolFree,
     PoolDestroy,
+    FloatMethod(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -881,6 +888,12 @@ impl PrettyPrinter {
                 self.block(&f.body);
                 self.pop();
             }
+            Stmt::SimBlock(b, _) => {
+                self.line("sim:");
+                self.push();
+                self.block(b);
+                self.pop();
+            }
             Stmt::UseLocal(path, imports, alias, _) => {
                 let p = path.join(".");
                 let i = imports.as_ref().map(|is| format!(" import {}", is.join(", "))).unwrap_or_default();
@@ -972,6 +985,10 @@ impl PrettyPrinter {
             ExprKind::StringMethod(recv, meth, args) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
                 format!("{}.str::{meth}({})", self.expr_str(recv), a.join(", "))
+            }
+            ExprKind::DeferredMethod(recv, meth, args) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
+                format!("{}.?::{meth}({})", self.expr_str(recv), a.join(", "))
             }
             ExprKind::VecMethod(recv, meth, args) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();

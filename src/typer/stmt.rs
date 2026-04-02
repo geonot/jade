@@ -405,6 +405,10 @@ impl Typer {
                     *span,
                 ))
             }
+            ast::Stmt::SimBlock(body, span) => {
+                let hbody = self.lower_block_no_scope(body, ret_ty)?;
+                Ok(hir::Stmt::SimBlock(hbody, *span))
+            }
             ast::Stmt::UseLocal(u) => {
                 Ok(hir::Stmt::UseLocal(
                     u.path.clone(),

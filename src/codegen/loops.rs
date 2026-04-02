@@ -1,3 +1,4 @@
+use inkwell::module::Linkage;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
@@ -53,6 +54,9 @@ impl<'ctx> Compiler<'ctx> {
             }
             if let Type::Vec(elem_ty) = iter_ty {
                 return self.compile_for_vec(f, elem_ty);
+            }
+            if matches!(iter_ty, Type::Coroutine(_)) {
+                return self.compile_for_coroutine(f);
             }
             if matches!(iter_ty, Type::String)
                 || matches!(f.bind_ty, Type::I64) && matches!(iter_ty, Type::String)
@@ -228,6 +232,72 @@ impl<'ctx> Compiler<'ctx> {
             .build_int_nuw_add(idx, i64t.const_int(1, false), "inc"));
         b!(self.bld.build_store(idx_alloca, next));
         b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(end_bb);
+        Ok(None)
+    }
+
+    /// for x in gen — iterate over a generator/dispatch using direct context swap.
+    /// Calls jade_gen_resume to get each value, breaks when done.
+    fn compile_for_coroutine(
+        &mut self,
+        f: &hir::For,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        self.declare_gen_runtime();
+        let fv = self.cur_fn.unwrap();
+        let i8t = self.ctx.i8_type();
+        let i64t = self.ctx.i64_type();
+
+        let gen_ptr = self.compile_expr(&f.iter)?.into_pointer_value();
+
+        let loop_bb = self.ctx.append_basic_block(fv, "forgen.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "forgen.body");
+        let end_bb = self.ctx.append_basic_block(fv, "forgen.end");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+
+        // Resume the generator
+        let gen_resume = self.module.get_function("jade_gen_resume").unwrap();
+        b!(self
+            .bld
+            .build_call(gen_resume, &[gen_ptr.into()], ""));
+
+        // Check if done
+        let done_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_DONE_OFF, "forgen.done")?;
+        let done_val = b!(self.bld.build_load(i8t, done_ptr, "done")).into_int_value();
+        let is_done = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            done_val,
+            i8t.const_int(0, false),
+            "is_done"
+        ));
+        b!(self.bld.build_conditional_branch(is_done, end_bb, body_bb));
+
+        // Read the yielded value and bind it
+        self.bld.position_at_end(body_bb);
+        let value_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_VALUE_OFF, "forgen.val")?;
+        let value = b!(self.bld.build_load(i64t, value_ptr, "yielded"));
+
+        // Clear has_value
+        let hv_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_HAS_VALUE_OFF, "forgen.hv")?;
+        b!(self.bld.build_store(hv_ptr, i8t.const_int(0, false)));
+
+        // Bind the loop variable
+        let a = self.entry_alloca(i64t.into(), &f.bind);
+        b!(self.bld.build_store(a, value));
+        self.set_var(&f.bind, a, f.bind_ty.clone());
+
+        self.loop_stack.push(super::LoopCtx {
+            continue_bb: loop_bb,
+            break_bb: end_bb,
+        });
+        self.compile_block(&f.body)?;
+        self.loop_stack.pop();
+
+        if self.no_term() {
+            b!(self.bld.build_unconditional_branch(loop_bb));
+        }
 
         self.bld.position_at_end(end_bb);
         Ok(None)
@@ -523,8 +593,343 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         f: &hir::For,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        // sim for: currently compiled as a sequential for loop
-        // A full implementation would spawn each iteration as a coroutine
-        self.compile_for(f)
+        // sim for: spawn each iteration as a coroutine, wait for all to finish.
+        //
+        // Layout of per-iteration arg struct passed to each coroutine:
+        //   offset 0: iter_val  (i64)   — the loop variable value
+        //   offset 8: counter   (*i64)  — pointer to shared atomic counter
+        // Total: 16 bytes
+        //
+        // Counter is decremented (atomically) by each coroutine on completion.
+        // Main code spins/yields until counter reaches 0.
+
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let void = self.ctx.void_type();
+        let fv = self.cur_fn.unwrap();
+
+        // Compute range bounds
+        let start_val = if f.end.is_some() {
+            self.compile_expr(&f.iter)?.into_int_value()
+        } else {
+            i64t.const_int(0, false)
+        };
+        let end_val = if let Some(end) = &f.end {
+            self.compile_expr(end)?.into_int_value()
+        } else {
+            self.compile_expr(&f.iter)?.into_int_value()
+        };
+        let step_val = if let Some(step) = &f.step {
+            self.compile_expr(step)?.into_int_value()
+        } else {
+            i64t.const_int(1, false)
+        };
+
+        // Build iteration body function: void __sim_iter_N(void *arg)
+        static SIM_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sim_id = SIM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let iter_fn_name = format!("__sim_iter_{sim_id}");
+        let iter_fn_ty = void.fn_type(&[ptr.into()], false);
+        let iter_fn = self
+            .module
+            .add_function(&iter_fn_name, iter_fn_ty, Some(Linkage::Internal));
+
+        let saved_fn = self.cur_fn;
+        let saved_bb = self.bld.get_insert_block();
+        let saved_vars = std::mem::replace(&mut self.vars, vec![std::collections::HashMap::new()]);
+        let saved_loop_stack = std::mem::replace(&mut self.loop_stack, Vec::new());
+
+        self.cur_fn = Some(iter_fn);
+        let entry = self.ctx.append_basic_block(iter_fn, "entry");
+        self.bld.position_at_end(entry);
+
+        let arg_ptr = iter_fn.get_first_param().unwrap().into_pointer_value();
+
+        // Load iter_val from arg[0]
+        let iter_val_ptr = arg_ptr; // offset 0
+        let iter_val = b!(self.bld.build_load(i64t, iter_val_ptr, "iter_val"));
+
+        // Load counter ptr from arg[8]
+        let counter_ptr_ptr = unsafe {
+            b!(self.bld.build_gep(
+                self.ctx.i8_type(),
+                arg_ptr,
+                &[i64t.const_int(8, false)],
+                "counter_pp"
+            ))
+        };
+        let counter_ptr = b!(self.bld.build_load(ptr, counter_ptr_ptr, "counter_ptr")).into_pointer_value();
+
+        // Set up the loop variable
+        let lvar = self.entry_alloca(i64t.into(), &f.bind);
+        b!(self.bld.build_store(lvar, iter_val));
+        self.set_var(&f.bind, lvar, Type::I64);
+
+        // Compile the loop body
+        self.compile_block(&f.body)?;
+
+        // Atomically decrement counter
+        if self.no_term() {
+            b!(self.bld.build_atomicrmw(
+                inkwell::AtomicRMWBinOp::Sub,
+                counter_ptr,
+                i64t.const_int(1, false),
+                inkwell::AtomicOrdering::AcquireRelease,
+            ));
+            // Free the arg struct
+            let free_fn = self.module.get_function("free").unwrap();
+            b!(self.bld.build_call(free_fn, &[arg_ptr.into()], ""));
+            b!(self.bld.build_return(None));
+        }
+
+        // Restore caller context
+        self.cur_fn = saved_fn;
+        self.vars = saved_vars;
+        self.loop_stack = saved_loop_stack;
+
+        let bb = saved_bb.unwrap_or_else(|| self.ctx.append_basic_block(fv, "sim.after"));
+        self.bld.position_at_end(bb);
+
+        // Allocate atomic counter
+        let counter_alloca = self.entry_alloca(i64t.into(), "sim.counter");
+        b!(self.bld.build_store(counter_alloca, i64t.const_int(0, false)));
+
+        let malloc_fn = self.ensure_malloc();
+        let coro_create = self.module.get_function("jade_coro_create").unwrap();
+        let sched_spawn = self.module.get_function("jade_sched_spawn").unwrap();
+
+        // Spawn loop: for i in start..end step step
+        let spawn_var = self.entry_alloca(i64t.into(), "sim.i");
+        b!(self.bld.build_store(spawn_var, start_val));
+
+        let spawn_cond = self.ctx.append_basic_block(fv, "sim.spawn.cond");
+        let spawn_body = self.ctx.append_basic_block(fv, "sim.spawn.body");
+        let spawn_inc = self.ctx.append_basic_block(fv, "sim.spawn.inc");
+        let spawn_done = self.ctx.append_basic_block(fv, "sim.spawn.done");
+
+        b!(self.bld.build_unconditional_branch(spawn_cond));
+        self.bld.position_at_end(spawn_cond);
+        let cur_i = b!(self.bld.build_load(i64t, spawn_var, "si")).into_int_value();
+        let cmp = b!(self.bld.build_int_compare(IntPredicate::SLT, cur_i, end_val, "sim.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, spawn_body, spawn_done));
+
+        self.bld.position_at_end(spawn_body);
+
+        // Increment counter atomically
+        b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Add,
+            counter_alloca,
+            i64t.const_int(1, false),
+            inkwell::AtomicOrdering::AcquireRelease,
+        ));
+
+        // Allocate arg struct (16 bytes: i64 iter_val, ptr counter)
+        let arg_mem = b!(self.bld.build_call(
+            malloc_fn,
+            &[i64t.const_int(16, false).into()],
+            "sim.arg"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_pointer_value();
+
+        // Store iter_val at offset 0
+        b!(self.bld.build_store(arg_mem, cur_i));
+        // Store counter_ptr at offset 8
+        let counter_field = unsafe {
+            b!(self.bld.build_gep(
+                self.ctx.i8_type(),
+                arg_mem,
+                &[i64t.const_int(8, false)],
+                "sim.arg.cp"
+            ))
+        };
+        b!(self.bld.build_store(counter_field, counter_alloca));
+
+        // Create and spawn coroutine
+        let coro = b!(self.bld.build_call(
+            coro_create,
+            &[
+                iter_fn.as_global_value().as_pointer_value().into(),
+                arg_mem.into(),
+            ],
+            "sim.coro"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .unwrap();
+        b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
+
+        b!(self.bld.build_unconditional_branch(spawn_inc));
+        self.bld.position_at_end(spawn_inc);
+        let cur_i = b!(self.bld.build_load(i64t, spawn_var, "si")).into_int_value();
+        let next_i = b!(self.bld.build_int_nsw_add(cur_i, step_val, "sim.next"));
+        b!(self.bld.build_store(spawn_var, next_i));
+        b!(self.bld.build_unconditional_branch(spawn_cond));
+
+        // Wait for all iterations to complete
+        self.bld.position_at_end(spawn_done);
+        let wait_cond = self.ctx.append_basic_block(fv, "sim.wait");
+        let wait_done = self.ctx.append_basic_block(fv, "sim.done");
+        b!(self.bld.build_unconditional_branch(wait_cond));
+
+        self.bld.position_at_end(wait_cond);
+        let remaining = b!(self.bld.build_load(i64t, counter_alloca, "sim.rem")).into_int_value();
+        let all_done = b!(self.bld.build_int_compare(
+            IntPredicate::EQ,
+            remaining,
+            i64t.const_int(0, false),
+            "sim.alldone"
+        ));
+        let wait_yield = self.ctx.append_basic_block(fv, "sim.wait.yield");
+        b!(self.bld.build_conditional_branch(all_done, wait_done, wait_yield));
+
+        self.bld.position_at_end(wait_yield);
+        let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
+        b!(self.bld.build_call(sched_yield, &[], ""));
+        b!(self.bld.build_unconditional_branch(wait_cond));
+
+        self.bld.position_at_end(wait_done);
+        Ok(None)
+    }
+
+    pub(crate) fn compile_sim_block(
+        &mut self,
+        stmts: &[hir::Stmt],
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        // sim block: spawn each statement as a coroutine, wait for all to finish.
+        //
+        // Each statement gets its own void(void*) wrapper function.
+        // A shared atomic counter tracks how many are still running.
+
+        if stmts.is_empty() {
+            return Ok(None);
+        }
+
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i64t = self.ctx.i64_type();
+        let void = self.ctx.void_type();
+        let fv = self.cur_fn.unwrap();
+
+        static SIM_BLK_COUNTER: std::sync::atomic::AtomicUsize =
+            std::sync::atomic::AtomicUsize::new(0);
+        let blk_id = SIM_BLK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // Build one wrapper function per statement
+        let mut stmt_fns = Vec::new();
+        for (i, stmt) in stmts.iter().enumerate() {
+            let fn_name = format!("__sim_blk_{blk_id}_s{i}");
+            let fn_ty = void.fn_type(&[ptr.into()], false);
+            let wrapper = self
+                .module
+                .add_function(&fn_name, fn_ty, Some(Linkage::Internal));
+
+            let saved_fn = self.cur_fn;
+            let saved_bb = self.bld.get_insert_block();
+            let saved_vars =
+                std::mem::replace(&mut self.vars, vec![std::collections::HashMap::new()]);
+            let saved_loop_stack = std::mem::replace(&mut self.loop_stack, Vec::new());
+
+            self.cur_fn = Some(wrapper);
+            let entry = self.ctx.append_basic_block(wrapper, "entry");
+            self.bld.position_at_end(entry);
+
+            let arg_ptr = wrapper.get_first_param().unwrap().into_pointer_value();
+
+            // arg_ptr points to a single ptr: the counter
+            let counter_ptr =
+                b!(self.bld.build_load(ptr, arg_ptr, "counter_ptr")).into_pointer_value();
+
+            // Compile the statement
+            self.compile_stmt(stmt)?;
+
+            // Atomically decrement counter
+            if self.no_term() {
+                b!(self.bld.build_atomicrmw(
+                    inkwell::AtomicRMWBinOp::Sub,
+                    counter_ptr,
+                    i64t.const_int(1, false),
+                    inkwell::AtomicOrdering::AcquireRelease,
+                ));
+                let free_fn = self.module.get_function("free").unwrap();
+                b!(self.bld.build_call(free_fn, &[arg_ptr.into()], ""));
+                b!(self.bld.build_return(None));
+            }
+
+            self.cur_fn = saved_fn;
+            self.vars = saved_vars;
+            self.loop_stack = saved_loop_stack;
+            if let Some(bb) = saved_bb {
+                self.bld.position_at_end(bb);
+            }
+
+            stmt_fns.push(wrapper);
+        }
+
+        // Back in the caller: allocate atomic counter, spawn all, wait
+        let counter_alloca = self.entry_alloca(i64t.into(), "simb.counter");
+        let n = stmts.len() as u64;
+        b!(self.bld.build_store(counter_alloca, i64t.const_int(n, false)));
+
+        let malloc_fn = self.ensure_malloc();
+        let coro_create = self.module.get_function("jade_coro_create").unwrap();
+        let sched_spawn = self.module.get_function("jade_sched_spawn").unwrap();
+
+        for wrapper in &stmt_fns {
+            // Allocate arg struct (8 bytes: just a pointer to counter)
+            let arg_mem = b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(8, false).into()],
+                "simb.arg"
+            ))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+
+            // Store counter_ptr
+            b!(self.bld.build_store(arg_mem, counter_alloca));
+
+            // Create and spawn
+            let coro = b!(self.bld.build_call(
+                coro_create,
+                &[
+                    wrapper.as_global_value().as_pointer_value().into(),
+                    arg_mem.into(),
+                ],
+                "simb.coro"
+            ))
+            .try_as_basic_value()
+            .basic()
+            .unwrap();
+            b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
+        }
+
+        // Wait for all statements to complete
+        let wait_cond = self.ctx.append_basic_block(fv, "simb.wait");
+        let wait_done = self.ctx.append_basic_block(fv, "simb.done");
+        b!(self.bld.build_unconditional_branch(wait_cond));
+
+        self.bld.position_at_end(wait_cond);
+        let remaining =
+            b!(self.bld.build_load(i64t, counter_alloca, "simb.rem")).into_int_value();
+        let all_done = b!(self.bld.build_int_compare(
+            IntPredicate::EQ,
+            remaining,
+            i64t.const_int(0, false),
+            "simb.alldone"
+        ));
+        let wait_yield = self.ctx.append_basic_block(fv, "simb.wait.yield");
+        b!(self.bld.build_conditional_branch(all_done, wait_done, wait_yield));
+
+        self.bld.position_at_end(wait_yield);
+        let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
+        b!(self.bld.build_call(sched_yield, &[], ""));
+        b!(self.bld.build_unconditional_branch(wait_cond));
+
+        self.bld.position_at_end(wait_done);
+        Ok(None)
     }
 }

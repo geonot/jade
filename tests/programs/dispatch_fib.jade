@@ -1,0 +1,12 @@
+# Dispatch yield computation — generator computing fibonacci numbers
+*main
+    gen is dispatch
+        a is 0
+        b is 1
+        for i in 10
+            yield a
+            temp is a + b
+            a is b
+            b is temp
+    for x in gen
+        log(x)

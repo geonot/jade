@@ -1,0 +1,144 @@
+# Word Counter
+# Computes text analysis metrics on generated text
+# Demonstrates: functions, loops, sim for parallelism, computation
+# 
+# Since Jade uses ownership semantics for strings,
+# we generate text inline and do integer-heavy analysis
+
+extern *jade_time_now_ns() returns i64
+
+# Simulate character-level text analysis using LCG-generated "text"
+# Each "character" is a pseudo-random value 0..127 (ASCII range)
+# We count various properties of this synthetic text
+
+*lcg_next(state as i64) returns i64
+    a is 6364136223846793005
+    c is 1442695040888963407
+    state * a + c
+
+# Analyze n "characters" of synthetic text from a seed
+# Returns: count of "spaces" (chars where value % 8 == 0)
+*count_spaces_synthetic(n as i64, seed as i64) returns i64
+    count is 0
+    state is seed
+    i is 0
+    while i < n
+        state is lcg_next(state)
+        ch is state % 128
+        if ch < 0
+            ch is 0 - ch
+        # Treat chars divisible by 8 as spaces
+        if ch % 8 eq 0
+            count is count + 1
+        i is i + 1
+    count
+
+# Count "vowels" (chars where value % 5 == 0)
+*count_vowels_synthetic(n as i64, seed as i64) returns i64
+    count is 0
+    state is seed
+    i is 0
+    while i < n
+        state is lcg_next(state)
+        ch is state % 128
+        if ch < 0
+            ch is 0 - ch
+        if ch % 5 eq 0
+            count is count + 1
+        i is i + 1
+    count
+
+# Count "uppercase" (chars where value is 65..90)
+*count_upper_synthetic(n as i64, seed as i64) returns i64
+    count is 0
+    state is seed
+    i is 0
+    while i < n
+        state is lcg_next(state)
+        ch is state % 128
+        if ch < 0
+            ch is 0 - ch
+        if ch > 64
+            if ch < 91
+                count is count + 1
+        i is i + 1
+    count
+
+# Heavy analysis: compute a "hash" of the text by accumulating character values
+*text_hash(n as i64, seed as i64) returns i64
+    hash is 5381
+    state is seed
+    i is 0
+    while i < n
+        state is lcg_next(state)
+        ch is state % 128
+        if ch < 0
+            ch is 0 - ch
+        hash is hash * 33 + ch
+        i is i + 1
+    hash
+
+# Wrapper functions that compute AND log results (for sim block)
+*analyze_spaces(n as i64, seed as i64) returns i64
+    result is count_spaces_synthetic(n, seed)
+    log("Par spaces:")
+    log(result)
+    result
+
+*analyze_vowels(n as i64, seed as i64) returns i64
+    result is count_vowels_synthetic(n, seed)
+    log("Par vowels:")
+    log(result)
+    result
+
+*analyze_upper(n as i64, seed as i64) returns i64
+    result is count_upper_synthetic(n, seed)
+    log("Par upper:")
+    log(result)
+    result
+
+*analyze_hash(n as i64, seed as i64) returns i64
+    result is text_hash(n, seed)
+    log("Par hash:")
+    log(result)
+    result
+
+*main
+    n is 10000000
+    seed is 42
+    log("=== Word Counter (Synthetic Text Analysis) ===")
+    log("Text size (chars):")
+    log(n)
+
+    # --- Sequential: run all 4 analyses one at a time ---
+    t0 is jade_time_now_ns()
+    s1 is count_spaces_synthetic(n, seed)
+    s2 is count_vowels_synthetic(n, seed)
+    s3 is count_upper_synthetic(n, seed)
+    s4 is text_hash(n, seed)
+    t1 is jade_time_now_ns()
+    seq_ms is (t1 - t0) / 1000000
+
+    log("Spaces:")
+    log(s1)
+    log("Vowels:")
+    log(s2)
+    log("Uppercase:")
+    log(s3)
+    log("Hash:")
+    log(s4)
+    log("Sequential ms:")
+    log(seq_ms)
+
+    # --- Parallel: run all 4 analyses concurrently ---
+    log("=== Parallel (sim block) ===")
+    t2 is jade_time_now_ns()
+    sim
+        analyze_spaces(10000000, 42)
+        analyze_vowels(10000000, 42)
+        analyze_upper(10000000, 42)
+        analyze_hash(10000000, 42)
+    t3 is jade_time_now_ns()
+    par_ms is (t3 - t2) / 1000000
+    log("Parallel ms:")
+    log(par_ms)

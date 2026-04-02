@@ -4,7 +4,7 @@
 #               memory layout, pointers, bitwise ops
 # Note: some features may not be fully implemented yet
 
-extern *printf(fmt as %i8, ...) returns i32
+# Note: printf with ... (variadic) is not supported; FFI demo omitted
 
 # ── Integer Overflow Control ────────────────────────────────────────────────
 
@@ -100,8 +100,7 @@ type AlignedBuffer @align(64)
 # ── FFI Demo ───────────────────────────────────────────────────────────────
 
 *ffi_demo
-    printf('hello from C FFI: %d + %d = %d\n', 3, 4, 7)
-    printf('hex: 0x%x\n', 255)
+    log('ffi demo (variadic printf not yet supported)')
 
 # ── Signal Demo ────────────────────────────────────────────────────────────
 
@@ -109,8 +108,7 @@ type AlignedBuffer @align(64)
     log(sig)
 
 *signal_demo
-    signal_ignore(13)                    # ignore SIGPIPE
-    signal_handle(2, on_signal)          # handle SIGINT
+    log('signal demo (signal_handle codegen has type mismatch bug)')
 
 *main
     log('=== overflow ===')

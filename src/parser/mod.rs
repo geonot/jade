@@ -179,6 +179,13 @@ impl Parser {
         }
     }
 
+    /// Skip newlines, indents, and dedents inside parenthesized/bracketed contexts.
+    fn skip_ws(&mut self) {
+        while self.check(Token::Newline) || self.check(Token::Indent) || self.check(Token::Dedent) {
+            self.advance();
+        }
+    }
+
     fn expect(&mut self, t: Token) -> Result<(), ParseError> {
         if self.check(Token::Eof) && !matches!(t, Token::Eof) {
             return Err(self.error(&format!("expected {t}, got EOF")));

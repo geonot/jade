@@ -1,12 +1,38 @@
 /*
  * Jade Runtime — Typed channels (bounded MPMC ring buffer).
  *
- * Fast path: atomic CAS on head/tail, no lock.
- * Slow path: park coroutine on wait queue, scheduler resumes on data/space.
+ * Uses an atomic spinlock instead of pthread_mutex to avoid glibc 2.42+
+ * __owner assertions when coroutines migrate between worker threads.
  */
 #include "jade_rt.h"
 #include <stdlib.h>
 #include <string.h>
+#include <sched.h>
+#include <unistd.h>
+#include <stdio.h>
+
+/* Debug: set to 1 to enable channel tracing */
+#ifndef CHAN_DEBUG
+#define CHAN_DEBUG 0
+#endif
+#define CHAN_TRACE(...) do { if (CHAN_DEBUG) fprintf(stderr, __VA_ARGS__); } while(0)
+
+/* ── Spinlock helpers ────────────────────────────────────────────── */
+
+static inline void chan_lock(jade_chan_t *ch) {
+    while (atomic_exchange_explicit(&ch->lock, 1, memory_order_acquire) != 0) {
+        /* Spin with a pause hint for better performance under contention */
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+
+static inline void chan_unlock(jade_chan_t *ch) {
+    atomic_store_explicit(&ch->lock, 0, memory_order_release);
+}
 
 /* Round up to next power of 2 */
 static uint64_t next_pow2(uint64_t v) {
@@ -36,14 +62,13 @@ jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity) {
     atomic_store(&ch->closed, 0);
     ch->send_waitq = NULL;
     ch->recv_waitq = NULL;
-    pthread_mutex_init(&ch->lock, NULL);
+    atomic_store(&ch->lock, 0);
 
     return ch;
 }
 
 void jade_chan_destroy(jade_chan_t *ch) {
     if (!ch) return;
-    pthread_mutex_destroy(&ch->lock);
     free(ch->buffer);
     free(ch);
 }
@@ -52,13 +77,13 @@ void jade_chan_close(jade_chan_t *ch) {
     atomic_store(&ch->closed, 1);
 
     /* Wake all blocked receivers so they get the close signal */
-    pthread_mutex_lock(&ch->lock);
+    chan_lock(ch);
     jade_coro_t *c = ch->recv_waitq;
     ch->recv_waitq = NULL;
     /* Also wake senders */
     jade_coro_t *s = ch->send_waitq;
     ch->send_waitq = NULL;
-    pthread_mutex_unlock(&ch->lock);
+    chan_unlock(ch);
 
     while (c) {
         jade_coro_t *next = c->next;
@@ -76,15 +101,16 @@ void jade_chan_close(jade_chan_t *ch) {
         jade_sched_enqueue(s);
         s = next;
     }
+    /* Wake non-coroutine thread waiters */
 }
 
 void jade_chan_send(jade_chan_t *ch, const void *data) {
     for (;;) {
-        pthread_mutex_lock(&ch->lock);
+        chan_lock(ch);
 
         /* Check for close */
         if (atomic_load(&ch->closed)) {
-            pthread_mutex_unlock(&ch->lock);
+            chan_unlock(ch);
             return;
         }
 
@@ -104,10 +130,10 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
                 waiter->next = NULL;
                 waiter->wait_chan = NULL;
                 waiter->state = JADE_CORO_READY;
-                pthread_mutex_unlock(&ch->lock);
+                chan_unlock(ch);
                 jade_sched_enqueue(waiter);
             } else {
-                pthread_mutex_unlock(&ch->lock);
+                chan_unlock(ch);
             }
             return;
         }
@@ -115,9 +141,17 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
         /* Buffer full — park this coroutine */
         jade_worker_t *w = tl_worker;
         if (!w || !w->current) {
-            /* Called from main thread (no coroutine) — spin-wait */
-            pthread_mutex_unlock(&ch->lock);
-            sched_yield();
+            /* Called from non-coroutine context — spin-wait then retry */
+            chan_unlock(ch);
+            CHAN_TRACE("send: full ch=%p (h=%lu t=%lu cap=%lu), backoff\n",
+                       (void*)ch, (unsigned long)head, (unsigned long)tail, (unsigned long)ch->capacity);
+            for (int _spin = 0; _spin < 128; _spin++) {
+#if defined(__x86_64__)
+                __builtin_ia32_pause();
+#elif defined(__aarch64__)
+                __asm__ volatile("yield");
+#endif
+            }
             continue;
         }
 
@@ -135,9 +169,11 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
             t->next = self;
         }
 
-        pthread_mutex_unlock(&ch->lock);
+        /* Don't unlock — scheduler will release after context is saved */
 
         /* Yield to scheduler — will be resumed when a recv frees space */
+        w->held_chan_lock = ch;
+        w->last_action = SCHED_ACTION_PARK;
         jade_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed here — retry send from the top */
     }
@@ -145,7 +181,7 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
 
 int jade_chan_recv(jade_chan_t *ch, void *data_out) {
     for (;;) {
-        pthread_mutex_lock(&ch->lock);
+        chan_lock(ch);
 
         uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
         uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_acquire);
@@ -163,10 +199,10 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
                 waiter->next = NULL;
                 waiter->wait_chan = NULL;
                 waiter->state = JADE_CORO_READY;
-                pthread_mutex_unlock(&ch->lock);
+                chan_unlock(ch);
                 jade_sched_enqueue(waiter);
             } else {
-                pthread_mutex_unlock(&ch->lock);
+                chan_unlock(ch);
             }
             return 1;  /* success */
         }
@@ -175,16 +211,22 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
         if (atomic_load(&ch->closed)) {
             /* Channel closed, no more data coming */
             memset(data_out, 0, ch->elem_size);
-            pthread_mutex_unlock(&ch->lock);
+            chan_unlock(ch);
             return 0;  /* closed */
         }
 
         /* Park this coroutine */
         jade_worker_t *w = tl_worker;
         if (!w || !w->current) {
-            /* Called from main thread — spin-wait */
-            pthread_mutex_unlock(&ch->lock);
-            sched_yield();
+            /* Called from non-coroutine context — spin-wait then retry */
+            chan_unlock(ch);
+            for (int _spin = 0; _spin < 128; _spin++) {
+#if defined(__x86_64__)
+                __builtin_ia32_pause();
+#elif defined(__aarch64__)
+                __asm__ volatile("yield");
+#endif
+            }
             continue;
         }
 
@@ -202,9 +244,11 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
             t->next = self;
         }
 
-        pthread_mutex_unlock(&ch->lock);
+        /* Don't unlock — scheduler will release after context is saved */
 
         /* Yield to scheduler */
+        w->held_chan_lock = ch;
+        w->last_action = SCHED_ACTION_PARK;
         jade_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed — retry recv */
     }

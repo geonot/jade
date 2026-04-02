@@ -1,0 +1,12 @@
+# Multiple generators test — multiple generators interleaved
+*main
+    evens is dispatch
+        for i in 5
+            yield i * 2
+    odds is dispatch
+        for i in 5
+            yield i * 2 + 1
+    for e in evens
+        log(e)
+    for o in odds
+        log(o)

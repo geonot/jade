@@ -396,6 +396,7 @@ impl Parser {
             }
             Token::LBracket => {
                 self.advance();
+                self.skip_ws();
                 if self.check(Token::RBracket) {
                     self.advance();
                     return Ok(Expr::Array(Vec::new(), sp));
@@ -431,11 +432,13 @@ impl Parser {
                 let mut v = vec![first];
                 while self.check(Token::Comma) {
                     self.advance();
+                    self.skip_ws();
                     if self.check(Token::RBracket) {
                         break;
                     }
                     v.push(self.parse_expr()?);
                 }
+                self.skip_ws();
                 self.expect(Token::RBracket)?;
                 Ok(Expr::Array(v, sp))
             }
@@ -552,6 +555,8 @@ impl Parser {
                     self.advance();
                     let mut fields = Vec::new();
                     while !self.check(Token::RParen) && !self.eof() {
+                        self.skip_ws();
+                        if self.check(Token::RParen) { break; }
                         if self.is_field_init() {
                             let n = self.ident()?;
                             self.expect(Token::Is)?;
@@ -565,10 +570,13 @@ impl Parser {
                                 value: self.parse_expr()?,
                             });
                         }
+                        self.skip_ws();
                         if !self.check(Token::RParen) {
                             self.expect(Token::Comma)?;
+                            self.skip_ws();
                         }
                     }
+                    self.skip_ws();
                     self.expect(Token::RParen)?;
                     return Ok(Expr::Struct(name, fields, sp));
                 }
@@ -942,6 +950,8 @@ impl Parser {
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
         let mut a = Vec::new();
         while !self.check(Token::RParen) && !self.eof() {
+            self.skip_ws();
+            if self.check(Token::RParen) { break; }
             if self.check(Token::DotDotDot) {
                 let sp = self.span();
                 self.advance();
@@ -956,8 +966,10 @@ impl Parser {
             } else {
                 a.push(self.parse_expr()?);
             }
+            self.skip_ws();
             if !self.check(Token::RParen) {
                 self.expect(Token::Comma)?;
+                self.skip_ws();
             }
         }
         Ok(a)
@@ -1025,16 +1037,16 @@ impl Parser {
             "i8" => Type::I8,
             "i16" => Type::I16,
             "i32" => Type::I32,
-            "i64" => Type::I64,
+            "int" | "i64" => Type::I64,
             "u8" => Type::U8,
             "u16" => Type::U16,
             "u32" => Type::U32,
             "u64" => Type::U64,
             "f32" => Type::F32,
-            "f64" => Type::F64,
+            "float" | "f64" => Type::F64,
             "bool" => Type::Bool,
             "void" => Type::Void,
-            "String" => Type::String,
+            "str" | "String" => Type::String,
             s if s.len() == 1 && s.chars().next().map_or(false, |c| c.is_uppercase()) => {
                 Type::Param(s.to_string())
             }

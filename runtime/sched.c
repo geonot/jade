@@ -29,8 +29,25 @@ static uint32_t jade_xorshift(uint64_t *state) {
 
 /* ── Inject queue (global, for cross-worker spawns) ──────────────── */
 
+/* Spinlock for inject queue — avoids futex overhead of pthread_mutex */
+static _Atomic(int32_t) g_inject_lock = 0;
+
+static inline void inject_lock_acquire(void) {
+    while (atomic_exchange_explicit(&g_inject_lock, 1, memory_order_acquire) != 0) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+
+static inline void inject_lock_release(void) {
+    atomic_store_explicit(&g_inject_lock, 0, memory_order_release);
+}
+
 static void jade_inject_push(jade_coro_t *c) {
-    pthread_mutex_lock(&g_sched.inject_lock);
+    inject_lock_acquire();
     c->next = NULL;
     if (g_sched.inject_tail) {
         g_sched.inject_tail->next = c;
@@ -38,11 +55,11 @@ static void jade_inject_push(jade_coro_t *c) {
         g_sched.inject_head = c;
     }
     g_sched.inject_tail = c;
-    pthread_mutex_unlock(&g_sched.inject_lock);
+    inject_lock_release();
 }
 
 static jade_coro_t *jade_inject_pop(void) {
-    pthread_mutex_lock(&g_sched.inject_lock);
+    inject_lock_acquire();
     jade_coro_t *c = g_sched.inject_head;
     if (c) {
         g_sched.inject_head = c->next;
@@ -51,21 +68,52 @@ static jade_coro_t *jade_inject_pop(void) {
         }
         c->next = NULL;
     }
-    pthread_mutex_unlock(&g_sched.inject_lock);
+    inject_lock_release();
     return c;
 }
 
 /* ── Worker parking ─────────────────────────────────────────────── */
 
 static void jade_worker_park(jade_worker_t *w) {
-    (void)w;
+    /* Phase 1: brief spin — avoids costly futex for short idle periods */
+    for (int spin = 0; spin < 40; spin++) {
+        /* Check inject queue every 10 spins to avoid lock contention */
+        if (spin % 10 == 0) {
+            jade_coro_t *c = jade_inject_pop();
+            if (c) {
+                jade_deque_push(&w->run_queue, c);
+                return;
+            }
+        }
+        /* Try stealing once per spin */
+        int n = g_sched.num_workers;
+        if (n > 1) {
+            uint32_t victim = jade_xorshift(&w->rng_state) % (uint32_t)n;
+            if (victim != w->id) {
+                jade_coro_t *c = jade_deque_steal(&g_sched.workers[victim].run_queue);
+                if (c) {
+                    jade_deque_push(&w->run_queue, c);
+                    return;
+                }
+            }
+        }
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+        __builtin_ia32_pause();
+        __builtin_ia32_pause();
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+
+    /* Phase 2: park on condvar with timeout */
     atomic_fetch_add(&g_sched.idle_count, 1);
     pthread_mutex_lock(&g_sched.idle_lock);
-    /* Double-check before sleeping */
     if (!atomic_load(&g_sched.shutdown)) {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_nsec += 1000000; /* 1ms timeout to check timers */
+        ts.tv_nsec += 100000; /* 100μs timeout */
         if (ts.tv_nsec >= 1000000000) {
             ts.tv_sec += 1;
             ts.tv_nsec -= 1000000000;
@@ -77,13 +125,18 @@ static void jade_worker_park(jade_worker_t *w) {
 }
 
 static void jade_sched_wake_one(void) {
-    if (atomic_load(&g_sched.idle_count) > 0) {
+    /* Only signal if there might be idle workers */
+    if (atomic_load_explicit(&g_sched.idle_count, memory_order_relaxed) > 0) {
+        pthread_mutex_lock(&g_sched.idle_lock);
         pthread_cond_signal(&g_sched.idle_cond);
+        pthread_mutex_unlock(&g_sched.idle_lock);
     }
 }
 
 static void jade_sched_wake_all(void) {
+    pthread_mutex_lock(&g_sched.idle_lock);
     pthread_cond_broadcast(&g_sched.idle_cond);
+    pthread_mutex_unlock(&g_sched.idle_lock);
 }
 
 /* ── Finding work ───────────────────────────────────────────────── */
@@ -127,21 +180,31 @@ static void *jade_worker_loop(void *arg) {
         /* Run the coroutine */
         c->state = JADE_CORO_RUNNING;
         w->current = c;
+        w->held_chan_lock = NULL;
         jade_context_swap(&w->sched_ctx, &c->ctx);
         /* Coroutine yielded or completed — back in scheduler */
         w->current = NULL;
 
-        if (c->state == JADE_CORO_DONE) {
+        /*
+         * Release any channel lock held across the context swap.
+         * This ensures the coroutine's context is fully saved before
+         * any waker can dequeue it from a wait queue.
+         */
+        if (w->held_chan_lock) {
+            jade_chan_t *ch = (jade_chan_t *)w->held_chan_lock;
+            atomic_store_explicit(&ch->lock, 0, memory_order_release);
+            w->held_chan_lock = NULL;
+        }
+
+        if (w->last_action == SCHED_ACTION_DESTROY) {
             if (!c->daemon) {
                 atomic_fetch_sub(&g_sched.active_coros, 1);
             }
             jade_coro_destroy(c);
-        } else if (c->state == JADE_CORO_SUSPENDED) {
-            /* Parked on channel/actor wait queue; don't re-enqueue */
-        } else {
-            /* READY = yielded voluntarily, put back on run queue */
+        } else if (w->last_action == SCHED_ACTION_REQUEUE) {
             jade_deque_push(&w->run_queue, c);
         }
+        /* PARK: coroutine is on a wait queue — don't touch it */
     }
     return NULL;
 }
@@ -164,7 +227,7 @@ void jade_sched_init(int num_workers) {
     atomic_store(&g_sched.started, 0);
     g_sched.inject_head = NULL;
     g_sched.inject_tail = NULL;
-    pthread_mutex_init(&g_sched.inject_lock, NULL);
+    atomic_store(&g_inject_lock, 0);
     pthread_mutex_init(&g_sched.idle_lock, NULL);
     pthread_cond_init(&g_sched.idle_cond, NULL);
 
@@ -172,6 +235,8 @@ void jade_sched_init(int num_workers) {
         g_sched.workers[i].id = (uint32_t)i;
         g_sched.workers[i].rng_state = (uint64_t)i + 1; /* nonzero seed */
         g_sched.workers[i].current = NULL;
+        g_sched.workers[i].held_chan_lock = NULL;
+        g_sched.workers[i].last_action = 0;
         jade_deque_init(&g_sched.workers[i].run_queue);
     }
 }
@@ -234,9 +299,41 @@ void jade_sched_shutdown(void) {
         }
     }
 
-    pthread_mutex_destroy(&g_sched.inject_lock);
     pthread_mutex_destroy(&g_sched.idle_lock);
     pthread_cond_destroy(&g_sched.idle_cond);
     free(g_sched.workers);
     g_sched.workers = NULL;
+}
+
+/* Aliases matching the codegen-declared symbols */
+void jade_sched_yield(void) {
+    jade_worker_t *w = tl_worker;
+    if (w && w->current) {
+        jade_coro_yield();
+    } else {
+        /* Called from main thread (not a coroutine) — brief sleep to avoid busy-spin */
+        usleep(10);
+    }
+}
+
+void jade_sched_park(void) {
+    jade_worker_t *w = tl_worker;
+    if (!w || !w->current) {
+        /* Called from main thread — can't truly park, just brief sleep */
+        usleep(10);
+        return;
+    }
+    jade_coro_t *c = w->current;
+    c->state = JADE_CORO_SUSPENDED;
+    w->held_chan_lock = NULL;
+    w->last_action = SCHED_ACTION_PARK;
+    jade_context_swap(&c->ctx, &w->sched_ctx);
+    /* Resumed here when unparked */
+}
+
+void jade_sched_unpark(jade_coro_t *c) {
+    if (!c) return;
+    c->state = JADE_CORO_READY;
+    jade_sched_enqueue(c);
+    jade_sched_wake_one();
 }

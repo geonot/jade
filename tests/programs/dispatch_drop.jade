@@ -1,0 +1,11 @@
+# Dispatch drop test — generator dropped before fully consumed
+*main
+    gen is dispatch
+        for i in 1000000
+            yield i
+    x is gen.next()
+    log(x)
+    y is gen.next()
+    log(y)
+    # gen goes out of scope here, should be cleaned up
+    log(0)

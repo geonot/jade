@@ -131,7 +131,9 @@ impl<'ctx> Compiler<'ctx> {
                 let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into(), replacement.into()], "re.replace"));
                 Ok(result.try_as_basic_value().basic().unwrap())
             }
-            _ => Err(format!("no method '{m}' on String")),
+            _ => {
+                Err(format!("no method '{m}' on String"))
+            }
         }
     }
 

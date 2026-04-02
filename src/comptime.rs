@@ -314,6 +314,7 @@ fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<String, hir::Fn>) {
             if let Some(e) = &mut f.step { fold_expr_with_fns(e, pure_fns); }
             fold_block_with_fns(&mut f.body, pure_fns);
         }
+        Stmt::SimBlock(b, _) => fold_block_with_fns(b, pure_fns),
         Stmt::Drop(_, _, _, _) | Stmt::Continue(_) | Stmt::Ret(None, _, _)
         | Stmt::Break(None, _) | Stmt::Asm(_) | Stmt::StoreDelete(_, _, _) | Stmt::UseLocal(_, _, _, _) => {}
     }
@@ -412,6 +413,7 @@ fn fold_stmt(stmt: &mut Stmt) {
             if let Some(e) = &mut f.step { fold_expr(e); }
             fold_block(&mut f.body);
         }
+        Stmt::SimBlock(b, _) => fold_block(b),
     }
 }
 
@@ -444,7 +446,7 @@ fn fold_expr(expr: &mut Expr) {
                 fold_expr(a);
             }
         }
-        ExprKind::StringMethod(obj, _, args) => {
+        ExprKind::StringMethod(obj, _, args) | ExprKind::DeferredMethod(obj, _, args) => {
             fold_expr(obj);
             for a in args {
                 fold_expr(a);

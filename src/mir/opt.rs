@@ -62,6 +62,19 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::StructInit(_, fs) => { for (_, v) in fs { sub!(v); } }
         InstKind::Slice(a, s, e) => { sub!(a); sub!(s); sub!(e); }
         InstKind::Store(_, v) => { sub!(v); }
+        // Collections
+        InstKind::VecNew(args) => { for a in args { sub!(a); } }
+        InstKind::VecPush(vec, val) | InstKind::ChanSend(vec, val) => { sub!(vec); sub!(val); }
+        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::RcClone(v)
+        | InstKind::WeakUpgrade(v) | InstKind::Log(v) => { sub!(v); }
+        InstKind::RcNew(v, _) => { sub!(v); }
+        // Closures
+        InstKind::ClosureCreate(_, captures) | InstKind::SpawnActor(_, captures)
+        | InstKind::SelectArm(captures) => { for a in captures { sub!(a); } }
+        InstKind::ClosureCall(f, args) => { sub!(f); for a in args { sub!(a); } }
+        InstKind::ChanCreate(_) | InstKind::MapInit | InstKind::SetInit => {}
+        InstKind::Assert(v, _) => { sub!(v); }
+        InstKind::DynDispatch(obj, _, _, args) => { sub!(obj); for a in args { sub!(a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) => {}
     }
@@ -108,6 +121,18 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::StructInit(_, fs) => { for (_, v) in fs { s.insert(*v); } }
         InstKind::Slice(a, lo, hi) => { s.insert(*a); s.insert(*lo); s.insert(*hi); }
         InstKind::Store(_, v) => { s.insert(*v); }
+        // Collections
+        InstKind::VecNew(args) => { for a in args { s.insert(*a); } }
+        InstKind::VecPush(vec, val) | InstKind::ChanSend(vec, val) => { s.insert(*vec); s.insert(*val); }
+        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::RcClone(v)
+        | InstKind::WeakUpgrade(v) | InstKind::Log(v) => { s.insert(*v); }
+        InstKind::RcNew(v, _) => { s.insert(*v); }
+        InstKind::ClosureCreate(_, captures) | InstKind::SpawnActor(_, captures)
+        | InstKind::SelectArm(captures) => { for a in captures { s.insert(*a); } }
+        InstKind::ClosureCall(f, args) => { s.insert(*f); for a in args { s.insert(*a); } }
+        InstKind::ChanCreate(_) | InstKind::MapInit | InstKind::SetInit => {}
+        InstKind::Assert(v, _) => { s.insert(*v); }
+        InstKind::DynDispatch(obj, _, _, args) => { s.insert(*obj); for a in args { s.insert(*a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) => {}
     }
@@ -129,7 +154,9 @@ fn is_pure(kind: &InstKind) -> bool {
         | InstKind::BinOp(..) | InstKind::UnaryOp(..) | InstKind::Cmp(..)
         | InstKind::Cast(..) | InstKind::Copy(..) | InstKind::Load(_)
         | InstKind::FieldGet(..) | InstKind::Index(..) | InstKind::Ref(..) | InstKind::Deref(..)
-        | InstKind::ArrayInit(_) | InstKind::StructInit(..))
+        | InstKind::ArrayInit(_) | InstKind::StructInit(..)
+        | InstKind::VecLen(..) | InstKind::MapInit | InstKind::SetInit
+        | InstKind::RcClone(..) | InstKind::WeakUpgrade(..))
 }
 
 // ━━━━━━━━━━━━━━━━━━━ Constant Folding ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -407,7 +434,7 @@ pub fn strength_reduction(func: &mut Function) -> bool {
             let entry = func.entry;
             func.block_mut(entry).insts.insert(0, Instruction {
                 dest: Some(d), kind: InstKind::IntConst(shift),
-                ty: Type::I64, span: Span::dummy(),
+                ty: Type::I64, span: Span::dummy(), def_id: None,
             });
             d
         });

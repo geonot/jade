@@ -57,6 +57,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::ChannelClose(_, s) => *s,
             hir::Stmt::Stop(_, s) => *s,
             hir::Stmt::SimFor(_, s) => *s,
+            hir::Stmt::SimBlock(_, s) => *s,
             hir::Stmt::UseLocal(_, _, _, s) => *s,
         };
         self.set_debug_location(span.line, span.col);
@@ -65,7 +66,14 @@ impl<'ctx> Compiler<'ctx> {
                 let val = self.compile_expr(&bind.value)?;
                 let ty = &bind.ty;
                 if matches!(ty, Type::Array(_, _)) {
-                    self.set_var(&bind.name, val.into_pointer_value(), ty.clone());
+                    if val.is_pointer_value() {
+                        self.set_var(&bind.name, val.into_pointer_value(), ty.clone());
+                    } else {
+                        // Array returned from function call — store to alloca
+                        let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name, ty);
+                        b!(self.bld.build_store(a, val));
+                        self.set_var(&bind.name, a, ty.clone());
+                    }
                 } else if let Some((ptr, _)) = self.find_var(&bind.name).cloned() {
                     b!(self.bld.build_store(ptr, val));
                     self.set_var(&bind.name, ptr, ty.clone());
@@ -106,7 +114,15 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::Loop(l) => self.compile_loop(l),
             hir::Stmt::Ret(v, _ty, _) => {
                 if let Some(e) = v {
-                    let val = self.compile_expr(e)?;
+                    let mut val = self.compile_expr(e)?;
+                    // If returning an array, load from pointer to get the array value
+                    if val.is_pointer_value() {
+                        if let Some(rt) = self.cur_fn.unwrap().get_type().get_return_type() {
+                            if rt.is_array_type() {
+                                val = b!(self.bld.build_load(rt, val.into_pointer_value(), "arr.ret"));
+                            }
+                        }
+                    }
                     let val = if let Some(rt) = self.cur_fn.unwrap().get_type().get_return_type() {
                         self.coerce_val(val, rt)
                     } else {
@@ -209,6 +225,10 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::SimFor(f, _) => {
                 // sim for: spawn each iteration as a coroutine on the scheduler
                 self.compile_sim_for(f)?;
+                Ok(None)
+            }
+            hir::Stmt::SimBlock(stmts, _) => {
+                self.compile_sim_block(stmts)?;
                 Ok(None)
             }
             hir::Stmt::UseLocal(_, _, _, _) => Ok(None),

@@ -1,0 +1,35 @@
+# Sim Block - Parallel independent computations
+# Each statement in sim block runs as its own coroutine
+# Demonstrates: 4 independent fib computations run in parallel
+
+extern *jade_time_now_ns() returns i64
+
+*fib(n as i64) returns i64
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+*main
+    # --- Sequential: 4 fib calls one after another ---
+    t0 is jade_time_now_ns()
+    log(fib(40))
+    log(fib(41))
+    log(fib(42))
+    log(fib(43))
+    t1 is jade_time_now_ns()
+    seq_ms is (t1 - t0) / 1000000
+    log(seq_ms)
+
+    # --- Parallel: 4 fib calls in sim block ---
+    t2 is jade_time_now_ns()
+    sim
+        log(fib(40))
+        log(fib(41))
+        log(fib(42))
+        log(fib(43))
+    t3 is jade_time_now_ns()
+    par_ms is (t3 - t2) / 1000000
+    log(par_ms)
+
+    log(0)

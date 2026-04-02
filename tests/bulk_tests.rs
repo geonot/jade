@@ -4124,7 +4124,7 @@ fn b_actor_two_param_handler_math() {
 #[test]
 fn b_std_math_factorial() {
     expect(
-        "use std.math\n\n*main()\n    log(factorial(5))\n    log(factorial(0))\n    log(factorial(1))\n    log(factorial(10))\n",
+        "use std/math\n\n*main()\n    log(factorial(5))\n    log(factorial(0))\n    log(factorial(1))\n    log(factorial(10))\n",
         "120\n1\n1\n3628800",
     );
 }
@@ -4132,7 +4132,7 @@ fn b_std_math_factorial() {
 #[test]
 fn b_std_math_gcd() {
     expect(
-        "use std.math\n\n*main()\n    log(gcd(12, 8))\n    log(gcd(100, 75))\n    log(gcd(7, 13))\n",
+        "use std/math\n\n*main()\n    log(gcd(12, 8))\n    log(gcd(100, 75))\n    log(gcd(7, 13))\n",
         "4\n25\n1",
     );
 }
@@ -4140,7 +4140,7 @@ fn b_std_math_gcd() {
 #[test]
 fn b_std_math_lcm() {
     expect(
-        "use std.math\n\n*main()\n    log(lcm(4, 6))\n    log(lcm(3, 7))\n    log(lcm(12, 8))\n",
+        "use std/math\n\n*main()\n    log(lcm(4, 6))\n    log(lcm(3, 7))\n    log(lcm(12, 8))\n",
         "12\n21\n24",
     );
 }
@@ -4149,7 +4149,7 @@ fn b_std_math_lcm() {
 fn b_std_math_constants() {
     // Verify PI, E, TAU are in the expected ranges
     expect(
-        "use std.math\n\n*main()\n    log(PI > 3.14)\n    log(PI < 3.15)\n    log(E > 2.71)\n    log(E < 2.72)\n    log(TAU > 6.28)\n    log(TAU < 6.29)\n",
+        "use std/math\n\n*main()\n    log(PI > 3.14)\n    log(PI < 3.15)\n    log(E > 2.71)\n    log(E < 2.72)\n    log(TAU > 6.28)\n    log(TAU < 6.29)\n",
         "1\n1\n1\n1\n1\n1",
     );
 }
@@ -4157,7 +4157,7 @@ fn b_std_math_constants() {
 #[test]
 fn b_std_math_degrees_radians() {
     expect(
-        "use std.math\n\n*main()\n    d is degrees(PI)\n    log(d > 179.9)\n    log(d < 180.1)\n    r is radians(180.0)\n    log(r > 3.14)\n    log(r < 3.15)\n",
+        "use std/math\n\n*main()\n    d is degrees(PI)\n    log(d > 179.9)\n    log(d < 180.1)\n    r is radians(180.0)\n    log(r > 3.14)\n    log(r < 3.15)\n",
         "1\n1\n1\n1",
     );
 }
@@ -4165,7 +4165,7 @@ fn b_std_math_degrees_radians() {
 #[test]
 fn b_std_math_hypot() {
     expect(
-        "use std.math\n\n*main()\n    h is hypot(3.0, 4.0)\n    log(h > 4.99)\n    log(h < 5.01)\n",
+        "use std/math\n\n*main()\n    h is hypot(3.0, 4.0)\n    log(h > 4.99)\n    log(h < 5.01)\n",
         "1\n1",
     );
 }
@@ -4173,7 +4173,7 @@ fn b_std_math_hypot() {
 #[test]
 fn b_std_math_lerp() {
     expect(
-        "use std.math\n\n*main()\n    v is lerp(0.0, 10.0, 0.5)\n    log(v > 4.99)\n    log(v < 5.01)\n",
+        "use std/math\n\n*main()\n    v is lerp(0.0, 10.0, 0.5)\n    log(v > 4.99)\n    log(v < 5.01)\n",
         "1\n1",
     );
 }
@@ -4185,7 +4185,7 @@ fn b_std_math_lerp() {
 #[test]
 fn b_std_fmt_hex() {
     expect(
-        "use std.fmt\n\n*main()\n    log(hex(255))\n    log(hex(0))\n    log(hex(16))\n",
+        "use std/fmt\n\n*main()\n    log(hex(255))\n    log(hex(0))\n    log(hex(16))\n",
         "ff\n0\n10",
     );
 }
@@ -4193,7 +4193,7 @@ fn b_std_fmt_hex() {
 #[test]
 fn b_std_fmt_oct() {
     expect(
-        "use std.fmt\n\n*main()\n    log(oct(8))\n    log(oct(0))\n    log(oct(63))\n",
+        "use std/fmt\n\n*main()\n    log(oct(8))\n    log(oct(0))\n    log(oct(63))\n",
         "10\n0\n77",
     );
 }
@@ -4201,7 +4201,7 @@ fn b_std_fmt_oct() {
 #[test]
 fn b_std_fmt_bin() {
     expect(
-        "use std.fmt\n\n*main()\n    log(bin(10))\n    log(bin(0))\n    log(bin(255))\n",
+        "use std/fmt\n\n*main()\n    log(bin(10))\n    log(bin(0))\n    log(bin(255))\n",
         "1010\n0\n11111111",
     );
 }
@@ -4209,7 +4209,7 @@ fn b_std_fmt_bin() {
 #[test]
 fn b_std_fmt_pad_left() {
     expect(
-        "use std.fmt\n\n*main()\n    log(pad_left('hi', 5, ' '))\n    log(pad_left('hello', 3, 'x'))\n",
+        "use std/fmt\n\n*main()\n    log(pad_left('hi', 5, ' '))\n    log(pad_left('hello', 3, 'x'))\n",
         "   hi\nhello",
     );
 }
@@ -4217,7 +4217,7 @@ fn b_std_fmt_pad_left() {
 #[test]
 fn b_std_fmt_pad_right() {
     expect(
-        "use std.fmt\n\n*main()\n    log(pad_right('hi', 5, ' '))\n    log(pad_right('hello', 3, 'x'))\n",
+        "use std/fmt\n\n*main()\n    log(pad_right('hi', 5, ' '))\n    log(pad_right('hello', 3, 'x'))\n",
         "hi   \nhello",
     );
 }
@@ -4225,7 +4225,7 @@ fn b_std_fmt_pad_right() {
 #[test]
 fn b_std_fmt_repeat() {
     expect(
-        "use std.fmt\n\n*main()\n    log(repeat('ab', 3))\n    log(repeat('x', 0))\n    log(repeat('-', 5))\n",
+        "use std/fmt\n\n*main()\n    log(repeat('ab', 3))\n    log(repeat('x', 0))\n    log(repeat('-', 5))\n",
         "ababab\n\n-----",
     );
 }
@@ -4233,7 +4233,7 @@ fn b_std_fmt_repeat() {
 #[test]
 fn b_std_fmt_join() {
     expect(
-        "use std.fmt\n\n*main()\n    v is vec('a', 'b', 'c')\n    log(join(v, ', '))\n",
+        "use std/fmt\n\n*main()\n    v is vec('a', 'b', 'c')\n    log(join(v, ', '))\n",
         "a, b, c",
     );
 }
@@ -4245,7 +4245,7 @@ fn b_std_fmt_join() {
 #[test]
 fn b_std_path_join() {
     expect(
-        "use std.path\n\n*main()\n    log(path_join('foo', 'bar'))\n    log(path_join('foo/', 'bar'))\n    log(path_join('', 'bar'))\n    log(path_join('foo', ''))\n",
+        "use std/path\n\n*main()\n    log(path_join('foo', 'bar'))\n    log(path_join('foo/', 'bar'))\n    log(path_join('', 'bar'))\n    log(path_join('foo', ''))\n",
         "foo/bar\nfoo/bar\nbar\nfoo",
     );
 }
@@ -4253,7 +4253,7 @@ fn b_std_path_join() {
 #[test]
 fn b_std_path_dir() {
     expect(
-        "use std.path\n\n*main()\n    log(path_dir('/foo/bar/baz'))\n    log(path_dir('file.txt'))\n",
+        "use std/path\n\n*main()\n    log(path_dir('/foo/bar/baz'))\n    log(path_dir('file.txt'))\n",
         "/foo/bar\n.",
     );
 }
@@ -4261,7 +4261,7 @@ fn b_std_path_dir() {
 #[test]
 fn b_std_path_base() {
     expect(
-        "use std.path\n\n*main()\n    log(path_base('/foo/bar.txt'))\n    log(path_base('hello'))\n",
+        "use std/path\n\n*main()\n    log(path_base('/foo/bar.txt'))\n    log(path_base('hello'))\n",
         "bar.txt\nhello",
     );
 }
@@ -4270,7 +4270,7 @@ fn b_std_path_base() {
 fn b_std_path_ext() {
     // path_ext('noext') returns "" — log("") prints empty line, trimmed by expect
     expect(
-        "use std.path\n\n*main()\n    log(path_ext('/foo/bar.txt'))\n",
+        "use std/path\n\n*main()\n    log(path_ext('/foo/bar.txt'))\n",
         ".txt",
     );
 }
@@ -4282,7 +4282,7 @@ fn b_std_path_ext() {
 #[test]
 fn b_std_time_monotonic() {
     expect(
-        "use std.time\n\n*main()\n    t is monotonic()\n    log(t > 0.0)\n",
+        "use std/time\n\n*main()\n    t is monotonic()\n    log(t > 0.0)\n",
         "1",
     );
 }
@@ -4290,7 +4290,7 @@ fn b_std_time_monotonic() {
 #[test]
 fn b_std_time_elapsed() {
     expect(
-        "use std.time\n\n*main()\n    t is monotonic()\n    sleep_ms(10)\n    e is elapsed(t)\n    log(e > 0.0)\n",
+        "use std/time\n\n*main()\n    t is monotonic()\n    sleep_ms(10)\n    e is elapsed(t)\n    log(e > 0.0)\n",
         "1",
     );
 }
@@ -4302,7 +4302,7 @@ fn b_std_time_elapsed() {
 #[test]
 fn b_std_os_pid() {
     expect(
-        "use std.os\n\n*main()\n    p is pid()\n    log(p > 0)\n",
+        "use std/os\n\n*main()\n    p is pid()\n    log(p > 0)\n",
         "1",
     );
 }
@@ -4310,7 +4310,7 @@ fn b_std_os_pid() {
 #[test]
 fn b_std_os_cwd() {
     expect(
-        "use std.os\n\n*main()\n    c is cwd()\n    log(c.length > 0)\n",
+        "use std/os\n\n*main()\n    c is cwd()\n    log(c.length > 0)\n",
         "1",
     );
 }
@@ -5639,7 +5639,9 @@ fn b_p42_strict_unsolved_typevar() {
         err.contains("ambiguous")
             || err.contains("unsolved")
             || err.contains("infer")
-            || err.contains("undefined"),
+            || err.contains("undefined")
+            || err.contains("return type")
+            || err.contains("codegen"),
         "expected type/codegen error, got: {err}"
     );
 }

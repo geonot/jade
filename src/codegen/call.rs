@@ -1,4 +1,4 @@
-use inkwell::types::BasicMetadataTypeEnum;
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue};
 
 use crate::hir;
@@ -121,8 +121,19 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_expr(obj)?
             };
             let mut a: Vec<BasicMetadataValueEnum<'ctx>> = vec![self_val.into()];
-            for arg in args {
-                a.push(self.compile_expr(arg)?.into());
+            let param_types = fv.get_type().get_param_types();
+            for (i, arg) in args.iter().enumerate() {
+                let mut val = self.compile_expr(arg)?;
+                // If the function expects a struct value but we have a pointer (e.g. self passed as arg),
+                // load the struct from the pointer.
+                if let Some(expected_ty) = param_types.get(i + 1) {
+                    if let Ok(basic_ty) = BasicTypeEnum::try_from(*expected_ty) {
+                        if basic_ty.is_struct_type() && val.is_pointer_value() {
+                            val = b!(self.bld.build_load(basic_ty, val.into_pointer_value(), "deref"));
+                        }
+                    }
+                }
+                a.push(val.into());
             }
             let csv = b!(self.bld.build_call(fv, &a, resolved_name));
             return Ok(self.call_result(csv));

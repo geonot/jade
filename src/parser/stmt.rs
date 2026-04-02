@@ -102,37 +102,44 @@ impl Parser {
             Token::Sim => {
                 let sp = self.span();
                 self.advance();
-                self.expect(Token::For)?;
-                let bind = self.ident()?;
-                if self.check(Token::From) {
+                if self.check(Token::For) {
                     self.advance();
+                    let bind = self.ident()?;
+                    if self.check(Token::From) {
+                        self.advance();
+                    } else {
+                        self.expect(Token::In)?;
+                    }
+                    let iter = self.parse_expr()?;
+                    let end = if self.check(Token::To) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    let step = if self.check(Token::By) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    self.expect(Token::Newline)?;
+                    Ok(Stmt::SimFor(For {
+                        label: None,
+                        bind,
+                        bind2: None,
+                        iter,
+                        end,
+                        step,
+                        body: self.parse_block()?,
+                        span: sp,
+                    }, sp))
                 } else {
-                    self.expect(Token::In)?;
+                    // sim block: run statements in parallel
+                    self.expect(Token::Newline)?;
+                    let body = self.parse_block()?;
+                    Ok(Stmt::SimBlock(body, sp))
                 }
-                let iter = self.parse_expr()?;
-                let end = if self.check(Token::To) {
-                    self.advance();
-                    Some(self.parse_expr()?)
-                } else {
-                    None
-                };
-                let step = if self.check(Token::By) {
-                    self.advance();
-                    Some(self.parse_expr()?)
-                } else {
-                    None
-                };
-                self.expect(Token::Newline)?;
-                Ok(Stmt::SimFor(For {
-                    label: None,
-                    bind,
-                    bind2: None,
-                    iter,
-                    end,
-                    step,
-                    body: self.parse_block()?,
-                    span: sp,
-                }, sp))
             }
             Token::Loop => {
                 let sp = self.span();

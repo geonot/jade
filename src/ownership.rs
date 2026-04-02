@@ -263,6 +263,9 @@ impl OwnershipVerifier {
                 self.verify_block_no_scope(&f.body);
                 self.pop_scope();
             }
+            Stmt::SimBlock(b, _) => {
+                self.verify_block_no_scope(b);
+            }
             Stmt::UseLocal(_, _, _, _) => {}
         }
     }
@@ -297,7 +300,9 @@ impl OwnershipVerifier {
                 for a in args {
                     if let ExprKind::Var(def_id, name) = &a.kind {
                         self.check_use(*def_id, name, a.span);
-                        self.record_move(*def_id, a.span);
+                        // Implicit borrow: Perceus RC handles copies at runtime.
+                        // Only record a borrow, not a move, so the variable
+                        // can be reused in subsequent expressions.
                     } else {
                         self.verify_expr(a);
                     }
@@ -309,7 +314,6 @@ impl OwnershipVerifier {
                 for a in args {
                     if let ExprKind::Var(def_id, name) = &a.kind {
                         self.check_use(*def_id, name, a.span);
-                        self.record_move(*def_id, a.span);
                     } else {
                         self.verify_expr(a);
                     }
@@ -322,7 +326,8 @@ impl OwnershipVerifier {
                 }
             }
 
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args) => {
+            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::DeferredMethod(obj, _, args) => {
                 self.verify_expr(obj);
                 for a in args {
                     self.verify_expr(a);
@@ -804,6 +809,7 @@ impl OwnershipVerifier {
                 for a in args { Self::collect_var_ids_expr(a, out); }
             }
             ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::DeferredMethod(obj, _, args)
             | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
                 Self::collect_var_ids_expr(obj, out);
                 for a in args { Self::collect_var_ids_expr(a, out); }

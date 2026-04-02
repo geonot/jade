@@ -188,6 +188,7 @@ impl HirValidator {
                 if let Some(e) = &f.step { self.validate_expr(e); }
                 self.validate_block(&f.body);
             }
+            hir::Stmt::SimBlock(b, _) => self.validate_block(b),
             hir::Stmt::UseLocal(_, _, _, _) => {}
         }
     }
@@ -245,6 +246,7 @@ impl HirValidator {
                 }
             }
             hir::ExprKind::StringMethod(obj, _, args)
+            | hir::ExprKind::DeferredMethod(obj, _, args)
             | hir::ExprKind::VecMethod(obj, _, args)
             | hir::ExprKind::MapMethod(obj, _, args)
             | hir::ExprKind::SetMethod(obj, _, args)
@@ -458,6 +460,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::ChannelClose(_, s) => *s,
         hir::Stmt::Stop(_, s) => *s,
         hir::Stmt::SimFor(_, s) => *s,
+        hir::Stmt::SimBlock(_, s) => *s,
         hir::Stmt::UseLocal(_, _, _, s) => *s,
     }
 }

@@ -1,0 +1,10 @@
+# Dispatch for-in test — iterate over a generator with for loop
+*main
+    gen is dispatch
+        for i in 5
+            yield i * i
+    total is 0
+    for x in gen
+        log(x)
+        total is total + x
+    log(total)

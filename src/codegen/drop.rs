@@ -80,10 +80,12 @@ impl<'ctx> Compiler<'ctx> {
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.drop_value(val, inner)?;
             }
-            // Coroutine, Channel, Fn, DynTrait, Cow — ptr-based, need
-            // runtime cooperation to drop correctly. For now, free the
-            // allocation if non-null.
-            Type::Coroutine(_) | Type::Channel(_) | Type::Cow(_) => {
+            // Coroutine — needs jade_gen_destroy to free both coroutine stack and gen block
+            Type::Coroutine(_) => {
+                self.drop_generator(val)?;
+            }
+            // Channel, Cow — ptr-based, free the allocation if non-null.
+            Type::Channel(_) | Type::Cow(_) => {
                 self.drop_ptr_allocated(val)?;
             }
             _ => {
@@ -277,6 +279,36 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(free_bb);
         b!(self.bld.build_call(free, &[ptr.into()], ""));
+        b!(self.bld.build_unconditional_branch(done_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(())
+    }
+
+    /// Drop a generator: calls jade_gen_destroy to free coroutine stack + gen block.
+    fn drop_generator(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let fv = self.cur_fn.unwrap();
+
+        let ptr = if val.is_pointer_value() {
+            val.into_pointer_value()
+        } else {
+            return Ok(());
+        };
+
+        self.declare_gen_runtime();
+        let gen_destroy = self.module.get_function("jade_gen_destroy").unwrap();
+
+        let null = ptr_ty.const_null();
+        let is_null = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ, ptr, null, "dg.null"
+        ));
+        let free_bb = self.ctx.append_basic_block(fv, "dg.free");
+        let done_bb = self.ctx.append_basic_block(fv, "dg.done");
+        b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
+
+        self.bld.position_at_end(free_bb);
+        b!(self.bld.build_call(gen_destroy, &[ptr.into()], ""));
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(done_bb);
