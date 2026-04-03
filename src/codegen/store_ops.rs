@@ -10,7 +10,7 @@ use super::b;
 use super::stores::HEADER_SIZE;
 
 impl<'ctx> Compiler<'ctx> {
-    fn store_read_count(
+    pub(crate) fn store_read_count(
         &mut self,
         fp: inkwell::values::PointerValue<'ctx>,
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
@@ -42,7 +42,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value())
     }
 
-    fn store_load_records(
+    pub(crate) fn store_load_records(
         &mut self,
         fp: inkwell::values::PointerValue<'ctx>,
         count: inkwell::values::IntValue<'ctx>,

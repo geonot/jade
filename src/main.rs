@@ -76,6 +76,9 @@ struct Cli {
     /// Enable incremental compilation (cache unchanged function artifacts)
     #[arg(long)]
     incremental: bool,
+    /// Use the MIR-based code generation backend instead of the HIR-based one
+    #[arg(long)]
+    mir_codegen: bool,
     /// Number of parallel codegen threads (0 = auto-detect)
     #[arg(long, default_value = "0")]
     threads: usize,
@@ -1104,7 +1107,7 @@ fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
     build_package_map(&cache, &resolved)
 }
 
-fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool) {
+fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool, mir_codegen_mode: bool) {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
@@ -1138,7 +1141,7 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     jadec::comptime::fold_program(&mut hir_prog);
 
     let mut perceus = PerceusPass::new();
-    let hints = perceus.optimize(&hir_prog);
+    let hir_hints = perceus.optimize(&hir_prog);
 
     let mut verifier = OwnershipVerifier::new();
     let diags = verifier.verify(&hir_prog);
@@ -1184,8 +1187,21 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     comp.set_source(&src);
     if fast_math { comp.set_fast_math(true); }
     if deterministic_fp { comp.set_deterministic_fp(); }
-    if let Err(e) = comp.compile_program(&hir_prog, hints) {
-        die(&format!("codegen: {e}"));
+
+    if mir_codegen_mode {
+        // MIR-based code generation path: use MIR Perceus for more precise analysis.
+        use jadec::codegen::mir_codegen::MirCodegen;
+        use jadec::perceus::mir_perceus;
+        let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
+        let mut mir_cg = MirCodegen::new(&mut comp);
+        if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
+            die(&format!("mir-codegen: {e}"));
+        }
+    } else {
+        // HIR-based code generation path (default).
+        if let Err(e) = comp.compile_program(&hir_prog, hir_hints) {
+            die(&format!("codegen: {e}"));
+        }
     }
 
     let opt = match opt_level {
@@ -1231,12 +1247,12 @@ fn main() {
                 let entry = find_project_entry();
                 let out = output.unwrap_or_else(|| PathBuf::from("a.out"));
                 let opt_level = opt.unwrap_or(3);
-                compile_and_link(&entry, &out, opt_level, lto, false, false, cli.fast_math, cli.deterministic_fp, cli.emit_mir, cli.incremental);
+                compile_and_link(&entry, &out, opt_level, lto, false, false, cli.fast_math, cli.deterministic_fp, cli.emit_mir, cli.incremental, cli.mir_codegen);
             }
             Cmd::Run { args } => {
                 let entry = find_project_entry();
                 let out = PathBuf::from("./.jade_run_tmp");
-                compile_and_link(&entry, &out, 2, false, false, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
+                compile_and_link(&entry, &out, 2, false, false, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental, cli.mir_codegen);
                 let status = Command::new(&out).args(&args).status();
                 let _ = fs::remove_file(&out);
                 match status {
@@ -1246,7 +1262,7 @@ fn main() {
             }
             Cmd::Test => {
                 let entry = find_project_entry();
-                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
+                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental, false);
                 let status = Command::new("./.jade_test_tmp").status();
                 let _ = fs::remove_file("./.jade_test_tmp");
                 match status {
@@ -1530,8 +1546,42 @@ fn main() {
     if cli.deterministic_fp {
         comp.set_deterministic_fp();
     }
-    if let Err(e) = comp.compile_program(&hir_prog, hints) {
-        die(&format!("codegen: {e}"));
+
+    if cli.mir_codegen {
+        // MIR-based code generation path: use MIR Perceus for more precise analysis.
+        use jadec::codegen::mir_codegen::MirCodegen;
+        use jadec::perceus::mir_perceus;
+        let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
+        if mir_hints.stats.drops_elided > 0
+            || mir_hints.stats.reuse_sites > 0
+            || mir_hints.stats.borrows_promoted > 0
+            || mir_hints.stats.fbip_sites > 0
+            || mir_hints.stats.tail_reuse_sites > 0
+            || mir_hints.stats.speculative_reuse_sites > 0
+            || mir_hints.stats.pool_hints_found > 0
+        {
+            eprintln!(
+                "mir-perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative, {} pool-hints, {} drops-fused ({} bindings)",
+                mir_hints.stats.drops_elided,
+                mir_hints.stats.reuse_sites,
+                mir_hints.stats.borrows_promoted,
+                mir_hints.stats.fbip_sites,
+                mir_hints.stats.tail_reuse_sites,
+                mir_hints.stats.speculative_reuse_sites,
+                mir_hints.stats.pool_hints_found,
+                mir_hints.stats.drops_fused,
+                mir_hints.stats.total_bindings_analyzed,
+            );
+        }
+        let mut mir_cg = MirCodegen::new(&mut comp);
+        if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
+            die(&format!("mir-codegen: {e}"));
+        }
+    } else {
+        // HIR-based code generation path (default).
+        if let Err(e) = comp.compile_program(&hir_prog, hints) {
+            die(&format!("codegen: {e}"));
+        }
     }
 
     if cli.emit_ir {

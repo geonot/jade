@@ -157,6 +157,9 @@ pub enum InstKind {
     /// Copy/move — eliminated by copy propagation.
     Copy(ValueId),
 
+    /// Reference to a named top-level function, used as a first-class value.
+    FnRef(String),
+
     Slice(ValueId, ValueId, ValueId),
 
     // ── Collections (needed for fusion/deforestation optimization) ──

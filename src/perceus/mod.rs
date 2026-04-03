@@ -96,6 +96,7 @@ pub struct PerceusPass {
 }
 
 mod analysis;
+pub mod mir_perceus;
 mod uses;
 
 impl PerceusPass {

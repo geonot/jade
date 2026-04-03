@@ -96,6 +96,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::MethodCall(obj, name, args) => format!("method_call {obj}.{name}({})", fmt_args(args)),
         InstKind::IndirectCall(f, args) => format!("indirect_call {f}({})", fmt_args(args)),
 
+        InstKind::FnRef(name) => format!("fn_ref {name}"),
         InstKind::Load(name) => format!("load {name}"),
         InstKind::Store(name, val) => format!("store {name} {val}"),
 

@@ -12,6 +12,7 @@ mod fmt;
 mod lambda;
 mod loops;
 mod map;
+pub mod mir_codegen;
 mod pattern_match;
 mod rc;
 mod stmt;
@@ -701,7 +702,7 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    fn uses_concurrency(prog: &hir::Program) -> bool {
+    pub(crate) fn uses_concurrency(prog: &hir::Program) -> bool {
         use crate::hir::{ExprKind, Stmt};
         fn scan_expr(e: &hir::Expr) -> bool {
             match &e.kind {
@@ -758,7 +759,7 @@ impl<'ctx> Compiler<'ctx> {
                 .any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
     }
 
-    fn uses_pool(prog: &hir::Program) -> bool {
+    pub(crate) fn uses_pool(prog: &hir::Program) -> bool {
         use crate::hir::{BuiltinFn, ExprKind, Stmt};
         fn has_pool(e: &hir::Expr) -> bool {
             matches!(&e.kind,

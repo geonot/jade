@@ -2,9 +2,9 @@
 //!
 //! Converts HIR functions into MIR basic blocks with explicit control flow.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind};
+use crate::hir::{self, ExprKind, Pat};
 use crate::types::Type;
 use super::*;
 
@@ -12,18 +12,18 @@ use super::*;
 pub fn lower_program(prog: &hir::Program) -> Program {
     let mut functions = Vec::new();
     for f in &prog.fns {
-        functions.push(lower_function(f));
+        functions.extend(lower_function(f));
     }
     // Also lower type methods
     for td in &prog.types {
         for m in &td.methods {
-            functions.push(lower_function(m));
+            functions.extend(lower_function(m));
         }
     }
     // Also lower trait impl methods
     for ti in &prog.trait_impls {
         for m in &ti.methods {
-            functions.push(lower_function(m));
+            functions.extend(lower_function(m));
         }
     }
     let types = prog.types.iter().map(|td| TypeDef {
@@ -42,7 +42,12 @@ struct Lowerer {
     func: Function,
     current_block: BlockId,
     var_map: HashMap<String, ValueId>,
+    /// Variables that are backed by memory (Store/Load) instead of var_map.
+    /// Used for variables reassigned inside loops or branches.
+    mem_vars: HashSet<String>,
     loop_stack: Vec<(BlockId, BlockId)>, // (continue_target, break_target)
+    /// Lambda functions generated during lowering (added to the program).
+    lambda_fns: Vec<Function>,
 }
 
 impl Lowerer {
@@ -69,7 +74,9 @@ impl Lowerer {
             func,
             current_block: entry,
             var_map: HashMap::new(),
+            mem_vars: HashSet::new(),
             loop_stack: Vec::new(),
+            lambda_fns: Vec::new(),
         }
     }
 
@@ -115,12 +122,63 @@ impl Lowerer {
         });
     }
 
+    /// Emit an instruction with no destination but carrying a type annotation.
+    /// Used for Store instructions so the variable type is preserved.
+    fn emit_void_typed(&mut self, kind: InstKind, ty: Type, span: Span) {
+        self.func.block_mut(self.current_block).insts.push(Instruction {
+            dest: None,
+            kind,
+            ty,
+            span,
+            def_id: None,
+        });
+    }
+
     fn set_terminator(&mut self, term: Terminator) {
         self.func.block_mut(self.current_block).terminator = term;
     }
 
     fn switch_to(&mut self, block: BlockId) {
         self.current_block = block;
+    }
+
+    fn current_block_has_terminator(&self) -> bool {
+        !matches!(
+            self.func.block(self.current_block).terminator,
+            Terminator::Unreachable
+        )
+    }
+
+    /// Try to extract an integer constant from a ValueId by scanning the
+    /// current function's instructions.
+    fn try_extract_int_const(&self, val: ValueId) -> Option<i64> {
+        for bb in &self.func.blocks {
+            for inst in &bb.insts {
+                if inst.dest == Some(val) {
+                    if let InstKind::IntConst(n) = &inst.kind {
+                        return Some(*n);
+                    }
+                    return None;
+                }
+            }
+        }
+        None
+    }
+
+    /// Look up the type of a ValueId by scanning instructions and params.
+    fn value_type(&self, val: ValueId) -> Type {
+        for p in &self.func.params {
+            if p.value == val { return p.ty.clone(); }
+        }
+        for bb in &self.func.blocks {
+            for phi in &bb.phis {
+                if phi.dest == val { return phi.ty.clone(); }
+            }
+            for inst in &bb.insts {
+                if inst.dest == Some(val) { return inst.ty.clone(); }
+            }
+        }
+        Type::I64 // fallback
     }
 
     fn lower_expr(&mut self, expr: &hir::Expr) -> ValueId {
@@ -303,7 +361,7 @@ impl Lowerer {
             }
 
             ExprKind::FnRef(_, name) => {
-                self.emit(InstKind::Load(name.clone()), ty, span)
+                self.emit(InstKind::FnRef(name.clone()), ty, span)
             }
 
             ExprKind::VariantRef(enum_name, variant_name, tag) => {
@@ -315,27 +373,69 @@ impl Lowerer {
             }
 
             ExprKind::Lambda(params, body) => {
-                // Create a closure: lower captured variables and the body as a
-                // named inner function. The closure name is auto-generated.
+                // Lower the lambda body as a separate MIR function.
+                // Captured variables become leading parameters; declared params follow.
                 let lambda_name = format!("lambda.{}", self.func.next_value);
-                let captures: Vec<ValueId> = {
-                    let mut cap_vals = Vec::new();
-                    // Collect variables referenced in body that are in our var_map
-                    // but not declared as lambda parameters
-                    let param_names: std::collections::HashSet<&str> =
-                        params.iter().map(|p| p.name.as_str()).collect();
-                    let mut refs = std::collections::HashSet::new();
-                    Self::collect_expr_var_refs_block(body, &mut refs);
-                    for name in &refs {
-                        if !param_names.contains(name.as_str()) {
-                            if let Some(&val) = self.var_map.get(name) {
-                                cap_vals.push(val);
-                            }
+
+                // Collect captured variable (name, ValueId, Type) triples.
+                let param_names: std::collections::HashSet<&str> =
+                    params.iter().map(|p| p.name.as_str()).collect();
+                let mut refs = std::collections::HashSet::new();
+                Self::collect_expr_var_refs_block(body, &mut refs);
+                let mut capture_info: Vec<(String, ValueId, Type)> = Vec::new();
+                for name in &refs {
+                    if !param_names.contains(name.as_str()) {
+                        if let Some(&val) = self.var_map.get(name) {
+                            let cap_ty = self.value_type(val);
+                            capture_info.push((name.clone(), val, cap_ty));
                         }
                     }
-                    cap_vals
-                };
-                self.emit(InstKind::ClosureCreate(lambda_name, captures), ty, span)
+                }
+                let capture_vals: Vec<ValueId> = capture_info.iter().map(|(_, v, _)| *v).collect();
+
+                // Determine return type from the closure's type annotation.
+                let ret_ty = if let Type::Fn(_, r) = &ty { *r.clone() } else { Type::I64 };
+
+                // Create a new Lowerer for the lambda function.
+                let mut lambda_lowerer = Lowerer::new(&lambda_name, crate::hir::DefId(0), span);
+                lambda_lowerer.func.ret_ty = ret_ty;
+
+                // Add capture parameters first.
+                for (cap_name, _, cap_ty) in &capture_info {
+                    let val = lambda_lowerer.new_value();
+                    lambda_lowerer.func.params.push(Param {
+                        value: val,
+                        name: cap_name.clone(),
+                        ty: cap_ty.clone(),
+                    });
+                    lambda_lowerer.var_map.insert(cap_name.clone(), val);
+                }
+
+                // Add declared parameters.
+                for p in params {
+                    let val = lambda_lowerer.new_value();
+                    lambda_lowerer.func.params.push(Param {
+                        value: val,
+                        name: p.name.clone(),
+                        ty: p.ty.clone(),
+                    });
+                    lambda_lowerer.var_map.insert(p.name.clone(), val);
+                }
+
+                // Lower the lambda body.
+                let mut last = lambda_lowerer.emit(InstKind::Void, Type::Void, span);
+                for stmt in body {
+                    last = lambda_lowerer.lower_stmt(stmt);
+                }
+                if !lambda_lowerer.current_block_has_terminator() {
+                    lambda_lowerer.set_terminator(Terminator::Return(Some(last)));
+                }
+
+                // Collect the lambda function and any nested lambdas.
+                self.lambda_fns.push(lambda_lowerer.func);
+                self.lambda_fns.append(&mut lambda_lowerer.lambda_fns);
+
+                self.emit(InstKind::ClosureCreate(lambda_name, capture_vals), ty, span)
             }
 
             ExprKind::Coerce(inner, _) => self.lower_expr(inner),
@@ -376,23 +476,29 @@ impl Lowerer {
 
                 let cond_bb = self.new_block("listcomp.cond");
                 let body_bb = self.new_block("listcomp.body");
+                let inc_bb = self.new_block("listcomp.inc");
                 let exit_bb = self.new_block("listcomp.exit");
 
-                // Create loop index
-                let idx = self.emit(InstKind::IntConst(0), Type::I64, span);
+                // Create loop index using Store/Load.
+                let zero = self.emit(InstKind::IntConst(0), Type::I64, span);
+                let one = self.emit(InstKind::IntConst(1), Type::I64, span);
                 let end_val = if let Some(e) = end {
                     self.lower_expr(e)
                 } else {
                     self.emit(InstKind::VecLen(iter_val), Type::I64, span)
                 };
-                self.var_map.insert(bind.clone(), idx);
+                let idx_name = format!("__listcomp_idx_{bind}");
+                self.emit_void_typed(InstKind::Store(idx_name.clone(), zero), Type::I64, span);
 
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
+                let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, span);
                 let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, end_val), Type::Bool, span);
                 self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                 self.switch_to(body_bb);
+                // Bind the loop variable.
+                self.var_map.insert(bind.clone(), idx);
                 let elem_val = self.lower_expr(body_expr);
                 if let Some(c) = cond {
                     let filter_bb = self.new_block("listcomp.filter");
@@ -402,14 +508,21 @@ impl Lowerer {
 
                     self.switch_to(push_bb);
                     self.emit_void(InstKind::VecPush(vec_val, elem_val), span);
-                    self.set_terminator(Terminator::Goto(cond_bb));
+                    self.set_terminator(Terminator::Goto(inc_bb));
 
                     self.switch_to(filter_bb);
-                    self.set_terminator(Terminator::Goto(cond_bb));
+                    self.set_terminator(Terminator::Goto(inc_bb));
                 } else {
                     self.emit_void(InstKind::VecPush(vec_val, elem_val), span);
-                    self.set_terminator(Terminator::Goto(cond_bb));
+                    self.set_terminator(Terminator::Goto(inc_bb));
                 }
+
+                // Increment index.
+                self.switch_to(inc_bb);
+                let cur_idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, span);
+                let next_idx = self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, span);
+                self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, span);
+                self.set_terminator(Terminator::Goto(cond_bb));
 
                 self.switch_to(exit_bb);
                 vec_val
@@ -439,6 +552,21 @@ impl Lowerer {
             }
 
             ExprKind::Select(arms, default) => {
+                // Demote variables assigned in any arm to memory (Store/Load)
+                // so the merge point sees correct values.
+                let mut assigned = HashSet::new();
+                for arm in arms.iter() {
+                    Self::collect_assigned_vars(&arm.body, &mut assigned);
+                }
+                if let Some(def_body) = default {
+                    Self::collect_assigned_vars(def_body, &mut assigned);
+                }
+                let pre_existing: HashSet<String> = assigned.iter()
+                    .filter(|n| self.var_map.contains_key(*n))
+                    .cloned()
+                    .collect();
+                self.demote_vars_to_memory(&pre_existing, span);
+
                 // Lower select as a SelectArm with all channel values
                 let ch_vals: Vec<ValueId> = arms.iter().map(|arm| {
                     self.lower_expr(&arm.chan)
@@ -453,8 +581,12 @@ impl Lowerer {
                         cases.push((i as i64, arm_bb));
                         self.switch_to(arm_bb);
                         if let Some(bind_name) = &arm.binding {
-                            let recv_val = self.emit(InstKind::ChanRecv(
-                                ch_vals[i]
+                            // Use __select_recv instead of ChanRecv — jade_select
+                            // already received the data into the case data buffer.
+                            let idx_val = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
+                            let recv_val = self.emit(InstKind::Call(
+                                "__select_recv".to_string(),
+                                vec![select_val, idx_val],
                             ), arm.elem_ty.clone(), span);
                             self.var_map.insert(bind_name.clone(), recv_val);
                         }
@@ -513,8 +645,9 @@ impl Lowerer {
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 match builtin {
                     BuiltinFn::Log => {
+                        let arg_ty = args.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
                         let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
-                        self.emit(InstKind::Log(v), ty, span)
+                        self.emit(InstKind::Log(v), arg_ty, span)
                     }
                     BuiltinFn::Assert => {
                         let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
@@ -574,8 +707,22 @@ impl Lowerer {
             }
 
             // Store operations — opaque calls
-            ExprKind::StoreQuery(store_name, _filter) => {
-                self.emit(InstKind::Call(format!("__store_query_{store_name}"), vec![]), ty, span)
+            ExprKind::StoreQuery(store_name, filter) => {
+                let filter_val = self.lower_expr(&filter.value);
+                // Encode field name and op in the call name for codegen
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                self.emit(InstKind::Call(
+                    format!("__store_query_{store_name}__{}__{op_str}", filter.field),
+                    vec![filter_val],
+                ), ty, span)
             }
             ExprKind::StoreCount(store_name) => {
                 self.emit(InstKind::Call(format!("__store_count_{store_name}"), vec![]), ty, span)
@@ -662,7 +809,19 @@ impl Lowerer {
                 {
                     inst.def_id = Some(b.def_id);
                 }
-                self.var_map.insert(b.name.clone(), val);
+                if self.mem_vars.contains(&b.name) {
+                    // Variable is memory-backed (reassigned in a loop/branch).
+                    // Emit Store with the variable's type so codegen allocas are correct.
+                    self.func.block_mut(self.current_block).insts.push(Instruction {
+                        dest: None,
+                        kind: InstKind::Store(b.name.clone(), val),
+                        ty: b.ty.clone(),
+                        span: b.span,
+                        def_id: None,
+                    });
+                } else {
+                    self.var_map.insert(b.name.clone(), val);
+                }
                 val
             }
 
@@ -670,11 +829,30 @@ impl Lowerer {
                 let val = self.lower_expr(value);
                 match &target.kind {
                     ExprKind::Var(_, name) => {
-                        self.var_map.insert(name.clone(), val);
+                        if self.mem_vars.contains(name) {
+                            // Use the value's type from the expression.
+                            self.func.block_mut(self.current_block).insts.push(Instruction {
+                                dest: None,
+                                kind: InstKind::Store(name.clone(), val),
+                                ty: value.ty.clone(),
+                                span: target.span,
+                                def_id: None,
+                            });
+                        } else {
+                            self.var_map.insert(name.clone(), val);
+                        }
                     }
                     ExprKind::Field(obj, field, _) => {
                         let obj_val = self.lower_expr(obj);
-                        self.emit_void(InstKind::FieldSet(obj_val, field.clone(), val), target.span);
+                        // Pass the obj's type so codegen can find the struct layout.
+                        let obj_ty = obj.ty.clone();
+                        self.func.block_mut(self.current_block).insts.push(Instruction {
+                            dest: None,
+                            kind: InstKind::FieldSet(obj_val, field.clone(), val),
+                            ty: obj_ty,
+                            span: target.span,
+                            def_id: None,
+                        });
                     }
                     ExprKind::Index(arr, idx) => {
                         let a = self.lower_expr(arr);
@@ -689,45 +867,127 @@ impl Lowerer {
             hir::Stmt::Expr(e) => self.lower_expr(e),
 
             hir::Stmt::If(if_stmt) => {
+                // Demote variables assigned in any branch to memory
+                // so the merge point gets the correct value via Load.
+                let mut assigned = HashSet::new();
+                Self::collect_assigned_vars(&if_stmt.then, &mut assigned);
+                for (_, elif_body) in &if_stmt.elifs {
+                    Self::collect_assigned_vars(elif_body, &mut assigned);
+                }
+                if let Some(els) = &if_stmt.els {
+                    Self::collect_assigned_vars(els, &mut assigned);
+                }
+                // Only demote vars that already exist in var_map (were defined before if).
+                let pre_existing: HashSet<String> = assigned.iter()
+                    .filter(|n| self.var_map.contains_key(*n))
+                    .cloned()
+                    .collect();
+                self.demote_vars_to_memory(&pre_existing, if_stmt.span);
+
                 let cond = self.lower_expr(&if_stmt.cond);
                 let then_bb = self.new_block("if.then");
                 let merge_bb = self.new_block("if.merge");
-                let has_else = if_stmt.els.is_some();
-                let else_bb = if has_else {
+
+                // Determine the false-branch target:
+                // elif chain first, then else, then merge.
+                let first_elif_bb = if !if_stmt.elifs.is_empty() {
+                    Some(self.new_block("elif.test"))
+                } else {
+                    None
+                };
+                let else_bb = if if_stmt.els.is_some() && first_elif_bb.is_none() {
                     self.new_block("if.else")
                 } else {
-                    merge_bb
+                    first_elif_bb.unwrap_or(merge_bb)
                 };
 
                 self.set_terminator(Terminator::Branch(cond, then_bb, else_bb));
 
                 self.switch_to(then_bb);
-                self.lower_block_stmts(&if_stmt.then);
+                let then_val = self.lower_block_expr(&if_stmt.then);
+                let then_end = self.current_block;
                 self.set_terminator(Terminator::Goto(merge_bb));
 
-                if let Some(els) = &if_stmt.els {
-                    self.switch_to(else_bb);
-                    self.lower_block_stmts(els);
-                    self.set_terminator(Terminator::Goto(merge_bb));
-                }
-
-                for (elif_cond, elif_body) in &if_stmt.elifs {
-                    let elif_test = self.new_block("elif.test");
+                // Lower elif chains.
+                let mut elif_vals: Vec<(BlockId, ValueId)> = Vec::new();
+                let mut prev_false_bb = first_elif_bb;
+                for (i, (elif_cond, elif_body)) in if_stmt.elifs.iter().enumerate() {
+                    let elif_test = prev_false_bb.unwrap();
                     let elif_body_bb = self.new_block("elif.body");
+
+                    // Determine where a false elif branches to.
+                    let is_last_elif = i + 1 == if_stmt.elifs.len();
+                    let elif_false_bb = if is_last_elif {
+                        if if_stmt.els.is_some() {
+                            Some(self.new_block("if.else"))
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(self.new_block("elif.test"))
+                    };
+
                     self.switch_to(elif_test);
                     let c = self.lower_expr(elif_cond);
-                    self.set_terminator(Terminator::Branch(c, elif_body_bb, merge_bb));
+                    self.set_terminator(Terminator::Branch(
+                        c,
+                        elif_body_bb,
+                        elif_false_bb.unwrap_or(merge_bb),
+                    ));
 
                     self.switch_to(elif_body_bb);
-                    self.lower_block_stmts(elif_body);
+                    let elif_val = self.lower_block_expr(elif_body);
+                    let elif_end = self.current_block;
                     self.set_terminator(Terminator::Goto(merge_bb));
+                    elif_vals.push((elif_end, elif_val));
+
+                    prev_false_bb = elif_false_bb;
                 }
 
+                let else_val_info = if let Some(els) = &if_stmt.els {
+                    // The else block target was the last false branch.
+                    let else_target = prev_false_bb.unwrap_or(else_bb);
+                    self.switch_to(else_target);
+                    let else_val = self.lower_block_expr(els);
+                    let else_end = self.current_block;
+                    self.set_terminator(Terminator::Goto(merge_bb));
+                    Some((else_end, else_val))
+                } else {
+                    None
+                };
+
                 self.switch_to(merge_bb);
-                self.emit(InstKind::Void, Type::Void, if_stmt.span)
+
+                // If all branches produce non-void values, insert a phi at merge.
+                let then_ty = self.value_type(then_val);
+                if !matches!(then_ty, Type::Void) && else_val_info.is_some() {
+                    let mut incoming = vec![(then_end, then_val)];
+                    for &(bb, v) in &elif_vals {
+                        incoming.push((bb, v));
+                    }
+                    if let Some((eb, ev)) = else_val_info {
+                        incoming.push((eb, ev));
+                    }
+                    let result = self.new_value();
+                    self.func.block_mut(merge_bb).phis.push(Phi {
+                        dest: result,
+                        ty: then_ty,
+                        incoming,
+                    });
+                    result
+                } else {
+                    self.emit(InstKind::Void, Type::Void, if_stmt.span)
+                }
             }
 
             hir::Stmt::While(w) => {
+                // Demote variables assigned inside loop body to memory
+                // so each iteration re-reads the current value via Load.
+                let mut assigned = HashSet::new();
+                Self::collect_assigned_vars(&w.body, &mut assigned);
+                // Also check condition for assigned vars (unlikely but safe)
+                self.demote_vars_to_memory(&assigned, w.span);
+
                 let cond_bb = self.new_block("while.cond");
                 let body_bb = self.new_block("while.body");
                 let exit_bb = self.new_block("while.exit");
@@ -740,7 +1000,9 @@ impl Lowerer {
                 self.loop_stack.push((cond_bb, exit_bb));
                 self.switch_to(body_bb);
                 self.lower_block_stmts(&w.body);
-                self.set_terminator(Terminator::Goto(cond_bb));
+                if !self.current_block_has_terminator() {
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                }
                 self.loop_stack.pop();
 
                 self.switch_to(exit_bb);
@@ -748,28 +1010,148 @@ impl Lowerer {
             }
 
             hir::Stmt::For(f) => {
-                // TODO: proper iterator protocol — for now, lower body in a loop
-                let _iter = self.lower_expr(&f.iter);
+                // Demote variables assigned inside for loop body to memory
+                // so each iteration re-reads the current value via Load.
+                let mut assigned = HashSet::new();
+                Self::collect_assigned_vars(&f.body, &mut assigned);
+                self.demote_vars_to_memory(&assigned, f.span);
+
+                // Range-based for: `for i in start..end`
+                // If `end` is present, this is a range for; otherwise iterate
+                // the collection via index.
+                let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("for.cond");
                 let body_bb = self.new_block("for.body");
+                let inc_bb = self.new_block("for.inc");
                 let exit_bb = self.new_block("for.exit");
 
-                self.set_terminator(Terminator::Goto(cond_bb));
-                self.switch_to(cond_bb);
-                let cond = self.emit(InstKind::BoolConst(false), Type::Bool, f.span);
-                self.set_terminator(Terminator::Branch(cond, body_bb, exit_bb));
+                if let Some(ref end_expr) = f.end {
+                    // Range for: iter_val = start, end = end_expr
+                    let end_val = self.lower_expr(end_expr);
+                    let step_val = if let Some(ref step_expr) = f.step {
+                        self.lower_expr(step_expr)
+                    } else {
+                        self.emit(InstKind::IntConst(1), Type::I64, f.span)
+                    };
 
-                self.loop_stack.push((cond_bb, exit_bb));
-                self.switch_to(body_bb);
-                self.lower_block_stmts(&f.body);
-                self.set_terminator(Terminator::Goto(cond_bb));
-                self.loop_stack.pop();
+                    // Store counter as a variable.
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), iter_val), f.bind_ty.clone(), f.span);
+                    self.var_map.insert(f.bind.clone(), iter_val);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    // Condition: load counter, compare < end.
+                    self.switch_to(cond_bb);
+                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, f.span);
+                    self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                    // Body
+                    self.loop_stack.push((inc_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    // Re-bind the loop variable to the loaded counter so body can use it.
+                    self.var_map.insert(f.bind.clone(), counter);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(inc_bb));
+                    self.loop_stack.pop();
+
+                    // Increment
+                    self.switch_to(inc_bb);
+                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, step_val), f.bind_ty.clone(), f.span);
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), f.span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                } else if matches!(f.iter.ty, Type::I64 | Type::I32 | Type::F64) {
+                    // Range for with implicit start=0: `for i in N` means 0..N
+                    let zero = self.emit(InstKind::IntConst(0), Type::I64, f.span);
+                    let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
+                    let end_val = iter_val;
+
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), zero), f.bind_ty.clone(), f.span);
+                    self.var_map.insert(f.bind.clone(), zero);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    self.switch_to(cond_bb);
+                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, f.span);
+                    self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                    self.loop_stack.push((inc_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    self.var_map.insert(f.bind.clone(), counter);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(inc_bb));
+                    self.loop_stack.pop();
+
+                    self.switch_to(inc_bb);
+                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, one), f.bind_ty.clone(), f.span);
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), f.span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                } else if matches!(f.iter.ty, Type::Coroutine(_) | Type::Generator(_)) {
+                    // Generator/coroutine for: resume loop.
+                    // cond: resume gen; done = __gen_done(gen); branch !done ? body : exit
+                    // body: val = __gen_next_val(gen); bind = val; ... body ...; goto cond
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    self.switch_to(cond_bb);
+                    // Resume the generator
+                    let _resume = self.emit(InstKind::Call("__gen_resume".into(), vec![iter_val]), Type::Void, f.span);
+                    // Check done flag
+                    let done = self.emit(InstKind::Call("__gen_done".into(), vec![iter_val]), Type::Bool, f.span);
+                    // Branch: if done, exit; else body
+                    self.set_terminator(Terminator::Branch(done, exit_bb, body_bb));
+
+                    // Body: read yielded value and bind it
+                    self.loop_stack.push((cond_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    let val = self.emit(InstKind::Call("__gen_next_val".into(), vec![iter_val]), f.bind_ty.clone(), f.span);
+                    self.var_map.insert(f.bind.clone(), val);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                    self.loop_stack.pop();
+                } else {
+                    // Collection for: iterate with index.
+                    // Get length.
+                    let len = self.emit(InstKind::VecLen(iter_val), Type::I64, f.span);
+                    let zero = self.emit(InstKind::IntConst(0), Type::I64, f.span);
+                    let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
+                    let idx_name = format!("__for_idx_{}", f.bind);
+                    self.emit_void_typed(InstKind::Store(idx_name.clone(), zero), Type::I64, f.span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    // Condition: idx < len.
+                    self.switch_to(cond_bb);
+                    let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, f.span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len), Type::Bool, f.span);
+                    self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                    // Body: bind element.
+                    self.loop_stack.push((inc_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), f.span);
+                    self.var_map.insert(f.bind.clone(), elem);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(inc_bb));
+                    self.loop_stack.pop();
+
+                    // Increment index.
+                    self.switch_to(inc_bb);
+                    let cur_idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, f.span);
+                    let next_idx = self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, f.span);
+                    self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, f.span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                }
 
                 self.switch_to(exit_bb);
                 self.emit(InstKind::Void, Type::Void, f.span)
             }
 
             hir::Stmt::Loop(l) => {
+                // Demote variables assigned inside loop body to memory.
+                let mut assigned = HashSet::new();
+                Self::collect_assigned_vars(&l.body, &mut assigned);
+                self.demote_vars_to_memory(&assigned, l.span);
+
                 let body_bb = self.new_block("loop.body");
                 let exit_bb = self.new_block("loop.exit");
 
@@ -777,7 +1159,9 @@ impl Lowerer {
                 self.loop_stack.push((body_bb, exit_bb));
                 self.switch_to(body_bb);
                 self.lower_block_stmts(&l.body);
-                self.set_terminator(Terminator::Goto(body_bb));
+                if !self.current_block_has_terminator() {
+                    self.set_terminator(Terminator::Goto(body_bb));
+                }
                 self.loop_stack.pop();
 
                 self.switch_to(exit_bb);
@@ -818,6 +1202,17 @@ impl Lowerer {
             }
 
             hir::Stmt::Match(m) => {
+                // Demote variables assigned in any match arm to memory.
+                let mut assigned = HashSet::new();
+                for arm in &m.arms {
+                    Self::collect_assigned_vars(&arm.body, &mut assigned);
+                }
+                // Only demote pre-existing variables (new bindings in arms are fine).
+                let pre_existing: HashSet<String> = assigned.into_iter()
+                    .filter(|v| self.var_map.contains_key(v))
+                    .collect();
+                self.demote_vars_to_memory(&pre_existing, m.span);
+
                 let subj = self.lower_expr(&m.subject);
                 let merge_bb = self.new_block("match.merge");
 
@@ -826,26 +1221,173 @@ impl Lowerer {
                     return self.emit(InstKind::Void, Type::Void, m.span);
                 }
 
-                let mut next_test = self.current_block;
-                for arm in &m.arms {
-                    let arm_bb = self.new_block("match.arm");
-                    let next_bb = self.new_block("match.next");
+                // Check if this is an integer/enum tag match (Switch) or
+                // needs sequential comparison (if-else chain).
+                let is_enum = matches!(m.subject.ty, Type::Enum(_));
+                let has_ctor = m.arms.iter().any(|a| matches!(a.pat, Pat::Ctor(..)));
+                let all_lit = m.arms.iter().all(|a| matches!(a.pat, Pat::Lit(_) | Pat::Wild(_)));
+                let result_ty = m.ty.clone();
+                let has_result = !matches!(result_ty, Type::Void);
 
-                    self.switch_to(next_test);
-                    self.set_terminator(Terminator::Goto(arm_bb));
+                // Track (value, block) pairs from each arm for Phi creation.
+                let mut phi_entries: Vec<(ValueId, BlockId)> = Vec::new();
 
-                    self.switch_to(arm_bb);
-                    self.lower_block_stmts(&arm.body);
-                    self.set_terminator(Terminator::Goto(merge_bb));
+                if is_enum || has_ctor || all_lit {
+                    // Switch-based match on integer/enum discriminant.
+                    let disc = if is_enum || has_ctor {
+                        // Extract tag from variant.
+                        self.emit(InstKind::FieldGet(subj, "__tag".into()), Type::I64, m.span)
+                    } else {
+                        subj
+                    };
 
-                    next_test = next_bb;
+                    let mut cases: Vec<(i64, BlockId)> = Vec::new();
+                    let mut has_explicit_default = false;
+                    let unreach_bb = self.new_block("match.unreach");
+                    let mut default_bb = unreach_bb;
+                    let mut arm_blocks = Vec::new();
+
+                    for arm in &m.arms {
+                        let arm_bb = self.new_block("match.arm");
+                        arm_blocks.push((arm_bb, arm));
+
+                        match &arm.pat {
+                            Pat::Lit(lit_expr) => {
+                                // Lower the literal to get its constant value.
+                                let lit_val = self.lower_expr(lit_expr);
+                                // Find the integer constant if possible.
+                                if let Some(ival) = self.try_extract_int_const(lit_val) {
+                                    cases.push((ival, arm_bb));
+                                } else {
+                                    // Non-integer literal — fallback, use as default.
+                                    default_bb = arm_bb;
+                                }
+                            }
+                            Pat::Ctor(_, tag, _, _) => {
+                                cases.push((*tag as i64, arm_bb));
+                            }
+                            Pat::Wild(_) => {
+                                default_bb = arm_bb;
+                                has_explicit_default = true;
+                            }
+                            _ => {
+                                default_bb = arm_bb;
+                                has_explicit_default = true;
+                            }
+                        }
+                    }
+
+                    self.set_terminator(Terminator::Switch(disc, cases, default_bb));
+
+                    // If no explicit default arm, make the unreachable block dead.
+                    if !has_explicit_default {
+                        self.switch_to(unreach_bb);
+                        // This block should never be reached; leave as Unreachable.
+                    }
+
+                    for (arm_bb, arm) in arm_blocks {
+                        self.switch_to(arm_bb);
+                        // Bind pattern variables for Ctor patterns.
+                        if let Pat::Ctor(_, _, sub_pats, _) = &arm.pat {
+                            for (i, sp) in sub_pats.iter().enumerate() {
+                                if let Pat::Bind(_, name, ty, _) = sp {
+                                    let field = self.emit(
+                                        InstKind::FieldGet(subj, format!("_{i}")),
+                                        ty.clone(),
+                                        arm.span,
+                                    );
+                                    self.var_map.insert(name.clone(), field);
+                                }
+                            }
+                        }
+                        if let Pat::Bind(_, name, _ty, _) = &arm.pat {
+                            self.var_map.insert(name.clone(), subj);
+                        }
+                        let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
+                        for s in &arm.body {
+                            arm_last = self.lower_stmt(s);
+                        }
+                        if !self.current_block_has_terminator() {
+                            if has_result {
+                                phi_entries.push((arm_last, self.current_block));
+                            }
+                            self.set_terminator(Terminator::Goto(merge_bb));
+                        }
+                    }
+                } else {
+                    // Sequential if-else chain for complex patterns.
+                    let mut next_test = self.current_block;
+                    for (i, arm) in m.arms.iter().enumerate() {
+                        let arm_bb = self.new_block("match.arm");
+                        let is_last = i + 1 == m.arms.len();
+                        let next_bb = if is_last {
+                            merge_bb
+                        } else {
+                            self.new_block("match.next")
+                        };
+
+                        self.switch_to(next_test);
+
+                        match &arm.pat {
+                            Pat::Wild(_) => {
+                                self.set_terminator(Terminator::Goto(arm_bb));
+                            }
+                            Pat::Bind(_, name, _ty, _) => {
+                                // Bind always matches.
+                                self.var_map.insert(name.clone(), subj);
+                                self.set_terminator(Terminator::Goto(arm_bb));
+                            }
+                            Pat::Lit(lit_expr) => {
+                                let lit_val = self.lower_expr(lit_expr);
+                                let cmp = self.emit(
+                                    InstKind::Cmp(CmpOp::Eq, subj, lit_val),
+                                    Type::Bool,
+                                    arm.span,
+                                );
+                                self.set_terminator(Terminator::Branch(cmp, arm_bb, next_bb));
+                            }
+                            _ => {
+                                // Fallback: unconditional (catches Range, Tuple, etc.)
+                                self.set_terminator(Terminator::Goto(arm_bb));
+                            }
+                        }
+
+                        self.switch_to(arm_bb);
+                        let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
+                        for s in &arm.body {
+                            arm_last = self.lower_stmt(s);
+                        }
+                        if !self.current_block_has_terminator() {
+                            if has_result {
+                                phi_entries.push((arm_last, self.current_block));
+                            }
+                            self.set_terminator(Terminator::Goto(merge_bb));
+                        }
+
+                        next_test = next_bb;
+                    }
+                    // If the last arm didn't have a wild/bind, ensure we go to merge.
+                    if next_test != merge_bb {
+                        self.switch_to(next_test);
+                        self.set_terminator(Terminator::Goto(merge_bb));
+                    }
                 }
-                self.switch_to(next_test);
-                self.set_terminator(Terminator::Goto(merge_bb));
 
                 self.switch_to(merge_bb);
-                let _ = subj;
-                self.emit(InstKind::Void, Type::Void, m.span)
+                if has_result && !phi_entries.is_empty() {
+                    let dest = self.new_value();
+                    let incoming: Vec<(BlockId, ValueId)> = phi_entries.iter()
+                        .map(|(val, blk)| (*blk, *val))
+                        .collect();
+                    self.func.block_mut(merge_bb).phis.push(Phi {
+                        dest,
+                        ty: result_ty,
+                        incoming,
+                    });
+                    dest
+                } else {
+                    self.emit(InstKind::Void, Type::Void, m.span)
+                }
             }
 
             hir::Stmt::Drop(_, name, ty, span) => {
@@ -908,22 +1450,100 @@ impl Lowerer {
             }
 
             hir::Stmt::SimFor(f, span) => {
-                // Parallel for — lower same as sequential for in MIR
-                let _iter = self.lower_expr(&f.iter);
+                // Demote variables assigned inside sim-for body to memory.
+                let mut assigned = HashSet::new();
+                Self::collect_assigned_vars(&f.body, &mut assigned);
+                self.demote_vars_to_memory(&assigned, *span);
+
+                // Parallel for — lower same as sequential for in MIR.
+                let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("simfor.cond");
                 let body_bb = self.new_block("simfor.body");
+                let inc_bb = self.new_block("simfor.inc");
                 let exit_bb = self.new_block("simfor.exit");
 
-                self.set_terminator(Terminator::Goto(cond_bb));
-                self.switch_to(cond_bb);
-                let cond = self.emit(InstKind::BoolConst(false), Type::Bool, *span);
-                self.set_terminator(Terminator::Branch(cond, body_bb, exit_bb));
+                if let Some(ref end_expr) = f.end {
+                    let end_val = self.lower_expr(end_expr);
+                    let step_val = if let Some(ref step_expr) = f.step {
+                        self.lower_expr(step_expr)
+                    } else {
+                        self.emit(InstKind::IntConst(1), Type::I64, *span)
+                    };
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), iter_val), f.bind_ty.clone(), *span);
+                    self.var_map.insert(f.bind.clone(), iter_val);
+                    self.set_terminator(Terminator::Goto(cond_bb));
 
-                self.loop_stack.push((cond_bb, exit_bb));
-                self.switch_to(body_bb);
-                self.lower_block_stmts(&f.body);
-                self.set_terminator(Terminator::Goto(cond_bb));
-                self.loop_stack.pop();
+                    self.switch_to(cond_bb);
+                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, *span);
+                    self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                    self.loop_stack.push((inc_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    self.var_map.insert(f.bind.clone(), counter);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(inc_bb));
+                    self.loop_stack.pop();
+
+                    self.switch_to(inc_bb);
+                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, step_val), f.bind_ty.clone(), *span);
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), *span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                } else if matches!(f.iter.ty, Type::I64 | Type::I32 | Type::F64) {
+                    // Implicit range: `sim for i in N` means 0..N
+                    let zero = self.emit(InstKind::IntConst(0), Type::I64, *span);
+                    let one = self.emit(InstKind::IntConst(1), Type::I64, *span);
+                    let end_val = iter_val;
+
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), zero), f.bind_ty.clone(), *span);
+                    self.var_map.insert(f.bind.clone(), zero);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    self.switch_to(cond_bb);
+                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, *span);
+                    self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                    self.loop_stack.push((inc_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    self.var_map.insert(f.bind.clone(), counter);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(inc_bb));
+                    self.loop_stack.pop();
+
+                    self.switch_to(inc_bb);
+                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, one), f.bind_ty.clone(), *span);
+                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), *span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                } else {
+                    let len = self.emit(InstKind::VecLen(iter_val), Type::I64, *span);
+                    let zero = self.emit(InstKind::IntConst(0), Type::I64, *span);
+                    let one = self.emit(InstKind::IntConst(1), Type::I64, *span);
+                    let idx_name = format!("__simfor_idx_{}", f.bind);
+                    self.emit_void_typed(InstKind::Store(idx_name.clone(), zero), Type::I64, *span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    self.switch_to(cond_bb);
+                    let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, *span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len), Type::Bool, *span);
+                    self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
+
+                    self.loop_stack.push((inc_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), *span);
+                    self.var_map.insert(f.bind.clone(), elem);
+                    self.lower_block_stmts(&f.body);
+                    self.set_terminator(Terminator::Goto(inc_bb));
+                    self.loop_stack.pop();
+
+                    self.switch_to(inc_bb);
+                    let cur_idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, *span);
+                    let next_idx = self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, *span);
+                    self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, *span);
+                    self.set_terminator(Terminator::Goto(cond_bb));
+                }
 
                 self.switch_to(exit_bb);
                 self.emit(InstKind::Void, Type::Void, *span)
@@ -944,6 +1564,94 @@ impl Lowerer {
     fn lower_block_stmts(&mut self, stmts: &[hir::Stmt]) {
         for stmt in stmts {
             self.lower_stmt(stmt);
+        }
+    }
+
+    /// Collect variable names *assigned* or *rebound* in a block of HIR statements.
+    fn collect_assigned_vars(body: &[hir::Stmt], assigned: &mut HashSet<String>) {
+        for stmt in body {
+            match stmt {
+                hir::Stmt::Bind(b) => {
+                    assigned.insert(b.name.clone());
+                }
+                hir::Stmt::Assign(target, _, _) => {
+                    if let ExprKind::Var(_, name) = &target.kind {
+                        assigned.insert(name.clone());
+                    }
+                }
+                hir::Stmt::If(i) => {
+                    Self::collect_assigned_vars(&i.then, assigned);
+                    for (_, elif_body) in &i.elifs {
+                        Self::collect_assigned_vars(elif_body, assigned);
+                    }
+                    if let Some(els) = &i.els {
+                        Self::collect_assigned_vars(els, assigned);
+                    }
+                }
+                hir::Stmt::While(w) => {
+                    Self::collect_assigned_vars(&w.body, assigned);
+                }
+                hir::Stmt::For(f) => {
+                    Self::collect_assigned_vars(&f.body, assigned);
+                }
+                hir::Stmt::Loop(l) => {
+                    Self::collect_assigned_vars(&l.body, assigned);
+                }
+                hir::Stmt::Match(m) => {
+                    for arm in &m.arms {
+                        Self::collect_assigned_vars(&arm.body, assigned);
+                    }
+                }
+                hir::Stmt::Expr(e) => {
+                    Self::collect_assigned_vars_in_expr(e, assigned);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Walk an expression tree to find Select (or other block-containing)
+    /// expressions and collect assigned vars from their bodies.
+    fn collect_assigned_vars_in_expr(expr: &hir::Expr, assigned: &mut HashSet<String>) {
+        match &expr.kind {
+            ExprKind::Select(arms, default) => {
+                for arm in arms {
+                    Self::collect_assigned_vars(&arm.body, assigned);
+                }
+                if let Some(def_body) = default {
+                    Self::collect_assigned_vars(def_body, assigned);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Demote variables to memory (Store/Load) — emit Store for their current
+    /// var_map value and remove them from var_map so reads use Load.
+    fn demote_vars_to_memory(&mut self, vars: &HashSet<String>, span: Span) {
+        for name in vars {
+            if let Some(&val) = self.var_map.get(name) {
+                // Find the type of this variable from the value.
+                let ty = self.func.blocks.iter()
+                    .flat_map(|bb| bb.insts.iter())
+                    .find(|i| i.dest == Some(val))
+                    .map(|i| i.ty.clone())
+                    .or_else(|| self.func.params.iter()
+                        .find(|p| p.value == val)
+                        .map(|p| p.ty.clone()))
+                    .unwrap_or(Type::I64);
+                // Emit Store with the variable's type (not Void) so codegen
+                // creates the alloca with the correct LLVM type.
+                self.func.block_mut(self.current_block).insts.push(Instruction {
+                    dest: None,
+                    kind: InstKind::Store(name.clone(), val),
+                    ty,
+                    span,
+                    def_id: None,
+                });
+                self.var_map.remove(name);
+                self.mem_vars.insert(name.clone());
+            }
         }
     }
 
@@ -1038,7 +1746,7 @@ impl Lowerer {
     }
 }
 
-fn lower_function(f: &hir::Fn) -> Function {
+fn lower_function(f: &hir::Fn) -> Vec<Function> {
     let mut lowerer = Lowerer::new(&f.name, f.def_id, f.span);
     lowerer.func.ret_ty = f.ret.clone();
 
@@ -1068,7 +1776,9 @@ fn lower_function(f: &hir::Fn) -> Function {
         }
     }
 
-    lowerer.func
+    let mut result = vec![lowerer.func];
+    result.append(&mut lowerer.lambda_fns);
+    result
 }
 
 fn lower_binop(op: &ast::BinOp) -> BinOp {
@@ -1086,9 +1796,11 @@ fn lower_binop(op: &ast::BinOp) -> BinOp {
         ast::BinOp::Shr => BinOp::Shr,
         ast::BinOp::And => BinOp::And,
         ast::BinOp::Or => BinOp::Or,
-        // Comparisons handled separately in lower_expr
+        // Comparisons handled separately in lower_expr; this path is unreachable.
         ast::BinOp::Eq | ast::BinOp::Ne | ast::BinOp::Lt
-        | ast::BinOp::Gt | ast::BinOp::Le | ast::BinOp::Ge => BinOp::Add, // unreachable
+        | ast::BinOp::Gt | ast::BinOp::Le | ast::BinOp::Ge => {
+            unreachable!("comparison ops should be handled by lower_expr, not lower_binop")
+        }
     }
 }
 

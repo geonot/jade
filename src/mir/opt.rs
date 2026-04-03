@@ -4,6 +4,7 @@
 //! The driver runs passes in a fixed-point loop until convergence.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use crate::ast::Span;
 use crate::types::Type;
 use super::*;
 
@@ -24,13 +25,17 @@ pub fn optimize(func: &mut Function, level: OptLevel) {
         let mut changed = false;
         changed |= constant_fold(func);
         changed |= copy_propagation(func);
+        changed |= store_load_forwarding(func);
         changed |= simplify_phis(func);
         changed |= dead_code_elimination(func);
         changed |= strength_reduction(func);
         if level == OptLevel::Full {
             changed |= global_value_numbering(func);
             changed |= branch_threading(func);
+            changed |= loop_invariant_code_motion(func);
         }
+        changed |= redundant_store_elimination(func);
+        changed |= constant_branch_elimination(func);
         changed |= merge_linear_blocks(func);
         changed |= remove_unreachable_blocks(func);
         if !changed { break; }
@@ -76,7 +81,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::Assert(v, _) => { sub!(v); }
         InstKind::DynDispatch(obj, _, _, args) => { sub!(obj); for a in args { sub!(a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
-        | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) => {}
+        | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) | InstKind::FnRef(_) => {}
     }
     hit
 }
@@ -134,7 +139,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::Assert(v, _) => { s.insert(*v); }
         InstKind::DynDispatch(obj, _, _, args) => { s.insert(*obj); for a in args { s.insert(*a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
-        | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) => {}
+        | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) | InstKind::FnRef(_) => {}
     }
 }
 
@@ -146,17 +151,21 @@ fn collect_term_uses(term: &Terminator, s: &mut HashSet<ValueId>) {
     }
 }
 
-/// Returns `true` if an instruction is side-effect-free.
+/// Returns `true` if an instruction is side-effect-free and can be eliminated
+/// by DCE if its result is unused.
 fn is_pure(kind: &InstKind) -> bool {
     matches!(kind,
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
-        | InstKind::StringConst(_) | InstKind::Void
+        | InstKind::StringConst(_) | InstKind::Void | InstKind::FnRef(_)
         | InstKind::BinOp(..) | InstKind::UnaryOp(..) | InstKind::Cmp(..)
-        | InstKind::Cast(..) | InstKind::Copy(..) | InstKind::Load(_)
+        | InstKind::Cast(..) | InstKind::Copy(..)
         | InstKind::FieldGet(..) | InstKind::Index(..) | InstKind::Ref(..) | InstKind::Deref(..)
         | InstKind::ArrayInit(_) | InstKind::StructInit(..)
-        | InstKind::VecLen(..) | InstKind::MapInit | InstKind::SetInit
-        | InstKind::RcClone(..) | InstKind::WeakUpgrade(..))
+        | InstKind::VecLen(..) | InstKind::MapInit | InstKind::SetInit)
+    // NOTE: Load is NOT pure — it reads mutable state. However, loads
+    // whose results have been forwarded are cleaned up by store_load_forwarding.
+    // RcClone is NOT pure — it increments a reference count.
+    // WeakUpgrade is NOT pure — it may have runtime side effects.
 }
 
 // ━━━━━━━━━━━━━━━━━━━ Constant Folding ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -483,14 +492,140 @@ pub fn strength_reduction(func: &mut Function) -> bool {
     changed
 }
 
+// ━━━━━━━━━━━━━━ Store–Load Forwarding ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Within each basic block, track the last stored/loaded value per variable.
+/// - After `Store(name, val)`, a subsequent `Load(name)` can use `val` directly.
+/// - After `Load(name) → v1`, a subsequent `Load(name)` can use `v1` directly.
+/// Calls invalidate all forwarding state (conservative).
+/// Forwarded loads are removed inline so no dead loads remain.
+pub fn store_load_forwarding(func: &mut Function) -> bool {
+    let mut replacements: HashMap<ValueId, ValueId> = HashMap::new();
+    let mut dead_loads: HashSet<ValueId> = HashSet::new();
+
+    for bb in &func.blocks {
+        let mut known: HashMap<String, ValueId> = HashMap::new();
+
+        for inst in &bb.insts {
+            match &inst.kind {
+                InstKind::Store(name, val) => {
+                    known.insert(name.clone(), *val);
+                }
+                InstKind::Load(name) => {
+                    if let Some(&val) = known.get(name) {
+                        if let Some(dest) = inst.dest {
+                            replacements.insert(dest, val);
+                            dead_loads.insert(dest);
+                        }
+                    } else if let Some(dest) = inst.dest {
+                        known.insert(name.clone(), dest);
+                    }
+                }
+                InstKind::Call(..) | InstKind::ChanSend(..) | InstKind::ChanRecv(..)
+                | InstKind::SelectArm(..) | InstKind::Log(..) => {
+                    known.clear();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if replacements.is_empty() { return false; }
+
+    for bb in &mut func.blocks {
+        for phi in &mut bb.phis {
+            for (_, v) in &mut phi.incoming {
+                if let Some(&r) = replacements.get(v) { *v = r; }
+            }
+        }
+        for inst in &mut bb.insts { subst_inst(inst, &replacements); }
+        subst_term(&mut bb.terminator, &replacements);
+        // Remove dead loads (whose values were forwarded).
+        bb.insts.retain(|inst| {
+            !inst.dest.map_or(false, |d| dead_loads.contains(&d))
+        });
+    }
+    true
+}
+
+/// Remove stores that are overwritten before being read.
+/// Within each basic block, if `Store(name, v1)` is followed by
+/// `Store(name, v2)` with no intervening `Load(name)`, the first store
+/// is dead.
+pub fn redundant_store_elimination(func: &mut Function) -> bool {
+    let mut changed = false;
+
+    for bb in &mut func.blocks {
+        let mut to_remove: HashSet<usize> = HashSet::new();
+        // Maps variable name → index of last Store instruction.
+        let mut last_store_idx: HashMap<String, usize> = HashMap::new();
+
+        for (i, inst) in bb.insts.iter().enumerate() {
+            match &inst.kind {
+                InstKind::Store(name, _) => {
+                    if let Some(prev_idx) = last_store_idx.insert(name.clone(), i) {
+                        to_remove.insert(prev_idx);
+                    }
+                }
+                InstKind::Load(name) => {
+                    // A load reads the stored value — the store is live.
+                    last_store_idx.remove(name);
+                }
+                InstKind::Call(..) | InstKind::ChanSend(..) | InstKind::ChanRecv(..)
+                | InstKind::SelectArm(..) | InstKind::Log(..) => {
+                    // Conservative: calls/effects might observe memory.
+                    last_store_idx.clear();
+                }
+                _ => {}
+            }
+        }
+
+        if !to_remove.is_empty() {
+            let mut idx = 0;
+            bb.insts.retain(|_| {
+                let keep = !to_remove.contains(&idx);
+                idx += 1;
+                keep
+            });
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Replace branches on constant booleans with unconditional gotos,
+/// making the dead successor potentially unreachable.
+pub fn constant_branch_elimination(func: &mut Function) -> bool {
+    let mut consts: HashMap<ValueId, bool> = HashMap::new();
+    for bb in &func.blocks {
+        for inst in &bb.insts {
+            if let (Some(d), InstKind::BoolConst(b)) = (inst.dest, &inst.kind) {
+                consts.insert(d, *b);
+            }
+        }
+    }
+    let mut changed = false;
+    for bb in &mut func.blocks {
+        if let Terminator::Branch(cond, then_bb, else_bb) = &bb.terminator {
+            if let Some(&b) = consts.get(cond) {
+                let target = if b { *then_bb } else { *else_bb };
+                bb.terminator = Terminator::Goto(target);
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
 // ━━━━━━━━━━━━━━━ Global Value Numbering ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Eliminate redundant computations by expression hashing.
+/// Uses local value numbering (per-block) to avoid dominance issues.
 pub fn global_value_numbering(func: &mut Function) -> bool {
-    let mut expr_map: HashMap<String, ValueId> = HashMap::new();
     let mut replacements: HashMap<ValueId, ValueId> = HashMap::new();
 
     for bb in &func.blocks {
+        let mut expr_map: HashMap<String, ValueId> = HashMap::new();
         for inst in &bb.insts {
             if let Some(d) = inst.dest {
                 if !is_pure(&inst.kind) { continue; }
@@ -587,6 +722,145 @@ pub fn branch_threading(func: &mut Function) -> bool {
     changed
 }
 
+// ━━━━━━━━━━━━━━ Loop-Invariant Code Motion ━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Hoist loop-invariant pure instructions to the loop preheader.
+/// A loop is detected by finding back-edges (edges to a block with a
+/// lower/equal index in the block list).
+pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
+    let mut changed = false;
+
+    // Build block index map.
+    let block_ids: Vec<BlockId> = func.blocks.iter().map(|b| b.id).collect();
+    let block_index: HashMap<BlockId, usize> = block_ids.iter().enumerate()
+        .map(|(i, id)| (*id, i))
+        .collect();
+
+    // Find back-edges: (from, to) where to <= from in block order.
+    let mut loops: Vec<(BlockId, HashSet<usize>)> = Vec::new(); // (header, body block indices)
+
+    for (i, bb) in func.blocks.iter().enumerate() {
+        for succ in bb.terminator.successors() {
+            if let Some(&succ_idx) = block_index.get(&succ) {
+                if succ_idx <= i {
+                    // Back-edge from block i to block succ_idx.
+                    // Loop body = blocks [succ_idx..=i].
+                    let body: HashSet<usize> = (succ_idx..=i).collect();
+                    // Verify this is a real loop: the header must have at least
+                    // one successor inside the loop body. A merge block (e.g.
+                    // match.merge with return) has no body successors and is
+                    // not a loop header.
+                    let header_has_body_succ = func.block(succ)
+                        .terminator
+                        .successors()
+                        .iter()
+                        .any(|s| block_index.get(s).map_or(false, |&si| body.contains(&si)));
+                    if header_has_body_succ {
+                        loops.push((succ, body));
+                    }
+                }
+            }
+        }
+    }
+
+    if loops.is_empty() {
+        return false;
+    }
+
+    // Collect all definitions (which block index defines each value).
+    let mut def_block: HashMap<ValueId, usize> = HashMap::new();
+    for (i, bb) in func.blocks.iter().enumerate() {
+        for p in &func.params {
+            def_block.entry(p.value).or_insert(0); // params are "defined" in entry
+        }
+        for phi in &bb.phis {
+            def_block.insert(phi.dest, i);
+        }
+        for inst in &bb.insts {
+            if let Some(d) = inst.dest {
+                def_block.insert(d, i);
+            }
+        }
+    }
+
+    for (header, body) in &loops {
+        let header_idx = match block_index.get(header) {
+            Some(&idx) => idx,
+            None => continue,
+        };
+
+        // Find or identify the single predecessor outside the loop as preheader.
+        let pred_map = func.predecessors();
+        let header_preds = pred_map.get(header).cloned().unwrap_or_default();
+        let preheader_preds: Vec<BlockId> = header_preds.into_iter()
+            .filter(|p| {
+                let pi = block_index.get(p).copied().unwrap_or(usize::MAX);
+                !body.contains(&pi)
+            })
+            .collect();
+
+        if preheader_preds.len() != 1 {
+            continue; // Multiple entries or no clear preheader — skip.
+        }
+        let preheader_id = preheader_preds[0];
+
+        // Collect instructions to hoist: pure, all operands defined outside the loop.
+        let mut to_hoist: Vec<Instruction> = Vec::new();
+        let mut hoisted_defs: HashSet<ValueId> = HashSet::new();
+
+        // Iterate blocks in the loop body.
+        for &bi in body {
+            let bb = &func.blocks[bi];
+            for inst in &bb.insts {
+                if !is_pure(&inst.kind) { continue; }
+                let Some(dest) = inst.dest else { continue; };
+
+                // Check all operands are defined outside the loop (or already hoisted).
+                let operands = collect_inst_operands(&inst.kind);
+                let all_outside = operands.iter().all(|op| {
+                    hoisted_defs.contains(op) || {
+                        let d = def_block.get(op).copied().unwrap_or(0);
+                        !body.contains(&d)
+                    }
+                });
+
+                if all_outside {
+                    to_hoist.push(inst.clone());
+                    hoisted_defs.insert(dest);
+                }
+            }
+        }
+
+        if to_hoist.is_empty() { continue; }
+
+        // Remove hoisted instructions from their original blocks.
+        let hoisted_ids: HashSet<ValueId> = to_hoist.iter()
+            .filter_map(|i| i.dest)
+            .collect();
+        for &bi in body {
+            func.blocks[bi].insts.retain(|i| {
+                i.dest.map_or(true, |d| !hoisted_ids.contains(&d))
+            });
+        }
+
+        // Insert hoisted instructions at the end of preheader (before terminator).
+        let ph_block = func.block_mut(preheader_id);
+        for inst in to_hoist {
+            ph_block.insts.push(inst);
+        }
+        changed = true;
+    }
+
+    changed
+}
+
+/// Collect all operand ValueIds from an instruction kind.
+fn collect_inst_operands(kind: &InstKind) -> Vec<ValueId> {
+    let mut s = HashSet::new();
+    collect_inst_uses(kind, &mut s);
+    s.into_iter().collect()
+}
+
 // ━━━━━━━━━━━━━━ Block Merging ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /// Merge a block B into its sole predecessor A when:
@@ -611,11 +885,25 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
                 continue;
             }
 
-            // Merge: append B's instructions and terminator to A, remove B
+            // Merge: append B's instructions and terminator to A, remove B.
+            // Convert any phi nodes in B to Copy instructions (safe because
+            // B has exactly one predecessor, so each phi has one incoming value).
+            let b_phis = func.block(bb_id).phis.clone();
             let b_insts = func.block(bb_id).insts.clone();
             let b_term = func.block(bb_id).terminator.clone();
 
             let pred_block = func.block_mut(pred_id);
+            for phi in b_phis {
+                if let Some((_, val)) = phi.incoming.first() {
+                    pred_block.insts.push(Instruction {
+                        dest: Some(phi.dest),
+                        kind: InstKind::Copy(*val),
+                        ty: phi.ty,
+                        span: Span::dummy(),
+                        def_id: None,
+                    });
+                }
+            }
             pred_block.insts.extend(b_insts);
             pred_block.terminator = b_term;
 

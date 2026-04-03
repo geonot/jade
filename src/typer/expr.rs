@@ -917,12 +917,14 @@ impl Typer {
                 let coro_ty = Type::Coroutine(Box::new(yield_ty));
                 if name != "__anon" {
                     let id = self.fresh_id();
+                    // Use Borrowed ownership so emit_scope_drops skips
+                    // this variable — the Bind target owns the allocation.
                     self.define_var(
                         name,
                         VarInfo {
                             def_id: id,
                             ty: coro_ty.clone(),
-                            ownership: crate::hir::Ownership::Owned,
+                            ownership: crate::hir::Ownership::Borrowed,
                             scheme: None,
                         },
                     );

@@ -2528,7 +2528,10 @@ impl Typer {
         };
         let mut drops: Vec<_> = scope
             .iter()
-            .filter(|(_, info)| Self::needs_drop(&info.ty))
+            .filter(|(_, info)| {
+                Self::needs_drop(&info.ty)
+                    && !matches!(info.ownership, crate::hir::Ownership::Borrowed | crate::hir::Ownership::BorrowMut)
+            })
             .collect();
         drops.sort_by_key(|(_, info)| std::cmp::Reverse(info.def_id.0));
         for (name, info) in drops {

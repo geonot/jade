@@ -265,7 +265,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn coerce_to_i64(&self, val: BasicValueEnum<'ctx>) -> inkwell::values::IntValue<'ctx> {
+    pub(crate) fn coerce_to_i64(&self, val: BasicValueEnum<'ctx>) -> inkwell::values::IntValue<'ctx> {
         let i64t = self.ctx.i64_type();
         match val {
             BasicValueEnum::IntValue(iv) => {
