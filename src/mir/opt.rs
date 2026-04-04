@@ -51,7 +51,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         ($v:expr) => { if let Some(&r) = map.get($v) { *$v = r; hit = true; } };
     }
     match &mut inst.kind {
-        InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b) => { sub!(a); sub!(b); }
+        InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => { sub!(a); sub!(b); }
         InstKind::UnaryOp(_, v) | InstKind::Cast(v, _) | InstKind::Ref(v)
         | InstKind::Deref(v) | InstKind::Copy(v) | InstKind::RcInc(v)
         | InstKind::RcDec(v) | InstKind::Alloc(v) => { sub!(v); }
@@ -62,6 +62,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::IndirectCall(f, args) => { sub!(f); for a in args { sub!(a); } }
         InstKind::FieldGet(o, _) => { sub!(o); }
         InstKind::FieldSet(o, _, v) => { sub!(o); sub!(v); }
+        InstKind::FieldStore(_, _, v) => { sub!(v); }
         InstKind::Index(a, i) => { sub!(a); sub!(i); }
         InstKind::IndexSet(a, i, v) => { sub!(a); sub!(i); sub!(v); }
         InstKind::StructInit(_, fs) => { for (_, v) in fs { sub!(v); } }
@@ -75,7 +76,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::RcNew(v, _) => { sub!(v); }
         // Closures
         InstKind::ClosureCreate(_, captures) | InstKind::SpawnActor(_, captures)
-        | InstKind::SelectArm(captures) => { for a in captures { sub!(a); } }
+        | InstKind::SelectArm(captures, _) => { for a in captures { sub!(a); } }
         InstKind::ClosureCall(f, args) => { sub!(f); for a in args { sub!(a); } }
         InstKind::ChanCreate(_) | InstKind::MapInit | InstKind::SetInit => {}
         InstKind::Assert(v, _) => { sub!(v); }
@@ -110,7 +111,7 @@ fn collect_used(func: &Function) -> HashSet<ValueId> {
 
 fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
     match kind {
-        InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b) => { s.insert(*a); s.insert(*b); }
+        InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => { s.insert(*a); s.insert(*b); }
         InstKind::UnaryOp(_, v) | InstKind::Cast(v, _) | InstKind::Ref(v)
         | InstKind::Deref(v) | InstKind::Copy(v) | InstKind::RcInc(v)
         | InstKind::RcDec(v) | InstKind::Alloc(v) => { s.insert(*v); }
@@ -121,6 +122,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::IndirectCall(f, args) => { s.insert(*f); for a in args { s.insert(*a); } }
         InstKind::FieldGet(o, _) => { s.insert(*o); }
         InstKind::FieldSet(o, _, v) => { s.insert(*o); s.insert(*v); }
+        InstKind::FieldStore(_, _, v) => { s.insert(*v); }
         InstKind::Index(a, i) => { s.insert(*a); s.insert(*i); }
         InstKind::IndexSet(a, i, v) => { s.insert(*a); s.insert(*i); s.insert(*v); }
         InstKind::StructInit(_, fs) => { for (_, v) in fs { s.insert(*v); } }
@@ -133,7 +135,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         | InstKind::WeakUpgrade(v) | InstKind::Log(v) => { s.insert(*v); }
         InstKind::RcNew(v, _) => { s.insert(*v); }
         InstKind::ClosureCreate(_, captures) | InstKind::SpawnActor(_, captures)
-        | InstKind::SelectArm(captures) => { for a in captures { s.insert(*a); } }
+        | InstKind::SelectArm(captures, _) => { for a in captures { s.insert(*a); } }
         InstKind::ClosureCall(f, args) => { s.insert(*f); for a in args { s.insert(*a); } }
         InstKind::ChanCreate(_) | InstKind::MapInit | InstKind::SetInit => {}
         InstKind::Assert(v, _) => { s.insert(*v); }
@@ -160,7 +162,7 @@ fn is_pure(kind: &InstKind) -> bool {
         | InstKind::BinOp(..) | InstKind::UnaryOp(..) | InstKind::Cmp(..)
         | InstKind::Cast(..) | InstKind::Copy(..)
         | InstKind::FieldGet(..) | InstKind::Index(..) | InstKind::Ref(..) | InstKind::Deref(..)
-        | InstKind::ArrayInit(_) | InstKind::StructInit(..)
+        | InstKind::ArrayInit(_) | InstKind::StructInit(..) | InstKind::VariantInit(..)
         | InstKind::VecLen(..) | InstKind::MapInit | InstKind::SetInit)
     // NOTE: Load is NOT pure — it reads mutable state. However, loads
     // whose results have been forwarded are cleaned up by store_load_forwarding.
@@ -207,7 +209,7 @@ pub fn constant_fold(func: &mut Function) -> bool {
             if let Some(d) = inst.dest {
                 let folded = match &inst.kind {
                     InstKind::BinOp(op, l, r) => fold_binop(*op, consts.get(l), consts.get(r)),
-                    InstKind::Cmp(op, l, r)   => fold_cmp(*op, consts.get(l), consts.get(r)),
+                    InstKind::Cmp(op, l, r, _)   => fold_cmp(*op, consts.get(l), consts.get(r)),
                     InstKind::UnaryOp(op, v)   => fold_unary(*op, consts.get(v)),
                     InstKind::Cast(v, ty)      => fold_cast(consts.get(v), ty),
                     _ => None,
@@ -235,11 +237,11 @@ fn fold_binop(op: BinOp, l: Option<&ConstVal>, r: Option<&ConstVal>) -> Option<C
     match (l?, r?) {
         (ConstVal::Int(a), ConstVal::Int(b)) => {
             let v = match op {
-                BinOp::Add => a.checked_add(*b)?,
-                BinOp::Sub => a.checked_sub(*b)?,
-                BinOp::Mul => a.checked_mul(*b)?,
-                BinOp::Div if *b != 0 => a.checked_div(*b)?,
-                BinOp::Mod if *b != 0 => a.checked_rem(*b)?,
+                BinOp::Add => a.wrapping_add(*b),
+                BinOp::Sub => a.wrapping_sub(*b),
+                BinOp::Mul => a.wrapping_mul(*b),
+                BinOp::Div if *b != 0 => a.wrapping_div(*b),
+                BinOp::Mod if *b != 0 => a.wrapping_rem(*b),
                 BinOp::BitAnd => a & b,
                 BinOp::BitOr  => a | b,
                 BinOp::BitXor => a ^ b,
@@ -342,6 +344,14 @@ pub fn copy_propagation(func: &mut Function) -> bool {
         }
         for inst in &mut bb.insts { changed |= subst_inst(inst, &resolved); }
         changed |= subst_term(&mut bb.terminator, &resolved);
+        // Remove dead Copy instructions whose dests have been resolved away.
+        bb.insts.retain(|inst| {
+            if let (Some(d), InstKind::Copy(_)) = (inst.dest, &inst.kind) {
+                !resolved.contains_key(&d)
+            } else {
+                true
+            }
+        });
     }
     changed
 }
@@ -362,6 +372,9 @@ pub fn simplify_phis(func: &mut Function) -> bool {
                 .collect();
             if unique.len() == 1 {
                 replacements.insert(phi.dest, *unique.iter().next().unwrap());
+            } else if unique.is_empty() {
+                // All incoming values are self-references — unreachable phi, skip.
+                continue;
             }
         }
     }
@@ -521,9 +534,13 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                         known.insert(name.clone(), dest);
                     }
                 }
-                InstKind::Call(..) | InstKind::ChanSend(..) | InstKind::ChanRecv(..)
+                InstKind::Call(..) | InstKind::MethodCall(..) | InstKind::ChanSend(..) | InstKind::ChanRecv(..)
                 | InstKind::SelectArm(..) | InstKind::Log(..) => {
                     known.clear();
+                }
+                InstKind::FieldStore(var_name, _, _) => {
+                    // Mutating a field of a variable invalidates its cached Load.
+                    known.remove(var_name);
                 }
                 _ => {}
             }
@@ -627,6 +644,20 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
     for bb in &func.blocks {
         let mut expr_map: HashMap<String, ValueId> = HashMap::new();
         for inst in &bb.insts {
+            // Invalidate cached FieldGet/Index entries on mutation.
+            match &inst.kind {
+                InstKind::FieldSet(_, _, _) | InstKind::FieldStore(_, _, _) => {
+                    expr_map.retain(|k, _| !k.starts_with("fg:"));
+                }
+                InstKind::IndexSet(_, _, _) => {
+                    expr_map.retain(|k, _| !k.starts_with("ix:"));
+                }
+                InstKind::Call(..) | InstKind::MethodCall(..) => {
+                    // Calls may mutate anything; invalidate all field/index entries.
+                    expr_map.retain(|k, _| !k.starts_with("fg:") && !k.starts_with("ix:"));
+                }
+                _ => {}
+            }
             if let Some(d) = inst.dest {
                 if !is_pure(&inst.kind) { continue; }
                 if let Some(key) = gvn_key(&inst.kind) {
@@ -660,7 +691,7 @@ fn gvn_key(kind: &InstKind) -> Option<String> {
             let (a, b) = if is_commutative(*op) && l.0 > r.0 { (r, l) } else { (l, r) };
             Some(format!("bin:{op:?}:{},{}", a.0, b.0))
         }
-        InstKind::Cmp(op, l, r) => Some(format!("cmp:{op:?}:{},{}", l.0, r.0)),
+        InstKind::Cmp(op, l, r, _) => Some(format!("cmp:{op:?}:{},{}", l.0, r.0)),
         InstKind::UnaryOp(op, v)  => Some(format!("un:{op:?}:{}", v.0)),
         InstKind::FieldGet(o, f)  => Some(format!("fg:{}:{f}", o.0)),
         InstKind::Index(a, i)     => Some(format!("ix:{}:{}", a.0, i.0)),

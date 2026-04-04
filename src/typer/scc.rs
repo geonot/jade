@@ -166,6 +166,19 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<String>) {
         ast::Stmt::Transaction(block, _) => {
             collect_calls_block(block, calls);
         }
+        ast::Stmt::SimFor(f, _) => {
+            collect_calls_expr(&f.iter, calls);
+            if let Some(e) = &f.end {
+                collect_calls_expr(e, calls);
+            }
+            if let Some(s) = &f.step {
+                collect_calls_expr(s, calls);
+            }
+            collect_calls_block(&f.body, calls);
+        }
+        ast::Stmt::SimBlock(body, _) => {
+            collect_calls_block(body, calls);
+        }
         _ => {}
     }
 }
@@ -207,7 +220,9 @@ pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<St
         state.on_stack.insert(v.to_string());
 
         if let Some(neighbors) = graph.get(v) {
-            for w in neighbors {
+            let mut sorted_neighbors: Vec<&String> = neighbors.iter().collect();
+            sorted_neighbors.sort();
+            for w in sorted_neighbors {
                 if !state.indices.contains_key(w.as_str()) {
                     strongconnect(w, graph, state);
                     let w_low = state.lowlinks[w.as_str()];
@@ -250,7 +265,9 @@ pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<St
         result: Vec::new(),
     };
 
-    for v in graph.keys() {
+    let mut sorted_keys: Vec<&String> = graph.keys().collect();
+    sorted_keys.sort();
+    for v in sorted_keys {
         if !state.indices.contains_key(v.as_str()) {
             strongconnect(v, graph, &mut state);
         }

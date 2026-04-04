@@ -224,7 +224,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         | InstKind::MapInit
         | InstKind::SetInit => vec![],
 
-        InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b) => vec![*a, *b],
+        InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => vec![*a, *b],
         InstKind::UnaryOp(_, a) => vec![*a],
 
         InstKind::Call(_, args) => args.clone(),
@@ -244,6 +244,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
 
         InstKind::FieldGet(obj, _) => vec![*obj],
         InstKind::FieldSet(obj, _, val) => vec![*obj, *val],
+        InstKind::FieldStore(_, _, val) => vec![*val],
         InstKind::Index(base, idx) => vec![*base, *idx],
         InstKind::IndexSet(base, idx, val) => vec![*base, *idx, *val],
 
@@ -280,7 +281,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::ChanCreate(_) => vec![],
         InstKind::ChanSend(ch, val) => vec![*ch, *val],
         InstKind::ChanRecv(ch) => vec![*ch],
-        InstKind::SelectArm(channels) => channels.clone(),
+        InstKind::SelectArm(channels, _) => channels.clone(),
 
         InstKind::Log(v) => vec![*v],
         InstKind::Assert(v, _) => vec![*v],

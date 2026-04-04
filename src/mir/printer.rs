@@ -90,7 +90,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
 
         InstKind::BinOp(op, l, r) => format!("{op} {l} {r}"),
         InstKind::UnaryOp(op, v) => format!("{op:?} {v}"),
-        InstKind::Cmp(op, l, r) => format!("{op} {l} {r}"),
+        InstKind::Cmp(op, l, r, _) => format!("{op} {l} {r}"),
 
         InstKind::Call(name, args) => format!("call {name}({})", fmt_args(args)),
         InstKind::MethodCall(obj, name, args) => format!("method_call {obj}.{name}({})", fmt_args(args)),
@@ -102,6 +102,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
 
         InstKind::FieldGet(obj, field) => format!("field_get {obj}.{field}"),
         InstKind::FieldSet(obj, field, val) => format!("field_set {obj}.{field} = {val}"),
+        InstKind::FieldStore(var, field, val) => format!("field_store ${var}.{field} = {val}"),
 
         InstKind::Index(arr, idx) => format!("index {arr}[{idx}]"),
         InstKind::IndexSet(arr, idx, val) => format!("index_set {arr}[{idx}] = {val}"),
@@ -146,7 +147,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::ChanCreate(ty) => format!("chan_create {ty:?}"),
         InstKind::ChanSend(ch, val) => format!("chan_send {ch} {val}"),
         InstKind::ChanRecv(ch) => format!("chan_recv {ch}"),
-        InstKind::SelectArm(arms) => format!("select [{}]", fmt_args(arms)),
+        InstKind::SelectArm(arms, _) => format!("select [{}]", fmt_args(arms)),
 
         // Builtins
         InstKind::Log(v) => format!("log {v}"),

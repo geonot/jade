@@ -178,6 +178,7 @@ impl Lowerer {
                 if inst.dest == Some(val) { return inst.ty.clone(); }
             }
         }
+        eprintln!("MIR lower: value_type fallback to I64 for {:?}", val);
         Type::I64 // fallback
     }
 
@@ -202,15 +203,57 @@ impl Lowerer {
 
             // HIR uses ast::BinOp which includes comparison operators
             ExprKind::BinOp(lhs, op, rhs) => {
+                // Short-circuit And/Or: evaluate rhs only if needed.
+                if *op == ast::BinOp::And {
+                    let l = self.lower_expr(lhs);
+                    let false_val = self.emit(InstKind::BoolConst(false), Type::Bool, span);
+                    let rhs_bb = self.new_block("and.rhs");
+                    let merge_bb = self.new_block("and.merge");
+                    let cur_bb = self.current_block;
+                    self.set_terminator(Terminator::Branch(l, rhs_bb, merge_bb));
+                    self.switch_to(rhs_bb);
+                    let r = self.lower_expr(rhs);
+                    let rhs_end = self.current_block;
+                    self.set_terminator(Terminator::Goto(merge_bb));
+                    self.switch_to(merge_bb);
+                    let phi = self.func.new_value();
+                    self.func.block_mut(merge_bb).phis.push(crate::mir::Phi {
+                        dest: phi,
+                        ty: Type::Bool,
+                        incoming: vec![(cur_bb, false_val), (rhs_end, r)],
+                    });
+                    return phi;
+                }
+                if *op == ast::BinOp::Or {
+                    let l = self.lower_expr(lhs);
+                    let true_val = self.emit(InstKind::BoolConst(true), Type::Bool, span);
+                    let rhs_bb = self.new_block("or.rhs");
+                    let merge_bb = self.new_block("or.merge");
+                    let cur_bb = self.current_block;
+                    self.set_terminator(Terminator::Branch(l, merge_bb, rhs_bb));
+                    self.switch_to(rhs_bb);
+                    let r = self.lower_expr(rhs);
+                    let rhs_end = self.current_block;
+                    self.set_terminator(Terminator::Goto(merge_bb));
+                    self.switch_to(merge_bb);
+                    let phi = self.func.new_value();
+                    self.func.block_mut(merge_bb).phis.push(crate::mir::Phi {
+                        dest: phi,
+                        ty: Type::Bool,
+                        incoming: vec![(cur_bb, true_val), (rhs_end, r)],
+                    });
+                    return phi;
+                }
                 let l = self.lower_expr(lhs);
                 let r = self.lower_expr(rhs);
+                let operand_ty = lhs.ty.clone();
                 match op {
-                    ast::BinOp::Eq => self.emit(InstKind::Cmp(CmpOp::Eq, l, r), ty, span),
-                    ast::BinOp::Ne => self.emit(InstKind::Cmp(CmpOp::Ne, l, r), ty, span),
-                    ast::BinOp::Lt => self.emit(InstKind::Cmp(CmpOp::Lt, l, r), ty, span),
-                    ast::BinOp::Gt => self.emit(InstKind::Cmp(CmpOp::Gt, l, r), ty, span),
-                    ast::BinOp::Le => self.emit(InstKind::Cmp(CmpOp::Le, l, r), ty, span),
-                    ast::BinOp::Ge => self.emit(InstKind::Cmp(CmpOp::Ge, l, r), ty, span),
+                    ast::BinOp::Eq => self.emit(InstKind::Cmp(CmpOp::Eq, l, r, operand_ty.clone()), ty, span),
+                    ast::BinOp::Ne => self.emit(InstKind::Cmp(CmpOp::Ne, l, r, operand_ty.clone()), ty, span),
+                    ast::BinOp::Lt => self.emit(InstKind::Cmp(CmpOp::Lt, l, r, operand_ty.clone()), ty, span),
+                    ast::BinOp::Gt => self.emit(InstKind::Cmp(CmpOp::Gt, l, r, operand_ty.clone()), ty, span),
+                    ast::BinOp::Le => self.emit(InstKind::Cmp(CmpOp::Le, l, r, operand_ty.clone()), ty, span),
+                    ast::BinOp::Ge => self.emit(InstKind::Cmp(CmpOp::Ge, l, r, operand_ty), ty, span),
                     _ => {
                         let mir_op = lower_binop(op);
                         self.emit(InstKind::BinOp(mir_op, l, r), ty, span)
@@ -493,7 +536,7 @@ impl Lowerer {
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
                 let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, span);
-                let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, end_val), Type::Bool, span);
+                let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, end_val, Type::I64), Type::Bool, span);
                 self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                 self.switch_to(body_bb);
@@ -571,7 +614,8 @@ impl Lowerer {
                 let ch_vals: Vec<ValueId> = arms.iter().map(|arm| {
                     self.lower_expr(&arm.chan)
                 }).collect();
-                let select_val = self.emit(InstKind::SelectArm(ch_vals.clone()), ty.clone(), span);
+                let has_default = default.is_some();
+                let select_val = self.emit(InstKind::SelectArm(ch_vals.clone(), has_default), ty.clone(), span);
                 // Lower bodies as a switch on the selected arm index
                 if !arms.is_empty() {
                     let merge_bb = self.new_block("select.merge");
@@ -843,6 +887,21 @@ impl Lowerer {
                         }
                     }
                     ExprKind::Field(obj, field, _) => {
+                        // If the object is a mem_var, emit a direct field store
+                        // on the variable name so codegen can GEP into the alloca.
+                        if let ExprKind::Var(_, name) = &obj.kind {
+                            if self.mem_vars.contains(name) {
+                                let obj_ty = obj.ty.clone();
+                                self.func.block_mut(self.current_block).insts.push(Instruction {
+                                    dest: None,
+                                    kind: InstKind::FieldStore(name.clone(), field.clone(), val),
+                                    ty: obj_ty,
+                                    span: target.span,
+                                    def_id: None,
+                                });
+                                return val;
+                            }
+                        }
                         let obj_val = self.lower_expr(obj);
                         // Pass the obj's type so codegen can find the struct layout.
                         let obj_ty = obj.ty.clone();
@@ -1042,10 +1101,9 @@ impl Lowerer {
                     // Condition: load counter, compare < end.
                     self.switch_to(cond_bb);
                     let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, f.span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, f.span);
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
-                    // Body
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
                     // Re-bind the loop variable to the loaded counter so body can use it.
@@ -1072,7 +1130,7 @@ impl Lowerer {
 
                     self.switch_to(cond_bb);
                     let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, f.span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, f.span);
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -1122,7 +1180,7 @@ impl Lowerer {
                     // Condition: idx < len.
                     self.switch_to(cond_bb);
                     let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, f.span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len), Type::Bool, f.span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len, Type::I64), Type::Bool, f.span);
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     // Body: bind element.
@@ -1339,8 +1397,9 @@ impl Lowerer {
                             }
                             Pat::Lit(lit_expr) => {
                                 let lit_val = self.lower_expr(lit_expr);
+                                let subj_ty = self.value_type(subj);
                                 let cmp = self.emit(
-                                    InstKind::Cmp(CmpOp::Eq, subj, lit_val),
+                                    InstKind::Cmp(CmpOp::Eq, subj, lit_val, subj_ty),
                                     Type::Bool,
                                     arm.span,
                                 );
@@ -1475,7 +1534,7 @@ impl Lowerer {
 
                     self.switch_to(cond_bb);
                     let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, *span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, *span);
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -1502,7 +1561,7 @@ impl Lowerer {
 
                     self.switch_to(cond_bb);
                     let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val), Type::Bool, *span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, *span);
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -1527,7 +1586,7 @@ impl Lowerer {
 
                     self.switch_to(cond_bb);
                     let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, *span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len), Type::Bool, *span);
+                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len, Type::I64), Type::Bool, *span);
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -1697,6 +1756,24 @@ impl Lowerer {
                     Self::collect_expr_var_refs_block(&arm.body, refs);
                 }
             }
+            hir::Stmt::Break(Some(e), _) | hir::Stmt::ErrReturn(e, _, _)
+            | hir::Stmt::ChannelClose(e, _) | hir::Stmt::Stop(e, _) => {
+                Self::collect_expr_var_refs_expr(e, refs);
+            }
+            hir::Stmt::TupleBind(_, e, _) => Self::collect_expr_var_refs_expr(e, refs),
+            hir::Stmt::SimFor(f, _) => {
+                Self::collect_expr_var_refs_expr(&f.iter, refs);
+                Self::collect_expr_var_refs_block(&f.body, refs);
+            }
+            hir::Stmt::SimBlock(body, _) | hir::Stmt::Transaction(body, _) => {
+                Self::collect_expr_var_refs_block(body, refs);
+            }
+            hir::Stmt::StoreInsert(_, exprs, _) => {
+                for e in exprs { Self::collect_expr_var_refs_expr(e, refs); }
+            }
+            hir::Stmt::StoreSet(_, updates, _, _) => {
+                for (_, e) in updates { Self::collect_expr_var_refs_expr(e, refs); }
+            }
             _ => {}
         }
     }
@@ -1738,6 +1815,64 @@ impl Lowerer {
                 Self::collect_expr_var_refs_expr(&i.cond, refs);
                 Self::collect_expr_var_refs_block(&i.then, refs);
                 if let Some(els) = &i.els { Self::collect_expr_var_refs_block(els, refs); }
+            }
+            ExprKind::Ternary(c, t, f) => {
+                Self::collect_expr_var_refs_expr(c, refs);
+                Self::collect_expr_var_refs_expr(t, refs);
+                Self::collect_expr_var_refs_expr(f, refs);
+            }
+            ExprKind::Struct(_, fields) | ExprKind::VariantCtor(_, _, _, fields) => {
+                for fi in fields { Self::collect_expr_var_refs_expr(&fi.value, refs); }
+            }
+            ExprKind::Select(arms, default) => {
+                for arm in arms {
+                    Self::collect_expr_var_refs_expr(&arm.chan, refs);
+                    if let Some(v) = &arm.value { Self::collect_expr_var_refs_expr(v, refs); }
+                    Self::collect_expr_var_refs_block(&arm.body, refs);
+                }
+                if let Some(def) = default { Self::collect_expr_var_refs_block(def, refs); }
+            }
+            ExprKind::DynDispatch(obj, _, _, args) | ExprKind::Send(obj, _, _, _, args)
+            | ExprKind::Pipe(obj, _, _, args) => {
+                Self::collect_expr_var_refs_expr(obj, refs);
+                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+            }
+            ExprKind::Builtin(_, args) => {
+                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+            }
+            ExprKind::ChannelSend(a, b) | ExprKind::AtomicStore(a, b)
+            | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
+                Self::collect_expr_var_refs_expr(a, refs);
+                Self::collect_expr_var_refs_expr(b, refs);
+            }
+            ExprKind::ChannelRecv(e) | ExprKind::CoroutineNext(e)
+            | ExprKind::Yield(e) | ExprKind::DynCoerce(e, _, _)
+            | ExprKind::AsFormat(e, _) | ExprKind::AtomicLoad(e)
+            | ExprKind::Slice(e, _, _) | ExprKind::Grad(e) => {
+                Self::collect_expr_var_refs_expr(e, refs);
+                if let ExprKind::Slice(_, lo, hi) = &expr.kind {
+                    Self::collect_expr_var_refs_expr(lo, refs);
+                    Self::collect_expr_var_refs_expr(hi, refs);
+                }
+            }
+            ExprKind::ChannelCreate(_, cap) => Self::collect_expr_var_refs_expr(cap, refs),
+            ExprKind::ListComp(body, _, _, iter, end, cond) => {
+                Self::collect_expr_var_refs_expr(body, refs);
+                Self::collect_expr_var_refs_expr(iter, refs);
+                if let Some(e) = end { Self::collect_expr_var_refs_expr(e, refs); }
+                if let Some(c) = cond { Self::collect_expr_var_refs_expr(c, refs); }
+            }
+            ExprKind::CoroutineCreate(_, stmts) => Self::collect_expr_var_refs_block(stmts, refs),
+            ExprKind::AtomicCas(a, b, c) => {
+                Self::collect_expr_var_refs_expr(a, refs);
+                Self::collect_expr_var_refs_expr(b, refs);
+                Self::collect_expr_var_refs_expr(c, refs);
+            }
+            ExprKind::Einsum(_, args) => {
+                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+            }
+            ExprKind::Builder(_, fields) => {
+                for (_, e) in fields { Self::collect_expr_var_refs_expr(e, refs); }
             }
             ExprKind::Block(stmts) => Self::collect_expr_var_refs_block(stmts, refs),
             ExprKind::Lambda(_, body) => Self::collect_expr_var_refs_block(body, refs),

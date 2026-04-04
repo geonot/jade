@@ -4,8 +4,8 @@
 *main
     total is 0
     i is 0
-    while i < 10000000
-        arr is [i, i + 1, i + 2, i + 3, i + 4]
+    while i < 1500000000
+        arr is [i xor total, i + 1, i + 2, i + 3, i + 4]
         total is total + arr[0] + arr[1] + arr[2] + arr[3] + arr[4]
         i is i + 1
     log(total)

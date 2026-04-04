@@ -10,9 +10,10 @@
 *main
     total is 0
     i is 0
-    while i < 10000000
+    while i < 2000000000
         total is total + apply(double, i)
         total is total + (i ~ double ~ add_one)
+        total is total xor i
         i is i + 1
     log(total)
     0

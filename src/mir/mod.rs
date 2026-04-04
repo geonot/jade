@@ -126,7 +126,7 @@ pub enum InstKind {
 
     BinOp(BinOp, ValueId, ValueId),
     UnaryOp(UnaryOp, ValueId),
-    Cmp(CmpOp, ValueId, ValueId),
+    Cmp(CmpOp, ValueId, ValueId, Type),
 
     Call(String, Vec<ValueId>),
     MethodCall(ValueId, String, Vec<ValueId>),
@@ -137,6 +137,8 @@ pub enum InstKind {
 
     FieldGet(ValueId, String),
     FieldSet(ValueId, String, ValueId),
+    /// Direct field store into a named variable's alloca (for mem_vars).
+    FieldStore(String, String, ValueId),
 
     Index(ValueId, ValueId),
     IndexSet(ValueId, ValueId, ValueId),
@@ -183,7 +185,7 @@ pub enum InstKind {
     ChanCreate(Type),
     ChanSend(ValueId, ValueId),
     ChanRecv(ValueId),
-    SelectArm(Vec<ValueId>),
+    SelectArm(Vec<ValueId>, bool),
 
     // ── Builtins (needed so MIR can fold/eliminate them) ──
     Log(ValueId),

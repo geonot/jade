@@ -128,7 +128,7 @@ x >>= 1             # x is x >> 1
 p is Vec3(x is 1, y is 2, z is 3)
 ```
 
-`is` is binding, not comparison. Comparison uses `equals` and `isnt`.
+`is` is binding, not comparison. Comparison uses `equals` and `neq`. `eq` is shorthand for `equals`.
 
 ### ALL_CAPS Constants
 
@@ -139,7 +139,17 @@ MAX_SIZE is 1024
 PI is 3.14159265
 DEFAULT_PORT is 8080
 ```
+The same convention applies inside types, where `FIELD is value` provides a default:
+```jade
+type Foo
+    BAR is 10
+    BAZ as i64
 
+x is Foo(BAZ is 5)
+log x.BAR    # 10 (default)
+log x.BAZ    # 5
+```
+**Note:** Default-valued fields are not yet enforced as immutable. `x.BAR is 20` will compile and overwrite the default. Compile-time immutability enforcement for ALL_CAPS fields is planned.
 ---
 
 ## Functions
@@ -228,13 +238,15 @@ Combines naturally with pattern clauses:
 ### Higher-Order Functions
 
 ```jade
-*apply f as (i64) returns i64, x as i64
-    f x
+*apply(f as (i64) returns i64, x as i64)
+    f(x)
 
 *main
     double is *fn(x as i64) x * 2
-    log apply(double, 21)
+    log apply(double, 21)    # 42
 ```
+
+Function-typed parameters use the form `f as (ParamTypes) returns RetType`. Parentheses on the function definition are required when using `as` type annotations.
 
 ### Lambdas
 
@@ -250,6 +262,8 @@ result is items ~ *fn(x)
     y is x * 2
     y + 1
 ```
+
+The `*fn(params) body` form is required — `fn` is not optional.
 
 ### Pipelines
 
@@ -271,23 +285,44 @@ connect(host is 'example.com')    # port defaults to 8080
 
 ### `$` Placeholder
 
-Universal placeholder for inline lambdas and partial application:
+Placeholder for partial application in pipelines. In pipeline context, `$ expr` desugars to an implicit lambda at parse time:
 
 ```jade
-# In lambdas — $ is the argument
-nums ~ map $ * 2
-nums ~ filter $ > 10
+# In named calls (pipeline + call with $ in args)
+result is value ~ add(5, $)       # → add(5, value)
 
 # Numbered: $0, $1, $2 for multi-arg
-pairs ~ map $0 + $1
-
-# Partial application
-add5 is add(5, $)
+pairs ~ combine($0, $1)
 ```
+
+> **Status**: The `$` placeholder in bare expressions (`nums ~ $ * 2`) parses and creates an implicit lambda, but does not compile — codegen fails with "cannot call non-function type". Use explicit lambdas instead: `nums.map(*fn(x) x * 2)` or define a named function and use method syntax.
 
 ---
 
 ## Control Flow
+
+### Ternary — `? !`
+
+The preferred conditional expression. `condition ? then ! else`.
+
+```jade
+# Basic
+sign is x > 0 ? 1 ! -1
+
+# Absolute value
+abs_x is x >= 0 ? x ! 0 - x
+
+# Nested ternary (right-associative)
+grade is score > 90 ? 'A' ! score > 80 ? 'B' ! score > 70 ? 'C' ! 'F'
+
+# In function calls
+log x > 0 ? 'positive' ! 'non-positive'
+
+# Assigning different types (branches must unify)
+result is ready ? compute() ! fallback()
+```
+
+Ternary binds looser than pipelines — `value ~ transform ? check ! default` works as expected.
 
 ### Conditionals
 
@@ -299,11 +334,8 @@ elif x equals 0
 else
     log 'negative'
 
-# If as expression
-sign is if x > 0 ? 1 ! -1
-
-# Ternary
-abs_x is x >= 0 ? x ! 0 - x
+# If as expression — use ternary
+sign is x > 0 ? 1 ! -1
 ```
 
 ### Loops
@@ -313,12 +345,12 @@ abs_x is x >= 0 ? x ! 0 - x
 while n > 0
     n is n - 1
 
-# For range (implicit assignment with 'from')
+# For range (with 'from')
 for i from 0 to 100
     log i
 
-# For range (explicit assignment with 'is')
-for i is 1 to 100
+# For range (with 'in')
+for i in 1 to 100
     log i
 
 # For with step
@@ -376,7 +408,7 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 | 3 | `or` | Logical OR |
 | 4 | `xor` | Logical XOR |
 | 5 | `and` | Logical AND |
-| 6 | `equals` `neq` | Equality |
+| 6 | `equals` `eq` `neq` | Equality |
 | 7 | `< > <= >=` `in` | Comparison / membership |
 | 8 | `\|` | Bitwise OR |
 | 9 | `^` | Bitwise XOR |
@@ -390,11 +422,13 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 
 ### Comparison
 
-`equals` and `neq` — not `==` or `!=`. Reads like language.
+`equals` (shorthand `eq`) and `neq` — not `==` or `!=`. Reads like language.
 
 ```jade
 if x equals 0
     log 'zero'
+if x eq 0
+    log 'also zero'
 if x neq y
     log 'different'
 ```
@@ -417,9 +451,17 @@ if x in [1, 2, 3]
     log 'found'
 if key in my_map
     log 'exists'
+if 'world' in greeting
+    log 'found substring'
 ```
 
-Desugars to `.contains()` on the collection.
+Desugars to `.contains()` on the collection. Works with:
+- **Vec/Array:** linear scan for element equality
+- **String:** substring search
+- **Map:** key lookup (equivalent to `.has()`)
+- **Set:** membership check
+
+**Note:** `in` on array literals (e.g., `x in [1, 2, 3]`) may fail at codegen — use a `vec()` instead.
 
 ### Logical
 
@@ -446,6 +488,8 @@ data is my_struct as json    # serialize struct to JSON string
 config is json_str as Config # deserialize JSON string to struct
 m is my_struct as map        # convert struct to Map
 ```
+
+**Status:** Serialization casts parse but are not yet implemented — they currently return an empty string. Full serialization requires runtime support.
 
 ---
 
@@ -475,7 +519,22 @@ type Vec3
         self.x * other.x + self.y * other.y + self.z * other.z
 ```
 
-Structs are value types. Passed by value (move), stack allocated. Methods take `self`.
+Structs are value types. Passed by value (move), stack allocated. Methods take `self` explicitly, or omit it and access fields by name directly — `self` is injected by the compiler.
+
+```jade
+type Vec3
+    x as i64
+    y as i64
+    z as i64
+
+    # Explicit self
+    *dot(self, other as Vec3)
+        self.x * other.x + self.y * other.y + self.z * other.z
+
+    # Implicit self — fields resolve to self.field automatically
+    *sum()
+        x + y + z
+```
 
 ---
 
@@ -525,10 +584,10 @@ err FileError
     NotFound
     PermissionDenied(String)
 
-*read_file path as String
+*read_file(path as String)
     if path equals ''
         ! NotFound
-    42
+    'file contents here'
 
 *main
     match read_file('test.txt')
@@ -537,38 +596,49 @@ err FileError
         _ ? log 'ok'
 ```
 
-`!` is the error return operator — returns the error value from the current function.
+`!` is the error return operator — returns the error value from the current function. The non-error path returns normally (here, the string on the last line).
 
 ---
 
 ## List Comprehensions
 
 ```jade
-squares is [x ** 2 for x from 0 to 10]
-evens is [x for x from 0 to 100 if x % 2 equals 0]
+squares is [x ** 2 for x in 0 to 10]
+evens is [x for x in 0 to 100 if x % 2 eq 0]
 ```
+
+Syntax: `[expr for bind in start to end]` or `[expr for bind in start to end if cond]`. Produces a `Vec`.
 
 ---
 
 ## Iterator Combinators
 
-Lazy iterator methods composable with `~` and `$`:
+Vec methods for functional data transformation. Chain with `.method()` syntax or `~` pipelines with named functions.
 
 ```jade
-# map, filter, fold
-total is items ~ map $ * 2 ~ filter $ > 10 ~ fold 0, $ + $1
+*double(x as i64) returns i64 is x * 2
+*big(x as i64) returns bool is x > 10
+
+# map, filter as method chains
+doubled is nums.map(double)
+result is nums.map(double).filter(big)
+
+# fold
+total is nums.fold(0, *fn(acc, x) acc + x)
 
 # zip, take, skip
-pairs is a ~ zip b ~ take 5
+pairs is a.zip(b).take(5)
 
 # any, all, find
-has_neg is nums ~ any $ < 0
-found is items ~ find $ equals target
+has_neg is nums.any(*fn(x) x < 0)
+found is items.find(*fn(x) x eq target)
 
-# chain, flatten, collect
-combined is a ~ chain b ~ collect
-flat is nested ~ flatten ~ collect
+# chain, flatten
+combined is a.chain(b)
+flat is nested.flatten()
 ```
+
+Available methods: `map`, `filter`, `fold`, `any`, `all`, `find`, `zip`, `take`, `skip`, `chain`, `flatten`, `enumerate`, `reverse`, `sort`, `sum`, `count`, `contains`, `join`, `collect`.
 
 ---
 
@@ -593,6 +663,8 @@ A function containing `yield` is automatically a generator. Calling it returns a
     log gen.next()     # 1
     log gen.next()     # 2
 ```
+
+**Status:** Generators are parsed and typed. The MIR codegen path has coroutine infrastructure (context switching, suspend/resume) but end-to-end `.next()` dispatch on generator return values is not yet working. For-in iteration over generators is supported in the MIR path.
 
 ---
 
@@ -620,21 +692,22 @@ log m.has('key')   # true
 ### Set
 
 ```jade
-s is set()
-s.add(1)
-s.add(2)
+s is set(1, 2, 3)
+s.add(4)
 s.add(1)           # no-op, already present
 log s.contains(1)  # true
-log s.len()        # 2
+log s.len()        # 4
 s.remove(1)
 
 # Set operations
-a_set is set()
-b_set is set()
+a_set is set(1, 2, 3)
+b_set is set(2, 3, 4)
 u is a_set.union(b_set)
 d is a_set.difference(b_set)
 i is a_set.intersection(b_set)
 ```
+
+**Note:** `set` is a parser keyword (used for store updates). Creating sets requires the call form `set(...)` — bare `set()` without arguments may conflict with the store `set` statement. Initialize with values: `set(1, 2, 3)`.
 
 ### Priority Queue
 
@@ -663,6 +736,8 @@ log d.pop_back()           # 2
 log d.len()                # 1
 ```
 
+**Status:** Deque is parsed and typed but codegen is not yet implemented. Runtime support exists in `runtime/deque.c`.
+
 ### Allocator-Aware Collections
 
 Collections can optionally use a custom allocator:
@@ -681,24 +756,19 @@ m is map_with_alloc(scratch)
 String methods for pattern matching via PCRE2:
 
 ```jade
-use regex
-
 # String methods
 log 'hello123'.matches('[0-9]+')         # true
 results is 'a1b2c3'.find_all('[0-9]+')   # ['1', '2', '3']
 cleaned is 'foo  bar'.replace_re('\\s+', ' ')  # 'foo bar'
-
-# Stdlib functions
-pat is regex.compile('[A-Z]+')
-log regex.is_match(pat, 'HELLO')         # true
-found is regex.find(pat, 'hello WORLD')  # 'WORLD'
 ```
+
+> **Status**: String regex methods (`matches`, `find_all`, `replace_re`) are parsed and dispatched in codegen, but currently fail with a type mismatch (String value vs ptr parameter). The `regex.compile` / `regex.is_match` stdlib API shown in earlier docs does not exist — regex is purely string-method-based. Requires runtime PCRE2 linkage.
 
 ---
 
 ## Query Blocks
 
-Native query syntax for structured data operations. Parsing is implemented; execution is deferred to 0.2.0 (Persistence phase).
+Native query syntax for structured data operations. Store queries are operational; general query blocks are parsed but execution is deferred.
 
 ```jade
 # Query with clauses
@@ -710,7 +780,7 @@ query users
 # Available clauses: where, sort, limit, take, skip, set, delete
 ```
 
-Query blocks produce a `query` expression over a source with typed clauses. The compiler validates clause structure at parse time.
+Query blocks produce a `query` expression over a source with typed clauses. The compiler validates clause structure at parse time. Store-specific queries (using persistent stores) are fully implemented.
 
 ---
 
@@ -733,7 +803,7 @@ File = module. `use` imports. Recursive module resolution.
 ### Selective Imports
 
 ```jade
-use math.{sin, cos, pi}     # import only specific symbols
+use math [sin, cos, pi]      # import only specific symbols
 log sin(pi)
 ```
 
@@ -894,6 +964,8 @@ b is a              # shared — no copy
 b is b + ' world'   # COW triggers: b gets its own copy
 ```
 
+**Status:** COW types exist in the type system but codegen is not yet implemented.
+
 ### Signal Handling
 
 POSIX signal infrastructure.
@@ -977,22 +1049,21 @@ Parses function declarations, structs, typedefs and generates corresponding Jade
 
 ```jade
 actor Counter
-    count as i64 is 0
+    count is 0
 
-    *increment self, amount as i64
-        self.count += amount
+    @increment amount
+        count is count + amount
 
-    *get_count self
-        self.count
+    @get_count
+        count
 
 *main
     c is spawn Counter
-    send c.increment(5)
-    send c.increment(3)
-    log c.get_count()    # 8
+    send c, @increment(5)
+    send c, @increment(3)
 ```
 
-Actors run on a cooperative work-stealing scheduler. Message sends are non-blocking.
+Actor handlers use `@name` syntax. Fields are defined in the actor body. Messages are sent with `send target, @handler(args)`. Actors run on a cooperative work-stealing scheduler. Message sends are non-blocking.
 
 ### Supervisor Trees
 
@@ -1009,22 +1080,24 @@ supervisor my_system
 
 Strategies: `one_for_one`, `one_for_all`, `rest_for_one`.
 
+**Status:** Parsed but not yet compiled. Supervisor definitions are accepted by the parser but skipped during type checking and codegen.
+
 ### Channels
 
 ```jade
 ch is channel of i64(10)     # buffered channel, capacity 10
-channel_send(ch, 42)
-val is channel_recv(ch)
-channel_close(ch)
+send ch, 42                  # send value
+val is receive ch            # receive value
+close ch                     # close channel
 ```
 
 ### Select
 
 ```jade
 select
-    recv from ch1 as val
+    receive ch1 as val
         log 'got {val} from ch1'
-    recv from ch2 as val
+    receive ch2 as val
         log 'got {val} from ch2'
     default
         log 'no messages'
@@ -1070,6 +1143,8 @@ sum is v + w     # (6.0, 8.0, 10.0, 12.0)
 prod is v * w    # (5.0, 12.0, 21.0, 32.0)
 ```
 
+**Status:** SIMD types exist in the type system but do not yet generate SIMD-specific LLVM IR.
+
 ### Einsum Notation
 
 Einstein summation for tensor contractions:
@@ -1085,6 +1160,8 @@ t is einsum 'ii->', M
 d is einsum 'i,i->', u, v
 ```
 
+**Status:** Parsed and typed but codegen is not yet implemented.
+
 ### Automatic Differentiation
 
 Source-to-source AD via `grad`:
@@ -1097,6 +1174,8 @@ Source-to-source AD via `grad`:
     dloss is grad(loss)    # returns a function: f64 returns f64
     log dloss(2.0)         # 7.0  (derivative: 2x + 3)
 ```
+
+**Status:** Parsed and typed but codegen is not yet implemented.
 
 ---
 
@@ -1115,6 +1194,8 @@ config is build ServerConfig
     host is 'localhost'
     workers is 4
 ```
+
+**Status:** Parsed and typed. The MIR codegen path desugars builder blocks to struct construction. The HIR codegen path has not yet implemented builder blocks.
 
 ---
 

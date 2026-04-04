@@ -9,8 +9,8 @@ type Vec3
 *main
     total is 0
     i is 0
-    while i < 10000000
-        a is Vec3(x is i, y is i + 1, z is i + 2)
+    while i < 800000000
+        a is Vec3(x is i xor total, y is i + 1, z is i + 2)
         b is Vec3(x is i + 3, y is i + 4, z is i + 5)
         total is total + dot(a, b)
         i is i + 1
