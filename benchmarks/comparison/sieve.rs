@@ -7,7 +7,7 @@ fn is_prime(n: i64) -> bool {
 
 fn main() {
     let mut count: i64 = 0;
-    for n in 2i64..1_000_000 {
+    for n in 2i64..5_000_000 {
         if is_prime(n) { count += 1; }
     }
     println!("{}", count);

@@ -10,10 +10,11 @@ fn eval_op(op: Op) -> i64 {
 
 fn main() {
     let mut total: i64 = 0;
-    for i in 0i64..5_000_000 {
+    for i in 0i64..2_000_000_000 {
         total += eval_op(Op::Add(i, i + 1));
         total += eval_op(Op::Mul(i, 2));
         total += eval_op(Op::Neg(i));
+        total ^= i;
     }
     println!("{}", total);
 }

@@ -1,0 +1,23 @@
+*churn(n)
+    v is vec()
+    v.push(n)
+    v.push(n + 1)
+    v.push(n + 2)
+    v.push(n + 3)
+    v.push(n + 4)
+    v.push(n + 5)
+    v.push(n + 6)
+    v.push(n + 7)
+    v.push(n + 8)
+    v.push(n + 9)
+    v.get(n mod 10)
+
+*main
+    total is 0
+    i is 0
+    while i < 50000000
+        total is total + churn(i)
+        total is total xor i
+        i is i + 1
+    log(total)
+    0

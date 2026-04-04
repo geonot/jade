@@ -8,4 +8,5 @@ total = 0
 for i in range(10000000):
     total += adder(i)
     total += apply(adder, i)
+    total ^= i
 print(total)

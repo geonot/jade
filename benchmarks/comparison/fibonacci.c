@@ -7,6 +7,6 @@ static int64_t fib(int64_t n) {
 }
 
 int main(void) {
-    printf("%ld\n", fib(40));
+    printf("%ld\n", fib(42));
     return 0;
 }

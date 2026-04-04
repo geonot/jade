@@ -7,6 +7,6 @@ int ack(int m, int n) {
 }
 
 int main(void) {
-    printf("%d\n", ack(3, 10));
+    printf("%d\n", ack(3, 11));
     return 0;
 }

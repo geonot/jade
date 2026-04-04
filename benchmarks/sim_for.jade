@@ -7,8 +7,6 @@
     return fib(n - 1) + fib(n - 2)
 
 *main
-    total is 0
     sim for i in 1000
-        k is 28 + total mod 5
-        total is total + fib(k)
-    log(total)
+        fib(28 + i mod 5)
+    log(0)

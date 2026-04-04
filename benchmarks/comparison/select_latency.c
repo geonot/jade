@@ -7,7 +7,7 @@ int main() {
     int p1[2], p2[2];
     pipe(p1);
     pipe(p2);
-    long n = 100000;
+    long n = 2000000;
     long total = 0;
     struct pollfd fds[2];
     fds[0].fd = p1[0]; fds[0].events = POLLIN;

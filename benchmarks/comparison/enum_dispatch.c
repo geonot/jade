@@ -19,10 +19,11 @@ static int64_t eval_op(Op op) {
 
 int main(void) {
     int64_t total = 0;
-    for (int64_t i = 0; i < 5000000; i++) {
+    for (int64_t i = 0; i < 2000000000; i++) {
         total += eval_op((Op){OP_ADD, i, i + 1});
         total += eval_op((Op){OP_MUL, i, 2});
         total += eval_op((Op){OP_NEG, i, 0});
+        total ^= i;
     }
     printf("%ld\n", total);
     return 0;

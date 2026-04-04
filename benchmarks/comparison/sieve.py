@@ -9,7 +9,7 @@ def is_prime(n):
     return True
 
 count = 0
-for n in range(2, 1000000):
+for n in range(2, 5000000):
     if is_prime(n):
         count += 1
 print(count)

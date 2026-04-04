@@ -10,7 +10,7 @@ def collatz_steps(n):
 
 max_steps = 0
 max_n = 0
-for n in range(1, 1000000):
+for n in range(1, 5000000):
     s = collatz_steps(n)
     if s > max_steps:
         max_steps = s

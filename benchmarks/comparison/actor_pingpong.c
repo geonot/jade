@@ -65,7 +65,7 @@ int main(void) {
     pthread_detach(tid);
 
     msg_t m = {0, 1};
-    for (long i = 0; i < 1000000; i++) {
+    for (long i = 0; i < 2000000; i++) {
         mb_send(mb, m);
     }
     usleep(500000);

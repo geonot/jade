@@ -7,7 +7,7 @@ static int64_t a_elem(int64_t i, int64_t j) {
 
 int main(void) {
     int64_t n = 1000, sum = 0;
-    for (int iter = 0; iter < 500; iter++)
+    for (int iter = 0; iter < 2000; iter++)
         for (int64_t i = 0; i < n; i++) {
             int64_t acc = 0;
             for (int64_t j = 0; j < n; j++)

@@ -3,7 +3,7 @@ def a_elem(i, j):
 
 n = 1000
 s = 0
-for _iter in range(500):
+for _iter in range(2000):
     for i in range(n):
         acc = 0
         for j in range(n):

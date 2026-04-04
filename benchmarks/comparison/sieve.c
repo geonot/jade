@@ -11,7 +11,7 @@ static int is_prime(int64_t n) {
 
 int main(void) {
     int64_t count = 0;
-    for (int64_t n = 2; n < 1000000; n++) {
+    for (int64_t n = 2; n < 5000000; n++) {
         if (is_prime(n)) count++;
     }
     printf("%ld\n", count);

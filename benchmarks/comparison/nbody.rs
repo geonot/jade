@@ -12,7 +12,7 @@ fn main() {
     let (mut x3,mut y3,mut z3,mut vx3,mut vy3,mut vz3,_m3) = (500i64,500,500,-20,20,-20,5i64);
     let (mut x4,mut y4,mut z4,mut vx4,mut vy4,mut vz4,_m4) = (-500i64,-500,-500,30,-10,30,5i64);
 
-    for _ in 0..10_000_000 {
+    for _ in 0..80_000_000 {
         let d = dist_sq(x0,y0,z0,x1,y1,z1) + 1;
         vx1 += (x0-x1)*m0/d;
         vy1 += (y0-y1)*m0/d;

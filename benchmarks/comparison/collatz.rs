@@ -10,7 +10,7 @@ fn collatz_steps(mut n: i64) -> i64 {
 fn main() {
     let mut max_steps: i64 = 0;
     let mut max_n: i64 = 0;
-    for n in 1i64..1_000_000 {
+    for n in 1i64..5_000_000 {
         let s = collatz_steps(n);
         if s > max_steps { max_steps = s; max_n = n; }
     }

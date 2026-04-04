@@ -4,6 +4,6 @@ for i in range(n):
     for j in range(n):
         s = 0
         for k in range(n):
-            s += (i * n + k) * (k * n + j)
+            s += (i * n + k) * (k * n + j) + (total ^ k)
         total += s
 print(total)

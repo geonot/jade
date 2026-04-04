@@ -11,4 +11,5 @@ total = 0
 for i in range(10000000):
     total += apply(double_val, i)
     total += add_one(double_val(i))
+    total ^= i
 print(total)

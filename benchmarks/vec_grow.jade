@@ -1,0 +1,16 @@
+*main
+    v is vec()
+    for i in 400000000
+        v.push(i)
+    n is v.len()
+    i is 0
+    while i < n
+        v.set(i, v.get(i) xor (i + 1))
+        i is i + 1
+    total is 0
+    i is 0
+    while i < n
+        total is total + v.get(i)
+        i is i + 1
+    log(total)
+    0

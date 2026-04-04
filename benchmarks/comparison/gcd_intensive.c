@@ -12,8 +12,8 @@ static int64_t gcd(int64_t a, int64_t b) {
 
 int main(void) {
     int64_t sum = 0;
-    for (int64_t i = 1; i < 10000; i++) {
-        for (int64_t j = i + 1; j < 10000; j += 100) {
+    for (int64_t i = 1; i < 30000; i++) {
+        for (int64_t j = i + 1; j < 30000; j += 10) {
             sum += gcd(i, j);
         }
     }

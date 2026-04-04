@@ -1,5 +1,5 @@
 /* Sim for benchmark — C comparison
- * Spawns N threads, each computing fib(25)
+ * Spawns N threads, each computing fib(28 + i % 5)
  */
 #include <stdio.h>
 #include <pthread.h>
@@ -11,21 +11,23 @@ static long fib(long n) {
 }
 
 static void *worker(void *arg) {
-    (void)arg;
-    fib(25);
+    long i = (long)arg;
+    long k = 28 + i % 5;
+    volatile long result = fib(k);
+    (void)result;
     return NULL;
 }
 
 int main(void) {
-    int n = 100;
+    int n = 1000;
     pthread_t *threads = malloc(sizeof(pthread_t) * (size_t)n);
     for (int i = 0; i < n; i++) {
-        pthread_create(&threads[i], NULL, worker, NULL);
+        pthread_create(&threads[i], NULL, worker, (void *)(long)i);
     }
     for (int i = 0; i < n; i++) {
         pthread_join(threads[i], NULL);
     }
-    free(threads);
     printf("0\n");
+    free(threads);
     return 0;
 }

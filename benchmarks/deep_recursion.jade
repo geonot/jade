@@ -1,0 +1,17 @@
+*deep(n, a, b, c, d)
+    if n < 1
+        return a + b + c + d
+    x is a + b
+    y is c + d
+    z is x * y
+    deep(n - 1, x, y, z, a + 1)
+
+*main
+    total is 0
+    i is 0
+    while i < 100000000
+        total is total + deep(20, i, i + 1, i + 2, i + 3)
+        total is total xor i
+        i is i + 1
+    log(total)
+    0

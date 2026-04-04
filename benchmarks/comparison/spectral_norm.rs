@@ -5,7 +5,7 @@ fn a_elem(i: i64, j: i64) -> i64 {
 fn main() {
     let n: i64 = 1000;
     let mut sum: i64 = 0;
-    for _ in 0..500 {
+    for _ in 0..2000 {
         for i in 0..n {
             let mut acc: i64 = 0;
             for j in 0..n {

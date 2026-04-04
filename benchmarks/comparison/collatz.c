@@ -15,7 +15,7 @@ static int64_t collatz_steps(int64_t n) {
 
 int main(void) {
     int64_t max_steps = 0, max_n = 0;
-    for (int64_t n = 1; n < 1000000; n++) {
+    for (int64_t n = 1; n < 5000000; n++) {
         int64_t s = collatz_steps(n);
         if (s > max_steps) {
             max_steps = s;

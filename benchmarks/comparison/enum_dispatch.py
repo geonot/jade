@@ -11,4 +11,5 @@ for i in range(5000000):
     total += eval_op(0, i, i + 1)
     total += eval_op(1, i, 2)
     total += eval_op(2, i, 0)
+    total ^= i
 print(total)

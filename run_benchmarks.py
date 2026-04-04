@@ -175,7 +175,7 @@ def save_history(history):
         json.dump(history, f, indent=2)
 
 
-SKIP_BENCHMARKS = {"store_ops"}
+SKIP_BENCHMARKS = set()
 
 def discover_benchmarks(bench_filter=None):
     """Find .jade benchmarks, optionally filtered by comma-separated patterns."""

@@ -14,7 +14,7 @@ int main(void) {
     int64_t x3=500,y3=500,z3=500,vx3=-20,vy3=20,vz3=-20,m3=5;
     int64_t x4=-500,y4=-500,z4=-500,vx4=30,vy4=-10,vz4=30,m4=5;
 
-    for (int step = 0; step < 10000000; step++) {
+    for (int step = 0; step < 80000000; step++) {
         int64_t d = dist_sq(x0,y0,z0,x1,y1,z1) + 1;
         vx1 += (x0-x1)*m0/d;
         vy1 += (y0-y1)*m0/d;

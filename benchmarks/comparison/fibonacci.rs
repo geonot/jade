@@ -4,5 +4,5 @@ fn fib(n: i64) -> i64 {
 }
 
 fn main() {
-    println!("{}", fib(40));
+    println!("{}", fib(42));
 }

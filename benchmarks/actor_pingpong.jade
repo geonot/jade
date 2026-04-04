@@ -8,7 +8,7 @@ actor Worker
 *main
     w is spawn Worker
     i is 0
-    while i < 1000000
+    while i < 2000000
         send w, @ping(1)
         i is i + 1
     usleep(500000)
