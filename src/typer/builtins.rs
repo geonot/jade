@@ -399,7 +399,14 @@ impl Typer {
                         if let Some(fields) = self.structs.get(s) {
                             fields.len() as i64 * 8 // rough estimate: 8 bytes per field
                         } else {
-                            0
+                            match s.as_str() {
+                                "i8" | "u8" | "bool" => 1,
+                                "i16" | "u16" => 2,
+                                "i32" | "u32" | "f32" => 4,
+                                "i64" | "u64" | "f64" => 8,
+                                "String" | "string" => 24,
+                                _ => 0,
+                            }
                         }
                     }
                     _ => {
@@ -428,6 +435,78 @@ impl Typer {
             }
             "unlikely" => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::Unlikely, Type::Bool, span))
+            }
+            "atomic_load" if args.len() == 1 && !self.fns.contains_key(name) => {
+                let harg = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                if !matches!(harg.ty, Type::Ptr(_)) {
+                    return Some(Err(format!("atomic_load() requires a pointer, got {}", harg.ty)));
+                }
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::AtomicLoad(Box::new(harg)),
+                    ty: Type::I64,
+                    span,
+                }))
+            }
+            "atomic_store" if args.len() == 2 && !self.fns.contains_key(name) => {
+                let hptr = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hval = match self.lower_expr(&args[1]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                if !matches!(hptr.ty, Type::Ptr(_)) {
+                    return Some(Err(format!("atomic_store() first arg must be a pointer, got {}", hptr.ty)));
+                }
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::AtomicStore(Box::new(hptr), Box::new(hval)),
+                    ty: Type::Void,
+                    span,
+                }))
+            }
+            "atomic_add" if args.len() == 2 && !self.fns.contains_key(name) => {
+                let hptr = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hval = match self.lower_expr(&args[1]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                if !matches!(hptr.ty, Type::Ptr(_)) {
+                    return Some(Err(format!("atomic_add() first arg must be a pointer, got {}", hptr.ty)));
+                }
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::AtomicAdd(Box::new(hptr), Box::new(hval)),
+                    ty: Type::I64,
+                    span,
+                }))
+            }
+            "atomic_cas" if args.len() == 3 && !self.fns.contains_key(name) => {
+                let hptr = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hexpected = match self.lower_expr(&args[1]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hnew = match self.lower_expr(&args[2]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                if !matches!(hptr.ty, Type::Ptr(_)) {
+                    return Some(Err(format!("atomic_cas() first arg must be a pointer, got {}", hptr.ty)));
+                }
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::AtomicCas(Box::new(hptr), Box::new(hexpected), Box::new(hnew)),
+                    ty: Type::I64,
+                    span,
+                }))
             }
             "Pool" if args.len() == 2 && !self.fns.contains_key(name) => {
                 let hsize = match self.lower_expr_expected(&args[0], Some(&Type::I64)) {

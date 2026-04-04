@@ -98,6 +98,10 @@ impl Typer {
             f.name.clone(),
             f.params.iter().map(|p| p.name.clone()).collect(),
         );
+        self.fn_defaults.insert(
+            f.name.clone(),
+            f.params.iter().map(|p| p.default.clone()).collect(),
+        );
     }
 
     #[allow(dead_code)]

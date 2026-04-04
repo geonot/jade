@@ -117,6 +117,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::ArrayInit(vals) => format!("array [{}]", fmt_args(vals)),
 
         InstKind::Cast(v, ty) => format!("cast {v} as {ty:?}"),
+        InstKind::StrictCast(v, ty) => format!("strict_cast {v} as {ty:?}"),
         InstKind::Ref(v) => format!("ref {v}"),
         InstKind::Deref(v) => format!("deref {v}"),
         InstKind::Alloc(v) => format!("alloc {v}"),
@@ -132,6 +133,8 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::VecLen(v) => format!("vec_len {v}"),
         InstKind::MapInit => "map_init".into(),
         InstKind::SetInit => "set_init".into(),
+        InstKind::PQInit => "pq_init".into(),
+        InstKind::DequeInit => "deque_init".into(),
 
         // Closures
         InstKind::ClosureCreate(name, captures) => format!("closure_create {name}({})", fmt_args(captures)),
@@ -144,7 +147,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
 
         // Actors/channels
         InstKind::SpawnActor(name, args) => format!("spawn_actor {name}({})", fmt_args(args)),
-        InstKind::ChanCreate(ty) => format!("chan_create {ty:?}"),
+        InstKind::ChanCreate(ty, _cap) => format!("chan_create {ty:?}"),
         InstKind::ChanSend(ch, val) => format!("chan_send {ch} {val}"),
         InstKind::ChanRecv(ch) => format!("chan_recv {ch}"),
         InstKind::SelectArm(arms, _) => format!("select [{}]", fmt_args(arms)),
@@ -156,6 +159,10 @@ fn format_inst_kind(kind: &InstKind) -> String {
         // Dynamic dispatch
         InstKind::DynDispatch(obj, trait_name, method, args) => {
             format!("dyn_dispatch {obj}.{trait_name}::{method}({})", fmt_args(args))
+        }
+
+        InstKind::InlineAsm(template, args) => {
+            format!("asm {:?} ({})", template, fmt_args(args))
         }
     }
 }

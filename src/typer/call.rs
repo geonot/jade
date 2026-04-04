@@ -289,6 +289,17 @@ impl Typer {
                     let expected = param_tys.get(i);
                     hargs.push(self.lower_expr_expected(arg, expected)?);
                 }
+                // Fill in defaults for missing arguments
+                if hargs.len() < param_tys.len() {
+                    if let Some(defaults) = self.fn_defaults.get(name).cloned() {
+                        for i in hargs.len()..param_tys.len() {
+                            if let Some(Some(def_expr)) = defaults.get(i) {
+                                let expected = param_tys.get(i);
+                                hargs.push(self.lower_expr_expected(def_expr, expected)?);
+                            }
+                        }
+                    }
+                }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
                         let _ = self
@@ -391,6 +402,7 @@ impl Typer {
                                     name: p.name.clone(),
                                     ty,
                                     ownership,
+                                    default: None,
                                     span: p.span,
                                 });
                             }
@@ -884,6 +896,17 @@ impl Typer {
                 });
             }
             return Err(format!("no method '{method}' on Coroutine"));
+        }
+
+        if let Type::Generator(ref yield_ty) = obj_ty {
+            if method == "next" {
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::GeneratorNext(Box::new(hobj)),
+                    ty: *yield_ty.clone(),
+                    span,
+                });
+            }
+            return Err(format!("no method '{method}' on Generator"));
         }
 
         if let Type::DynTrait(ref trait_name) = obj_ty {

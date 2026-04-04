@@ -123,20 +123,16 @@ impl Parser {
                     rhs
                 } else {
                     let replaced = replace_placeholder(&rhs, "__ph");
-                    Expr::Call(
-                        Box::new(Expr::Lambda(
-                            vec![Param {
-                                name: "__ph".into(),
-                                ty: None,
-                                default: None,
-                                literal: None,
-                                span: sp,
-                            }],
-                            None,
-                            vec![Stmt::Expr(replaced)],
-                            sp,
-                        )),
-                        vec![],
+                    Expr::Lambda(
+                        vec![Param {
+                            name: "__ph".into(),
+                            ty: None,
+                            default: None,
+                            literal: None,
+                            span: sp,
+                        }],
+                        None,
+                        vec![Stmt::Expr(replaced)],
                         sp,
                     )
                 }
@@ -637,6 +633,21 @@ impl Parser {
                     vec![Stmt::Expr(self.parse_expr()?)]
                 };
                 Ok(Expr::Lambda(params, ret, body, sp))
+            }
+            Token::Syscall => {
+                self.advance();
+                self.expect(Token::LParen)?;
+                let mut args = Vec::new();
+                if !self.check(Token::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.check(Token::Comma) {
+                        self.advance();
+                        if self.check(Token::RParen) { break; }
+                        args.push(self.parse_expr()?);
+                    }
+                }
+                self.expect(Token::RParen)?;
+                Ok(Expr::Syscall(args, sp))
             }
             Token::Dollar => {
                 self.advance();

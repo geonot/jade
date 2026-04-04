@@ -439,6 +439,10 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 if let Some(result) = self.try_handle_magic_call(name, args, &inst.ty)? {
                     return Ok(result);
                 }
+                // Handle overflow builtins that MIR lowered as __builtin_* calls
+                if let Some(result) = self.try_handle_overflow_builtin(name, args)? {
+                    return Ok(result);
+                }
                 let arg_vals: Vec<BasicValueEnum<'ctx>> = args
                     .iter()
                     .map(|a| self.val(*a))
@@ -532,8 +536,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         let lt = self.comp.llvm_ty(&ty);
                         Ok(b!(self.comp.bld.build_load(lt, ptr, name)))
                     } else {
-                        // Try as global constant or function.
-                        Ok(void_val())
+                        Err(format!("mir_codegen: Load of undefined variable `{name}`"))
                     }
                 }
             }
@@ -602,11 +605,27 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let payload_gep = b!(self.comp.bld.build_struct_gep(
                         st, alloca, 1, "payload"
                     ));
+                    // Compute total payload size for bounds validation.
+                    let payload_field_ty = st.get_field_type_at_index(1);
+                    let payload_capacity = payload_field_ty
+                        .and_then(|t| t.size_of())
+                        .map(|s| s.get_zero_extended_constant().unwrap_or(u64::MAX))
+                        .unwrap_or(u64::MAX);
                     // Store payload fields at proper byte offsets based on actual type sizes.
                     let mut byte_offset: u64 = 0;
                     for (i, vid) in payload.iter().enumerate() {
                         let v = self.val(*vid);
                         let vty = v.get_type();
+                        // Validate that this field won't overflow the payload area.
+                        let type_size = vty.size_of()
+                            .map(|s| s.get_zero_extended_constant().unwrap_or(8))
+                            .unwrap_or(8);
+                        if byte_offset + type_size > payload_capacity {
+                            return Err(format!(
+                                "mir_codegen: VariantInit payload overflow for `{enum_name}::{variant}` \
+                                 field {i}: offset {byte_offset} + size {type_size} > capacity {payload_capacity}"
+                            ));
+                        }
                         if i == 0 {
                             b!(self.comp.bld.build_store(payload_gep, v));
                         } else {
@@ -624,9 +643,6 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             b!(self.comp.bld.build_store(elem_ptr, v));
                         }
                         // Accumulate offset by actual type size (with 8-byte alignment).
-                        let type_size = vty.size_of()
-                            .map(|s| s.get_zero_extended_constant().unwrap_or(8))
-                            .unwrap_or(8);
                         byte_offset += (type_size + 7) & !7;
                     }
                     agg = b!(self.comp.bld.build_load(enum_ty, alloca, "variant.loaded"));
@@ -687,6 +703,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             ));
                             b!(self.comp.bld.build_store(gep, v));
                         }
+                    }
+                } else if obj_val.is_struct_value() {
+                    // SSA struct value — use insert_value for immutable update.
+                    let sv = obj_val.into_struct_value();
+                    let struct_ty_name = sv.get_type().get_name()
+                        .map(|n| n.to_str().unwrap_or("").to_string());
+                    if let Some(name) = &struct_ty_name {
+                        let field_idx = self.field_index(name, field);
+                        let updated = b!(self.comp.bld.build_insert_value(
+                            sv, v, field_idx, field
+                        ));
+                        return Ok(updated.into_struct_value().into());
                     }
                 }
                 Ok(void_val())
@@ -775,6 +803,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         ))
                     };
                     b!(self.comp.bld.build_store(ptr, v));
+                    // Load the modified array back so the mutation is visible.
+                    let updated = b!(self.comp.bld.build_load(arr_ty, alloca, "idxset.updated"));
+                    return Ok(updated);
                 } else if base_val.get_type().is_pointer_type() {
                     // Vec: header is { ptr, len, cap }.
                     let header_ptr = base_val.into_pointer_value();
@@ -809,6 +840,34 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let target_llvm = self.comp.llvm_ty(target_ty);
                 self.emit_cast(v, &inst.ty, target_ty, target_llvm)
             }
+            mir::InstKind::StrictCast(val, target_ty) => {
+                let v = self.val(*val);
+                let target_llvm = self.comp.llvm_ty(target_ty);
+                let casted = self.emit_cast(v, &inst.ty, target_ty, target_llvm)?;
+                // Validate: cast back and compare to original to detect overflow.
+                let source_llvm = v.get_type();
+                if v.is_int_value() && casted.is_int_value() {
+                    let back = self.emit_cast(casted, target_ty, &inst.ty, source_llvm)?;
+                    let eq = b!(self.comp.bld.build_int_compare(
+                        inkwell::IntPredicate::EQ,
+                        v.into_int_value(),
+                        back.into_int_value(),
+                        "strict.eq"
+                    ));
+                    // If not equal, trap
+                    let cur_fn = self.comp.bld.get_insert_block().unwrap().get_parent().unwrap();
+                    let ok_bb = self.comp.ctx.append_basic_block(cur_fn, "strict.ok");
+                    let trap_bb = self.comp.ctx.append_basic_block(cur_fn, "strict.trap");
+                    b!(self.comp.bld.build_conditional_branch(eq, ok_bb, trap_bb));
+                    self.comp.bld.position_at_end(trap_bb);
+                    if let Some(trap) = self.comp.module.get_function("llvm.trap") {
+                        b!(self.comp.bld.build_call(trap, &[], ""));
+                    }
+                    b!(self.comp.bld.build_unreachable());
+                    self.comp.bld.position_at_end(ok_bb);
+                }
+                Ok(casted)
+            }
             mir::InstKind::Ref(val) => {
                 let v = self.val(*val);
                 let alloca = self.comp.entry_alloca(v.get_type(), "ref");
@@ -817,6 +876,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             }
             mir::InstKind::Deref(val) => {
                 let v = self.val(*val);
+                if !v.is_pointer_value() {
+                    return Err(format!("mir_codegen: Deref on non-pointer value {:?}", val));
+                }
                 let inner_ty = self.comp.llvm_ty(&inst.ty);
                 Ok(b!(self.comp.bld.build_load(
                     inner_ty,
@@ -920,21 +982,15 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     ));
                     Ok(self.comp.call_result(csv))
                 } else {
-                    Ok(self.comp.ctx.i64_type().const_int(0, false).into())
+                    Err("mir_codegen: VecLen used but jade_vec_len runtime function not declared".into())
                 }
             }
             mir::InstKind::MapInit => {
-                // Delegate to runtime jade_map_new (if runtime declared).
                 if let Some(fv) = self.comp.module.get_function("jade_map_new") {
                     let csv = b!(self.comp.bld.build_call(fv, &[], "map"));
                     Ok(self.comp.call_result(csv))
                 } else {
-                    Ok(self
-                        .comp
-                        .ctx
-                        .ptr_type(AddressSpace::default())
-                        .const_null()
-                        .into())
+                    Err("mir_codegen: MapInit used but jade_map_new runtime function not declared".into())
                 }
             }
             mir::InstKind::SetInit => {
@@ -942,12 +998,23 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let csv = b!(self.comp.bld.build_call(fv, &[], "set"));
                     Ok(self.comp.call_result(csv))
                 } else {
-                    Ok(self
-                        .comp
-                        .ctx
-                        .ptr_type(AddressSpace::default())
-                        .const_null()
-                        .into())
+                    Err("mir_codegen: SetInit used but jade_set_new runtime function not declared".into())
+                }
+            }
+            mir::InstKind::PQInit => {
+                if let Some(fv) = self.comp.module.get_function("jade_pq_new") {
+                    let csv = b!(self.comp.bld.build_call(fv, &[], "pq"));
+                    Ok(self.comp.call_result(csv))
+                } else {
+                    Err("mir_codegen: PQInit used but jade_pq_new runtime function not declared".into())
+                }
+            }
+            mir::InstKind::DequeInit => {
+                if let Some(fv) = self.comp.module.get_function("jade_deque_new") {
+                    let csv = b!(self.comp.bld.build_call(fv, &[], "deque"));
+                    Ok(self.comp.call_result(csv))
+                } else {
+                    Err("mir_codegen: DequeInit used but jade_deque_new runtime function not declared".into())
                 }
             }
 
@@ -988,11 +1055,16 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
             // ── Actors / Channels ──
             mir::InstKind::SpawnActor(name, args) => {
-                let _ = args;
+                if !args.is_empty() {
+                    return Err(format!(
+                        "mir_codegen: SpawnActor '{name}' has {} constructor args but actor spawn does not yet support arguments",
+                        args.len()
+                    ));
+                }
                 self.emit_spawn_actor(name)
             }
-            mir::InstKind::ChanCreate(elem_ty) => {
-                self.emit_chan_create(elem_ty)
+            mir::InstKind::ChanCreate(elem_ty, cap) => {
+                self.emit_chan_create(elem_ty, cap.as_ref())
             }
             mir::InstKind::ChanSend(ch, val) => {
                 self.emit_chan_send(*ch, *val)
@@ -1059,6 +1131,30 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             mir::InstKind::DynDispatch(obj, trait_name, method, args) => {
                 self.emit_dyn_dispatch(*obj, trait_name, method, args, &inst.ty)
             }
+
+            mir::InstKind::InlineAsm(template, args) => {
+                let arg_vals: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args.iter().map(|a| self.val(*a).into()).collect();
+                let arg_tys: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = arg_vals.iter().map(|v| {
+                    match v {
+                        inkwell::values::BasicMetadataValueEnum::IntValue(iv) => iv.get_type().into(),
+                        inkwell::values::BasicMetadataValueEnum::FloatValue(fv) => fv.get_type().into(),
+                        inkwell::values::BasicMetadataValueEnum::PointerValue(pv) => pv.get_type().into(),
+                        _ => self.comp.ctx.i64_type().into(),
+                    }
+                }).collect();
+                let ft = self.comp.ctx.void_type().fn_type(&arg_tys, false);
+                let asm = self.comp.ctx.create_inline_asm(
+                    ft,
+                    template.clone(),
+                    String::new(), // constraints
+                    true,          // has side effects
+                    false,         // needs aligned stack
+                    None,          // dialect
+                    false,         // can throw
+                );
+                b!(self.comp.bld.build_indirect_call(ft, asm, &arg_vals, ""));
+                Ok(void_val())
+            }
         }
     }
 
@@ -1121,7 +1217,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         (iv, self.block_map[bid])
                     })
                     .collect();
-                let switch = b!(self.comp.bld.build_switch(
+                let _switch = b!(self.comp.bld.build_switch(
                     disc_val,
                     default_bb,
                     &case_bbs
@@ -1142,8 +1238,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             .get(&id)
             .copied()
             .unwrap_or_else(|| {
-                eprintln!("MIR codegen: missing value for {:?}, defaulting to i64(0)", id);
-                self.comp.ctx.i64_type().const_int(0, false).into()
+                panic!("MIR codegen: missing value for {:?} — this is a compiler bug", id);
             })
     }
 
@@ -1529,9 +1624,8 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let val = b!(self.comp.bld.build_extract_value(sv, idx, field));
                 return Ok(val);
             }
-            // Unknown struct — try index 0.
-            let val = b!(self.comp.bld.build_extract_value(sv, 0, field));
-            Ok(val)
+            // Unknown struct type — cannot determine correct field index.
+            Err(format!("mir_codegen: FieldGet on unknown struct type for field `{field}`"))
         } else if obj_val.is_pointer_value() {
             // Pointer to struct: GEP + load.
             let ptr = obj_val.into_pointer_value();
@@ -1567,8 +1661,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     return Ok(b!(self.comp.bld.build_load(res_llvm, gep, field)));
                 }
             }
-            // Fallback: load directly (field 0 or opaque pointer).
-            Ok(b!(self.comp.bld.build_load(res_llvm, ptr, field)))
+            // No fallback — loading from an unknown struct pointer at offset 0
+            // silently produces wrong values for any field other than the first.
+            Err(format!("mir_codegen: FieldGet on pointer to unknown struct type for field `{field}`"))
         } else {
             Ok(obj_val)
         }
@@ -1611,13 +1706,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             }
             Ok(ptr)
         } else {
-            // No runtime — return null.
-            Ok(self
-                .comp
-                .ctx
-                .ptr_type(AddressSpace::default())
-                .const_null()
-                .into())
+            Err("mir_codegen: VecNew used but jade_vec_new runtime function not declared".into())
         }
     }
 
@@ -1752,14 +1841,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         Ok(agg)
     }
 
-    fn emit_chan_create(&mut self, elem_ty: &Type) -> Result<BasicValueEnum<'ctx>, String> {
+    fn emit_chan_create(&mut self, elem_ty: &Type, cap: Option<&mir::ValueId>) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.comp.ctx.i64_type();
         let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
         if let Some(fv) = self.comp.module.get_function("jade_chan_create") {
             let elem_size = self.comp.llvm_ty(elem_ty).size_of().unwrap_or(
                 i64t.const_int(8, false),
             );
-            let capacity = i64t.const_int(64, false); // default capacity
+            let capacity = if let Some(cap_id) = cap {
+                self.val(*cap_id).into_int_value()
+            } else {
+                i64t.const_int(64, false) // default capacity
+            };
             let csv = b!(self
                 .comp
                 .bld
@@ -1829,12 +1922,35 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
     /// When we don't have type info, defaults to `target_idx * 8`.
     fn compute_enum_payload_offset(
         &self,
-        _enum_name: &str,
+        enum_name: &str,
         target_idx: usize,
     ) -> u64 {
-        // Without per-variant payload type information available at this point,
-        // use the same 8-byte-aligned heuristic that VariantInit produces
-        // for uniformly-sized (i64/f64/ptr) payloads.
+        // Try to look up actual variant field types from the enum definition.
+        // Since FieldGet doesn't carry the variant name, we must work with
+        // the alignment heuristic matching VariantInit: each field is stored
+        // at its actual size rounded up to 8-byte alignment.
+        //
+        // Look for the variant with the most fields that has at least
+        // target_idx fields, and use those field types. In most cases all
+        // variants that reach this code path have the same payload layout.
+        if let Some(variants) = self.comp.enums.get(enum_name) {
+            // Find the variant whose payload best matches target_idx.
+            for (_, field_types) in variants {
+                if field_types.len() > target_idx {
+                    let mut offset: u64 = 0;
+                    for (i, fty) in field_types.iter().enumerate() {
+                        if i == target_idx {
+                            return offset;
+                        }
+                        let type_size = self.comp.llvm_ty(fty).size_of()
+                            .map(|s| s.get_zero_extended_constant().unwrap_or(8))
+                            .unwrap_or(8);
+                        offset += (type_size + 7) & !7;
+                    }
+                }
+            }
+        }
+        // Fallback: 8-byte-aligned slots (matches VariantInit for i64/f64/ptr).
         (target_idx * 8) as u64
     }
 
@@ -2698,17 +2814,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         &mut self,
         store_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Store all returns a pointer to all records — complex implementation.
-        // For now return null.
-        Ok(self.comp.ctx.ptr_type(AddressSpace::default()).const_null().into())
+        Err(format!("mir_codegen: store.all() for '{store_name}' is not yet implemented"))
     }
 
     fn emit_store_delete(
         &mut self,
         store_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Store delete requires filter — complex implementation.
-        Ok(self.comp.ctx.i8_type().const_int(0, false).into())
+        Err(format!("mir_codegen: store.delete() for '{store_name}' is not yet implemented"))
     }
 
     fn emit_store_set(
@@ -2716,7 +2829,95 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         store_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Store set requires filter — complex implementation.
-        Ok(self.comp.ctx.i8_type().const_int(0, false).into())
+        let _ = args;
+        Err(format!("mir_codegen: store.set() for '{store_name}' is not yet implemented"))
+    }
+
+    /// Handle overflow builtins that MIR lowered as `__builtin_WrappingAdd` etc.
+    fn try_handle_overflow_builtin(
+        &mut self,
+        name: &str,
+        args: &[mir::ValueId],
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        let builtin_name = match name.strip_prefix("__builtin_") {
+            Some(n) => n,
+            None => return Ok(None),
+        };
+        if args.len() != 2 {
+            return Ok(None);
+        }
+        let lhs = self.val(args[0]).into_int_value();
+        let rhs = self.val(args[1]).into_int_value();
+        let result = match builtin_name {
+            // Wrapping ops — just normal LLVM int arithmetic (wraps naturally)
+            "WrappingAdd" => b!(self.comp.bld.build_int_add(lhs, rhs, "wrap.add")),
+            "WrappingSub" => b!(self.comp.bld.build_int_sub(lhs, rhs, "wrap.sub")),
+            "WrappingMul" => b!(self.comp.bld.build_int_mul(lhs, rhs, "wrap.mul")),
+            // Saturating ops — use LLVM intrinsics
+            "SaturatingAdd" => {
+                let bw = lhs.get_type().get_bit_width();
+                let name = format!("llvm.sadd.sat.i{bw}");
+                let ft = lhs.get_type().fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
+                let f = self.comp.module.get_function(&name).unwrap_or_else(|| self.comp.module.add_function(&name, ft, None));
+                b!(self.comp.bld.build_call(f, &[lhs.into(), rhs.into()], "sat.add"))
+                    .try_as_basic_value().basic().unwrap().into_int_value()
+            }
+            "SaturatingSub" => {
+                let bw = lhs.get_type().get_bit_width();
+                let name = format!("llvm.ssub.sat.i{bw}");
+                let ft = lhs.get_type().fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
+                let f = self.comp.module.get_function(&name).unwrap_or_else(|| self.comp.module.add_function(&name, ft, None));
+                b!(self.comp.bld.build_call(f, &[lhs.into(), rhs.into()], "sat.sub"))
+                    .try_as_basic_value().basic().unwrap().into_int_value()
+            }
+            "SaturatingMul" => {
+                // No LLVM intrinsic for sat mul; use checked mul + select
+                let bw = lhs.get_type().get_bit_width();
+                let intr = format!("llvm.smul.with.overflow.i{bw}");
+                let ovf_ty = self.comp.ctx.struct_type(&[lhs.get_type().into(), self.comp.ctx.bool_type().into()], false);
+                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
+                let f = self.comp.module.get_function(&intr).unwrap_or_else(|| self.comp.module.add_function(&intr, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[lhs.into(), rhs.into()], "smul"))
+                    .try_as_basic_value().basic().unwrap().into_struct_value();
+                let val = b!(self.comp.bld.build_extract_value(r, 0, "smul.val")).into_int_value();
+                let ovf = b!(self.comp.bld.build_extract_value(r, 1, "smul.ovf")).into_int_value();
+                let max_val = lhs.get_type().const_int(i64::MAX as u64, false);
+                b!(self.comp.bld.build_select(ovf, max_val, val, "sat.mul")).into_int_value()
+            }
+            // Checked ops — return {value, overflow_flag}
+            "CheckedAdd" => {
+                let bw = lhs.get_type().get_bit_width();
+                let intr = format!("llvm.sadd.with.overflow.i{bw}");
+                let ovf_ty = self.comp.ctx.struct_type(&[lhs.get_type().into(), self.comp.ctx.bool_type().into()], false);
+                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
+                let f = self.comp.module.get_function(&intr).unwrap_or_else(|| self.comp.module.add_function(&intr, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[lhs.into(), rhs.into()], "cadd"))
+                    .try_as_basic_value().basic().unwrap().into_struct_value();
+                // Return just the value; overflow info is in the struct
+                b!(self.comp.bld.build_extract_value(r, 0, "cadd.val")).into_int_value()
+            }
+            "CheckedSub" => {
+                let bw = lhs.get_type().get_bit_width();
+                let intr = format!("llvm.ssub.with.overflow.i{bw}");
+                let ovf_ty = self.comp.ctx.struct_type(&[lhs.get_type().into(), self.comp.ctx.bool_type().into()], false);
+                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
+                let f = self.comp.module.get_function(&intr).unwrap_or_else(|| self.comp.module.add_function(&intr, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[lhs.into(), rhs.into()], "csub"))
+                    .try_as_basic_value().basic().unwrap().into_struct_value();
+                b!(self.comp.bld.build_extract_value(r, 0, "csub.val")).into_int_value()
+            }
+            "CheckedMul" => {
+                let bw = lhs.get_type().get_bit_width();
+                let intr = format!("llvm.smul.with.overflow.i{bw}");
+                let ovf_ty = self.comp.ctx.struct_type(&[lhs.get_type().into(), self.comp.ctx.bool_type().into()], false);
+                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
+                let f = self.comp.module.get_function(&intr).unwrap_or_else(|| self.comp.module.add_function(&intr, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[lhs.into(), rhs.into()], "cmul"))
+                    .try_as_basic_value().basic().unwrap().into_struct_value();
+                b!(self.comp.bld.build_extract_value(r, 0, "cmul.val")).into_int_value()
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(result.into()))
     }
 }

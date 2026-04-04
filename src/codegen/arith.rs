@@ -22,19 +22,29 @@ impl<'ctx> Compiler<'ctx> {
             return self.compile_ndarray_elementwise(left, op, right, elem_ty, dims);
         }
         // SIMD vector operations — LLVM vector ops work directly
-        if let Type::SIMD(_, _) = &left.ty {
+        if let Type::SIMD(inner, _) = &left.ty {
             let lhs = self.compile_expr(left)?;
             let rhs = self.compile_expr(right)?;
             let lv = lhs.into_vector_value();
             let rv = rhs.into_vector_value();
-            let result = match op {
-                BinOp::Add => b!(self.bld.build_float_add(lv, rv, "simd.add")).into(),
-                BinOp::Sub => b!(self.bld.build_float_sub(lv, rv, "simd.sub")).into(),
-                BinOp::Mul => b!(self.bld.build_float_mul(lv, rv, "simd.mul")).into(),
-                BinOp::Div => b!(self.bld.build_float_div(lv, rv, "simd.div")).into(),
-                _ => return Err(format!("unsupported SIMD binop: {op:?}")),
+            let result = if inner.is_float() {
+                match op {
+                    BinOp::Add => b!(self.bld.build_float_add(lv, rv, "simd.add")).into(),
+                    BinOp::Sub => b!(self.bld.build_float_sub(lv, rv, "simd.sub")).into(),
+                    BinOp::Mul => b!(self.bld.build_float_mul(lv, rv, "simd.mul")).into(),
+                    BinOp::Div => b!(self.bld.build_float_div(lv, rv, "simd.div")).into(),
+                    _ => return Err(format!("unsupported SIMD float binop: {op:?}")),
+                }
+            } else {
+                match op {
+                    BinOp::Add => b!(self.bld.build_int_add(lv, rv, "simd.iadd")).into(),
+                    BinOp::Sub => b!(self.bld.build_int_sub(lv, rv, "simd.isub")).into(),
+                    BinOp::Mul => b!(self.bld.build_int_mul(lv, rv, "simd.imul")).into(),
+                    BinOp::Div => b!(self.bld.build_int_signed_div(lv, rv, "simd.idiv")).into(),
+                    _ => return Err(format!("unsupported SIMD int binop: {op:?}")),
+                }
             };
-            self.tag_fast_math(result);
+            if inner.is_float() { self.tag_fast_math(result); }
             return Ok(result);
         }
         if matches!(op, BinOp::And) {

@@ -79,6 +79,7 @@ pub struct Param {
     pub name: String,
     pub ty: Type,
     pub ownership: Ownership,
+    pub default: Option<Expr>,
     pub span: Span,
 }
 

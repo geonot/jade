@@ -37,7 +37,11 @@ impl<'ctx> Compiler<'ctx> {
             Type::Vec(_) | Type::Map(_, _) | Type::Set(_) | Type::NDArray(_, _) | Type::PriorityQueue(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::SIMD(inner, lanes) => {
                 let elem = self.llvm_ty(inner);
-                elem.into_float_type().vec_type(*lanes as u32).into()
+                if inner.is_float() {
+                    elem.into_float_type().vec_type(*lanes as u32).into()
+                } else {
+                    elem.into_int_type().vec_type(*lanes as u32).into()
+                }
             }
             Type::Tuple(tys) => self
                 .ctx

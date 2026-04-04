@@ -75,6 +75,7 @@ pub struct Typer {
     pub(crate) poly_lambda_asts: HashMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
     pub(crate) type_errors: Vec<String>,
     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
+    pub(crate) fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
     pub(crate) current_method_type: Option<String>,
 }
 
@@ -128,6 +129,7 @@ impl Typer {
             poly_lambda_asts: HashMap::new(),
             type_errors: Vec::new(),
             fn_param_names: HashMap::new(),
+            fn_defaults: HashMap::new(),
             current_method_type: None,
         }
     }

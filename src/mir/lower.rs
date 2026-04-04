@@ -178,8 +178,9 @@ impl Lowerer {
                 if inst.dest == Some(val) { return inst.ty.clone(); }
             }
         }
-        eprintln!("MIR lower: value_type fallback to I64 for {:?}", val);
-        Type::I64 // fallback
+        // All value types should be resolvable. If not, it indicates a compiler bug
+        // in MIR lowering.
+        panic!("MIR lower: cannot resolve type for {:?} — this is a compiler bug", val)
     }
 
     fn lower_expr(&mut self, expr: &hir::Expr) -> ValueId {
@@ -310,6 +311,19 @@ impl Lowerer {
             }
 
             ExprKind::IfExpr(if_expr) => {
+                // Demote variables assigned in branches to memory
+                // so the merge point reads current values via Load.
+                let mut assigned = HashSet::new();
+                Self::collect_assigned_vars(&if_expr.then, &mut assigned);
+                if let Some(els) = &if_expr.els {
+                    Self::collect_assigned_vars(els, &mut assigned);
+                }
+                let pre_existing: HashSet<String> = assigned.iter()
+                    .filter(|n| self.var_map.contains_key(*n))
+                    .cloned()
+                    .collect();
+                self.demote_vars_to_memory(&pre_existing, span);
+
                 let cond_val = self.lower_expr(&if_expr.cond);
                 let then_bb = self.new_block("if.then");
                 let else_bb = self.new_block("if.else");
@@ -376,9 +390,13 @@ impl Lowerer {
                 result
             }
 
-            ExprKind::Cast(inner, target_ty) | ExprKind::StrictCast(inner, target_ty) => {
+            ExprKind::Cast(inner, target_ty) => {
                 let v = self.lower_expr(inner);
                 self.emit(InstKind::Cast(v, target_ty.clone()), ty, span)
+            }
+            ExprKind::StrictCast(inner, target_ty) => {
+                let v = self.lower_expr(inner);
+                self.emit(InstKind::StrictCast(v, target_ty.clone()), ty, span)
             }
 
             ExprKind::Ref(inner) => {
@@ -508,8 +526,14 @@ impl Lowerer {
                 self.emit(InstKind::MapInit, ty, span)
             }
 
-            ExprKind::SetNew | ExprKind::PQNew | ExprKind::DequeNew => {
+            ExprKind::SetNew => {
                 self.emit(InstKind::SetInit, ty, span)
+            }
+            ExprKind::PQNew => {
+                self.emit(InstKind::PQInit, ty, span)
+            }
+            ExprKind::DequeNew => {
+                self.emit(InstKind::DequeInit, ty, span)
             }
 
             ExprKind::ListComp(body_expr, _def_id, bind, iter, end, cond) => {
@@ -540,8 +564,14 @@ impl Lowerer {
                 self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                 self.switch_to(body_bb);
-                // Bind the loop variable.
-                self.var_map.insert(bind.clone(), idx);
+                // Bind the loop variable — for collection iteration (no end),
+                // bind the element at the current index, not the index itself.
+                if end.is_none() {
+                    let elem = self.emit(InstKind::Index(iter_val, idx), ty.clone(), span);
+                    self.var_map.insert(bind.clone(), elem);
+                } else {
+                    self.var_map.insert(bind.clone(), idx);
+                }
                 let elem_val = self.lower_expr(body_expr);
                 if let Some(c) = cond {
                     let filter_bb = self.new_block("listcomp.filter");
@@ -581,8 +611,8 @@ impl Lowerer {
                 self.emit(InstKind::Call(format!("__send_{handler}"), all), ty, span)
             }
             ExprKind::ChannelCreate(elem_ty, cap) => {
-                let _c = self.lower_expr(cap);
-                self.emit(InstKind::ChanCreate(elem_ty.clone()), ty, span)
+                let cap_val = self.lower_expr(cap);
+                self.emit(InstKind::ChanCreate(elem_ty.clone(), Some(cap_val)), ty, span)
             }
             ExprKind::ChannelSend(chan, val) => {
                 let ch = self.lower_expr(chan);
@@ -691,6 +721,8 @@ impl Lowerer {
                     BuiltinFn::Log => {
                         let arg_ty = args.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
                         let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        // NOTE: inst.ty carries the argument type (not Void) so
+                        // codegen can determine the format specifier for printing.
                         self.emit(InstKind::Log(v), arg_ty, span)
                     }
                     BuiltinFn::Assert => {
@@ -727,8 +759,8 @@ impl Lowerer {
             }
 
             // Coroutines — opaque calls
-            ExprKind::CoroutineCreate(name, body) => {
-                self.lower_block_stmts(body);
+            ExprKind::CoroutineCreate(name, _body) => {
+                // Body is compiled separately — don't inline it here.
                 self.emit(InstKind::Call(format!("__coro_create_{name}"), vec![]), ty, span)
             }
             ExprKind::CoroutineNext(coro) => {
@@ -813,8 +845,8 @@ impl Lowerer {
                 self.emit(InstKind::Call("__cow_clone".into(), vec![v]), ty, span)
             }
 
-            ExprKind::GeneratorCreate(_def_id, name, body) => {
-                self.lower_block_stmts(body);
+            ExprKind::GeneratorCreate(_def_id, name, _body) => {
+                // Body is compiled separately — don't inline it here.
                 self.emit(InstKind::Call(format!("__gen_create_{name}"), vec![]), ty, span)
             }
             ExprKind::GeneratorNext(gen_expr) => {
@@ -1109,7 +1141,9 @@ impl Lowerer {
                     // Re-bind the loop variable to the loaded counter so body can use it.
                     self.var_map.insert(f.bind.clone(), counter);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(inc_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(inc_bb));
+                    }
                     self.loop_stack.pop();
 
                     // Increment
@@ -1137,7 +1171,9 @@ impl Lowerer {
                     self.switch_to(body_bb);
                     self.var_map.insert(f.bind.clone(), counter);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(inc_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(inc_bb));
+                    }
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
@@ -1165,7 +1201,9 @@ impl Lowerer {
                     let val = self.emit(InstKind::Call("__gen_next_val".into(), vec![iter_val]), f.bind_ty.clone(), f.span);
                     self.var_map.insert(f.bind.clone(), val);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(cond_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(cond_bb));
+                    }
                     self.loop_stack.pop();
                 } else {
                     // Collection for: iterate with index.
@@ -1189,7 +1227,9 @@ impl Lowerer {
                     let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), f.span);
                     self.var_map.insert(f.bind.clone(), elem);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(inc_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(inc_bb));
+                    }
                     self.loop_stack.pop();
 
                     // Increment index.
@@ -1484,9 +1524,9 @@ impl Lowerer {
                 self.emit(InstKind::Call("__stop".into(), vec![v]), Type::Void, *span)
             }
 
-            hir::Stmt::Asm(_asm) => {
-                // Inline assembly — lower as opaque call
-                self.emit(InstKind::Call("__asm".into(), vec![]), Type::Void, Span::dummy())
+            hir::Stmt::Asm(asm) => {
+                let input_vals: Vec<_> = asm.inputs.iter().map(|(_, e)| self.lower_expr(e)).collect();
+                self.emit(InstKind::InlineAsm(asm.template.clone(), input_vals), Type::Void, asm.span)
             }
 
             hir::Stmt::StoreInsert(store_name, exprs, span) => {
@@ -1494,21 +1534,31 @@ impl Lowerer {
                 self.emit(InstKind::Call(format!("__store_insert_{store_name}"), vals), Type::Void, *span)
             }
 
-            hir::Stmt::StoreDelete(store_name, _filter, span) => {
-                self.emit(InstKind::Call(format!("__store_delete_{store_name}"), vec![]), Type::Void, *span)
+            hir::Stmt::StoreDelete(store_name, filter, span) => {
+                // Lower the filter value and pass it to the runtime delete function.
+                let filter_val = self.lower_expr(&filter.value);
+                self.emit(InstKind::Call(format!("__store_delete_{store_name}"), vec![filter_val]), Type::Void, *span)
             }
 
-            hir::Stmt::StoreSet(store_name, fields, _filter, span) => {
-                let vals: Vec<_> = fields.iter().map(|(_, e)| self.lower_expr(e)).collect();
+            hir::Stmt::StoreSet(store_name, fields, filter, span) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let mut vals = vec![filter_val];
+                vals.extend(fields.iter().map(|(_, e)| self.lower_expr(e)));
                 self.emit(InstKind::Call(format!("__store_set_{store_name}"), vals), Type::Void, *span)
             }
 
             hir::Stmt::Transaction(body, span) => {
+                self.emit(InstKind::Call("__txn_begin".into(), vec![]), Type::Void, *span);
                 self.lower_block_stmts(body);
-                self.emit(InstKind::Void, Type::Void, *span)
+                self.emit(InstKind::Call("__txn_commit".into(), vec![]), Type::Void, *span)
             }
 
             hir::Stmt::SimFor(f, span) => {
+                // NOTE: sim for is lowered as sequential for — parallelism
+                // semantics are not yet implemented in MIR codegen. This is
+                // an accepted limitation; future work to emit parallel
+                // execution primitives or mark loops for LLVM vectorization.
+
                 // Demote variables assigned inside sim-for body to memory.
                 let mut assigned = HashSet::new();
                 Self::collect_assigned_vars(&f.body, &mut assigned);
@@ -1541,7 +1591,9 @@ impl Lowerer {
                     self.switch_to(body_bb);
                     self.var_map.insert(f.bind.clone(), counter);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(inc_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(inc_bb));
+                    }
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
@@ -1568,7 +1620,9 @@ impl Lowerer {
                     self.switch_to(body_bb);
                     self.var_map.insert(f.bind.clone(), counter);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(inc_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(inc_bb));
+                    }
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
@@ -1594,7 +1648,9 @@ impl Lowerer {
                     let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), *span);
                     self.var_map.insert(f.bind.clone(), elem);
                     self.lower_block_stmts(&f.body);
-                    self.set_terminator(Terminator::Goto(inc_bb));
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(inc_bb));
+                    }
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
@@ -1669,8 +1725,8 @@ impl Lowerer {
         }
     }
 
-    /// Walk an expression tree to find Select (or other block-containing)
-    /// expressions and collect assigned vars from their bodies.
+    /// Walk an expression tree to find block-containing expressions
+    /// and collect assigned vars from their bodies.
     fn collect_assigned_vars_in_expr(expr: &hir::Expr, assigned: &mut HashSet<String>) {
         match &expr.kind {
             ExprKind::Select(arms, default) => {
@@ -1680,6 +1736,47 @@ impl Lowerer {
                 if let Some(def_body) = default {
                     Self::collect_assigned_vars(def_body, assigned);
                 }
+            }
+            ExprKind::IfExpr(i) => {
+                Self::collect_assigned_vars(&i.then, assigned);
+                if let Some(els) = &i.els {
+                    Self::collect_assigned_vars(els, assigned);
+                }
+            }
+            ExprKind::Block(stmts) => {
+                Self::collect_assigned_vars(stmts, assigned);
+            }
+            ExprKind::Lambda(_, body) => {
+                Self::collect_assigned_vars(body, assigned);
+            }
+            ExprKind::ListComp(body, _, _, iter, end, cond) => {
+                Self::collect_assigned_vars_in_expr(body, assigned);
+                Self::collect_assigned_vars_in_expr(iter, assigned);
+                if let Some(e) = end { Self::collect_assigned_vars_in_expr(e, assigned); }
+                if let Some(c) = cond { Self::collect_assigned_vars_in_expr(c, assigned); }
+            }
+            // Recurse into sub-expressions that may contain blocks.
+            ExprKind::BinOp(l, _, r) => {
+                Self::collect_assigned_vars_in_expr(l, assigned);
+                Self::collect_assigned_vars_in_expr(r, assigned);
+            }
+            ExprKind::Ternary(c, t, f) => {
+                Self::collect_assigned_vars_in_expr(c, assigned);
+                Self::collect_assigned_vars_in_expr(t, assigned);
+                Self::collect_assigned_vars_in_expr(f, assigned);
+            }
+            ExprKind::Call(_, _, args) => {
+                for a in args { Self::collect_assigned_vars_in_expr(a, assigned); }
+            }
+            ExprKind::IndirectCall(f, args) => {
+                Self::collect_assigned_vars_in_expr(f, assigned);
+                for a in args { Self::collect_assigned_vars_in_expr(a, assigned); }
+            }
+            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args) | ExprKind::DeferredMethod(obj, _, args) => {
+                Self::collect_assigned_vars_in_expr(obj, assigned);
+                for a in args { Self::collect_assigned_vars_in_expr(a, assigned); }
             }
             _ => {}
         }

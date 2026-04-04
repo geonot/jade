@@ -92,6 +92,8 @@ impl<'ctx> Compiler<'ctx> {
                     return Err("matches() takes 1 argument (pattern)".into());
                 }
                 let pattern = self.compile_expr(&args[0])?;
+                let sv_data = self.string_data(sv)?.into_pointer_value();
+                let pat_data = self.string_data(pattern)?.into_pointer_value();
                 let ptr_t = self.ctx.ptr_type(AddressSpace::default());
                 let bool_t = self.ctx.bool_type();
                 let fn_type = bool_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
@@ -99,7 +101,7 @@ impl<'ctx> Compiler<'ctx> {
                     .module
                     .get_function("__jade_regex_match")
                     .unwrap_or_else(|| self.module.add_function("__jade_regex_match", fn_type, None));
-                let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into()], "re.match"));
+                let result = b!(self.bld.build_call(func, &[sv_data.into(), pat_data.into()], "re.match"));
                 Ok(result.try_as_basic_value().basic().unwrap())
             }
             "find_all" => {
@@ -107,13 +109,15 @@ impl<'ctx> Compiler<'ctx> {
                     return Err("find_all() takes 1 argument (pattern)".into());
                 }
                 let pattern = self.compile_expr(&args[0])?;
+                let sv_data = self.string_data(sv)?.into_pointer_value();
+                let pat_data = self.string_data(pattern)?.into_pointer_value();
                 let ptr_t = self.ctx.ptr_type(AddressSpace::default());
                 let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
                 let func = self
                     .module
                     .get_function("__jade_regex_find_all")
                     .unwrap_or_else(|| self.module.add_function("__jade_regex_find_all", fn_type, None));
-                let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into()], "re.findall"));
+                let result = b!(self.bld.build_call(func, &[sv_data.into(), pat_data.into()], "re.findall"));
                 Ok(result.try_as_basic_value().basic().unwrap())
             }
             "replace_re" => {
@@ -122,13 +126,16 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 let pattern = self.compile_expr(&args[0])?;
                 let replacement = self.compile_expr(&args[1])?;
+                let sv_data = self.string_data(sv)?.into_pointer_value();
+                let pat_data = self.string_data(pattern)?.into_pointer_value();
+                let rep_data = self.string_data(replacement)?.into_pointer_value();
                 let ptr_t = self.ctx.ptr_type(AddressSpace::default());
                 let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into(), ptr_t.into()], false);
                 let func = self
                     .module
                     .get_function("__jade_regex_replace")
                     .unwrap_or_else(|| self.module.add_function("__jade_regex_replace", fn_type, None));
-                let result = b!(self.bld.build_call(func, &[sv.into(), pattern.into(), replacement.into()], "re.replace"));
+                let result = b!(self.bld.build_call(func, &[sv_data.into(), pat_data.into(), rep_data.into()], "re.replace"));
                 Ok(result.try_as_basic_value().basic().unwrap())
             }
             _ => {

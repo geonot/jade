@@ -198,31 +198,35 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_slice(obj, start, end)
             }
             hir::ExprKind::DequeNew => {
-                Err("DequeNew not yet implemented in codegen".into())
+                self.compile_deque_new()
             }
-            hir::ExprKind::DequeMethod(_, _, _) => {
-                Err("DequeMethod not yet implemented in codegen".into())
+            hir::ExprKind::DequeMethod(obj, method, args) => {
+                self.compile_deque_method(obj, method, args)
             }
-            hir::ExprKind::Grad(_) => {
-                Err("Grad not yet implemented in codegen".into())
+            hir::ExprKind::Grad(inner) => {
+                self.compile_grad(inner)
             }
-            hir::ExprKind::Einsum(_, _) => {
-                Err("Einsum not yet implemented in codegen".into())
+            hir::ExprKind::Einsum(notation, args) => {
+                self.compile_einsum(notation, args)
             }
-            hir::ExprKind::Builder(_, _) => {
-                Err("Builder not yet implemented in codegen".into())
+            hir::ExprKind::Builder(name, fields) => {
+                // Desugar builder to struct init
+                let inits: Vec<hir::FieldInit> = fields.iter().map(|(fname, expr)| {
+                    hir::FieldInit { name: Some(fname.clone()), value: expr.clone() }
+                }).collect();
+                self.compile_struct(name, &inits)
             }
-            hir::ExprKind::CowWrap(_) => {
-                Err("CowWrap not yet implemented in codegen".into())
+            hir::ExprKind::CowWrap(inner) => {
+                self.compile_cow_wrap(inner)
             }
-            hir::ExprKind::CowClone(_) => {
-                Err("CowClone not yet implemented in codegen".into())
+            hir::ExprKind::CowClone(inner) => {
+                self.compile_cow_clone(inner)
             }
-            hir::ExprKind::GeneratorCreate(_, _, _) => {
-                Err("GeneratorCreate not yet implemented in codegen".into())
+            hir::ExprKind::GeneratorCreate(_, name, body) => {
+                self.compile_coroutine_create(name, body)
             }
-            hir::ExprKind::GeneratorNext(_) => {
-                Err("GeneratorNext not yet implemented in codegen".into())
+            hir::ExprKind::GeneratorNext(gen_expr) => {
+                self.compile_coroutine_next(gen_expr)
             }
         }
     }
@@ -750,6 +754,11 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 Err("tuple indexing on rvalue not supported".into())
             }
+            Type::SIMD(inner, _) => {
+                let vec_val = self.compile_expr(arr)?.into_vector_value();
+                let elem = b!(self.bld.build_extract_element(vec_val, idx_val, "simd.lane"));
+                Ok(elem)
+            }
             Type::Vec(elem_ty) => {
                 let lty = self.llvm_ty(elem_ty);
                 let header_ptr = self.compile_expr(arr)?.into_pointer_value();
@@ -1236,13 +1245,77 @@ impl<'ctx> Compiler<'ctx> {
     fn compile_as_format(
         &mut self,
         expr: &hir::Expr,
-        _fmt: &str,
+        fmt: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // as json / as map — for now, delegate to the Display/toString path
-        let val = self.compile_expr(expr)?;
-        let _ = val;
-        // Return empty string placeholder — full serialization would need runtime support
-        self.compile_str_literal("")
+        match fmt {
+            "json" => self.compile_as_json(expr),
+            _ => {
+                // Fallback: use compile_to_string
+                self.compile_to_string(expr)
+            }
+        }
+    }
+
+    fn compile_as_json(
+        &mut self,
+        expr: &hir::Expr,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ty = self.resolve_ty(expr.ty.clone());
+        match &ty {
+            Type::Struct(name, _) => {
+                let fields = self.structs.get(name).cloned().unwrap_or_default();
+                let val = self.compile_expr(expr)?;
+                // Build JSON: {"field1": val1, "field2": val2, ...}
+                let mut result = self.compile_str_literal("{")?;
+                let struct_ty = self.module.get_struct_type(name)
+                    .ok_or_else(|| format!("unknown struct type: {name}"))?;
+                for (i, (fname, fty)) in fields.iter().enumerate() {
+                    // Add comma separator
+                    if i > 0 {
+                        let comma = self.compile_str_literal(", ")?;
+                        result = self.string_concat(result, comma)?;
+                    }
+                    // Add "fieldname":
+                    let key_str = self.compile_str_literal(&format!("\"{fname}\": "))?;
+                    result = self.string_concat(result, key_str)?;
+                    // Extract field value
+                    let field_val = if val.is_pointer_value() {
+                        let fgep = b!(self.bld.build_struct_gep(struct_ty, val.into_pointer_value(), i as u32, "json.fgep"));
+                        b!(self.bld.build_load(self.llvm_ty(fty), fgep, "json.fld"))
+                    } else {
+                        b!(self.bld.build_extract_value(val.into_struct_value(), i as u32, "json.fld"))
+                    };
+                    // Format field value based on type
+                    let fval_str = match fty {
+                        Type::String => {
+                            // Wrap in quotes
+                            let q = self.compile_str_literal("\"")?;
+                            let s = self.string_concat(q.clone(), field_val)?;
+                            self.string_concat(s, q)?
+                        }
+                        Type::I64 | Type::I32 | Type::I16 | Type::I8 => self.int_to_string(field_val, false)?,
+                        Type::U64 | Type::U32 | Type::U16 | Type::U8 => self.int_to_string(field_val, true)?,
+                        Type::F64 | Type::F32 => self.float_to_string(field_val)?,
+                        Type::Bool => self.bool_to_string(field_val)?,
+                        _ => self.int_to_string(field_val, false)?,
+                    };
+                    result = self.string_concat(result, fval_str)?;
+                }
+                let close = self.compile_str_literal("}")?;
+                self.string_concat(result, close)
+            }
+            Type::String => {
+                // String: wrap in quotes
+                let q = self.compile_str_literal("\"")?;
+                let val = self.compile_expr(expr)?;
+                let s = self.string_concat(q.clone(), val)?;
+                self.string_concat(s, q)
+            }
+            _ => {
+                // Primitives: just convert to string
+                self.compile_to_string(expr)
+            }
+        }
     }
 
     fn compile_atomic_load(
@@ -1327,6 +1400,60 @@ impl<'ctx> Compiler<'ctx> {
         Ok(old)
     }
 
+    fn ensure_deque_fn(&self, name: &str, param_tys: &[BasicMetadataTypeEnum<'ctx>], ret_ty: inkwell::types::BasicTypeEnum<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+        self.module.get_function(name).unwrap_or_else(|| {
+            let ft = ret_ty.fn_type(param_tys, false);
+            self.module.add_function(name, ft, Some(inkwell::module::Linkage::External))
+        })
+    }
+
+    fn compile_deque_new(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let f = self.module.get_function("__jade_deque_new").unwrap_or_else(|| {
+            let ft = ptr_ty.fn_type(&[], false);
+            self.module.add_function("__jade_deque_new", ft, Some(inkwell::module::Linkage::External))
+        });
+        let result = b!(self.bld.build_call(f, &[], "deque.new"));
+        Ok(result.try_as_basic_value().basic().unwrap())
+    }
+
+    fn compile_deque_method(
+        &mut self,
+        obj: &hir::Expr,
+        method: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i64t = self.ctx.i64_type();
+        let void_ty = self.ctx.void_type();
+        let handle = self.compile_expr(obj)?;
+
+        match method {
+            "push_back" | "push_front" => {
+                let rt_name = if method == "push_back" { "__jade_deque_push_back" } else { "__jade_deque_push_front" };
+                let f = self.module.get_function(rt_name).unwrap_or_else(|| {
+                    let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into()], false);
+                    self.module.add_function(rt_name, ft, Some(inkwell::module::Linkage::External))
+                });
+                let val = self.compile_expr(&args[0])?;
+                b!(self.bld.build_call(f, &[handle.into(), val.into()], ""));
+                Ok(i64t.const_int(0, false).into())
+            }
+            "pop_front" | "pop_back" => {
+                let rt_name = if method == "pop_front" { "__jade_deque_pop_front" } else { "__jade_deque_pop_back" };
+                let f = self.ensure_deque_fn(rt_name, &[ptr_ty.into()], i64t.into());
+                let result = b!(self.bld.build_call(f, &[handle.into()], "dq.pop"));
+                Ok(result.try_as_basic_value().basic().unwrap())
+            }
+            "len" => {
+                let f = self.ensure_deque_fn("__jade_deque_len", &[ptr_ty.into()], i64t.into());
+                let result = b!(self.bld.build_call(f, &[handle.into()], "dq.len"));
+                Ok(result.try_as_basic_value().basic().unwrap())
+            }
+            _ => Err(format!("no method '{method}' on Deque")),
+        }
+    }
+
     fn compile_slice(
         &mut self,
         obj: &hir::Expr,
@@ -1340,17 +1467,20 @@ impl<'ctx> Compiler<'ctx> {
         let start_val = self.compile_expr(start)?;
         let end_val = self.compile_expr(end)?;
         match &obj.ty {
-            Type::Vec(_elem_ty) => {
-                // Vec slice: call jade_vec_slice(vec_ptr, start, end) → new vec
+            Type::Vec(elem_ty) => {
+                // Vec slice: call jade_vec_slice(vec_ptr, start, end, elem_size) → new vec
+                let lty = self.llvm_ty(elem_ty);
+                let elem_size = self.type_store_size(lty);
+                let i64t = self.ctx.i64_type();
                 let slice_fn = self.module.get_function("__jade_vec_slice").unwrap_or_else(|| {
                     let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                    let i64t = self.ctx.i64_type();
-                    let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
+                    let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into(), i64t.into()], false);
                     self.module.add_function("__jade_vec_slice", ft, Some(inkwell::module::Linkage::External))
                 });
+                let esz = i64t.const_int(elem_size, false);
                 let result = b!(self.bld.build_call(
                     slice_fn,
-                    &[obj_val.into(), start_val.into(), end_val.into()],
+                    &[obj_val.into(), start_val.into(), end_val.into(), esz.into()],
                     "slice"
                 ));
                 Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
@@ -1374,5 +1504,136 @@ impl<'ctx> Compiler<'ctx> {
                 Err(format!("slice not supported for type: {}", &obj.ty))
             }
         }
+    }
+
+    /// COW wrap: allocate {rc: i64, data: T}, set rc=1, copy value into data.
+    fn compile_cow_wrap(&mut self, inner: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
+        let val = self.compile_expr(inner)?;
+        let data_ty = self.llvm_ty(&inner.ty);
+        let i64t = self.ctx.i64_type();
+        let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
+        let malloc = self.ensure_malloc();
+        let size = cow_st.size_of().unwrap();
+        let ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.alloc"))
+            .try_as_basic_value().basic().unwrap().into_pointer_value();
+        // rc = 1
+        let rc_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 0, "cow.rc"));
+        b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
+        // store data
+        let data_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 1, "cow.data"));
+        b!(self.bld.build_store(data_gep, val));
+        Ok(ptr.into())
+    }
+
+    /// COW clone: if RC > 1, duplicate the backing storage and decrement
+    /// the original's RC. Otherwise return the same pointer.
+    fn compile_cow_clone(&mut self, inner: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
+        let cow_ptr = self.compile_expr(inner)?.into_pointer_value();
+        let cow_inner_ty = match &inner.ty {
+            crate::types::Type::Cow(inner) => inner.as_ref().clone(),
+            other => other.clone(),
+        };
+        let data_ty = self.llvm_ty(&cow_inner_ty);
+        let i64t = self.ctx.i64_type();
+        let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
+
+        let rc_gep = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 0, "cow.rcp"));
+        let rc = b!(self.bld.build_load(i64t, rc_gep, "cow.rc")).into_int_value();
+        let needs_clone = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::UGT, rc, i64t.const_int(1, false), "cow.shared"
+        ));
+
+        let fn_val = self.cur_fn.unwrap();
+        let clone_bb = self.ctx.append_basic_block(fn_val, "cow.clone");
+        let done_bb = self.ctx.append_basic_block(fn_val, "cow.done");
+        let cur_bb = self.bld.get_insert_block().unwrap();
+        b!(self.bld.build_conditional_branch(needs_clone, clone_bb, done_bb));
+
+        // Clone path: allocate new cow, copy data, set rc=1, decrement original rc
+        self.bld.position_at_end(clone_bb);
+        let malloc = self.ensure_malloc();
+        let size = cow_st.size_of().unwrap();
+        let new_ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.new"))
+            .try_as_basic_value().basic().unwrap().into_pointer_value();
+        let new_rc = b!(self.bld.build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
+        b!(self.bld.build_store(new_rc, i64t.const_int(1, false)));
+        let new_data = b!(self.bld.build_struct_gep(cow_st, new_ptr, 1, "cow.ndata"));
+        let old_data = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 1, "cow.odata"));
+        let old_val = b!(self.bld.build_load(data_ty, old_data, "cow.oval"));
+        b!(self.bld.build_store(new_data, old_val));
+        // Decrement original rc
+        let dec = b!(self.bld.build_int_sub(rc, i64t.const_int(1, false), "cow.dec"));
+        b!(self.bld.build_store(rc_gep, dec));
+        b!(self.bld.build_unconditional_branch(done_bb));
+
+        // Merge
+        self.bld.position_at_end(done_bb);
+        let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let phi = b!(self.bld.build_phi(ptr_t, "cow.result"));
+        phi.add_incoming(&[(&cow_ptr, cur_bb), (&new_ptr, clone_bb)]);
+        Ok(phi.as_basic_value())
+    }
+
+    /// Compile `grad(f)` — numerical derivative via central differences.
+    /// `f` must be a function `f64 -> f64`. Returns a closure `f64 -> f64`.
+    fn compile_grad(&mut self, inner: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
+        // Compile the inner fn closure
+        let f_closure = self.compile_expr(inner)?;
+
+        // Build the derivative wrapper function: (env_ptr, x) -> f64
+        // env_ptr points to the original closure stored as {fn_ptr, env_ptr}
+        let f64t = self.ctx.f64_type();
+        let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let grad_ft = f64t.fn_type(&[ptr_t.into(), f64t.into()], false);
+        let grad_fn = self.module.add_function("__grad_wrapper", grad_ft, None);
+
+        let saved_bb = self.bld.get_insert_block();
+        let saved_fn = self.cur_fn;
+        let entry = self.ctx.append_basic_block(grad_fn, "entry");
+        self.bld.position_at_end(entry);
+        self.cur_fn = Some(grad_fn);
+
+        let env_arg = grad_fn.get_nth_param(0).unwrap().into_pointer_value();
+        let x = grad_fn.get_nth_param(1).unwrap().into_float_value();
+
+        // Load the original closure from the env: {fn_ptr, env_ptr}
+        let cl_ty = self.closure_type();
+        let orig_cl = b!(self.bld.build_load(cl_ty, env_arg, "orig.cl")).into_struct_value();
+        let orig_fn = b!(self.bld.build_extract_value(orig_cl, 0, "orig.fn")).into_pointer_value();
+        let orig_env = b!(self.bld.build_extract_value(orig_cl, 1, "orig.env"));
+
+        // Build the inner function type: (env_ptr, f64) -> f64
+        let inner_ft = f64t.fn_type(&[ptr_t.into(), f64t.into()], false);
+
+        // h = 1e-8
+        let h = f64t.const_float(1e-8);
+        let two_h = f64t.const_float(2e-8);
+
+        // x_plus = x + h
+        let x_plus = b!(self.bld.build_float_add(x, h, "xp"));
+        // x_minus = x - h
+        let x_minus = b!(self.bld.build_float_sub(x, h, "xm"));
+
+        // f(x + h)
+        let fp = b!(self.bld.build_indirect_call(inner_ft, orig_fn, &[orig_env.into(), x_plus.into()], "fp"));
+        let fp_val = fp.try_as_basic_value().basic().unwrap().into_float_value();
+        // f(x - h)
+        let fm = b!(self.bld.build_indirect_call(inner_ft, orig_fn, &[orig_env.into(), x_minus.into()], "fm"));
+        let fm_val = fm.try_as_basic_value().basic().unwrap().into_float_value();
+        // (f(x+h) - f(x-h)) / 2h
+        let diff = b!(self.bld.build_float_sub(fp_val, fm_val, "diff"));
+        let grad_val = b!(self.bld.build_float_div(diff, two_h, "grad"));
+        b!(self.bld.build_return(Some(&grad_val)));
+
+        self.cur_fn = saved_fn;
+        if let Some(bb) = saved_bb {
+            self.bld.position_at_end(bb);
+        }
+
+        // Allocate env holding the original closure, build new closure
+        let cl_alloc = self.entry_alloca(cl_ty.into(), "grad.env");
+        b!(self.bld.build_store(cl_alloc, f_closure));
+
+        self.make_closure(grad_fn.as_global_value().as_pointer_value(), cl_alloc)
     }
 }

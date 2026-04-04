@@ -1,4 +1,5 @@
 use inkwell::module::Linkage;
+use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -109,6 +110,19 @@ impl<'ctx> Compiler<'ctx> {
             Type::Array(et, _) => *et.clone(),
             _ => Type::I64,
         };
+
+        // Fixed-size array: inline linear scan for contains, len returns constant
+        if let Type::Array(_, arr_len) = &obj.ty {
+            let arr_len = *arr_len;
+            match method {
+                "contains" => return self.array_contains(obj, &elem_ty, arr_len, args),
+                "len" => {
+                    return Ok(self.ctx.i64_type().const_int(arr_len as u64, false).into());
+                }
+                _ => {}
+            }
+        }
+
         let obj_val = self.compile_expr(obj)?;
         let header_ptr = obj_val.into_pointer_value();
 
@@ -1466,5 +1480,81 @@ impl<'ctx> Compiler<'ctx> {
         let phi = b!(self.bld.build_phi(st, "jn.v"));
         phi.add_incoming(&[(&empty_str, empty_exit), (&result, done_exit)]);
         Ok(phi.as_basic_value())
+    }
+
+    /// Inline linear scan for `x in [a, b, c]` on fixed-size arrays.
+    fn array_contains(
+        &mut self,
+        obj: &hir::Expr,
+        elem_ty: &Type,
+        arr_len: usize,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let needle = self.compile_expr(&args[0])?;
+        let obj_val = self.compile_expr(obj)?;
+        let arr_ptr = obj_val.into_pointer_value();
+        let lty = self.llvm_ty(elem_ty);
+        let i64t = self.ctx.i64_type();
+        let bool_ty = self.ctx.bool_type();
+        let fv = self.cur_fn.unwrap();
+
+        let result_ptr = self.entry_alloca(bool_ty.into(), "acont.res");
+        b!(self.bld.build_store(result_ptr, bool_ty.const_int(0, false)));
+        let idx_ptr = self.entry_alloca(i64t.into(), "acont.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let len = i64t.const_int(arr_len as u64, false);
+        let arr_ty = lty.array_type(arr_len as u32);
+
+        let loop_bb = self.ctx.append_basic_block(fv, "acont.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "acont.body");
+        let done_bb = self.ctx.append_basic_block(fv, "acont.done");
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "acont.i")).into_int_value();
+        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "acont.cmp"));
+        b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let gep = unsafe {
+            b!(self.bld.build_gep(
+                arr_ty,
+                arr_ptr,
+                &[i64t.const_int(0, false), idx],
+                "acont.gep"
+            ))
+        };
+        let elem = b!(self.bld.build_load(lty, gep, "acont.elem"));
+        let eq = match elem_ty {
+            Type::F64 => b!(self.bld.build_float_compare(
+                inkwell::FloatPredicate::OEQ,
+                elem.into_float_value(),
+                needle.into_float_value(),
+                "acont.eq"
+            ))
+            .into(),
+            _ => b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                elem.into_int_value(),
+                needle.into_int_value(),
+                "acont.eq"
+            ))
+            .into(),
+        };
+        let found_bb = self.ctx.append_basic_block(fv, "acont.found");
+        let cont_bb = self.ctx.append_basic_block(fv, "acont.cont");
+        b!(self.bld.build_conditional_branch(eq, found_bb, cont_bb));
+
+        self.bld.position_at_end(found_bb);
+        b!(self.bld.build_store(result_ptr, bool_ty.const_int(1, false)));
+        b!(self.bld.build_unconditional_branch(done_bb));
+
+        self.bld.position_at_end(cont_bb);
+        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "acont.next"));
+        b!(self.bld.build_store(idx_ptr, next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(b!(self.bld.build_load(bool_ty, result_ptr, "acont.v")))
     }
 }

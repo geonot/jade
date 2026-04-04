@@ -322,6 +322,7 @@ impl Typer {
                 name: p.name.clone(),
                 ty,
                 ownership,
+                default: None,
                 span: p.span,
             });
         }

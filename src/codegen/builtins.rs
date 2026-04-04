@@ -470,6 +470,201 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result_ptr.into())
     }
 
+    /// Einsum codegen: parse notation, dispatch to known patterns or generic loop nest
+    pub(crate) fn compile_einsum(
+        &mut self,
+        notation: &str,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        // Parse notation: "ij,jk->ik" → inputs=["ij","jk"], output="ik"
+        let parts: Vec<&str> = notation.split("->").collect();
+        let (inp_str, out_str) = match parts.as_slice() {
+            [inp, out] => (*inp, *out),
+            _ => return Err(format!("invalid einsum notation: {notation}")),
+        };
+        let inputs: Vec<&str> = inp_str.split(',').collect();
+
+        // Matmul: ij,jk->ik
+        if inputs.len() == 2 && args.len() == 2 {
+            if inputs[0] == "ij" && inputs[1] == "jk" && out_str == "ik" {
+                return self.compile_matmul(args);
+            }
+            // Dot product: i,i->
+            if inputs[0] == "i" && inputs[1] == "i" && out_str.is_empty() {
+                return self.compile_einsum_dot(args);
+            }
+        }
+        // Trace: ii->
+        if inputs.len() == 1 && args.len() == 1 && inputs[0] == "ii" && out_str.is_empty() {
+            return self.compile_einsum_trace(args);
+        }
+        // Transpose: ij->ji
+        if inputs.len() == 1 && args.len() == 1 && inputs[0] == "ij" && out_str == "ji" {
+            return self.compile_einsum_transpose(args);
+        }
+        Err(format!("unsupported einsum pattern: {notation}"))
+    }
+
+    fn compile_einsum_dot(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
+        let b_ptr = self.compile_expr(&args[1])?.into_pointer_value();
+        let n = match &args[0].ty {
+            Type::NDArray(_, dims) if dims.len() == 1 => dims[0] as u64,
+            _ => return Err("einsum dot requires 1D NDArrays".into()),
+        };
+        let i64t = self.ctx.i64_type();
+        let f64t = self.ctx.f64_type();
+        let fn_val = self.cur_fn.unwrap();
+
+        let acc = self.entry_alloca(f64t.into(), "dot.acc");
+        b!(self.bld.build_store(acc, f64t.const_float(0.0)));
+        let iv = self.entry_alloca(i64t.into(), "dot.i");
+        b!(self.bld.build_store(iv, i64t.const_zero()));
+
+        let loop_bb = self.ctx.append_basic_block(fn_val, "dot.loop");
+        let body_bb = self.ctx.append_basic_block(fn_val, "dot.body");
+        let end_bb = self.ctx.append_basic_block(fn_val, "dot.end");
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
+        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, i, i64t.const_int(n, false), "dot.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
+
+        self.bld.position_at_end(body_bb);
+        let a_ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[i], "a.ep")) };
+        let a_val = b!(self.bld.build_load(f64t, a_ep, "a.v")).into_float_value();
+        let b_ep = unsafe { b!(self.bld.build_gep(f64t, b_ptr, &[i], "b.ep")) };
+        let b_val = b!(self.bld.build_load(f64t, b_ep, "b.v")).into_float_value();
+        let prod = b!(self.bld.build_float_mul(a_val, b_val, "dot.prod"));
+        let cur = b!(self.bld.build_load(f64t, acc, "dot.cur")).into_float_value();
+        let sum = b!(self.bld.build_float_add(cur, prod, "dot.sum"));
+        b!(self.bld.build_store(acc, sum));
+        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        b!(self.bld.build_store(iv, i_next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(end_bb);
+        Ok(b!(self.bld.build_load(f64t, acc, "dot.result")))
+    }
+
+    fn compile_einsum_trace(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
+        let n = match &args[0].ty {
+            Type::NDArray(_, dims) if dims.len() == 2 && dims[0] == dims[1] => dims[0] as u64,
+            _ => return Err("einsum trace requires square 2D NDArray".into()),
+        };
+        let i64t = self.ctx.i64_type();
+        let f64t = self.ctx.f64_type();
+        let fn_val = self.cur_fn.unwrap();
+
+        let acc = self.entry_alloca(f64t.into(), "tr.acc");
+        b!(self.bld.build_store(acc, f64t.const_float(0.0)));
+        let iv = self.entry_alloca(i64t.into(), "tr.i");
+        b!(self.bld.build_store(iv, i64t.const_zero()));
+
+        let loop_bb = self.ctx.append_basic_block(fn_val, "tr.loop");
+        let body_bb = self.ctx.append_basic_block(fn_val, "tr.body");
+        let end_bb = self.ctx.append_basic_block(fn_val, "tr.end");
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
+        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, i, i64t.const_int(n, false), "tr.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
+
+        self.bld.position_at_end(body_bb);
+        // A[i*n + i]
+        let idx = b!(self.bld.build_int_mul(i, i64t.const_int(n, false), "tr.row"));
+        let idx = b!(self.bld.build_int_add(idx, i, "tr.diag"));
+        let ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[idx], "tr.ep")) };
+        let val = b!(self.bld.build_load(f64t, ep, "tr.v")).into_float_value();
+        let cur = b!(self.bld.build_load(f64t, acc, "tr.cur")).into_float_value();
+        let sum = b!(self.bld.build_float_add(cur, val, "tr.sum"));
+        b!(self.bld.build_store(acc, sum));
+        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        b!(self.bld.build_store(iv, i_next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(end_bb);
+        Ok(b!(self.bld.build_load(f64t, acc, "tr.result")))
+    }
+
+    fn compile_einsum_transpose(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
+        let (m, n) = match &args[0].ty {
+            Type::NDArray(_, dims) if dims.len() == 2 => (dims[0] as u64, dims[1] as u64),
+            _ => return Err("einsum transpose requires 2D NDArray".into()),
+        };
+        let i64t = self.ctx.i64_type();
+        let f64t = self.ctx.f64_type();
+        let malloc = self.ensure_malloc();
+
+        let total = m * n;
+        let byte_size = i64t.const_int(total * 8, false);
+        let result_ptr = b!(self.bld.build_call(malloc, &[byte_size.into()], "tp.ptr"))
+            .try_as_basic_value().basic().unwrap().into_pointer_value();
+
+        let fn_val = self.cur_fn.unwrap();
+        let iv = self.entry_alloca(i64t.into(), "tp.i");
+        let jv = self.entry_alloca(i64t.into(), "tp.j");
+        b!(self.bld.build_store(iv, i64t.const_zero()));
+
+        let i_loop = self.ctx.append_basic_block(fn_val, "tp.i");
+        let j_loop = self.ctx.append_basic_block(fn_val, "tp.j");
+        let body = self.ctx.append_basic_block(fn_val, "tp.body");
+        let j_end = self.ctx.append_basic_block(fn_val, "tp.j.end");
+        let i_end = self.ctx.append_basic_block(fn_val, "tp.end");
+        b!(self.bld.build_unconditional_branch(i_loop));
+
+        self.bld.position_at_end(i_loop);
+        let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
+        let cmp_i = b!(self.bld.build_int_compare(IntPredicate::ULT, i, i64t.const_int(m, false), "tp.icmp"));
+        b!(self.bld.build_conditional_branch(cmp_i, j_loop, i_end));
+
+        self.bld.position_at_end(j_loop);
+        b!(self.bld.build_store(jv, i64t.const_zero()));
+        let j_loop2 = self.ctx.append_basic_block(fn_val, "tp.j2");
+        b!(self.bld.build_unconditional_branch(j_loop2));
+
+        self.bld.position_at_end(j_loop2);
+        let j = b!(self.bld.build_load(i64t, jv, "j")).into_int_value();
+        let cmp_j = b!(self.bld.build_int_compare(IntPredicate::ULT, j, i64t.const_int(n, false), "tp.jcmp"));
+        b!(self.bld.build_conditional_branch(cmp_j, body, j_end));
+
+        self.bld.position_at_end(body);
+        // src[i*n + j] -> dst[j*m + i]
+        let src_idx = b!(self.bld.build_int_mul(i, i64t.const_int(n, false), "s.row"));
+        let src_idx = b!(self.bld.build_int_add(src_idx, j, "s.idx"));
+        let src_ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[src_idx], "s.ep")) };
+        let val = b!(self.bld.build_load(f64t, src_ep, "s.v")).into_float_value();
+        let dst_idx = b!(self.bld.build_int_mul(j, i64t.const_int(m, false), "d.row"));
+        let dst_idx = b!(self.bld.build_int_add(dst_idx, i, "d.idx"));
+        let dst_ep = unsafe { b!(self.bld.build_gep(f64t, result_ptr, &[dst_idx], "d.ep")) };
+        b!(self.bld.build_store(dst_ep, val));
+
+        let j_next = b!(self.bld.build_int_add(j, i64t.const_int(1, false), "j.next"));
+        b!(self.bld.build_store(jv, j_next));
+        b!(self.bld.build_unconditional_branch(j_loop2));
+
+        self.bld.position_at_end(j_end);
+        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        b!(self.bld.build_store(iv, i_next));
+        b!(self.bld.build_unconditional_branch(i_loop));
+
+        self.bld.position_at_end(i_end);
+        Ok(result_ptr.into())
+    }
+
     fn compile_bit_intrinsic(
         &mut self,
         builtin: &hir::BuiltinFn,
@@ -736,16 +931,18 @@ impl<'ctx> Compiler<'ctx> {
         let signum = self.compile_expr(&args[0])?;
         let handler = self.compile_expr(&args[1])?;
         let signal_fn = self.ensure_signal();
+        let sig32 = b!(self.bld.build_int_truncate(signum.into_int_value(), self.ctx.i32_type(), "sig.trunc"));
         b!(self
             .bld
-            .build_call(signal_fn, &[signum.into(), handler.into()], "sig"));
+            .build_call(signal_fn, &[sig32.into(), handler.into()], "sig"));
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
     fn compile_signal_raise(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
         let signum = self.compile_expr(&args[0])?;
         let raise_fn = self.ensure_raise();
-        Ok(b!(self.bld.build_call(raise_fn, &[signum.into()], "raise"))
+        let sig32 = b!(self.bld.build_int_truncate(signum.into_int_value(), self.ctx.i32_type(), "sig.trunc"));
+        Ok(b!(self.bld.build_call(raise_fn, &[sig32.into()], "raise"))
             .try_as_basic_value()
             .basic()
             .unwrap())
@@ -757,6 +954,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let signum = self.compile_expr(&args[0])?;
         let signal_fn = self.ensure_signal();
+        let sig32 = b!(self.bld.build_int_truncate(signum.into_int_value(), self.ctx.i32_type(), "sig.trunc"));
         let sig_ign = self
             .bld
             .build_int_to_ptr(
@@ -767,7 +965,7 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap();
         b!(self
             .bld
-            .build_call(signal_fn, &[signum.into(), sig_ign.into()], "sig.ign"));
+            .build_call(signal_fn, &[sig32.into(), sig_ign.into()], "sig.ign"));
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
@@ -1025,6 +1223,19 @@ impl<'ctx> Compiler<'ctx> {
                 let not_inf = b!(self.bld.build_float_compare(inkwell::FloatPredicate::ONE, abs_val, inf, "notinf"));
                 let not_nan = b!(self.bld.build_float_compare(inkwell::FloatPredicate::ORD, receiver, receiver, "notnan"));
                 Ok(b!(self.bld.build_and(not_inf, not_nan, "isfinite")).into())
+            }
+            "clamp" => {
+                if args.len() < 3 { return Err("clamp() takes 2 arguments (lo, hi)".into()); }
+                let lo = self.compile_expr(&args[1])?.into_float_value();
+                let hi = self.compile_expr(&args[2])?.into_float_value();
+                let min_f = self.module.get_function("llvm.minnum.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.minnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                });
+                let max_f = self.module.get_function("llvm.maxnum.f64").unwrap_or_else(|| {
+                    self.module.add_function("llvm.maxnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                });
+                let min_val = b!(self.bld.build_call(min_f, &[receiver.into(), hi.into()], "clamp.min")).try_as_basic_value().basic().unwrap().into_float_value();
+                Ok(b!(self.bld.build_call(max_f, &[min_val.into(), lo.into()], "clamp.max")).try_as_basic_value().basic().unwrap())
             }
             "to_int" => {
                 Ok(b!(self.bld.build_float_to_signed_int(receiver, i64t, "ftoi")).into())
@@ -1507,6 +1718,48 @@ impl<'ctx> Compiler<'ctx> {
                 let is_upper = b!(self.bld.build_and(ge, le, "ch.isup"));
                 let lower = b!(self.bld.build_int_add(char_val, i64t.const_int(0x20, false), "ch.toL"));
                 Ok(b!(self.bld.build_select(is_upper, lower, char_val, "ch.tolower")).into())
+            }
+            "to_float" => {
+                let f64t = self.ctx.f64_type();
+                let result = b!(self.bld.build_signed_int_to_float(char_val, f64t, "i2f"));
+                Ok(result.into())
+            }
+            "abs" => {
+                // x < 0 ? -x : x
+                let neg = b!(self.bld.build_int_neg(char_val, "int.neg"));
+                let is_neg = b!(self.bld.build_int_compare(IntPredicate::SLT, char_val, i64t.const_zero(), "int.isneg"));
+                Ok(b!(self.bld.build_select(is_neg, neg, char_val, "int.abs")).into())
+            }
+            "min" => {
+                if args.len() < 2 {
+                    return Err("min() takes 1 argument".into());
+                }
+                let other = self.compile_expr(&args[1])?.into_int_value();
+                let cmp = b!(self.bld.build_int_compare(IntPredicate::SLT, char_val, other, "int.lt"));
+                Ok(b!(self.bld.build_select(cmp, char_val, other, "int.min")).into())
+            }
+            "max" => {
+                if args.len() < 2 {
+                    return Err("max() takes 1 argument".into());
+                }
+                let other = self.compile_expr(&args[1])?.into_int_value();
+                let cmp = b!(self.bld.build_int_compare(IntPredicate::SGT, char_val, other, "int.gt"));
+                Ok(b!(self.bld.build_select(cmp, char_val, other, "int.max")).into())
+            }
+            "clamp" => {
+                if args.len() < 3 {
+                    return Err("clamp() takes 2 arguments (lo, hi)".into());
+                }
+                let lo = self.compile_expr(&args[1])?.into_int_value();
+                let hi = self.compile_expr(&args[2])?.into_int_value();
+                // max(lo, min(x, hi))
+                let cmp_hi = b!(self.bld.build_int_compare(IntPredicate::SLT, char_val, hi, "clamp.lthi"));
+                let min_val = b!(self.bld.build_select(cmp_hi, char_val, hi, "clamp.min")).into_int_value();
+                let cmp_lo = b!(self.bld.build_int_compare(IntPredicate::SGT, min_val, lo, "clamp.gtlo"));
+                Ok(b!(self.bld.build_select(cmp_lo, min_val, lo, "clamp.max")).into())
+            }
+            "to_str" => {
+                self.compile_to_string(&args[0])
             }
             _ => Err(format!("unknown char method '{method}'")),
         }

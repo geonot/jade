@@ -163,9 +163,13 @@ log x.BAZ    # 5
     'hello {name}'
 
 # With defaults
-*connect host as String, port as i64 is 8080
+*connect(host as String, port as i64 is 8080)
     ...
+```
 
+> **Note:** Default parameter values are parsed but the HIR validator does not yet account for them — calling a function with fewer arguments than declared (relying on defaults) produces a validation error. Provide all arguments explicitly for now.
+
+```jade
 # No-arg functions — no parens needed
 *hello
     log 'hi'
@@ -189,8 +193,9 @@ Parameters infer types from usage. Return type inferred from body. Explicit anno
 *double x is x * 2
 
 result is double of 5      # same as double(5)
-log of 'hello'             # same as log('hello')
 ```
+
+`of` after a user-defined function name treats the next expression as its argument. Does not work with builtins like `log`.
 
 ### Pattern-Directed Function Clauses
 
@@ -276,12 +281,13 @@ result is value ~ double ~ add_one ~ square
 ### Named Arguments
 
 ```jade
-*connect host as String, port as i64 is 8080
+*connect(host as String, port as i64 is 8080)
     log 'connecting to {host}:{port}'
 
 connect(host is 'localhost', port is 3000)
-connect(host is 'example.com')    # port defaults to 8080
 ```
+
+Parentheses are required when using `as` type annotations on parameters.
 
 ### `$` Placeholder
 
@@ -361,11 +367,6 @@ for i from 0 to 100 by 2
 loop
     if done
         break
-
-# Yield — return a value from a loop
-result is loop
-    if check()
-        yield 42
 
 # Labeled loops — binding name IS the label
 outer is for i from 0 to 10
@@ -910,14 +911,16 @@ extern *printf(fmt as %i8, ...) returns i32
     syscall 1, 1, 'hello\n', 6   # write(stdout, msg, len)
 ```
 
+**Status:** The `syscall` AST node exists but is not reachable from source code — the parser does not recognize `syscall` as a keyword or builtin function. Use `extern` declarations for system-level calls instead.
+
 ### Inline Assembly
 
 ```jade
 asm
-    'mov $1, %rax'
-    'mov $1, %rdi'
-    'syscall'
+    nop
 ```
+
+Assembly lines are bare instructions (no quotes). The parser collects indented lines as raw assembly text and emits them via LLVM inline asm.
 
 ### Raw Pointers
 
@@ -931,12 +934,12 @@ val is @ptr        # dereference
 Hardware-observable reads and writes. No compiler reordering, no elision.
 
 ```jade
-extern *mmio_base() returns %i32
-
 *poll_device
-    reg is mmio_base()
-    status is volatile_load reg       # Always reads from memory
-    volatile_store reg, status | 1    # Always writes to memory
+    x is 0
+    ptr is %x
+    volatile_store(ptr, 99)
+    v is volatile_load(ptr)      # Always reads from memory
+    log v                        # 99
 ```
 
 ### Weak References
@@ -953,6 +956,8 @@ type Node
     child_parent is weak root            # downgrade to weak
     strong is weak_upgrade child_parent  # upgrade: returns rc or none
 ```
+
+**Status:** `weak` is a reserved keyword and `Type::Weak` exists in the type system, but `weak` is not yet parsed as an expression or type modifier. The `weak()` and `weak_upgrade()` function calls are not registered as builtins. Use `rc()` for now; weak references are planned.
 
 ### Copy-on-Write (COW)
 
@@ -971,7 +976,7 @@ b is b + ' world'   # COW triggers: b gets its own copy
 POSIX signal infrastructure.
 
 ```jade
-*handler sig as i32
+*handler(sig as i32)
     log sig
 
 *main
@@ -979,6 +984,8 @@ POSIX signal infrastructure.
     signal_ignore 13             # SIGPIPE → ignore
     signal_raise 2               # raise SIGINT
 ```
+
+**Status:** Signal builtins are parsed and recognized, but `signal_handle` has a codegen type mismatch (passes `i64` signal number where libc expects `i32`). `signal_ignore` compiles but has the same issue. Planned fix.
 
 ### Integer Overflow Control
 
@@ -996,6 +1003,8 @@ Default: trap on overflow. Explicit control via builtins:
 
 Available for `add`, `sub`, `mul` — each in `wrapping_`, `saturating_`, `checked_` variants.
 
+> **Note:** Integer overflow builtins work with the default HIR codegen backend. The MIR codegen backend does not yet support them.
+
 ### Atomic Operations
 
 Lock-free atomic instructions for concurrent programming:
@@ -1007,6 +1016,8 @@ val is atomic_load(%counter)      # atomic read
 atomic_store(%counter, 0)         # atomic write
 old, ok is atomic_cas(%counter, 0, 1)  # compare-and-swap
 ```
+
+**Status:** Atomic operations exist in the HIR and codegen, but are not registered as builtins — calling them from source code produces "undefined function." Wiring them up in the typer's builtin table is required.
 
 ### Arena / Region Allocation
 
@@ -1110,18 +1121,20 @@ select
 ### Multi-Dimensional Arrays
 
 ```jade
-# 3×3 matrix
-m is ndarray(3, 3)
+# 3×3 matrix (created with the `by` keyword)
+m is 3 by 3
 
 # Access
 log m[1][2]
 
 # Element-wise arithmetic (broadcasting)
-a is ndarray(3, 3)
-b is ndarray(3, 3)
+a is 3 by 3
+b is 3 by 3
 c is a + b       # element-wise add
 d is a * 2.0     # scalar broadcast
 ```
+
+The `by` keyword creates an NDArray. `3 by 3` produces a 3×3 matrix of f64 zeros.
 
 ### Matrix Multiplication
 
@@ -1206,10 +1219,12 @@ config is build ServerConfig
 Introspect types at compile time:
 
 ```jade
-fields is fields_of('Point')    # ['x', 'y'] — array of field names
-t is type_of(42)                # 'Int' — type as string
-s is size_of('Point')           # 16 — byte size
+fields is fields_of('Point')    # field names (array)
+t is type_of(42)                # type as string
+s is size_of('Point')           # byte size
 ```
+
+**Status:** Comptime reflection builtins compile and run but produce incorrect results — `size_of` returns 0 for primitives, `type_of` returns garbled output, `fields_of` returns a raw pointer. These are placeholders awaiting proper implementation.
 
 ### Extended Comptime Inference
 
@@ -1249,7 +1264,7 @@ Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST
 ### CLI
 
 ```
-jadec <INPUT> [-o OUTPUT] [--emit-ir] [--opt 0-3] [--lto] [-g/--debug]
+jadec <INPUT> [-o OUTPUT] [--emit-ir] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [-g/--debug] [--mir-codegen] [--fast-math] [--deterministic-fp] [--incremental] [--threads N]
 ```
 
 Subcommands:
@@ -1267,9 +1282,18 @@ jade bind header.h         # generate extern declarations from C header
 ```
 
 - `--emit-ir` — print LLVM IR instead of compiling
+- `--emit-llvm` — print LLVM IR (alias)
+- `--emit-hir` — print HIR (typed intermediate representation)
+- `--emit-mir` — print MIR (mid-level IR)
+- `--emit-obj` — emit object file only
 - `--opt` — optimization level (default: 3)
 - `--lto` — link-time optimization
 - `-g` / `--debug` — emit DWARF debug info (for lldb/gdb)
+- `--mir-codegen` — use MIR-based backend instead of HIR-based
+- `--fast-math` — enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
+- `--deterministic-fp` — guarantee deterministic floating-point results
+- `--incremental` — cache unchanged function artifacts
+- `--threads N` — parallel codegen threads (0 = auto-detect)
 
 ### Codegen Optimizations
 
@@ -1494,27 +1518,28 @@ signal_ignore(sig)      # ignore signal (SIG_IGN)
 rc(value)               # allocate RC-wrapped value
 rc_retain(rv)           # increment refcount
 rc_release(rv)          # decrement refcount (frees at 0)
-weak(rc_val)            # downgrade RC → weak reference
-weak_upgrade(w)         # upgrade weak → RC (or none)
 ```
+
+`weak()` and `weak_upgrade()` are planned but not yet callable (see Weak References section).
 
 ### Float
 
 ```jade
 x.sqrt()    x.sin()     x.cos()     x.tan()
 x.abs()     x.floor()   x.ceil()    x.round()
-x.is_nan()  x.is_infinite()
-x.min(y)    x.max(y)    x.clamp(lo, hi)
+x.is_nan()  x.is_infinite()  x.is_finite()
+x.min(y)    x.max(y)
 ```
 
 ### Array/Slice
 
 ```jade
-arr.length              # compile-time for fixed arrays
+arr.length              # Vec length (property access)
+arr.len()               # Vec length (method call)
 arr[i]                  # bounds-checked
-arr from i to j         # slice
+arr from i to j         # slice (Vec only — links but runtime not yet wired)
 arr.contains(x)
-arr.iter()              # iterator
+arr.join(sep)           # join elements with separator string
 ```
 
 ### String
@@ -1526,13 +1551,16 @@ s.ends_with('suf')      # true if s ends with suffix
 s.char_at(i)            # byte at index i (as i64)
 s.slice(start, end)     # substring [start, end)
 s.split(delim)          # split into array of strings
-s.join(arr)             # join array with separator
 s.trim()                # strip leading/trailing whitespace
 s.to_upper()            # uppercase copy
 s.to_lower()            # lowercase copy
 s.replace(old, new)     # replace all occurrences
 s.find(sub)             # index of first occurrence (-1 if not found)
 s.lines()               # split by newlines
+s.repeat(n)             # repeat string n times
+s.is_empty()            # true if length is 0
+s.trim_left()           # strip leading whitespace
+s.trim_right()          # strip trailing whitespace
 
 # Regex (requires PCRE2)
 s.matches(pattern)      # true if pattern matches anywhere in s
@@ -1553,14 +1581,10 @@ log('x={x} x2={x * 2}')      # x=42 x2=84
 
 ```jade
 log(value)              # print to stdout
-sqrt(x)    abs(x)       # math
-min(a, b)  max(a, b)
-to_string(x)
+to_string(x)            # convert to string
 time_now()              # nanosecond timestamp
 assert(cond)            # rich assert with auto-generated messages
-panic(msg)
-size_of of T()          # compile-time size
-align_of of T()         # compile-time alignment
+constant_time_eq(a, b)  # constant-time equality comparison
 
 # Collections
 set()                   # new empty set
@@ -1575,10 +1599,7 @@ size_of('TypeName')     # byte size as i64
 
 # Matrix / SIMD
 matmul(A, B)            # matrix multiplication
-ndarray(dims...)        # N-dimensional array
-
-# Safety
-constant_time_eq(a, b)  # constant-time equality comparison
+# ndarray: use `3 by 3` syntax (the `by` keyword)
 ```
 
 ### Debug

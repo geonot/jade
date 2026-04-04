@@ -35,7 +35,8 @@ pub fn optimize(func: &mut Function, level: OptLevel) {
             changed |= loop_invariant_code_motion(func);
         }
         changed |= redundant_store_elimination(func);
-        changed |= constant_branch_elimination(func);
+        // constant_branch_elimination is subsumed by constant_fold
+        // which already folds Branch on known booleans.
         changed |= merge_linear_blocks(func);
         changed |= remove_unreachable_blocks(func);
         if !changed { break; }
@@ -52,7 +53,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
     }
     match &mut inst.kind {
         InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => { sub!(a); sub!(b); }
-        InstKind::UnaryOp(_, v) | InstKind::Cast(v, _) | InstKind::Ref(v)
+        InstKind::UnaryOp(_, v) | InstKind::Cast(v, _) | InstKind::StrictCast(v, _) | InstKind::Ref(v)
         | InstKind::Deref(v) | InstKind::Copy(v) | InstKind::RcInc(v)
         | InstKind::RcDec(v) | InstKind::Alloc(v) => { sub!(v); }
         InstKind::Drop(v, _) => { sub!(v); }
@@ -78,9 +79,11 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::ClosureCreate(_, captures) | InstKind::SpawnActor(_, captures)
         | InstKind::SelectArm(captures, _) => { for a in captures { sub!(a); } }
         InstKind::ClosureCall(f, args) => { sub!(f); for a in args { sub!(a); } }
-        InstKind::ChanCreate(_) | InstKind::MapInit | InstKind::SetInit => {}
+        InstKind::ChanCreate(_, cap) => { if let Some(c) = cap { sub!(c); } }
+        InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit => {}
         InstKind::Assert(v, _) => { sub!(v); }
         InstKind::DynDispatch(obj, _, _, args) => { sub!(obj); for a in args { sub!(a); } }
+        InstKind::InlineAsm(_, args) => { for a in args { sub!(a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) | InstKind::FnRef(_) => {}
     }
@@ -112,7 +115,7 @@ fn collect_used(func: &Function) -> HashSet<ValueId> {
 fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
     match kind {
         InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => { s.insert(*a); s.insert(*b); }
-        InstKind::UnaryOp(_, v) | InstKind::Cast(v, _) | InstKind::Ref(v)
+        InstKind::UnaryOp(_, v) | InstKind::Cast(v, _) | InstKind::StrictCast(v, _) | InstKind::Ref(v)
         | InstKind::Deref(v) | InstKind::Copy(v) | InstKind::RcInc(v)
         | InstKind::RcDec(v) | InstKind::Alloc(v) => { s.insert(*v); }
         InstKind::Drop(v, _) => { s.insert(*v); }
@@ -137,9 +140,11 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::ClosureCreate(_, captures) | InstKind::SpawnActor(_, captures)
         | InstKind::SelectArm(captures, _) => { for a in captures { s.insert(*a); } }
         InstKind::ClosureCall(f, args) => { s.insert(*f); for a in args { s.insert(*a); } }
-        InstKind::ChanCreate(_) | InstKind::MapInit | InstKind::SetInit => {}
+        InstKind::ChanCreate(_, cap) => { if let Some(c) = cap { s.insert(*c); } }
+        InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit => {}
         InstKind::Assert(v, _) => { s.insert(*v); }
         InstKind::DynDispatch(obj, _, _, args) => { s.insert(*obj); for a in args { s.insert(*a); } }
+        InstKind::InlineAsm(_, args) => { for a in args { s.insert(*a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) | InstKind::FnRef(_) => {}
     }
@@ -160,10 +165,10 @@ fn is_pure(kind: &InstKind) -> bool {
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::FnRef(_)
         | InstKind::BinOp(..) | InstKind::UnaryOp(..) | InstKind::Cmp(..)
-        | InstKind::Cast(..) | InstKind::Copy(..)
-        | InstKind::FieldGet(..) | InstKind::Index(..) | InstKind::Ref(..) | InstKind::Deref(..)
+        | InstKind::Cast(..) | InstKind::StrictCast(..) | InstKind::Copy(..)
+        | InstKind::FieldGet(..) | InstKind::Index(..)
         | InstKind::ArrayInit(_) | InstKind::StructInit(..) | InstKind::VariantInit(..)
-        | InstKind::VecLen(..) | InstKind::MapInit | InstKind::SetInit)
+        | InstKind::VecLen(..) | InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit)
     // NOTE: Load is NOT pure — it reads mutable state. However, loads
     // whose results have been forwarded are cleaned up by store_load_forwarding.
     // RcClone is NOT pure — it increments a reference count.
@@ -212,6 +217,7 @@ pub fn constant_fold(func: &mut Function) -> bool {
                     InstKind::Cmp(op, l, r, _)   => fold_cmp(*op, consts.get(l), consts.get(r)),
                     InstKind::UnaryOp(op, v)   => fold_unary(*op, consts.get(v)),
                     InstKind::Cast(v, ty)      => fold_cast(consts.get(v), ty),
+                    InstKind::StrictCast(v, ty) => fold_cast(consts.get(v), ty),
                     _ => None,
                 };
                 if let Some(cv) = folded {
@@ -478,6 +484,8 @@ pub fn strength_reduction(func: &mut Function) -> bool {
                         if shift == 0 { Some(InstKind::Copy(*r)) }
                         else { Some(InstKind::BinOp(BinOp::Shl, *r, shift_vals[&shift])) }
                     }
+                    // x * 0 → 0 (IntConst(0) is correct for all int widths
+                    // because codegen uses inst.ty to determine the constant width)
                     (_, Some(0)) | (Some(0), _) => Some(InstKind::IntConst(0)),
                     _ => None,
                 },
@@ -691,11 +699,15 @@ fn gvn_key(kind: &InstKind) -> Option<String> {
             let (a, b) = if is_commutative(*op) && l.0 > r.0 { (r, l) } else { (l, r) };
             Some(format!("bin:{op:?}:{},{}", a.0, b.0))
         }
-        InstKind::Cmp(op, l, r, _) => Some(format!("cmp:{op:?}:{},{}", l.0, r.0)),
+        InstKind::Cmp(op, l, r, _) => {
+            let (a, b) = if matches!(op, CmpOp::Eq | CmpOp::Ne) && l.0 > r.0 { (r, l) } else { (l, r) };
+            Some(format!("cmp:{op:?}:{},{}", a.0, b.0))
+        }
         InstKind::UnaryOp(op, v)  => Some(format!("un:{op:?}:{}", v.0)),
         InstKind::FieldGet(o, f)  => Some(format!("fg:{}:{f}", o.0)),
         InstKind::Index(a, i)     => Some(format!("ix:{}:{}", a.0, i.0)),
         InstKind::Cast(v, ty)     => Some(format!("cast:{}:{ty:?}", v.0)),
+        InstKind::StrictCast(v, ty) => Some(format!("scast:{}:{ty:?}", v.0)),
         _ => None,
     }
 }
@@ -768,6 +780,10 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
         .collect();
 
     // Find back-edges: (from, to) where to <= from in block order.
+    // NOTE: This assumes blocks are roughly in topological order. After
+    // DCE/merging passes, verify the back-edge really forms a natural loop
+    // by checking the header dominates all body blocks (approximated by
+    // ensuring the header has a successor inside the body range).
     let mut loops: Vec<(BlockId, HashSet<usize>)> = Vec::new(); // (header, body block indices)
 
     for (i, bb) in func.blocks.iter().enumerate() {
@@ -786,7 +802,14 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
                         .successors()
                         .iter()
                         .any(|s| block_index.get(s).map_or(false, |&si| body.contains(&si)));
-                    if header_has_body_succ {
+                    // Additional check: verify all body blocks are reachable from
+                    // the header within the body (validates natural loop structure).
+                    let header_has_exit = func.block(succ)
+                        .terminator
+                        .successors()
+                        .iter()
+                        .any(|s| block_index.get(s).map_or(true, |&si| !body.contains(&si)));
+                    if header_has_body_succ && (body.len() > 1 || header_has_exit) {
                         loops.push((succ, body));
                     }
                 }

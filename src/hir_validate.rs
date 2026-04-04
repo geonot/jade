@@ -6,7 +6,7 @@ use crate::types::Type;
 
 pub struct HirValidator {
     fn_defs: HashMap<u32, Span>,
-    fn_sigs: HashMap<u32, (String, usize)>,
+    fn_sigs: HashMap<u32, (String, usize, usize)>, // (name, max_params, min_required_params)
     errors: Vec<String>,
 }
 
@@ -19,12 +19,13 @@ impl HirValidator {
         };
 
         for f in &prog.fns {
+            let min_params = f.params.iter().filter(|p| p.default.is_none()).count();
             v.fn_sigs
-                .insert(f.def_id.0, (f.name.clone(), f.params.len()));
+                .insert(f.def_id.0, (f.name.clone(), f.params.len(), min_params));
         }
         for ext in &prog.externs {
             v.fn_sigs
-                .insert(ext.def_id.0, (ext.name.clone(), ext.params.len()));
+                .insert(ext.def_id.0, (ext.name.clone(), ext.params.len(), ext.params.len()));
         }
 
         for f in &prog.fns {
@@ -114,6 +115,16 @@ impl HirValidator {
                 self.validate_expr(expr);
             }
             hir::Stmt::Assign(target, value, _) => {
+                // Check for reassignment to ALL_CAPS constants
+                match &target.kind {
+                    hir::ExprKind::Var(_, name) if is_all_caps(name) => {
+                        self.errors.push(format!("cannot reassign constant `{name}`"));
+                    }
+                    hir::ExprKind::Field(_, field, _) if is_all_caps(field) => {
+                        self.errors.push(format!("cannot reassign constant field `{field}`"));
+                    }
+                    _ => {}
+                }
                 self.validate_expr(target);
                 self.validate_expr(value);
             }
@@ -216,13 +227,14 @@ impl HirValidator {
                 for a in args {
                     self.validate_expr(a);
                 }
-                if let Some((_, expected)) = self.fn_sigs.get(&id.0) {
-                    if args.len() != *expected {
+                if let Some((_, max_params, min_params)) = self.fn_sigs.get(&id.0) {
+                    if args.len() < *min_params || args.len() > *max_params {
                         self.errors.push(format!(
-                            "call to `{}` at line {}: expected {} args, got {}",
+                            "call to `{}` at line {}: expected {}{} args, got {}",
                             name,
                             expr.span.line,
-                            expected,
+                            if min_params != max_params { format!("{}-", min_params) } else { String::new() },
+                            max_params,
                             args.len()
                         ));
                     }
@@ -463,4 +475,11 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::SimBlock(_, s) => *s,
         hir::Stmt::UseLocal(_, _, _, s) => *s,
     }
+}
+
+/// Returns true if the name is ALL_CAPS (at least 2 chars, all alphabetic chars uppercase).
+fn is_all_caps(name: &str) -> bool {
+    name.len() >= 2
+        && name.chars().any(|c| c.is_alphabetic())
+        && name.chars().all(|c| !c.is_alphabetic() || c.is_uppercase())
 }

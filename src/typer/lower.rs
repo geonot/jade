@@ -85,7 +85,16 @@ impl Typer {
                 ast::Decl::Const(name, expr, _) => {
                     self.consts.insert(name.clone(), expr.clone());
                 }
-                ast::Decl::Supervisor(_) => {}
+                ast::Decl::Supervisor(sup) => {
+                    // Validate supervisor: check children are known actor names
+                    for child in &sup.children {
+                        if !self.fns.contains_key(child) && !self.actors.contains_key(child) {
+                            self.type_errors.push(
+                                format!("supervisor '{}': unknown child '{}'", sup.name, child),
+                            );
+                        }
+                    }
+                }
                 ast::Decl::TypeAlias(_, _, _) => {}
                 ast::Decl::Newtype(_, _, _) => {}
                 ast::Decl::TopStmt(_) => {}
@@ -293,6 +302,24 @@ impl Typer {
         hir_enums.extend(self.mono_enums.drain(..));
         hir_types.extend(self.mono_types.drain(..));
 
+        let mut hir_supervisors = Vec::new();
+        for d in &prog.decls {
+            if let ast::Decl::Supervisor(sup) = d {
+                let strat = match sup.strategy {
+                    ast::SupervisorStrategy::OneForOne => hir::SupervisorStrategy::OneForOne,
+                    ast::SupervisorStrategy::OneForAll => hir::SupervisorStrategy::OneForAll,
+                    ast::SupervisorStrategy::RestForOne => hir::SupervisorStrategy::RestForOne,
+                };
+                hir_supervisors.push(hir::SupervisorDef {
+                    def_id: self.fresh_id(),
+                    name: sup.name.clone(),
+                    strategy: strat,
+                    children: sup.children.clone(),
+                    span: sup.span,
+                });
+            }
+        }
+
         let mut program = hir::Program {
             fns: hir_fns,
             types: hir_types,
@@ -302,7 +329,7 @@ impl Typer {
             actors: hir_actors,
             stores: hir_stores,
             trait_impls: hir_trait_impls,
-            supervisors: Vec::new(),
+            supervisors: hir_supervisors,
             type_aliases: Vec::new(),
             newtypes: Vec::new(),
         };
@@ -799,7 +826,7 @@ impl Typer {
                     "sinh", "cosh", "tanh",
                     "exp", "exp2", "ln", "log2", "log10",
                     "cbrt", "recip", "signum",
-                    "pow", "atan2", "copysign", "min", "max",
+                    "pow", "atan2", "copysign", "min", "max", "clamp",
                     "is_nan", "is_infinite", "is_finite", "to_int",
                 ];
                 if float_methods.contains(&method.as_str()) {
@@ -1037,6 +1064,7 @@ impl Typer {
                         name: "__self".into(),
                         ty: self_ty.clone(),
                         ownership: hir::Ownership::Owned,
+                        default: None,
                         span,
                     }],
                     ret: Type::String,
@@ -1668,6 +1696,7 @@ impl Typer {
                     name: p.name.clone(),
                     ty,
                     ownership,
+                    default: None,
                     span: p.span,
                 });
             }
@@ -1818,11 +1847,17 @@ impl Typer {
                     scheme: None,
                 },
             );
+            let hir_default = if let Some(ref def_expr) = p.default {
+                self.lower_expr(def_expr).ok()
+            } else {
+                None
+            };
             params.push(hir::Param {
                 def_id: pid,
                 name: p.name.clone(),
                 ty,
                 ownership,
+                default: hir_default,
                 span: p.span,
             });
         }
@@ -2018,6 +2053,7 @@ impl Typer {
             name: "self".to_string(),
             ty: self_ty,
             ownership: Ownership::BorrowMut,
+            default: None,
             span: m.span,
         });
 
@@ -2044,6 +2080,7 @@ impl Typer {
                 name: p.name.clone(),
                 ty,
                 ownership,
+                default: None,
                 span: p.span,
             });
         }

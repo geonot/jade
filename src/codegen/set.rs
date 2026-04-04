@@ -174,14 +174,18 @@ impl<'ctx> Compiler<'ctx> {
             _ => return Err("compile_simd_new called with non-SIMD type".into()),
         };
         let elem_llvm = self.llvm_ty(inner);
-        let vec_ty = elem_llvm.into_float_type().vec_type(lanes as u32);
+        let vec_ty = if inner.is_float() {
+            elem_llvm.into_float_type().vec_type(lanes as u32)
+        } else {
+            elem_llvm.into_int_type().vec_type(lanes as u32)
+        };
         let mut vec_val = vec_ty.get_undef();
         for (i, elem) in elems.iter().enumerate() {
             let val = self.compile_expr(elem)?;
             let idx = self.ctx.i32_type().const_int(i as u64, false);
             vec_val = b!(self
                 .bld
-                .build_insert_element(vec_val, val.into_float_value(), idx, "simd.ins"));
+                .build_insert_element(vec_val, val, idx, "simd.ins"));
         }
         Ok(vec_val.into())
     }

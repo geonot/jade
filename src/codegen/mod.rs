@@ -297,6 +297,11 @@ impl<'ctx> Compiler<'ctx> {
             self.compile_actor_loop(ad)?;
         }
 
+        // Supervisor trees: generate a start function for each supervisor
+        for sup in &prog.supervisors {
+            self.compile_supervisor(sup)?;
+        }
+
         for f in &prog.fns {
             self.compile_fn(f)?;
         }
@@ -854,5 +859,26 @@ impl<'ctx> Compiler<'ctx> {
         self.ensure_malloc();
         self.ensure_free();
         self.ensure_memcpy();
+    }
+
+    fn compile_supervisor(&mut self, sup: &hir::SupervisorDef) -> Result<(), String> {
+        let fn_name = format!("{}_start", sup.name);
+        let i64t = self.ctx.i64_type();
+        let ft = i64t.fn_type(&[], false);
+        let fv = self.module.add_function(&fn_name, ft, None);
+        let entry = self.ctx.append_basic_block(fv, "entry");
+        self.bld.position_at_end(entry);
+        let old_fn = self.cur_fn;
+        self.cur_fn = Some(fv);
+
+        // Spawn each child actor
+        for child in &sup.children {
+            let _ = self.compile_spawn(child)?;
+        }
+
+        b!(self.bld.build_return(Some(&i64t.const_int(0, false))));
+        self.cur_fn = old_fn;
+        self.fns.insert(fn_name, (fv, vec![], Type::I64));
+        Ok(())
     }
 }

@@ -222,7 +222,9 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         | InstKind::StringConst(_)
         | InstKind::Void
         | InstKind::MapInit
-        | InstKind::SetInit => vec![],
+        | InstKind::SetInit
+        | InstKind::PQInit
+        | InstKind::DequeInit => vec![],
 
         InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => vec![*a, *b],
         InstKind::UnaryOp(_, a) => vec![*a],
@@ -252,7 +254,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::VariantInit(_, _, _, payload) => payload.clone(),
         InstKind::ArrayInit(elems) => elems.clone(),
 
-        InstKind::Cast(v, _) => vec![*v],
+        InstKind::Cast(v, _) | InstKind::StrictCast(v, _) => vec![*v],
         InstKind::Ref(v) => vec![*v],
         InstKind::Deref(v) => vec![*v],
 
@@ -278,7 +280,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::WeakUpgrade(v) => vec![*v],
 
         InstKind::SpawnActor(_, args) => args.clone(),
-        InstKind::ChanCreate(_) => vec![],
+        InstKind::ChanCreate(..) => vec![],
         InstKind::ChanSend(ch, val) => vec![*ch, *val],
         InstKind::ChanRecv(ch) => vec![*ch],
         InstKind::SelectArm(channels, _) => channels.clone(),
@@ -291,6 +293,8 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
             v.extend(args);
             v
         }
+
+        InstKind::InlineAsm(_, args) => args.clone(),
     }
 }
 

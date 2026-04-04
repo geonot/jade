@@ -148,6 +148,7 @@ pub enum InstKind {
     ArrayInit(Vec<ValueId>),
 
     Cast(ValueId, Type),
+    StrictCast(ValueId, Type),
     Ref(ValueId),
     Deref(ValueId),
 
@@ -170,6 +171,8 @@ pub enum InstKind {
     VecLen(ValueId),
     MapInit,
     SetInit,
+    PQInit,
+    DequeInit,
 
     // ── Closures (needed for escape analysis) ──
     ClosureCreate(String, Vec<ValueId>),
@@ -182,7 +185,7 @@ pub enum InstKind {
 
     // ── Actors/channels (needed for actor optimization pass) ──
     SpawnActor(String, Vec<ValueId>),
-    ChanCreate(Type),
+    ChanCreate(Type, Option<ValueId>),
     ChanSend(ValueId, ValueId),
     ChanRecv(ValueId),
     SelectArm(Vec<ValueId>, bool),
@@ -193,6 +196,9 @@ pub enum InstKind {
 
     // ── Dynamic dispatch ──
     DynDispatch(ValueId, String, String, Vec<ValueId>),
+
+    // ── Inline assembly ──
+    InlineAsm(String, Vec<ValueId>),
 }
 
 /// Binary operations.

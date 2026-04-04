@@ -88,6 +88,7 @@ pub enum Token {
     Einsum,
     Contract,
     Build,
+    Syscall,
     Plus,
     Minus,
     Star,
@@ -271,6 +272,7 @@ impl std::fmt::Display for Token {
             Self::Einsum => f.write_str("einsum"),
             Self::Contract => f.write_str("contract"),
             Self::Build => f.write_str("build"),
+            Self::Syscall => f.write_str("syscall"),
         }
     }
 }
@@ -388,6 +390,7 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("einsum", Token::Einsum),
         ("contract", Token::Contract),
         ("build", Token::Build),
+        ("syscall", Token::Syscall),
         ("true", Token::True),
         ("false", Token::False),
         ("none", Token::None),
