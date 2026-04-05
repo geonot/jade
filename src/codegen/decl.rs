@@ -363,16 +363,15 @@ impl<'ctx> Compiler<'ctx> {
         let mut resolved = Vec::new();
         let mut max_payload = 0usize;
         for (vname, ftys, tag) in variants {
-            let payload_bytes: usize = ftys
-                .iter()
-                .map(|t| {
-                    if Self::is_recursive_field(t, name) {
-                        8
-                    } else {
-                        self.type_store_size(self.llvm_ty(t)) as usize
-                    }
-                })
-                .sum();
+            let mut payload_bytes: usize = 0;
+            for t in ftys {
+                let size = if Self::is_recursive_field(t, name) {
+                    8
+                } else {
+                    self.type_store_size(self.llvm_ty(t)) as usize
+                };
+                payload_bytes += (size + 7) & !7;
+            }
             max_payload = max_payload.max(payload_bytes);
             self.variant_tags
                 .insert(vname.clone(), (name.to_string(), *tag));

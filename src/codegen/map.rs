@@ -68,10 +68,27 @@ impl<'ctx> Compiler<'ctx> {
 
         match method {
             "len" => self.vec_len(header_ptr),
-            "set" => self.map_set(header_ptr, obj, args),
-            "get" => self.map_get(header_ptr, obj, args),
-            "has" | "contains" => self.map_has(header_ptr, obj, args),
-            "remove" => self.map_remove(header_ptr, obj, args),
+            "set" => {
+                if args.len() < 2 { return Err("map.set() requires key and value".into()); }
+                let key_val = self.compile_expr(&args[0])?;
+                let val_val = self.compile_expr(&args[1])?;
+                self.map_set_val(header_ptr, key_val, val_val)
+            }
+            "get" => {
+                if args.is_empty() { return Err("map.get() requires a key".into()); }
+                let key_val = self.compile_expr(&args[0])?;
+                self.map_get_val(header_ptr, key_val)
+            }
+            "has" | "contains" => {
+                if args.is_empty() { return Err("map.has() requires a key".into()); }
+                let key_val = self.compile_expr(&args[0])?;
+                self.map_has_val(header_ptr, key_val)
+            }
+            "remove" => {
+                if args.is_empty() { return Err("map.remove() requires a key".into()); }
+                let key_val = self.compile_expr(&args[0])?;
+                self.map_remove_val(header_ptr, key_val)
+            }
             "clear" => self.map_clear(header_ptr),
             "keys" => self.map_keys(header_ptr),
             "values" => self.map_values(header_ptr),
@@ -166,17 +183,12 @@ impl<'ctx> Compiler<'ctx> {
         Ok((entry_ptr, occ_ptr))
     }
 
-    fn map_set(
+    pub(crate) fn map_set_val(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
-        _obj: &hir::Expr,
-        args: &[hir::Expr],
+        key_val: BasicValueEnum<'ctx>,
+        val_val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.len() < 2 {
-            return Err("map.set() requires key and value".into());
-        }
-        let key_val = self.compile_expr(&args[0])?;
-        let val_val = self.compile_expr(&args[1])?;
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let header_ty = self.vec_header_type();
@@ -242,16 +254,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    fn map_get(
+    pub(crate) fn map_get_val(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
-        _obj: &hir::Expr,
-        args: &[hir::Expr],
+        key_val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.is_empty() {
-            return Err("map.get() requires a key".into());
-        }
-        let key_val = self.compile_expr(&args[0])?;
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let fv = self.cur_fn.unwrap();
@@ -280,16 +287,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
-    fn map_has(
+    pub(crate) fn map_has_val(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
-        _obj: &hir::Expr,
-        args: &[hir::Expr],
+        key_val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.is_empty() {
-            return Err("map.has() requires a key".into());
-        }
-        let key_val = self.compile_expr(&args[0])?;
         let fv = self.cur_fn.unwrap();
         let hash = self.fnv_hash_string(key_val)?;
 
@@ -314,16 +316,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
-    fn map_remove(
+    pub(crate) fn map_remove_val(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
-        _obj: &hir::Expr,
-        args: &[hir::Expr],
+        key_val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.is_empty() {
-            return Err("map.remove() requires a key".into());
-        }
-        let key_val = self.compile_expr(&args[0])?;
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let header_ty = self.vec_header_type();
@@ -350,7 +347,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    fn map_clear(
+    pub(crate) fn map_clear(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {

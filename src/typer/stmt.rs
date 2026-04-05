@@ -554,7 +554,7 @@ impl Typer {
         let resolved_subj_ty = self.infer_ctx.resolve(&subj_ty);
         let result_ty = first_arm_ty
             .map(|t| self.infer_ctx.shallow_resolve(&t))
-            .unwrap_or_else(|| subj_ty.clone());
+            .unwrap_or(Type::Void);
         let result = hir::Match {
             subject,
             arms,

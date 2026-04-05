@@ -249,6 +249,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::FieldStore(_, _, val) => vec![*val],
         InstKind::Index(base, idx) => vec![*base, *idx],
         InstKind::IndexSet(base, idx, val) => vec![*base, *idx, *val],
+        InstKind::IndexStore(_, idx, val) => vec![*idx, *val],
 
         InstKind::StructInit(_, fields) => fields.iter().map(|(_, v)| *v).collect(),
         InstKind::VariantInit(_, _, _, payload) => payload.clone(),
@@ -293,6 +294,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
             v.extend(args);
             v
         }
+        InstKind::DynCoerce(v, _, _) => vec![*v],
 
         InstKind::InlineAsm(_, args) => args.clone(),
     }

@@ -131,8 +131,17 @@ impl<'ctx> Compiler<'ctx> {
             "pop" => self.vec_pop(header_ptr, &elem_ty),
             "len" => self.vec_len(header_ptr),
             "get" => self.vec_get(header_ptr, &elem_ty, args),
-            "set" => self.vec_set(header_ptr, &elem_ty, args),
-            "remove" => self.vec_remove(header_ptr, &elem_ty, args),
+            "set" => {
+                if args.len() < 2 { return Err("set() requires index and value".into()); }
+                let idx = self.compile_expr(&args[0])?.into_int_value();
+                let val = self.compile_expr(&args[1])?;
+                self.vec_set_val(header_ptr, &elem_ty, idx, val)
+            }
+            "remove" => {
+                if args.is_empty() { return Err("remove() requires an index".into()); }
+                let idx = self.compile_expr(&args[0])?.into_int_value();
+                self.vec_remove_val(header_ptr, &elem_ty, idx)
+            }
             "clear" => self.vec_clear(header_ptr),
             "map" => self.vec_map(header_ptr, &elem_ty, args),
             "filter" => self.vec_filter(header_ptr, &elem_ty, args),
@@ -273,7 +282,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn vec_pop(
+    pub(crate) fn vec_pop(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
         elem_ty: &Type,
@@ -314,6 +323,15 @@ impl<'ctx> Compiler<'ctx> {
             return Err("get() requires an index".into());
         }
         let idx = self.compile_expr(&args[0])?.into_int_value();
+        self.vec_get_idx(header_ptr, elem_ty, idx)
+    }
+
+    pub(crate) fn vec_get_idx(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        elem_ty: &Type,
+        idx: inkwell::values::IntValue<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
@@ -338,17 +356,13 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(lty, elem_gep, "vg.v")))
     }
 
-    fn vec_set(
+    pub(crate) fn vec_set_val(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
         elem_ty: &Type,
-        args: &[hir::Expr],
+        idx: inkwell::values::IntValue<'ctx>,
+        val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.len() < 2 {
-            return Err("set() requires index and value".into());
-        }
-        let idx = self.compile_expr(&args[0])?.into_int_value();
-        let val = self.compile_expr(&args[1])?;
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
@@ -374,16 +388,12 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    fn vec_remove(
+    pub(crate) fn vec_remove_val(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
         elem_ty: &Type,
-        args: &[hir::Expr],
+        idx: inkwell::values::IntValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.is_empty() {
-            return Err("remove() requires an index".into());
-        }
-        let idx = self.compile_expr(&args[0])?.into_int_value();
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
@@ -430,7 +440,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(removed)
     }
 
-    fn vec_clear(
+    pub(crate) fn vec_clear(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {

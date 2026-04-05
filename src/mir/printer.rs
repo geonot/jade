@@ -106,6 +106,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
 
         InstKind::Index(arr, idx) => format!("index {arr}[{idx}]"),
         InstKind::IndexSet(arr, idx, val) => format!("index_set {arr}[{idx}] = {val}"),
+        InstKind::IndexStore(var, idx, val) => format!("index_store ${var}[{idx}] = {val}"),
 
         InstKind::StructInit(name, fields) => {
             let fs = fields.iter().map(|(n, v)| format!("{n}: {v}")).collect::<Vec<_>>().join(", ");
@@ -159,6 +160,9 @@ fn format_inst_kind(kind: &InstKind) -> String {
         // Dynamic dispatch
         InstKind::DynDispatch(obj, trait_name, method, args) => {
             format!("dyn_dispatch {obj}.{trait_name}::{method}({})", fmt_args(args))
+        }
+        InstKind::DynCoerce(v, type_name, trait_name) => {
+            format!("dyn_coerce {v} as {type_name}:{trait_name}")
         }
 
         InstKind::InlineAsm(template, args) => {

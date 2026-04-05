@@ -142,6 +142,8 @@ pub enum InstKind {
 
     Index(ValueId, ValueId),
     IndexSet(ValueId, ValueId, ValueId),
+    /// Direct index store into a named variable's alloca (for mem_var arrays).
+    IndexStore(String, ValueId, ValueId),
 
     StructInit(String, Vec<(String, ValueId)>),
     VariantInit(String, String, u32, Vec<ValueId>),
@@ -196,6 +198,8 @@ pub enum InstKind {
 
     // ── Dynamic dispatch ──
     DynDispatch(ValueId, String, String, Vec<ValueId>),
+    /// Box a concrete value into a fat pointer {data_ptr, vtable_ptr} for dyn trait.
+    DynCoerce(ValueId, String, String),
 
     // ── Inline assembly ──
     InlineAsm(String, Vec<ValueId>),

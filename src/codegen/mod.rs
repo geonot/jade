@@ -325,7 +325,7 @@ impl<'ctx> Compiler<'ctx> {
         self.module.verify().map_err(|e| e.to_string())
     }
 
-    fn generate_vtables(&mut self, trait_impls: &[hir::TraitImpl]) -> Result<(), String> {
+    pub(crate) fn generate_vtables(&mut self, trait_impls: &[hir::TraitImpl]) -> Result<(), String> {
         let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
         for ti in trait_impls {
@@ -861,7 +861,7 @@ impl<'ctx> Compiler<'ctx> {
         self.ensure_memcpy();
     }
 
-    fn compile_supervisor(&mut self, sup: &hir::SupervisorDef) -> Result<(), String> {
+    pub(crate) fn compile_supervisor(&mut self, sup: &hir::SupervisorDef) -> Result<(), String> {
         let fn_name = format!("{}_start", sup.name);
         let i64t = self.ctx.i64_type();
         let ft = i64t.fn_type(&[], false);

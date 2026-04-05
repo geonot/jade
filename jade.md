@@ -1264,7 +1264,7 @@ Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST
 ### CLI
 
 ```
-jadec <INPUT> [-o OUTPUT] [--emit-ir] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [-g/--debug] [--mir-codegen] [--fast-math] [--deterministic-fp] [--incremental] [--threads N]
+jadec <INPUT> [-o OUTPUT] [--emit-ir] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [-g/--debug] [--hir-codegen] [--fast-math] [--deterministic-fp] [--incremental] [--threads N]
 ```
 
 Subcommands:
@@ -1289,7 +1289,7 @@ jade bind header.h         # generate extern declarations from C header
 - `--opt` — optimization level (default: 3)
 - `--lto` — link-time optimization
 - `-g` / `--debug` — emit DWARF debug info (for lldb/gdb)
-- `--mir-codegen` — use MIR-based backend instead of HIR-based
+- `--hir-codegen` — use legacy HIR-based backend instead of default MIR-based
 - `--fast-math` — enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
 - `--deterministic-fp` — guarantee deterministic floating-point results
 - `--incremental` — cache unchanged function artifacts

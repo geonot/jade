@@ -1292,7 +1292,7 @@ impl<'ctx> Compiler<'ctx> {
         self.build_string(buf, len, size, "sfp")
     }
 
-    fn compile_get_args(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_get_args(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());

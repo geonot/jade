@@ -88,6 +88,32 @@ impl Lowerer {
         self.func.new_block(label)
     }
 
+    /// Recursively lower a field assignment on an SSA (non-mem_var) struct.
+    /// For `o.inner.val is 42`:
+    ///   inner = FieldGet(o, "inner")
+    ///   updated_inner = FieldSet(inner, "val", 42)
+    ///   updated_o = FieldSet(o, "inner", updated_inner)
+    ///   var_map["o"] = updated_o
+    fn lower_field_assign(&mut self, obj: &hir::Expr, field: &str, val: ValueId, span: Span) {
+        let obj_val = self.lower_expr(obj);
+        let obj_ty = obj.ty.clone();
+        let updated = self.emit(
+            InstKind::FieldSet(obj_val, field.to_string(), val),
+            obj_ty,
+            span,
+        );
+        match &obj.kind {
+            ExprKind::Var(_, name) => {
+                self.var_map.insert(name.clone(), updated);
+            }
+            ExprKind::Field(parent, parent_field, _) => {
+                // Propagate the update up: parent.parent_field = updated
+                self.lower_field_assign(parent, parent_field, updated, span);
+            }
+            _ => {}
+        }
+    }
+
     fn emit(&mut self, kind: InstKind, ty: Type, span: Span) -> ValueId {
         let dest = self.new_value();
         self.func.block_mut(self.current_block).insts.push(Instruction {
@@ -157,6 +183,9 @@ impl Lowerer {
                 if inst.dest == Some(val) {
                     if let InstKind::IntConst(n) = &inst.kind {
                         return Some(*n);
+                    }
+                    if let InstKind::BoolConst(b) = &inst.kind {
+                        return Some(*b as i64);
                     }
                     return None;
                 }
@@ -279,11 +308,11 @@ impl Lowerer {
                 self.emit(InstKind::IndirectCall(f, arg_vals), ty, span)
             }
 
-            // Method(obj, _type_name, method_name, args)
-            ExprKind::Method(obj, _type_name, method_name, args) => {
+            // Method(obj, mangled_name, plain_method_name, args)
+            ExprKind::Method(obj, mangled_name, _method_name, args) => {
                 let obj_val = self.lower_expr(obj);
                 let arg_vals: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::MethodCall(obj_val, method_name.clone(), arg_vals), ty, span)
+                self.emit(InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals), ty, span)
             }
 
             ExprKind::Field(obj, field, _idx) => {
@@ -315,6 +344,9 @@ impl Lowerer {
                 // so the merge point reads current values via Load.
                 let mut assigned = HashSet::new();
                 Self::collect_assigned_vars(&if_expr.then, &mut assigned);
+                for (_, elif_body) in &if_expr.elifs {
+                    Self::collect_assigned_vars(elif_body, &mut assigned);
+                }
                 if let Some(els) = &if_expr.els {
                     Self::collect_assigned_vars(els, &mut assigned);
                 }
@@ -326,8 +358,20 @@ impl Lowerer {
 
                 let cond_val = self.lower_expr(&if_expr.cond);
                 let then_bb = self.new_block("if.then");
-                let else_bb = self.new_block("if.else");
                 let merge_bb = self.new_block("if.merge");
+
+                // Determine the false-branch target:
+                // elif chain first, then else, then merge.
+                let first_elif_bb = if !if_expr.elifs.is_empty() {
+                    Some(self.new_block("elif.test"))
+                } else {
+                    None
+                };
+                let else_bb = if if_expr.els.is_some() && first_elif_bb.is_none() {
+                    self.new_block("if.else")
+                } else {
+                    first_elif_bb.unwrap_or(merge_bb)
+                };
 
                 self.set_terminator(Terminator::Branch(cond_val, then_bb, else_bb));
 
@@ -337,24 +381,83 @@ impl Lowerer {
                 let then_end = self.current_block;
                 self.set_terminator(Terminator::Goto(merge_bb));
 
+                // Lower elif chains
+                let mut elif_vals: Vec<(BlockId, ValueId)> = Vec::new();
+                let mut prev_false_bb = first_elif_bb;
+                for (i, (elif_cond, elif_body)) in if_expr.elifs.iter().enumerate() {
+                    let elif_test = prev_false_bb.unwrap();
+                    let elif_body_bb = self.new_block("elif.body");
+
+                    let is_last_elif = i + 1 == if_expr.elifs.len();
+                    let elif_false_bb = if is_last_elif {
+                        if if_expr.els.is_some() {
+                            Some(self.new_block("if.else"))
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(self.new_block("elif.test"))
+                    };
+
+                    self.switch_to(elif_test);
+                    let c = self.lower_expr(elif_cond);
+                    self.set_terminator(Terminator::Branch(
+                        c,
+                        elif_body_bb,
+                        elif_false_bb.unwrap_or(merge_bb),
+                    ));
+
+                    self.switch_to(elif_body_bb);
+                    let elif_val = self.lower_block_expr(elif_body);
+                    let elif_end = self.current_block;
+                    self.set_terminator(Terminator::Goto(merge_bb));
+                    elif_vals.push((elif_end, elif_val));
+
+                    prev_false_bb = elif_false_bb;
+                }
+
                 // Else branch
-                self.switch_to(else_bb);
-                let else_val = if let Some(els) = &if_expr.els {
-                    self.lower_block_expr(els)
+                let else_val_info = if let Some(els) = &if_expr.els {
+                    let else_target = prev_false_bb.unwrap_or(else_bb);
+                    self.switch_to(else_target);
+                    let else_val = self.lower_block_expr(els);
+                    let else_end = self.current_block;
+                    self.set_terminator(Terminator::Goto(merge_bb));
+                    Some((else_end, else_val))
                 } else {
-                    self.emit(InstKind::Void, Type::Void, span)
+                    None
                 };
-                let else_end = self.current_block;
-                self.set_terminator(Terminator::Goto(merge_bb));
 
                 // Merge
                 self.switch_to(merge_bb);
-                if !matches!(ty, Type::Void) {
+                if !matches!(ty, Type::Void) && (else_val_info.is_some() || !elif_vals.is_empty()) {
+                    let mut incoming = vec![(then_end, then_val)];
+                    for &(bb, v) in &elif_vals {
+                        incoming.push((bb, v));
+                    }
+                    if let Some((eb, ev)) = else_val_info {
+                        incoming.push((eb, ev));
+                    }
+                    // If no else branch, add a void from the last false branch
+                    if else_val_info.is_none() && elif_vals.is_empty() {
+                        // No phi needed — only then branch produces a value
+                    }
                     let result = self.new_value();
                     self.func.block_mut(merge_bb).phis.push(Phi {
                         dest: result,
                         ty: ty.clone(),
-                        incoming: vec![(then_end, then_val), (else_end, else_val)],
+                        incoming,
+                    });
+                    result
+                } else if !matches!(ty, Type::Void) {
+                    // No elif/else — no phi, just pass through then value
+                    // via a phi from then or a void from merge
+                    let void_val = self.emit(InstKind::Void, Type::Void, span);
+                    let result = self.new_value();
+                    self.func.block_mut(merge_bb).phis.push(Phi {
+                        dest: result,
+                        ty: ty.clone(),
+                        incoming: vec![(then_end, then_val), (self.current_block, void_val)],
                     });
                     result
                 } else {
@@ -547,7 +650,9 @@ impl Lowerer {
                 let exit_bb = self.new_block("listcomp.exit");
 
                 // Create loop index using Store/Load.
-                let zero = self.emit(InstKind::IntConst(0), Type::I64, span);
+                let init_val = if end.is_some() { iter_val } else {
+                    self.emit(InstKind::IntConst(0), Type::I64, span)
+                };
                 let one = self.emit(InstKind::IntConst(1), Type::I64, span);
                 let end_val = if let Some(e) = end {
                     self.lower_expr(e)
@@ -555,7 +660,7 @@ impl Lowerer {
                     self.emit(InstKind::VecLen(iter_val), Type::I64, span)
                 };
                 let idx_name = format!("__listcomp_idx_{bind}");
-                self.emit_void_typed(InstKind::Store(idx_name.clone(), zero), Type::I64, span);
+                self.emit_void_typed(InstKind::Store(idx_name.clone(), init_val), Type::I64, span);
 
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
@@ -686,7 +791,8 @@ impl Lowerer {
                     self.func.block_mut(select_block).terminator = Terminator::Switch(select_val, cases, default_bb);
                     self.switch_to(merge_bb);
                 }
-                select_val
+                // Return 0 from the merge block, not the jade_select result
+                self.emit(InstKind::IntConst(0), Type::I64, span)
             }
 
             // Atomics — all lowered as intrinsic calls
@@ -778,13 +884,15 @@ impl Lowerer {
                 let arg_vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 self.emit(InstKind::DynDispatch(obj_val, trait_name.clone(), method.clone(), arg_vals), ty, span)
             }
-            ExprKind::DynCoerce(inner, _type_name, _trait_name) => {
-                self.lower_expr(inner)
+            ExprKind::DynCoerce(inner, type_name, trait_name) => {
+                let inner_val = self.lower_expr(inner);
+                self.emit(InstKind::DynCoerce(inner_val, type_name.clone(), trait_name.clone()), ty, span)
             }
 
             // Store operations — opaque calls
             ExprKind::StoreQuery(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
+                let mut args = vec![filter_val];
                 // Encode field name and op in the call name for codegen
                 let op_str = match filter.op {
                     ast::BinOp::Eq => "eq",
@@ -795,10 +903,27 @@ impl Lowerer {
                     ast::BinOp::Ge => "ge",
                     _ => "eq",
                 };
-                self.emit(InstKind::Call(
-                    format!("__store_query_{store_name}__{}__{op_str}", filter.field),
-                    vec![filter_val],
-                ), ty, span)
+                let mut name = format!("__store_query_{store_name}__{}__{op_str}", filter.field);
+                // Encode extra compound conditions
+                for (lop, cond) in &filter.extra {
+                    let lop_str = match lop {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let eop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                    let ev = self.lower_expr(&cond.value);
+                    args.push(ev);
+                }
+                self.emit(InstKind::Call(name, args), ty, span)
             }
             ExprKind::StoreCount(store_name) => {
                 self.emit(InstKind::Call(format!("__store_count_{store_name}"), vec![]), ty, span)
@@ -934,18 +1059,34 @@ impl Lowerer {
                                 return val;
                             }
                         }
-                        let obj_val = self.lower_expr(obj);
-                        // Pass the obj's type so codegen can find the struct layout.
-                        let obj_ty = obj.ty.clone();
-                        self.func.block_mut(self.current_block).insts.push(Instruction {
-                            dest: None,
-                            kind: InstKind::FieldSet(obj_val, field.clone(), val),
-                            ty: obj_ty,
-                            span: target.span,
-                            def_id: None,
-                        });
+                        // SSA field set: produce updated struct and propagate
+                        // back up through nested field chains to the root variable.
+                        self.lower_field_assign(obj, field, val, target.span);
                     }
                     ExprKind::Index(arr, idx) => {
+                        // If the array is a mem_var, emit a direct index store
+                        // on the variable name so codegen can GEP into the alloca.
+                        if let ExprKind::Var(_, name) = &arr.kind {
+                            if self.mem_vars.contains(name) {
+                                let i = self.lower_expr(idx);
+                                let arr_ty = arr.ty.clone();
+                                self.func.block_mut(self.current_block).insts.push(Instruction {
+                                    dest: None,
+                                    kind: InstKind::IndexStore(name.clone(), i, val),
+                                    ty: arr_ty,
+                                    span: target.span,
+                                    def_id: None,
+                                });
+                                return val;
+                            }
+                            // Non-mem_var array: emit IndexSet and store updated value back.
+                            let a = self.lower_expr(arr);
+                            let i = self.lower_expr(idx);
+                            let arr_ty = arr.ty.clone();
+                            let updated = self.emit(InstKind::IndexSet(a, i, val), arr_ty, target.span);
+                            self.var_map.insert(name.clone(), updated);
+                            return val;
+                        }
                         let a = self.lower_expr(arr);
                         let i = self.lower_expr(idx);
                         self.emit_void(InstKind::IndexSet(a, i, val), target.span);
@@ -1241,6 +1382,12 @@ impl Lowerer {
                 }
 
                 self.switch_to(exit_bb);
+                // The loop bound variable's SSA value is from the condition
+                // block and is not valid here.  Mark it as memory-resident so
+                // subsequent demote_vars_to_memory won't try to store a stale
+                // ValueId from a non-dominating block.
+                self.var_map.remove(&f.bind);
+                self.mem_vars.insert(f.bind.clone());
                 self.emit(InstKind::Void, Type::Void, f.span)
             }
 
@@ -1327,10 +1474,24 @@ impl Lowerer {
                 let result_ty = m.ty.clone();
                 let has_result = !matches!(result_ty, Type::Void);
 
+                // Check for duplicate outer tags (e.g. Wrap(X) / Wrap(Y) both match tag 0).
+                // If so, fall back to sequential if-else chain.
+                let has_dup_tags = {
+                    let mut seen = HashSet::new();
+                    m.arms.iter().any(|a| {
+                        if let Pat::Ctor(_, tag, _, _) = &a.pat {
+                            !seen.insert(*tag)
+                        } else { false }
+                    })
+                };
+
+                // If any arm has a guard, fall back to sequential if-else chain.
+                let has_guard = m.arms.iter().any(|a| a.guard.is_some());
+
                 // Track (value, block) pairs from each arm for Phi creation.
                 let mut phi_entries: Vec<(ValueId, BlockId)> = Vec::new();
 
-                if is_enum || has_ctor || all_lit {
+                if !has_dup_tags && !has_guard && (is_enum || has_ctor || all_lit) {
                     // Switch-based match on integer/enum discriminant.
                     let disc = if is_enum || has_ctor {
                         // Extract tag from variant.
@@ -1401,6 +1562,33 @@ impl Lowerer {
                         if let Pat::Bind(_, name, _ty, _) = &arm.pat {
                             self.var_map.insert(name.clone(), subj);
                         }
+                        // Bind pattern variables for Tuple patterns.
+                        if let Pat::Tuple(sub_pats, _) = &arm.pat {
+                            for (i, sp) in sub_pats.iter().enumerate() {
+                                if let Pat::Bind(_, name, ty, _) = sp {
+                                    let field = self.emit(
+                                        InstKind::FieldGet(subj, format!("_{i}")),
+                                        ty.clone(),
+                                        arm.span,
+                                    );
+                                    self.var_map.insert(name.clone(), field);
+                                }
+                            }
+                        }
+                        // Bind pattern variables for Array patterns.
+                        if let Pat::Array(sub_pats, _) = &arm.pat {
+                            for (i, sp) in sub_pats.iter().enumerate() {
+                                if let Pat::Bind(_, name, ty, _) = sp {
+                                    let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, arm.span);
+                                    let elem = self.emit(
+                                        InstKind::Index(subj, idx),
+                                        ty.clone(),
+                                        arm.span,
+                                    );
+                                    self.var_map.insert(name.clone(), elem);
+                                }
+                            }
+                        }
                         let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
                         for s in &arm.body {
                             arm_last = self.lower_stmt(s);
@@ -1445,13 +1633,191 @@ impl Lowerer {
                                 );
                                 self.set_terminator(Terminator::Branch(cmp, arm_bb, next_bb));
                             }
+                            Pat::Ctor(_, tag, sub_pats, _) => {
+                                // Compare tag, then optionally check sub-patterns.
+                                let tag_val = self.emit(
+                                    InstKind::FieldGet(subj, "__tag".into()),
+                                    Type::I64,
+                                    arm.span,
+                                );
+                                let tag_const = self.emit(
+                                    InstKind::IntConst(*tag as i64),
+                                    Type::I64,
+                                    arm.span,
+                                );
+                                let tag_cmp = self.emit(
+                                    InstKind::Cmp(CmpOp::Eq, tag_val, tag_const, Type::I64),
+                                    Type::Bool,
+                                    arm.span,
+                                );
+                                // Check if any sub-pattern needs matching (nested Ctors).
+                                let needs_sub_check = sub_pats.iter().any(|sp| matches!(sp, Pat::Ctor(..)));
+                                if needs_sub_check {
+                                    // Tag matches → check sub-patterns.
+                                    let sub_check_bb = self.new_block("match.subcheck");
+                                    self.set_terminator(Terminator::Branch(tag_cmp, sub_check_bb, next_bb));
+                                    self.switch_to(sub_check_bb);
+                                    // Compare inner tags.
+                                    let mut all_match = tag_cmp; // will be overwritten
+                                    for (idx, sp) in sub_pats.iter().enumerate() {
+                                        if let Pat::Ctor(_, inner_tag, _, _) = sp {
+                                            let field_val = self.emit(
+                                                InstKind::FieldGet(subj, format!("_{idx}")),
+                                                Type::I64,
+                                                arm.span,
+                                            );
+                                            let inner_tag_val = self.emit(
+                                                InstKind::FieldGet(field_val, "__tag".into()),
+                                                Type::I64,
+                                                arm.span,
+                                            );
+                                            let inner_const = self.emit(
+                                                InstKind::IntConst(*inner_tag as i64),
+                                                Type::I64,
+                                                arm.span,
+                                            );
+                                            all_match = self.emit(
+                                                InstKind::Cmp(CmpOp::Eq, inner_tag_val, inner_const, Type::I64),
+                                                Type::Bool,
+                                                arm.span,
+                                            );
+                                        }
+                                    }
+                                    self.set_terminator(Terminator::Branch(all_match, arm_bb, next_bb));
+                                } else {
+                                    self.set_terminator(Terminator::Branch(tag_cmp, arm_bb, next_bb));
+                                }
+                            }
+                            Pat::Or(alternatives, _) => {
+                                // Or pattern: match if ANY alternative matches.
+                                // Build a chain: check alt1 → arm_bb, else check alt2 → arm_bb, else ... → next_bb
+                                let mut cur_test = self.current_block;
+                                for (ai, alt) in alternatives.iter().enumerate() {
+                                    let is_last_alt = ai + 1 == alternatives.len();
+                                    let fail_bb = if is_last_alt { next_bb } else { self.new_block("or.next") };
+                                    self.switch_to(cur_test);
+                                    match alt {
+                                        Pat::Lit(lit_expr) => {
+                                            let lit_val = self.lower_expr(lit_expr);
+                                            let subj_ty = self.value_type(subj);
+                                            let cmp = self.emit(
+                                                InstKind::Cmp(CmpOp::Eq, subj, lit_val, subj_ty),
+                                                Type::Bool,
+                                                arm.span,
+                                            );
+                                            self.set_terminator(Terminator::Branch(cmp, arm_bb, fail_bb));
+                                        }
+                                        Pat::Wild(_) => {
+                                            self.set_terminator(Terminator::Goto(arm_bb));
+                                        }
+                                        Pat::Bind(_, name, _ty, _) => {
+                                            self.var_map.insert(name.clone(), subj);
+                                            self.set_terminator(Terminator::Goto(arm_bb));
+                                        }
+                                        Pat::Range(lo, hi, _) => {
+                                            let lo_val = self.lower_expr(lo);
+                                            let hi_val = self.lower_expr(hi);
+                                            let subj_ty = self.value_type(subj);
+                                            let ge = self.emit(
+                                                InstKind::Cmp(CmpOp::Ge, subj, lo_val, subj_ty.clone()),
+                                                Type::Bool,
+                                                arm.span,
+                                            );
+                                            let le = self.emit(
+                                                InstKind::Cmp(CmpOp::Le, subj, hi_val, subj_ty),
+                                                Type::Bool,
+                                                arm.span,
+                                            );
+                                            let in_range = self.emit(
+                                                InstKind::BinOp(BinOp::And, ge, le),
+                                                Type::Bool,
+                                                arm.span,
+                                            );
+                                            self.set_terminator(Terminator::Branch(in_range, arm_bb, fail_bb));
+                                        }
+                                        _ => {
+                                            // Sub-pattern types we don't handle in or: fallback to match
+                                            self.set_terminator(Terminator::Goto(arm_bb));
+                                        }
+                                    }
+                                    cur_test = fail_bb;
+                                }
+                            }
+                            Pat::Range(lo, hi, _) => {
+                                let lo_val = self.lower_expr(lo);
+                                let hi_val = self.lower_expr(hi);
+                                let subj_ty = self.value_type(subj);
+                                let ge = self.emit(
+                                    InstKind::Cmp(CmpOp::Ge, subj, lo_val, subj_ty.clone()),
+                                    Type::Bool,
+                                    arm.span,
+                                );
+                                let le = self.emit(
+                                    InstKind::Cmp(CmpOp::Le, subj, hi_val, subj_ty),
+                                    Type::Bool,
+                                    arm.span,
+                                );
+                                let in_range = self.emit(
+                                    InstKind::BinOp(BinOp::And, ge, le),
+                                    Type::Bool,
+                                    arm.span,
+                                );
+                                self.set_terminator(Terminator::Branch(in_range, arm_bb, next_bb));
+                            }
                             _ => {
-                                // Fallback: unconditional (catches Range, Tuple, etc.)
+                                // Fallback: unconditional (catches Tuple, Array, etc.)
                                 self.set_terminator(Terminator::Goto(arm_bb));
                             }
                         }
 
                         self.switch_to(arm_bb);
+                        // Bind pattern variables for Ctor patterns (sequential match).
+                        if let Pat::Ctor(_, _, sub_pats, _) = &arm.pat {
+                            for (i, sp) in sub_pats.iter().enumerate() {
+                                if let Pat::Bind(_, name, ty, _) = sp {
+                                    let field = self.emit(
+                                        InstKind::FieldGet(subj, format!("_{i}")),
+                                        ty.clone(),
+                                        arm.span,
+                                    );
+                                    self.var_map.insert(name.clone(), field);
+                                }
+                            }
+                        }
+                        // Bind pattern variables for Tuple patterns (sequential match).
+                        if let Pat::Tuple(sub_pats, _) = &arm.pat {
+                            for (i, sp) in sub_pats.iter().enumerate() {
+                                if let Pat::Bind(_, name, ty, _) = sp {
+                                    let field = self.emit(
+                                        InstKind::FieldGet(subj, format!("_{i}")),
+                                        ty.clone(),
+                                        arm.span,
+                                    );
+                                    self.var_map.insert(name.clone(), field);
+                                }
+                            }
+                        }
+                        // Bind pattern variables for Array patterns (sequential match).
+                        if let Pat::Array(sub_pats, _) = &arm.pat {
+                            for (i, sp) in sub_pats.iter().enumerate() {
+                                if let Pat::Bind(_, name, ty, _) = sp {
+                                    let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, arm.span);
+                                    let elem = self.emit(
+                                        InstKind::Index(subj, idx),
+                                        ty.clone(),
+                                        arm.span,
+                                    );
+                                    self.var_map.insert(name.clone(), elem);
+                                }
+                            }
+                        }
+                        // Evaluate guard (when clause) — if false, skip to next arm.
+                        if let Some(guard_expr) = &arm.guard {
+                            let guard_val = self.lower_expr(guard_expr);
+                            let body_bb = self.new_block("match.guard_pass");
+                            self.set_terminator(Terminator::Branch(guard_val, body_bb, next_bb));
+                            self.switch_to(body_bb);
+                        }
                         let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
                         for s in &arm.body {
                             arm_last = self.lower_stmt(s);
@@ -1535,16 +1901,69 @@ impl Lowerer {
             }
 
             hir::Stmt::StoreDelete(store_name, filter, span) => {
-                // Lower the filter value and pass it to the runtime delete function.
+                // Encode filter field+op in the call name so MIR codegen can reconstruct.
                 let filter_val = self.lower_expr(&filter.value);
-                self.emit(InstKind::Call(format!("__store_delete_{store_name}"), vec![filter_val]), Type::Void, *span)
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut extra_vals = Vec::new();
+                for (_logic_op, cond) in &filter.extra {
+                    extra_vals.push(self.lower_expr(&cond.value));
+                }
+                let mut all_vals = vec![filter_val];
+                all_vals.extend(extra_vals);
+                // Encode extra filter conditions in the name: __store_delete_{name}__{field}__{op}[__and_{field2}__{op2}]*
+                let mut encoded = format!("__store_delete_{store_name}__{}__{op_str}", filter.field);
+                for (logic_op, cond) in &filter.extra {
+                    let lop = match logic_op { ast::LogicalOp::And => "and", ast::LogicalOp::Or => "or" };
+                    let cop_str = match cond.op {
+                        ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    encoded.push_str(&format!("__{lop}_{}__{cop_str}", cond.field));
+                }
+                self.emit(InstKind::Call(encoded, all_vals), Type::Void, *span)
             }
 
             hir::Stmt::StoreSet(store_name, fields, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let mut vals = vec![filter_val];
-                vals.extend(fields.iter().map(|(_, e)| self.lower_expr(e)));
-                self.emit(InstKind::Call(format!("__store_set_{store_name}"), vals), Type::Void, *span)
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut extra_vals = Vec::new();
+                for (_logic_op, cond) in &filter.extra {
+                    extra_vals.push(self.lower_expr(&cond.value));
+                }
+                let mut all_vals = vec![filter_val];
+                all_vals.extend(extra_vals);
+                // Append field assignment values after filter values.
+                let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                all_vals.extend(fields.iter().map(|(_, e)| self.lower_expr(e)));
+                // Encode: __store_set_{name}__{field}__{op}[__and/or_{field2}__{op2}]*__fields_{f1}_{f2}_...
+                let mut encoded = format!("__store_set_{store_name}__{}__{op_str}", filter.field);
+                for (logic_op, cond) in &filter.extra {
+                    let lop = match logic_op { ast::LogicalOp::And => "and", ast::LogicalOp::Or => "or" };
+                    let cop_str = match cond.op {
+                        ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    encoded.push_str(&format!("__{lop}_{}__{cop_str}", cond.field));
+                }
+                encoded.push_str("__fields");
+                for fname in &field_names {
+                    encoded.push_str(&format!("_{fname}"));
+                }
+                self.emit(InstKind::Call(encoded, all_vals), Type::Void, *span)
             }
 
             hir::Stmt::Transaction(body, span) => {
@@ -1996,7 +2415,13 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
     // Lower body
     let mut last = lowerer.emit(InstKind::Void, Type::Void, f.span);
     for stmt in &f.body {
-        last = lowerer.lower_stmt(stmt);
+        let v = lowerer.lower_stmt(stmt);
+        // Don't let Drop/void statements clobber the result value
+        // for non-void functions (drops are inserted by perceus after
+        // the last-expression that should be returned).
+        if !matches!(stmt, hir::Stmt::Drop(..)) {
+            last = v;
+        }
     }
 
     // Add implicit return if not already terminated

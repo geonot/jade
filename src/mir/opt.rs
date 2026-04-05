@@ -21,7 +21,7 @@ pub fn optimize(func: &mut Function, level: OptLevel) {
     remove_unreachable_blocks(func);
 
     let max = match level { OptLevel::None => 0, OptLevel::Basic => 4, OptLevel::Full => 16 };
-    for _ in 0..max {
+    for _iter in 0..max {
         let mut changed = false;
         changed |= constant_fold(func);
         changed |= copy_propagation(func);
@@ -35,8 +35,6 @@ pub fn optimize(func: &mut Function, level: OptLevel) {
             changed |= loop_invariant_code_motion(func);
         }
         changed |= redundant_store_elimination(func);
-        // constant_branch_elimination is subsumed by constant_fold
-        // which already folds Branch on known booleans.
         changed |= merge_linear_blocks(func);
         changed |= remove_unreachable_blocks(func);
         if !changed { break; }
@@ -66,6 +64,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::FieldStore(_, _, v) => { sub!(v); }
         InstKind::Index(a, i) => { sub!(a); sub!(i); }
         InstKind::IndexSet(a, i, v) => { sub!(a); sub!(i); sub!(v); }
+        InstKind::IndexStore(_, i, v) => { sub!(i); sub!(v); }
         InstKind::StructInit(_, fs) => { for (_, v) in fs { sub!(v); } }
         InstKind::Slice(a, s, e) => { sub!(a); sub!(s); sub!(e); }
         InstKind::Store(_, v) => { sub!(v); }
@@ -83,6 +82,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit => {}
         InstKind::Assert(v, _) => { sub!(v); }
         InstKind::DynDispatch(obj, _, _, args) => { sub!(obj); for a in args { sub!(a); } }
+        InstKind::DynCoerce(v, _, _) => { sub!(v); }
         InstKind::InlineAsm(_, args) => { for a in args { sub!(a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) | InstKind::FnRef(_) => {}
@@ -128,6 +128,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::FieldStore(_, _, v) => { s.insert(*v); }
         InstKind::Index(a, i) => { s.insert(*a); s.insert(*i); }
         InstKind::IndexSet(a, i, v) => { s.insert(*a); s.insert(*i); s.insert(*v); }
+        InstKind::IndexStore(_, i, v) => { s.insert(*i); s.insert(*v); }
         InstKind::StructInit(_, fs) => { for (_, v) in fs { s.insert(*v); } }
         InstKind::Slice(a, lo, hi) => { s.insert(*a); s.insert(*lo); s.insert(*hi); }
         InstKind::Store(_, v) => { s.insert(*v); }
@@ -144,6 +145,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit => {}
         InstKind::Assert(v, _) => { s.insert(*v); }
         InstKind::DynDispatch(obj, _, _, args) => { s.insert(*obj); for a in args { s.insert(*a); } }
+        InstKind::DynCoerce(v, _, _) => { s.insert(*v); }
         InstKind::InlineAsm(_, args) => { for a in args { s.insert(*a); } }
         InstKind::IntConst(_) | InstKind::FloatConst(_) | InstKind::BoolConst(_)
         | InstKind::StringConst(_) | InstKind::Void | InstKind::Load(_) | InstKind::FnRef(_) => {}
@@ -387,13 +389,25 @@ pub fn simplify_phis(func: &mut Function) -> bool {
 
     if replacements.is_empty() { return false; }
 
+    // Resolve transitive chains: if v9 → v_inner and v_inner → v2,
+    // replace v9 → v2 directly to avoid dangling references.
+    let resolved: HashMap<ValueId, ValueId> = replacements.keys().map(|&k| {
+        let mut v = k;
+        let mut seen = HashSet::new();
+        while let Some(&next) = replacements.get(&v) {
+            if !seen.insert(v) { break; }
+            v = next;
+        }
+        (k, v)
+    }).collect();
+
     for bb in &mut func.blocks {
-        bb.phis.retain(|phi| !replacements.contains_key(&phi.dest));
-        for inst in &mut bb.insts { subst_inst(inst, &replacements); }
-        subst_term(&mut bb.terminator, &replacements);
+        bb.phis.retain(|phi| !resolved.contains_key(&phi.dest));
+        for inst in &mut bb.insts { subst_inst(inst, &resolved); }
+        subst_term(&mut bb.terminator, &resolved);
         for phi in &mut bb.phis {
             for (_, v) in &mut phi.incoming {
-                if let Some(&r) = replacements.get(v) { *v = r; }
+                if let Some(&r) = resolved.get(v) { *v = r; }
             }
         }
     }
@@ -447,26 +461,18 @@ pub fn strength_reduction(func: &mut Function) -> bool {
             }
         }
     }
-    // Build a map from shift amount → ValueId
+    // Build a map from shift amount → ValueId.
+    // Always insert at entry block start to guarantee dominance over all uses.
     let mut shift_vals: HashMap<i64, ValueId> = HashMap::new();
     for shift in needed_shifts {
         if shift_vals.contains_key(&shift) { continue; }
-        // Look for existing constant first
-        let existing = func.blocks.iter().flat_map(|bb| &bb.insts)
-            .find_map(|inst| match (&inst.dest, &inst.kind) {
-                (Some(d), InstKind::IntConst(n)) if *n == shift => Some(*d),
-                _ => None,
-            });
-        let vid = existing.unwrap_or_else(|| {
-            let d = func.new_value();
-            let entry = func.entry;
-            func.block_mut(entry).insts.insert(0, Instruction {
-                dest: Some(d), kind: InstKind::IntConst(shift),
-                ty: Type::I64, span: Span::dummy(), def_id: None,
-            });
-            d
+        let d = func.new_value();
+        let entry = func.entry;
+        func.block_mut(entry).insts.insert(0, Instruction {
+            dest: Some(d), kind: InstKind::IntConst(shift),
+            ty: Type::I64, span: Span::dummy(), def_id: None,
         });
-        shift_vals.insert(shift, vid);
+        shift_vals.insert(shift, d);
     }
 
     for bb in &mut func.blocks {
@@ -525,6 +531,14 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
     let mut dead_loads: HashSet<ValueId> = HashSet::new();
 
     for bb in &func.blocks {
+        // Skip blocks that loop back to themselves (self-loops).
+        // In such blocks, a Store at the end of the iteration updates
+        // the value that a Load at the beginning of the next iteration
+        // should see — forwarding would incorrectly use the initial value.
+        if bb.terminator.successors().contains(&bb.id) {
+            continue;
+        }
+
         let mut known: HashMap<String, ValueId> = HashMap::new();
 
         for inst in &bb.insts {
@@ -548,6 +562,9 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                 }
                 InstKind::FieldStore(var_name, _, _) => {
                     // Mutating a field of a variable invalidates its cached Load.
+                    known.remove(var_name);
+                }
+                InstKind::IndexStore(var_name, _, _) => {
                     known.remove(var_name);
                 }
                 _ => {}
@@ -657,7 +674,7 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
                 InstKind::FieldSet(_, _, _) | InstKind::FieldStore(_, _, _) => {
                     expr_map.retain(|k, _| !k.starts_with("fg:"));
                 }
-                InstKind::IndexSet(_, _, _) => {
+                InstKind::IndexSet(_, _, _) | InstKind::IndexStore(_, _, _) => {
                     expr_map.retain(|k, _| !k.starts_with("ix:"));
                 }
                 InstKind::Call(..) | InstKind::MethodCall(..) => {
@@ -948,10 +965,16 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
 
             let pred_block = func.block_mut(pred_id);
             for phi in b_phis {
-                if let Some((_, val)) = phi.incoming.first() {
+                // Pick the incoming value from the actual predecessor, not just .first(),
+                // because branch_threading may leave stale phi entries from dead predecessors.
+                let val = phi.incoming.iter()
+                    .find(|(bid, _)| *bid == pred_id)
+                    .map(|(_, v)| *v)
+                    .or_else(|| phi.incoming.first().map(|(_, v)| *v));
+                if let Some(val) = val {
                     pred_block.insts.push(Instruction {
                         dest: Some(phi.dest),
-                        kind: InstKind::Copy(*val),
+                        kind: InstKind::Copy(val),
                         ty: phi.ty,
                         span: Span::dummy(),
                         def_id: None,
@@ -960,6 +983,19 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
             }
             pred_block.insts.extend(b_insts);
             pred_block.terminator = b_term;
+
+            // Update phi incoming edges in other blocks that reference the
+            // removed block — remap to the predecessor that absorbed it.
+            for other_bb in &mut func.blocks {
+                if other_bb.id == bb_id { continue; }
+                for phi in &mut other_bb.phis {
+                    for (bid, _) in &mut phi.incoming {
+                        if *bid == bb_id {
+                            *bid = pred_id;
+                        }
+                    }
+                }
+            }
 
             func.blocks.retain(|b| b.id != bb_id);
             merged_any = true;
@@ -986,7 +1022,16 @@ pub fn remove_unreachable_blocks(func: &mut Function) -> bool {
     }
     let before = func.blocks.len();
     func.blocks.retain(|b| reachable.contains(&b.id));
-    func.blocks.len() != before
+    let changed = func.blocks.len() != before;
+    // Clean up phi incoming edges that reference removed blocks.
+    if changed {
+        for bb in &mut func.blocks {
+            for phi in &mut bb.phis {
+                phi.incoming.retain(|(bid, _)| reachable.contains(bid));
+            }
+        }
+    }
+    changed
 }
 
 // ━━━━━━━━━━━━━━ Value Range Analysis ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

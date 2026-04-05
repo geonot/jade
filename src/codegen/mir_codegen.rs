@@ -45,12 +45,19 @@ pub struct MirCodegen<'a, 'ctx> {
     pending_phis: Vec<PendingPhi<'ctx>>,
     /// MIR ValueId → variable alloca (for Store/Load variable pairs).
     var_allocs: HashMap<String, (PointerValue<'ctx>, Type)>,
+    /// MIR ValueId → Jade type (for FieldGet struct type resolution on parameters).
+    value_types: HashMap<mir::ValueId, Type>,
     /// Coroutine/generator bodies extracted from HIR, keyed by name.
     coro_bodies: HashMap<String, Vec<hir::Stmt>>,
     /// Actor definitions from HIR, keyed by name.
     actor_defs: HashMap<String, hir::ActorDef>,
     /// Select data buffers: select_val ValueId → Vec<PointerValue> (one per arm).
     select_data_bufs: HashMap<mir::ValueId, Vec<PointerValue<'ctx>>>,
+    /// MIR ValueId → alloca for structs that were passed by pointer to methods (cached so mutations persist).
+    self_allocs: HashMap<mir::ValueId, PointerValue<'ctx>>,
+    /// MIR BlockId → actual LLVM exit block (may differ from block_map entry
+    /// when helpers like string_concat create intermediate LLVM blocks).
+    block_exit_map: HashMap<mir::BlockId, LLVMBlock<'ctx>>,
 }
 
 struct PendingPhi<'ctx> {
@@ -66,9 +73,12 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             block_map: HashMap::new(),
             pending_phis: Vec::new(),
             var_allocs: HashMap::new(),
+            value_types: HashMap::new(),
             coro_bodies: HashMap::new(),
             actor_defs: HashMap::new(),
             select_data_bufs: HashMap::new(),
+            self_allocs: HashMap::new(),
+            block_exit_map: HashMap::new(),
         }
     }
 
@@ -95,15 +105,41 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             self.comp.structs.insert(td.name.clone(), fields);
         }
 
+        // Populate struct_defaults from HIR type definitions.
+        for td in &hir_prog.types {
+            let defaults: std::collections::HashMap<String, hir::Expr> = td
+                .fields
+                .iter()
+                .filter_map(|f| f.default.as_ref().map(|d| (f.name.clone(), d.clone())))
+                .collect();
+            if !defaults.is_empty() {
+                self.comp.struct_defaults.insert(td.name.clone(), defaults);
+            }
+            // Also register struct_layouts for alignment info.
+            self.comp.struct_layouts.insert(td.name.clone(), td.layout.clone());
+        }
+
         // Register HIR enum definitions (MIR doesn't carry enum info yet).
         for ed in &hir_prog.enums {
             let _ = self.comp.declare_enum(ed);
         }
 
+        // Register error definitions (tagged unions like enums).
+        for ed in &hir_prog.err_defs {
+            self.comp.declare_err_def(ed)?;
+        }
+
         // Register extern declarations.
         for ext in &prog.externs {
             let ptys: Vec<BasicMetadataTypeEnum<'ctx>> =
-                ext.params.iter().map(|t| self.comp.llvm_ty(t).into()).collect();
+                ext.params.iter().map(|t| {
+                    // Extern functions use C ABI: String → ptr (char*)
+                    if matches!(t, Type::String) {
+                        self.comp.ctx.ptr_type(inkwell::AddressSpace::default()).into()
+                    } else {
+                        self.comp.llvm_ty(t).into()
+                    }
+                }).collect();
             let ft = self.comp.mk_fn_type(&ext.ret, &ptys, false);
             let fv = self
                 .comp
@@ -197,12 +233,29 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             self.declare_mir_fn(func)?;
         }
 
+        // ── Declare trait impl methods not already declared via MIR fns ──
+        for ti in &hir_prog.trait_impls {
+            for m in &ti.methods {
+                if !self.comp.fns.contains_key(&m.name) {
+                    self.comp.declare_method(&ti.type_name, m)?;
+                }
+            }
+        }
+
+        // ── Generate vtables for dynamic dispatch ──
+        self.comp.generate_vtables(&hir_prog.trait_impls)?;
+
         // ── Compile actor loop bodies (after MIR fn declarations so
         //    functions like fib are available for actor handlers) ──
         if !hir_prog.actors.is_empty() {
             for ad in &hir_prog.actors {
                 self.comp.compile_actor_loop(ad)?;
             }
+        }
+
+        // ── Supervisor trees ──
+        for sup in &hir_prog.supervisors {
+            self.comp.compile_supervisor(sup)?;
         }
 
         // ── Compile each MIR function body ──
@@ -318,6 +371,8 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         self.block_map.clear();
         self.pending_phis.clear();
         self.var_allocs.clear();
+        self.value_types.clear();
+        self.self_allocs.clear();
         self.comp.vars = vec![HashMap::new()];
 
         // 1. Create all LLVM basic blocks up-front.
@@ -330,6 +385,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         for (i, param) in func.params.iter().enumerate() {
             let llvm_val = fv.get_nth_param(i as u32).unwrap();
             self.value_map.insert(param.value, llvm_val);
+            self.value_types.insert(param.value, param.ty.clone());
         }
 
         // 3. Emit each basic block.
@@ -353,8 +409,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let val = self.emit_inst(inst)?;
                 if let Some(dest) = inst.dest {
                     self.value_map.insert(dest, val);
+                    self.value_types.insert(dest, inst.ty.clone());
                 }
             }
+
+            // Record actual exit block (helpers like string_concat may have
+            // repositioned the builder to intermediate LLVM blocks).
+            let exit_bb = self.comp.bld.get_insert_block().unwrap();
+            self.block_exit_map.insert(bb.id, exit_bb);
 
             // 3c. Emit terminator.
             self.emit_terminator(&bb.terminator, &func.ret_ty)?;
@@ -362,13 +424,31 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
         // 4. Back-patch phi incoming edges.
         for pp in &self.pending_phis {
+            let phi_ty = pp.phi.as_basic_value().get_type();
             let incoming: Vec<(BasicValueEnum<'ctx>, LLVMBlock<'ctx>)> = pp
                 .incoming
                 .iter()
                 .filter_map(|(block_id, val_id)| {
-                    let llvm_bb = self.block_map.get(block_id)?;
+                    // Use exit block (may differ from entry block if helpers
+                    // like string_concat created intermediate LLVM blocks).
+                    let llvm_bb = self.block_exit_map.get(block_id)
+                        .or_else(|| self.block_map.get(block_id))?;
                     let llvm_val = self.value_map.get(val_id)?;
-                    Some((*llvm_val, *llvm_bb))
+                    // Coerce void sentinel (i8 0) to the phi's actual type.
+                    let v = if llvm_val.get_type() != phi_ty {
+                        if phi_ty.is_int_type() {
+                            phi_ty.into_int_type().const_int(0, false).into()
+                        } else if phi_ty.is_float_type() {
+                            phi_ty.into_float_type().const_float(0.0).into()
+                        } else if phi_ty.is_pointer_type() {
+                            phi_ty.into_pointer_type().const_null().into()
+                        } else {
+                            *llvm_val
+                        }
+                    } else {
+                        *llvm_val
+                    };
+                    Some((v, *llvm_bb))
                 })
                 .collect();
             let refs: Vec<(&dyn BasicValue<'ctx>, LLVMBlock<'ctx>)> = incoming
@@ -448,15 +528,31 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     .map(|a| self.val(*a))
                     .collect();
                 if let Some((fv, _, _)) = self.comp.fns.get(name).cloned() {
+                    let ptypes = fv.get_type().get_param_types();
+                    let st = self.comp.string_type();
                     let md: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
-                        arg_vals.iter().map(|v| (*v).into()).collect();
+                        arg_vals.iter().enumerate().map(|(i, v)| {
+                            if let Some(pt) = ptypes.get(i) {
+                                if v.get_type() == st.into() && pt.is_pointer_type() {
+                                    self.comp.string_data(*v).unwrap_or(*v).into()
+                                } else { (*v).into() }
+                            } else { (*v).into() }
+                        }).collect();
                     let csv = b!(self.comp.bld.build_call(fv, &md, "call"));
                     Ok(self.comp.call_result(csv))
                 } else {
                     // Try looking up as a module-level function.
                     if let Some(fv) = self.comp.module.get_function(name) {
+                        let ptypes = fv.get_type().get_param_types();
+                        let st = self.comp.string_type();
                         let md: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
-                            arg_vals.iter().map(|v| (*v).into()).collect();
+                            arg_vals.iter().enumerate().map(|(i, v)| {
+                                if let Some(pt) = ptypes.get(i) {
+                                    if v.get_type() == st.into() && pt.is_pointer_type() {
+                                        self.comp.string_data(*v).unwrap_or(*v).into()
+                                    } else { (*v).into() }
+                                } else { (*v).into() }
+                            }).collect();
                         let csv = b!(self.comp.bld.build_call(fv, &md, "call"));
                         Ok(self.comp.call_result(csv))
                     } else {
@@ -465,13 +561,231 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 }
             }
             mir::InstKind::MethodCall(recv, method, args) => {
-                let recv_val = self.val(*recv);
-                let mut all_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
-                    vec![recv_val.into()];
-                for a in args {
-                    all_args.push(self.val(*a).into());
+                // Try vec/array methods first (these are inline, not compiled functions)
+                let recv_ty = self.value_types.get(recv).cloned();
+
+                // String methods
+                if matches!(&recv_ty, Some(Type::String)) {
+                    let recv_val = self.val(*recv);
+                    match method.as_str() {
+                        "length" | "len" => return self.comp.string_len(recv_val),
+                        "contains" => {
+                            if !args.is_empty() {
+                                let a = self.val(args[0]);
+                                return self.comp.string_contains(recv_val, a);
+                            }
+                        }
+                        "starts_with" => {
+                            if !args.is_empty() {
+                                let a = self.val(args[0]);
+                                return self.comp.string_starts_with(recv_val, a);
+                            }
+                        }
+                        "ends_with" => {
+                            if !args.is_empty() {
+                                let a = self.val(args[0]);
+                                return self.comp.string_ends_with(recv_val, a);
+                            }
+                        }
+                        "char_at" => {
+                            if !args.is_empty() {
+                                let a = self.val(args[0]);
+                                return self.comp.string_char_at(recv_val, a);
+                            }
+                        }
+                        "slice" => {
+                            if args.len() >= 2 {
+                                let start = self.val(args[0]);
+                                let end = self.val(args[1]);
+                                return self.comp.string_slice(recv_val, start, end);
+                            }
+                        }
+                        "find" => {
+                            if !args.is_empty() {
+                                let a = self.val(args[0]);
+                                return self.comp.string_find(recv_val, a);
+                            }
+                        }
+                        "trim" => return self.comp.string_trim(recv_val, true, true),
+                        "trim_left" => return self.comp.string_trim(recv_val, true, false),
+                        "trim_right" => return self.comp.string_trim(recv_val, false, true),
+                        "to_upper" => return self.comp.string_case(recv_val, true),
+                        "to_lower" => return self.comp.string_case(recv_val, false),
+                        "replace" => {
+                            if args.len() >= 2 {
+                                let old = self.val(args[0]);
+                                let new = self.val(args[1]);
+                                return self.comp.string_replace(recv_val, old, new);
+                            }
+                        }
+                        "split" => {
+                            if !args.is_empty() {
+                                let delim = self.val(args[0]);
+                                return self.comp.string_split(recv_val, delim);
+                            }
+                        }
+                        "lines" => {
+                            let newline = self.comp.compile_str_literal("\n")?;
+                            return self.comp.string_split(recv_val, newline);
+                        }
+                        "repeat" => {
+                            if !args.is_empty() {
+                                let count = self.val(args[0]);
+                                return self.comp.string_repeat(recv_val, count);
+                            }
+                        }
+                        "is_empty" => {
+                            let len = self.comp.string_len(recv_val)?.into_int_value();
+                            let i64t = self.comp.ctx.i64_type();
+                            let cmp = b!(self.comp.bld.build_int_compare(
+                                inkwell::IntPredicate::EQ,
+                                len,
+                                i64t.const_int(0, false),
+                                "isempty"
+                            ));
+                            return Ok(cmp.into());
+                        }
+                        _ => {} // fall through to function lookup
+                    }
                 }
+
+                let is_vec_or_array = matches!(&recv_ty, Some(Type::Vec(_)) | Some(Type::Array(_, _)));
+                if is_vec_or_array {
+                    let recv_val = self.val(*recv);
+                    let elem_ty = match &recv_ty {
+                        Some(Type::Vec(et)) => *et.clone(),
+                        Some(Type::Array(et, _)) => *et.clone(),
+                        _ => Type::I64,
+                    };
+                    // Fixed-size array: len returns constant, contains is inline scan
+                    if let Some(Type::Array(_, arr_len)) = &recv_ty {
+                        match method.as_str() {
+                            "len" => {
+                                return Ok(self.comp.ctx.i64_type().const_int(*arr_len as u64, false).into());
+                            }
+                            _ => {}
+                        }
+                    }
+                    let header_ptr = recv_val.into_pointer_value();
+                    let lty = self.comp.llvm_ty(&elem_ty);
+                    match method.as_str() {
+                        "len" | "count" => return self.comp.vec_len(header_ptr),
+                        "push" => {
+                            if !args.is_empty() {
+                                let val = self.val(args[0]);
+                                let elem_size = self.comp.type_store_size(lty);
+                                self.comp.vec_push_raw(header_ptr, val, lty, elem_size)?;
+                                return Ok(self.comp.ctx.i8_type().const_int(0, false).into());
+                            }
+                            return Err("push() requires an argument".into());
+                        }
+                        "pop" => return self.comp.vec_pop(header_ptr, &elem_ty),
+                        "get" => {
+                            if !args.is_empty() {
+                                let idx = self.val(args[0]).into_int_value();
+                                return self.comp.vec_get_idx(header_ptr, &elem_ty, idx);
+                            }
+                            return Err("get() requires an index".into());
+                        }
+                        "collect" => return Ok(recv_val),
+                        "set" => {
+                            if args.len() >= 2 {
+                                let idx = self.val(args[0]).into_int_value();
+                                let val = self.val(args[1]);
+                                return self.comp.vec_set_val(header_ptr, &elem_ty, idx, val);
+                            }
+                            return Err("set() requires index and value".into());
+                        }
+                        "remove" => {
+                            if !args.is_empty() {
+                                let idx = self.val(args[0]).into_int_value();
+                                return self.comp.vec_remove_val(header_ptr, &elem_ty, idx);
+                            }
+                            return Err("remove() requires an index".into());
+                        }
+                        "clear" => return self.comp.vec_clear(header_ptr),
+                        _ => {} // fall through to function lookup
+                    }
+                }
+                let is_map = matches!(&recv_ty, Some(Type::Map(_, _)));
+                if is_map {
+                    let recv_val = self.val(*recv);
+                    let header_ptr = recv_val.into_pointer_value();
+                    match method.as_str() {
+                        "len" | "count" => return self.comp.vec_len(header_ptr),
+                        "set" => {
+                            if args.len() >= 2 {
+                                let k = self.val(args[0]);
+                                let v = self.val(args[1]);
+                                return self.comp.map_set_val(header_ptr, k, v);
+                            }
+                            return Err("map.set() requires key and value".into());
+                        }
+                        "get" => {
+                            if !args.is_empty() {
+                                let k = self.val(args[0]);
+                                return self.comp.map_get_val(header_ptr, k);
+                            }
+                            return Err("map.get() requires a key".into());
+                        }
+                        "has" | "contains" => {
+                            if !args.is_empty() {
+                                let k = self.val(args[0]);
+                                return self.comp.map_has_val(header_ptr, k);
+                            }
+                            return Err("map.has() requires a key".into());
+                        }
+                        "remove" => {
+                            if !args.is_empty() {
+                                let k = self.val(args[0]);
+                                return self.comp.map_remove_val(header_ptr, k);
+                            }
+                            return Err("map.remove() requires a key".into());
+                        }
+                        "clear" => return self.comp.map_clear(header_ptr),
+                        _ => {} // fall through
+                    }
+                }
+
+                let recv_val = self.val(*recv);
                 if let Some((fv, _, _)) = self.comp.fns.get(method).cloned() {
+                    // Check if the method expects self by pointer (first param is ptr type)
+                    let first_param_is_ptr = fv
+                        .get_type()
+                        .get_param_types()
+                        .first()
+                        .map(|t| t.is_pointer_type())
+                        .unwrap_or(false);
+                    let self_arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !recv_val.is_pointer_value() {
+                        // Struct value but method expects pointer: alloca + store.
+                        // Cache the alloca so mutations from the method persist across calls
+                        // (e.g. iterator .next() mutating self.n in a loop).
+                        if let Some(cached) = self.self_allocs.get(recv) {
+                            (*cached).into()
+                        } else {
+                            let tmp = self.comp.entry_alloca(recv_val.get_type(), "self.tmp");
+                            // Store must happen in the entry block (not in a loop body)
+                            // so it only executes once.
+                            let cur_fn = self.comp.cur_fn.unwrap();
+                            let entry_bb = cur_fn.get_first_basic_block().unwrap();
+                            let entry_bld = self.comp.ctx.create_builder();
+                            if let Some(term) = entry_bb.get_terminator() {
+                                entry_bld.position_before(&term);
+                            } else {
+                                entry_bld.position_at_end(entry_bb);
+                            }
+                            entry_bld.build_store(tmp, recv_val).unwrap();
+                            self.self_allocs.insert(*recv, tmp);
+                            tmp.into()
+                        }
+                    } else {
+                        recv_val
+                    };
+                    let mut all_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
+                        vec![self_arg.into()];
+                    for a in args {
+                        all_args.push(self.val(*a).into());
+                    }
                     let csv = b!(self.comp.bld.build_call(fv, &all_args, "mcall"));
                     Ok(self.comp.call_result(csv))
                 } else {
@@ -560,22 +874,57 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             mir::InstKind::StructInit(name, fields) => {
                 let st = self.comp.module.get_struct_type(name)
                     .ok_or_else(|| format!("mir_codegen: unknown struct `{name}`"))?;
-                let field_order: Vec<String> = self
+                let field_defs: Vec<(String, Type)> = self
                     .comp
                     .structs
                     .get(name)
-                    .map(|fs| fs.iter().map(|(n, _)| n.clone()).collect())
+                    .cloned()
                     .unwrap_or_default();
+                let defaults = self.comp.struct_defaults.get(name).cloned();
                 let mut agg: BasicValueEnum<'ctx> = st.const_zero().into();
-                for (fname, vid) in fields {
+                // Track which field indices were explicitly provided.
+                let mut provided = std::collections::HashSet::new();
+                for (i, (fname, vid)) in fields.iter().enumerate() {
                     let v = self.val(*vid);
-                    let idx = field_order
-                        .iter()
-                        .position(|n| n == fname)
-                        .ok_or_else(|| format!("mir_codegen: struct `{name}` has no field `{fname}`"))? as u32;
+                    let idx = if fname.is_empty() {
+                        provided.insert(i as u32);
+                        i as u32
+                    } else {
+                        let pos = field_defs
+                            .iter()
+                            .position(|(n, _)| n == fname)
+                            .ok_or_else(|| format!("mir_codegen: struct `{name}` has no field `{fname}`"))? as u32;
+                        provided.insert(pos);
+                        pos
+                    };
+                    let label = if fname.is_empty() {
+                        field_defs.get(i).map(|s| s.0.as_str()).unwrap_or("field")
+                    } else {
+                        fname
+                    };
                     agg = b!(self.comp.bld.build_insert_value(
                         agg.into_struct_value(),
                         v,
+                        idx,
+                        label
+                    ))
+                    .into_struct_value()
+                    .into();
+                }
+                // Fill in defaults for missing fields.
+                for (i, (fname, fty)) in field_defs.iter().enumerate() {
+                    let idx = i as u32;
+                    if provided.contains(&idx) {
+                        continue;
+                    }
+                    let val = if let Some(def_expr) = defaults.as_ref().and_then(|d| d.get(fname)) {
+                        self.comp.compile_expr(def_expr)?
+                    } else {
+                        self.comp.default_val(fty)
+                    };
+                    agg = b!(self.comp.bld.build_insert_value(
+                        agg.into_struct_value(),
+                        val,
                         idx,
                         fname
                     ))
@@ -605,45 +954,59 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let payload_gep = b!(self.comp.bld.build_struct_gep(
                         st, alloca, 1, "payload"
                     ));
-                    // Compute total payload size for bounds validation.
-                    let payload_field_ty = st.get_field_type_at_index(1);
-                    let payload_capacity = payload_field_ty
-                        .and_then(|t| t.size_of())
-                        .map(|s| s.get_zero_extended_constant().unwrap_or(u64::MAX))
-                        .unwrap_or(u64::MAX);
+                    // Look up variant field types for recursive-field detection.
+                    let variant_field_types: Vec<Type> = self.comp.enums.get(enum_name)
+                        .and_then(|vs| vs.iter().find(|(vn, _)| vn == variant))
+                        .map(|(_, ftys)| ftys.clone())
+                        .unwrap_or_default();
                     // Store payload fields at proper byte offsets based on actual type sizes.
                     let mut byte_offset: u64 = 0;
                     for (i, vid) in payload.iter().enumerate() {
                         let v = self.val(*vid);
-                        let vty = v.get_type();
-                        // Validate that this field won't overflow the payload area.
-                        let type_size = vty.size_of()
-                            .map(|s| s.get_zero_extended_constant().unwrap_or(8))
-                            .unwrap_or(8);
-                        if byte_offset + type_size > payload_capacity {
-                            return Err(format!(
-                                "mir_codegen: VariantInit payload overflow for `{enum_name}::{variant}` \
-                                 field {i}: offset {byte_offset} + size {type_size} > capacity {payload_capacity}"
-                            ));
-                        }
-                        if i == 0 {
-                            b!(self.comp.bld.build_store(payload_gep, v));
+                        let is_rec = variant_field_types.get(i)
+                            .map(|fty| Compiler::is_recursive_field(fty, enum_name))
+                            .unwrap_or(false);
+                        let field_ptr = if byte_offset == 0 {
+                            payload_gep
                         } else {
                             let offset_val = self.comp.ctx.i64_type().const_int(
                                 byte_offset, false
                             );
-                            let elem_ptr = unsafe {
+                            unsafe {
                                 b!(self.comp.bld.build_gep(
                                     self.comp.ctx.i8_type(),
                                     payload_gep,
                                     &[offset_val],
                                     "payload.elem"
                                 ))
-                            };
-                            b!(self.comp.bld.build_store(elem_ptr, v));
+                            }
+                        };
+                        if is_rec {
+                            // Box the recursive field: malloc, store value, store pointer.
+                            let actual_ty = self.comp.llvm_ty(
+                                variant_field_types.get(i).unwrap_or(&Type::I64)
+                            );
+                            let size = self.comp.type_store_size(actual_ty);
+                            let malloc_fn = self.comp.ensure_malloc();
+                            let heap = b!(self.comp.bld.build_call(
+                                malloc_fn,
+                                &[self.comp.ctx.i64_type().const_int(size, false).into()],
+                                "box.alloc"
+                            ))
+                            .try_as_basic_value()
+                            .basic()
+                            .unwrap()
+                            .into_pointer_value();
+                            b!(self.comp.bld.build_store(heap, v));
+                            b!(self.comp.bld.build_store(field_ptr, heap));
+                            byte_offset += 8;
+                        } else {
+                            b!(self.comp.bld.build_store(field_ptr, v));
+                            let type_size = v.get_type().size_of()
+                                .map(|s| s.get_zero_extended_constant().unwrap_or(8))
+                                .unwrap_or(8);
+                            byte_offset += (type_size + 7) & !7;
                         }
-                        // Accumulate offset by actual type size (with 8-byte alignment).
-                        byte_offset += (type_size + 7) & !7;
                     }
                     agg = b!(self.comp.bld.build_load(enum_ty, alloca, "variant.loaded"));
                 }
@@ -741,18 +1104,32 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             mir::InstKind::Index(base, idx) => {
                 let base_val = self.val(*base);
                 let idx_val = self.val(*idx);
+                let base_ty = self.value_types.get(base);
+
+                // String indexing: get char at index (returns byte as i64)
+                if matches!(base_ty, Some(Type::String)) {
+                    return self.comp.string_char_at(base_val, idx_val);
+                }
+
                 // For arrays: GEP into the array.
                 if base_val.get_type().is_array_type() {
                     let arr_ty = base_val.get_type().into_array_type();
+                    let arr_len = arr_ty.len() as u64;
+                    let i64t = self.comp.ctx.i64_type();
+                    // Wrap negative indices: if idx < 0, idx = len + idx
+                    let idx_int = idx_val.into_int_value();
+                    let is_neg = b!(self.comp.bld.build_int_compare(
+                        inkwell::IntPredicate::SLT, idx_int, i64t.const_int(0, false), "neg"));
+                    let wrapped = b!(self.comp.bld.build_int_nsw_add(
+                        idx_int, i64t.const_int(arr_len, false), "wrap"));
+                    let final_idx = b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                        .into_int_value();
                     let alloca = self.comp.entry_alloca(arr_ty.into(), "idx.tmp");
                     b!(self.comp.bld.build_store(alloca, base_val));
-                    let zero = self.comp.ctx.i64_type().const_int(0, false);
+                    let zero = i64t.const_int(0, false);
                     let ptr = unsafe {
                         b!(self.comp.bld.build_gep(
-                            arr_ty,
-                            alloca,
-                            &[zero, idx_val.into_int_value()],
-                            "idx.ptr"
+                            arr_ty, alloca, &[zero, final_idx], "idx.ptr"
                         ))
                     };
                     let elem_ty = self.comp.llvm_ty(&inst.ty);
@@ -774,13 +1151,43 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     ));
                     let len = b!(self.comp.bld.build_load(i64t, len_gep, "vi.len"))
                         .into_int_value();
-                    self.comp.emit_vec_bounds_check(idx_val.into_int_value(), len)?;
+                    // Wrap negative indices: if idx < 0, idx = len + idx
+                    let idx_int = idx_val.into_int_value();
+                    let is_neg = b!(self.comp.bld.build_int_compare(
+                        inkwell::IntPredicate::SLT, idx_int, i64t.const_int(0, false), "neg"));
+                    let wrapped = b!(self.comp.bld.build_int_nsw_add(idx_int, len, "wrap"));
+                    let final_idx = b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                        .into_int_value();
+                    self.comp.emit_vec_bounds_check(final_idx, len)?;
                     let elem_gep = unsafe {
                         b!(self.comp.bld.build_gep(
-                            elem_ty, data_ptr, &[idx_val.into_int_value()], "vi.egep"
+                            elem_ty, data_ptr, &[final_idx], "vi.egep"
                         ))
                     };
                     Ok(b!(self.comp.bld.build_load(elem_ty, elem_gep, "vi.elem")))
+                } else if base_val.is_struct_value() {
+                    // Tuple indexing: extract element from struct value.
+                    if let Some(idx_const) = idx_val.into_int_value().get_zero_extended_constant() {
+                        let elem = b!(self.comp.bld.build_extract_value(
+                            base_val.into_struct_value(),
+                            idx_const as u32,
+                            "tup.elem"
+                        ));
+                        Ok(elem)
+                    } else {
+                        // Dynamic index: store to alloca and GEP.
+                        let st = base_val.get_type();
+                        let alloca = self.comp.entry_alloca(st, "tup.idx");
+                        b!(self.comp.bld.build_store(alloca, base_val));
+                        let elem_ty = self.comp.llvm_ty(&inst.ty);
+                        let zero = self.comp.ctx.i64_type().const_int(0, false);
+                        let ptr = unsafe {
+                            b!(self.comp.bld.build_gep(
+                                st, alloca, &[zero, idx_val.into_int_value()], "tup.ptr"
+                            ))
+                        };
+                        Ok(b!(self.comp.bld.build_load(elem_ty, ptr, "tup.val")))
+                    }
                 } else {
                     Ok(void_val())
                 }
@@ -791,14 +1198,24 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let v = self.val(*val);
                 if base_val.get_type().is_array_type() {
                     let arr_ty = base_val.get_type().into_array_type();
+                    let arr_len = arr_ty.len() as u64;
                     let alloca = self.comp.entry_alloca(arr_ty.into(), "idxset.tmp");
                     b!(self.comp.bld.build_store(alloca, base_val));
-                    let zero = self.comp.ctx.i64_type().const_int(0, false);
+                    let i64t = self.comp.ctx.i64_type();
+                    let zero = i64t.const_int(0, false);
+                    // Wrap negative indices
+                    let idx_int = idx_val.into_int_value();
+                    let is_neg = b!(self.comp.bld.build_int_compare(
+                        inkwell::IntPredicate::SLT, idx_int, zero, "neg"));
+                    let wrapped = b!(self.comp.bld.build_int_nsw_add(
+                        idx_int, i64t.const_int(arr_len, false), "wrap"));
+                    let final_idx = b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                        .into_int_value();
                     let ptr = unsafe {
                         b!(self.comp.bld.build_gep(
                             arr_ty,
                             alloca,
-                            &[zero, idx_val.into_int_value()],
+                            &[zero, final_idx],
                             "idxset.ptr"
                         ))
                     };
@@ -830,6 +1247,63 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         ))
                     };
                     b!(self.comp.bld.build_store(elem_gep, v));
+                }
+                Ok(void_val())
+            }
+            mir::InstKind::IndexStore(var_name, idx, val) => {
+                // Direct index store into a named variable's alloca.
+                let idx_val = self.val(*idx);
+                let v = self.val(*val);
+                if let Some((alloca, ty)) = self.var_allocs.get(var_name).cloned() {
+                    let llvm_ty = self.comp.llvm_ty(&ty);
+                    if llvm_ty.is_array_type() {
+                        let arr_ty = llvm_ty.into_array_type();
+                        let arr_len = arr_ty.len() as u64;
+                        let i64t = self.comp.ctx.i64_type();
+                        let zero = i64t.const_int(0, false);
+                        // Wrap negative indices
+                        let idx_int = idx_val.into_int_value();
+                        let is_neg = b!(self.comp.bld.build_int_compare(
+                            inkwell::IntPredicate::SLT, idx_int, zero, "neg"));
+                        let wrapped = b!(self.comp.bld.build_int_nsw_add(
+                            idx_int, i64t.const_int(arr_len, false), "wrap"));
+                        let final_idx = b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                            .into_int_value();
+                        let ptr = unsafe {
+                            b!(self.comp.bld.build_gep(
+                                arr_ty,
+                                alloca,
+                                &[zero, final_idx],
+                                "idxstore.ptr"
+                            ))
+                        };
+                        b!(self.comp.bld.build_store(ptr, v));
+                    } else {
+                        // Vec or other pointer-based type: load the header and index into data.
+                        let header_ty = self.comp.vec_header_type();
+                        let i64t = self.comp.ctx.i64_type();
+                        let ptr_ty = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                        let header_ptr = b!(self.comp.bld.build_load(ptr_ty, alloca, "vis.hdr"))
+                            .into_pointer_value();
+                        let ptr_gep = b!(self.comp.bld.build_struct_gep(
+                            header_ty, header_ptr, 0, "vis.ptrp"
+                        ));
+                        let data_ptr = b!(self.comp.bld.build_load(ptr_ty, ptr_gep, "vis.data"))
+                            .into_pointer_value();
+                        let len_gep = b!(self.comp.bld.build_struct_gep(
+                            header_ty, header_ptr, 1, "vis.lenp"
+                        ));
+                        let len = b!(self.comp.bld.build_load(i64t, len_gep, "vis.len"))
+                            .into_int_value();
+                        let elem_ty = v.get_type();
+                        self.comp.emit_vec_bounds_check(idx_val.into_int_value(), len)?;
+                        let elem_gep = unsafe {
+                            b!(self.comp.bld.build_gep(
+                                elem_ty, data_ptr, &[idx_val.into_int_value()], "vis.egep"
+                            ))
+                        };
+                        b!(self.comp.bld.build_store(elem_gep, v));
+                    }
                 }
                 Ok(void_val())
             }
@@ -878,6 +1352,11 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let v = self.val(*val);
                 if !v.is_pointer_value() {
                     return Err(format!("mir_codegen: Deref on non-pointer value {:?}", val));
+                }
+                // RC deref: skip refcount field, load from field 1
+                let val_ty = self.value_types.get(val).cloned();
+                if let Some(Type::Rc(ref inner)) = val_ty {
+                    return self.comp.rc_deref(v, inner);
                 }
                 let inner_ty = self.comp.llvm_ty(&inst.ty);
                 Ok(b!(self.comp.bld.build_load(
@@ -959,39 +1438,36 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 self.emit_vec_new(elems, &inst.ty)
             }
             mir::InstKind::VecPush(vec, elem) => {
-                let vec_val = self.val(*vec);
+                let vec_val = self.val(*vec).into_pointer_value();
                 let elem_val = self.val(*elem);
-                if let Some(push_fn) = self.comp.module.get_function("jade_vec_push") {
-                    let alloca = self.comp.entry_alloca(elem_val.get_type(), "vpush.tmp");
-                    b!(self.comp.bld.build_store(alloca, elem_val));
-                    b!(self.comp.bld.build_call(
-                        push_fn,
-                        &[vec_val.into(), alloca.into()],
-                        ""
-                    ));
-                }
+                let lty = elem_val.get_type();
+                let elem_size = self.comp.type_store_size(lty);
+                self.comp.vec_push_raw(vec_val, elem_val, lty, elem_size)?;
                 Ok(void_val())
             }
             mir::InstKind::VecLen(vec) => {
                 let vec_val = self.val(*vec);
-                if let Some(len_fn) = self.comp.module.get_function("jade_vec_len") {
-                    let csv = b!(self.comp.bld.build_call(
-                        len_fn,
-                        &[vec_val.into()],
-                        "veclen"
-                    ));
-                    Ok(self.comp.call_result(csv))
+                let i64t = self.comp.ctx.i64_type();
+                let vec_ty = self.value_types.get(vec);
+                if matches!(vec_ty, Some(Type::String)) || vec_val.is_struct_value() {
+                    // String: struct { ptr, len, cap }; len is field 1.
+                    self.comp.string_len(vec_val)
+                } else if vec_val.is_pointer_value() {
+                    // Vec (heap-allocated): ptr to {ptr, i64, i64}; len is field 1.
+                    let header_ty = self.comp.vec_header_type();
+                    let header_ptr = vec_val.into_pointer_value();
+                    let len_gep = b!(self.comp.bld.build_struct_gep(header_ty, header_ptr, 1, "vl.len"));
+                    Ok(b!(self.comp.bld.build_load(i64t, len_gep, "vl.v")))
+                } else if vec_val.is_array_value() {
+                    // Fixed-size array: length is known at compile time.
+                    let arr_len = vec_val.into_array_value().get_type().len();
+                    Ok(i64t.const_int(arr_len as u64, false).into())
                 } else {
-                    Err("mir_codegen: VecLen used but jade_vec_len runtime function not declared".into())
+                    Err("mir_codegen: VecLen on non-vec/array value".into())
                 }
             }
             mir::InstKind::MapInit => {
-                if let Some(fv) = self.comp.module.get_function("jade_map_new") {
-                    let csv = b!(self.comp.bld.build_call(fv, &[], "map"));
-                    Ok(self.comp.call_result(csv))
-                } else {
-                    Err("mir_codegen: MapInit used but jade_map_new runtime function not declared".into())
-                }
+                self.comp.compile_map_new()
             }
             mir::InstKind::SetInit => {
                 if let Some(fv) = self.comp.module.get_function("jade_set_new") {
@@ -1132,6 +1608,34 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 self.emit_dyn_dispatch(*obj, trait_name, method, args, &inst.ty)
             }
 
+            mir::InstKind::DynCoerce(inner, type_name, trait_name) => {
+                let val = self.val(*inner);
+                let ptr_ty = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+
+                let data_ptr = if val.is_pointer_value() {
+                    val.into_pointer_value()
+                } else {
+                    let lty = val.get_type();
+                    let alloc = self.comp.entry_alloca(lty, "dyn.data");
+                    b!(self.comp.bld.build_store(alloc, val));
+                    alloc
+                };
+
+                let vtable_ptr = self.comp
+                    .vtables
+                    .get(&(type_name.to_string(), trait_name.to_string()))
+                    .map(|gv| gv.as_pointer_value())
+                    .unwrap_or_else(|| ptr_ty.const_null());
+
+                let fat_ty = self.comp.ctx.struct_type(&[ptr_ty.into(), ptr_ty.into()], false);
+                let fat = fat_ty.const_zero();
+                let fat = b!(self.comp.bld.build_insert_value(fat, data_ptr, 0, "dyn.fat.data"))
+                    .into_struct_value();
+                let fat = b!(self.comp.bld.build_insert_value(fat, vtable_ptr, 1, "dyn.fat.vtable"))
+                    .into_struct_value();
+                Ok(fat.into())
+            }
+
             mir::InstKind::InlineAsm(template, args) => {
                 let arg_vals: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = args.iter().map(|a| self.val(*a).into()).collect();
                 let arg_tys: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = arg_vals.iter().map(|v| {
@@ -1193,6 +1697,12 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let expected = self.comp.llvm_ty(ret_ty);
                     if v.get_type() == expected {
                         b!(self.comp.bld.build_return(Some(&v)));
+                    } else if matches!(ret_ty, Type::Tuple(_)) && v.is_array_value() {
+                        // Tuple return: coerce array → struct via alloca bitcast.
+                        let alloca = self.comp.entry_alloca(v.get_type(), "tup.coerce");
+                        b!(self.comp.bld.build_store(alloca, v));
+                        let coerced = b!(self.comp.bld.build_load(expected, alloca, "tup.ret"));
+                        b!(self.comp.bld.build_return(Some(&coerced)));
                     } else {
                         // Type mismatch (e.g. void-valued last expr in non-void fn).
                         let default = self.comp.default_val(ret_ty);
@@ -1243,44 +1753,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
     }
 
     fn emit_string_const(&mut self, s: &str) -> Result<BasicValueEnum<'ctx>, String> {
-        let string_ty = self.comp.string_type();
-        let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
-        let i64t = self.comp.ctx.i64_type();
-        let len = s.len() as u64;
-
-        // SSO layout: {ptr, len, cap}.  For constants, allocate a global
-        // and point the ptr field at it.
-        let gv = self
-            .comp
-            .bld
-            .build_global_string_ptr(s, "str.data")
-            .map_err(|e| e.to_string())?;
-        let mut agg: BasicValueEnum<'ctx> = string_ty.const_zero().into();
-        agg = b!(self.comp.bld.build_insert_value(
-            agg.into_struct_value(),
-            gv.as_pointer_value(),
-            0,
-            "str.ptr"
-        ))
-        .into_struct_value()
-        .into();
-        agg = b!(self.comp.bld.build_insert_value(
-            agg.into_struct_value(),
-            i64t.const_int(len, false),
-            1,
-            "str.len"
-        ))
-        .into_struct_value()
-        .into();
-        agg = b!(self.comp.bld.build_insert_value(
-            agg.into_struct_value(),
-            i64t.const_int(len, false),
-            2,
-            "str.cap"
-        ))
-        .into_struct_value()
-        .into();
-        Ok(agg)
+        self.comp.compile_str_literal(s)
     }
 
     fn emit_binop(
@@ -1290,6 +1763,40 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         rhs: mir::ValueId,
         result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        // Check for struct operator overload dispatch (e.g. Vec2 + Vec2 → Vec2.add(other)).
+        if let Some(Type::Struct(name, _)) = self.value_types.get(&lhs) {
+            let method = match op {
+                mir::BinOp::Add => Some("add"),
+                mir::BinOp::Sub => Some("sub"),
+                mir::BinOp::Mul => Some("mul"),
+                mir::BinOp::Div => Some("div"),
+                _ => None,
+            };
+            if let Some(method_name) = method {
+                let fn_name = format!("{name}_{method_name}");
+                if let Some((fv, _, _)) = self.comp.fns.get(&fn_name).cloned() {
+                    let l = self.val(lhs);
+                    let r = self.val(rhs);
+                    let first_param_is_ptr = fv.get_type().get_param_types().first()
+                        .map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let self_arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !l.is_pointer_value() {
+                        let tmp = self.comp.entry_alloca(l.get_type(), "op.self");
+                        b!(self.comp.bld.build_store(tmp, l));
+                        tmp.into()
+                    } else { l };
+                    let csv = b!(self.comp.bld.build_call(fv, &[self_arg.into(), r.into()], &format!("{method_name}.call")));
+                    return Ok(self.comp.call_result(csv));
+                }
+            }
+        }
+
+        // String concatenation: String + String.
+        if matches!(op, mir::BinOp::Add) && matches!(result_ty, Type::String) {
+            let l = self.val(lhs);
+            let r = self.val(rhs);
+            return self.comp.string_concat(l, r);
+        }
+
         let l = self.val(lhs);
         let r = self.val(rhs);
 
@@ -1413,8 +1920,49 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         rhs: mir::ValueId,
         operand_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        // Check for struct operator overload dispatch for comparisons.
+        if let Some(Type::Struct(name, _)) = self.value_types.get(&lhs) {
+            let method = match op {
+                mir::CmpOp::Lt => Some("less"),
+                mir::CmpOp::Gt => Some("greater"),
+                mir::CmpOp::Le => Some("less_eq"),
+                mir::CmpOp::Ge => Some("greater_eq"),
+                mir::CmpOp::Eq => Some("equal"),
+                mir::CmpOp::Ne => Some("equal"), // call equal then negate
+            };
+            if let Some(method_name) = method {
+                let fn_name = format!("{name}_{method_name}");
+                if let Some((fv, _, _)) = self.comp.fns.get(&fn_name).cloned() {
+                    let l = self.val(lhs);
+                    let r = self.val(rhs);
+                    let first_param_is_ptr = fv.get_type().get_param_types().first()
+                        .map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let self_arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !l.is_pointer_value() {
+                        let tmp = self.comp.entry_alloca(l.get_type(), "cmp.self");
+                        b!(self.comp.bld.build_store(tmp, l));
+                        tmp.into()
+                    } else { l };
+                    let csv = b!(self.comp.bld.build_call(fv, &[self_arg.into(), r.into()], "cmp.call"));
+                    let result = self.comp.call_result(csv);
+                    return if matches!(op, mir::CmpOp::Ne) {
+                        Ok(b!(self.comp.bld.build_not(result.into_int_value(), "neq")).into())
+                    } else {
+                        Ok(result)
+                    };
+                }
+            }
+        }
+
         let l = self.val(lhs);
         let r = self.val(rhs);
+
+        // String comparison: delegate to Compiler::string_eq which uses memcmp.
+        let is_string_type = matches!(operand_ty, Type::String) ||
+            matches!(operand_ty, Type::Struct(n, _) if n == "String");
+        if l.is_struct_value() && is_string_type {
+            let negate = matches!(op, mir::CmpOp::Ne);
+            return self.comp.string_eq(l, r, negate);
+        }
 
         // Determine comparison mode from the actual LLVM value type, not
         // from inst.ty (which is Bool — the result type, not operand type).
@@ -1562,6 +2110,17 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let obj_val = self.val(obj);
+
+        // String field access — handle "length"/"len" via SSO-aware string_len
+        let obj_ty = self.value_types.get(&obj).cloned();
+        if matches!(&obj_ty, Some(Type::String)) {
+            match field {
+                "length" | "len" => return self.comp.string_len(obj_val),
+                "data" => return self.comp.string_data(obj_val),
+                _ => {}
+            }
+        }
+
         if obj_val.is_struct_value() {
             // Inline struct: extract_value.
             let sv = obj_val.into_struct_value();
@@ -1595,14 +2154,10 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                                 st, alloca, 1, "payload"
                             ));
                             let res_llvm = self.comp.llvm_ty(result_ty);
-                            let field_ptr = if idx == 0 {
+                            let byte_offset = self.compute_enum_payload_offset(name, idx);
+                            let field_ptr = if byte_offset == 0 {
                                 payload_gep
                             } else {
-                                // Compute byte offset by summing aligned sizes of
-                                // preceding payload fields from the enum definition.
-                                let byte_offset = self.compute_enum_payload_offset(
-                                    name, idx,
-                                );
                                 let offset_val = self.comp.ctx.i64_type().const_int(
                                     byte_offset, false
                                 );
@@ -1615,6 +2170,20 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                                     ))
                                 }
                             };
+                            // Check if this field is a recursive reference (boxed as ptr).
+                            let is_rec = Compiler::is_recursive_field(result_ty, name);
+                            if is_rec {
+                                let ptr_ty = self.comp.ctx.ptr_type(
+                                    inkwell::AddressSpace::default()
+                                );
+                                let heap_ptr = b!(self.comp.bld.build_load(
+                                    ptr_ty, field_ptr, "box.ptr"
+                                )).into_pointer_value();
+                                let val = b!(self.comp.bld.build_load(
+                                    res_llvm, heap_ptr, field
+                                ));
+                                return Ok(val);
+                            }
                             let val = b!(self.comp.bld.build_load(res_llvm, field_ptr, field));
                             return Ok(val);
                         }
@@ -1627,6 +2196,19 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             // Unknown struct type — cannot determine correct field index.
             Err(format!("mir_codegen: FieldGet on unknown struct type for field `{field}`"))
         } else if obj_val.is_pointer_value() {
+            // Vec .length/.len: read len field from vec header.
+            if matches!(field, "length" | "len") {
+                if matches!(&obj_ty, Some(Type::Vec(_))) {
+                    let header_ptr = obj_val.into_pointer_value();
+                    let header_ty = self.comp.vec_header_type();
+                    let i64t = self.comp.ctx.i64_type();
+                    let len_gep = b!(self.comp.bld.build_struct_gep(
+                        header_ty, header_ptr, 1, "vl.lenp"
+                    ));
+                    let len = b!(self.comp.bld.build_load(i64t, len_gep, "vl.len"));
+                    return Ok(len);
+                }
+            }
             // Pointer to struct: GEP + load.
             let ptr = obj_val.into_pointer_value();
             let res_llvm = self.comp.llvm_ty(result_ty);
@@ -1651,6 +2233,17 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             }
                         })
                     })
+                })
+                .or_else(|| {
+                    // Search value_types for the MIR ValueId's type (covers function parameters).
+                    self.value_types.get(&obj).and_then(|ty| match ty {
+                        Type::Ptr(inner) => match inner.as_ref() {
+                            Type::Struct(name, _) => Some(name.clone()),
+                            _ => None,
+                        },
+                        Type::Struct(name, _) => Some(name.clone()),
+                        _ => None,
+                    })
                 });
             if let Some(name) = &struct_name {
                 if let Some(st) = self.comp.module.get_struct_type(name) {
@@ -1664,6 +2257,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             // No fallback — loading from an unknown struct pointer at offset 0
             // silently produces wrong values for any field other than the first.
             Err(format!("mir_codegen: FieldGet on pointer to unknown struct type for field `{field}`"))
+        } else if obj_val.is_array_value() {
+            // Tuple — represented as an LLVM array [N x T].
+            // Fields are named _0, _1, ...
+            if let Some(idx_str) = field.strip_prefix('_') {
+                if let Ok(idx) = idx_str.parse::<u32>() {
+                    let val = b!(self.comp.bld.build_extract_value(
+                        obj_val.into_array_value(), idx, field
+                    ));
+                    return Ok(val);
+                }
+            }
+            Ok(obj_val)
         } else {
             Ok(obj_val)
         }
@@ -1678,36 +2283,48 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             Type::Vec(e) => e.as_ref(),
             _ => &Type::I64,
         };
-        // Call jade_vec_new(elem_size, capacity).
+        // Inline vec construction matching HIR codegen: allocate {ptr, i64, i64} header.
         let i64t = self.comp.ctx.i64_type();
-        if let Some(fv) = self.comp.module.get_function("jade_vec_new") {
-            let elem_size = self.comp.llvm_ty(elem_ty).size_of().unwrap_or(
-                i64t.const_int(8, false),
-            );
-            let cap = i64t.const_int(elems.len().max(4) as u64, false);
-            let ptr = b!(self
-                .comp
-                .bld
-                .build_call(fv, &[elem_size.into(), cap.into()], "vec"))
-            .try_as_basic_value()
-            .basic()
-            .unwrap();
-            // Push initial elements.
-            if let Some(push_fn) = self.comp.module.get_function("jade_vec_push") {
-                for vid in elems {
-                    let v = self.val(*vid);
-                    let alloca = self.comp.entry_alloca(v.get_type(), "vpush.tmp");
-                    b!(self.comp.bld.build_store(alloca, v));
-                    b!(self
-                        .comp
-                        .bld
-                        .build_call(push_fn, &[ptr.into(), alloca.into()], ""));
-                }
+        let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
+        let header_ty = self.comp.vec_header_type();
+        let malloc = self.comp.ensure_malloc();
+
+        let header_size = i64t.const_int(24, false);
+        let header_ptr = b!(self.comp.bld.build_call(malloc, &[header_size.into()], "vec.hdr"))
+            .try_as_basic_value().basic().unwrap().into_pointer_value();
+
+        let n = elems.len();
+        let cap = if n == 0 { 0u64 } else { n.next_power_of_two() as u64 };
+
+        if n > 0 {
+            let lty = self.comp.llvm_ty(elem_ty);
+            let elem_size = self.comp.type_store_size(lty);
+            let buf_size = i64t.const_int(cap * elem_size, false);
+            let buf = b!(self.comp.bld.build_call(malloc, &[buf_size.into()], "vec.buf"))
+                .try_as_basic_value().basic().unwrap().into_pointer_value();
+
+            for (i, vid) in elems.iter().enumerate() {
+                let val = self.val(*vid);
+                let gep = unsafe {
+                    b!(self.comp.bld.build_gep(lty, buf, &[i64t.const_int(i as u64, false)], "vec.elem"))
+                };
+                b!(self.comp.bld.build_store(gep, val));
             }
-            Ok(ptr)
+
+            let ptr_gep = b!(self.comp.bld.build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
+            b!(self.comp.bld.build_store(ptr_gep, buf));
         } else {
-            Err("mir_codegen: VecNew used but jade_vec_new runtime function not declared".into())
+            let ptr_gep = b!(self.comp.bld.build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
+            b!(self.comp.bld.build_store(ptr_gep, ptr_ty.const_null()));
         }
+
+        let len_gep = b!(self.comp.bld.build_struct_gep(header_ty, header_ptr, 1, "vec.len"));
+        b!(self.comp.bld.build_store(len_gep, i64t.const_int(n as u64, false)));
+
+        let cap_gep = b!(self.comp.bld.build_struct_gep(header_ty, header_ptr, 2, "vec.cap"));
+        b!(self.comp.bld.build_store(cap_gep, i64t.const_int(cap, false)));
+
+        Ok(header_ptr.into())
     }
 
     fn emit_closure_create(
@@ -1913,6 +2530,10 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
     fn struct_name_from_type(&self, ty: &Type) -> Option<String> {
         match ty {
             Type::Struct(name, _) => Some(name.clone()),
+            Type::Ptr(inner) => match inner.as_ref() {
+                Type::Struct(name, _) => Some(name.clone()),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -1925,16 +2546,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         enum_name: &str,
         target_idx: usize,
     ) -> u64 {
-        // Try to look up actual variant field types from the enum definition.
-        // Since FieldGet doesn't carry the variant name, we must work with
-        // the alignment heuristic matching VariantInit: each field is stored
-        // at its actual size rounded up to 8-byte alignment.
-        //
-        // Look for the variant with the most fields that has at least
-        // target_idx fields, and use those field types. In most cases all
-        // variants that reach this code path have the same payload layout.
         if let Some(variants) = self.comp.enums.get(enum_name) {
-            // Find the variant whose payload best matches target_idx.
             for (_, field_types) in variants {
                 if field_types.len() > target_idx {
                     let mut offset: u64 = 0;
@@ -1942,16 +2554,31 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         if i == target_idx {
                             return offset;
                         }
-                        let type_size = self.comp.llvm_ty(fty).size_of()
-                            .map(|s| s.get_zero_extended_constant().unwrap_or(8))
-                            .unwrap_or(8);
+                        let type_size = if Compiler::is_recursive_field(fty, enum_name) {
+                            8 // pointer
+                        } else {
+                            self.comp.llvm_ty(fty).size_of()
+                                .map(|s| s.get_zero_extended_constant().unwrap_or(8))
+                                .unwrap_or(8)
+                        };
                         offset += (type_size + 7) & !7;
                     }
                 }
             }
         }
-        // Fallback: 8-byte-aligned slots (matches VariantInit for i64/f64/ptr).
         (target_idx * 8) as u64
+    }
+
+    /// Check if a specific payload field index in an enum is a recursive reference.
+    fn is_recursive_enum_field(&self, enum_name: &str, field_idx: usize) -> bool {
+        if let Some(variants) = self.comp.enums.get(enum_name) {
+            for (_, field_types) in variants {
+                if let Some(fty) = field_types.get(field_idx) {
+                    return Compiler::is_recursive_field(fty, enum_name);
+                }
+            }
+        }
+        false
     }
 
     /// Emit dynamic dispatch: fat pointer vtable lookup and indirect call.
@@ -2281,8 +2908,8 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         if let Some(store_name) = name.strip_prefix("__store_insert_") {
             return self.emit_store_insert(store_name, args).map(Some);
         }
-        if let Some(store_name) = name.strip_prefix("__store_query_") {
-            return self.emit_store_query(store_name, args).map(Some);
+        if let Some(rest) = name.strip_prefix("__store_query_") {
+            return self.emit_store_query(rest, args).map(Some);
         }
         if let Some(store_name) = name.strip_prefix("__store_count_") {
             return self.emit_store_count(store_name).map(Some);
@@ -2290,11 +2917,38 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         if let Some(store_name) = name.strip_prefix("__store_all_") {
             return self.emit_store_all(store_name).map(Some);
         }
-        if let Some(store_name) = name.strip_prefix("__store_delete_") {
-            return self.emit_store_delete(store_name).map(Some);
+        if let Some(rest) = name.strip_prefix("__store_delete_") {
+            return self.emit_store_delete(rest, args).map(Some);
         }
-        if let Some(store_name) = name.strip_prefix("__store_set_") {
-            return self.emit_store_set(store_name, args).map(Some);
+        if let Some(rest) = name.strip_prefix("__store_set_") {
+            return self.emit_store_set(rest, args).map(Some);
+        }
+        // ── Transaction begin/commit (no-op at LLVM level) ──
+        if name == "__txn_begin" || name == "__txn_commit" {
+            return Ok(Some(self.comp.ctx.i8_type().const_int(0, false).into()));
+        }
+        // ── Channel close ──
+        if name == "__chan_close" {
+            if let Some(&ch_val) = args.first() {
+                let ch_ptr = self.val(ch_val).into_pointer_value();
+                let chan_close = self.comp.module.get_function("jade_chan_close")
+                    .ok_or("jade_chan_close not declared")?;
+                b!(self.comp.bld.build_call(chan_close, &[ch_ptr.into()], ""));
+                return Ok(Some(self.comp.ctx.i8_type().const_int(0, false).into()));
+            }
+        }
+        // ── Actor stop (close the actor's internal channel) ──
+        if name == "__stop" {
+            if let Some(&actor_val) = args.first() {
+                let actor_ptr = self.val(actor_val).into_pointer_value();
+                let ptr_ty = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                let ch_ptr = b!(self.comp.bld.build_load(ptr_ty, actor_ptr, "stop.ch"))
+                    .into_pointer_value();
+                let chan_close = self.comp.module.get_function("jade_chan_close")
+                    .ok_or("jade_chan_close not declared")?;
+                b!(self.comp.bld.build_call(chan_close, &[ch_ptr.into()], ""));
+                return Ok(Some(self.comp.ctx.i8_type().const_int(0, false).into()));
+            }
         }
         Ok(None)
     }
@@ -2657,22 +3311,34 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Name format: {store_name}__{field}__{op}
+        // Name format: {store_name}__{field}__{op}[__and__{field2}__{op2}]*
         let parts: Vec<&str> = encoded_name.splitn(3, "__").collect();
         if parts.len() < 3 || args.is_empty() {
             return Ok(self.comp.ctx.i64_type().const_int(0, false).into());
         }
         let store_name = parts[0];
         let field_name = parts[1];
-        let op = match parts[2] {
-            "eq" => crate::ast::BinOp::Eq,
-            "ne" => crate::ast::BinOp::Ne,
-            "lt" => crate::ast::BinOp::Lt,
-            "le" => crate::ast::BinOp::Le,
-            "gt" => crate::ast::BinOp::Gt,
-            "ge" => crate::ast::BinOp::Ge,
-            _ => crate::ast::BinOp::Eq,
-        };
+
+        // Parse primary op and any extra conditions from parts[2]
+        // parts[2] could be "eq" or "eq__and__val__gt" etc.
+        let remainder = parts[2];
+        let segments: Vec<&str> = remainder.split("__").collect();
+        let op = Self::parse_store_op(segments[0]);
+
+        // Parse extra compound conditions: __and/or__field__op
+        let mut extra_specs: Vec<(crate::ast::LogicalOp, &str, crate::ast::BinOp)> = Vec::new();
+        let mut i = 1;
+        while i + 2 < segments.len() {
+            let lop = match segments[i] {
+                "and" => crate::ast::LogicalOp::And,
+                "or" => crate::ast::LogicalOp::Or,
+                _ => { i += 1; continue; }
+            };
+            let efield = segments[i + 1];
+            let eop = Self::parse_store_op(segments[i + 2]);
+            extra_specs.push((lop, efield, eop));
+            i += 3;
+        }
 
         let sd = self.comp.store_defs.get(store_name)
             .ok_or_else(|| format!("unknown store '{store_name}'"))?
@@ -2743,8 +3409,20 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 self.comp.ctx.i8_type(), buf, &[offset], "q.rec"))
         };
 
-        let cond = self.comp.eval_store_filter(
-            rec_ptr, st, field_idx, &field_ty, op, filter_val, &[])?;
+        let cond = {
+            // Build extras for compound filters
+            let mut extras: Vec<(crate::ast::LogicalOp, usize, Type, crate::ast::BinOp, BasicValueEnum<'ctx>)> = Vec::new();
+            for (ei, (lop, efield, eop)) in extra_specs.iter().enumerate() {
+                let (eidx, ety) = sd.fields.iter().enumerate()
+                    .find(|(_, f)| f.name == *efield)
+                    .map(|(i, f)| (i, f.ty.clone()))
+                    .ok_or_else(|| format!("unknown field '{efield}' in store '{store_name}'"))?;
+                let eval = self.value_map[&args[ei + 1]];
+                extras.push((*lop, eidx, ety, *eop, eval));
+            }
+            self.comp.eval_store_filter(
+                rec_ptr, st, field_idx, &field_ty, op, filter_val, &extras)?
+        };
         b!(self.comp.bld.build_conditional_branch(cond, match_bb, next_bb));
 
         self.comp.bld.position_at_end(match_bb);
@@ -2771,6 +3449,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         b!(self.comp.bld.build_call(free_fn, &[buf.into()], ""));
         let result = self.comp.load_store_record_as_jade(st, result_ptr, &sd)?;
         Ok(result)
+    }
+
+    fn parse_store_op(s: &str) -> crate::ast::BinOp {
+        match s {
+            "eq" => crate::ast::BinOp::Eq,
+            "ne" => crate::ast::BinOp::Ne,
+            "lt" => crate::ast::BinOp::Lt,
+            "le" => crate::ast::BinOp::Le,
+            "gt" => crate::ast::BinOp::Gt,
+            "ge" => crate::ast::BinOp::Ge,
+            _ => crate::ast::BinOp::Eq,
+        }
     }
 
     fn emit_store_count(
@@ -2814,23 +3504,443 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         &mut self,
         store_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        Err(format!("mir_codegen: store.all() for '{store_name}' is not yet implemented"))
+        let sd = self.comp.store_defs.get(store_name)
+            .ok_or_else(|| format!("unknown store '{store_name}'"))?
+            .clone();
+
+        let ensure_fn_name = format!("__store_ensure_{store_name}");
+        if let Some(ensure_fn) = self.comp.module.get_function(&ensure_fn_name) {
+            b!(self.comp.bld.build_call(ensure_fn, &[], ""));
+        } else {
+            let ensure_fn = self.comp.gen_store_ensure_open(&sd)?;
+            b!(self.comp.bld.build_call(ensure_fn, &[], ""));
+        }
+
+        let fp = self.comp.load_store_fp(store_name)?;
+        let i64t = self.comp.ctx.i64_type();
+
+        let rec_name = format!("__store_{store_name}_rec");
+        let rec_st = self.comp.module.get_struct_type(&rec_name).unwrap();
+        let rec_size = self.comp.store_record_size(&sd);
+
+        let jade_name = format!("__store_{store_name}");
+        let jade_st = self.comp.module.get_struct_type(&jade_name).unwrap();
+        let jade_size = self.comp.type_store_size(jade_st.into());
+
+        let count = self.comp.store_read_count(fp)?;
+        let raw_buf = self.comp.store_load_records(fp, count, rec_size)?;
+
+        let jade_total =
+            b!(self.comp.bld.build_int_mul(count, i64t.const_int(jade_size, false), "all.jade_total"));
+        let one = i64t.const_int(1, false);
+        let jade_alloc = b!(self.comp.bld.build_select(
+            b!(self.comp.bld.build_int_compare(
+                inkwell::IntPredicate::EQ, jade_total, i64t.const_int(0, false), "all.jade_isz"
+            )),
+            one, jade_total, "all.jade_alloc"
+        )).into_int_value();
+        let malloc_fn = self.comp.ensure_malloc();
+        let jade_buf = self.comp.call_result(
+            b!(self.comp.bld.build_call(malloc_fn, &[jade_alloc.into()], "all.jade"))
+        ).into_pointer_value();
+
+        let has_strings = sd.fields.iter().any(|f| matches!(f.ty, Type::String));
+
+        if has_strings {
+            let fv = self.comp.cur_fn.unwrap();
+            let idx_ptr = self.comp.entry_alloca(i64t.into(), "all.idx");
+            b!(self.comp.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+
+            let loop_bb = self.comp.ctx.append_basic_block(fv, "all.loop");
+            let body_bb = self.comp.ctx.append_basic_block(fv, "all.body");
+            let done_bb = self.comp.ctx.append_basic_block(fv, "all.done");
+
+            b!(self.comp.bld.build_unconditional_branch(loop_bb));
+            self.comp.bld.position_at_end(loop_bb);
+            let idx = b!(self.comp.bld.build_load(i64t, idx_ptr, "all.i")).into_int_value();
+            let cmp = b!(self.comp.bld.build_int_compare(inkwell::IntPredicate::ULT, idx, count, "all.cmp"));
+            b!(self.comp.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+            self.comp.bld.position_at_end(body_bb);
+            let raw_off = b!(self.comp.bld.build_int_mul(idx, i64t.const_int(rec_size, false), "all.roff"));
+            let raw_ptr = unsafe {
+                b!(self.comp.bld.build_gep(self.comp.ctx.i8_type(), raw_buf, &[raw_off], "all.rptr"))
+            };
+            let jade_val = self.comp.load_store_record_as_jade(rec_st, raw_ptr, &sd)?;
+            let jade_off = b!(self.comp.bld.build_int_mul(idx, i64t.const_int(jade_size, false), "all.joff"));
+            let jade_ptr = unsafe {
+                b!(self.comp.bld.build_gep(self.comp.ctx.i8_type(), jade_buf, &[jade_off], "all.jptr"))
+            };
+            b!(self.comp.bld.build_store(jade_ptr, jade_val));
+
+            let next_idx = b!(self.comp.bld.build_int_add(idx, i64t.const_int(1, false), "all.next"));
+            b!(self.comp.bld.build_store(idx_ptr, next_idx));
+            b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+            self.comp.bld.position_at_end(done_bb);
+        } else {
+            let total = b!(self.comp.bld.build_int_mul(count, i64t.const_int(rec_size, false), "all.total"));
+            let memcpy_fn = self.comp.ensure_memcpy();
+            b!(self.comp.bld.build_call(memcpy_fn, &[jade_buf.into(), raw_buf.into(), total.into()], ""));
+        }
+
+        let free_fn = self.comp.ensure_free();
+        b!(self.comp.bld.build_call(free_fn, &[raw_buf.into()], ""));
+
+        Ok(jade_buf.into())
     }
 
     fn emit_store_delete(
         &mut self,
-        store_name: &str,
+        encoded_name: &str,
+        args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        Err(format!("mir_codegen: store.delete() for '{store_name}' is not yet implemented"))
+        // Name format: {store_name}__{field}__{op}[__and/or_{field2}__{op2}]*
+        let parts: Vec<&str> = encoded_name.splitn(3, "__").collect();
+        if parts.len() < 3 || args.is_empty() {
+            return Ok(self.comp.ctx.i64_type().const_int(0, false).into());
+        }
+        let store_name = parts[0];
+        let field_name = parts[1];
+        // rest = "eq__and_stock__lt" → split on "__" → ["eq", "and_stock", "lt"]
+        let rest_parts: Vec<&str> = parts[2].split("__").collect();
+        let primary_op = Self::parse_filter_op(rest_parts[0]);
+
+        let sd = self.comp.store_defs.get(store_name)
+            .ok_or_else(|| format!("unknown store '{store_name}'"))?
+            .clone();
+
+        // Parse extra filter conditions from the name.
+        let mut extra_conds: Vec<(crate::ast::LogicalOp, String, crate::ast::BinOp)> = Vec::new();
+        let mut ri = 1;
+        while ri + 1 < rest_parts.len() {
+            let logic_field = rest_parts[ri]; // "and_stock" or "or_value"
+            let cop_str = rest_parts[ri + 1]; // "lt", "eq", etc.
+            let (lop, fname) = if let Some(f) = logic_field.strip_prefix("and_") {
+                (crate::ast::LogicalOp::And, f.to_string())
+            } else if let Some(f) = logic_field.strip_prefix("or_") {
+                (crate::ast::LogicalOp::Or, f.to_string())
+            } else {
+                ri += 1; continue;
+            };
+            let cop = Self::parse_filter_op(cop_str);
+            extra_conds.push((lop, fname, cop));
+            ri += 2;
+        }
+
+        let ensure_fn_name = format!("__store_ensure_{store_name}");
+        if let Some(ensure_fn) = self.comp.module.get_function(&ensure_fn_name) {
+            b!(self.comp.bld.build_call(ensure_fn, &[], ""));
+        } else {
+            let ensure_fn = self.comp.gen_store_ensure_open(&sd)?;
+            b!(self.comp.bld.build_call(ensure_fn, &[], ""));
+        }
+
+        let fp = self.comp.load_store_fp(store_name)?;
+        self.comp.store_lock(fp)?;
+        let i64t = self.comp.ctx.i64_type();
+        let i32t = self.comp.ctx.i32_type();
+
+        let rec_name = format!("__store_{store_name}_rec");
+        let st = self.comp.module.get_struct_type(&rec_name).unwrap();
+        let rec_size = self.comp.store_record_size(&sd);
+
+        let (field_idx, field_ty) = sd.fields.iter().enumerate()
+            .find(|(_, f)| f.name == field_name)
+            .map(|(i, f)| (i, f.ty.clone()))
+            .ok_or_else(|| format!("unknown field '{field_name}' in store '{store_name}'"))?;
+
+        let filter_val = self.val(args[0]);
+
+        let count = self.comp.store_read_count(fp)?;
+        let buf = self.comp.store_load_records(fp, count, rec_size)?;
+
+        // Rewrite file: close and reopen in w+b mode
+        let fclose_fn = self.comp.module.get_function("fclose").unwrap();
+        b!(self.comp.bld.build_call(fclose_fn, &[fp.into()], ""));
+
+        let filename = format!("{store_name}.store\0");
+        let file_str = b!(self.comp.bld.build_global_string_ptr(&filename, "del.path"));
+        let mode_wb = b!(self.comp.bld.build_global_string_ptr("w+b\0", "del.mode"));
+        let fopen_fn = self.comp.module.get_function("fopen").unwrap();
+        let new_fp = self.comp.call_result(
+            b!(self.comp.bld.build_call(fopen_fn,
+                &[file_str.as_pointer_value().into(), mode_wb.as_pointer_value().into()],
+                "del.fp"))
+        ).into_pointer_value();
+
+        let global_name = format!("__store_{store_name}_fp");
+        let global = self.comp.module.get_global(&global_name).unwrap();
+        b!(self.comp.bld.build_store(global.as_pointer_value(), new_fp));
+
+        // Write header: magic + count placeholder + rec_size
+        let fwrite_fn = self.comp.module.get_function("fwrite").unwrap();
+        let magic = b!(self.comp.bld.build_global_string_ptr("JADESTR\0", "del.magic"));
+        b!(self.comp.bld.build_call(fwrite_fn,
+            &[magic.as_pointer_value().into(), i64t.const_int(1, false).into(), i64t.const_int(8, false).into(), new_fp.into()],
+            ""));
+
+        let new_count_ptr = self.comp.entry_alloca(i64t.into(), "del.newcount");
+        b!(self.comp.bld.build_store(new_count_ptr, i64t.const_int(0, false)));
+        b!(self.comp.bld.build_call(fwrite_fn,
+            &[new_count_ptr.into(), i64t.const_int(8, false).into(), i64t.const_int(1, false).into(), new_fp.into()],
+            ""));
+
+        let rec_size_ptr = self.comp.entry_alloca(i64t.into(), "del.recsz");
+        b!(self.comp.bld.build_store(rec_size_ptr, i64t.const_int(rec_size, false)));
+        b!(self.comp.bld.build_call(fwrite_fn,
+            &[rec_size_ptr.into(), i64t.const_int(8, false).into(), i64t.const_int(1, false).into(), new_fp.into()],
+            ""));
+
+        // Loop: keep records that DON'T match the filter
+        let fv_fn = self.comp.cur_fn.unwrap();
+        let idx_ptr = self.comp.entry_alloca(i64t.into(), "del.idx");
+        b!(self.comp.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+
+        let loop_bb = self.comp.ctx.append_basic_block(fv_fn, "del.loop");
+        let body_bb = self.comp.ctx.append_basic_block(fv_fn, "del.body");
+        let keep_bb = self.comp.ctx.append_basic_block(fv_fn, "del.keep");
+        let skip_bb = self.comp.ctx.append_basic_block(fv_fn, "del.skip");
+        let done_bb = self.comp.ctx.append_basic_block(fv_fn, "del.done");
+
+        b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+        self.comp.bld.position_at_end(loop_bb);
+        let idx = b!(self.comp.bld.build_load(i64t, idx_ptr, "del.i")).into_int_value();
+        let cmp = b!(self.comp.bld.build_int_compare(inkwell::IntPredicate::ULT, idx, count, "del.cmp"));
+        b!(self.comp.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+        self.comp.bld.position_at_end(body_bb);
+        let offset = b!(self.comp.bld.build_int_mul(idx, i64t.const_int(rec_size, false), "del.off"));
+        let rec_ptr = unsafe {
+            b!(self.comp.bld.build_gep(self.comp.ctx.i8_type(), buf, &[offset], "del.rec"))
+        };
+
+        let matches = {
+            let extras: Vec<(crate::ast::LogicalOp, usize, Type, crate::ast::BinOp, BasicValueEnum<'ctx>)> =
+                extra_conds.iter().enumerate().map(|(ei, (lop, fname, cop))| {
+                    let (fi, ft) = sd.fields.iter().enumerate()
+                        .find(|(_, f)| f.name == *fname)
+                        .map(|(i, f)| (i, f.ty.clone()))
+                        .unwrap_or((0, Type::I64));
+                    let ev = self.val(args[1 + ei]);
+                    (*lop, fi, ft, *cop, ev)
+                }).collect();
+            self.comp.eval_store_filter(rec_ptr, st, field_idx, &field_ty, primary_op, filter_val, &extras)?
+        };
+        b!(self.comp.bld.build_conditional_branch(matches, skip_bb, keep_bb));
+
+        self.comp.bld.position_at_end(keep_bb);
+        b!(self.comp.bld.build_call(fwrite_fn,
+            &[rec_ptr.into(), i64t.const_int(rec_size, false).into(), i64t.const_int(1, false).into(), new_fp.into()],
+            ""));
+        let kept = b!(self.comp.bld.build_load(i64t, new_count_ptr, "kept")).into_int_value();
+        let kept_inc = b!(self.comp.bld.build_int_add(kept, i64t.const_int(1, false), "kept.inc"));
+        b!(self.comp.bld.build_store(new_count_ptr, kept_inc));
+        b!(self.comp.bld.build_unconditional_branch(skip_bb));
+
+        self.comp.bld.position_at_end(skip_bb);
+        let next_idx = b!(self.comp.bld.build_int_add(idx, i64t.const_int(1, false), "del.next"));
+        b!(self.comp.bld.build_store(idx_ptr, next_idx));
+        b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+        self.comp.bld.position_at_end(done_bb);
+        // Update count in header
+        let fseek_fn = self.comp.module.get_function("fseek").unwrap();
+        b!(self.comp.bld.build_call(fseek_fn,
+            &[new_fp.into(), i64t.const_int(8, false).into(), i32t.const_int(0, false).into()],
+            ""));
+        b!(self.comp.bld.build_call(fwrite_fn,
+            &[new_count_ptr.into(), i64t.const_int(8, false).into(), i64t.const_int(1, false).into(), new_fp.into()],
+            ""));
+
+        let free_fn = self.comp.ensure_free();
+        b!(self.comp.bld.build_call(free_fn, &[buf.into()], ""));
+
+        let fflush_fn = self.comp.module.get_function("fflush").unwrap();
+        b!(self.comp.bld.build_call(fflush_fn, &[new_fp.into()], ""));
+
+        self.comp.store_unlock(fp)?;
+        Ok(self.comp.ctx.i8_type().const_int(0, false).into())
     }
 
     fn emit_store_set(
         &mut self,
-        store_name: &str,
+        encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let _ = args;
-        Err(format!("mir_codegen: store.set() for '{store_name}' is not yet implemented"))
+        // Name format: {store_name}__{field}__{op}[__and/or_{f2}__{op2}]*__fields_{f1}_{f2}_...
+        // Split out the __fields_ suffix first.
+        let (filter_part, fields_part) = if let Some(pos) = encoded_name.find("__fields_") {
+            (&encoded_name[..pos], &encoded_name[pos + 9..]) // skip "__fields_"
+        } else {
+            return Err(format!("mir_codegen: malformed store.set name '{encoded_name}'"));
+        };
+
+        let field_names: Vec<&str> = fields_part.split('_').collect();
+
+        let parts: Vec<&str> = filter_part.splitn(3, "__").collect();
+        if parts.len() < 3 || args.is_empty() {
+            return Ok(self.comp.ctx.i64_type().const_int(0, false).into());
+        }
+        let store_name = parts[0];
+        let filter_field = parts[1];
+        let rest_parts: Vec<&str> = parts[2].split("__").collect();
+        let primary_op = Self::parse_filter_op(rest_parts[0]);
+
+        let sd = self.comp.store_defs.get(store_name)
+            .ok_or_else(|| format!("unknown store '{store_name}'"))?
+            .clone();
+
+        // Parse extra filter conditions.
+        let mut extra_conds: Vec<(crate::ast::LogicalOp, String, crate::ast::BinOp)> = Vec::new();
+        let mut ri = 1;
+        while ri + 1 < rest_parts.len() {
+            let logic_field = rest_parts[ri];
+            let cop_str = rest_parts[ri + 1];
+            let (lop, fname) = if let Some(f) = logic_field.strip_prefix("and_") {
+                (crate::ast::LogicalOp::And, f.to_string())
+            } else if let Some(f) = logic_field.strip_prefix("or_") {
+                (crate::ast::LogicalOp::Or, f.to_string())
+            } else {
+                ri += 1; continue;
+            };
+            let cop = Self::parse_filter_op(cop_str);
+            extra_conds.push((lop, fname, cop));
+            ri += 2;
+        }
+        let extra_count = extra_conds.len();
+
+        let ensure_fn_name = format!("__store_ensure_{store_name}");
+        if let Some(ensure_fn) = self.comp.module.get_function(&ensure_fn_name) {
+            b!(self.comp.bld.build_call(ensure_fn, &[], ""));
+        } else {
+            let ensure_fn = self.comp.gen_store_ensure_open(&sd)?;
+            b!(self.comp.bld.build_call(ensure_fn, &[], ""));
+        }
+
+        let fp = self.comp.load_store_fp(store_name)?;
+        self.comp.store_lock(fp)?;
+        let i64t = self.comp.ctx.i64_type();
+        let i32t = self.comp.ctx.i32_type();
+
+        let rec_name = format!("__store_{store_name}_rec");
+        let st = self.comp.module.get_struct_type(&rec_name).unwrap();
+        let rec_size = self.comp.store_record_size(&sd);
+
+        let (field_idx, field_ty) = sd.fields.iter().enumerate()
+            .find(|(_, f)| f.name == filter_field)
+            .map(|(i, f)| (i, f.ty.clone()))
+            .ok_or_else(|| format!("unknown field '{filter_field}' in store '{store_name}'"))?;
+
+        let filter_val = self.val(args[0]);
+        // args[1..1+extra_count] are extra filter vals
+        // args[1+extra_count..] are the field assignment values
+        let assign_start = 1 + extra_count;
+
+        // Pre-gather field assignment values
+        let mut assign_vals: Vec<(usize, &str, BasicValueEnum<'ctx>)> = Vec::new();
+        for (i, fname) in field_names.iter().enumerate() {
+            let arg_idx = assign_start + i;
+            if arg_idx >= args.len() { break; }
+            let val = self.val(args[arg_idx]);
+            let field_pos = sd.fields.iter().position(|f| f.name == *fname)
+                .ok_or_else(|| format!("unknown field '{fname}' in store '{store_name}'"))?;
+            assign_vals.push((field_pos, fname, val));
+        }
+
+        let fseek_fn = self.comp.module.get_function("fseek").unwrap();
+
+        let count = self.comp.store_read_count(fp)?;
+        let buf = self.comp.store_load_records(fp, count, rec_size)?;
+
+        let fv = self.comp.cur_fn.unwrap();
+        let idx_ptr = self.comp.entry_alloca(i64t.into(), "set.idx");
+        b!(self.comp.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+
+        let loop_bb = self.comp.ctx.append_basic_block(fv, "set.loop");
+        let body_bb = self.comp.ctx.append_basic_block(fv, "set.body");
+        let update_bb = self.comp.ctx.append_basic_block(fv, "set.update");
+        let next_bb = self.comp.ctx.append_basic_block(fv, "set.next");
+        let done_bb = self.comp.ctx.append_basic_block(fv, "set.done");
+
+        b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+        self.comp.bld.position_at_end(loop_bb);
+        let idx = b!(self.comp.bld.build_load(i64t, idx_ptr, "set.i")).into_int_value();
+        let cmp = b!(self.comp.bld.build_int_compare(
+            inkwell::IntPredicate::ULT, idx, count, "set.cmp"));
+        b!(self.comp.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+        self.comp.bld.position_at_end(body_bb);
+        let offset = b!(self.comp.bld.build_int_mul(idx, i64t.const_int(rec_size, false), "set.off"));
+        let rec_ptr = unsafe {
+            b!(self.comp.bld.build_gep(self.comp.ctx.i8_type(), buf, &[offset], "set.rec"))
+        };
+        let matches = {
+            let extras: Vec<(crate::ast::LogicalOp, usize, Type, crate::ast::BinOp, BasicValueEnum<'ctx>)> =
+                extra_conds.iter().enumerate().map(|(ei, (lop, fname, cop))| {
+                    let (fi, ft) = sd.fields.iter().enumerate()
+                        .find(|(_, f)| f.name == *fname)
+                        .map(|(i, f)| (i, f.ty.clone()))
+                        .unwrap_or((0, Type::I64));
+                    let ev = self.val(args[1 + ei]);
+                    (*lop, fi, ft, *cop, ev)
+                }).collect();
+            self.comp.eval_store_filter(rec_ptr, st, field_idx, &field_ty, primary_op, filter_val, &extras)?
+        };
+        b!(self.comp.bld.build_conditional_branch(matches, update_bb, next_bb));
+
+        self.comp.bld.position_at_end(update_bb);
+        for (fpos, _fname, val) in &assign_vals {
+            let fty = &sd.fields[*fpos].ty;
+            let gep = b!(self.comp.bld.build_struct_gep(st, rec_ptr, *fpos as u32, "set.assign"));
+            match fty {
+                Type::String => {
+                    self.comp.copy_string_to_fixed_buf(*val, gep)?;
+                }
+                _ => {
+                    b!(self.comp.bld.build_store(gep, *val));
+                }
+            }
+        }
+        b!(self.comp.bld.build_unconditional_branch(next_bb));
+
+        self.comp.bld.position_at_end(next_bb);
+        let next_idx = b!(self.comp.bld.build_int_add(idx, i64t.const_int(1, false), "set.next"));
+        b!(self.comp.bld.build_store(idx_ptr, next_idx));
+        b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+        self.comp.bld.position_at_end(done_bb);
+        b!(self.comp.bld.build_call(fseek_fn,
+            &[fp.into(), i64t.const_int(super::stores::HEADER_SIZE, false).into(), i32t.const_int(0, false).into()],
+            ""));
+        let fwrite_fn = self.comp.module.get_function("fwrite").unwrap();
+        b!(self.comp.bld.build_call(fwrite_fn,
+            &[buf.into(), i64t.const_int(rec_size, false).into(), count.into(), fp.into()],
+            ""));
+
+        let free_fn = self.comp.ensure_free();
+        b!(self.comp.bld.build_call(free_fn, &[buf.into()], ""));
+
+        let fflush_fn = self.comp.module.get_function("fflush").unwrap();
+        b!(self.comp.bld.build_call(fflush_fn, &[fp.into()], ""));
+
+        self.comp.store_unlock(fp)?;
+        Ok(self.comp.ctx.i8_type().const_int(0, false).into())
+    }
+
+    /// Parse a filter op string back to a BinOp.
+    fn parse_filter_op(s: &str) -> crate::ast::BinOp {
+        match s {
+            "eq" => crate::ast::BinOp::Eq,
+            "ne" => crate::ast::BinOp::Ne,
+            "lt" => crate::ast::BinOp::Lt,
+            "le" => crate::ast::BinOp::Le,
+            "gt" => crate::ast::BinOp::Gt,
+            "ge" => crate::ast::BinOp::Ge,
+            _ => crate::ast::BinOp::Eq,
+        }
     }
 
     /// Handle overflow builtins that MIR lowered as `__builtin_WrappingAdd` etc.
@@ -2843,6 +3953,152 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             Some(n) => n,
             None => return Ok(None),
         };
+        // ── Bit intrinsics (1 arg) ──
+        match builtin_name {
+            "Bswap" | "Popcount" | "Clz" | "Ctz" | "RotateLeft" | "RotateRight" => {
+                return self.try_handle_bit_builtin(builtin_name, args);
+            }
+            "Likely" | "Unlikely" => {
+                if args.is_empty() { return Ok(None); }
+                let cond = self.val(args[0]);
+                let i1ty = self.comp.ctx.bool_type();
+                let ft = i1ty.fn_type(&[i1ty.into(), i1ty.into()], false);
+                let expect_fn = self.comp.module.get_function("llvm.expect.i1")
+                    .unwrap_or_else(|| self.comp.module.add_function("llvm.expect.i1", ft, None));
+                let expected = if builtin_name == "Likely" {
+                    i1ty.const_int(1, false)
+                } else {
+                    i1ty.const_int(0, false)
+                };
+                let r = b!(self.comp.bld.build_call(expect_fn, &[cond.into(), expected.into()], "expect"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
+            }
+            "PoolNew" => {
+                if args.len() != 2 { return Ok(None); }
+                let obj_size = self.val(args[0]).into_int_value();
+                let count = self.val(args[1]).into_int_value();
+                let ptr_t = self.comp.ctx.ptr_type(AddressSpace::default());
+                let i64t = self.comp.ctx.i64_type();
+                let ft = ptr_t.fn_type(&[i64t.into(), i64t.into()], false);
+                let func = self.comp.module.get_function("jade_pool_create")
+                    .unwrap_or_else(|| self.comp.module.add_function("jade_pool_create", ft, Some(Linkage::External)));
+                let r = b!(self.comp.bld.build_call(func, &[obj_size.into(), count.into()], "pool.new"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
+            }
+            "PoolAlloc" => {
+                if args.is_empty() { return Ok(None); }
+                let pool_ptr = self.val(args[0]).into_pointer_value();
+                let ptr_t = self.comp.ctx.ptr_type(AddressSpace::default());
+                let ft = ptr_t.fn_type(&[ptr_t.into()], false);
+                let func = self.comp.module.get_function("jade_pool_alloc")
+                    .unwrap_or_else(|| self.comp.module.add_function("jade_pool_alloc", ft, Some(Linkage::External)));
+                let r = b!(self.comp.bld.build_call(func, &[pool_ptr.into()], "pool.alloc"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
+            }
+            "PoolFree" => {
+                if args.len() != 2 { return Ok(None); }
+                let pool_ptr = self.val(args[0]).into_pointer_value();
+                let obj_ptr = self.val(args[1]).into_pointer_value();
+                let ptr_t = self.comp.ctx.ptr_type(AddressSpace::default());
+                let void_t = self.comp.ctx.void_type();
+                let ft = void_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
+                let func = self.comp.module.get_function("jade_pool_free")
+                    .unwrap_or_else(|| self.comp.module.add_function("jade_pool_free", ft, Some(Linkage::External)));
+                b!(self.comp.bld.build_call(func, &[pool_ptr.into(), obj_ptr.into()], ""));
+                return Ok(Some(self.comp.ctx.i64_type().const_int(0, false).into()));
+            }
+            "PoolDestroy" => {
+                if args.is_empty() { return Ok(None); }
+                let pool_ptr = self.val(args[0]).into_pointer_value();
+                let ptr_t = self.comp.ctx.ptr_type(AddressSpace::default());
+                let void_t = self.comp.ctx.void_type();
+                let ft = void_t.fn_type(&[ptr_t.into()], false);
+                let func = self.comp.module.get_function("jade_pool_destroy")
+                    .unwrap_or_else(|| self.comp.module.add_function("jade_pool_destroy", ft, Some(Linkage::External)));
+                b!(self.comp.bld.build_call(func, &[pool_ptr.into()], ""));
+                return Ok(Some(self.comp.ctx.i64_type().const_int(0, false).into()));
+            }
+            "ToString" => {
+                if args.is_empty() { return Ok(None); }
+                let val = self.val(args[0]);
+                let val_ty = self.value_types.get(&args[0]).cloned().unwrap_or(Type::I64);
+                return Ok(Some(self.emit_to_string(val, &val_ty)?));
+            }
+            "FmtHex" => {
+                if args.is_empty() { return Ok(None); }
+                let val = self.val(args[0]).into_int_value();
+                let i64t = self.comp.ctx.i64_type();
+                let wide = if val.get_type().get_bit_width() < 64 {
+                    b!(self.comp.bld.build_int_s_extend(val, i64t, "fw")).into()
+                } else { val.into() };
+                return Ok(Some(self.comp.snprintf_to_string("%lx", &[wide], "fh")?));
+            }
+            "FmtOct" => {
+                if args.is_empty() { return Ok(None); }
+                let val = self.val(args[0]).into_int_value();
+                let i64t = self.comp.ctx.i64_type();
+                let wide = if val.get_type().get_bit_width() < 64 {
+                    b!(self.comp.bld.build_int_s_extend(val, i64t, "fw")).into()
+                } else { val.into() };
+                return Ok(Some(self.comp.snprintf_to_string("%lo", &[wide], "fo")?));
+            }
+            "FmtBin" => {
+                if args.is_empty() { return Ok(None); }
+                let val = self.val(args[0]).into_int_value();
+                return Ok(Some(self.emit_fmt_bin(val)?));
+            }
+            "FmtFloat" => {
+                if args.len() < 2 { return Ok(None); }
+                let x = self.val(args[0]).into_float_value();
+                let decimals = self.val(args[1]).into_int_value();
+                let dec_i32 = b!(self.comp.bld.build_int_truncate(decimals, self.comp.ctx.i32_type(), "dec32"));
+                return Ok(Some(self.comp.snprintf_to_string("%.*f", &[dec_i32.into(), x.into()], "ff")?));
+            }
+            "TimeMonotonic" => {
+                return Ok(Some(self.comp.compile_time_monotonic()?));
+            }
+            "SleepMs" => {
+                if args.is_empty() { return Ok(None); }
+                let ms = self.val(args[0]).into_int_value();
+                return Ok(Some(self.emit_sleep_ms(ms)?));
+            }
+            "GetArgs" => {
+                return Ok(Some(self.comp.compile_get_args()?));
+            }
+            "StringFromRaw" => {
+                if args.len() < 2 { return Ok(None); }
+                let ptr = self.val(args[0]);
+                let len = self.val(args[1]);
+                let cap = if args.len() > 2 { self.val(args[2]) } else { len };
+                return Ok(Some(self.comp.build_string(ptr, len, cap, "sfr")?));
+            }
+            "StringFromPtr" => {
+                if args.is_empty() { return Ok(None); }
+                let ptr = self.val(args[0]);
+                let i64t = self.comp.ctx.i64_type();
+                let ptr_ty = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                let strlen = self.comp.module.get_function("strlen").unwrap_or_else(|| {
+                    self.comp.module.add_function(
+                        "strlen",
+                        i64t.fn_type(&[ptr_ty.into()], false),
+                        Some(inkwell::module::Linkage::External),
+                    )
+                });
+                let len = b!(self.comp.bld.build_call(strlen, &[ptr.into()], "sfp.len"))
+                    .try_as_basic_value().basic().unwrap().into_int_value();
+                let size = b!(self.comp.bld.build_int_nsw_add(len, i64t.const_int(1, false), "sfp.sz"));
+                let malloc = self.comp.ensure_malloc();
+                let buf = b!(self.comp.bld.build_call(malloc, &[size.into()], "sfp.buf"))
+                    .try_as_basic_value().basic().unwrap();
+                let memcpy = self.comp.ensure_memcpy();
+                b!(self.comp.bld.build_call(memcpy, &[buf.into(), ptr.into(), size.into()], ""));
+                return Ok(Some(self.comp.build_string(buf, len, size, "sfp")?));
+            }
+            _ => {}
+        }
         if args.len() != 2 {
             return Ok(None);
         }
@@ -2919,5 +4175,204 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             _ => return Ok(None),
         };
         Ok(Some(result.into()))
+    }
+
+    /// Handle bit intrinsics: bswap, popcount, clz, ctz, rotate_left, rotate_right.
+    fn try_handle_bit_builtin(
+        &mut self,
+        name: &str,
+        args: &[mir::ValueId],
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        if args.is_empty() {
+            return Ok(None);
+        }
+        let val = self.val(args[0]).into_int_value();
+        let bw = val.get_type().get_bit_width();
+        let it = val.get_type();
+        match name {
+            "Bswap" => {
+                let llvm_name = format!("llvm.bswap.i{bw}");
+                let ft = it.fn_type(&[it.into()], false);
+                let f = self.comp.module.get_function(&llvm_name)
+                    .unwrap_or_else(|| self.comp.module.add_function(&llvm_name, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[val.into()], "bswap"))
+                    .try_as_basic_value().basic().unwrap();
+                Ok(Some(r))
+            }
+            "Popcount" => {
+                let llvm_name = format!("llvm.ctpop.i{bw}");
+                let ft = it.fn_type(&[it.into()], false);
+                let f = self.comp.module.get_function(&llvm_name)
+                    .unwrap_or_else(|| self.comp.module.add_function(&llvm_name, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[val.into()], "popcount"))
+                    .try_as_basic_value().basic().unwrap();
+                Ok(Some(r))
+            }
+            "Clz" => {
+                let llvm_name = format!("llvm.ctlz.i{bw}");
+                let false_val = self.comp.ctx.bool_type().const_int(0, false);
+                let ft = it.fn_type(&[it.into(), self.comp.ctx.bool_type().into()], false);
+                let f = self.comp.module.get_function(&llvm_name)
+                    .unwrap_or_else(|| self.comp.module.add_function(&llvm_name, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[val.into(), false_val.into()], "clz"))
+                    .try_as_basic_value().basic().unwrap();
+                Ok(Some(r))
+            }
+            "Ctz" => {
+                let llvm_name = format!("llvm.cttz.i{bw}");
+                let false_val = self.comp.ctx.bool_type().const_int(0, false);
+                let ft = it.fn_type(&[it.into(), self.comp.ctx.bool_type().into()], false);
+                let f = self.comp.module.get_function(&llvm_name)
+                    .unwrap_or_else(|| self.comp.module.add_function(&llvm_name, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[val.into(), false_val.into()], "ctz"))
+                    .try_as_basic_value().basic().unwrap();
+                Ok(Some(r))
+            }
+            "RotateLeft" => {
+                if args.len() < 2 { return Ok(None); }
+                let amt = self.val(args[1]).into_int_value();
+                let llvm_name = format!("llvm.fshl.i{bw}");
+                let ft = it.fn_type(&[it.into(), it.into(), it.into()], false);
+                let f = self.comp.module.get_function(&llvm_name)
+                    .unwrap_or_else(|| self.comp.module.add_function(&llvm_name, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[val.into(), val.into(), amt.into()], "rotl"))
+                    .try_as_basic_value().basic().unwrap();
+                Ok(Some(r))
+            }
+            "RotateRight" => {
+                if args.len() < 2 { return Ok(None); }
+                let amt = self.val(args[1]).into_int_value();
+                let llvm_name = format!("llvm.fshr.i{bw}");
+                let ft = it.fn_type(&[it.into(), it.into(), it.into()], false);
+                let f = self.comp.module.get_function(&llvm_name)
+                    .unwrap_or_else(|| self.comp.module.add_function(&llvm_name, ft, None));
+                let r = b!(self.comp.bld.build_call(f, &[val.into(), val.into(), amt.into()], "rotr"))
+                    .try_as_basic_value().basic().unwrap();
+                Ok(Some(r))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Convert a value to a String, matching HIR codegen's compile_to_string.
+    fn emit_to_string(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        match ty {
+            Type::String => Ok(val),
+            Type::I64 | Type::I32 | Type::I16 | Type::I8 => self.comp.int_to_string(val, false),
+            Type::U64 | Type::U32 | Type::U16 | Type::U8 => self.comp.int_to_string(val, true),
+            Type::F64 | Type::F32 => self.comp.float_to_string(val),
+            Type::Bool => self.comp.bool_to_string(val),
+            Type::Struct(name, _) => {
+                let fn_name = format!("{name}_display");
+                if let Some((fv, _, _)) = self.comp.fns.get(&fn_name).cloned() {
+                    let first_param_is_ptr = fv.get_type().get_param_types().first()
+                        .map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let self_arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !val.is_pointer_value() {
+                        let tmp = self.comp.entry_alloca(val.get_type(), "display.self");
+                        b!(self.comp.bld.build_store(tmp, val));
+                        tmp.into()
+                    } else { val };
+                    let result = b!(self.comp.bld.build_call(fv, &[self_arg.into()], "display.call"))
+                        .try_as_basic_value().basic().unwrap();
+                    Ok(result)
+                } else {
+                    self.comp.int_to_string(val, false)
+                }
+            }
+            _ => self.comp.int_to_string(val, false),
+        }
+    }
+
+    fn emit_fmt_bin(
+        &mut self,
+        val: inkwell::values::IntValue<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.comp.ctx.i64_type();
+        let i8t = self.comp.ctx.i8_type();
+        let malloc = self.comp.ensure_malloc();
+        let buf = b!(self.comp.bld.build_call(malloc, &[i64t.const_int(65, false).into()], "fb.buf"))
+            .try_as_basic_value().basic().unwrap();
+        let buf_ptr = buf.into_pointer_value();
+
+        let fv = self.comp.cur_fn.unwrap();
+        let loop_bb = self.comp.ctx.append_basic_block(fv, "fb.loop");
+        let body_bb = self.comp.ctx.append_basic_block(fv, "fb.body");
+        let done_bb = self.comp.ctx.append_basic_block(fv, "fb.done");
+
+        let wide = if val.get_type().get_bit_width() < 64 {
+            b!(self.comp.bld.build_int_z_extend(val, i64t, "fb.w"))
+        } else { val };
+
+        let clz_name = "llvm.ctlz.i64";
+        let clz = self.comp.module.get_function(clz_name).unwrap_or_else(|| {
+            let ft = i64t.fn_type(&[i64t.into(), self.comp.ctx.bool_type().into()], false);
+            self.comp.module.add_function(clz_name, ft, None)
+        });
+        let lz = b!(self.comp.bld.build_call(clz, &[wide.into(), self.comp.ctx.bool_type().const_int(1, false).into()], "fb.lz"))
+            .try_as_basic_value().basic().unwrap().into_int_value();
+        let raw_bits = b!(self.comp.bld.build_int_nsw_sub(i64t.const_int(64, false), lz, "fb.nb"));
+        let is_zero = b!(self.comp.bld.build_int_compare(inkwell::IntPredicate::EQ, wide, i64t.const_int(0, false), "fb.z"));
+        let nbits = b!(self.comp.bld.build_select(is_zero, i64t.const_int(1, false), raw_bits, "fb.bits")).into_int_value();
+
+        let idx_ptr = self.comp.entry_alloca(i64t.into(), "fb.idx");
+        b!(self.comp.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let bit_ptr = self.comp.entry_alloca(i64t.into(), "fb.bit");
+        b!(self.comp.bld.build_store(bit_ptr, b!(self.comp.bld.build_int_nsw_sub(nbits, i64t.const_int(1, false), "fb.start"))));
+        b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+        self.comp.bld.position_at_end(loop_bb);
+        let idx = b!(self.comp.bld.build_load(i64t, idx_ptr, "fb.i")).into_int_value();
+        let cond = b!(self.comp.bld.build_int_compare(inkwell::IntPredicate::SLT, idx, nbits, "fb.cond"));
+        b!(self.comp.bld.build_conditional_branch(cond, body_bb, done_bb));
+
+        self.comp.bld.position_at_end(body_bb);
+        let bit = b!(self.comp.bld.build_load(i64t, bit_ptr, "fb.b")).into_int_value();
+        let shifted = b!(self.comp.bld.build_right_shift(wide, bit, false, "fb.sh"));
+        let masked = b!(self.comp.bld.build_and(shifted, i64t.const_int(1, false), "fb.m"));
+        let ch = b!(self.comp.bld.build_int_nsw_add(
+            b!(self.comp.bld.build_int_truncate(masked, i8t, "fb.trunc")),
+            i8t.const_int(b'0' as u64, false), "fb.ch"));
+        let dest = unsafe { b!(self.comp.bld.build_gep(i8t, buf_ptr, &[idx], "fb.p")) };
+        b!(self.comp.bld.build_store(dest, ch));
+        let next_idx = b!(self.comp.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "fb.ni"));
+        b!(self.comp.bld.build_store(idx_ptr, next_idx));
+        let next_bit = b!(self.comp.bld.build_int_nsw_sub(bit, i64t.const_int(1, false), "fb.nb2"));
+        b!(self.comp.bld.build_store(bit_ptr, next_bit));
+        b!(self.comp.bld.build_unconditional_branch(loop_bb));
+
+        self.comp.bld.position_at_end(done_bb);
+        let end = unsafe { b!(self.comp.bld.build_gep(i8t, buf_ptr, &[nbits], "fb.end")) };
+        b!(self.comp.bld.build_store(end, i8t.const_int(0, false)));
+        self.comp.build_string(buf, nbits, b!(self.comp.bld.build_int_nsw_add(nbits, i64t.const_int(1, false), "fb.cap")), "fb.s")
+    }
+
+    fn emit_sleep_ms(
+        &mut self,
+        ms: inkwell::values::IntValue<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i32t = self.comp.ctx.i32_type();
+        let i64t = self.comp.ctx.i64_type();
+        let ptr_ty = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+        let nanosleep = self.comp.module.get_function("nanosleep").unwrap_or_else(|| {
+            self.comp.module.add_function("nanosleep",
+                i32t.fn_type(&[ptr_ty.into(), ptr_ty.into()], false),
+                Some(inkwell::module::Linkage::External))
+        });
+        let ts_ty = self.comp.ctx.struct_type(&[i64t.into(), i64t.into()], false);
+        let ts = self.comp.entry_alloca(ts_ty.into(), "sleep.ts");
+        let secs = b!(self.comp.bld.build_int_unsigned_div(ms, i64t.const_int(1000, false), "sleep.s"));
+        let ns = b!(self.comp.bld.build_int_unsigned_rem(ms, i64t.const_int(1000, false), "sleep.rem"));
+        let ns_full = b!(self.comp.bld.build_int_mul(ns, i64t.const_int(1_000_000, false), "sleep.ns"));
+        let s_ptr = b!(self.comp.bld.build_struct_gep(ts_ty, ts, 0, "sleep.sp"));
+        b!(self.comp.bld.build_store(s_ptr, secs));
+        let n_ptr = b!(self.comp.bld.build_struct_gep(ts_ty, ts, 1, "sleep.np"));
+        b!(self.comp.bld.build_store(n_ptr, ns_full));
+        let null = ptr_ty.const_null();
+        b!(self.comp.bld.build_call(nanosleep, &[ts.into(), null.into()], ""));
+        Ok(i64t.const_int(0, false).into())
     }
 }
