@@ -212,14 +212,14 @@ fn fn_signature(f: &ast::Fn) -> String {
         .params
         .iter()
         .map(|p| match &p.ty {
-            Some(t) => format!("{}: {t}", p.name),
+            Some(t) => format!("{} as {t}", p.name),
             None => p.name.clone(),
         })
         .collect();
     let ret = f
         .ret
         .as_ref()
-        .map(|t| format!(" -> {t}"))
+        .map(|t| format!(" returns {t}"))
         .unwrap_or_default();
     format!("*{}({}){}", f.name, params.join(", "), ret)
 }
@@ -228,9 +228,9 @@ fn extern_signature(ef: &ast::ExternFn) -> String {
     let params: Vec<String> = ef
         .params
         .iter()
-        .map(|(name, ty)| format!("{name}: {ty}"))
+        .map(|(name, ty)| format!("{name} as {ty}"))
         .collect();
-    let ret = format!(" -> {}", ef.ret);
+    let ret = format!(" returns {}", ef.ret);
     format!("extern *{}({}){}", ef.name, params.join(", "), ret)
 }
 

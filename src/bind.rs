@@ -72,6 +72,7 @@ fn strip_preprocessor(src: &str) -> String {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum CDecl {
     Function(CFn),
     Struct(String),

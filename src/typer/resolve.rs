@@ -265,7 +265,8 @@ impl Typer {
                 }
             }
 
-            let trait_sigs = self.traits.get(trait_name).cloned().unwrap();
+            let trait_sigs = self.traits.get(trait_name).cloned()
+                .unwrap_or_else(|| panic!("ICE: trait '{}' not found during impl validation", trait_name));
             let impl_method_names: Vec<&str> = ib.methods.iter().map(|m| m.name.as_str()).collect();
             for sig in &trait_sigs {
                 if !sig.has_default && !impl_method_names.contains(&sig.name.as_str()) {

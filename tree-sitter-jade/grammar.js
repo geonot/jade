@@ -78,7 +78,7 @@ module.exports = grammar({
         "(",
         optional(field("parameters", $.parameter_list)),
         ")",
-        optional(seq(choice("->", "returns"), field("return_type", $.type_annotation))),
+        optional(seq("returns", field("return_type", $.type_annotation))),
         $._newline,
         field("body", $.block),
       ),
@@ -88,7 +88,7 @@ module.exports = grammar({
     parameter: ($) =>
       seq(
         field("name", $.identifier),
-        optional(seq(choice(":", "as"), field("type", $.type_annotation))),
+        optional(seq("as", field("type", $.type_annotation))),
         optional(seq("is", field("default", $._expression))),
       ),
 
@@ -108,7 +108,7 @@ module.exports = grammar({
       prec.left(seq($.identifier, "of", commaSep1($.type_annotation))),
 
     function_type: ($) =>
-      seq("(", commaSep($.type_annotation), ")", choice("->", "returns"), $.type_annotation),
+      seq("(", commaSep($.type_annotation), ")", "returns", $.type_annotation),
 
     simd_type: ($) =>
       seq("SIMD", "of", $.type_annotation, ",", $.integer),
@@ -133,7 +133,7 @@ module.exports = grammar({
     field_definition: ($) =>
       seq(
         field("name", $.identifier),
-        optional(seq(choice(":", "as"), field("type", $.type_annotation))),
+        optional(seq("as", field("type", $.type_annotation))),
         optional(seq("is", field("default", $._expression))),
         $._newline,
       ),
@@ -509,11 +509,11 @@ module.exports = grammar({
         ["/", PREC.MUL],
         ["%", PREC.MUL],
         ["mod", PREC.MUL],
-        ["**", PREC.EXP],
+        ["pow", PREC.EXP],
       ];
       return choice(
         ...table.map(([op, p]) => {
-          const assoc = op === "**" ? prec.right : prec.left;
+          const assoc = op === "pow" ? prec.right : prec.left;
           return assoc(p, seq(
             field("left", $._expression),
             field("operator", alias(op, $.operator)),
@@ -615,13 +615,13 @@ module.exports = grammar({
 
     lambda_expression: ($) =>
       choice(
-        // *fn(x) expr
-        seq("*", "fn", "(", optional(field("parameters", $.parameter_list)), ")",
-          optional(seq(choice("->", "returns"), field("return_type", $.type_annotation))),
+        // |x| expr
+        seq("|", optional(field("parameters", $.parameter_list)), "|",
+          optional(seq("returns", field("return_type", $.type_annotation))),
           field("body", $._expression)),
-        // *fn(x) do ... end
-        seq("*", "fn", "(", optional(field("parameters", $.parameter_list)), ")",
-          optional(seq(choice("->", "returns"), field("return_type", $.type_annotation))),
+        // |x| do ... end
+        seq("|", optional(field("parameters", $.parameter_list)), "|",
+          optional(seq("returns", field("return_type", $.type_annotation))),
           "do",
           field("body", $.do_end_body)),
       ),

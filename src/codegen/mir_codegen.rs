@@ -795,7 +795,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             mir::InstKind::IndirectCall(callee, args) => {
                 let callee_val = self.val(*callee);
                 // Closure call: callee is a {fn_ptr, env_ptr} struct.
-                let closure_ty = self.comp.closure_type();
+                let _closure_ty = self.comp.closure_type();
                 let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
                 let fn_ptr = b!(self.comp.bld.build_extract_value(
                     callee_val.into_struct_value(),
@@ -2569,18 +2569,6 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         (target_idx * 8) as u64
     }
 
-    /// Check if a specific payload field index in an enum is a recursive reference.
-    fn is_recursive_enum_field(&self, enum_name: &str, field_idx: usize) -> bool {
-        if let Some(variants) = self.comp.enums.get(enum_name) {
-            for (_, field_types) in variants {
-                if let Some(fty) = field_types.get(field_idx) {
-                    return Compiler::is_recursive_field(fty, enum_name);
-                }
-            }
-        }
-        false
-    }
-
     /// Emit dynamic dispatch: fat pointer vtable lookup and indirect call.
     fn emit_dyn_dispatch(
         &mut self,
@@ -2821,7 +2809,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         &mut self,
         name: &str,
         args: &[mir::ValueId],
-        result_ty: &Type,
+        _result_ty: &Type,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
         // ── Coroutine create ──
         if let Some(coro_name) = name.strip_prefix("__coro_create_") {
@@ -2950,6 +2938,133 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 return Ok(Some(self.comp.ctx.i8_type().const_int(0, false).into()));
             }
         }
+        // ── Atomic operations ──
+        if name == "__atomic_load" {
+            if let Some(&ptr_val) = args.first() {
+                let ptr = self.val(ptr_val).into_pointer_value();
+                let i64t = self.comp.ctx.i64_type();
+                let load = b!(self.comp.bld.build_load(i64t, ptr, "atomic.load"));
+                load.as_instruction_value()
+                    .unwrap()
+                    .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                    .map_err(|_| "failed to set atomic ordering")?;
+                return Ok(Some(load));
+            }
+        }
+        if name == "__atomic_store" {
+            if args.len() >= 2 {
+                let ptr = self.val(args[0]).into_pointer_value();
+                let val = self.val(args[1]);
+                let store = b!(self.comp.bld.build_store(ptr, val));
+                store
+                    .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                    .map_err(|_| "failed to set atomic ordering")?;
+                return Ok(Some(self.comp.ctx.i64_type().const_zero().into()));
+            }
+        }
+        if name == "__atomic_add" {
+            if args.len() >= 2 {
+                let ptr = self.val(args[0]).into_pointer_value();
+                let val = self.val(args[1]).into_int_value();
+                let old = b!(self.comp.bld.build_atomicrmw(
+                    inkwell::AtomicRMWBinOp::Add,
+                    ptr, val,
+                    inkwell::AtomicOrdering::SequentiallyConsistent,
+                ));
+                return Ok(Some(old.into()));
+            }
+        }
+        if name == "__atomic_sub" {
+            if args.len() >= 2 {
+                let ptr = self.val(args[0]).into_pointer_value();
+                let val = self.val(args[1]).into_int_value();
+                let old = b!(self.comp.bld.build_atomicrmw(
+                    inkwell::AtomicRMWBinOp::Sub,
+                    ptr, val,
+                    inkwell::AtomicOrdering::SequentiallyConsistent,
+                ));
+                return Ok(Some(old.into()));
+            }
+        }
+        if name == "__atomic_cas" {
+            if args.len() >= 3 {
+                let ptr = self.val(args[0]).into_pointer_value();
+                let expected = self.val(args[1]).into_int_value();
+                let new_val = self.val(args[2]).into_int_value();
+                let cas = b!(self.comp.bld.build_cmpxchg(
+                    ptr, expected, new_val,
+                    inkwell::AtomicOrdering::SequentiallyConsistent,
+                    inkwell::AtomicOrdering::SequentiallyConsistent,
+                ));
+                let old = b!(self.comp.bld.build_extract_value(cas, 0, "cas.old"));
+                return Ok(Some(old));
+            }
+        }
+        // ── COW operations ──
+        if name == "__cow_wrap" {
+            if let Some(&inner_val_id) = args.first() {
+                let val = self.val(inner_val_id);
+                let inner_ty = self.value_types.get(&inner_val_id).cloned().unwrap_or(Type::I64);
+                let data_ty = self.comp.llvm_ty(&inner_ty);
+                let i64t = self.comp.ctx.i64_type();
+                let cow_st = self.comp.ctx.struct_type(&[i64t.into(), data_ty], false);
+                let malloc = self.comp.ensure_malloc();
+                let size = cow_st.size_of().unwrap();
+                let ptr = b!(self.comp.bld.build_call(malloc, &[size.into()], "cow.alloc"))
+                    .try_as_basic_value().basic().unwrap().into_pointer_value();
+                let rc_gep = b!(self.comp.bld.build_struct_gep(cow_st, ptr, 0, "cow.rc"));
+                b!(self.comp.bld.build_store(rc_gep, i64t.const_int(1, false)));
+                let data_gep = b!(self.comp.bld.build_struct_gep(cow_st, ptr, 1, "cow.data"));
+                b!(self.comp.bld.build_store(data_gep, val));
+                return Ok(Some(ptr.into()));
+            }
+        }
+        if name == "__cow_clone" {
+            if let Some(&inner_val_id) = args.first() {
+                let cow_ptr = self.val(inner_val_id).into_pointer_value();
+                let cow_ty = self.value_types.get(&inner_val_id).cloned().unwrap_or(Type::I64);
+                let inner_ty = match &cow_ty {
+                    Type::Cow(t) => t.as_ref().clone(),
+                    other => other.clone(),
+                };
+                let data_ty = self.comp.llvm_ty(&inner_ty);
+                let i64t = self.comp.ctx.i64_type();
+                let cow_st = self.comp.ctx.struct_type(&[i64t.into(), data_ty], false);
+
+                let rc_gep = b!(self.comp.bld.build_struct_gep(cow_st, cow_ptr, 0, "cow.rcp"));
+                let rc = b!(self.comp.bld.build_load(i64t, rc_gep, "cow.rc")).into_int_value();
+                let needs_clone = b!(self.comp.bld.build_int_compare(
+                    inkwell::IntPredicate::UGT, rc, i64t.const_int(1, false), "cow.shared"
+                ));
+
+                let fn_val = self.comp.cur_fn.unwrap();
+                let clone_bb = self.comp.ctx.append_basic_block(fn_val, "cow.clone");
+                let done_bb = self.comp.ctx.append_basic_block(fn_val, "cow.done");
+                let cur_bb = self.comp.bld.get_insert_block().unwrap();
+                b!(self.comp.bld.build_conditional_branch(needs_clone, clone_bb, done_bb));
+
+                self.comp.bld.position_at_end(clone_bb);
+                let malloc = self.comp.ensure_malloc();
+                let size = cow_st.size_of().unwrap();
+                let new_ptr = b!(self.comp.bld.build_call(malloc, &[size.into()], "cow.new"))
+                    .try_as_basic_value().basic().unwrap().into_pointer_value();
+                let new_rc = b!(self.comp.bld.build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
+                b!(self.comp.bld.build_store(new_rc, i64t.const_int(1, false)));
+                let new_data = b!(self.comp.bld.build_struct_gep(cow_st, new_ptr, 1, "cow.ndata"));
+                let old_data = b!(self.comp.bld.build_struct_gep(cow_st, cow_ptr, 1, "cow.odata"));
+                let old_val = b!(self.comp.bld.build_load(data_ty, old_data, "cow.oval"));
+                b!(self.comp.bld.build_store(new_data, old_val));
+                let dec = b!(self.comp.bld.build_int_sub(rc, i64t.const_int(1, false), "cow.dec"));
+                b!(self.comp.bld.build_store(rc_gep, dec));
+                b!(self.comp.bld.build_unconditional_branch(done_bb));
+
+                self.comp.bld.position_at_end(done_bb);
+                let ptr_t = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                let phi = b!(self.comp.bld.build_phi(ptr_t, "cow.result"));
+                phi.add_incoming(&[(&cow_ptr, cur_bb), (&new_ptr, clone_bb)]);
+                return Ok(Some(phi.as_basic_value()));
+            }
+        }
         Ok(None)
     }
 
@@ -2962,7 +3077,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = self.comp.ctx.ptr_type(AddressSpace::default());
-        let i64t = self.comp.ctx.i64_type();
+        let _i64t = self.comp.ctx.i64_type();
 
         // Try to find the body in extracted HIR coroutine bodies
         if let Some(body) = self.coro_bodies.get(name).cloned() {
@@ -4096,6 +4211,110 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let memcpy = self.comp.ensure_memcpy();
                 b!(self.comp.bld.build_call(memcpy, &[buf.into(), ptr.into(), size.into()], ""));
                 return Ok(Some(self.comp.build_string(buf, len, size, "sfp")?));
+            }
+            "VolatileLoad" => {
+                if args.is_empty() { return Ok(None); }
+                let ptr = self.val(args[0]).into_pointer_value();
+                let i64t = self.comp.ctx.i64_type();
+                let load = b!(self.comp.bld.build_load(i64t, ptr, "vload"));
+                load.as_instruction_value().unwrap().set_volatile(true).unwrap();
+                return Ok(Some(load));
+            }
+            "VolatileStore" => {
+                if args.len() < 2 { return Ok(None); }
+                let ptr = self.val(args[0]).into_pointer_value();
+                let val = self.val(args[1]).into_int_value();
+                let store_inst = b!(self.comp.bld.build_store(ptr, val));
+                store_inst.set_volatile(true).unwrap();
+                return Ok(Some(self.comp.ctx.i64_type().const_int(0, false).into()));
+            }
+            "SignalHandle" => {
+                if args.len() < 2 { return Ok(None); }
+                let signum = self.val(args[0]).into_int_value();
+                let handler = self.val(args[1]).into_pointer_value();
+                let ptr_t = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                let i32t = self.comp.ctx.i32_type();
+                let ft = ptr_t.fn_type(&[i32t.into(), ptr_t.into()], false);
+                let sig32 = b!(self.comp.bld.build_int_truncate(signum, i32t, "sig32"));
+                let func = self.comp.module.get_function("signal")
+                    .unwrap_or_else(|| self.comp.module.add_function("signal", ft, Some(inkwell::module::Linkage::External)));
+                b!(self.comp.bld.build_call(func, &[sig32.into(), handler.into()], ""));
+                return Ok(Some(self.comp.ctx.i64_type().const_int(0, false).into()));
+            }
+            "SignalRaise" => {
+                if args.is_empty() { return Ok(None); }
+                let signum = self.val(args[0]).into_int_value();
+                let i32t = self.comp.ctx.i32_type();
+                let ft = i32t.fn_type(&[i32t.into()], false);
+                let sig32 = b!(self.comp.bld.build_int_truncate(signum, i32t, "sig32"));
+                let func = self.comp.module.get_function("raise")
+                    .unwrap_or_else(|| self.comp.module.add_function("raise", ft, Some(inkwell::module::Linkage::External)));
+                let r = b!(self.comp.bld.build_call(func, &[sig32.into()], "raise"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
+            }
+            "SignalIgnore" => {
+                if args.is_empty() { return Ok(None); }
+                let signum = self.val(args[0]).into_int_value();
+                let ptr_t = self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                let i32t = self.comp.ctx.i32_type();
+                let ft = ptr_t.fn_type(&[i32t.into(), ptr_t.into()], false);
+                let sig32 = b!(self.comp.bld.build_int_truncate(signum, i32t, "sig32"));
+                let sig_ign = b!(self.comp.bld.build_int_to_ptr(
+                    self.comp.ctx.i64_type().const_int(1, false), ptr_t, "sig_ign")); // SIG_IGN = 1
+                let func = self.comp.module.get_function("signal")
+                    .unwrap_or_else(|| self.comp.module.add_function("signal", ft, Some(inkwell::module::Linkage::External)));
+                b!(self.comp.bld.build_call(func, &[sig32.into(), sig_ign.into()], ""));
+                return Ok(Some(self.comp.ctx.i64_type().const_int(0, false).into()));
+            }
+            "Ln" | "Log2" | "Log10" | "Exp" | "Exp2" => {
+                if args.is_empty() { return Ok(None); }
+                let x = self.val(args[0]).into_float_value();
+                let f64t = self.comp.ctx.f64_type();
+                let intrinsic = match builtin_name {
+                    "Ln" => "llvm.log.f64",
+                    "Log2" => "llvm.log2.f64",
+                    "Log10" => "llvm.log10.f64",
+                    "Exp" => "llvm.exp.f64",
+                    "Exp2" => "llvm.exp2.f64",
+                    _ => unreachable!(),
+                };
+                let ft = f64t.fn_type(&[f64t.into()], false);
+                let func = self.comp.module.get_function(intrinsic)
+                    .unwrap_or_else(|| self.comp.module.add_function(intrinsic, ft, None));
+                let r = b!(self.comp.bld.build_call(func, &[x.into()], "math"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
+            }
+            "PowF" | "Copysign" => {
+                if args.len() < 2 { return Ok(None); }
+                let x = self.val(args[0]).into_float_value();
+                let y = self.val(args[1]).into_float_value();
+                let f64t = self.comp.ctx.f64_type();
+                let intrinsic = match builtin_name {
+                    "PowF" => "llvm.pow.f64",
+                    "Copysign" => "llvm.copysign.f64",
+                    _ => unreachable!(),
+                };
+                let ft = f64t.fn_type(&[f64t.into(), f64t.into()], false);
+                let func = self.comp.module.get_function(intrinsic)
+                    .unwrap_or_else(|| self.comp.module.add_function(intrinsic, ft, None));
+                let r = b!(self.comp.bld.build_call(func, &[x.into(), y.into()], "math"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
+            }
+            "Fma" => {
+                if args.len() < 3 { return Ok(None); }
+                let a = self.val(args[0]).into_float_value();
+                let b_val = self.val(args[1]).into_float_value();
+                let c = self.val(args[2]).into_float_value();
+                let f64t = self.comp.ctx.f64_type();
+                let ft = f64t.fn_type(&[f64t.into(), f64t.into(), f64t.into()], false);
+                let func = self.comp.module.get_function("llvm.fma.f64")
+                    .unwrap_or_else(|| self.comp.module.add_function("llvm.fma.f64", ft, None));
+                let r = b!(self.comp.bld.build_call(func, &[a.into(), b_val.into(), c.into()], "fma"))
+                    .try_as_basic_value().basic().unwrap();
+                return Ok(Some(r));
             }
             _ => {}
         }

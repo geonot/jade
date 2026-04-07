@@ -389,7 +389,7 @@ impl<'ctx> Compiler<'ctx> {
         let mid_bb = self.ctx.append_basic_block(fn_val, "mm.j");
         let inner_bb = self.ctx.append_basic_block(fn_val, "mm.k");
         let inner_body = self.ctx.append_basic_block(fn_val, "mm.body");
-        let inner_end = self.ctx.append_basic_block(fn_val, "mm.k.end");
+        let _inner_end = self.ctx.append_basic_block(fn_val, "mm.k.end");
         let mid_end = self.ctx.append_basic_block(fn_val, "mm.j.end");
         let outer_end = self.ctx.append_basic_block(fn_val, "mm.end");
 
@@ -1634,7 +1634,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let char_val = self.compile_expr(&args[0])?.into_int_value();
         let i64t = self.ctx.i64_type();
-        let bool_t = self.ctx.bool_type();
+        let _bool_t = self.ctx.bool_type();
 
         match method {
             "to_code" => Ok(char_val.into()),

@@ -153,11 +153,7 @@ impl Parser {
                 break;
             }
             let pname = self.ident()?;
-            if self.check(Token::Colon) || self.check(Token::As) {
-                self.advance();
-            } else {
-                self.expect(Token::Colon)?;
-            }
+            self.expect(Token::As)?;
             let pty = self.parse_type()?;
             params.push((pname, pty));
             if !self.check(Token::RParen) && !variadic {
@@ -165,7 +161,7 @@ impl Parser {
             }
         }
         self.expect(Token::RParen)?;
-        let ret = if self.check(Token::Arrow) || self.check(Token::Returns) {
+        let ret = if self.check(Token::Returns) {
             self.advance();
             self.parse_type()?
         } else {
@@ -199,7 +195,6 @@ impl Parser {
             self.expect(Token::RParen)?;
         } else {
             while !self.check(Token::Newline)
-                && !self.check(Token::Arrow)
                 && !self.check(Token::Returns)
                 && !self.check(Token::Is)
                 && !self.eof()
@@ -211,7 +206,7 @@ impl Parser {
             }
         }
 
-        let ret = if self.check(Token::Arrow) || self.check(Token::Returns) {
+        let ret = if self.check(Token::Returns) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -264,7 +259,7 @@ impl Parser {
     pub(super) fn parse_param(&mut self, typed: bool) -> Result<Param, ParseError> {
         let sp = self.span();
         let name = self.ident()?;
-        let ty = if typed && (self.check(Token::Colon) || self.check(Token::As)) {
+        let ty = if typed && self.check(Token::As) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -338,7 +333,7 @@ impl Parser {
                     self.expect(Token::LParen)?;
                     let n = match self.peek() {
                         Token::Int(n) => {
-                            let v = n as u32;
+                            let v = *n as u32;
                             self.advance();
                             v
                         }
@@ -359,7 +354,7 @@ impl Parser {
     fn parse_field(&mut self) -> Result<Field, ParseError> {
         let sp = self.span();
         let name = self.ident()?;
-        let ty = if self.check(Token::Colon) || self.check(Token::As) {
+        let ty = if self.check(Token::As) {
             self.advance();
             Some(self.parse_type()?)
         } else {
@@ -416,7 +411,7 @@ impl Parser {
         if self.check(Token::Is) {
             self.advance();
             if let Token::Int(n) = self.peek() {
-                discriminant = Some(n);
+                discriminant = Some(*n);
                 self.advance();
             }
         }
@@ -515,7 +510,7 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Test)?;
         let name = match self.peek() {
-            Token::Str(ref s) => {
+            Token::Str(s) => {
                 let n = s.clone();
                 self.advance();
                 n
@@ -647,12 +642,11 @@ impl Parser {
             self.expect(Token::RParen)?;
         } else {
             while !self.check(Token::Newline)
-                && !self.check(Token::Arrow)
                 && !self.check(Token::Returns)
                 && !self.check(Token::Is)
                 && !self.eof()
             {
-                let is_self = matches!(self.peek(), Token::Ident(ref s) if s == "self");
+                let is_self = matches!(self.peek(), Token::Ident(s) if s == "self");
                 params.push(self.parse_param(!is_self)?);
                 if self.check(Token::Comma) {
                     self.advance();
@@ -660,7 +654,7 @@ impl Parser {
             }
         }
 
-        let ret = if self.check(Token::Arrow) || self.check(Token::Returns) {
+        let ret = if self.check(Token::Returns) {
             self.advance();
             Some(self.parse_type()?)
         } else {

@@ -2,7 +2,7 @@
 
 **Systems language. Scripting readability. C performance.**
 
-Jade inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/`!` ternary, `~` pipelines, indentation structure — and compiles through LLVM 21 to native code that matches Clang -O3. No runtime. No GC. No 64-byte Value struct. Every integer is a register. Every struct is contiguous memory. Every function is a native call.
+Jade inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/`!` ternary, `~` pipelines, indentation structure — and compiles through LLVM 21 to native code that matches Clang -O3. No runtime. No GC. No 64-byte Value class. Every integer is a register. Every class is contiguous memory. Every function is a native call.
 
 ```jade
 *fib n
@@ -18,10 +18,10 @@ This compiles to the same LLVM IR as equivalent C. Same speed. Zero overhead.
 
 ### Principles
 
-1. **Values are their types.** An `i64` is a register. A struct is contiguous memory at known offsets. No universal wrapper. No indirection unless requested.
+1. **Values are their types.** An `i64` is a register. A class is contiguous memory at known offsets. No universal wrapper. No indirection unless requested.
 2. **Ownership is default.** One owner per value. Compiler inserts drops statically. No GC, no cycle detector.
 3. **Borrowing is free.** Read access borrows a reference — zero runtime cost. No retain, no release.
-4. **Sharing is explicit.** `rc` for shared ownership. Non-atomic single-threaded, atomic cross-thread. No cycle detector — use `weak` or design acyclic.
+4. **Sharing is inferred.** The compiler determines when values need shared ownership and inserts reference counting automatically. No manual `rc` or `weak` annotations.
 5. **Inference does the work.** HM + bidirectional + ownership inference. You don't write types unless you want to.
 6. **Performance is non-negotiable.** Every design evaluated against: *does this prevent generating the same code C would?* If yes, the design is wrong.
 
@@ -45,7 +45,7 @@ Integer literals infer width from context. `42` is `i64` by default, narrows to 
 ### Compound Types
 
 ```jade
-# Structs — value types, contiguous memory
+# Classes — value types, contiguous memory
 type Vec3
     x as i64
     y as i64
@@ -55,9 +55,6 @@ type Vec3
 enum Shape
     Circle(f64)
     Rect(f64, f64)
-
-# Tuples
-point is (10, 20, 30)
 
 # Fixed arrays
 nums is [1, 2, 3, 4, 5]
@@ -124,15 +121,15 @@ x ^= mask           # x is x ^ mask
 x <<= 2             # x is x << 2
 x >>= 1             # x is x >> 1
 
-# Destructuring (structs)
+# Destructuring
 p is Vec3(x is 1, y is 2, z is 3)
 ```
 
-`is` is binding, not comparison. Comparison uses `equals` and `neq`. `eq` is shorthand for `equals`.
+`is` is binding, not comparison. Comparison uses `equals`, `neq`, and `not equals`.
 
 ### ALL_CAPS Constants
 
-Top-level constants use `ALL_CAPS` by convention. The formatter enforces this.
+Top-level constants use `ALL_CAPS` by convention. Constants cannot be reassigned — the compiler enforces this.
 
 ```jade
 MAX_SIZE is 1024
@@ -146,11 +143,10 @@ type Foo
     BAZ as i64
 
 x is Foo(BAZ is 5)
-log x.BAR    # 10 (default)
-log x.BAZ    # 5
+log x.BAR    # 10 (constant default)
+log x.BAZ   # 5
 ```
-**Note:** Default-valued fields are not yet enforced as immutable. `x.BAR is 20` will compile and overwrite the default. Compile-time immutability enforcement for ALL_CAPS fields is planned.
----
+
 
 ## Functions
 
@@ -166,8 +162,6 @@ log x.BAZ    # 5
 *connect(host as String, port as i64 is 8080)
     ...
 ```
-
-> **Note:** Default parameter values are parsed but the HIR validator does not yet account for them — calling a function with fewer arguments than declared (relying on defaults) produces a validation error. Provide all arguments explicitly for now.
 
 ```jade
 # No-arg functions — no parens needed
@@ -247,7 +241,7 @@ Combines naturally with pattern clauses:
     f(x)
 
 *main
-    double is *fn(x as i64) x * 2
+    double is |x as i64| x * 2
     log apply(double, 21)    # 42
 ```
 
@@ -257,18 +251,21 @@ Function-typed parameters use the form `f as (ParamTypes) returns RetType`. Pare
 
 ```jade
 # Inline
-square is *fn(x as i64) x * x
+square is |x| x * x
 
-# Placeholder shorthand
-doubled is items ~ *fn(x) x * 2
+# With type annotation
+double is |x as i64| x * 2
+
+# Placeholder shorthand in pipelines
+doubled is items ~ |x| x * 2
 
 # Multi-line — just indent the body
-result is items ~ *fn(x)
+result is items ~ |x|
     y is x * 2
     y + 1
 ```
 
-The `*fn(params) body` form is required — `fn` is not optional.
+The `|params| body` form defines an anonymous function.
 
 ### Pipelines
 
@@ -301,7 +298,7 @@ result is value ~ add(5, $)       # → add(5, value)
 pairs ~ combine($0, $1)
 ```
 
-> **Status**: The `$` placeholder in bare expressions (`nums ~ $ * 2`) parses and creates an implicit lambda, but does not compile — codegen fails with "cannot call non-function type". Use explicit lambdas instead: `nums.map(*fn(x) x * 2)` or define a named function and use method syntax.
+For expressions outside pipeline context, use explicit lambdas: `nums.map(|x| x * 2)`.
 
 ---
 
@@ -326,6 +323,18 @@ log x > 0 ? 'positive' ! 'non-positive'
 
 # Assigning different types (branches must unify)
 result is ready ? compute() ! fallback()
+
+# Multi-line ternary — indent branches for complex logic
+result is condition
+    ? do_something()
+    ! do_something_else()
+
+# Nested multi-line
+output is status equals 'ok'
+    ? data.length > 0
+        ? process(data)
+        ! default_value
+    ! handle_error(status)
 ```
 
 Ternary binds looser than pipelines — `value ~ transform ? check ! default` works as expected.
@@ -409,7 +418,7 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 | 3 | `or` | Logical OR |
 | 4 | `xor` | Logical XOR |
 | 5 | `and` | Logical AND |
-| 6 | `equals` `eq` `neq` | Equality |
+| 6 | `equals` `eq` `neq` `not equals` | Equality |
 | 7 | `< > <= >=` `in` | Comparison / membership |
 | 8 | `\|` | Bitwise OR |
 | 9 | `^` | Bitwise XOR |
@@ -417,13 +426,13 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 | 11 | `<< >>` | Shift |
 | 12 | `+ -` | Additive |
 | 13 | `* / % mod` | Multiplicative |
-| 14 | `**` | Exponent |
+| 14 | `pow` | Exponent |
 | 15 | `- not` | Unary |
 | 16 | `() [] . as` | Postfix |
 
 ### Comparison
 
-`equals` (shorthand `eq`) and `neq` — not `==` or `!=`. Reads like language.
+`equals` (shorthand `eq`) and `neq` / `not equals` — not `==` or `!=`. Reads like language.
 
 ```jade
 if x equals 0
@@ -432,6 +441,8 @@ if x eq 0
     log 'also zero'
 if x neq y
     log 'different'
+if x not equals y
+    log 'also different'
 ```
 
 ### Comparison Chaining
@@ -456,13 +467,7 @@ if 'world' in greeting
     log 'found substring'
 ```
 
-Desugars to `.contains()` on the collection. Works with:
-- **Vec/Array:** linear scan for element equality
-- **String:** substring search
-- **Map:** key lookup (equivalent to `.has()`)
-- **Set:** membership check
-
-**Note:** `in` on array literals (e.g., `x in [1, 2, 3]`) may fail at codegen — use a `vec()` instead.
+Works with arrays, vectors, strings (substring search), and maps (key lookup).
 
 ### Logical
 
@@ -486,15 +491,13 @@ w is big as i16          # truncating — silently truncates (compiler warning)
 
 ```jade
 data is my_struct as json    # serialize struct to JSON string
-config is json_str as Config # deserialize JSON string to struct
-m is my_struct as map        # convert struct to Map
 ```
 
-**Status:** Serialization casts parse but are not yet implemented — they currently return an empty string. Full serialization requires runtime support.
+`as json` serializes any struct to a JSON string. Field names and values are emitted as key-value pairs.
 
 ---
 
-## Structs
+## Classes
 
 ```jade
 type Point
@@ -514,13 +517,13 @@ type Vec3
     z as i64
 
     *length(self)
-        ((self.x * self.x + self.y * self.y + self.z * self.z) as f64) ** 0.5
+        ((self.x * self.x + self.y * self.y + self.z * self.z) as f64).sqrt()
 
     *dot(self, other as Vec3)
         self.x * other.x + self.y * other.y + self.z * other.z
 ```
 
-Structs are value types. Passed by value (move), stack allocated. Methods take `self` explicitly, or omit it and access fields by name directly — `self` is injected by the compiler.
+Classes are value types. Passed by value (move), stack allocated. Methods take `self` explicitly, or omit it and access fields by name directly — `self` is injected by the compiler.
 
 ```jade
 type Vec3
@@ -587,34 +590,47 @@ err FileError
 
 *read_file(path as String)
     if path equals ''
-        ! NotFound
+        ! FileError:NotFound
     'file contents here'
 
 *main
     match read_file('test.txt')
-        NotFound ? log 'not found'
-        PermissionDenied(msg) ? log msg
+        FileError:NotFound ? log 'not found'
+        FileError:PermissionDenied(msg) ? log msg
         _ ? log 'ok'
 ```
 
-`!` is the error return operator — returns the error value from the current function. The non-error path returns normally (here, the string on the last line).
+`!` is the error return operator — returns the error value from the current function. Error variants are qualified with their error type using a single colon: `FileError:NotFound`. The non-error path returns normally (here, the string on the last line).
+
+When `!` might be ambiguous with the ternary `!` (else branch), use `!! ErrorType:Variant` to make intent explicit:
+
+```jade
+result is condition ? value ! fallback     # ternary: condition ? then ! else
+!! FileError:NotFound                      # error return (unambiguous)
+```
 
 ---
 
 ## List Comprehensions
 
 ```jade
-squares is [x ** 2 for x in 0 to 10]
-evens is [x for x in 0 to 100 if x % 2 eq 0]
+squares is [x pow 2 for x in 0 to 10]
+evens is [x for x in 0 to 100 if x mod 2 eq 0]
 ```
 
-Syntax: `[expr for bind in start to end]` or `[expr for bind in start to end if cond]`. Produces a `Vec`.
+Syntax: `[expr for bind in start to end]` or `[expr for bind in start to end if cond]`. Produces a `vector`.
+
+For a fixed-size array instead:
+
+```jade
+squares is array[x pow 2 for x in 0 to 10]
+```
 
 ---
 
 ## Iterator Combinators
 
-Vec methods for functional data transformation. Chain with `.method()` syntax or `~` pipelines with named functions.
+Vector methods for functional data transformation. Chain with `.method()` syntax or `~` pipelines with named functions.
 
 ```jade
 *double(x as i64) returns i64 is x * 2
@@ -625,14 +641,14 @@ doubled is nums.map(double)
 result is nums.map(double).filter(big)
 
 # fold
-total is nums.fold(0, *fn(acc, x) acc + x)
+total is nums.fold(0, |acc, x| acc + x)
 
 # zip, take, skip
 pairs is a.zip(b).take(5)
 
 # any, all, find
-has_neg is nums.any(*fn(x) x < 0)
-found is items.find(*fn(x) x eq target)
+has_neg is nums.any(|x| x < 0)
+found is items.find(|x| x eq target)
 
 # chain, flatten
 combined is a.chain(b)
@@ -665,16 +681,16 @@ A function containing `yield` is automatically a generator. Calling it returns a
     log gen.next()     # 2
 ```
 
-**Status:** Generators are parsed and typed. The MIR codegen path has coroutine infrastructure (context switching, suspend/resume) but end-to-end `.next()` dispatch on generator return values is not yet working. For-in iteration over generators is supported in the MIR path.
+Generators are backed by the coroutine runtime (cooperative context switching). For-in iteration over generators is supported.
 
 ---
 
 ## Collections
 
-### Vec (dynamic array)
+### Vector (dynamic array)
 
 ```jade
-v is vec()
+v is vector()
 v.push(1)
 v.push(2)
 log v.length      # 2
@@ -690,80 +706,21 @@ log m.get('key')   # 42
 log m.has('key')   # true
 ```
 
-### Set
-
-```jade
-s is set(1, 2, 3)
-s.add(4)
-s.add(1)           # no-op, already present
-log s.contains(1)  # true
-log s.len()        # 4
-s.remove(1)
-
-# Set operations
-a_set is set(1, 2, 3)
-b_set is set(2, 3, 4)
-u is a_set.union(b_set)
-d is a_set.difference(b_set)
-i is a_set.intersection(b_set)
-```
-
-**Note:** `set` is a parser keyword (used for store updates). Creating sets requires the call form `set(...)` — bare `set()` without arguments may conflict with the store `set` statement. Initialize with values: `set(1, 2, 3)`.
-
-### Priority Queue
-
-```jade
-pq is priority_queue()
-pq.push('urgent', 10)     # value, priority (higher = first out)
-pq.push('normal', 1)
-pq.push('critical', 100)
-
-log pq.peek()              # 'critical'
-log pq.pop()               # 'critical'
-log pq.len()               # 2
-log pq.is_empty()          # false
-pq.clear()
-```
-
-### Deque (Double-Ended Queue)
-
-```jade
-d is deque()
-d.push_back(1)
-d.push_back(2)
-d.push_front(0)
-log d.pop_front()          # 0
-log d.pop_back()           # 2
-log d.len()                # 1
-```
-
-**Status:** Deque is parsed and typed but codegen is not yet implemented. Runtime support exists in `runtime/deque.c`.
-
-### Allocator-Aware Collections
-
-Collections can optionally use a custom allocator:
-
-```jade
-scratch is Arena(4096)
-v is vec_with_alloc(scratch)
-m is map_with_alloc(scratch)
-# All allocations go to the arena; freed in one shot at scope exit
-```
-
 ---
 
 ## Regex
 
-String methods for pattern matching via PCRE2:
+Pattern matching via the `regex` standard library module:
 
 ```jade
-# String methods
-log 'hello123'.matches('[0-9]+')         # true
-results is 'a1b2c3'.find_all('[0-9]+')   # ['1', '2', '3']
-cleaned is 'foo  bar'.replace_re('\\s+', ' ')  # 'foo bar'
+use regex
+
+log regex.is_match('hello123', '[0-9]+')        # true
+found is regex.find('hello123world', '[0-9]+')  # '123'
+results is regex.find_all('a1b2c3', '[0-9]+')   # ['1', '2', '3']
 ```
 
-> **Status**: String regex methods (`matches`, `find_all`, `replace_re`) are parsed and dispatched in codegen, but currently fail with a type mismatch (String value vs ptr parameter). The `regex.compile` / `regex.is_match` stdlib API shown in earlier docs does not exist — regex is purely string-method-based. Requires runtime PCRE2 linkage.
+Backed by PCRE2 at the runtime level. Also available with flat imports: `is_match(text, pattern)`.
 
 ---
 
@@ -792,19 +749,18 @@ Query blocks produce a `query` expression over a source with typed clauses. The 
 *add a, b
     a + b
 
-# main.jade
-use math
-
+# main.jade — implicit import (no `use` required)
 *main
     log math.add(1, 2)
 ```
 
-File = module. `use` imports. Recursive module resolution.
+File = module. The compiler automatically resolves module references — `math.add` searches the standard library, project source files, and dependencies without requiring an explicit `use` statement.
 
-### Selective Imports
+### Explicit Imports
 
 ```jade
-use math [sin, cos, pi]      # import only specific symbols
+use math                     # import module explicitly
+use math [sin, cos, pi]      # import specific symbols
 log sin(pi)
 ```
 
@@ -813,20 +769,6 @@ log sin(pi)
 ```jade
 use long_module_name as lmn
 lmn.do_thing()
-```
-
-### Scope-Limited Imports
-
-`use` inside a function body limits visibility to that scope:
-
-```jade
-*compute()
-    use math [sin, cos]
-    log sin(3.14)          # sin/cos available here
-
-*main()
-    # sin and cos are NOT visible here
-    log 'done'
 ```
 
 ---
@@ -846,7 +788,7 @@ insert users 'Alice', 30
 insert users 'Bob', 25
 insert users 'Carol', 35
 
-# Query — returns first matching record as a struct
+# Query — returns first matching record
 young is users where age < 30
 log young.name    # Bob
 log young.age     # 25
@@ -881,7 +823,7 @@ transaction
 
 **Supported field types:** `i64`, `f64`, `bool`, `String` (fixed 256-byte buffers on disk).
 
-**Query operators:** `equals`, `isnt`, `<`, `>`, `<=`, `>=` — validated at compile time.
+**Query operators:** `equals`, `neq`, `<`, `>`, `<=`, `>=` — validated at compile time.
 
 **Compound filters:** Chain conditions with `and` / `or` for multi-field filtering.
 
@@ -911,7 +853,7 @@ extern *printf(fmt as %i8, ...) returns i32
     syscall 1, 1, 'hello\n', 6   # write(stdout, msg, len)
 ```
 
-**Status:** The `syscall` AST node exists but is not reachable from source code — the parser does not recognize `syscall` as a keyword or builtin function. Use `extern` declarations for system-level calls instead.
+Direct system call interface for low-level OS interaction.
 
 ### Inline Assembly
 
@@ -931,33 +873,18 @@ val is @ptr        # dereference
 
 ### Volatile Memory Operations
 
-Hardware-observable reads and writes. No compiler reordering, no elision.
+Hardware-observable reads and writes via the `volatile` standard library module. The compiler will not reorder, combine, or elide these operations — every load/store hits memory exactly as written. Required for memory-mapped I/O, hardware registers, and shared-memory communication where the compiler must not optimize away accesses.
 
 ```jade
+use volatile
+
 *poll_device
     x is 0
     ptr is %x
-    volatile_store(ptr, 99)
-    v is volatile_load(ptr)      # Always reads from memory
+    volatile.write(ptr, 99)
+    v is volatile.read(ptr)      # Always reads from memory
     log v                        # 99
 ```
-
-### Weak References
-
-Explicit cycle-breaking for reference-counted values. The compiler warns when weak refs are used without upgrading.
-
-```jade
-type Node
-    value as i64
-    parent as weak rc Node     # weak reference breaks the cycle
-
-*main
-    root is rc(Node(value is 1, parent is none))
-    child_parent is weak root            # downgrade to weak
-    strong is weak_upgrade child_parent  # upgrade: returns rc or none
-```
-
-**Status:** `weak` is a reserved keyword and `Type::Weak` exists in the type system, but `weak` is not yet parsed as an expression or type modifier. The `weak()` and `weak_upgrade()` function calls are not registered as builtins. Use `rc()` for now; weak references are planned.
 
 ### Copy-on-Write (COW)
 
@@ -969,78 +896,21 @@ b is a              # shared — no copy
 b is b + ' world'   # COW triggers: b gets its own copy
 ```
 
-**Status:** COW types exist in the type system but codegen is not yet implemented.
-
 ### Signal Handling
 
-POSIX signal infrastructure.
+POSIX signal infrastructure via the `signal` standard library module.
 
 ```jade
+use signal
+
 *handler(sig as i32)
     log sig
 
 *main
-    signal_handle 2, handler     # SIGINT → handler
-    signal_ignore 13             # SIGPIPE → ignore
-    signal_raise 2               # raise SIGINT
+    signal.handle(2, handler)      # SIGINT → handler
+    signal.ignore(13)              # SIGPIPE → ignore
+    signal.raise(2)                # raise SIGINT
 ```
-
-**Status:** Signal builtins are parsed and recognized, but `signal_handle` has a codegen type mismatch (passes `i64` signal number where libc expects `i32`). `signal_ignore` compiles but has the same issue. Planned fix.
-
-### Integer Overflow Control
-
-Default: trap on overflow. Explicit control via builtins:
-
-```jade
-*main
-    a is 9223372036854775807       # i64 max
-    w is wrapping_add a, 1         # wraps to i64 min
-    s is saturating_add a, 1       # stays at i64 max
-    result, overflowed is checked_add a, 1
-    if overflowed
-        log 'overflow detected'
-```
-
-Available for `add`, `sub`, `mul` — each in `wrapping_`, `saturating_`, `checked_` variants.
-
-> **Note:** Integer overflow builtins work with the default HIR codegen backend. The MIR codegen backend does not yet support them.
-
-### Atomic Operations
-
-Lock-free atomic instructions for concurrent programming:
-
-```jade
-counter is 0
-atomic_add(%counter, 1)           # atomic increment
-val is atomic_load(%counter)      # atomic read
-atomic_store(%counter, 0)         # atomic write
-old, ok is atomic_cas(%counter, 0, 1)  # compare-and-swap
-```
-
-**Status:** Atomic operations exist in the HIR and codegen, but are not registered as builtins — calling them from source code produces "undefined function." Wiring them up in the typer's builtin table is required.
-
-### Arena / Region Allocation
-
-Scope-based bulk allocation — the entire arena is freed in one shot at scope exit:
-
-```jade
-scratch is Arena(4096)
-# All allocations in this scope use the arena
-v is vec_with_alloc(scratch)
-m is map_with_alloc(scratch)
-# Arena freed when scratch goes out of scope
-```
-
-### Constant-Time Operations
-
-Prevent timing side-channel attacks:
-
-```jade
-if constant_time_eq(user_token, expected_token)
-    log 'authorized'
-```
-
-For integer args, compiles to XOR + compare. For string args, calls a constant-time comparison runtime function.
 
 ### C Header Import
 
@@ -1050,7 +920,7 @@ Generate Jade extern declarations from C headers automatically:
 jade bind /usr/include/sqlite3.h > std/sqlite.jade
 ```
 
-Parses function declarations, structs, typedefs and generates corresponding Jade `extern` declarations with correct type mappings.
+Parses function declarations, types, typedefs and generates corresponding Jade `extern` declarations with correct type mappings.
 
 ---
 
@@ -1136,95 +1006,9 @@ d is a * 2.0     # scalar broadcast
 
 The `by` keyword creates an NDArray. `3 by 3` produces a 3×3 matrix of f64 zeros.
 
-### Matrix Multiplication
-
-```jade
-result is matmul(A, B)    # A and B are 2D NDArrays
-```
-
-### SIMD Intrinsics
-
-Expose LLVM vector types at the language level:
-
-```jade
-# 4-lane f32 SIMD vector
-v is SIMD of f32, 4(1.0, 2.0, 3.0, 4.0)
-w is SIMD of f32, 4(5.0, 6.0, 7.0, 8.0)
-
-# Arithmetic operates on all lanes in parallel
-sum is v + w     # (6.0, 8.0, 10.0, 12.0)
-prod is v * w    # (5.0, 12.0, 21.0, 32.0)
-```
-
-**Status:** SIMD types exist in the type system but do not yet generate SIMD-specific LLVM IR.
-
-### Einsum Notation
-
-Einstein summation for tensor contractions:
-
-```jade
-# Matrix multiplication: C[i,k] = sum_j A[i,j] * B[j,k]
-C is einsum 'ij,jk->ik', A, B
-
-# Trace of a matrix: sum of diagonal
-t is einsum 'ii->', M
-
-# Dot product
-d is einsum 'i,i->', u, v
-```
-
-**Status:** Parsed and typed but codegen is not yet implemented.
-
-### Automatic Differentiation
-
-Source-to-source AD via `grad`:
-
-```jade
-*loss(x as f64) returns f64
-    x ** 2 + 3.0 * x + 1.0
-
-*main()
-    dloss is grad(loss)    # returns a function: f64 returns f64
-    log dloss(2.0)         # 7.0  (derivative: 2x + 3)
-```
-
-**Status:** Parsed and typed but codegen is not yet implemented.
-
----
-
-## DSL Builder Blocks
-
-Builder-pattern blocks for domain-specific construction:
-
-```jade
-page is build HtmlElement
-    tag is 'div'
-    class is 'container'
-    id is 'main'
-
-config is build ServerConfig
-    port is 8080
-    host is 'localhost'
-    workers is 4
-```
-
-**Status:** Parsed and typed. The MIR codegen path desugars builder blocks to struct construction. The HIR codegen path has not yet implemented builder blocks.
-
 ---
 
 ## Compile-Time Evaluation
-
-### Comptime Reflection
-
-Introspect types at compile time:
-
-```jade
-fields is fields_of('Point')    # field names (array)
-t is type_of(42)                # type as string
-s is size_of('Point')           # byte size
-```
-
-**Status:** Comptime reflection builtins compile and run but produce incorrect results — `size_of` returns 0 for primitives, `type_of` returns garbled output, `fields_of` returns a raw pointer. These are placeholders awaiting proper implementation.
 
 ### Extended Comptime Inference
 
@@ -1264,7 +1048,7 @@ Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST
 ### CLI
 
 ```
-jadec <INPUT> [-o OUTPUT] [--emit-ir] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [-g/--debug] [--hir-codegen] [--fast-math] [--deterministic-fp] [--incremental] [--threads N]
+jadec <INPUT> [-o OUTPUT] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [--debug] [--hir-codegen] [--fast-math] [--deterministic-fp] [--threads N]
 ```
 
 Subcommands:
@@ -1281,18 +1065,16 @@ jade update                # update dependency lock file
 jade bind header.h         # generate extern declarations from C header
 ```
 
-- `--emit-ir` — print LLVM IR instead of compiling
-- `--emit-llvm` — print LLVM IR (alias)
+- `--emit-llvm` — print LLVM IR
 - `--emit-hir` — print HIR (typed intermediate representation)
 - `--emit-mir` — print MIR (mid-level IR)
 - `--emit-obj` — emit object file only
 - `--opt` — optimization level (default: 3)
 - `--lto` — link-time optimization
-- `-g` / `--debug` — emit DWARF debug info (for lldb/gdb)
+- `--debug` — emit DWARF debug info (for lldb/gdb)
 - `--hir-codegen` — use legacy HIR-based backend instead of default MIR-based
 - `--fast-math` — enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
 - `--deterministic-fp` — guarantee deterministic floating-point results
-- `--incremental` — cache unchanged function artifacts
 - `--threads N` — parallel codegen threads (0 = auto-detect)
 
 ### Codegen Optimizations
@@ -1358,7 +1140,7 @@ cd jade && cargo build --release
 cargo test
 
 # Emit LLVM IR
-./target/release/jadec hello.jade --emit-ir
+./target/release/jadec hello.jade --emit-llvm
 ```
 
 ---
@@ -1369,28 +1151,27 @@ Three tiers, determined at compile time:
 
 | Tier | Allocation | Deallocation | Cost | Used For |
 |------|------------|--------------|------|----------|
-| **Register** | CPU register | N/A | Zero | Scalars, small tuples |
-| **Stack** | `alloca` | Function return | Zero | Structs, fixed arrays, locals |
-| **Heap** | `malloc`/pool | Ownership drop or RC | Non-zero | Strings, dynamic arrays, Rc values |
+| **Register** | CPU register | N/A | Zero | Scalars |
+| **Stack** | `alloca` | Function return | Zero | Classes, fixed arrays, locals |
+| **Heap** | `malloc`/pool | Ownership drop or RC | Non-zero | Strings, dynamic arrays, shared values |
 
 **Decision rules:**
 1. Primitives (`i64`, `f64`, `bool`): always Register.
-2. Small structs (≤128 bytes) that don't escape: Stack.
+2. Small classes (≤128 bytes) that don't escape: Stack.
 3. Fixed-size arrays that don't escape: Stack.
-4. `rc` values: always Heap (with refcount header).
-5. Strings: Heap (but small-string optimization for ≤23 bytes).
-6. Values that escape (returned, stored in heap struct): promoted to Heap.
+4. Strings: Heap (but small-string optimization for ≤23 bytes).
+5. Values that escape (returned, stored in heap class): promoted to Heap.
+6. Shared values: Heap with automatic reference counting.
 
-**Ownership inference:** read → borrow, consume → move, mutate → mut ref, shared → rc auto.
+**Ownership inference:** read → borrow, consume → move, mutate → mut ref, shared → automatic RC.
 
-**Perceus reference counting** (for `rc` values):
+**Perceus reference counting** (automatic for shared values):
 - Precision retain/release insertion based on ownership analysis
 - Borrow optimization — no retain/release for read-only access
 - Drop specialization — each type gets a specialized drop function
 - Reuse analysis — in-place update when RC=1 and same layout
 - Non-atomic fast path for thread-local values
-
-**No cycle detector.** Programs using `rc` must use `weak` references for back-edges. Compiler detects potential cycles in the type graph and suggests `weak` fields.
+- Compiler detects potential cycles in the type graph and breaks them automatically
 
 ### Memory Layout Control
 
@@ -1445,10 +1226,10 @@ Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership 
 |----------|-----------|
 | No runtime library | Primitives compile to pure LLVM IR. No FFI boundary for basic operations. |
 | Typed native ABI | Functions use native LLVM signatures (`i64`, `f64`, `ptr`). No NaN-boxing. |
-| Value types as default | Structs laid out contiguously. No heap indirection for compound data. |
+| Value types as default | Classes laid out contiguously. No heap indirection for compound data. |
 | Monomorphization | Generics generate specialized code. No boxing, no virtual dispatch. |
 | Ownership + borrow checking | Memory safety without GC. Compile-time only — zero runtime cost. |
-| Perceus RC as fallback | For shared/graph structures, reference counting with borrow elision. |
+| Perceus RC for shared values | Automatic reference counting with borrow elision for shared data. |
 
 ### Diagnostics
 
@@ -1490,37 +1271,8 @@ ctz(x)                  # count trailing zeros
 rotate_left(x, n)       # bit rotation
 rotate_right(x, n)
 bswap(x)                # byte swap (endianness)
-wrapping_add(x, y)      # wrapping arithmetic
-wrapping_sub(x, y)
-wrapping_mul(x, y)
-saturating_add(x, y)    # saturating arithmetic
-saturating_sub(x, y)
-saturating_mul(x, y)
-checked_add(x, y)       # returns (result, overflowed)
-checked_sub(x, y)
-checked_mul(x, y)
-x ** n                  # square-and-multiply exponentiation
+x pow n                 # square-and-multiply exponentiation
 ```
-
-### Volatile / Hardware
-
-```jade
-volatile_load(ptr)      # volatile read (never elided/reordered)
-volatile_store(ptr, v)  # volatile write
-signal_handle(sig, fn)  # register signal handler
-signal_raise(sig)       # raise signal → i32
-signal_ignore(sig)      # ignore signal (SIG_IGN)
-```
-
-### Reference Counting
-
-```jade
-rc(value)               # allocate RC-wrapped value
-rc_retain(rv)           # increment refcount
-rc_release(rv)          # decrement refcount (frees at 0)
-```
-
-`weak()` and `weak_upgrade()` are planned but not yet callable (see Weak References section).
 
 ### Float
 
@@ -1534,12 +1286,12 @@ x.min(y)    x.max(y)
 ### Array/Slice
 
 ```jade
-arr.length              # Vec length (property access)
-arr.len()               # Vec length (method call)
-arr[i]                  # bounds-checked
-arr from i to j         # slice (Vec only — links but runtime not yet wired)
-arr.contains(x)
-arr.join(sep)           # join elements with separator string
+a.length              # length (property access)
+a.len()               # length (method call)
+a[i]                  # bounds-checked index
+a from i to j         # slice
+a.contains(x)
+a.join(sep)           # join elements with separator string
 ```
 
 ### String
@@ -1561,11 +1313,6 @@ s.repeat(n)             # repeat string n times
 s.is_empty()            # true if length is 0
 s.trim_left()           # strip leading whitespace
 s.trim_right()          # strip trailing whitespace
-
-# Regex (requires PCRE2)
-s.matches(pattern)      # true if pattern matches anywhere in s
-s.find_all(pattern)     # all matches as array of strings
-s.replace_re(pat, rep)  # regex replace
 ```
 
 String interpolation with `{expr}` inside single-quoted strings:
@@ -1584,30 +1331,14 @@ log(value)              # print to stdout
 to_string(x)            # convert to string
 time_now()              # nanosecond timestamp
 assert(cond)            # rich assert with auto-generated messages
-constant_time_eq(a, b)  # constant-time equality comparison
-
-# Collections
-set()                   # new empty set
-priority_queue()        # new empty priority queue
-vec_with_alloc(alloc)   # vec using custom allocator
-map_with_alloc(alloc)   # map using custom allocator
-
-# Comptime reflection
-fields_of('TypeName')   # field names as array of strings
-type_of(expr)           # type as string
-size_of('TypeName')     # byte size as i64
-
-# Matrix / SIMD
-matmul(A, B)            # matrix multiplication
-# ndarray: use `3 by 3` syntax (the `by` keyword)
 ```
 
 ### Debug
 
-Compile with `-g` / `--debug` to emit DWARF debug info. Use with lldb or gdb:
+Compile with `--debug` to emit DWARF debug info. Use with lldb or gdb:
 
 ```bash
-jadec main.jade -o main -g
+jadec main.jade -o main --debug
 lldb ./main
 ```
 

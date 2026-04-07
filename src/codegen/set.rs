@@ -113,7 +113,7 @@ impl<'ctx> Compiler<'ctx> {
         dims: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
-        let f64t = self.ctx.f64_type();
+        let _f64t = self.ctx.f64_type();
         let malloc = self.ensure_malloc();
 
         // Compute total elements = product of all dims

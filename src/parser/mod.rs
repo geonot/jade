@@ -86,6 +86,7 @@ impl Parser {
                             name,
                             value: val,
                             ty: None,
+                            atomic: false,
                             span: sp,
                         }));
                     }
@@ -139,11 +140,20 @@ impl Parser {
         }
     }
 
-    fn peek(&self) -> Token {
+    fn peek(&self) -> &Token {
         if self.pos < self.tok.len() {
-            self.tok[self.pos].token.clone()
+            &self.tok[self.pos].token
         } else {
-            Token::Eof
+            &Token::Eof
+        }
+    }
+
+    fn peek_at(&self, offset: usize) -> &Token {
+        let idx = self.pos + offset;
+        if idx < self.tok.len() {
+            &self.tok[idx].token
+        } else {
+            &Token::Eof
         }
     }
 
@@ -385,6 +395,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
                     name: p.name.clone(),
                     value: Expr::Ident(unified_params[pi].name.clone(), sp),
                     ty: None,
+                    atomic: false,
                     span: sp,
                 }));
             }
@@ -588,7 +599,7 @@ mod tests {
 
     #[test]
     fn exponentiation() {
-        let p = parse("*main()\n    x is 2 ** 3\n");
+        let p = parse("*main()\n    x is 2 pow 3\n");
         if let Decl::Fn(f) = &p.decls[0] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::BinOp(_, op, _, _) = &b.value {
@@ -602,7 +613,7 @@ mod tests {
 
     #[test]
     fn exp_right_assoc() {
-        let p = parse("*main()\n    x is 2 ** 3 ** 4\n");
+        let p = parse("*main()\n    x is 2 pow 3 pow 4\n");
         if let Decl::Fn(f) = &p.decls[0] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::BinOp(l, BinOp::Exp, r, _) = &b.value {
@@ -657,7 +668,7 @@ mod tests {
 
     #[test]
     fn fn_with_typed_params() {
-        let p = parse("*add(a: i64, b: i64) -> i64\n    return a + b\n");
+        let p = parse("*add(a as i64, b as i64) returns i64\n    return a + b\n");
         if let Decl::Fn(f) = &p.decls[0] {
             assert_eq!(f.params[0].ty, Some(Type::I64));
             assert_eq!(f.params[1].ty, Some(Type::I64));
@@ -744,7 +755,7 @@ mod tests {
 
     #[test]
     fn pipeline_simple() {
-        let p = parse("*double(x: i64) -> i64\n    x * 2\n\n*main()\n    x is 10 ~ double\n");
+        let p = parse("*double(x as i64) returns i64\n    x * 2\n\n*main()\n    x is 10 ~ double\n");
         if let Decl::Fn(f) = &p.decls[1] {
             if let Stmt::Bind(b) = &f.body[0] {
                 assert!(matches!(b.value, Expr::Pipe(_, _, _, _)));
@@ -757,7 +768,7 @@ mod tests {
     #[test]
     fn pipeline_chain() {
         let p = parse(
-            "*a(x: i64) -> i64\n    x\n\n*b(x: i64) -> i64\n    x\n\n*main()\n    x is 1 ~ a ~ b\n",
+            "*a(x as i64) returns i64\n    x\n\n*b(x as i64) returns i64\n    x\n\n*main()\n    x is 1 ~ a ~ b\n",
         );
         if let Decl::Fn(f) = &p.decls[2] {
             if let Stmt::Bind(b) = &f.body[0] {
@@ -772,7 +783,7 @@ mod tests {
 
     #[test]
     fn pipeline_with_call() {
-        let p = parse("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n");
+        let p = parse("*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n");
         if let Decl::Fn(f) = &p.decls[1] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::Pipe(_, right, _, _) = &b.value {
@@ -787,7 +798,7 @@ mod tests {
     #[test]
     fn placeholder_in_call() {
         let p =
-            parse("*mul(a: i64, b: i64) -> i64\n    a * b\n\n*main()\n    x is 10 ~ mul($, 3)\n");
+            parse("*mul(a as i64, b as i64) returns i64\n    a * b\n\n*main()\n    x is 10 ~ mul($, 3)\n");
         if let Decl::Fn(f) = &p.decls[1] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::Pipe(_, right, _, _) = &b.value {
@@ -803,7 +814,7 @@ mod tests {
 
     #[test]
     fn lambda_expr() {
-        let p = parse("*main()\n    f is *fn(x: i64) -> i64 x * 2\n");
+        let p = parse("*main()\n    f is |x as i64| returns i64 x * 2\n");
         if let Decl::Fn(f) = &p.decls[0] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::Lambda(params, ret, _, _) = &b.value {
@@ -819,7 +830,7 @@ mod tests {
 
     #[test]
     fn lambda_multi_param() {
-        let p = parse("*main()\n    f is *fn(a: i64, b: i64) -> i64 a + b\n");
+        let p = parse("*main()\n    f is |a as i64, b as i64| returns i64 a + b\n");
         if let Decl::Fn(f) = &p.decls[0] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::Lambda(params, _, _, _) = &b.value {
@@ -833,7 +844,7 @@ mod tests {
 
     #[test]
     fn fn_type_annotation() {
-        let p = parse("*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n");
+        let p = parse("*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n");
         if let Decl::Fn(f) = &p.decls[0] {
             if let Some(Type::Fn(ptys, ret)) = &f.params[0].ty {
                 assert_eq!(ptys.len(), 1);

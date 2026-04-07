@@ -604,7 +604,7 @@ impl<'ctx> Compiler<'ctx> {
         // Main code spins/yields until counter reaches 0.
 
         let ptr = self.ctx.ptr_type(AddressSpace::default());
-        let i32t = self.ctx.i32_type();
+        let _i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
         let void = self.ctx.void_type();
         let fv = self.cur_fn.unwrap();

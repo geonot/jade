@@ -63,23 +63,68 @@ impl<'ctx> Compiler<'ctx> {
         self.set_debug_location(span.line, span.col);
         match stmt {
             hir::Stmt::Bind(bind) => {
+                if bind.atomic {
+                    self.atomic_vars.insert(bind.name.clone());
+                }
+                // Detect atomic augmented assignment: `x is x + val` or `x is x - val`
+                if bind.atomic || self.atomic_vars.contains(&bind.name) {
+                    if let Some((ptr, _)) = self.find_var(&bind.name).cloned() {
+                        if let hir::ExprKind::BinOp(lhs, op, rhs) = &bind.value.kind {
+                            if let hir::ExprKind::Var(_, ref vname) = lhs.kind {
+                                if vname == &bind.name {
+                                    let rmw_op = match op {
+                                        crate::ast::BinOp::Add => Some(inkwell::AtomicRMWBinOp::Add),
+                                        crate::ast::BinOp::Sub => Some(inkwell::AtomicRMWBinOp::Sub),
+                                        _ => None,
+                                    };
+                                    if let Some(rmw_op) = rmw_op {
+                                        let rval = self.compile_expr(rhs)?;
+                                        b!(self.bld.build_atomicrmw(
+                                            rmw_op,
+                                            ptr,
+                                            rval.into_int_value(),
+                                            inkwell::AtomicOrdering::SequentiallyConsistent,
+                                        ));
+                                        return Ok(None);
+                                    }
+                                }
+                            }
+                        }
+                        // Generic atomic store for non-augmented reassignment
+                        let val = self.compile_expr(&bind.value)?;
+                        let store = b!(self.bld.build_store(ptr, val));
+                        store
+                            .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                            .map_err(|_| "failed to set atomic ordering".to_string())?;
+                        return Ok(None);
+                    }
+                }
                 let val = self.compile_expr(&bind.value)?;
                 let ty = &bind.ty;
                 if matches!(ty, Type::Array(_, _)) {
                     if val.is_pointer_value() {
                         self.set_var(&bind.name, val.into_pointer_value(), ty.clone());
                     } else {
-                        // Array returned from function call — store to alloca
                         let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name, ty);
                         b!(self.bld.build_store(a, val));
                         self.set_var(&bind.name, a, ty.clone());
                     }
                 } else if let Some((ptr, _)) = self.find_var(&bind.name).cloned() {
-                    b!(self.bld.build_store(ptr, val));
+                    let store = b!(self.bld.build_store(ptr, val));
+                    if self.atomic_vars.contains(&bind.name) {
+                        store
+                            .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                            .map_err(|_| "failed to set atomic ordering".to_string())?;
+                    }
                     self.set_var(&bind.name, ptr, ty.clone());
                 } else {
                     let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name, ty);
-                    b!(self.bld.build_store(a, val));
+                    let store = b!(self.bld.build_store(a, val));
+                    if bind.atomic {
+                        store
+                            .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                            .map_err(|_| "failed to set atomic ordering".to_string())?;
+                    }
                     self.set_var(&bind.name, a, ty.clone());
                 }
                 Ok(None)

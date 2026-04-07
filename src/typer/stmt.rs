@@ -68,6 +68,7 @@ impl Typer {
                         value,
                         ty: existing_ty,
                         ownership,
+                        atomic: b.atomic,
                         span: b.span,
                     }))
                 } else {
@@ -102,6 +103,7 @@ impl Typer {
                         value,
                         ty,
                         ownership,
+                        atomic: b.atomic,
                         span: b.span,
                     }))
                 }

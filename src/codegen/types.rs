@@ -21,12 +21,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Void => self.ctx.i8_type().into(),
             Type::String => self.string_type().into(),
             Type::TypeVar(v) => {
-                // ICE guard: TypeVars should be resolved before codegen.
-                // Falling back to i64 to avoid crashing, but this indicates
-                // a monomorphization gap in the typer.
-                debug_assert!(false, "ICE: unresolved TypeVar({v}) reached codegen");
-                eprintln!("warning: unresolved TypeVar({v}) reached codegen — defaulting to i64");
-                self.ctx.i64_type().into()
+                panic!("ICE: unresolved TypeVar({v}) reached codegen — this indicates a monomorphization bug in the typer");
             }
             Type::Struct(name, _) | Type::Enum(name) => self
                 .module
@@ -66,11 +61,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Arena => self.arena_type().into(),
             Type::Pool => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Param(name) => {
-                // ICE guard: Type parameters should be monomorphized before
-                // codegen. Falling back to i64 to avoid crashing, but this
-                // masks a genuine typer/monomorphization bug.
-                eprintln!("warning: unresolved type parameter '{name}' reached codegen — defaulting to i64");
-                self.ctx.i64_type().into()
+                panic!("ICE: unresolved type parameter '{name}' reached codegen — this indicates a monomorphization bug in the typer");
             }
             Type::Deque(_) | Type::Cow(_) | Type::Generator(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),

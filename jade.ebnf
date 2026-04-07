@@ -112,7 +112,7 @@ bitand_expr    = shift_expr { "&" shift_expr } ;
 shift_expr     = add_expr { ( "<<" | ">>" ) add_expr } ;
 add_expr       = mul_expr { ( "+" | "-" ) mul_expr } ;
 mul_expr       = exp_expr { ( "*" | "/" | "mod" ) exp_expr } ;
-exp_expr       = unary_expr [ "**" exp_expr ] ;
+exp_expr       = unary_expr [ "pow" exp_expr ] ;
 unary_expr     = ( "-" | "not" ) unary_expr
                | postfix_expr ;
 postfix_expr   = primary { call_suffix | member_suffix | index_suffix | cast_suffix | slice_suffix | of_suffix } ;
@@ -126,7 +126,7 @@ cast_suffix    = "as" [ "strict" ] type
 slice_suffix   = "from" expr "to" expr ;
 arg_list       = arg { "," arg } ;
 arg            = [ IDENT "is" ] expr ;
-lambda         = "*" "fn" "(" [ param_list ] ")" [ "returns" type ] expr ;
+lambda         = "|" [ param_list ] "|" [ "returns" type ] expr ;
 primary        = INT | FLOAT | STRING | "true" | "false" | "none"
                | IDENT
                | "$" [ INT ]

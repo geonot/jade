@@ -67,8 +67,10 @@ impl HirValidator {
         }
         if let Some(prev) = self.fn_defs.insert(id.0, span) {
             if prev.line != span.line {
-                // Same DefId at different locations — only warn if not a duplicate extern
-                // (the typer reuses DefIds for duplicate extern declarations)
+                self.errors.push(format!(
+                    "duplicate DefId({}) for '{}' at line {} (previously at line {})",
+                    id.0, name, span.line, prev.line
+                ));
             }
         }
     }
@@ -212,7 +214,9 @@ impl HirValidator {
                 use crate::ast::BinOp::*;
                 match op {
                     Add | Sub | Mul | Div | Mod | Lt | Gt | Le | Ge => {
-                        if lhs.ty != rhs.ty {
+                        let is_ptr_arith = matches!((&lhs.ty, &rhs.ty),
+                            (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_)));
+                        if lhs.ty != rhs.ty && !is_ptr_arith {
                             self.errors.push(format!(
                                 "BinOp {:?} type mismatch at line {}: lhs {:?} vs rhs {:?}",
                                 op, expr.span.line, lhs.ty, rhs.ty

@@ -126,18 +126,6 @@ impl Lowerer {
         dest
     }
 
-    fn emit_with_def_id(&mut self, kind: InstKind, ty: Type, span: Span, def_id: crate::hir::DefId) -> ValueId {
-        let dest = self.new_value();
-        self.func.block_mut(self.current_block).insts.push(Instruction {
-            dest: Some(dest),
-            kind,
-            ty,
-            span,
-            def_id: Some(def_id),
-        });
-        dest
-    }
-
     fn emit_void(&mut self, kind: InstKind, span: Span) {
         self.func.block_mut(self.current_block).insts.push(Instruction {
             dest: None,

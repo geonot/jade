@@ -51,8 +51,8 @@ extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %i64
         return ''
     ovector is pcre2_get_ovector_pointer_8(md)
     start is @ovector
-    end is @(ovector + 1)
-    result is text.slice(start, end)
+    end_pos is @(ovector + 1)
+    result is text.slice(start, end_pos)
     pcre2_match_data_free_8(md)
     pcre2_code_free_8(code)
     result
@@ -71,9 +71,9 @@ extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %i64
             break
         ovector is pcre2_get_ovector_pointer_8(md)
         start is @ovector
-        end is @(ovector + 1)
-        results.push text.slice(start, end)
-        offset is end
+        end_pos is @(ovector + 1)
+        results.push text.slice(start, end_pos)
+        offset is end_pos
     pcre2_match_data_free_8(md)
     pcre2_code_free_8(code)
     results

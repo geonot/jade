@@ -12,6 +12,7 @@ use crate::types::Type;
 use super::Compiler;
 use super::b;
 
+#[allow(dead_code)]
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn declare_builtins(&mut self) {
         let i32t = self.ctx.i32_type();
@@ -28,6 +29,7 @@ impl<'ctx> Compiler<'ctx> {
         pc.add_attribute(AttributeLoc::Function, self.attr("nofree"));
     }
 
+    #[allow(dead_code)]
     pub(crate) fn declare_fn(&mut self, f: &hir::Fn) -> Result<(), String> {
         let ptys: Vec<Type> = f.params.iter().map(|p| p.ty.clone()).collect();
         let ret = if f.name == "main" {
@@ -125,6 +127,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn fn_may_recurse(&self, f: &hir::Fn) -> bool {
         let mut refs = std::collections::HashSet::new();
         Self::collect_var_refs_block(&f.body, &mut refs);
@@ -147,48 +150,6 @@ impl<'ctx> Compiler<'ctx> {
             self.tag_param_ownership(fv, loc, &p.ownership, &p.ty);
         }
         self.fns.insert(method_name, (fv, ptys, ret));
-        Ok(())
-    }
-
-    pub(crate) fn emit_body(
-        &mut self,
-        fv: inkwell::values::FunctionValue<'ctx>,
-        params: &[(String, Type)],
-        body: &hir::Block,
-        ret: &Type,
-        name: &str,
-        line: u32,
-    ) -> Result<(), String> {
-        self.create_debug_function(fv, name, line);
-        self.cur_fn = Some(fv);
-        let entry = self.ctx.append_basic_block(fv, "entry");
-        self.bld.position_at_end(entry);
-        self.vars.push(HashMap::new());
-        for (i, (name, ty)) in params.iter().enumerate() {
-            let param_val = fv.get_nth_param(i as u32).unwrap();
-            let a = self.alloca_for_type(self.llvm_ty(ty), name, ty);
-            b!(self.bld.build_store(a, param_val));
-            self.set_var(name, a, ty.clone());
-        }
-        let last = self.compile_block(body)?;
-        if self.no_term() {
-            match ret {
-                Type::Void => {
-                    b!(self.bld.build_return(None));
-                }
-                _ => {
-                    let rty = self.llvm_ty(ret);
-                    let v = match last {
-                        Some(v) => self.coerce_val(v, rty),
-                        _ => self.default_val(ret),
-                    };
-                    b!(self.bld.build_return(Some(&v)));
-                }
-            }
-        }
-        self.vars.pop();
-        self.cur_fn = None;
-        self.pop_debug_scope();
         Ok(())
     }
 

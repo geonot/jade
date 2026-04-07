@@ -60,7 +60,13 @@ impl Typer {
                 ast::Decl::Extern(ef) => {
                     self.declare_extern_sig(ef);
                 }
-                ast::Decl::Use(_) => {}
+                ast::Decl::Use(u) => {
+                    // Track module name (or alias) for module-qualified dispatch
+                    let mod_name = u.alias.clone().unwrap_or_else(|| u.path.last().cloned().unwrap_or_default());
+                    if !mod_name.is_empty() {
+                        self.modules.insert(mod_name);
+                    }
+                }
                 ast::Decl::ErrDef(ed) => {
                     self.declare_err_def_sig(ed);
                 }
@@ -2257,6 +2263,7 @@ impl Typer {
             value: iter_expr.clone(),
             ty: iter_expr.ty.clone(),
             ownership: Ownership::Owned,
+            atomic: false,
             span,
         });
 
@@ -2365,6 +2372,7 @@ impl Typer {
             value: map_expr,
             ty: map_ty.clone(),
             ownership: Ownership::Owned,
+            atomic: false,
             span,
         });
 
@@ -2400,6 +2408,7 @@ impl Typer {
             value: keys_call,
             ty: keys_ty.clone(),
             ownership: Ownership::Owned,
+            atomic: false,
             span,
         });
 
@@ -2451,6 +2460,7 @@ impl Typer {
             value: k_get,
             ty: key_ty.clone(),
             ownership: Ownership::Owned,
+            atomic: false,
             span,
         });
 
@@ -2488,6 +2498,7 @@ impl Typer {
             value: v_get,
             ty: val_ty,
             ownership: Ownership::Owned,
+            atomic: false,
             span,
         });
 

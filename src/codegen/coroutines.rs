@@ -20,7 +20,6 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) const GEN_VALUE_OFF: u64 = 8;
     pub(crate) const GEN_HAS_VALUE_OFF: u64 = 16;
     pub(crate) const GEN_DONE_OFF: u64 = 17;
-    pub(crate) const GEN_CALLER_CTX_PTR_OFF: u64 = 24;
     pub(crate) const GEN_SIZE: u64 = 32;
 
     pub(crate) fn gen_field_ptr(

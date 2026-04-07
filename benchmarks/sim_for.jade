@@ -1,7 +1,7 @@
 # Sim for benchmark
 # Spawns N independent coroutines via sim for
 
-*fib(n as i64) -> i64
+*fib(n as i64) returns i64
     if n < 2
         return n
     return fib(n - 1) + fib(n - 2)

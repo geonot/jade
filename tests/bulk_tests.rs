@@ -736,7 +736,7 @@ fn b_loop_break_early() {
 #[test]
 fn b_fn_basic() {
     expect(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
     );
 }
@@ -747,49 +747,49 @@ fn b_fn_void() {
 #[test]
 fn b_fn_recursive() {
     expect(
-        "*fact(n: i64) -> i64\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main()\n    log(fact(5))\n",
+        "*fact(n as i64) returns i64\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main()\n    log(fact(5))\n",
         "120",
     );
 }
 #[test]
 fn b_fn_nested_call() {
     expect(
-        "*f(x: i64) -> i64\n    x + 1\n\n*g(x: i64) -> i64\n    f(x) * 2\n\n*main()\n    log(g(5))\n",
+        "*f(x as i64) returns i64\n    x + 1\n\n*g(x as i64) returns i64\n    f(x) * 2\n\n*main()\n    log(g(5))\n",
         "12",
     );
 }
 #[test]
 fn b_fn_early_return() {
     expect(
-        "*check(x: i64) -> i64\n    if x > 0\n        return 1\n    0\n\n*main()\n    log(check(5))\n    log(check(-1))\n",
+        "*check(x as i64) returns i64\n    if x > 0\n        return 1\n    0\n\n*main()\n    log(check(5))\n    log(check(-1))\n",
         "1\n0",
     );
 }
 #[test]
 fn b_fn_chain() {
     expect(
-        "*a(x: i64) -> i64\n    x + 1\n\n*b(x: i64) -> i64\n    x * 2\n\n*c(x: i64) -> i64\n    x - 3\n\n*main()\n    log(c(b(a(5))))\n",
+        "*a(x as i64) returns i64\n    x + 1\n\n*b(x as i64) returns i64\n    x * 2\n\n*c(x as i64) returns i64\n    x - 3\n\n*main()\n    log(c(b(a(5))))\n",
         "9",
     );
 }
 #[test]
 fn b_fn_multi_return() {
     expect(
-        "*abs_val(x: i64) -> i64\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs_val(-5))\n    log(abs_val(3))\n",
+        "*abs_val(x as i64) returns i64\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs_val(-5))\n    log(abs_val(3))\n",
         "5\n3",
     );
 }
 #[test]
 fn b_mutual_recursion() {
     expect(
-        "*is_even(n: i64) -> i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n: i64) -> i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(10))\n",
+        "*is_even(n as i64) returns i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n as i64) returns i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(10))\n",
         "1\n0",
     );
 }
 #[test]
 fn b_fn_ten_params() {
     expect(
-        "*sum5(a: i64, b: i64, c: i64, d: i64, e: i64) -> i64\n    a + b + c + d + e\n\n*main()\n    log(sum5(1, 2, 3, 4, 5))\n",
+        "*sum5(a as i64, b as i64, c as i64, d as i64, e as i64) returns i64\n    a + b + c + d + e\n\n*main()\n    log(sum5(1, 2, 3, 4, 5))\n",
         "15",
     );
 }
@@ -801,42 +801,42 @@ fn b_fn_ten_params() {
 #[test]
 fn b_lambda_inline() {
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(*fn(x: i64) -> i64 x * 3, 14))\n    0\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    log(apply(|x as i64| returns i64 x * 3, 14))\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_lambda_var() {
     expect(
-        "*main() -> i32\n    g is *fn(x: i64) -> i64 x + 100\n    log(g(42))\n    0\n",
+        "*main() returns i32\n    g is |x as i64| returns i64 x + 100\n    log(g(42))\n    0\n",
         "142",
     );
 }
 #[test]
 fn b_closure_single() {
     expect(
-        "*main() -> i32\n    x is 10\n    f is *fn(y: i64) -> i64 x + y\n    log(f(5))\n    0\n",
+        "*main() returns i32\n    x is 10\n    f is |y as i64| returns i64 x + y\n    log(f(5))\n    0\n",
         "15",
     );
 }
 #[test]
 fn b_closure_multi() {
     expect(
-        "*main() -> i32\n    a is 10\n    b is 20\n    f is *fn(x: i64) -> i64 a + b + x\n    log(f(5))\n    0\n",
+        "*main() returns i32\n    a is 10\n    b is 20\n    f is |x as i64| returns i64 a + b + x\n    log(f(5))\n    0\n",
         "35",
     );
 }
 #[test]
 fn b_closure_hof() {
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    base is 100\n    f is *fn(x: i64) -> i64 base + x\n    log(apply(f, 42))\n    0\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    base is 100\n    f is |x as i64| returns i64 base + x\n    log(apply(f, 42))\n    0\n",
         "142",
     );
 }
 #[test]
 fn b_do_end_lambda() {
     expect(
-        "*main() -> i32\n    g is *fn(x: i64) -> i64 do\n        y is x * 2\n        y + 1\n    end\n    log(g(20))\n    0\n",
+        "*main() returns i32\n    g is |x as i64| returns i64 do\n        y is x * 2\n        y + 1\n    end\n    log(g(20))\n    0\n",
         "41",
     );
 }
@@ -876,49 +876,49 @@ fn b_ternary_arith() {
 #[test]
 fn b_struct_basic() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 3, y is 4)\n    log(p.x)\n    log(p.y)\n    0\n",
+        "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 3, y is 4)\n    log(p.x)\n    log(p.y)\n    0\n",
         "3\n4",
     );
 }
 #[test]
 fn b_struct_arith() {
     expect(
-        "type Vec2\n    x: i64\n    y: i64\n\n*main() -> i32\n    v is Vec2(x is 3, y is 4)\n    log(v.x * v.x + v.y * v.y)\n    0\n",
+        "type Vec2\n    x as i64\n    y as i64\n\n*main() returns i32\n    v is Vec2(x is 3, y is 4)\n    log(v.x * v.x + v.y * v.y)\n    0\n",
         "25",
     );
 }
 #[test]
 fn b_struct_positional() {
     expect(
-        "type Pair\n    a: i64\n    b: i64\n\n*main() -> i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
+        "type Pair\n    a as i64\n    b as i64\n\n*main() returns i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
         "20",
     );
 }
 #[test]
 fn b_struct_fn_arg() {
     expect(
-        "type Pt\n    x: i64\n    y: i64\n\n*sum(p: Pt) -> i64\n    p.x + p.y\n\n*main() -> i32\n    log(sum(Pt(x is 4, y is 6)))\n    0\n",
+        "type Pt\n    x as i64\n    y as i64\n\n*sum(p as Pt) returns i64\n    p.x + p.y\n\n*main() returns i32\n    log(sum(Pt(x is 4, y is 6)))\n    0\n",
         "10",
     );
 }
 #[test]
 fn b_struct_method() {
     expect(
-        "type Counter\n    val: i64\n\n    *get() -> i64\n        self.val\n\n*main() -> i32\n    c is Counter(val is 42)\n    log(c.get())\n    0\n",
+        "type Counter\n    val as i64\n\n    *get() returns i64\n        self.val\n\n*main() returns i32\n    c is Counter(val is 42)\n    log(c.get())\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_struct_method_add() {
     expect(
-        "type Vec2\n    x: i64\n    y: i64\n\n    *sum() -> i64\n        self.x + self.y\n\n*main() -> i32\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n    0\n",
+        "type Vec2\n    x as i64\n    y as i64\n\n    *sum() returns i64\n        self.x + self.y\n\n*main() returns i32\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n    0\n",
         "10",
     );
 }
 #[test]
 fn b_struct_3field() {
     expect(
-        "type V3\n    x: i64\n    y: i64\n    z: i64\n\n*main() -> i32\n    v is V3(x is 1, y is 2, z is 3)\n    log(v.x + v.y + v.z)\n    0\n",
+        "type V3\n    x as i64\n    y as i64\n    z as i64\n\n*main() returns i32\n    v is V3(x is 1, y is 2, z is 3)\n    log(v.x + v.y + v.z)\n    0\n",
         "6",
     );
 }
@@ -930,42 +930,42 @@ fn b_struct_3field() {
 #[test]
 fn b_enum_2() {
     expect(
-        "enum Dir\n    Up\n    Down\n\n*main() -> i32\n    d is Up\n    match d\n        Up ? log(1)\n        Down ? log(2)\n    0\n",
+        "enum Dir\n    Up\n    Down\n\n*main() returns i32\n    d is Up\n    match d\n        Up ? log(1)\n        Down ? log(2)\n    0\n",
         "1",
     );
 }
 #[test]
 fn b_enum_3() {
     expect(
-        "enum Light\n    Red\n    Yellow\n    Green\n\n*main() -> i32\n    l is Yellow\n    match l\n        Red ? log(0)\n        Yellow ? log(1)\n        Green ? log(2)\n    0\n",
+        "enum Light\n    Red\n    Yellow\n    Green\n\n*main() returns i32\n    l is Yellow\n    match l\n        Red ? log(0)\n        Yellow ? log(1)\n        Green ? log(2)\n    0\n",
         "1",
     );
 }
 #[test]
 fn b_enum_data() {
     expect(
-        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main() -> i32\n    s is Circle(5)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w + h)\n    0\n",
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main() returns i32\n    s is Circle(5)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w + h)\n    0\n",
         "5",
     );
 }
 #[test]
 fn b_enum_data_rect() {
     expect(
-        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main() -> i32\n    s is Rect(3, 4)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w * h)\n    0\n",
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*main() returns i32\n    s is Rect(3, 4)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w * h)\n    0\n",
         "12",
     );
 }
 #[test]
 fn b_enum_wildcard() {
     expect(
-        "enum Op\n    Add\n    Sub\n    Mul\n\n*main() -> i32\n    o is Mul\n    match o\n        Add ? log(1)\n        _ ? log(99)\n    0\n",
+        "enum Op\n    Add\n    Sub\n    Mul\n\n*main() returns i32\n    o is Mul\n    match o\n        Add ? log(1)\n        _ ? log(99)\n    0\n",
         "99",
     );
 }
 #[test]
 fn b_enum_fn_arg() {
     expect(
-        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s: Shape) -> i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main() -> i32\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n    0\n",
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s as Shape) returns i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main() returns i32\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n    0\n",
         "25\n21",
     );
 }
@@ -991,14 +991,14 @@ fn b_match_int_default() {
 #[test]
 fn b_match_expr_fn() {
     expect(
-        "*choose(x: i64) -> i64\n    match x\n        1 ? 10\n        2 ? 20\n        _ ? 99\n\n*main() -> i32\n    log(choose(1))\n    log(choose(2))\n    log(choose(7))\n    0\n",
+        "*choose(x as i64) returns i64\n    match x\n        1 ? 10\n        2 ? 20\n        _ ? 99\n\n*main() returns i32\n    log(choose(1))\n    log(choose(2))\n    log(choose(7))\n    0\n",
         "10\n20\n99",
     );
 }
 #[test]
 fn b_match_enum_expr() {
     expect(
-        "enum Op\n    Add(i64, i64)\n    Neg(i64)\n\n*eval(op: Op) -> i64\n    match op\n        Add(a, b) ? a + b\n        Neg(a) ? 0 - a\n\n*main() -> i32\n    log(eval(Add(3, 4)))\n    log(eval(Neg(10)))\n    0\n",
+        "enum Op\n    Add(i64, i64)\n    Neg(i64)\n\n*eval(op as Op) returns i64\n    match op\n        Add(a, b) ? a + b\n        Neg(a) ? 0 - a\n\n*main() returns i32\n    log(eval(Add(3, 4)))\n    log(eval(Neg(10)))\n    0\n",
         "7\n-10",
     );
 }
@@ -1010,28 +1010,28 @@ fn b_match_enum_expr() {
 #[test]
 fn b_arr_index() {
     expect(
-        "*main() -> i32\n    a is [10, 20, 30]\n    log(a[0])\n    log(a[1])\n    log(a[2])\n    0\n",
+        "*main() returns i32\n    a is [10, 20, 30]\n    log(a[0])\n    log(a[1])\n    log(a[2])\n    0\n",
         "10\n20\n30",
     );
 }
 #[test]
 fn b_arr_sum_loop() {
     expect(
-        "*main() -> i32\n    a is [1, 2, 3, 4, 5]\n    total is 0\n    i is 0\n    while i < 5\n        total is total + a[i]\n        i is i + 1\n    log(total)\n    0\n",
+        "*main() returns i32\n    a is [1, 2, 3, 4, 5]\n    total is 0\n    i is 0\n    while i < 5\n        total is total + a[i]\n        i is i + 1\n    log(total)\n    0\n",
         "15",
     );
 }
 #[test]
 fn b_arr_4elem() {
     expect(
-        "*main() -> i32\n    a is [10, 20, 30, 40]\n    log(a[0] + a[3])\n    0\n",
+        "*main() returns i32\n    a is [10, 20, 30, 40]\n    log(a[0] + a[3])\n    0\n",
         "50",
     );
 }
 #[test]
 fn b_arr_5elem() {
     expect(
-        "*main() -> i32\n    a is [1, 1, 1, 1, 1]\n    sum is 0\n    for i in 5\n        sum is sum + a[i]\n    log(sum)\n    0\n",
+        "*main() returns i32\n    a is [1, 1, 1, 1, 1]\n    sum is 0\n    for i in 5\n        sum is sum + a[i]\n    log(sum)\n    0\n",
         "5",
     );
 }
@@ -1064,21 +1064,21 @@ fn b_arr_for_product() {
 #[test]
 fn b_tuple_2() {
     expect(
-        "*main() -> i32\n    t is (10, 20)\n    log(t[0])\n    log(t[1])\n    0\n",
+        "*main() returns i32\n    t is (10, 20)\n    log(t[0])\n    log(t[1])\n    0\n",
         "10\n20",
     );
 }
 #[test]
 fn b_tuple_3() {
     expect(
-        "*main() -> i32\n    t is (100, 200, 300)\n    log(t[0] + t[1] + t[2])\n    0\n",
+        "*main() returns i32\n    t is (100, 200, 300)\n    log(t[0] + t[1] + t[2])\n    0\n",
         "600",
     );
 }
 #[test]
 fn b_tuple_arith() {
     expect(
-        "*main() -> i32\n    t is (7, 3)\n    log(t[0] * t[1])\n    0\n",
+        "*main() returns i32\n    t is (7, 3)\n    log(t[0] * t[1])\n    0\n",
         "21",
     );
 }
@@ -1101,7 +1101,7 @@ fn b_cast_f64_int() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 20: Strings
+// BATCH 20as Strings
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -1161,35 +1161,35 @@ fn b_str_long() {
 #[test]
 fn b_pipe_single() {
     expect(
-        "*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    result is 10 ~ double\n    log(result)\n    0\n",
+        "*double(x as i64) returns i64\n    x * 2\n\n*main() returns i32\n    result is 10 ~ double\n    log(result)\n    0\n",
         "20",
     );
 }
 #[test]
 fn b_pipe_chain() {
     expect(
-        "*double(x: i64) -> i64\n    x * 2\n\n*add_one(x: i64) -> i64\n    x + 1\n\n*main() -> i32\n    result is 10 ~ double ~ add_one\n    log(result)\n    0\n",
+        "*double(x as i64) returns i64\n    x * 2\n\n*add_one(x as i64) returns i64\n    x + 1\n\n*main() returns i32\n    result is 10 ~ double ~ add_one\n    log(result)\n    0\n",
         "21",
     );
 }
 #[test]
 fn b_pipe_placeholder() {
     expect(
-        "*mul(a: i64, b: i64) -> i64\n    a * b\n\n*main() -> i32\n    result is 10 ~ mul($, 3)\n    log(result)\n    0\n",
+        "*mul(a as i64, b as i64) returns i64\n    a * b\n\n*main() returns i32\n    result is 10 ~ mul($, 3)\n    log(result)\n    0\n",
         "30",
     );
 }
 #[test]
 fn b_pipe_lambda() {
     expect(
-        "*main() -> i32\n    result is 5 ~ *fn(x: i64) -> i64 x * x\n    log(result)\n    0\n",
+        "*main() returns i32\n    result is 5 ~ |x as i64| returns i64 x * x\n    log(result)\n    0\n",
         "25",
     );
 }
 #[test]
 fn b_pipe_with_args() {
     expect(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main() -> i32\n    result is 10 ~ add(5)\n    log(result)\n    0\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main() returns i32\n    result is 10 ~ add(5)\n    log(result)\n    0\n",
         "15",
     );
 }
@@ -1201,56 +1201,56 @@ fn b_pipe_with_args() {
 #[test]
 fn b_gen_id() {
     expect(
-        "*id of T(x: T) -> T\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n",
+        "*id of T(x as T) returns T\n    x\n\n*main() returns i32\n    log(id(42))\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_gen_add() {
     expect(
-        "*add of T(a: T, b: T) -> T\n    a + b\n\n*main() -> i32\n    log(add(3, 4))\n    0\n",
+        "*add of T(a as T, b as T) returns T\n    a + b\n\n*main() returns i32\n    log(add(3, 4))\n    0\n",
         "7",
     );
 }
 #[test]
 fn b_gen_max() {
     expect(
-        "*max of T(a: T, b: T) -> T\n    if a > b\n        return a\n    b\n\n*main() -> i32\n    log(max(10, 20))\n    0\n",
+        "*max of T(a as T, b as T) returns T\n    if a > b\n        return a\n    b\n\n*main() returns i32\n    log(max(10, 20))\n    0\n",
         "20",
     );
 }
 #[test]
 fn b_gen_min() {
     expect(
-        "*min of T(a: T, b: T) -> T\n    if a < b\n        return a\n    b\n\n*main() -> i32\n    log(min(10, 20))\n    0\n",
+        "*min of T(a as T, b as T) returns T\n    if a < b\n        return a\n    b\n\n*main() returns i32\n    log(min(10, 20))\n    0\n",
         "10",
     );
 }
 #[test]
 fn b_inferred_gen() {
     expect(
-        "*identity(x: T) -> T\n    x\n\n*main() -> i32\n    log(identity(99))\n    0\n",
+        "*identity(x as T) returns T\n    x\n\n*main() returns i32\n    log(identity(99))\n    0\n",
         "99",
     );
 }
 #[test]
 fn b_inferred_gen_add() {
     expect(
-        "*add(a: T, b: T) -> T\n    a + b\n\n*main() -> i32\n    log(add(10, 20))\n    0\n",
+        "*add(a as T, b as T) returns T\n    a + b\n\n*main() returns i32\n    log(add(10, 20))\n    0\n",
         "30",
     );
 }
 #[test]
 fn b_untyped_gen() {
     expect(
-        "*double(x)\n    x * 2\n\n*main() -> i32\n    log(double(21))\n    0\n",
+        "*double(x)\n    x * 2\n\n*main() returns i32\n    log(double(21))\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_untyped_rec() {
     expect(
-        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main() -> i32\n    log(fact(10))\n    0\n",
+        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main() returns i32\n    log(fact(10))\n    0\n",
         "3628800",
     );
 }
@@ -1262,27 +1262,27 @@ fn b_untyped_rec() {
 #[test]
 fn b_hof_pass() {
     expect(
-        "*double(x: i64) -> i64\n    x * 2\n\n*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(double, 21))\n    0\n",
+        "*double(x as i64) returns i64\n    x * 2\n\n*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    log(apply(double, 21))\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_hof_var() {
     expect(
-        "*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    f is double\n    log(f(21))\n    0\n",
+        "*double(x as i64) returns i64\n    x * 2\n\n*main() returns i32\n    f is double\n    log(f(21))\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_hof_chain() {
     expect(
-        "*add_one(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(add_one, apply(double, 10)))\n    0\n",
+        "*add_one(x as i64) returns i64\n    x + 1\n\n*double(x as i64) returns i64\n    x * 2\n\n*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    log(apply(add_one, apply(double, 10)))\n    0\n",
         "21",
     );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 24: Option / Result
+// BATCH 24 as Option / Result
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -1330,7 +1330,7 @@ fn b_result_ok_arith() {
 #[test]
 fn b_option_local() {
     expect(
-        "enum Option\n    Some(i64)\n    None\n\n*safe_div(a: i64, b: i64) -> Option\n    if b equals 0\n        return None\n    Some(a / b)\n\n*main() -> i32\n    match safe_div(10, 2)\n        Some(v) ? log(v)\n        None ? log(-1)\n    match safe_div(10, 0)\n        Some(v) ? log(v)\n        None ? log(-1)\n    0\n",
+        "enum Option\n    Some(i64)\n    None\n\n*safe_div(a as i64, b as i64) returns Option\n    if b equals 0\n        return None\n    Some(a / b)\n\n*main() returns i32\n    match safe_div(10, 2)\n        Some(v) ? log(v)\n        None ? log(-1)\n    match safe_div(10, 0)\n        Some(v) ? log(v)\n        None ? log(-1)\n    0\n",
         "5\n-1",
     );
 }
@@ -1362,47 +1362,47 @@ fn b_rc_deref_arith() {
 #[test]
 fn b_ptr_ref_deref() {
     expect(
-        "*main() -> i32\n    x is 42\n    p is %x\n    log(@p)\n    0\n",
+        "*main() returns i32\n    x is 42\n    p is %x\n    log(@p)\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_ptr_arith() {
     expect(
-        "*main() -> i32\n    a is 10\n    b is 20\n    pa is %a\n    pb is %b\n    log(@pa + @pb)\n    0\n",
+        "*main() returns i32\n    a is 10\n    b is 20\n    pa is %a\n    pb is %b\n    log(@pa + @pb)\n    0\n",
         "30",
     );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 27: List comprehension
+// BATCH 27 as List comprehension
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_listcomp_squares() {
     expect(
-        "*main() -> i32\n    arr is [x * x for x in 0 to 5]\n    log(arr[0])\n    log(arr[1])\n    log(arr[4])\n    0\n",
+        "*main() returns i32\n    arr is [x * x for x in 0 to 5]\n    log(arr[0])\n    log(arr[1])\n    log(arr[4])\n    0\n",
         "0\n1\n16",
     );
 }
 #[test]
 fn b_listcomp_filter() {
     expect(
-        "*main() -> i32\n    arr is [x for x in 0 to 10 if x > 5]\n    log(arr[0])\n    log(arr[1])\n    0\n",
+        "*main() returns i32\n    arr is [x for x in 0 to 10 if x > 5]\n    log(arr[0])\n    log(arr[1])\n    0\n",
         "6\n7",
     );
 }
 #[test]
 fn b_listcomp_add() {
     expect(
-        "*main() -> i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    0\n",
+        "*main() returns i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    0\n",
         "10\n11\n12",
     );
 }
 #[test]
 fn b_listcomp_double() {
     expect(
-        "*main() -> i32\n    arr is [i * 2 for i in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    log(arr[3])\n    0\n",
+        "*main() returns i32\n    arr is [i * 2 for i in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    log(arr[3])\n    0\n",
         "0\n2\n4\n6",
     );
 }
@@ -1413,23 +1413,23 @@ fn b_listcomp_double() {
 
 #[test]
 fn b_exp_2_10() {
-    expect("*main()\n    log(2 ** 10)\n", "1024");
+    expect("*main()\n    log(2 pow 10)\n", "1024");
 }
 #[test]
 fn b_exp_3_3() {
-    expect("*main()\n    log(3 ** 3)\n", "27");
+    expect("*main()\n    log(3 pow 3)\n", "27");
 }
 #[test]
 fn b_exp_5_0() {
-    expect("*main()\n    log(5 ** 0)\n", "1");
+    expect("*main()\n    log(5 pow 0)\n", "1");
 }
 #[test]
 fn b_exp_7_1() {
-    expect("*main()\n    log(7 ** 1)\n", "7");
+    expect("*main()\n    log(7 pow 1)\n", "7");
 }
 #[test]
 fn b_exp_2_20() {
-    expect("*main()\n    log(2 ** 20)\n", "1048576");
+    expect("*main()\n    log(2 pow 20)\n", "1048576");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1464,21 +1464,21 @@ fn b_neg_lit() {
 #[test]
 fn b_err_def() {
     expect(
-        "err IoError\n    NotFound\n    Permission\n\n*main() -> i32\n    log(99)\n    0\n",
+        "err IoError\n    NotFound\n    Permission\n\n*main() returns i32\n    log(99)\n    0\n",
         "99",
     );
 }
 #[test]
 fn b_bang_return() {
     expect(
-        "*check(x: i64) -> i64\n    if x < 0\n        ! -1\n    x * 2\n\n*main() -> i32\n    log(check(5))\n    log(check(-3))\n    0\n",
+        "*check(x as i64) returns i64\n    if x < 0\n        ! -1\n    x * 2\n\n*main() returns i32\n    log(check(5))\n    log(check(-3))\n    0\n",
         "10\n-1",
     );
 }
 #[test]
 fn b_err_safe_div() {
     expect(
-        "err MathError\n    DivZero\n    Overflow\n\n*safe_div(a: i64, b: i64) -> i64\n    if b equals 0\n        ! 0\n    a / b\n\n*main()\n    log(safe_div(10, 2))\n",
+        "err MathError\n    DivZero\n    Overflow\n\n*safe_div(a as i64, b as i64) returns i64\n    if b equals 0\n        ! 0\n    a / b\n\n*main()\n    log(safe_div(10, 2))\n",
         "5",
     );
 }
@@ -1490,17 +1490,17 @@ fn b_err_safe_div() {
 #[test]
 fn b_popcount() {
     expect(
-        "*main() -> i32\n    log(popcount(7))\n    log(popcount(255))\n    0\n",
+        "*main() returns i32\n    log(popcount(7))\n    log(popcount(255))\n    0\n",
         "3\n8",
     );
 }
 #[test]
 fn b_ctz_8() {
-    expect("*main() -> i32\n    log(ctz(8))\n    0\n", "3");
+    expect("*main() returns i32\n    log(ctz(8))\n    0\n", "3");
 }
 #[test]
 fn b_popcount_0() {
-    expect("*main() -> i32\n    log(popcount(0))\n    0\n", "0");
+    expect("*main() returns i32\n    log(popcount(0))\n    0\n", "0");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1510,7 +1510,7 @@ fn b_popcount_0() {
 #[test]
 fn b_asm_nop() {
     expect(
-        "*main() -> i32\n    asm\n        nop\n    log(42)\n    0\n",
+        "*main() returns i32\n    asm\n        nop\n    log(42)\n    0\n",
         "42",
     );
 }
@@ -1530,7 +1530,7 @@ fn b_fail_undef_var() {
 #[test]
 fn b_fail_non_exhaustive() {
     let err = expect_compile_fail(
-        "enum AB\n    A\n    B\n\n*main() -> i32\n    x is A\n    match x\n        A ? log(1)\n    0\n",
+        "enum AB\n    A\n    B\n\n*main() returns i32\n    x is A\n    match x\n        A ? log(1)\n    0\n",
     );
     assert!(err.contains("non-exhaustive") || err.contains("missing"));
 }
@@ -1546,35 +1546,35 @@ fn b_fail_tab_indent() {
 #[test]
 fn b_fibonacci() {
     expect(
-        "*fib(n: i64) -> i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "*fib(n as i64) returns i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
         "55",
     );
 }
 #[test]
 fn b_gcd() {
     expect(
-        "*gcd(a: i64, b: i64) -> i64\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main()\n    log(gcd(48, 18))\n",
+        "*gcd(a as i64, b as i64) returns i64\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main()\n    log(gcd(48, 18))\n",
         "6",
     );
 }
 #[test]
 fn b_power() {
     expect(
-        "*power(base: i64, exp: i64) -> i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
+        "*power(base as i64, exp as i64) returns i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
         "1024",
     );
 }
 #[test]
 fn b_sum_to_n() {
     expect(
-        "*sum_to(n: i64) -> i64\n    total is 0\n    for i in 1 to n + 1\n        total is total + i\n    total\n\n*main()\n    log(sum_to(100))\n",
+        "*sum_to(n as i64) returns i64\n    total is 0\n    for i in 1 to n + 1\n        total is total + i\n    total\n\n*main()\n    log(sum_to(100))\n",
         "5050",
     );
 }
 #[test]
 fn b_deep_rec() {
     expect(
-        "*countdown(n: i64) -> i64\n    if n equals 0\n        return 0\n    countdown(n - 1)\n\n*main()\n    log(countdown(10000))\n",
+        "*countdown(n as i64) returns i64\n    if n equals 0\n        return 0\n    countdown(n - 1)\n\n*main()\n    log(countdown(10000))\n",
         "0",
     );
 }
@@ -1602,49 +1602,49 @@ fn b_arr_min() {
 #[test]
 fn b_collatz() {
     expect(
-        "*collatz(n: i64) -> i64\n    steps is 0\n    x is n\n    while x neq 1\n        if x % 2 equals 0\n            x is x / 2\n        else\n            x is 3 * x + 1\n        steps is steps + 1\n    steps\n\n*main()\n    log(collatz(27))\n",
+        "*collatz(n as i64) returns i64\n    steps is 0\n    x is n\n    while x neq 1\n        if x % 2 equals 0\n            x is x / 2\n        else\n            x is 3 * x + 1\n        steps is steps + 1\n    steps\n\n*main()\n    log(collatz(27))\n",
         "111",
     );
 }
 #[test]
 fn b_sum_digits() {
     expect(
-        "*sum_digits(n: i64) -> i64\n    sum is 0\n    x is n\n    while x > 0\n        sum is sum + x % 10\n        x is x / 10\n    sum\n\n*main()\n    log(sum_digits(12345))\n",
+        "*sum_digits(n as i64) returns i64\n    sum is 0\n    x is n\n    while x > 0\n        sum is sum + x % 10\n        x is x / 10\n    sum\n\n*main()\n    log(sum_digits(12345))\n",
         "15",
     );
 }
 #[test]
 fn b_reverse_num() {
     expect(
-        "*reverse(n: i64) -> i64\n    result is 0\n    x is n\n    while x > 0\n        result is result * 10 + x % 10\n        x is x / 10\n    result\n\n*main()\n    log(reverse(12345))\n",
+        "*reverse(n as i64) returns i64\n    result is 0\n    x is n\n    while x > 0\n        result is result * 10 + x % 10\n        x is x / 10\n    result\n\n*main()\n    log(reverse(12345))\n",
         "54321",
     );
 }
 #[test]
 fn b_is_prime() {
     expect(
-        "*is_prime(n: i64) -> i64\n    if n < 2\n        return 0\n    i is 2\n    while i * i <= n\n        if n % i equals 0\n            return 0\n        i is i + 1\n    1\n\n*main()\n    log(is_prime(7))\n    log(is_prime(10))\n    log(is_prime(97))\n",
+        "*is_prime(n as i64) returns i64\n    if n < 2\n        return 0\n    i is 2\n    while i * i <= n\n        if n % i equals 0\n            return 0\n        i is i + 1\n    1\n\n*main()\n    log(is_prime(7))\n    log(is_prime(10))\n    log(is_prime(97))\n",
         "1\n0\n1",
     );
 }
 #[test]
 fn b_lcm() {
     expect(
-        "*gcd(a: i64, b: i64) -> i64\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*lcm(a: i64, b: i64) -> i64\n    a / gcd(a, b) * b\n\n*main()\n    log(lcm(12, 18))\n",
+        "*gcd(a as i64, b as i64) returns i64\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*lcm(a as i64, b as i64) returns i64\n    a / gcd(a, b) * b\n\n*main()\n    log(lcm(12, 18))\n",
         "36",
     );
 }
 #[test]
 fn b_count_primes() {
     expect(
-        "*is_prime(n: i64) -> i64\n    if n < 2\n        return 0\n    i is 2\n    while i * i <= n\n        if n % i equals 0\n            return 0\n        i is i + 1\n    1\n\n*main()\n    count is 0\n    for i in 2 to 30\n        count is count + is_prime(i)\n    log(count)\n",
+        "*is_prime(n as i64) returns i64\n    if n < 2\n        return 0\n    i is 2\n    while i * i <= n\n        if n % i equals 0\n            return 0\n        i is i + 1\n    1\n\n*main()\n    count is 0\n    for i in 2 to 30\n        count is count + is_prime(i)\n    log(count)\n",
         "10",
     );
 }
 #[test]
 fn b_triangle_num() {
     expect(
-        "*tri(n: i64) -> i64\n    n * (n + 1) / 2\n\n*main()\n    log(tri(10))\n    log(tri(100))\n",
+        "*tri(n as i64) returns i64\n    n * (n + 1) / 2\n\n*main()\n    log(tri(10))\n    log(tri(100))\n",
         "55\n5050",
     );
 }
@@ -1735,7 +1735,7 @@ fn b_sc_or_neither() {
 #[test]
 fn b_extern_puts() {
     expect(
-        "extern *puts(s: String) -> i32\n\n*main() -> i32\n    puts(\"hello extern\")\n    0\n",
+        "extern *puts(s as String) returns i32\n\n*main() returns i32\n    puts(\"hello extern\")\n    0\n",
         "hello extern",
     );
 }
@@ -1750,10 +1750,10 @@ fn b_module_import() {
     let helper = dir.path().join("helper.jade");
     let main = dir.path().join("main.jade");
     let out = dir.path().join("test_bin");
-    std::fs::write(&helper, "*double(x: i64) -> i64\n    x + x\n").unwrap();
+    std::fs::write(&helper, "*double(x as i64) returns i64\n    x + x\n").unwrap();
     std::fs::write(
         &main,
-        "use helper\n\n*main() -> i32\n    log(double(21))\n    0\n",
+        "use helper\n\n*main() returns i32\n    log(double(21))\n    0\n",
     )
     .unwrap();
     let status = Command::new(jadec())
@@ -1776,21 +1776,21 @@ fn b_module_import() {
 #[test]
 fn b_exhaust_all() {
     expect(
-        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() returns i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
         "1",
     );
 }
 #[test]
 fn b_exhaust_wildcard() {
     expect(
-        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Green\n    match c\n        Red ? log(1)\n        _ ? log(99)\n    0\n",
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() returns i32\n    c is Green\n    match c\n        Red ? log(1)\n        _ ? log(99)\n    0\n",
         "99",
     );
 }
 #[test]
 fn b_exhaust_fail() {
     let err = expect_compile_fail(
-        "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n    0\n",
+        "enum Color\n    Red\n    Green\n    Blue\n\n*main() returns i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n    0\n",
     );
     assert!(err.contains("non-exhaustive") || err.contains("missing"));
 }
@@ -1802,7 +1802,7 @@ fn b_exhaust_fail() {
 #[test]
 fn b_iterative_fib() {
     expect(
-        "*fib(n: i64) -> i64\n    a is 0\n    b is 1\n    for i in n\n        t is a\n        a is b\n        b is t + b\n    a\n\n*main()\n    log(fib(10))\n    log(fib(20))\n",
+        "*fib(n as i64) returns i64\n    a is 0\n    b is 1\n    for i in n\n        t is a\n        a is b\n        b is t + b\n    a\n\n*main()\n    log(fib(10))\n    log(fib(20))\n",
         "55\n6765",
     );
 }
@@ -1830,70 +1830,70 @@ fn b_geometric() {
 #[test]
 fn b_nested_fn_call() {
     expect(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*mul(a: i64, b: i64) -> i64\n    a * b\n\n*main()\n    log(add(mul(2, 3), mul(4, 5)))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*mul(a as i64, b as i64) returns i64\n    a * b\n\n*main()\n    log(add(mul(2, 3), mul(4, 5)))\n",
         "26",
     );
 }
 #[test]
 fn b_apply_n_times() {
     expect(
-        "*apply_n(f: (i64) -> i64, x: i64, n: i64) -> i64\n    result is x\n    for i in n\n        result is f(result)\n    result\n\n*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    log(apply_n(double, 1, 10))\n    0\n",
+        "*apply_n(f as (i64) returns i64, x as i64, n as i64) returns i64\n    result is x\n    for i in n\n        result is f(result)\n    result\n\n*double(x as i64) returns i64\n    x * 2\n\n*main() returns i32\n    log(apply_n(double, 1, 10))\n    0\n",
         "1024",
     );
 }
 #[test]
 fn b_fn_returns_fn_val() {
     expect(
-        "*square(x: i64) -> i64\n    x * x\n\n*cube(x: i64) -> i64\n    x * x * x\n\n*pick_fn(n: i64) -> (i64) -> i64\n    if n equals 2\n        return square\n    cube\n\n*main() -> i32\n    f is pick_fn(2)\n    log(f(5))\n    g is pick_fn(3)\n    log(g(3))\n    0\n",
+        "*square(x as i64) returns i64\n    x * x\n\n*cube(x as i64) returns i64\n    x * x * x\n\n*pick_fn(n as i64) returns (i64) returns i64\n    if n equals 2\n        return square\n    cube\n\n*main() returns i32\n    f is pick_fn(2)\n    log(f(5))\n    g is pick_fn(3)\n    log(g(3))\n    0\n",
         "25\n27",
     );
 }
 #[test]
 fn b_enum_4variant() {
     expect(
-        "enum Op\n    Add(i64, i64)\n    Sub(i64, i64)\n    Mul(i64, i64)\n    Neg(i64)\n\n*eval(op: Op) -> i64\n    match op\n        Add(a, b) ? a + b\n        Sub(a, b) ? a - b\n        Mul(a, b) ? a * b\n        Neg(a) ? 0 - a\n\n*main() -> i32\n    log(eval(Add(10, 20)))\n    log(eval(Sub(50, 8)))\n    log(eval(Mul(6, 7)))\n    log(eval(Neg(42)))\n    0\n",
+        "enum Op\n    Add(i64, i64)\n    Sub(i64, i64)\n    Mul(i64, i64)\n    Neg(i64)\n\n*eval(op as Op) returns i64\n    match op\n        Add(a, b) ? a + b\n        Sub(a, b) ? a - b\n        Mul(a, b) ? a * b\n        Neg(a) ? 0 - a\n\n*main() returns i32\n    log(eval(Add(10, 20)))\n    log(eval(Sub(50, 8)))\n    log(eval(Mul(6, 7)))\n    log(eval(Neg(42)))\n    0\n",
         "30\n42\n42\n-42",
     );
 }
 #[test]
 fn b_enum_recursive_sum() {
     expect(
-        "enum List\n    Cons(i64, i64)\n    Nil\n\n*main() -> i32\n    a is Cons(10, 0)\n    match a\n        Cons(v, _) ? log(v)\n        Nil ? log(0)\n    0\n",
+        "enum List\n    Cons(i64, i64)\n    Nil\n\n*main() returns i32\n    a is Cons(10, 0)\n    match a\n        Cons(v, _) ? log(v)\n        Nil ? log(0)\n    0\n",
         "10",
     );
 }
 #[test]
 fn b_struct_multi_methods() {
     expect(
-        "type Rect\n    w: i64\n    h: i64\n\n    *area() -> i64\n        self.w * self.h\n\n    *perimeter() -> i64\n        2 * (self.w + self.h)\n\n*main() -> i32\n    r is Rect(w is 5, h is 3)\n    log(r.area())\n    log(r.perimeter())\n    0\n",
+        "type Rect\n    w as i64\n    h as i64\n\n    *area() returns i64\n        self.w * self.h\n\n    *perimeter() returns i64\n        2 * (self.w + self.h)\n\n*main() returns i32\n    r is Rect(w is 5, h is 3)\n    log(r.area())\n    log(r.perimeter())\n    0\n",
         "15\n16",
     );
 }
 #[test]
 fn b_pipeline_complex() {
     expect(
-        "*double(x: i64) -> i64\n    x * 2\n\n*sub_one(x: i64) -> i64\n    x - 1\n\n*square(x: i64) -> i64\n    x * x\n\n*main() -> i32\n    result is 3 ~ double ~ sub_one ~ square\n    log(result)\n    0\n",
+        "*double(x as i64) returns i64\n    x * 2\n\n*sub_one(x as i64) returns i64\n    x - 1\n\n*square(x as i64) returns i64\n    x * x\n\n*main() returns i32\n    result is 3 ~ double ~ sub_one ~ square\n    log(result)\n    0\n",
         "25",
     );
 }
 #[test]
 fn b_listcomp_sum() {
     expect(
-        "*main() -> i32\n    arr is [i * i for i in 1 to 6]\n    log(arr[0] + arr[1] + arr[2] + arr[3] + arr[4])\n    0\n",
+        "*main() returns i32\n    arr is [i * i for i in 1 to 6]\n    log(arr[0] + arr[1] + arr[2] + arr[3] + arr[4])\n    0\n",
         "55",
     );
 }
 #[test]
 fn b_closure_counter() {
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    base is 10\n    f is *fn(x: i64) -> i64 base + x\n    log(apply(f, 5))\n    base is 20\n    g is *fn(x: i64) -> i64 base + x\n    log(apply(g, 5))\n    0\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    base is 10\n    f is |x as i64| returns i64 base + x\n    log(apply(f, 5))\n    base is 20\n    g is |x as i64| returns i64 base + x\n    log(apply(g, 5))\n    0\n",
         "15\n25",
     );
 }
 #[test]
 fn b_enum_as_return() {
     expect(
-        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*checked_add(a: i64, b: i64) -> Result\n    sum is a + b\n    if sum > 100\n        return Err(sum)\n    Ok(sum)\n\n*main() -> i32\n    match checked_add(30, 40)\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - e)\n    match checked_add(60, 50)\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - e)\n    0\n",
+        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*checked_add(a as i64, b as i64) returns Result\n    sum is a + b\n    if sum > 100\n        return Err(sum)\n    Ok(sum)\n\n*main() returns i32\n    match checked_add(30, 40)\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - e)\n    match checked_add(60, 50)\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - e)\n    0\n",
         "70\n-110",
     );
 }
@@ -1931,7 +1931,7 @@ fn b_arr_all_positive() {
 #[test]
 fn b_match_5() {
     expect(
-        "*classify(x: i64) -> i64\n    match x\n        0 ? 0\n        1 ? 1\n        2 ? 4\n        3 ? 9\n        _ ? -1\n\n*main()\n    log(classify(0))\n    log(classify(2))\n    log(classify(99))\n",
+        "*classify(x as i64) returns i64\n    match x\n        0 ? 0\n        1 ? 1\n        2 ? 4\n        3 ? 9\n        _ ? -1\n\n*main()\n    log(classify(0))\n    log(classify(2))\n    log(classify(99))\n",
         "0\n4\n-1",
     );
 }
@@ -1945,14 +1945,14 @@ fn b_match_large_wildcard() {
 #[test]
 fn b_enum_5() {
     expect(
-        "enum Weekday\n    Mon\n    Tue\n    Wed\n    Thu\n    Fri\n\n*is_mid(d: Weekday) -> i64\n    match d\n        Wed ? 1\n        _ ? 0\n\n*main() -> i32\n    log(is_mid(Wed))\n    log(is_mid(Mon))\n    0\n",
+        "enum Weekday\n    Mon\n    Tue\n    Wed\n    Thu\n    Fri\n\n*is_mid(d as Weekday) returns i64\n    match d\n        Wed ? 1\n        _ ? 0\n\n*main() returns i32\n    log(is_mid(Wed))\n    log(is_mid(Mon))\n    0\n",
         "1\n0",
     );
 }
 #[test]
 fn b_struct_pass_return() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*translate(p: Point, dx: i64, dy: i64) -> Point\n    Point(x is p.x + dx, y is p.y + dy)\n\n*main() -> i32\n    p is Point(x is 1, y is 2)\n    q is translate(p, 10, 20)\n    log(q.x)\n    log(q.y)\n    0\n",
+        "type Point\n    x as i64\n    y as i64\n\n*translate(p as Point, dx as i64, dy as i64) returns Point\n    Point(x is p.x + dx, y is p.y + dy)\n\n*main() returns i32\n    p is Point(x is 1, y is 2)\n    q is translate(p, 10, 20)\n    log(q.x)\n    log(q.y)\n    0\n",
         "11\n22",
     );
 }
@@ -1964,28 +1964,28 @@ fn b_struct_pass_return() {
 #[test]
 fn b_abs_fn() {
     expect(
-        "*abs(x: i64) -> i64\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs(5))\n    log(abs(-5))\n    log(abs(0))\n",
+        "*abs(x as i64) returns i64\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs(5))\n    log(abs(-5))\n    log(abs(0))\n",
         "5\n5\n0",
     );
 }
 #[test]
 fn b_max_fn() {
     expect(
-        "*max(a: i64, b: i64) -> i64\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n    log(max(9, 2))\n    log(max(5, 5))\n",
+        "*max(a as i64, b as i64) returns i64\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n    log(max(9, 2))\n    log(max(5, 5))\n",
         "7\n9\n5",
     );
 }
 #[test]
 fn b_min_fn() {
     expect(
-        "*min(a: i64, b: i64) -> i64\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(3, 7))\n    log(min(9, 2))\n    log(min(5, 5))\n",
+        "*min(a as i64, b as i64) returns i64\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(3, 7))\n    log(min(9, 2))\n    log(min(5, 5))\n",
         "3\n2\n5",
     );
 }
 #[test]
 fn b_clamp() {
     expect(
-        "*clamp(x: i64, lo: i64, hi: i64) -> i64\n    if x < lo\n        return lo\n    if x > hi\n        return hi\n    x\n\n*main()\n    log(clamp(5, 0, 10))\n    log(clamp(-5, 0, 10))\n    log(clamp(15, 0, 10))\n",
+        "*clamp(x as i64, lo as i64, hi as i64) returns i64\n    if x < lo\n        return lo\n    if x > hi\n        return hi\n    x\n\n*main()\n    log(clamp(5, 0, 10))\n    log(clamp(-5, 0, 10))\n    log(clamp(15, 0, 10))\n",
         "5\n0\n10",
     );
 }
@@ -1997,21 +1997,21 @@ fn b_clamp() {
 #[test]
 fn b_closure_in_pipe() {
     expect(
-        "*main() -> i32\n    c is 3\n    result is 7 ~ *fn(x: i64) -> i64 x * c\n    log(result)\n    0\n",
+        "*main() returns i32\n    c is 3\n    result is 7 ~ |x as i64| returns i64 x * c\n    log(result)\n    0\n",
         "21",
     );
 }
 #[test]
 fn b_do_end_if() {
     expect(
-        "*main() -> i32\n    abs is *fn(x: i64) -> i64 do\n        result is x\n        if x < 0\n            result is 0 - x\n        result\n    end\n    log(abs(5))\n    log(abs(-3))\n    0\n",
+        "*main() returns i32\n    abs is |x as i64| returns i64 do\n        result is x\n        if x < 0\n            result is 0 - x\n        result\n    end\n    log(abs(5))\n    log(abs(-3))\n    0\n",
         "5\n3",
     );
 }
 #[test]
 fn b_lambda_chain_pipe() {
     expect(
-        "*add_one(x: i64) -> i64\n    x + 1\n\n*main() -> i32\n    result is 5 ~ *fn(x: i64) -> i64 x * x ~ add_one\n    log(result)\n    0\n",
+        "*add_one(x as i64) returns i64\n    x + 1\n\n*main() returns i32\n    result is 5 ~ |x as i64| returns i64 x * x ~ add_one\n    log(result)\n    0\n",
         "26",
     );
 }
@@ -2023,21 +2023,21 @@ fn b_lambda_chain_pipe() {
 #[test]
 fn b_is_palindrome() {
     expect(
-        "*reverse(n: i64) -> i64\n    result is 0\n    x is n\n    while x > 0\n        result is result * 10 + x % 10\n        x is x / 10\n    result\n\n*is_palindrome(n: i64) -> i64\n    if n equals reverse(n)\n        return 1\n    0\n\n*main()\n    log(is_palindrome(121))\n    log(is_palindrome(123))\n    log(is_palindrome(12321))\n",
+        "*reverse(n as i64) returns i64\n    result is 0\n    x is n\n    while x > 0\n        result is result * 10 + x % 10\n        x is x / 10\n    result\n\n*is_palindrome(n as i64) returns i64\n    if n equals reverse(n)\n        return 1\n    0\n\n*main()\n    log(is_palindrome(121))\n    log(is_palindrome(123))\n    log(is_palindrome(12321))\n",
         "1\n0\n1",
     );
 }
 #[test]
 fn b_digit_count() {
     expect(
-        "*digits(n: i64) -> i64\n    if n equals 0\n        return 1\n    count is 0\n    x is n\n    while x > 0\n        count is count + 1\n        x is x / 10\n    count\n\n*main()\n    log(digits(0))\n    log(digits(9))\n    log(digits(99))\n    log(digits(12345))\n",
+        "*digits(n as i64) returns i64\n    if n equals 0\n        return 1\n    count is 0\n    x is n\n    while x > 0\n        count is count + 1\n        x is x / 10\n    count\n\n*main()\n    log(digits(0))\n    log(digits(9))\n    log(digits(99))\n    log(digits(12345))\n",
         "1\n1\n2\n5",
     );
 }
 #[test]
 fn b_pow_mod() {
     expect(
-        "*powmod(base: i64, exp: i64, m: i64) -> i64\n    result is 1\n    b is base % m\n    e is exp\n    while e > 0\n        if e % 2 equals 1\n            result is result * b % m\n        e is e / 2\n        b is b * b % m\n    result\n\n*main()\n    log(powmod(2, 10, 1000))\n",
+        "*powmod(base as i64, exp as i64, m as i64) returns i64\n    result is 1\n    b is base % m\n    e is exp\n    while e > 0\n        if e % 2 equals 1\n            result is result * b % m\n        e is e / 2\n        b is b * b % m\n    result\n\n*main()\n    log(powmod(2, 10, 1000))\n",
         "24",
     );
 }
@@ -2056,21 +2056,21 @@ fn b_harmonic_int() {
 #[test]
 fn b_struct_default() {
     expect(
-        "type Config\n    width: i64\n    height: i64\n    depth: i64\n\n*volume(c: Config) -> i64\n    c.width * c.height * c.depth\n\n*main() -> i32\n    c is Config(width is 2, height is 3, depth is 4)\n    log(volume(c))\n    0\n",
+        "type Config\n    width as i64\n    height as i64\n    depth as i64\n\n*volume(c as Config) returns i64\n    c.width * c.height * c.depth\n\n*main() returns i32\n    c is Config(width is 2, height is 3, depth is 4)\n    log(volume(c))\n    0\n",
         "24",
     );
 }
 #[test]
 fn b_struct_nested_access() {
     expect(
-        "type Pair\n    a: i64\n    b: i64\n\n*main() -> i32\n    p1 is Pair(a is 10, b is 20)\n    p2 is Pair(a is p1.a + 1, b is p1.b + 1)\n    log(p2.a)\n    log(p2.b)\n    0\n",
+        "type Pair\n    a as i64\n    b as i64\n\n*main() returns i32\n    p1 is Pair(a is 10, b is 20)\n    p2 is Pair(a is p1.a + 1, b is p1.b + 1)\n    log(p2.a)\n    log(p2.b)\n    0\n",
         "11\n21",
     );
 }
 #[test]
 fn b_struct_cmp() {
     expect(
-        "type Box\n    val: i64\n\n*bigger(a: Box, b: Box) -> i64\n    if a.val > b.val\n        return a.val\n    b.val\n\n*main() -> i32\n    log(bigger(Box(val is 10), Box(val is 20)))\n    0\n",
+        "type Box\n    val as i64\n\n*bigger(a as Box, b as Box) returns i64\n    if a.val > b.val\n        return a.val\n    b.val\n\n*main() returns i32\n    log(bigger(Box(val is 10), Box(val is 20)))\n    0\n",
         "20",
     );
 }
@@ -2115,20 +2115,20 @@ fn b_nested_for_mult_table() {
 #[test]
 fn b_gen_apply() {
     expect(
-        "*apply of T(f: (T) -> T, x: T) -> T\n    f(x)\n\n*main() -> i32\n    log(apply(*fn(x: i64) -> i64 x + 1, 41))\n    0\n",
+        "*apply of T(f as (T) returns T, x as T) returns T\n    f(x)\n\n*main() returns i32\n    log(apply(|x as i64| returns i64 x + 1, 41))\n    0\n",
         "42",
     );
 }
 #[test]
 fn b_gen_compose() {
     expect(
-        "*compose(f: (i64) -> i64, g: (i64) -> i64, x: i64) -> i64\n    f(g(x))\n\n*dbl(x: i64) -> i64\n    x * 2\n\n*inc(x: i64) -> i64\n    x + 1\n\n*main() -> i32\n    log(compose(dbl, inc, 5))\n    log(compose(inc, dbl, 5))\n    0\n",
+        "*compose(f as (i64) returns i64, g as (i64) returns i64, x as i64) returns i64\n    f(g(x))\n\n*dbl(x as i64) returns i64\n    x * 2\n\n*inc(x as i64) returns i64\n    x + 1\n\n*main() returns i32\n    log(compose(dbl, inc, 5))\n    log(compose(inc, dbl, 5))\n    0\n",
         "12\n11",
     );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 49: String operations
+// BATCH 49 as String operations
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -2180,7 +2180,7 @@ fn b_euler_sum_div() {
 #[test]
 fn b_perfect_number() {
     expect(
-        "*is_perfect(n: i64) -> i64\n    sum is 0\n    i is 1\n    while i < n\n        if n % i equals 0\n            sum is sum + i\n        i is i + 1\n    if sum equals n\n        return 1\n    0\n\n*main()\n    log(is_perfect(6))\n    log(is_perfect(28))\n    log(is_perfect(12))\n",
+        "*is_perfect(n as i64) returns i64\n    sum is 0\n    i is 1\n    while i < n\n        if n % i equals 0\n            sum is sum + i\n        i is i + 1\n    if sum equals n\n        return 1\n    0\n\n*main()\n    log(is_perfect(6))\n    log(is_perfect(28))\n    log(is_perfect(12))\n",
         "1\n1\n0",
     );
 }
@@ -2192,14 +2192,14 @@ fn b_perfect_number() {
 #[test]
 fn b_pipe_4_chain() {
     expect(
-        "*a(x: i64) -> i64\n    x + 1\n\n*b(x: i64) -> i64\n    x * 2\n\n*c(x: i64) -> i64\n    x - 3\n\n*d(x: i64) -> i64\n    x * x\n\n*main() -> i32\n    result is 5 ~ a ~ b ~ c ~ d\n    log(result)\n    0\n",
+        "*a(x as i64) returns i64\n    x + 1\n\n*b(x as i64) returns i64\n    x * 2\n\n*c(x as i64) returns i64\n    x - 3\n\n*d(x as i64) returns i64\n    x * x\n\n*main() returns i32\n    result is 5 ~ a ~ b ~ c ~ d\n    log(result)\n    0\n",
         "81",
     );
 }
 #[test]
 fn b_pipe_placeholder_2() {
     expect(
-        "*sub(a: i64, b: i64) -> i64\n    a - b\n\n*main() -> i32\n    result is 10 ~ sub($, 3)\n    log(result)\n    0\n",
+        "*sub(a as i64, b as i64) returns i64\n    a - b\n\n*main() returns i32\n    result is 10 ~ sub($, 3)\n    log(result)\n    0\n",
         "7",
     );
 }
@@ -2211,21 +2211,21 @@ fn b_pipe_placeholder_2() {
 #[test]
 fn b_arr_nested_access() {
     expect(
-        "*main() -> i32\n    a is [10, 20, 30, 40, 50]\n    log(a[a[0] / 10])\n    0\n",
+        "*main() returns i32\n    a is [10, 20, 30, 40, 50]\n    log(a[a[0] / 10])\n    0\n",
         "20",
     );
 }
 #[test]
 fn b_arr_expr_index() {
     expect(
-        "*main() -> i32\n    a is [100, 200, 300]\n    i is 1\n    log(a[i])\n    log(a[i + 1])\n    0\n",
+        "*main() returns i32\n    a is [100, 200, 300]\n    i is 1\n    log(a[i])\n    log(a[i + 1])\n    0\n",
         "200\n300",
     );
 }
 #[test]
 fn b_listcomp_chain() {
     expect(
-        "*main() -> i32\n    arr is [x * 2 + 1 for x in 0 to 5]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    log(arr[3])\n    log(arr[4])\n    0\n",
+        "*main() returns i32\n    arr is [x * 2 + 1 for x in 0 to 5]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    log(arr[3])\n    log(arr[4])\n    0\n",
         "1\n3\n5\n7\n9",
     );
 }
@@ -2244,21 +2244,21 @@ fn b_fn_no_return_type() {
 #[test]
 fn b_fn_single_arg() {
     expect(
-        "*negate(x: i64) -> i64\n    0 - x\n\n*main()\n    log(negate(42))\n    log(negate(-7))\n",
+        "*negate(x as i64) returns i64\n    0 - x\n\n*main()\n    log(negate(42))\n    log(negate(-7))\n",
         "-42\n7",
     );
 }
 #[test]
 fn b_fn_implicit_return() {
     expect(
-        "*square(x: i64) -> i64\n    x * x\n\n*main()\n    log(square(9))\n",
+        "*square(x as i64) returns i64\n    x * x\n\n*main()\n    log(square(9))\n",
         "81",
     );
 }
 #[test]
 fn b_fn_arg_expr() {
     expect(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(2 + 3, 4 * 5))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(2 + 3, 4 * 5))\n",
         "25",
     );
 }
@@ -2287,14 +2287,14 @@ fn b_mod_large() {
 #[test]
 fn b_enum_data_3_variants() {
     expect(
-        "enum Expr\n    Lit(i64)\n    Add(i64, i64)\n    Mul(i64, i64)\n\n*eval(e: Expr) -> i64\n    match e\n        Lit(x) ? x\n        Add(a, b) ? a + b\n        Mul(a, b) ? a * b\n\n*main() -> i32\n    log(eval(Lit(5)))\n    log(eval(Add(3, 4)))\n    log(eval(Mul(6, 7)))\n    0\n",
+        "enum Expr\n    Lit(i64)\n    Add(i64, i64)\n    Mul(i64, i64)\n\n*eval(e as Expr) returns i64\n    match e\n        Lit(x) ? x\n        Add(a, b) ? a + b\n        Mul(a, b) ? a * b\n\n*main() returns i32\n    log(eval(Lit(5)))\n    log(eval(Add(3, 4)))\n    log(eval(Mul(6, 7)))\n    0\n",
         "5\n7\n42",
     );
 }
 #[test]
 fn b_enum_unit_all() {
     expect(
-        "enum Season\n    Spring\n    Summer\n    Autumn\n    Winter\n\n*name(s: Season) -> i64\n    match s\n        Spring ? 1\n        Summer ? 2\n        Autumn ? 3\n        Winter ? 4\n\n*main() -> i32\n    log(name(Spring))\n    log(name(Summer))\n    log(name(Autumn))\n    log(name(Winter))\n    0\n",
+        "enum Season\n    Spring\n    Summer\n    Autumn\n    Winter\n\n*name(s as Season) returns i64\n    match s\n        Spring ? 1\n        Summer ? 2\n        Autumn ? 3\n        Winter ? 4\n\n*main() returns i32\n    log(name(Spring))\n    log(name(Summer))\n    log(name(Autumn))\n    log(name(Winter))\n    0\n",
         "1\n2\n3\n4",
     );
 }
@@ -2349,14 +2349,14 @@ fn b_while_not_cond() {
 #[test]
 fn b_option_fn() {
     expect(
-        "*main() -> i32\n    arr is [3, 7, 1, 9, 2]\n    found is -1\n    for x in arr\n        if x > 5 and found equals -1\n            found is x\n    log(found)\n    0\n",
+        "*main() returns i32\n    arr is [3, 7, 1, 9, 2]\n    found is -1\n    for x in arr\n        if x > 5 and found equals -1\n            found is x\n    log(found)\n    0\n",
         "7",
     );
 }
 #[test]
 fn b_result_chain() {
     expect(
-        "enum MaybeI64\n    Val(i64)\n    None\n\n*try_div(a: i64, b: i64) -> MaybeI64\n    if b equals 0\n        return None\n    Val(a / b)\n\n*main() -> i32\n    match try_div(100, 5)\n        Val(v) ? log(v)\n        None ? log(-1)\n    match try_div(100, 0)\n        Val(v) ? log(v)\n        None ? log(-1)\n    0\n",
+        "enum MaybeI64\n    Val(i64)\n    None\n\n*try_div(a as i64, b as i64) returns MaybeI64\n    if b equals 0\n        return None\n    Val(a / b)\n\n*main() returns i32\n    match try_div(100, 5)\n        Val(v) ? log(v)\n        None ? log(-1)\n    match try_div(100, 0)\n        Val(v) ? log(v)\n        None ? log(-1)\n    0\n",
         "20\n-1",
     );
 }
@@ -2432,7 +2432,7 @@ fn b_for_in_nested_if() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: String Interpolation
+// BATCH as String Interpolation
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -2509,7 +2509,7 @@ fn b_aug_mul() {
 fn b_aug_div() {
     expect("*main()\n    x is 100\n    x /= 4\n    log(x)\n", "25");
 }
-// b_aug_mod removed: %= dropped from language
+// b_aug_mod removed as %= dropped from language
 #[test]
 fn b_aug_bitand() {
     expect("*main()\n    x is 0xFF\n    x &= 0x0F\n    log(x)\n", "15");
@@ -2539,7 +2539,7 @@ fn b_aug_chain() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: String Methods
+// BATCH as String Methods
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -2647,7 +2647,7 @@ fn b_arr_assign_neg() {
 #[test]
 fn b_field_assign_basic() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    p.x is 42\n    log(p.x)\n",
+        "type Point\n    x as i64\n    y as i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    p.x is 42\n    log(p.x)\n",
         "42",
     );
 }
@@ -2655,7 +2655,7 @@ fn b_field_assign_basic() {
 #[test]
 fn b_field_assign_both() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 1, y is 2)\n    p.x is 10\n    p.y is 20\n    log(p.x + p.y)\n",
+        "type Point\n    x as i64\n    y as i64\n\n*main()\n    p is Point(x is 1, y is 2)\n    p.x is 10\n    p.y is 20\n    log(p.x + p.y)\n",
         "30",
     );
 }
@@ -2797,7 +2797,7 @@ fn b_match_guard_enum_fail() {
 #[test]
 fn b_ext_method_basic() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\nimpl Point\n    *sum() -> i64\n        self.x + self.y\n\n*main()\n    p is Point(3, 4)\n    log p.sum()\n",
+        "type Point\n    x as i64\n    y as i64\n\nimpl Point\n    *sum() returns i64\n        self.x + self.y\n\n*main()\n    p is Point(3, 4)\n    log p.sum()\n",
         "7",
     );
 }
@@ -2805,7 +2805,7 @@ fn b_ext_method_basic() {
 #[test]
 fn b_ext_method_with_args() {
     expect(
-        "type Vec2\n    x: i64\n    y: i64\n\nimpl Vec2\n    *add(other: Vec2) -> Vec2\n        Vec2(self.x + other.x, self.y + other.y)\n\n*main()\n    a is Vec2(1, 2)\n    b is Vec2(3, 4)\n    c is a.add(b)\n    log c.x\n    log c.y\n",
+        "type Vec2\n    x as i64\n    y as i64\n\nimpl Vec2\n    *add(other as Vec2) returns Vec2\n        Vec2(self.x + other.x, self.y + other.y)\n\n*main()\n    a is Vec2(1, 2)\n    b is Vec2(3, 4)\n    c is a.add(b)\n    log c.x\n    log c.y\n",
         "4\n6",
     );
 }
@@ -2994,7 +2994,7 @@ fn compile_and_run_in_dir(src: &str) -> String {
 fn b_actor_spawn_send_basic() {
     // Actor that logs a value when it receives a message
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Printer\n    @say n: i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    send p, @say(42)\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Printer\n    @say n as i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    send p, @say(42)\n    usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -3002,7 +3002,7 @@ fn b_actor_spawn_send_basic() {
 #[test]
 fn b_actor_multiple_messages() {
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Echo\n    @say n: i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    send e, @say(1)\n    send e, @say(2)\n    send e, @say(3)\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Echo\n    @say n as i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    send e, @say(1)\n    send e, @say(2)\n    send e, @say(3)\n    usleep(100000)\n    0\n",
         "1\n2\n3",
     );
 }
@@ -3010,7 +3010,7 @@ fn b_actor_multiple_messages() {
 #[test]
 fn b_actor_state_accumulation() {
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Adder\n    total: i64\n    @add n: i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    send a, @add(10)\n    send a, @add(20)\n    send a, @add(30)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    send a, @add(10)\n    send a, @add(20)\n    send a, @add(30)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    0\n",
         "60",
     );
 }
@@ -3018,7 +3018,7 @@ fn b_actor_state_accumulation() {
 #[test]
 fn b_actor_multi_handler() {
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Math\n    val: i64\n    @assign n: i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    send m, @assign(5)\n    send m, @double()\n    usleep(100000)\n    send m, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Math\n    val as i64\n    @assign n as i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    send m, @assign(5)\n    send m, @double()\n    usleep(100000)\n    send m, @show()\n    usleep(100000)\n    0\n",
         "10",
     );
 }
@@ -3029,7 +3029,7 @@ fn b_actor_multi_handler() {
 fn b_actor_zero_param_handler() {
     // Handler with no parameters
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Pinger\n    count: i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    send p, @ping()\n    send p, @ping()\n    send p, @ping()\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Pinger\n    count as i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    send p, @ping()\n    send p, @ping()\n    send p, @ping()\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
         "3",
     );
 }
@@ -3038,7 +3038,7 @@ fn b_actor_zero_param_handler() {
 fn b_actor_two_param_handler() {
     // Handler with two parameters
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Calc\n    result: i64\n    @add a: i64, b: i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(17, 25)\n    usleep(100000)\n    send c, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(17, 25)\n    usleep(100000)\n    send c, @show()\n    usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -3047,7 +3047,7 @@ fn b_actor_two_param_handler() {
 fn b_actor_multiple_state_fields() {
     // Actor with multiple state fields
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Point\n    x: i64\n    y: i64\n    @set_x n: i64\n        x is n\n    @set_y n: i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    send p, @set_x(10)\n    send p, @set_y(20)\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Point\n    x as i64\n    y as i64\n    @set_x n as i64\n        x is n\n    @set_y n as i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    send p, @set_x(10)\n    send p, @set_y(20)\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
         "30",
     );
 }
@@ -3056,7 +3056,7 @@ fn b_actor_multiple_state_fields() {
 fn b_actor_sequential_messages() {
     // Actor processes messages in FIFO order
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Logger\n    @say n: i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say(10)\n    send l, @say(20)\n    send l, @say(30)\n    send l, @say(40)\n    send l, @say(50)\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say(10)\n    send l, @say(20)\n    send l, @say(30)\n    send l, @say(40)\n    send l, @say(50)\n    usleep(100000)\n    0\n",
         "10\n20\n30\n40\n50",
     );
 }
@@ -3067,7 +3067,7 @@ fn b_actor_sequential_messages() {
 fn b_store_insert_and_count() {
     // Basic insert and count
     let out = compile_and_run_in_dir(
-        "store items\n    key: i64\n    val: i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    c is count items\n    log(c)\n",
+        "store items\n    key as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    c is count items\n    log(c)\n",
     );
     assert_eq!(out, "3");
 }
@@ -3076,7 +3076,7 @@ fn b_store_insert_and_count() {
 fn b_store_query_equals() {
     // Query with equals filter
     let out = compile_and_run_in_dir(
-        "store data\n    key: i64\n    val: i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    log(r.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    log(r.val)\n",
     );
     assert_eq!(out, "200");
 }
@@ -3085,7 +3085,7 @@ fn b_store_query_equals() {
 fn b_store_query_less_than() {
     // Query with less-than filter
     let out = compile_and_run_in_dir(
-        "store nums\n    id: i64\n    score: i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is nums where score < 40\n    log(r.id)\n",
+        "store nums\n    id as i64\n    score as i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is nums where score < 40\n    log(r.id)\n",
     );
     assert_eq!(out, "2");
 }
@@ -3094,7 +3094,7 @@ fn b_store_query_less_than() {
 fn b_store_query_greater_than() {
     // Query with greater-than filter
     let out = compile_and_run_in_dir(
-        "store vals\n    x: i64\n    y: i64\n\n*main()\n    insert vals 10, 1\n    insert vals 20, 2\n    insert vals 30, 3\n    r is vals where x > 15\n    log(r.y)\n",
+        "store vals\n    x as i64\n    y as i64\n\n*main()\n    insert vals 10, 1\n    insert vals 20, 2\n    insert vals 30, 3\n    r is vals where x > 15\n    log(r.y)\n",
     );
     assert_eq!(out, "2");
 }
@@ -3103,7 +3103,7 @@ fn b_store_query_greater_than() {
 fn b_store_delete() {
     // Delete records matching a filter
     let out = compile_and_run_in_dir(
-        "store items\n    key: i64\n    val: i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    delete items where key equals 2\n    c is count items\n    log(c)\n",
+        "store items\n    key as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    delete items where key equals 2\n    c is count items\n    log(c)\n",
     );
     assert_eq!(out, "2");
 }
@@ -3112,7 +3112,7 @@ fn b_store_delete() {
 fn b_store_all() {
     // Get all records and verify data via count
     let out = compile_and_run_in_dir(
-        "store recs\n    n: i64\n\n*main()\n    insert recs 10\n    insert recs 20\n    insert recs 30\n    c is count recs\n    log(c)\n    a is all recs\n    log(0)\n",
+        "store recs\n    n as i64\n\n*main()\n    insert recs 10\n    insert recs 20\n    insert recs 30\n    c is count recs\n    log(c)\n    a is all recs\n    log(0)\n",
     );
     assert_eq!(out, "3\n0");
 }
@@ -3121,7 +3121,7 @@ fn b_store_all() {
 fn b_store_set_update() {
     // Update records with set (spec syntax: set store where filter field value)
     let out = compile_and_run_in_dir(
-        "store users\n    id: i64\n    score: i64\n\n*main()\n    insert users 1, 100\n    insert users 2, 200\n    set users where id equals 1 score 999\n    r is users where id equals 1\n    log(r.score)\n",
+        "store users\n    id as i64\n    score as i64\n\n*main()\n    insert users 1, 100\n    insert users 2, 200\n    set users where id equals 1 score 999\n    r is users where id equals 1\n    log(r.score)\n",
     );
     assert_eq!(out, "999");
 }
@@ -3130,7 +3130,7 @@ fn b_store_set_update() {
 fn b_store_multiple_inserts_query() {
     // Insert many records and query
     let out = compile_and_run_in_dir(
-        "store db\n    key: i64\n    val: i64\n\n*main()\n    i is 0\n    while i < 100\n        insert db i, i * 7\n        i is i + 1\n    r is db where key equals 50\n    log(r.val)\n",
+        "store db\n    key as i64\n    val as i64\n\n*main()\n    i is 0\n    while i < 100\n        insert db i, i * 7\n        i is i + 1\n    r is db where key equals 50\n    log(r.val)\n",
     );
     assert_eq!(out, "350");
 }
@@ -3139,7 +3139,7 @@ fn b_store_multiple_inserts_query() {
 fn b_store_transaction_basic() {
     // Transaction block groups store operations
     let out = compile_and_run_in_dir(
-        "store ledger\n    amount: i64\n\n*main()\n    transaction\n        insert ledger 10\n        insert ledger 20\n        insert ledger 30\n    c is count ledger\n    log(c)\n",
+        "store ledger\n    amount as i64\n\n*main()\n    transaction\n        insert ledger 10\n        insert ledger 20\n        insert ledger 30\n    c is count ledger\n    log(c)\n",
     );
     assert_eq!(out, "3");
 }
@@ -3148,7 +3148,7 @@ fn b_store_transaction_basic() {
 fn b_store_compound_filter_and() {
     // AND compound filter
     let out = compile_and_run_in_dir(
-        "store items\n    cat: i64\n    val: i64\n\n*main()\n    insert items 1, 10\n    insert items 1, 20\n    insert items 2, 30\n    insert items 2, 40\n    r is items where cat equals 1 and val > 15\n    log(r.val)\n",
+        "store items\n    cat as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 1, 20\n    insert items 2, 30\n    insert items 2, 40\n    r is items where cat equals 1 and val > 15\n    log(r.val)\n",
     );
     assert_eq!(out, "20");
 }
@@ -3157,7 +3157,7 @@ fn b_store_compound_filter_and() {
 fn b_store_string_field() {
     // Store with string fields
     let out = compile_and_run_in_dir(
-        "store people\n    name: String\n    age: i64\n\n*main()\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    r is people where age equals 25\n    log(r.name)\n",
+        "store people\n    name as String\n    age as i64\n\n*main()\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    r is people where age equals 25\n    log(r.name)\n",
     );
     assert_eq!(out, "Bob");
 }
@@ -3166,7 +3166,7 @@ fn b_store_string_field() {
 fn b_store_delete_and_recount() {
     // Delete multiple records and verify count
     let out = compile_and_run_in_dir(
-        "store records\n    key: i64\n    val: i64\n\n*main()\n    insert records 1, 10\n    insert records 2, 20\n    insert records 3, 30\n    insert records 4, 40\n    insert records 5, 50\n    delete records where key > 3\n    c is count records\n    log(c)\n",
+        "store records\n    key as i64\n    val as i64\n\n*main()\n    insert records 1, 10\n    insert records 2, 20\n    insert records 3, 30\n    insert records 4, 40\n    insert records 5, 50\n    delete records where key > 3\n    c is count records\n    log(c)\n",
     );
     assert_eq!(out, "3");
 }
@@ -3177,7 +3177,7 @@ fn b_store_delete_and_recount() {
 fn b_trait_basic_impl() {
     // Define a trait and implement it for a struct
     expect(
-        "type Vec2\n    x: i64\n    y: i64\n\ntrait Summable\n    *sum() -> i64\n\nimpl Summable for Vec2\n    *sum() -> i64\n        self.x + self.y\n\n*main()\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n",
+        "type Vec2\n    x as i64\n    y as i64\n\ntrait Summable\n    *sum() returns i64\n\nimpl Summable for Vec2\n    *sum() returns i64\n        self.x + self.y\n\n*main()\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n",
         "10",
     );
 }
@@ -3186,7 +3186,7 @@ fn b_trait_basic_impl() {
 fn b_trait_multiple_methods() {
     // Trait with multiple methods
     expect(
-        "type Point\n    x: i64\n    y: i64\n\ntrait Describable\n    *get_x() -> i64\n    *get_y() -> i64\n\nimpl Describable for Point\n    *get_x() -> i64\n        self.x\n    *get_y() -> i64\n        self.y\n\n*main()\n    p is Point(x is 5, y is 12)\n    log(p.get_x())\n    log(p.get_y())\n",
+        "type Point\n    x as i64\n    y as i64\n\ntrait Describable\n    *get_x() returns i64\n    *get_y() returns i64\n\nimpl Describable for Point\n    *get_x() returns i64\n        self.x\n    *get_y() returns i64\n        self.y\n\n*main()\n    p is Point(x is 5, y is 12)\n    log(p.get_x())\n    log(p.get_y())\n",
         "5\n12",
     );
 }
@@ -3195,7 +3195,7 @@ fn b_trait_multiple_methods() {
 fn b_trait_with_params() {
     // Trait method with extra parameters
     expect(
-        "type Counter\n    val: i64\n\ntrait Addable\n    *add_to(n: i64) -> i64\n\nimpl Addable for Counter\n    *add_to(n: i64) -> i64\n        self.val + n\n\n*main()\n    c is Counter(val is 10)\n    log(c.add_to(5))\n",
+        "type Counter\n    val as i64\n\ntrait Addable\n    *add_to(n as i64) returns i64\n\nimpl Addable for Counter\n    *add_to(n as i64) returns i64\n        self.val + n\n\n*main()\n    c is Counter(val is 10)\n    log(c.add_to(5))\n",
         "15",
     );
 }
@@ -3204,7 +3204,7 @@ fn b_trait_with_params() {
 fn b_trait_impl_alongside_methods() {
     // Struct with inline methods AND trait impl methods
     expect(
-        "type Num\n    v: i64\n\n    *double() -> i64\n        self.v * 2\n\ntrait Showable\n    *value() -> i64\n\nimpl Showable for Num\n    *value() -> i64\n        self.v\n\n*main()\n    n is Num(v is 21)\n    log(n.double())\n    log(n.value())\n",
+        "type Num\n    v as i64\n\n    *double() returns i64\n        self.v * 2\n\ntrait Showable\n    *value() returns i64\n\nimpl Showable for Num\n    *value() returns i64\n        self.v\n\n*main()\n    n is Num(v is 21)\n    log(n.double())\n    log(n.value())\n",
         "42\n21",
     );
 }
@@ -3213,7 +3213,7 @@ fn b_trait_impl_alongside_methods() {
 fn b_trait_multiple_impls() {
     // Same trait implemented for different types
     expect(
-        "type A\n    x: i64\n\ntype B\n    y: i64\n\ntrait GetVal\n    *val() -> i64\n\nimpl GetVal for A\n    *val() -> i64\n        self.x\n\nimpl GetVal for B\n    *val() -> i64\n        self.y\n\n*main()\n    a is A(x is 10)\n    b is B(y is 20)\n    log(a.val())\n    log(b.val())\n",
+        "type A\n    x as i64\n\ntype B\n    y as i64\n\ntrait GetVal\n    *val() returns i64\n\nimpl GetVal for A\n    *val() returns i64\n        self.x\n\nimpl GetVal for B\n    *val() returns i64\n        self.y\n\n*main()\n    a is A(x is 10)\n    b is B(y is 20)\n    log(a.val())\n    log(b.val())\n",
         "10\n20",
     );
 }
@@ -3222,7 +3222,7 @@ fn b_trait_multiple_impls() {
 fn b_trait_missing_method_fails() {
     // Impl missing a required method should fail compilation
     let err = expect_compile_fail(
-        "type Foo\n    x: i64\n\ntrait NeedTwo\n    *first() -> i64\n    *second() -> i64\n\nimpl NeedTwo for Foo\n    *first() -> i64\n        self.x\n\n*main()\n    log(0)\n",
+        "type Foo\n    x as i64\n\ntrait NeedTwo\n    *first() returns i64\n    *second() returns i64\n\nimpl NeedTwo for Foo\n    *first() returns i64\n        self.x\n\n*main()\n    log(0)\n",
     );
     assert!(
         err.contains("missing required method 'second'"),
@@ -3234,7 +3234,7 @@ fn b_trait_missing_method_fails() {
 fn b_trait_unknown_trait_fails() {
     // Impl for nonexistent trait should fail
     let err = expect_compile_fail(
-        "type Bar\n    x: i64\n\nimpl Nonexistent for Bar\n    *foo() -> i64\n        self.x\n\n*main()\n    log(0)\n",
+        "type Bar\n    x as i64\n\nimpl Nonexistent for Bar\n    *foo() returns i64\n        self.x\n\n*main()\n    log(0)\n",
     );
     assert!(
         err.contains("unknown trait"),
@@ -3246,7 +3246,7 @@ fn b_trait_unknown_trait_fails() {
 fn b_trait_unknown_type_fails() {
     // Impl for nonexistent type should fail
     let err = expect_compile_fail(
-        "trait MyTrait\n    *foo() -> i64\n\nimpl MyTrait for Nonexistent\n    *foo() -> i64\n        0\n\n*main()\n    log(0)\n",
+        "trait MyTrait\n    *foo() returns i64\n\nimpl MyTrait for Nonexistent\n    *foo() returns i64\n        0\n\n*main()\n    log(0)\n",
     );
     assert!(
         err.contains("unknown type"),
@@ -3255,7 +3255,7 @@ fn b_trait_unknown_type_fails() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Vec operations
+// BATCH as Vec operations
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -3342,7 +3342,7 @@ fn b_vec_for_in_empty() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Map operations
+// BATCH as Map operations
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -3399,7 +3399,7 @@ fn b_map_clear() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: String new methods
+// BATCH as String new methods
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -3491,7 +3491,7 @@ fn b_str_split_no_delim() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: String equality
+// BATCH as String equality
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -3566,7 +3566,7 @@ fn b_range_pat_miss() {
 #[test]
 fn b_range_pat_multi() {
     expect(
-        "*classify(x: i64) -> i64\n    match x\n        0 to 9 ? 1\n        10 to 99 ? 2\n        _ ? 3\n\n*main()\n    log(classify(5))\n    log(classify(42))\n    log(classify(100))\n",
+        "*classify(x as i64) returns i64\n    match x\n        0 to 9 ? 1\n        10 to 99 ? 2\n        _ ? 3\n\n*main()\n    log(classify(5))\n    log(classify(42))\n    log(classify(100))\n",
         "1\n2\n3",
     );
 }
@@ -3645,7 +3645,7 @@ fn b_dispatch_keyword_parses() {
     // The actor may or may not process the message before main exits
     // (daemon coroutine race), so accept either "" or "0".
     let out = compile_and_run(
-        "actor Counter\n    count: i64\n    @show\n        log(count)\n\n*main()\n    c is spawn Counter\n    dispatch c, @show()\n",
+        "actor Counter\n    count as i64\n    @show\n        log(count)\n\n*main()\n    c is spawn Counter\n    dispatch c, @show()\n",
     );
     let trimmed = out.trim_end();
     assert!(
@@ -3655,7 +3655,7 @@ fn b_dispatch_keyword_parses() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: String iteration (for ch in string)
+// BATCH as String iteration (for ch in string)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
@@ -3715,7 +3715,7 @@ fn b_string_iter_single_char() {
 fn b_trait_bound_basic() {
     // Basic bounded generic
     expect(
-        "*max of T: Ord(a: T, b: T) -> T\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n",
+        "*max of T: Ord(a as T, b as T) returns T\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n",
         "7",
     );
 }
@@ -3724,7 +3724,7 @@ fn b_trait_bound_basic() {
 fn b_trait_bound_violation() {
     // Type without Ord impl should fail
     let err = expect_compile_fail(
-        "type Blob\n    data: i64\n\n*bad of T: Ord(x: T) -> T\n    x\n\n*main()\n    log(bad(Blob(data is 1)))\n",
+        "type Blob\n    data as i64\n\n*bad of T: Ord(x as T) returns T\n    x\n\n*main()\n    log(bad(Blob(data is 1)))\n",
     );
     assert!(
         err.contains("does not satisfy trait bound") || err.contains("Ord"),
@@ -3736,7 +3736,7 @@ fn b_trait_bound_violation() {
 fn b_trait_bound_i64_satisfies() {
     // i64 satisfies Ord, Add, etc.
     expect(
-        "*min of T: Ord(a: T, b: T) -> T\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(10, 3))\n",
+        "*min of T: Ord(a as T, b as T) returns T\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(10, 3))\n",
         "3",
     );
 }
@@ -3745,7 +3745,7 @@ fn b_trait_bound_i64_satisfies() {
 fn b_trait_bound_no_bound_still_works() {
     // Unbounded generics continue to work
     expect(
-        "*id of T(x: T) -> T\n    x\n\n*main()\n    log(id(42))\n",
+        "*id of T(x as T) returns T\n    x\n\n*main()\n    log(id(42))\n",
         "42",
     );
 }
@@ -3754,7 +3754,7 @@ fn b_trait_bound_no_bound_still_works() {
 fn b_trait_bound_multiple_uses() {
     // Use bounded generic with multiple types
     expect(
-        "*bigger of T: Ord(a: T, b: T) -> T\n    if a > b\n        return a\n    b\n\n*main()\n    log(bigger(10, 20))\n    log(bigger(100, 50))\n",
+        "*bigger of T: Ord(a as T, b as T) returns T\n    if a > b\n        return a\n    b\n\n*main()\n    log(bigger(10, 20))\n    log(bigger(100, 50))\n",
         "20\n100",
     );
 }
@@ -3763,7 +3763,7 @@ fn b_trait_bound_multiple_uses() {
 fn b_trait_bound_with_impl() {
     // Bound satisfied via explicit impl
     expect(
-        "type Score\n    val: i64\n\ntrait Rankable\n    *rank() -> i64\n\nimpl Rankable for Score\n    *rank() -> i64\n        self.val\n\n*get_rank of T: Rankable(x: T) -> i64\n    x.rank()\n\n*main()\n    s is Score(val is 42)\n    log(get_rank(s))\n",
+        "type Score\n    val as i64\n\ntrait Rankable\n    *rank() returns i64\n\nimpl Rankable for Score\n    *rank() returns i64\n        self.val\n\n*get_rank of T: Rankable(x as T) returns i64\n    x.rank()\n\n*main()\n    s is Score(val is 42)\n    log(get_rank(s))\n",
         "42",
     );
 }
@@ -3772,7 +3772,7 @@ fn b_trait_bound_with_impl() {
 fn b_trait_bound_struct_satisfies() {
     // Struct with trait impl satisfies generic bound
     expect(
-        "type Weight\n    kg: i64\n\ntrait Measurable\n    *measure() -> i64\n\nimpl Measurable for Weight\n    *measure() -> i64\n        self.kg\n\n*weigh of T: Measurable(item: T) -> i64\n    item.measure()\n\n*main()\n    w is Weight(kg is 75)\n    log(weigh(w))\n",
+        "type Weight\n    kg as i64\n\ntrait Measurable\n    *measure() returns i64\n\nimpl Measurable for Weight\n    *measure() returns i64\n        self.kg\n\n*weigh of T: Measurable(item as T) returns i64\n    item.measure()\n\n*main()\n    w is Weight(kg is 75)\n    log(weigh(w))\n",
         "75",
     );
 }
@@ -3781,7 +3781,7 @@ fn b_trait_bound_struct_satisfies() {
 fn b_trait_bound_param_name() {
     // Type::Param fallthrough gives clear error with type param name
     let err = expect_compile_fail(
-        "type Empty\n    x: i64\n\n*process of T: Ord(v: T) -> T\n    v\n\n*main()\n    log(process(Empty(x is 1)))\n",
+        "type Empty\n    x as i64\n\n*process of T: Ord(v as T) returns T\n    v\n\n*main()\n    log(process(Empty(x is 1)))\n",
     );
     assert!(
         err.contains("does not satisfy") || err.contains("Ord"),
@@ -3797,7 +3797,7 @@ fn b_trait_bound_param_name() {
 fn b_assoc_type_basic() {
     // Trait with associated type, impl provides it
     expect(
-        "trait Container\n    type Item\n    *get() -> i64\n\ntype Box\n    val: i64\n\nimpl Container for Box\n    type Item is i64\n    *get() -> i64\n        self.val\n\n*main()\n    b is Box(val is 42)\n    log(b.get())\n",
+        "trait Container\n    type Item\n    *get() returns i64\n\ntype Box\n    val as i64\n\nimpl Container for Box\n    type Item is i64\n    *get() returns i64\n        self.val\n\n*main()\n    b is Box(val is 42)\n    log(b.get())\n",
         "42",
     );
 }
@@ -3806,7 +3806,7 @@ fn b_assoc_type_basic() {
 fn b_assoc_type_missing() {
     // Missing associated type binding should fail
     let err = expect_compile_fail(
-        "trait Container\n    type Item\n    *get() -> i64\n\ntype Box\n    val: i64\n\nimpl Container for Box\n    *get() -> i64\n        self.val\n\n*main()\n    log(0)\n",
+        "trait Container\n    type Item\n    *get() returns i64\n\ntype Box\n    val as i64\n\nimpl Container for Box\n    *get() returns i64\n        self.val\n\n*main()\n    log(0)\n",
     );
     assert!(
         err.contains("missing associated type") || err.contains("Item"),
@@ -3818,7 +3818,7 @@ fn b_assoc_type_missing() {
 fn b_assoc_type_multiple() {
     // Trait with multiple associated types
     expect(
-        "trait Pair\n    type First\n    type Second\n    *sum() -> i64\n\ntype TwoVals\n    a: i64\n    b: i64\n\nimpl Pair for TwoVals\n    type First is i64\n    type Second is i64\n    *sum() -> i64\n        self.a + self.b\n\n*main()\n    t is TwoVals(a is 10, b is 20)\n    log(t.sum())\n",
+        "trait Pair\n    type First\n    type Second\n    *sum() returns i64\n\ntype TwoVals\n    a as i64\n    b as i64\n\nimpl Pair for TwoVals\n    type First is i64\n    type Second is i64\n    *sum() returns i64\n        self.a + self.b\n\n*main()\n    t is TwoVals(a is 10, b is 20)\n    log(t.sum())\n",
         "30",
     );
 }
@@ -3827,7 +3827,7 @@ fn b_assoc_type_multiple() {
 fn b_assoc_type_partial_missing() {
     // One of two associated types missing
     let err = expect_compile_fail(
-        "trait Pair\n    type First\n    type Second\n    *sum() -> i64\n\ntype TwoVals\n    a: i64\n    b: i64\n\nimpl Pair for TwoVals\n    type First is i64\n    *sum() -> i64\n        self.a + self.b\n\n*main()\n    log(0)\n",
+        "trait Pair\n    type First\n    type Second\n    *sum() returns i64\n\ntype TwoVals\n    a as i64\n    b as i64\n\nimpl Pair for TwoVals\n    type First is i64\n    *sum() returns i64\n        self.a + self.b\n\n*main()\n    log(0)\n",
     );
     assert!(
         err.contains("missing associated type") || err.contains("Second"),
@@ -3839,7 +3839,7 @@ fn b_assoc_type_partial_missing() {
 fn b_assoc_type_no_assoc_required() {
     // Trait without associated types still works
     expect(
-        "trait Simple\n    *val() -> i64\n\ntype Num\n    v: i64\n\nimpl Simple for Num\n    *val() -> i64\n        self.v\n\n*main()\n    n is Num(v is 7)\n    log(n.val())\n",
+        "trait Simple\n    *val() returns i64\n\ntype Num\n    v as i64\n\nimpl Simple for Num\n    *val() returns i64\n        self.v\n\n*main()\n    n is Num(v is 7)\n    log(n.val())\n",
         "7",
     );
 }
@@ -3848,7 +3848,7 @@ fn b_assoc_type_no_assoc_required() {
 fn b_assoc_type_with_methods() {
     // Associated type alongside multiple methods
     expect(
-        "trait Collection\n    type Elem\n    *first() -> i64\n    *second() -> i64\n\ntype Duo\n    x: i64\n    y: i64\n\nimpl Collection for Duo\n    type Elem is i64\n    *first() -> i64\n        self.x\n    *second() -> i64\n        self.y\n\n*main()\n    d is Duo(x is 3, y is 7)\n    log(d.first())\n    log(d.second())\n",
+        "trait Collection\n    type Elem\n    *first() returns i64\n    *second() returns i64\n\ntype Duo\n    x as i64\n    y as i64\n\nimpl Collection for Duo\n    type Elem is i64\n    *first() returns i64\n        self.x\n    *second() returns i64\n        self.y\n\n*main()\n    d is Duo(x is 3, y is 7)\n    log(d.first())\n    log(d.second())\n",
         "3\n7",
     );
 }
@@ -3861,7 +3861,7 @@ fn b_assoc_type_with_methods() {
 fn b_iter_basic_counter() {
     // Counter yields 0,1,2,3,4 — sum should be 10
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 5)\n        total is total + x\n    log(total)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 5)\n        total is total + x\n    log(total)\n",
         "10",
     );
 }
@@ -3870,7 +3870,7 @@ fn b_iter_basic_counter() {
 fn b_iter_empty() {
     // max is 0, nothing yielded
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 0)\n        total is total + x\n    log(total)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 0)\n        total is total + x\n    log(total)\n",
         "0",
     );
 }
@@ -3879,7 +3879,7 @@ fn b_iter_empty() {
 fn b_iter_single_element() {
     // max is 1, yields only 0
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 1)\n        total is total + x\n    log(total)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 1)\n        total is total + x\n    log(total)\n",
         "0",
     );
 }
@@ -3888,7 +3888,7 @@ fn b_iter_single_element() {
 fn b_iter_log_each() {
     // Log each element individually
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    for x in Counter(n is 0, max is 3)\n        log(x)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    for x in Counter(n is 0, max is 3)\n        log(x)\n",
         "0\n1\n2",
     );
 }
@@ -3897,7 +3897,7 @@ fn b_iter_log_each() {
 fn b_iter_break() {
     // Break after accumulating 3 elements
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 10)\n        count is count + 1\n        if count equals 3\n            break\n    log(count)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 10)\n        count is count + 1\n        if count equals 3\n            break\n    log(count)\n",
         "3",
     );
 }
@@ -3906,7 +3906,7 @@ fn b_iter_break() {
 fn b_iter_with_offset() {
     // Start from 5, go to 8: yields 5,6,7 — sum 18
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 5, max is 8)\n        total is total + x\n    log(total)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 5, max is 8)\n        total is total + x\n    log(total)\n",
         "18",
     );
 }
@@ -3915,7 +3915,7 @@ fn b_iter_with_offset() {
 fn b_iter_count_elements() {
     // Count how many elements yielded
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 7)\n        count is count + 1\n    log(count)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 7)\n        count is count + 1\n    log(count)\n",
         "7",
     );
 }
@@ -3924,7 +3924,7 @@ fn b_iter_count_elements() {
 fn b_iter_two_sequential() {
     // Two separate iterators in sequence
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    a is 0\n    for x in Counter(n is 0, max is 3)\n        a is a + x\n    b is 0\n    for y in Counter(n is 10, max is 13)\n        b is b + y\n    log(a)\n    log(b)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    a is 0\n    for x in Counter(n is 0, max is 3)\n        a is a + x\n    b is 0\n    for y in Counter(n is 10, max is 13)\n        b is b + y\n    log(a)\n    log(b)\n",
         "3\n33",
     );
 }
@@ -3933,7 +3933,7 @@ fn b_iter_two_sequential() {
 fn b_iter_accumulate_product() {
     // Product: 1*2*3*4 = 24
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    prod is 1\n    for x in Counter(n is 1, max is 5)\n        prod is prod * x\n    log(prod)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    prod is 1\n    for x in Counter(n is 1, max is 5)\n        prod is prod * x\n    log(prod)\n",
         "24",
     );
 }
@@ -3942,7 +3942,7 @@ fn b_iter_accumulate_product() {
 fn b_iter_large_range() {
     // Sum 0..100 = 4950
     expect(
-        "type Counter\n    n: i64\n    max: i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 100)\n        total is total + x\n    log(total)\n",
+        "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 100)\n        total is total + x\n    log(total)\n",
         "4950",
     );
 }
@@ -4085,7 +4085,7 @@ fn b_select_default_arm() {
 fn b_actor_stop_basic() {
     // Spawn actor, send messages, stop it, program exits cleanly
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Acc\n    total: i64\n    @add n: i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    send a, @add(5)\n    send a, @add(10)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    stop a\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    send a, @add(5)\n    send a, @add(10)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    stop a\n    0\n",
         "15",
     );
 }
@@ -4094,7 +4094,7 @@ fn b_actor_stop_basic() {
 fn b_actor_sequential_message_order() {
     // Send many messages sequentially, verify accumulated state
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Sum\n    total: i64\n    @add n: i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        send s, @add(i)\n        i is i + 1\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        send s, @add(i)\n        i is i + 1\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
         "45",
     );
 }
@@ -4103,7 +4103,7 @@ fn b_actor_sequential_message_order() {
 fn b_actor_multiple_state_tracking() {
     // Actor with multiple state fields
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Stats\n    count: i64\n    sum: i64\n    @record n: i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    send s, @record(10)\n    send s, @record(20)\n    send s, @record(30)\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Stats\n    count as i64\n    sum as i64\n    @record n as i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    send s, @record(10)\n    send s, @record(20)\n    send s, @record(30)\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
         "3\n60",
     );
 }
@@ -4112,7 +4112,7 @@ fn b_actor_multiple_state_tracking() {
 fn b_actor_two_param_handler_math() {
     // Handler with two parameters
     expect(
-        "extern *usleep(us: i32) -> i32\n\nactor Calc\n    result: i64\n    @add_mul a: i64, b: i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add_mul(3, 4)\n    send c, @add_mul(5, 6)\n    usleep(200000)\n    send c, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add_mul a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add_mul(3, 4)\n    send c, @add_mul(5, 6)\n    usleep(200000)\n    send c, @show()\n    usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -4268,7 +4268,7 @@ fn b_std_path_base() {
 
 #[test]
 fn b_std_path_ext() {
-    // path_ext('noext') returns "" — log("") prints empty line, trimmed by expect
+    // path_ext('noext') -> "" — log("") prints empty line, trimmed by expect
     expect(
         "use std/path\n\n*main()\n    log(path_ext('/foo/bar.txt'))\n",
         ".txt",
@@ -4523,7 +4523,7 @@ fn b_infer_array_element_unification() {
 fn b_infer_return_type() {
     // Return type should be inferred from the return expression
     expect(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
     );
 }
@@ -4532,7 +4532,7 @@ fn b_infer_return_type() {
 fn b_infer_lambda_from_context() {
     // Lambda param types inferred from function signature
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    result is apply(*fn(x: i64) -> i64 x * 2, 21)\n    log(result)\n    0\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    result is apply(|x as i64| returns i64 x * 2, 21)\n    log(result)\n    0\n",
         "42",
     );
 }
@@ -4553,7 +4553,7 @@ fn b_infer_vec_element_type() {
 fn b_infer_nested_lambda() {
     // Nested lambda should infer types correctly
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main() -> i32\n    log(apply(*fn(x: i64) -> i64 x + 10, 32))\n    0\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    log(apply(|x as i64| returns i64 x + 10, 32))\n    0\n",
         "42",
     );
 }
@@ -4562,7 +4562,7 @@ fn b_infer_nested_lambda() {
 fn b_infer_struct_field_from_literal() {
     // Struct field type inferred from literal
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
+        "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
         "30",
     );
 }
@@ -4581,7 +4581,7 @@ fn b_infer_if_expr_type() {
 fn b_struct_field_infer_basic() {
     // Struct with no type annotations — types inferred from constructor
     expect(
-        "type Point\n    x\n    y\n\n*main() -> i32\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n    0\n",
+        "type Point\n    x\n    y\n\n*main() returns i32\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n    0\n",
         "7",
     );
 }
@@ -4590,7 +4590,7 @@ fn b_struct_field_infer_basic() {
 fn b_struct_field_infer_default() {
     // Struct with default values, no type annotations
     expect(
-        "type Config\n    width is 800\n    height is 600\n\n*main() -> i32\n    c is Config()\n    log(c.width)\n    log(c.height)\n    0\n",
+        "type Config\n    width is 800\n    height is 600\n\n*main() returns i32\n    c is Config()\n    log(c.width)\n    log(c.height)\n    0\n",
         "800\n600",
     );
 }
@@ -4599,7 +4599,7 @@ fn b_struct_field_infer_default() {
 fn b_struct_field_infer_partial_override() {
     // Override one default, keep another
     expect(
-        "type Cfg\n    a is 10\n    b is 20\n\n*main() -> i32\n    c is Cfg(a is 99)\n    log(c.a)\n    log(c.b)\n    0\n",
+        "type Cfg\n    a is 10\n    b is 20\n\n*main() returns i32\n    c is Cfg(a is 99)\n    log(c.a)\n    log(c.b)\n    0\n",
         "99\n20",
     );
 }
@@ -4608,7 +4608,7 @@ fn b_struct_field_infer_partial_override() {
 fn b_struct_field_infer_method() {
     // Method on struct with inferred fields
     expect(
-        "type Vec2\n    x\n    y\n\n    *mag_sq() -> i64\n        self.x * self.x + self.y * self.y\n\n*main() -> i32\n    v is Vec2(x is 3, y is 4)\n    log(v.mag_sq())\n    0\n",
+        "type Vec2\n    x\n    y\n\n    *mag_sq() returns i64\n        self.x * self.x + self.y * self.y\n\n*main() returns i32\n    v is Vec2(x is 3, y is 4)\n    log(v.mag_sq())\n    0\n",
         "25",
     );
 }
@@ -4617,7 +4617,7 @@ fn b_struct_field_infer_method() {
 fn b_struct_field_infer_mixed() {
     // Mix of annotated and unannotated fields
     expect(
-        "type Item\n    name: str\n    count\n\n*main() -> i32\n    i is Item(name is 'widget', count is 42)\n    log(i.count)\n    0\n",
+        "type Item\n    name as str\n    count\n\n*main() returns i32\n    i is Item(name is 'widget', count is 42)\n    log(i.count)\n    0\n",
         "42",
     );
 }
@@ -4626,7 +4626,7 @@ fn b_struct_field_infer_mixed() {
 fn b_row_poly_basic() {
     // Generic function accessing struct field — row polymorphism via monomorphization
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*get_x(p)\n    p.x\n\n*main() -> i32\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n    0\n",
+        "type Point\n    x as i64\n    y as i64\n\n*get_x(p)\n    p.x\n\n*main() returns i32\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n    0\n",
         "42",
     );
 }
@@ -4635,7 +4635,7 @@ fn b_row_poly_basic() {
 fn b_row_poly_two_structs() {
     // Same generic function works with different struct types
     expect(
-        "type A\n    x: i64\n    y: i64\n\ntype B\n    x: i64\n    z: i64\n\n*get_x(p)\n    p.x\n\n*main() -> i32\n    a is A(x is 10, y is 20)\n    b is B(x is 30, z is 40)\n    log(get_x(a))\n    log(get_x(b))\n    0\n",
+        "type A\n    x as i64\n    y as i64\n\ntype B\n    x as i64\n    z as i64\n\n*get_x(p)\n    p.x\n\n*main() returns i32\n    a is A(x is 10, y is 20)\n    b is B(x is 30, z is 40)\n    log(get_x(a))\n    log(get_x(b))\n    0\n",
         "10\n30",
     );
 }
@@ -4644,7 +4644,7 @@ fn b_row_poly_two_structs() {
 fn b_row_poly_inferred_fields() {
     // Row polymorphism with inferred field types
     expect(
-        "type P\n    x\n    y\n\ntype Q\n    x\n    w\n\n*get_x(obj)\n    obj.x\n\n*main() -> i32\n    p is P(x is 5, y is 6)\n    q is Q(x is 7, w is 8)\n    log(get_x(p))\n    log(get_x(q))\n    0\n",
+        "type P\n    x\n    y\n\ntype Q\n    x\n    w\n\n*get_x(obj)\n    obj.x\n\n*main() returns i32\n    p is P(x is 5, y is 6)\n    q is Q(x is 7, w is 8)\n    log(get_x(p))\n    log(get_x(q))\n    0\n",
         "5\n7",
     );
 }
@@ -4653,7 +4653,7 @@ fn b_row_poly_inferred_fields() {
 fn b_row_poly_computation() {
     // Row poly function does computation on struct fields
     expect(
-        "type Rect\n    w: i64\n    h: i64\n\n*area(r)\n    r.w * r.h\n\n*main() -> i32\n    r is Rect(w is 6, h is 7)\n    log(area(r))\n    0\n",
+        "type Rect\n    w as i64\n    h as i64\n\n*area(r)\n    r.w * r.h\n\n*main() returns i32\n    r is Rect(w is 6, h is 7)\n    log(area(r))\n    0\n",
         "42",
     );
 }
@@ -4663,7 +4663,7 @@ fn b_row_poly_computation() {
 fn b_struct_field_infer_positional() {
     // Unannotated struct fields inferred from positional constructor
     expect(
-        "type Pair\n    a\n    b\n\n*main() -> i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
+        "type Pair\n    a\n    b\n\n*main() returns i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
         "20",
     );
 }
@@ -4672,7 +4672,7 @@ fn b_struct_field_infer_positional() {
 fn b_struct_field_infer_positional_string() {
     // Positional constructor with string type inference
     expect(
-        "type Name\n    first\n    last\n\n*main() -> i32\n    n is Name('John', 'Doe')\n    log(n.first)\n    log(n.last)\n    0\n",
+        "type Name\n    first\n    last\n\n*main() returns i32\n    n is Name('John', 'Doe')\n    log(n.first)\n    log(n.last)\n    0\n",
         "John\nDoe",
     );
 }
@@ -4681,7 +4681,7 @@ fn b_struct_field_infer_positional_string() {
 fn b_row_poly_with_defaults() {
     // Row poly on struct with defaults
     expect(
-        "type Settings\n    scale is 2\n    offset is 10\n\n*apply_scale(s)\n    s.scale * s.offset\n\n*main() -> i32\n    s is Settings()\n    log(apply_scale(s))\n    0\n",
+        "type Settings\n    scale is 2\n    offset is 10\n\n*apply_scale(s)\n    s.scale * s.offset\n\n*main() returns i32\n    s is Settings()\n    log(apply_scale(s))\n    0\n",
         "20",
     );
 }
@@ -4690,7 +4690,7 @@ fn b_row_poly_with_defaults() {
 fn b_struct_default_typed() {
     // Explicit types with defaults
     expect(
-        "type Dims\n    w: i64 is 100\n    h: i64 is 200\n\n*main() -> i32\n    d is Dims()\n    log(d.w)\n    log(d.h)\n    0\n",
+        "type Dims\n    w as i64 is 100\n    h as i64 is 200\n\n*main() returns i32\n    d is Dims()\n    log(d.w)\n    log(d.h)\n    0\n",
         "100\n200",
     );
 }
@@ -4699,7 +4699,7 @@ fn b_struct_default_typed() {
 fn b_struct_default_partial_typed() {
     // Explicit types with partial override
     expect(
-        "type Dims\n    w: i64 is 100\n    h: i64 is 200\n\n*main() -> i32\n    d is Dims(w is 50)\n    log(d.w)\n    log(d.h)\n    0\n",
+        "type Dims\n    w as i64 is 100\n    h as i64 is 200\n\n*main() returns i32\n    d is Dims(w is 50)\n    log(d.w)\n    log(d.h)\n    0\n",
         "50\n200",
     );
 }
@@ -4708,7 +4708,7 @@ fn b_struct_default_partial_typed() {
 fn b_row_poly_missing_field_error() {
     // Accessing a field that doesn't exist on the struct should fail at compile time
     let err = expect_compile_fail(
-        "type Box\n    w: i64\n    h: i64\n\n*get_x(p)\n    p.x\n\n*main() -> i32\n    b is Box(w is 10, h is 20)\n    log(get_x(b))\n    0\n",
+        "type Box\n    w as i64\n    h as i64\n\n*get_x(p)\n    p.x\n\n*main() returns i32\n    b is Box(w is 10, h is 20)\n    log(get_x(b))\n    0\n",
     );
     assert!(
         err.contains("no field 'x'") || err.contains("has no field"),
@@ -4730,7 +4730,7 @@ fn strict_types_well_typed_program() {
 #[test]
 fn strict_types_annotated_functions() {
     let out = compile_with_strict(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(3, 4))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(3, 4))\n",
     );
     assert_eq!(out.trim(), "7");
 }
@@ -4773,7 +4773,7 @@ fn strict_types_float_literal_default() {
 #[test]
 fn strict_types_struct_inference() {
     let out = compile_with_strict(
-        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    log(p.x)\n",
+        "type Point\n    x as i64\n    y as i64\n\n*main()\n    p is Point(x is 10, y is 20)\n    log(p.x)\n",
     );
     assert_eq!(out.trim(), "10");
 }
@@ -4921,7 +4921,7 @@ fn implicit_generic_same_type_multiple_calls() {
 fn annotated_fn_still_works() {
     // Annotated functions should not be affected by implicit generic changes
     let out = compile_and_run(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(10, 32))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(10, 32))\n",
     );
     assert_eq!(out.trim(), "42");
 }
@@ -4949,7 +4949,7 @@ fn implicit_generic_chained_calls() {
 fn hof_apply_named_fn() {
     // *apply(f, x) → f(x) with a named function
     let out = compile_and_run(
-        "*add1(x: i64) -> i64\n    x + 1\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 42))\n",
+        "*add1(x as i64) returns i64\n    x + 1\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 42))\n",
     );
     assert_eq!(out.trim(), "43");
 }
@@ -4958,7 +4958,7 @@ fn hof_apply_named_fn() {
 fn hof_apply_with_lambda() {
     // apply with a lambda argument
     let out = compile_and_run(
-        "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(*fn(x: i64) x + 10, 32))\n",
+        "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(|x as i64| x + 10, 32))\n",
     );
     assert_eq!(out.trim(), "42");
 }
@@ -4967,7 +4967,7 @@ fn hof_apply_with_lambda() {
 fn hof_compose_two_functions() {
     // compose(f, g, x) = f(g(x))
     let out = compile_and_run(
-        "*inc(x: i64) -> i64\n    x + 1\n\n*dbl(x: i64) -> i64\n    x * 2\n\n*compose(f, g, x)\n    f(g(x))\n\n*main()\n    log(compose(inc, dbl, 20))\n",
+        "*inc(x as i64) returns i64\n    x + 1\n\n*dbl(x as i64) returns i64\n    x * 2\n\n*compose(f, g, x)\n    f(g(x))\n\n*main()\n    log(compose(inc, dbl, 20))\n",
     );
     assert_eq!(out.trim(), "41");
 }
@@ -4976,7 +4976,7 @@ fn hof_compose_two_functions() {
 fn hof_apply_twice() {
     // apply_twice(f, x) = f(f(x))
     let out = compile_and_run(
-        "*apply_twice(f, x)\n    f(f(x))\n\n*main()\n    log(apply_twice(*fn(x: i64) x + 1, 40))\n",
+        "*apply_twice(f, x)\n    f(f(x))\n\n*main()\n    log(apply_twice(|x as i64| x + 1, 40))\n",
     );
     assert_eq!(out.trim(), "42");
 }
@@ -4985,7 +4985,7 @@ fn hof_apply_twice() {
 fn hof_transform_and_add() {
     // Higher-order fn calling f twice with different args and combining results
     let out = compile_and_run(
-        "*transform_and_add(f, x, y)\n    f(x) + f(y)\n\n*main()\n    log(transform_and_add(*fn(x: i64) x * x, 3, 4))\n",
+        "*transform_and_add(f, x, y)\n    f(x) + f(y)\n\n*main()\n    log(transform_and_add(|x as i64| x * x, 3, 4))\n",
     );
     assert_eq!(out.trim(), "25");
 }
@@ -4994,7 +4994,7 @@ fn hof_transform_and_add() {
 fn hof_apply_different_fns() {
     // Same apply function used with different function arguments (monomorphized separately)
     let out = compile_and_run(
-        "*add1(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 41))\n    log(apply(double, 21))\n",
+        "*add1(x as i64) returns i64\n    x + 1\n\n*double(x as i64) returns i64\n    x * 2\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 41))\n    log(apply(double, 21))\n",
     );
     assert_eq!(out.trim(), "42\n42");
 }
@@ -5003,7 +5003,7 @@ fn hof_apply_different_fns() {
 fn hof_pipeline_with_untyped_functions() {
     // Pipeline operator with typed functions
     let out = compile_and_run(
-        "*add1(x: i64) -> i64\n    x + 1\n\n*double(x: i64) -> i64\n    x * 2\n\n*main()\n    result is 20 ~ double ~ add1\n    log(result)\n",
+        "*add1(x as i64) returns i64\n    x + 1\n\n*double(x as i64) returns i64\n    x * 2\n\n*main()\n    result is 20 ~ double ~ add1\n    log(result)\n",
     );
     assert_eq!(out.trim(), "41");
 }
@@ -5014,7 +5014,7 @@ fn hof_pipeline_with_untyped_functions() {
 #[test]
 fn b_hm_identity_two_types() {
     expect(
-        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    log(id(99))\n    0\n",
+        "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    log(id(99))\n    0\n",
         "42\n99",
     );
 }
@@ -5023,7 +5023,7 @@ fn b_hm_identity_two_types() {
 fn b_hm_identity_int_and_string() {
     // Same untyped function called with int and string
     expect(
-        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    log(id(\"hello\"))\n    0\n",
+        "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    log(id(\"hello\"))\n    0\n",
         "42\nhello",
     );
 }
@@ -5032,7 +5032,7 @@ fn b_hm_identity_int_and_string() {
 fn b_hm_identity_bool_and_int() {
     // Bools are printed as 1/0 in Jade
     expect(
-        "*id(x)\n    x\n\n*main() -> i32\n    log(id(true))\n    log(id(7))\n    0\n",
+        "*id(x)\n    x\n\n*main() returns i32\n    log(id(true))\n    log(id(7))\n    0\n",
         "1\n7",
     );
 }
@@ -5042,7 +5042,7 @@ fn b_hm_identity_bool_and_int() {
 fn b_hm_lambda_standalone() {
     // Lambda with no expected-type context — inline syntax
     expect(
-        "*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(41))\n    0\n",
+        "*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(41))\n    0\n",
         "42",
     );
 }
@@ -5052,7 +5052,7 @@ fn b_hm_lambda_standalone() {
 fn b_hm_mixed_params() {
     // *f(a: i64, b) where b inferred from usage
     expect(
-        "*f(a: i64, b)\n    a + b\n\n*main() -> i32\n    log(f(10, 32))\n    0\n",
+        "*f(a as i64, b)\n    a + b\n\n*main() returns i32\n    log(f(10, 32))\n    0\n",
         "42",
     );
 }
@@ -5061,7 +5061,7 @@ fn b_hm_mixed_params() {
 #[test]
 fn b_hm_map_value_type() {
     expect(
-        "*main() -> i32\n    m is map()\n    m.set('x', 42)\n    log(m.get('x'))\n    0\n",
+        "*main() returns i32\n    m is map()\n    m.set('x', 42)\n    log(m.get('x'))\n    0\n",
         "42",
     );
 }
@@ -5071,7 +5071,7 @@ fn b_hm_map_value_type() {
 fn b_hm_poly_compile_ok() {
     // Polymorphic function called at two types should compile fine
     expect(
-        "*f(x)\n    x\n\n*main() -> i32\n    log(f(42))\n    log(f(\"hello\"))\n    0\n",
+        "*f(x)\n    x\n\n*main() returns i32\n    log(f(42))\n    log(f(\"hello\"))\n    0\n",
         "42\nhello",
     );
 }
@@ -5081,7 +5081,7 @@ fn b_hm_poly_compile_ok() {
 fn b_hm_cross_fn_constraint() {
     // *f(x) calls g(x), g has known type → f's param constrained
     expect(
-        "*g(x: i64) -> i64\n    x * 2\n\n*f(x)\n    g(x)\n\n*main() -> i32\n    log(f(21))\n    0\n",
+        "*g(x as i64) returns i64\n    x * 2\n\n*f(x)\n    g(x)\n\n*main() returns i32\n    log(f(21))\n    0\n",
         "42",
     );
 }
@@ -5090,7 +5090,7 @@ fn b_hm_cross_fn_constraint() {
 #[test]
 fn b_cross_fn_deep_chain() {
     expect(
-        "*h(x: i64) -> i64\n    x + 100\n\n*g(x)\n    h(x)\n\n*f(x)\n    g(x)\n\n*main() -> i32\n    log(f(5))\n    0\n",
+        "*h(x as i64) returns i64\n    x + 100\n\n*g(x)\n    h(x)\n\n*f(x)\n    g(x)\n\n*main() returns i32\n    log(f(5))\n    0\n",
         "105",
     );
 }
@@ -5099,7 +5099,7 @@ fn b_cross_fn_deep_chain() {
 #[test]
 fn b_hm_recursive_branches() {
     expect(
-        "*fib(n)\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main() -> i32\n    log(fib(10))\n    0\n",
+        "*fib(n)\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main() returns i32\n    log(fib(10))\n    0\n",
         "55",
     );
 }
@@ -5107,7 +5107,7 @@ fn b_hm_recursive_branches() {
 #[test]
 fn b_hm_recursive_factorial() {
     expect(
-        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main() -> i32\n    log(fact(10))\n    0\n",
+        "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main() returns i32\n    log(fact(10))\n    0\n",
         "3628800",
     );
 }
@@ -5116,7 +5116,7 @@ fn b_hm_recursive_factorial() {
 #[test]
 fn b_hm_generic_enum_variant() {
     expect(
-        "*main() -> i32\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n    0\n",
+        "*main() returns i32\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n    0\n",
         "42",
     );
 }
@@ -5125,7 +5125,7 @@ fn b_hm_generic_enum_variant() {
 #[test]
 fn b_hm_higher_order_inferred() {
     expect(
-        "*apply(f, x)\n    f(x)\n\n*double(x: i64) -> i64\n    x * 2\n\n*main() -> i32\n    log(apply(double, 21))\n    0\n",
+        "*apply(f, x)\n    f(x)\n\n*double(x as i64) returns i64\n    x * 2\n\n*main() returns i32\n    log(apply(double, 21))\n    0\n",
         "42",
     );
 }
@@ -5134,7 +5134,7 @@ fn b_hm_higher_order_inferred() {
 #[test]
 fn b_hm_nested_calls() {
     expect(
-        "*h(x)\n    x + 1\n\n*g(x)\n    x * 2\n\n*f(x)\n    x + 10\n\n*main() -> i32\n    log(f(g(h(5))))\n    0\n",
+        "*h(x)\n    x + 1\n\n*g(x)\n    x * 2\n\n*f(x)\n    x + 10\n\n*main() returns i32\n    log(f(g(h(5))))\n    0\n",
         "22",
     );
 }
@@ -5144,7 +5144,7 @@ fn b_hm_nested_calls() {
 fn b_hm_identity_called_once() {
     // Scheme works even with single call site
     expect(
-        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n",
+        "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    0\n",
         "42",
     );
 }
@@ -5153,7 +5153,7 @@ fn b_hm_identity_called_once() {
 fn b_hm_mutual_recursion_untyped() {
     // Mutual recursion with both functions untyped — bools print as 1/0
     expect(
-        "*is_even(n)\n    if n equals 0\n        return true\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return false\n    is_even(n - 1)\n\n*main() -> i32\n    log(is_even(10))\n    log(is_odd(7))\n    0\n",
+        "*is_even(n)\n    if n equals 0\n        return true\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return false\n    is_even(n - 1)\n\n*main() returns i32\n    log(is_even(10))\n    log(is_odd(7))\n    0\n",
         "1\n1",
     );
 }
@@ -5162,7 +5162,7 @@ fn b_hm_mutual_recursion_untyped() {
 fn b_hm_gcd_untyped() {
     // Classic GCD — recursive with untyped params
     expect(
-        "*gcd(a, b)\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main() -> i32\n    log(gcd(48, 18))\n    0\n",
+        "*gcd(a, b)\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main() returns i32\n    log(gcd(48, 18))\n    0\n",
         "6",
     );
 }
@@ -5171,7 +5171,7 @@ fn b_hm_gcd_untyped() {
 fn b_hm_poly_pair_functions() {
     // Two different functions using the same polymorphic helper
     expect(
-        "*first(a, b)\n    a\n\n*main() -> i32\n    log(first(1, 2))\n    log(first(\"a\", \"b\"))\n    0\n",
+        "*first(a, b)\n    a\n\n*main() returns i32\n    log(first(1, 2))\n    log(first(\"a\", \"b\"))\n    0\n",
         "1\na",
     );
 }
@@ -5180,7 +5180,7 @@ fn b_hm_poly_pair_functions() {
 fn b_hm_untyped_with_comparison() {
     // Untyped function that uses comparison operators
     expect(
-        "*max_val(a, b)\n    if a > b\n        return a\n    b\n\n*main() -> i32\n    log(max_val(3, 7))\n    log(max_val(9, 2))\n    0\n",
+        "*max_val(a, b)\n    if a > b\n        return a\n    b\n\n*main() returns i32\n    log(max_val(3, 7))\n    log(max_val(9, 2))\n    0\n",
         "7\n9",
     );
 }
@@ -5189,7 +5189,7 @@ fn b_hm_untyped_with_comparison() {
 fn b_hm_listcomp_range_typed() {
     // List comprehension with range: bind type should be I64
     expect(
-        "*main() -> i32\n    arr is [x * x for x in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[3])\n    0\n",
+        "*main() returns i32\n    arr is [x * x for x in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[3])\n    0\n",
         "0\n1\n9",
     );
 }
@@ -5198,7 +5198,7 @@ fn b_hm_listcomp_range_typed() {
 fn b_hm_ptr_index() {
     // Ptr indexing should properly extract element type
     expect(
-        "*main() -> i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[2])\n    0\n",
+        "*main() returns i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[2])\n    0\n",
         "10\n12",
     );
 }
@@ -5207,14 +5207,14 @@ fn b_hm_ptr_index() {
 #[test]
 fn b_strict_integer_literal_defaults() {
     // Integer literals with no context should get Integer constraint → I64 default (no error)
-    expect("*main() -> i32\n    x is 42\n    log(x)\n    0\n", "42");
+    expect("*main() returns i32\n    x is 42\n    log(x)\n    0\n", "42");
 }
 
 #[test]
 fn b_strict_float_literal_defaults() {
     // Float literals should get Float constraint → F64 default (no error)
     expect(
-        "*main() -> i32\n    x is 3.14\n    log(x)\n    0\n",
+        "*main() returns i32\n    x is 3.14\n    log(x)\n    0\n",
         "3.140000",
     );
 }
@@ -5227,7 +5227,7 @@ fn b_lenient_flag() {
     let out = dir.path().join("test_bin");
     std::fs::write(
         &jade,
-        "*id(x)\n    x\n\n*main() -> i32\n    log(id(42))\n    0\n",
+        "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    0\n",
     )
     .unwrap();
     let status = Command::new(jadec())
@@ -5244,7 +5244,7 @@ fn b_lenient_flag() {
 #[test]
 fn b_standalone_method_self_infer() {
     expect(
-        "type Cat\n    name: str\n\n*Cat_speak(self) -> i64\n    1\n\n*main()\n    c is Cat(\"kitty\")\n    log(c.speak())\n",
+        "type Cat\n    name as str\n\n*Cat_speak(self) returns i64\n    1\n\n*main()\n    c is Cat(\"kitty\")\n    log(c.speak())\n",
         "1",
     );
 }
@@ -5253,7 +5253,7 @@ fn b_standalone_method_self_infer() {
 #[test]
 fn b_standalone_method_via_inferred_param() {
     expect(
-        "type Cat\n    name: str\n\n*Cat_speak(self) -> i64\n    1\n\n*make_sound(x) -> i64\n    x.speak()\n\n*main()\n    c is Cat(\"kitty\")\n    log(make_sound(c))\n",
+        "type Cat\n    name as str\n\n*Cat_speak(self) returns i64\n    1\n\n*make_sound(x) returns i64\n    x.speak()\n\n*main()\n    c is Cat(\"kitty\")\n    log(make_sound(c))\n",
         "1",
     );
 }
@@ -5262,7 +5262,7 @@ fn b_standalone_method_via_inferred_param() {
 #[test]
 fn b_multi_candidate_row_poly() {
     expect(
-        "type Cat\n    name: str\n\n*Cat_speak(self) -> i64\n    1\n\ntype Dog\n    name: str\n\n*Dog_speak(self) -> i64\n    2\n\n*make_sound(x) -> i64\n    x.speak()\n\n*main()\n    c is Cat(\"kitty\")\n    d is Dog(\"rex\")\n    log(make_sound(c))\n    log(make_sound(d))\n",
+        "type Cat\n    name as str\n\n*Cat_speak(self) returns i64\n    1\n\ntype Dog\n    name as str\n\n*Dog_speak(self) returns i64\n    2\n\n*make_sound(x) returns i64\n    x.speak()\n\n*main()\n    c is Cat(\"kitty\")\n    d is Dog(\"rex\")\n    log(make_sound(c))\n    log(make_sound(d))\n",
         "1\n2",
     );
 }
@@ -5271,7 +5271,7 @@ fn b_multi_candidate_row_poly() {
 #[test]
 fn b_trait_narrows_candidates() {
     expect(
-        "type Alpha\n    x: i64\n\ntype Beta\n    x: i64\n\ntrait Doable\n    *do_thing() -> i64\n\nimpl Doable for Alpha\n    *do_thing() -> i64\n        self.x\n\n*Beta_do_thing(self) -> i64\n    self.x * 2\n\n*main()\n    a is Alpha(x is 5)\n    log(a.do_thing())\n",
+        "type Alpha\n    x as i64\n\ntype Beta\n    x as i64\n\ntrait Doable\n    *do_thing() returns i64\n\nimpl Doable for Alpha\n    *do_thing() returns i64\n        self.x\n\n*Beta_do_thing(self) returns i64\n    self.x * 2\n\n*main()\n    a is Alpha(x is 5)\n    log(a.do_thing())\n",
         "5",
     );
 }
@@ -5280,7 +5280,7 @@ fn b_trait_narrows_candidates() {
 #[test]
 fn b_lambda_hof_apply() {
     expect(
-        "*apply(f, x)\n    f(x)\n\n*main()\n    double is *fn(x) x + x\n    log(apply(double, 5))\n",
+        "*apply(f, x)\n    f(x)\n\n*main()\n    double is |x| x + x\n    log(apply(double, 5))\n",
         "10",
     );
 }
@@ -5289,7 +5289,7 @@ fn b_lambda_hof_apply() {
 #[test]
 fn b_lambda_hof_compose() {
     expect(
-        "*compose(f, g, x)\n    f(g(x))\n\n*main()\n    inc is *fn(x) x + 1\n    dbl is *fn(x) x * 2\n    log(compose(inc, dbl, 3))\n",
+        "*compose(f, g, x)\n    f(g(x))\n\n*main()\n    inc is |x| x + 1\n    dbl is |x| x * 2\n    log(compose(inc, dbl, 3))\n",
         "7",
     );
 }
@@ -5298,7 +5298,7 @@ fn b_lambda_hof_compose() {
 #[test]
 fn b_lambda_hof_twice() {
     expect(
-        "*twice(f, x)\n    f(f(x))\n\n*main()\n    add3 is *fn(n) n + 3\n    log(twice(add3, 10))\n",
+        "*twice(f, x)\n    f(f(x))\n\n*main()\n    add3 is |n| n + 3\n    log(twice(add3, 10))\n",
         "16",
     );
 }
@@ -5307,7 +5307,7 @@ fn b_lambda_hof_twice() {
 #[test]
 fn b_lambda_hof_closure() {
     expect(
-        "*apply(f, x)\n    f(x)\n\n*main()\n    offset is 100\n    add_offset is *fn(x) x + offset\n    log(apply(add_offset, 42))\n",
+        "*apply(f, x)\n    f(x)\n\n*main()\n    offset is 100\n    add_offset is |x| x + offset\n    log(apply(add_offset, 42))\n",
         "142",
     );
 }
@@ -5491,7 +5491,7 @@ fn b_p41_compose_numeric() {
 fn b_p41_lambda_infer_from_call() {
     // Lambda type inferred from function parameter context
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main()\n    log(apply(*fn(x: i64) -> i64 x + 10, 32))\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main()\n    log(apply(|x as i64| returns i64 x + 10, 32))\n",
         "42",
     );
 }
@@ -5500,7 +5500,7 @@ fn b_p41_lambda_infer_from_call() {
 fn b_p41_let_generalization() {
     // Let-bound lambda with inferred param type used at i64
     expect(
-        "*main()\n    id is *fn(x) x\n    log(id(42))\n    log(id(7))\n",
+        "*main()\n    id is |x| x\n    log(id(42))\n    log(id(7))\n",
         "42\n7",
     );
 }
@@ -5524,7 +5524,7 @@ fn b_p41_numeric_constraint_float() {
 fn b_p41_struct_param_infer_unique_field() {
     // Struct param inferred by unique field access
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*get_x(p)\n    p.x\n\n*main()\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n",
+        "type Point\n    x as i64\n    y as i64\n\n*get_x(p)\n    p.x\n\n*main()\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n",
         "42",
     );
 }
@@ -5542,7 +5542,7 @@ fn b_p41_enum_variant_infer() {
 fn b_p41_recursive_function_type() {
     // Recursive function type inferred correctly
     expect(
-        "*fib(n: i64) -> i64\n    if n < 2\n        n\n    else\n        fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "*fib(n as i64) returns i64\n    if n < 2\n        n\n    else\n        fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
         "55",
     );
 }
@@ -5551,7 +5551,7 @@ fn b_p41_recursive_function_type() {
 fn b_p41_match_return_type_infer() {
     // Match expression return type unified from arm types
     expect(
-        "*describe(x: i64) -> i64\n    match x\n        0 ? 100\n        1 ? 200\n        _ ? 300\n\n*main()\n    log(describe(0))\n    log(describe(1))\n    log(describe(42))\n",
+        "*describe(x as i64) returns i64\n    match x\n        0 ? 100\n        1 ? 200\n        _ ? 300\n\n*main()\n    log(describe(0))\n    log(describe(1))\n    log(describe(42))\n",
         "100\n200\n300",
     );
 }
@@ -5567,7 +5567,7 @@ fn b_p41_strict_types_basic() {
 fn b_p41_strict_types_arithmetic() {
     // Strict mode: arithmetic result types fully determined
     let out = compile_with_strict(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
     );
     assert_eq!(out.trim(), "7");
 }
@@ -5618,7 +5618,7 @@ fn b_p42_undefined_variable() {
 fn b_p42_wrong_arg_count() {
     // Function called with wrong number of arguments
     let err =
-        expect_compile_fail("*foo(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(foo(1))\n");
+        expect_compile_fail("*foo(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(foo(1))\n");
     assert!(
         err.contains("argument")
             || err.contains("param")
@@ -5661,7 +5661,7 @@ fn b_p43_deferred_method_on_vec() {
 fn b_p43_deferred_field_from_return() {
     // Field accessed on value returned from function
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*make_point() -> Point\n    Point(x is 10, y is 20)\n\n*main()\n    p is make_point()\n    log(p.x)\n    log(p.y)\n",
+        "type Point\n    x as i64\n    y as i64\n\n*make_point() returns Point\n    Point(x is 10, y is 20)\n\n*main()\n    p is make_point()\n    log(p.x)\n    log(p.y)\n",
         "10\n20",
     );
 }
@@ -5670,7 +5670,7 @@ fn b_p43_deferred_field_from_return() {
 fn b_p43_deferred_method_chain() {
     // Chained method calls on inferred types
     expect(
-        "type Counter\n    val: i64\n\nimpl Counter\n    *get() -> i64\n        self.val\n\n*make(n: i64) -> Counter\n    Counter(val is n)\n\n*main()\n    log(make(42).get())\n",
+        "type Counter\n    val as i64\n\nimpl Counter\n    *get() returns i64\n        self.val\n\n*make(n as i64) returns Counter\n    Counter(val is n)\n\n*main()\n    log(make(42).get())\n",
         "42",
     );
 }
@@ -5679,7 +5679,7 @@ fn b_p43_deferred_method_chain() {
 fn b_p43_deferred_field_unique_match() {
     // Unique field name resolves struct type
     expect(
-        "type Circle\n    radius: i64\n\n*area_approx(c)\n    c.radius * c.radius * 3\n\n*main()\n    ci is Circle(radius is 5)\n    log(area_approx(ci))\n",
+        "type Circle\n    radius as i64\n\n*area_approx(c)\n    c.radius * c.radius * 3\n\n*main()\n    ci is Circle(radius is 5)\n    log(area_approx(ci))\n",
         "75",
     );
 }
@@ -5697,7 +5697,7 @@ fn b_p43_deferred_vec_push_len() {
 fn b_p43_deferred_struct_method_on_param() {
     // Method resolved on param whose struct type is inferred from call site
     expect(
-        "type Box\n    value: i64\n\nimpl Box\n    *get() -> i64\n        self.value\n\n*extract(b: Box) -> i64\n    b.get()\n\n*main()\n    bx is Box(value is 99)\n    log(extract(bx))\n",
+        "type Box\n    value as i64\n\nimpl Box\n    *get() returns i64\n        self.value\n\n*extract(b as Box) returns i64\n    b.get()\n\n*main()\n    bx is Box(value is 99)\n    log(extract(bx))\n",
         "99",
     );
 }
@@ -5722,7 +5722,7 @@ fn b_p43_deferred_map_operations() {
 fn b_p5_lambda_no_annotation_i64() {
     // Lambda param inferred from i64 context — no annotation needed
     expect(
-        "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n\n*main()\n    log(apply(*fn(x: i64) -> i64 x + 10, 32))\n",
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main()\n    log(apply(|x as i64| returns i64 x + 10, 32))\n",
         "42",
     );
 }
@@ -5730,13 +5730,13 @@ fn b_p5_lambda_no_annotation_i64() {
 #[test]
 fn b_p5_lambda_unannotated_let_bound() {
     // Let-bound lambda with unannotated param, type inferred from usage
-    expect("*main()\n    f is *fn(x) x + 1\n    log(f(41))\n", "42");
+    expect("*main()\n    f is |x| x + 1\n    log(f(41))\n", "42");
 }
 
 #[test]
 fn b_p5_lambda_unannotated_mul() {
     // Unannotated lambda doing multiplication
-    expect("*main()\n    g is *fn(a) a * 3\n    log(g(14))\n", "42");
+    expect("*main()\n    g is |a| a * 3\n    log(g(14))\n", "42");
 }
 
 // --- Struct parameter inference (target: <50% annotated) ---
@@ -5745,7 +5745,7 @@ fn b_p5_lambda_unannotated_mul() {
 fn b_p5_struct_param_unique_field() {
     // Struct param inferred by unique field name — no annotation needed
     expect(
-        "type Circle\n    radius: i64\n\n*get_radius(c)\n    c.radius\n\n*main()\n    ci is Circle(radius is 7)\n    log(get_radius(ci))\n",
+        "type Circle\n    radius as i64\n\n*get_radius(c)\n    c.radius\n\n*main()\n    ci is Circle(radius is 7)\n    log(get_radius(ci))\n",
         "7",
     );
 }
@@ -5754,7 +5754,7 @@ fn b_p5_struct_param_unique_field() {
 fn b_p5_struct_param_unique_method() {
     // Struct param inferred by unique method name
     expect(
-        "type Box\n    value: i64\n\nimpl Box\n    *get() -> i64\n        self.value\n\n*unbox(b: Box) -> i64\n    b.get()\n\n*main()\n    bx is Box(value is 42)\n    log(unbox(bx))\n",
+        "type Box\n    value as i64\n\nimpl Box\n    *get() returns i64\n        self.value\n\n*unbox(b as Box) returns i64\n    b.get()\n\n*main()\n    bx is Box(value is 42)\n    log(unbox(bx))\n",
         "42",
     );
 }
@@ -5763,7 +5763,7 @@ fn b_p5_struct_param_unique_method() {
 fn b_p5_struct_param_from_constructor() {
     // Param type inferred from constructor at call site
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*add_coords(p: Point) -> i64\n    p.x + p.y\n\n*main()\n    log(add_coords(Point(x is 10, y is 32)))\n",
+        "type Point\n    x as i64\n    y as i64\n\n*add_coords(p as Point) returns i64\n    p.x + p.y\n\n*main()\n    log(add_coords(Point(x is 10, y is 32)))\n",
         "42",
     );
 }
@@ -5816,7 +5816,7 @@ fn b_p5_func_no_annotation_identity() {
 fn b_p5_annotation_reduction_combo() {
     // Combined: unannotated functions, struct inference, lambda all working together
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*dist_sq(p: Point) -> i64\n    p.x * p.x + p.y * p.y\n\n*scale(n, factor)\n    n * factor\n\n*main()\n    p is Point(x is 3, y is 4)\n    d is dist_sq(p)\n    log(scale(d, 2))\n",
+        "type Point\n    x as i64\n    y as i64\n\n*dist_sq(p as Point) returns i64\n    p.x * p.x + p.y * p.y\n\n*scale(n, factor)\n    n * factor\n\n*main()\n    p is Point(x is 3, y is 4)\n    d is dist_sq(p)\n    log(scale(d, 2))\n",
         "50",
     );
 }
@@ -5877,7 +5877,7 @@ fn b_r5_poly_nested_calls() {
 fn b_r5_poly_apply_with_lambdas() {
     // Apply function used with different lambda types
     expect(
-        "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(*fn(x) x + 1, 5))\n    log(apply(*fn(x) x * 2, 10))\n",
+        "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(|x| x + 1, 5))\n    log(apply(|x| x * 2, 10))\n",
         "6\n20",
     );
 }
@@ -5886,7 +5886,7 @@ fn b_r5_poly_apply_with_lambdas() {
 fn b_r5_poly_choose_first() {
     // choose function used multiple times with different integer args
     expect(
-        "*choose(a, b, flag: i64) -> i64\n    if flag equals 1\n        return a\n    b\n\n*main()\n    log(choose(10, 20, 1))\n    log(choose(30, 40, 0))\n",
+        "*choose(a, b, flag as i64) returns i64\n    if flag equals 1\n        return a\n    b\n\n*main()\n    log(choose(10, 20, 1))\n    log(choose(30, 40, 0))\n",
         "10\n40",
     );
 }
@@ -5907,7 +5907,7 @@ fn b_r5_poly_three_calls() {
 fn b_r5_lambda_capture_int() {
     // Lambda captures integer variable
     expect(
-        "*main()\n    x is 10\n    f is *fn(y) x + y\n    log(f(5))\n",
+        "*main()\n    x is 10\n    f is |y| x + y\n    log(f(5))\n",
         "15",
     );
 }
@@ -5916,7 +5916,7 @@ fn b_r5_lambda_capture_int() {
 fn b_r5_lambda_capture_two_vars() {
     // Lambda captures two variables
     expect(
-        "*main()\n    a is 3\n    b is 7\n    f is *fn(x) a * x + b\n    log(f(4))\n",
+        "*main()\n    a is 3\n    b is 7\n    f is |x| a * x + b\n    log(f(4))\n",
         "19",
     );
 }
@@ -5925,7 +5925,7 @@ fn b_r5_lambda_capture_two_vars() {
 fn b_r5_lambda_capture_outer_param() {
     // Inner function captures outer function's parameter
     expect(
-        "*make_adder(n: i64) -> (i64) -> i64\n    *fn(x: i64) -> i64 n + x\n\n*main()\n    add5 is make_adder(5)\n    log(add5(10))\n",
+        "*make_adder(n as i64) returns (i64) returns i64\n    |x as i64| returns i64 n + x\n\n*main()\n    add5 is make_adder(5)\n    log(add5(10))\n",
         "15",
     );
 }
@@ -5934,7 +5934,7 @@ fn b_r5_lambda_capture_outer_param() {
 fn b_r5_lambda_capture_nested() {
     // Nested lambdas each capturing from different scopes
     expect(
-        "*main()\n    x is 100\n    f is *fn(a: i64) -> i64 x + a\n    log(f(42))\n",
+        "*main()\n    x is 100\n    f is |a as i64| returns i64 x + a\n    log(f(42))\n",
         "142",
     );
 }
@@ -5943,7 +5943,7 @@ fn b_r5_lambda_capture_nested() {
 fn b_r5_lambda_capture_in_hof() {
     // Closure passed to higher-order function
     expect(
-        "*apply(f, x)\n    f(x)\n\n*main()\n    base is 50\n    add_base is *fn(x) x + base\n    log(apply(add_base, 7))\n",
+        "*apply(f, x)\n    f(x)\n\n*main()\n    base is 50\n    add_base is |x| x + base\n    log(apply(add_base, 7))\n",
         "57",
     );
 }
@@ -5955,7 +5955,7 @@ fn b_r5_lambda_capture_in_hof() {
 fn b_r5_recursive_factorial() {
     // Classic factorial with inferred types
     expect(
-        "*factorial(n: i64) -> i64\n    if n <= 1\n        return 1\n    n * factorial(n - 1)\n\n*main()\n    log(factorial(6))\n",
+        "*factorial(n as i64) returns i64\n    if n <= 1\n        return 1\n    n * factorial(n - 1)\n\n*main()\n    log(factorial(6))\n",
         "720",
     );
 }
@@ -5964,7 +5964,7 @@ fn b_r5_recursive_factorial() {
 fn b_r5_recursive_sum_to() {
     // Recursive sum 1..n
     expect(
-        "*sum_to(n: i64) -> i64\n    if n <= 0\n        return 0\n    n + sum_to(n - 1)\n\n*main()\n    log(sum_to(10))\n",
+        "*sum_to(n as i64) returns i64\n    if n <= 0\n        return 0\n    n + sum_to(n - 1)\n\n*main()\n    log(sum_to(10))\n",
         "55",
     );
 }
@@ -5973,7 +5973,7 @@ fn b_r5_recursive_sum_to() {
 fn b_r5_recursive_power() {
     // Recursive exponentiation
     expect(
-        "*power(base: i64, exp: i64) -> i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
+        "*power(base as i64, exp as i64) returns i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
         "1024",
     );
 }
@@ -5982,7 +5982,7 @@ fn b_r5_recursive_power() {
 fn b_r5_recursive_fib_inferred() {
     // Fibonacci with full annotations but still exercises recursive unification
     expect(
-        "*fib(n: i64) -> i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
+        "*fib(n as i64) returns i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
         "55",
     );
 }
@@ -5991,7 +5991,7 @@ fn b_r5_recursive_fib_inferred() {
 fn b_r5_recursive_mutual_even_odd() {
     // Mutual recursion: is_even and is_odd
     expect(
-        "*is_even(n: i64) -> i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n: i64) -> i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(7))\n",
+        "*is_even(n as i64) returns i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n as i64) returns i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(7))\n",
         "1\n1",
     );
 }
@@ -6003,7 +6003,7 @@ fn b_r5_recursive_mutual_even_odd() {
 fn b_r5_deferred_struct_method() {
     // Method on struct where receiver type resolves late
     expect(
-        "type Counter\n    val: i64\n\n    *get() -> i64\n        self.val\n\n*use_counter(c) -> i64\n    c.get()\n\n*main()\n    c is Counter(val is 99)\n    log(use_counter(c))\n",
+        "type Counter\n    val as i64\n\n    *get() returns i64\n        self.val\n\n*use_counter(c) returns i64\n    c.get()\n\n*main()\n    c is Counter(val is 99)\n    log(use_counter(c))\n",
         "99",
     );
 }
@@ -6012,7 +6012,7 @@ fn b_r5_deferred_struct_method() {
 fn b_r5_deferred_field_access() {
     // Field access on unknown-type var resolved through usage
     expect(
-        "type Pt\n    x: i64\n    y: i64\n\n*get_x(p) -> i64\n    p.x\n\n*main()\n    p is Pt(x is 5, y is 6)\n    log(get_x(p))\n",
+        "type Pt\n    x as i64\n    y as i64\n\n*get_x(p) returns i64\n    p.x\n\n*main()\n    p is Pt(x is 5, y is 6)\n    log(get_x(p))\n",
         "5",
     );
 }
@@ -6021,7 +6021,7 @@ fn b_r5_deferred_field_access() {
 fn b_r5_deferred_method_chain() {
     // Chained method calls resolved through deferred mechanism
     expect(
-        "type Box\n    val: i64\n\n    *get_val() -> i64\n        self.val\n\n*extract(b) -> i64\n    b.get_val()\n\n*main()\n    b is Box(val is 77)\n    log(extract(b))\n",
+        "type Box\n    val as i64\n\n    *get_val() returns i64\n        self.val\n\n*extract(b) returns i64\n    b.get_val()\n\n*main()\n    b is Box(val is 77)\n    log(extract(b))\n",
         "77",
     );
 }
@@ -6030,7 +6030,7 @@ fn b_r5_deferred_method_chain() {
 fn b_r5_deferred_method_with_arg() {
     // Method taking argument, deferred resolution
     expect(
-        "type Acc\n    total: i64\n\n    *add(n: i64) -> i64\n        self.total + n\n\n*use_acc(a, n: i64) -> i64\n    a.add(n)\n\n*main()\n    a is Acc(total is 10)\n    log(use_acc(a, 32))\n",
+        "type Acc\n    total as i64\n\n    *add(n as i64) returns i64\n        self.total + n\n\n*use_acc(a, n as i64) returns i64\n    a.add(n)\n\n*main()\n    a is Acc(total is 10)\n    log(use_acc(a, 32))\n",
         "42",
     );
 }
@@ -6039,7 +6039,7 @@ fn b_r5_deferred_method_with_arg() {
 fn b_r5_deferred_vec_method() {
     // Vec method called through typed function
     expect(
-        "*get_len(v: Vec of i64) -> i64\n    v.len()\n\n*main()\n    v is vec(1, 2, 3, 4)\n    log(get_len(v))\n",
+        "*get_len(v as Vec of i64) returns i64\n    v.len()\n\n*main()\n    v is vec(1, 2, 3, 4)\n    log(get_len(v))\n",
         "4",
     );
 }
@@ -6051,7 +6051,7 @@ fn b_r5_deferred_vec_method() {
 fn b_r5_mixed_one_annotated() {
     // First param annotated, second inferred
     expect(
-        "*add(a: i64, b) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "*add(a as i64, b) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
     );
 }
@@ -6060,7 +6060,7 @@ fn b_r5_mixed_one_annotated() {
 fn b_r5_mixed_ret_annotated_params_not() {
     // Return type annotated, params inferred
     expect(
-        "*mul(a, b) -> i64\n    a * b\n\n*main()\n    log(mul(6, 7))\n",
+        "*mul(a, b) returns i64\n    a * b\n\n*main()\n    log(mul(6, 7))\n",
         "42",
     );
 }
@@ -6069,7 +6069,7 @@ fn b_r5_mixed_ret_annotated_params_not() {
 fn b_r5_mixed_struct_param_annotated() {
     // Struct param annotated, other inferred
     expect(
-        "type Pt\n    x: i64\n    y: i64\n\n*scale_x(p: Pt, factor) -> i64\n    p.x * factor\n\n*main()\n    p is Pt(x is 5, y is 3)\n    log(scale_x(p, 10))\n",
+        "type Pt\n    x as i64\n    y as i64\n\n*scale_x(p as Pt, factor) returns i64\n    p.x * factor\n\n*main()\n    p is Pt(x is 5, y is 3)\n    log(scale_x(p, 10))\n",
         "50",
     );
 }
@@ -6078,7 +6078,7 @@ fn b_r5_mixed_struct_param_annotated() {
 fn b_r5_mixed_return_inferred() {
     // No return annotation — inferred from body
     expect(
-        "*double(x: i64)\n    x * 2\n\n*main()\n    log(double(21))\n",
+        "*double(x as i64)\n    x * 2\n\n*main()\n    log(double(21))\n",
         "42",
     );
 }
@@ -6172,7 +6172,7 @@ fn b_r5_error_missing_main() {
 fn b_r5_error_wrong_arity() {
     // Calling function with wrong number of arguments
     let err =
-        expect_compile_fail("*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(1))\n");
+        expect_compile_fail("*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(1))\n");
     assert!(!err.is_empty(), "expected arity error");
 }
 
@@ -6189,14 +6189,14 @@ fn b_r5_error_tab_in_source() {
 #[test]
 fn b_r5_struct_unused_compiles() {
     // Struct declared but never used — should still compile
-    expect("type Phantom\n    x: i64\n\n*main()\n    log(42)\n", "42");
+    expect("type Phantom\n    x as i64\n\n*main()\n    log(42)\n", "42");
 }
 
 #[test]
 fn b_r5_struct_only_in_type_sig() {
     // Struct used only in type signature, constructed at call site
     expect(
-        "type Wrap\n    val: i64\n\n*unwrap(w: Wrap) -> i64\n    w.val\n\n*main()\n    log(unwrap(Wrap(val is 99)))\n",
+        "type Wrap\n    val as i64\n\n*unwrap(w as Wrap) returns i64\n    w.val\n\n*main()\n    log(unwrap(Wrap(val is 99)))\n",
         "99",
     );
 }
@@ -6205,7 +6205,7 @@ fn b_r5_struct_only_in_type_sig() {
 fn b_r5_struct_field_default() {
     // Struct with fields that get default types
     expect(
-        "type Pair\n    a: i64\n    b: i64\n\n*sum_pair(p: Pair) -> i64\n    p.a + p.b\n\n*main()\n    log(sum_pair(Pair(a is 11, b is 22)))\n",
+        "type Pair\n    a as i64\n    b as i64\n\n*sum_pair(p as Pair) returns i64\n    p.a + p.b\n\n*main()\n    log(sum_pair(Pair(a is 11, b is 22)))\n",
         "33",
     );
 }
@@ -6215,14 +6215,14 @@ fn b_r5_struct_field_default() {
 #[test]
 fn b_infer_t1_occurs_check() {
     // Self-application x(x) creates infinite type — must fail
-    expect_compile_fail("*main()\n    f is *fn(x) x(x)\n    log(f(f))\n");
+    expect_compile_fail("*main()\n    f is |x| x(x)\n    log(f(f))\n");
 }
 
 #[test]
 fn b_infer_t2_value_restriction() {
     // apply result is monomorphic — not generalized since it's not a syntactic value
     expect(
-        "*apply(f, x)\n    f(x)\n\n*main()\n    r is apply(*fn(x) x + 1, 5)\n    log(r)\n",
+        "*apply(f, x)\n    f(x)\n\n*main()\n    r is apply(|x| x + 1, 5)\n    log(r)\n",
         "6",
     );
 }
@@ -6231,7 +6231,7 @@ fn b_infer_t2_value_restriction() {
 fn b_infer_t3_poly_lambda_multi_instantiate() {
     // Let-bound polymorphic lambda called at I64 and String
     expect(
-        "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n",
+        "*main()\n    id is |x| x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n",
         "42\nhello",
     );
 }
@@ -6240,7 +6240,7 @@ fn b_infer_t3_poly_lambda_multi_instantiate() {
 fn b_infer_t4_lambda_capture() {
     // Lambda capturing outer variable
     expect(
-        "*main()\n    offset is 10\n    f is *fn(x: i64) -> i64 x + offset\n    log(f(32))\n",
+        "*main()\n    offset is 10\n    f is |x as i64| returns i64 x + offset\n    log(f(32))\n",
         "42",
     );
 }
@@ -6249,7 +6249,7 @@ fn b_infer_t4_lambda_capture() {
 fn b_infer_t6_match_type_propagation() {
     // Match arms propagate return type correctly
     expect(
-        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s: Shape) -> i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main()\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n",
+        "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s as Shape) returns i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main()\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n",
         "25\n21",
     );
 }
@@ -6258,7 +6258,7 @@ fn b_infer_t6_match_type_propagation() {
 fn b_infer_t7_pipe_inference() {
     // Pipe operator infers function param type
     expect(
-        "*double(x: i64) -> i64\n    x * 2\n\n*main()\n    log(21 ~ double)\n",
+        "*double(x as i64) returns i64\n    x * 2\n\n*main()\n    log(21 ~ double)\n",
         "42",
     );
 }
@@ -6267,7 +6267,7 @@ fn b_infer_t7_pipe_inference() {
 fn b_infer_t8_mixed_params() {
     // Mixed annotated and unannotated params
     expect(
-        "*mixed(a, b: i64) -> i64\n    a + b\n\n*main()\n    log(mixed(1, 2))\n",
+        "*mixed(a, b as i64) returns i64\n    a + b\n\n*main()\n    log(mixed(1, 2))\n",
         "3",
     );
 }
@@ -6276,7 +6276,7 @@ fn b_infer_t8_mixed_params() {
 fn b_infer_t9_struct_field_inference() {
     // Struct field types inferred from constructor call
     expect(
-        "type Point\n    x: i64\n    y: i64\n\n*main()\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n",
+        "type Point\n    x as i64\n    y as i64\n\n*main()\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n",
         "7",
     );
 }
@@ -6285,7 +6285,7 @@ fn b_infer_t9_struct_field_inference() {
 fn b_infer_t10_trait_method_dispatch() {
     // Trait method resolution on struct instance
     expect(
-        "type Foo\n    x: i64\n\ntrait Show\n    *show() -> String\n\nimpl Show for Foo\n    *show() -> String\n        \"Foo\"\n\n*main()\n    f is Foo(x is 42)\n    log(f.show())\n",
+        "type Foo\n    x as i64\n\ntrait Show\n    *show() returns String\n\nimpl Show for Foo\n    *show() returns String\n        \"Foo\"\n\n*main()\n    f is Foo(x is 42)\n    log(f.show())\n",
         "Foo",
     );
 }
@@ -6314,7 +6314,7 @@ fn b_infer_i3_pedantic_rejects_integer_default() {
 fn b_infer_i3_pedantic_passes_annotated() {
     // Pedantic mode: fully annotated function should pass
     expect(
-        "*add(a: i64, b: i64) -> i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
     );
 }
@@ -6343,7 +6343,7 @@ fn b_s6_enum_inference_single_variant() {
 fn b_r41_trait_guided_single_implementor() {
     // R4.1: TypeVar with trait constraint resolved to single implementing type
     expect(
-        "trait Greetable\n    *greet() -> String\n\ntype Dog\n    name: String\n\nimpl Greetable for Dog\n    *greet() -> String\n        \"Woof from \" + self.name\n\n*say_hello(x)\n    x.greet()\n\n*main()\n    d is Dog(name is \"Rex\")\n    log(say_hello(d))\n",
+        "trait Greetable\n    *greet() returns String\n\ntype Dog\n    name as String\n\nimpl Greetable for Dog\n    *greet() returns String\n        \"Woof from \" + self.name\n\n*say_hello(x)\n    x.greet()\n\n*main()\n    d is Dog(name is \"Rex\")\n    log(say_hello(d))\n",
         "Woof from Rex",
     );
 }
@@ -6351,9 +6351,9 @@ fn b_r41_trait_guided_single_implementor() {
 #[test]
 fn b_value_restriction_non_value_monomorphic() {
     // Value restriction: result of function call is monomorphic, not generalized.
-    // r = wrap(42) binds r as i64; passing to process_str(String) -> String fails.
+    // r = wrap(42) binds r: i64; passing to process_str(String) -> String fails.
     let _err = expect_compile_fail(
-        "*wrap(x)\n    x\n\n*process_int(n: i64) -> i64\n    n + 1\n\n*process_str(s: String) -> String\n    s + \"!\"\n\n*main()\n    r is wrap(42)\n    log(process_int(r))\n    log(process_str(r))\n",
+        "*wrap(x)\n    x\n\n*process_int(n as i64) returns i64\n    n + 1\n\n*process_str(s as String) returns String\n    s + \"!\"\n\n*main()\n    r is wrap(42)\n    log(process_int(r))\n    log(process_str(r))\n",
     );
 }
 
@@ -6361,7 +6361,7 @@ fn b_value_restriction_non_value_monomorphic() {
 fn b_value_restriction_lambda_is_poly() {
     // Value restriction: let-bound lambda IS a syntactic value, so it can be polymorphic
     expect(
-        "*main()\n    id is *fn(x) x\n    log(id(42))\n    log(id(\"hello\"))\n",
+        "*main()\n    id is |x| x\n    log(id(42))\n    log(id(\"hello\"))\n",
         "42\nhello",
     );
 }
@@ -6388,7 +6388,7 @@ fn b_struct_field_inference_mixed_types() {
 fn b_width_propagation_param() {
     // Width propagation: i32 param type propagates to untyped arg
     expect(
-        "*add_i32(a: i32, b: i32) -> i32\n    a + b\n\n*main()\n    x is 10\n    y is 20\n    log(add_i32(x, y))\n",
+        "*add_i32(a as i32, b as i32) returns i32\n    a + b\n\n*main()\n    x is 10\n    y is 20\n    log(add_i32(x, y))\n",
         "30",
     );
 }
@@ -6397,7 +6397,7 @@ fn b_width_propagation_param() {
 fn b_width_propagation_return() {
     // Width propagation: return type propagates to body literal
     expect(
-        "*make_u8() -> u8\n    42\n\n*main()\n    log(make_u8())\n",
+        "*make_u8() returns u8\n    42\n\n*main()\n    log(make_u8())\n",
         "42",
     );
 }
@@ -6406,7 +6406,7 @@ fn b_width_propagation_return() {
 fn b_f32_struct_field_store_load() {
     // f32 struct fields store and load correctly
     expect(
-        "type Sensor\n    reading: f32\n    count: u16\n\n*main()\n    s is Sensor(reading is 3.14, count is 100)\n    log(s.reading)\n    log(s.count)\n",
+        "type Sensor\n    reading as f32\n    count as u16\n\n*main()\n    s is Sensor(reading is 3.14, count is 100)\n    log(s.reading)\n    log(s.count)\n",
         "3.140000\n100",
     );
 }
@@ -6415,7 +6415,7 @@ fn b_f32_struct_field_store_load() {
 fn b_f32_function_roundtrip() {
     // f32 param and return type work correctly
     expect(
-        "*compute(x: f32) -> f32\n    x * 2.0\n\n*main()\n    log(compute(3.14))\n",
+        "*compute(x as f32) returns f32\n    x * 2.0\n\n*main()\n    log(compute(3.14))\n",
         "6.280000",
     );
 }
@@ -6426,7 +6426,7 @@ fn b_f32_function_roundtrip() {
 
 #[test]
 fn b_string_param_inferred_from_contains() {
-    // Parameter type inferred as String from .contains() call
+    // Parameter type inferred: String from .contains() call
     expect(
         "*check(s)\n    s.contains('world')\n\n*main()\n    log(check('hello world'))\n",
         "1",
@@ -6483,7 +6483,7 @@ fn b_string_param_inferred_from_split() {
 
 #[test]
 fn b_string_param_inferred_from_concat() {
-    // When one side of + is known String, the other should be inferred as String
+    // When one side of + is known String, the other should be inferred: String
     expect(
         "*greet(name)\n    'Hello, ' + name\n\n*main()\n    log(greet('world'))\n",
         "Hello, world",
@@ -6498,7 +6498,7 @@ fn b_string_param_inferred_from_concat() {
 fn b_trait_constraint_inferred_single_candidate() {
     // When only one struct implements a trait method, unannotated param resolves correctly
     expect(
-        "trait Describable\n    *describe() -> String\n\ntype Widget\n    label: String\n\nimpl Describable for Widget\n    *describe()\n        self.label\n\n*show(x)\n    log(x.describe())\n\n*main()\n    show(Widget(label is 'hello'))\n",
+        "trait Describable\n    *describe() returns String\n\ntype Widget\n    label as String\n\nimpl Describable for Widget\n    *describe()\n        self.label\n\n*show(x)\n    log(x.describe())\n\n*main()\n    show(Widget(label is 'hello'))\n",
         "hello",
     );
 }
@@ -6508,7 +6508,7 @@ fn b_trait_constraint_narrowing() {
     // When multiple structs have same method but only one implements the required trait,
     // trait constraint narrows candidates correctly
     expect(
-        "trait Printable\n    *to_text() -> String\n\ntype Alpha\n    val: i64\n\ntype Beta\n    val: i64\n\nimpl Printable for Alpha\n    *to_text()\n        'alpha'\n\nimpl Printable for Beta\n    *to_text()\n        'beta'\n\n*main()\n    a is Alpha(val is 1)\n    b is Beta(val is 2)\n    log(a.to_text())\n    log(b.to_text())\n",
+        "trait Printable\n    *to_text() returns String\n\ntype Alpha\n    val as i64\n\ntype Beta\n    val as i64\n\nimpl Printable for Alpha\n    *to_text()\n        'alpha'\n\nimpl Printable for Beta\n    *to_text()\n        'beta'\n\n*main()\n    a is Alpha(val is 1)\n    b is Beta(val is 2)\n    log(a.to_text())\n    log(b.to_text())\n",
         "alpha\nbeta",
     );
 }
@@ -6548,7 +6548,7 @@ fn b_empty_vec_no_context_compiles() {
 #[test]
 fn b_curried_add() {
     expect(
-        "*add(a)\n    *fn(b) a + b\n\n*main()\n    add3 is add(3)\n    log(add3(4))\n",
+        "*add(a)\n    |b| a + b\n\n*main()\n    add3 is add(3)\n    log(add3(4))\n",
         "7",
     );
 }
@@ -6556,7 +6556,7 @@ fn b_curried_add() {
 #[test]
 fn b_curried_inline_call() {
     expect(
-        "*add(a)\n    *fn(b) a + b\n\n*main()\n    log(add(10)(20))\n",
+        "*add(a)\n    |b| a + b\n\n*main()\n    log(add(10)(20))\n",
         "30",
     );
 }
@@ -6564,7 +6564,7 @@ fn b_curried_inline_call() {
 #[test]
 fn b_curried_lambda() {
     expect(
-        "*main()\n    mul is *fn(a) *fn(b) a * b\n    mul5 is mul(5)\n    log(mul5(6))\n",
+        "*main()\n    mul is |a| |b| a * b\n    mul5 is mul(5)\n    log(mul5(6))\n",
         "30",
     );
 }
@@ -6634,7 +6634,7 @@ fn b_struct_type_params_generic() {
 fn b_curried_string_concat() {
     // Curried function that captures a String — previously caused LLVM IR type mismatch
     expect(
-        "*concat(a: String)\n    *fn(b: String) -> String a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
+        "*concat(a as String)\n    |b as String| returns String a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
         "hello world",
     );
 }
@@ -6643,7 +6643,7 @@ fn b_curried_string_concat() {
 fn b_curried_string_concat_inferred() {
     // Same but with fully inferred types (the core bug)
     expect(
-        "*concat(a)\n    *fn(b) a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
+        "*concat(a)\n    |b| a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
         "hello world",
     );
 }
@@ -6652,7 +6652,7 @@ fn b_curried_string_concat_inferred() {
 fn b_addable_still_works_numeric() {
     // Ensure + with integers still works after Addable constraint
     expect(
-        "*add(a)\n    *fn(b) a + b\n\n*main()\n    log(add(3)(4))\n",
+        "*add(a)\n    |b| a + b\n\n*main()\n    log(add(3)(4))\n",
         "7",
     );
 }
@@ -6664,7 +6664,7 @@ fn b_addable_still_works_numeric() {
 #[test]
 fn b_chained_field_access_two_deep() {
     expect(
-        "type Point\n    x: i64\n    y: i64\n\ntype Line\n    a: Point\n    b: Point\n\n*main()\n    l is Line(Point(1, 2), Point(3, 4))\n    log(l.a.x)\n    log(l.b.y)\n",
+        "type Point\n    x as i64\n    y as i64\n\ntype Line\n    a as Point\n    b as Point\n\n*main()\n    l is Line(Point(1, 2), Point(3, 4))\n    log(l.a.x)\n    log(l.b.y)\n",
         "1\n4",
     );
 }
@@ -6672,7 +6672,7 @@ fn b_chained_field_access_two_deep() {
 #[test]
 fn b_chained_field_access_three_deep() {
     expect(
-        "type Inner\n    val: i64\n\ntype Mid\n    inner: Inner\n\ntype Outer\n    mid: Mid\n\n*main()\n    o is Outer(Mid(Inner(99)))\n    log(o.mid.inner.val)\n",
+        "type Inner\n    val as i64\n\ntype Mid\n    inner as Inner\n\ntype Outer\n    mid as Mid\n\n*main()\n    o is Outer(Mid(Inner(99)))\n    log(o.mid.inner.val)\n",
         "99",
     );
 }
@@ -6680,7 +6680,7 @@ fn b_chained_field_access_three_deep() {
 #[test]
 fn b_chained_field_assignment() {
     expect(
-        "type Inner\n    val: i64\n\ntype Outer\n    inner: Inner\n\n*main()\n    o is Outer(Inner(10))\n    o.inner.val is 42\n    log(o.inner.val)\n",
+        "type Inner\n    val as i64\n\ntype Outer\n    inner as Inner\n\n*main()\n    o is Outer(Inner(10))\n    o.inner.val is 42\n    log(o.inner.val)\n",
         "42",
     );
 }

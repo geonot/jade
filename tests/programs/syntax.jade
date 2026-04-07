@@ -78,13 +78,13 @@
 # ── 3. Operators ────────────────────────────────────────────────────────────
 
 *operators
-    # Arithmetic: + - * / mod **
+    # Arithmetic: + - * / mod pow
     log(2 + 3)           # 5
     log(10 - 4)          # 6
     log(6 * 7)           # 42
     log(15 / 4)          # 3 (integer division)
     log(17 mod 5)          # 2
-    log(2 ** 10)         # 1024
+    log(2 pow 10)         # 1024
 
     # Comparison: < > <= >=
     log(3 < 5)           # true
@@ -187,7 +187,7 @@
     connect(host is 'localhost', port is 3000)
 
     # $ placeholder — creates anonymous lambda
-    double is $($ * 2)           # *fn(x) x * 2
+    double is $($ * 2)           # |x| x * 2
     log(double(21))              # 42
 
 
@@ -198,15 +198,15 @@
     f(x)
 
 *demo_higher_order
-    # Lambda: *fn(params) body
-    double is *fn(x as i64) x * 2
+    # Lambda: |params| body
+    double is |x as i64| x * 2
     log(apply(double, 21))       # 42
 
-    square is *fn(x as i64) x * x
+    square is |x as i64| x * x
     log(apply(square, 7))        # 49
 
     # Multi-line lambda — just indent the body
-    transform is *fn(x as i64)
+    transform is |x as i64|
         y is x * 2
         y + 1
     log(transform(10))           # 21
@@ -467,7 +467,7 @@ err FileError
 
 *demo_comprehensions
     # Basic comprehension
-    squares is [x ** 2 for x from 0 to 10]
+    squares is [x pow 2 for x from 0 to 10]
     log(squares[4])              # 16
 
     # Filtered comprehension
@@ -811,7 +811,7 @@ actor Counter
     evens is nums.filter($($ mod 2 equals 0))
     log(evens[0])                        # 2
 
-    total is nums.fold(0, *fn(acc, x) acc + x)
+    total is nums.fold(0, |acc, x| acc + x)
     log(total)                           # 55
 
     # zip / take / skip
@@ -941,7 +941,7 @@ actor Counter
 
 # ── 39. Generators ────────────────────────────────────────────────────────
 
-*counter limit: i64
+*counter limit as i64
     i is 0
     while i < limit
         yield i
@@ -978,8 +978,8 @@ alias Seconds is f64
 
 # ── 44. Grad ──────────────────────────────────────────────────────────────
 
-*square(x: f64) -> f64
-    x ** 2
+*square(x as f64) returns f64
+    x pow 2
 
 *demo_grad
     dsquare is grad(square)              # derivative: 2x

@@ -178,27 +178,205 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop a Map, freeing its bucket array and header.
-    /// Map and Set share the same {ptr, len, cap} layout.
+    /// Drop a Map, recursively destroying keys and values if they are non-trivially
+    /// droppable. Iterates all capacity slots, checking the occupancy marker at
+    /// bucket offset 40. Bucket layout: [8B hash][24B key][8B value][1B occ][7B pad].
     fn drop_map_deep(
         &mut self,
         val: BasicValueEnum<'ctx>,
-        _kt: &Type,
-        _vt: &Type,
+        kt: &Type,
+        vt: &Type,
     ) -> Result<(), String> {
-        // Map uses open-addressing hash table with {ptr, len, cap}.
-        // Element-level recursive drop would require iterating live slots.
-        // For now, free the bucket array and header (same as existing drop_map).
-        self.drop_container_simple(val)
+        if kt.is_trivially_droppable() && vt.is_trivially_droppable() {
+            return self.drop_container_simple(val);
+        }
+
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let header_ty = self.vec_header_type();
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let fv = self.cur_fn.unwrap();
+        let free = self.ensure_free();
+        let null = ptr_ty.const_null();
+
+        let header_ptr = val.into_pointer_value();
+        let is_null = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ, header_ptr, null, "dmd.null"
+        ));
+        let drop_bb = self.ctx.append_basic_block(fv, "dmd.drop");
+        let done_bb = self.ctx.append_basic_block(fv, "dmd.done");
+        b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
+        self.bld.position_at_end(drop_bb);
+
+        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dmd.d"));
+        let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dmd.buf")).into_pointer_value();
+        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "dmd.c"));
+        let cap = b!(self.bld.build_load(i64t, cap_gep, "dmd.cap")).into_int_value();
+
+        let bucket_size = i64t.const_int(48, false);
+
+        let loop_bb = self.ctx.append_basic_block(fv, "dmd.loop");
+        let check_bb = self.ctx.append_basic_block(fv, "dmd.check");
+        let body_bb = self.ctx.append_basic_block(fv, "dmd.body");
+        let inc_bb = self.ctx.append_basic_block(fv, "dmd.inc");
+        let post_bb = self.ctx.append_basic_block(fv, "dmd.post");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let phi = b!(self.bld.build_phi(i64t, "dmd.i"));
+        phi.add_incoming(&[(&i64t.const_int(0, false), drop_bb)]);
+        let i = phi.as_basic_value().into_int_value();
+        let cond = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dmd.cmp"));
+        b!(self.bld.build_conditional_branch(cond, check_bb, post_bb));
+
+        // Check occupancy marker at bucket offset 40
+        self.bld.position_at_end(check_bb);
+        let offset = b!(self.bld.build_int_mul(i, bucket_size, "dmd.off"));
+        let _entry_ptr = unsafe {
+            b!(self.bld.build_gep(i8t, data_ptr, &[offset], "dmd.ep"))
+        };
+        let occ_off = b!(self.bld.build_int_add(offset, i64t.const_int(40, false), "dmd.ooff"));
+        let occ_ptr = unsafe {
+            b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dmd.ocp"))
+        };
+        let occ = b!(self.bld.build_load(i8t, occ_ptr, "dmd.occ")).into_int_value();
+        let is_occupied = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::NE, occ, i8t.const_int(0, false), "dmd.occ_ne"
+        ));
+        b!(self.bld.build_conditional_branch(is_occupied, body_bb, inc_bb));
+
+        // Drop key (at offset 8) and value (at offset 32) if non-trivially-droppable
+        self.bld.position_at_end(body_bb);
+        if !kt.is_trivially_droppable() {
+            let key_off = b!(self.bld.build_int_add(offset, i64t.const_int(8, false), "dmd.koff"));
+            let key_ptr = unsafe {
+                b!(self.bld.build_gep(i8t, data_ptr, &[key_off], "dmd.kp"))
+            };
+            let key_llvm = self.llvm_ty(kt);
+            let key_val = b!(self.bld.build_load(key_llvm, key_ptr, "dmd.kv"));
+            self.drop_value(key_val, kt)?;
+        }
+        if !vt.is_trivially_droppable() {
+            let val_off = b!(self.bld.build_int_add(offset, i64t.const_int(32, false), "dmd.voff"));
+            let val_ptr = unsafe {
+                b!(self.bld.build_gep(i8t, data_ptr, &[val_off], "dmd.vp"))
+            };
+            let val_llvm = self.llvm_ty(vt);
+            let val_val = b!(self.bld.build_load(val_llvm, val_ptr, "dmd.vv"));
+            self.drop_value(val_val, vt)?;
+        }
+        let after_drop_bb = self.bld.get_insert_block().unwrap();
+        b!(self.bld.build_unconditional_branch(inc_bb));
+
+        self.bld.position_at_end(inc_bb);
+        let inc_phi = b!(self.bld.build_phi(i64t, "dmd.iphi"));
+        inc_phi.add_incoming(&[(&i, check_bb), (&i, after_drop_bb)]);
+        let next = b!(self.bld.build_int_add(
+            inc_phi.as_basic_value().into_int_value(),
+            i64t.const_int(1, false),
+            "dmd.next"
+        ));
+        phi.add_incoming(&[(&next, inc_bb)]);
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(post_bb);
+        b!(self.bld.build_call(free, &[data_ptr.into()], ""));
+        b!(self.bld.build_call(free, &[header_ptr.into()], ""));
+        b!(self.bld.build_unconditional_branch(done_bb));
+        self.bld.position_at_end(done_bb);
+        Ok(())
     }
 
-    /// Drop a Set. Same layout as Map.
+    /// Drop a Set, recursively destroying elements if they are non-trivially
+    /// droppable. Same bucket layout as Map: 48-byte entries, occupancy at offset 40,
+    /// element at offset 8.
     fn drop_set_deep(
         &mut self,
         val: BasicValueEnum<'ctx>,
-        _elem: &Type,
+        elem: &Type,
     ) -> Result<(), String> {
-        self.drop_container_simple(val)
+        if elem.is_trivially_droppable() {
+            return self.drop_container_simple(val);
+        }
+
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let header_ty = self.vec_header_type();
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let fv = self.cur_fn.unwrap();
+        let free = self.ensure_free();
+        let null = ptr_ty.const_null();
+
+        let header_ptr = val.into_pointer_value();
+        let is_null = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ, header_ptr, null, "dsd.null"
+        ));
+        let drop_bb = self.ctx.append_basic_block(fv, "dsd.drop");
+        let done_bb = self.ctx.append_basic_block(fv, "dsd.done");
+        b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
+        self.bld.position_at_end(drop_bb);
+
+        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dsd.d"));
+        let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dsd.buf")).into_pointer_value();
+        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "dsd.c"));
+        let cap = b!(self.bld.build_load(i64t, cap_gep, "dsd.cap")).into_int_value();
+
+        let bucket_size = i64t.const_int(48, false);
+
+        let loop_bb = self.ctx.append_basic_block(fv, "dsd.loop");
+        let check_bb = self.ctx.append_basic_block(fv, "dsd.check");
+        let body_bb = self.ctx.append_basic_block(fv, "dsd.body");
+        let inc_bb = self.ctx.append_basic_block(fv, "dsd.inc");
+        let post_bb = self.ctx.append_basic_block(fv, "dsd.post");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let phi = b!(self.bld.build_phi(i64t, "dsd.i"));
+        phi.add_incoming(&[(&i64t.const_int(0, false), drop_bb)]);
+        let i = phi.as_basic_value().into_int_value();
+        let cond = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dsd.cmp"));
+        b!(self.bld.build_conditional_branch(cond, check_bb, post_bb));
+
+        self.bld.position_at_end(check_bb);
+        let offset = b!(self.bld.build_int_mul(i, bucket_size, "dsd.off"));
+        let occ_off = b!(self.bld.build_int_add(offset, i64t.const_int(40, false), "dsd.ooff"));
+        let occ_ptr = unsafe {
+            b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dsd.ocp"))
+        };
+        let occ = b!(self.bld.build_load(i8t, occ_ptr, "dsd.occ")).into_int_value();
+        let is_occupied = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::NE, occ, i8t.const_int(0, false), "dsd.occ_ne"
+        ));
+        b!(self.bld.build_conditional_branch(is_occupied, body_bb, inc_bb));
+
+        self.bld.position_at_end(body_bb);
+        let elem_off = b!(self.bld.build_int_add(offset, i64t.const_int(8, false), "dsd.eoff"));
+        let elem_ptr = unsafe {
+            b!(self.bld.build_gep(i8t, data_ptr, &[elem_off], "dsd.ep"))
+        };
+        let elem_llvm = self.llvm_ty(elem);
+        let elem_val = b!(self.bld.build_load(elem_llvm, elem_ptr, "dsd.ev"));
+        self.drop_value(elem_val, elem)?;
+        let after_drop_bb = self.bld.get_insert_block().unwrap();
+        b!(self.bld.build_unconditional_branch(inc_bb));
+
+        self.bld.position_at_end(inc_bb);
+        let inc_phi = b!(self.bld.build_phi(i64t, "dsd.iphi"));
+        inc_phi.add_incoming(&[(&i, check_bb), (&i, after_drop_bb)]);
+        let next = b!(self.bld.build_int_add(
+            inc_phi.as_basic_value().into_int_value(),
+            i64t.const_int(1, false),
+            "dsd.next"
+        ));
+        phi.add_incoming(&[(&next, inc_bb)]);
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(post_bb);
+        b!(self.bld.build_call(free, &[data_ptr.into()], ""));
+        b!(self.bld.build_call(free, &[header_ptr.into()], ""));
+        b!(self.bld.build_unconditional_branch(done_bb));
+        self.bld.position_at_end(done_bb);
+        Ok(())
     }
 
     /// Free a container with {ptr, len, cap} header: free data, free header.

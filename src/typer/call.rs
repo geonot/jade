@@ -72,7 +72,7 @@ impl Typer {
         &mut self,
         callee: &ast::Expr,
         args: &[ast::Expr],
-        span: Span,
+        _span: Span,
     ) -> Option<Vec<ast::Expr>> {
         let has_spread = args.iter().any(|a| matches!(a, ast::Expr::Spread(..)));
         let expected_param_count = if let ast::Expr::Ident(name, _) = callee {
@@ -1120,7 +1120,8 @@ impl Typer {
                     type_map.entry(tp.clone()).or_insert(Type::I64);
                 }
                 let mangled = self.monomorphize_fn(name, &type_map)?;
-                let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap();
+                let (id, _, ret) = self.fns.get(&mangled).cloned()
+                    .unwrap_or_else(|| panic!("ICE: monomorphized fn '{mangled}' not found after instantiation"));
                 let mut all_args = vec![hleft];
                 for a in extra_args {
                     all_args.push(self.lower_expr(a)?);
@@ -1203,7 +1204,8 @@ impl Typer {
                         type_map.entry(tp.clone()).or_insert(Type::I64);
                     }
                     let mangled = self.monomorphize_fn(name, &type_map)?;
-                    let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap();
+                    let (id, _, ret) = self.fns.get(&mangled).cloned()
+                        .unwrap_or_else(|| panic!("ICE: monomorphized fn '{mangled}' not found after instantiation"));
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Call(id, mangled, all_args),
                         ty: ret,
@@ -1281,7 +1283,8 @@ impl Typer {
         coerce: bool,
     ) -> Result<hir::Expr, String> {
         let mangled = self.monomorphize_fn(name, type_map)?;
-        let (id, mono_param_tys, ret) = self.fns.get(&mangled).cloned().unwrap();
+        let (id, mono_param_tys, ret) = self.fns.get(&mangled).cloned()
+            .unwrap_or_else(|| panic!("ICE: monomorphized fn '{mangled}' not found after instantiation"));
         if coerce {
             for (i, ha) in hargs.iter_mut().enumerate() {
                 if let Some(pt) = mono_param_tys.get(i) {

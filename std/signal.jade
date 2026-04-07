@@ -1,0 +1,11 @@
+# std.signal — POSIX signal handling
+# Wraps signal builtins for module-qualified dispatch
+
+*handle(sig as i32, handler)
+    signal_handle(sig, handler)
+
+*ignore(sig as i32)
+    signal_ignore(sig)
+
+*raise(sig as i32) returns i32
+    signal_raise(sig)

@@ -26,7 +26,7 @@ mod types;
 mod vec;
 mod set;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use inkwell::basic_block::BasicBlock;
@@ -89,6 +89,10 @@ pub struct Compiler<'ctx> {
     /// When a drop is skipped for reuse, the pointer is stashed here
     /// so the next compatible allocation can reuse it instead of malloc.
     pub(crate) reuse_tokens: HashMap<hir::DefId, PointerValue<'ctx>>,
+    /// Cached builder used exclusively for entry-block alloca insertion.
+    pub(crate) alloca_bld: Builder<'ctx>,
+    /// Set of variable names declared with `atomic` keyword.
+    pub(crate) atomic_vars: HashSet<String>,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
@@ -101,6 +105,7 @@ impl<'ctx> Compiler<'ctx> {
         Self {
             module: ctx.create_module(name),
             bld: ctx.create_builder(),
+            alloca_bld: ctx.create_builder(),
             ctx,
             cur_fn: None,
             vars: vec![HashMap::new()],
@@ -125,6 +130,7 @@ impl<'ctx> Compiler<'ctx> {
             needs_runtime: false,
             fast_math_flags: 0,
             reuse_tokens: HashMap::new(),
+            atomic_vars: HashSet::new(),
         }
     }
 
@@ -227,104 +233,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(tm)
     }
 
-    pub fn compile_program(
-        &mut self,
-        prog: &hir::Program,
-        hints: PerceusHints,
-    ) -> Result<(), String> {
-        self.hints = hints;
-        self.setup_target()?;
-        self.declare_builtins();
-
-        debug_assert_eq!(
-            self.type_store_size(self.string_type().into()),
-            24,
-            "String SSO layout changed — expected 24 bytes"
-        );
-
-        for td in &prog.types {
-            self.declare_type(td)?;
-            for m in &td.methods {
-                self.declare_method(&td.name, m)?;
-            }
-        }
-        for ed in &prog.enums {
-            self.declare_enum(ed)?;
-        }
-        for ef in &prog.externs {
-            self.declare_extern(ef)?;
-        }
-        for ed in &prog.err_defs {
-            self.declare_err_def(ed)?;
-        }
-
-        let needs_runtime = !prog.actors.is_empty() || Self::uses_concurrency(prog) || Self::uses_pool(prog);
-        self.needs_runtime = needs_runtime;
-        if needs_runtime {
-            self.declare_jade_runtime();
-        }
-
-        if !prog.actors.is_empty() {
-            self.declare_actor_runtime();
-            for ad in &prog.actors {
-                self.declare_actor(ad)?;
-            }
-        }
-
-        if !prog.stores.is_empty() {
-            self.declare_store_runtime();
-            for sd in &prog.stores {
-                self.declare_store(sd)?;
-                self.store_defs.insert(sd.name.clone(), sd.clone());
-            }
-        }
-
-        for f in &prog.fns {
-            self.declare_fn(f)?;
-        }
-
-        for ti in &prog.trait_impls {
-            for m in &ti.methods {
-                if !self.fns.contains_key(&m.name) {
-                    self.declare_method(&ti.type_name, m)?;
-                }
-            }
-        }
-
-        self.generate_vtables(&prog.trait_impls)?;
-
-        for ad in &prog.actors {
-            self.compile_actor_loop(ad)?;
-        }
-
-        // Supervisor trees: generate a start function for each supervisor
-        for sup in &prog.supervisors {
-            self.compile_supervisor(sup)?;
-        }
-
-        for f in &prog.fns {
-            self.compile_fn(f)?;
-        }
-        for td in &prog.types {
-            for m in &td.methods {
-                if self.fns.contains_key(&m.name) {
-                    self.compile_method_body(&td.name, &m.name, m)?;
-                }
-            }
-        }
-
-        for ti in &prog.trait_impls {
-            for m in &ti.methods {
-                if self.fns.contains_key(&m.name) {
-                    self.compile_method_body(&ti.type_name, &m.name, m)?;
-                }
-            }
-        }
-
-        self.finalize_debug();
-        self.module.verify().map_err(|e| e.to_string())
-    }
-
     pub(crate) fn generate_vtables(&mut self, trait_impls: &[hir::TraitImpl]) -> Result<(), String> {
         let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
@@ -414,6 +322,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 }
 
+#[allow(dead_code)]
 impl<'ctx> Compiler<'ctx> {
     fn finalize_debug(&self) {
         if let Some(ref di) = self.di_builder {
@@ -498,6 +407,7 @@ impl<'ctx> Compiler<'ctx> {
         self.tag_fn_inner(fv, true);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn tag_fn_noreturn_ok(&self, fv: FunctionValue<'ctx>) {
         self.tag_fn_inner(fv, false);
     }
@@ -556,7 +466,14 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn load_var(&mut self, name: &str) -> Result<BasicValueEnum<'ctx>, String> {
         if let Some((ptr, ty)) = self.find_var(name).cloned() {
-            return Ok(b!(self.bld.build_load(self.llvm_ty(&ty), ptr, name)));
+            let load = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, name));
+            if self.atomic_vars.contains(name) {
+                load.as_instruction_value()
+                    .unwrap()
+                    .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                    .map_err(|_| "failed to set atomic ordering")?;
+            }
+            return Ok(load);
         }
         if let Some(fv) = self.module.get_function(name) {
             let wrapper = self.fn_ref_wrapper(fv);
@@ -568,12 +485,11 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn entry_alloca(&self, ty: BasicTypeEnum<'ctx>, name: &str) -> PointerValue<'ctx> {
         let entry = self.cur_fn.unwrap().get_first_basic_block().unwrap();
-        let tmp = self.ctx.create_builder();
         match entry.get_first_instruction() {
-            Some(inst) => tmp.position_before(&inst),
-            None => tmp.position_at_end(entry),
+            Some(inst) => self.alloca_bld.position_before(&inst),
+            None => self.alloca_bld.position_at_end(entry),
         }
-        tmp.build_alloca(ty, name).unwrap()
+        self.alloca_bld.build_alloca(ty, name).unwrap()
     }
 
     pub(crate) fn entry_alloca_aligned(

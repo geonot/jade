@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn test_complex_program() {
         let hints = analyze(
-            "*factorial(n: i64) -> i64\n    if n <= 1\n        1\n    else\n        n * factorial(n - 1)\n\n*main()\n    result is factorial(10)\n    log(result)\n",
+            "*factorial(n as i64) returns i64\n    if n <= 1\n        1\n    else\n        n * factorial(n - 1)\n\n*main()\n    result is factorial(10)\n    log(result)\n",
         );
         assert!(hints.stats.total_bindings_analyzed >= 1);
         assert!(hints.stats.drops_elided >= 1);
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn test_function_params_analyzed() {
         let hints =
-            analyze("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+            analyze("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
         assert!(hints.stats.drops_elided >= 2);
     }
 
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn test_enum_analysis() {
         let hints = analyze(
-            "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
+            "enum Color\n    Red\n    Green\n    Blue\n\n*main() returns i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
         );
         assert!(hints.stats.total_bindings_analyzed >= 1);
     }
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn test_match_arms_analyzed() {
         let hints = analyze(
-            "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*area(s: Shape) -> f64\n    match s\n        Circle(r) ? 3.14159 * r * r\n        Square(side) ? side * side\n\n*main()\n    log(area(Circle(5.0)))\n",
+            "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*area(s as Shape) returns f64\n    match s\n        Circle(r) ? 3.14159 * r * r\n        Square(side) ? side * side\n\n*main()\n    log(area(Circle(5.0)))\n",
         );
         assert!(hints.stats.total_bindings_analyzed >= 1);
     }

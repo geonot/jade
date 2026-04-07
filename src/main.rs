@@ -27,7 +27,7 @@ struct Cli {
     input: Option<PathBuf>,
     #[arg(short, long, default_value = "a.out")]
     output: PathBuf,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     emit_ir: bool,
     #[arg(long)]
     emit_llvm: bool,
@@ -45,7 +45,7 @@ struct Cli {
     lib: bool,
     #[arg(long)]
     link: Vec<PathBuf>,
-    #[arg(short = 'g', long)]
+    #[arg(long)]
     debug: bool,
     #[arg(long)]
     debug_types: bool,
@@ -74,11 +74,8 @@ struct Cli {
     #[arg(long)]
     deterministic_fp: bool,
     /// Enable incremental compilation (cache unchanged function artifacts)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     incremental: bool,
-    /// Use the legacy HIR-based code generation backend instead of the default MIR-based one
-    #[arg(long)]
-    hir_codegen: bool,
     /// Number of parallel codegen threads (0 = auto-detect)
     #[arg(long, default_value = "0")]
     threads: usize,
@@ -1107,7 +1104,7 @@ fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
     build_package_map(&cache, &resolved)
 }
 
-fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool, hir_codegen_mode: bool) {
+fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool) {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
@@ -1141,7 +1138,7 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     jadec::comptime::fold_program(&mut hir_prog);
 
     let mut perceus = PerceusPass::new();
-    let hir_hints = perceus.optimize(&hir_prog);
+    let _hir_hints = perceus.optimize(&hir_prog);
 
     let mut verifier = OwnershipVerifier::new();
     let diags = verifier.verify(&hir_prog);
@@ -1188,19 +1185,13 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     if fast_math { comp.set_fast_math(true); }
     if deterministic_fp { comp.set_deterministic_fp(); }
 
-    if !hir_codegen_mode {
-        // MIR-based code generation path (default): use MIR Perceus for more precise analysis.
+    {
         use jadec::codegen::mir_codegen::MirCodegen;
         use jadec::perceus::mir_perceus;
         let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
         let mut mir_cg = MirCodegen::new(&mut comp);
         if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&format!("mir-codegen: {e}"));
-        }
-    } else {
-        // Legacy HIR-based code generation path.
-        if let Err(e) = comp.compile_program(&hir_prog, hir_hints) {
-            die(&format!("codegen: {e}"));
         }
     }
 
@@ -1247,12 +1238,12 @@ fn main() {
                 let entry = find_project_entry();
                 let out = output.unwrap_or_else(|| PathBuf::from("a.out"));
                 let opt_level = opt.unwrap_or(3);
-                compile_and_link(&entry, &out, opt_level, lto, false, false, cli.fast_math, cli.deterministic_fp, cli.emit_mir, cli.incremental, cli.hir_codegen);
+                compile_and_link(&entry, &out, opt_level, lto, false, false, cli.fast_math, cli.deterministic_fp, cli.emit_mir, cli.incremental);
             }
             Cmd::Run { args } => {
                 let entry = find_project_entry();
                 let out = PathBuf::from("./.jade_run_tmp");
-                compile_and_link(&entry, &out, 2, false, false, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental, cli.hir_codegen);
+                compile_and_link(&entry, &out, 2, false, false, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
                 let status = Command::new(&out).args(&args).status();
                 let _ = fs::remove_file(&out);
                 match status {
@@ -1262,7 +1253,7 @@ fn main() {
             }
             Cmd::Test => {
                 let entry = find_project_entry();
-                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental, cli.hir_codegen);
+                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
                 let status = Command::new("./.jade_test_tmp").status();
                 let _ = fs::remove_file("./.jade_test_tmp");
                 match status {
@@ -1514,7 +1505,7 @@ fn main() {
     // ── Strict-types: reject FnRef to polymorphic functions that aren't called ──
     if cli.strict_types {
         use jadec::mir::{InstKind, Terminator};
-        let fn_names: std::collections::HashSet<String> = mir_prog.functions.iter()
+        let _fn_names: std::collections::HashSet<String> = mir_prog.functions.iter()
             .map(|f| f.name.clone()).collect();
         for func in &mir_prog.functions {
             for bb in &func.blocks {
@@ -1573,8 +1564,7 @@ fn main() {
         comp.set_deterministic_fp();
     }
 
-    if !cli.hir_codegen {
-        // MIR-based code generation path (default): use MIR Perceus for more precise analysis.
+    {
         use jadec::codegen::mir_codegen::MirCodegen;
         use jadec::perceus::mir_perceus;
         let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
@@ -1602,11 +1592,6 @@ fn main() {
         let mut mir_cg = MirCodegen::new(&mut comp);
         if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&format!("mir-codegen: {e}"));
-        }
-    } else {
-        // Legacy HIR-based code generation path.
-        if let Err(e) = comp.compile_program(&hir_prog, hints) {
-            die(&format!("codegen: {e}"));
         }
     }
 

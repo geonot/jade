@@ -226,6 +226,7 @@ pub enum Expr {
     Builder(String, Vec<BuilderField>, Span),
     Deque(Vec<Expr>, Span),
     OfCall(Box<Expr>, Box<Expr>, Span),
+    QualifiedIdent(String, String, Span),
 }
 
 impl Expr {
@@ -284,7 +285,8 @@ impl Expr {
             | Self::Einsum(_, _, s)
             | Self::Builder(_, _, s)
             | Self::Deque(_, s)
-            | Self::OfCall(_, _, s) => *s,
+            | Self::OfCall(_, _, s)
+            | Self::QualifiedIdent(_, _, s) => *s,
         }
     }
 }
@@ -367,6 +369,7 @@ pub struct Bind {
     pub name: String,
     pub value: Expr,
     pub ty: Option<Type>,
+    pub atomic: bool,
     pub span: Span,
 }
 

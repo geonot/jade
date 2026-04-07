@@ -1,0 +1,2065 @@
+# Jade Stores — Design Document
+
+## Vision
+
+A language-native persistence layer that unifies the best of SQL (relational queries, joins, aggregation), document databases (flexible schemas, nested data), columnar stores (analytics, compression), vector databases (semantic search, embeddings), graph databases (relationship traversal, pathfinding), and time-series databases (temporal queries, windowed aggregation) — all as a first-class compile-time feature. No ORM. No driver. No separate query language. The store IS the data structure.
+
+Modern machines have 16-128 cores and 16-256GB RAM. Jade stores exploit this: hot data lives in memory, persistence happens in the background, indexes are maintained concurrently, and queries compile to native code with zero interpretation overhead.
+
+One wire format. Stores, actor messages, remote procedure calls, and file export all share the same binary encoding — JadePack. Every type the compiler knows how to lay out, it knows how to serialize. Zero-copy when possible, zero-overhead always.
+
+Two APIs. A method-based ORM-style API (`users.select(...)`) for programmatic use, and query blocks (`query users where ... sort ... limit ...`) for inline SQL-like expressiveness. Both compile to the same native code. Choose whichever reads better in context.
+
+## Current State
+
+- File format: `[8B magic "JADESTR\0"][8B count][8B record_size][records...]`
+- String fields: fixed 256B buffers on disk (`[8B len][248B data]`)
+- Operations: insert, count, query, delete, all, set (update), transaction
+- Compound filters: AND/OR chaining
+- Directory per store: `<name>/` in store directory with `<name>.store`, `<name>.schema`, `<name>.wal` files
+- Query blocks: parser implemented (`where`, `sort`, `limit`, `take`, `skip`, `set`, `delete` clauses)
+
+---
+
+## Project-Level Configuration
+
+### `project.jade`
+```jade
+store_path is 'data'              # directory for store directories (default: '.')
+store_persistence is 'always'     # 'always' — persist on every mutation
+                                  # 'explicit' — persist only when .save() is called
+```
+
+Only two knobs. Everything else is per-store or automatic.
+
+---
+
+## Store Types
+
+### String vs Text
+- **String** (`str`): max 256 bytes. Fixed-size buffer on disk (8B length prefix + 248B data). Fast comparisons, indexable, sortable. Used for names, emails, codes, identifiers — anything bounded.
+- **Text** (`text`): variable-length. Stored as overflow pages (8B offset + 8B length in the record, content in a separate `.text` segment). Used for descriptions, bodies, logs — anything unbounded.
+
+### Numeric Types
+All standard Jade numeric types are valid store fields: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `bool`.
+
+### Enum Fields
+Store fields can be enum types. Stored as their discriminant tag (i32) on disk. Variants with payloads are serialized via JadePack.
+
+```jade
+enum Status
+    Active
+    Inactive
+    Suspended str  # reason
+
+store Event
+    name as str
+    status as Status
+```
+
+---
+
+## Store Declaration
+
+### Basic Syntax
+```jade
+store User
+    name as str
+    email as str
+    age as i64
+    bio as text
+```
+
+### Full Syntax with Decorators
+```jade
+store User @mem
+    first_name as str
+    last_name as str @index
+    email as str @index @unique
+    age as i64 @sorted
+    bio as text
+    score as f64 @transient
+    rank as i64 @increment
+    &address as Address          # has-one relation
+    &messages as [Message]       # has-many relation
+```
+
+### Specialized Store Types
+
+```jade
+store Embedding @vector(768)     # vector store, 768 dimensions
+    label as str
+    source as str
+
+store Relationship @graph         # graph store
+    &from as Person
+    &to as Person
+    kind as str
+    weight as f64
+
+store SensorReading @timeseries(timestamp)   # time-series store, keyed on timestamp
+    timestamp as i64
+    device_id as str @index
+    temperature as f64
+    humidity as f64
+
+store Cache @kv                   # key-value store, Redis-like
+    # no fields declared — keys are strings, values are any serializable type
+
+store Session @kv @mem            # in-memory KV with persistence
+    # composable with @mem, @transient, @versioned
+```
+
+See **Specialized Store Types** section below for full details.
+
+---
+
+## Store Decorators
+
+### Store-Level Decorators
+
+| Decorator | Effect |
+|-----------|--------|
+| `@simple` | No built-in fields (sid, uuid, hash, created, updated, deleted are omitted). Raw record only. |
+| `@mem` | All records kept in memory. Background persistence to disk. |
+| `@transient` | In-memory only. Never persisted. Lost on restart. |
+| `@versioned` | Full store versioning. Every mutation creates a new store version. Records are immutable snapshots. Combined with `@versioned` fields, produces a version matrix. |
+| `@vector(N)` | Vector store with N-dimensional embeddings. Enables similarity search, nearest-neighbor queries. |
+| `@graph` | Graph store. Records are edges with `&from` and `&to` relationships. Enables traversal, pathfinding, subgraph queries. |
+| `@timeseries(field)` | Time-series store keyed on the named timestamp field. Enables windowed aggregation, downsampling, retention policies. |
+| `@kv` | Key-value store. String keys, any serializable value. In-memory with persistent backend. Replaces Redis/Consul/memcached. TTL, pub/sub, atomic ops. |
+
+### Field-Level Decorators
+
+| Decorator | Effect |
+|-----------|--------|
+| `@index` | Hash index on this field. O(1) equality lookups. Separate `.idx` file. |
+| `@unique` | Uniqueness constraint. Insert/update rejected on duplicate. Implies `@index`. |
+| `@sorted` | B-tree index. Enables range queries, ordered iteration, binary search. |
+| `@transient` | Not persisted to disk. Held in memory only. Resets on restart. |
+| `@increment` | Auto-incrementing i64. Value assigned on insert, monotonically increasing. |
+| `@required` | Field must be provided on insert. No zero-value default. Compile-time enforced. |
+| `@versioned` | Field history retained. Previous values accessible by version number. |
+
+### `@versioned` — Store vs Field vs Both
+
+**Field-level `@versioned`:** Individual fields retain history. The record holds the latest value; previous values are stored in an append-only version segment. Accessing `doc.body.history()` returns the version chain for that field.
+
+**Store-level `@versioned`:** The entire store is versioned. Every mutation (insert, update, delete) creates a new store version — an immutable snapshot. Queries can target a specific store version: `users.at_version(42).select(...)`. This is structural sharing — unchanged records are not duplicated.
+
+**Both (`@versioned` store + `@versioned` field):** This produces a **version matrix**. Each store version contains records, and each versioned field within those records has its own version chain. On disk, there is a file per versioned field per store version:
+
+```
+data/documents/
+    versions/
+        v1/
+            documents.store
+            body.versions       # body version history for records in store v1
+        v2/
+            documents.store
+            body.versions       # body version history for records in store v2
+        ...
+    data/
+        documents.store         # current (head) version
+        body.versions           # current version history
+```
+
+```jade
+store Document @versioned
+    title as str
+    body as text @versioned
+    author as str
+
+doc is documents.insert(title is 'Draft', body is 'v1 content', author is 'Alice')
+doc.body is 'v2 content'
+doc.title is 'Final'
+
+# Field version history (within current store version)
+doc.body.history()                 # [{version: 1, value: 'v1 content'}, {version: 2, value: 'v2 content'}]
+
+# Store version history
+documents.versions()               # [1, 2, 3] — three store mutations
+documents.at_version(1)            # snapshot of store at version 1
+
+# Version matrix: field history at a specific store version
+old_store is documents.at_version(1)
+old_doc is old_store.get(doc.sid)
+old_doc.body.history()             # field history as it existed at store v1
+```
+
+---
+
+## Built-In Fields
+
+Every store (unless `@simple`) automatically includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sid` | i64 | Sequential ID. Monotonic, gap-free within a session. Assigned on insert. |
+| `uuid` | str | UUID v4. 36-char string. Generated on insert. Globally unique. |
+| `hash` | str | BLAKE3 hash of the record's user-defined fields. Content-addressable. |
+| `created` | i64 | Unix timestamp (seconds). Set on insert. Immutable. |
+| `updated` | i64 | Unix timestamp (seconds). Set on every mutation. |
+| `deleted` | i64 | Unix timestamp (seconds). Set on soft-delete. 0 if not deleted. |
+
+This means every record is:
+- **Identifiable** — by sequential ID, UUID, or content hash
+- **Temporal** — created/updated/deleted timestamps for audit trails
+- **Soft-deletable** — `deleted` field enables trash/restore without data loss
+
+### Soft Delete Semantics
+- `users.delete(user)` — sets `deleted` to current timestamp
+- `users.destroy(user)` — hard-deletes, removes record from file
+- Queries automatically filter out soft-deleted records
+- `users.include_deleted()` — query modifier to include soft-deleted records
+- `users.restore(user)` — clears the `deleted` timestamp
+- `hash` field enables deduplication: insert-if-not-exists by content hash
+
+---
+
+## Store API — Method-Based Operations
+
+All store operations are methods on the store object. No reserved keywords for insert/delete/select. The store is a first-class value with a typed method interface generated by the compiler.
+
+### Insert
+
+```jade
+# Positional — fields in declaration order
+users.insert('Alice', 'Smith', 'alice@test.com', 30)
+
+# Named — any order, self-documenting
+users.insert(first_name is 'Alice', last_name is 'Smith', email is 'alice@test.com', age is 30)
+
+# From a constructed record
+u is User(first_name is 'Alice', last_name is 'Smith', email is 'alice@test.com', age is 30)
+users.insert(u)
+
+# Returns the inserted record (with sid, uuid, hash, timestamps populated)
+alice is users.insert(first_name is 'Alice', last_name is 'Smith', email is 'alice@test.com', age is 30)
+log alice.sid       # 1
+log alice.uuid      # 'a1b2c3d4-...'
+log alice.created   # 1712400000
+```
+
+`insert` always returns the fully-populated record. Built-in fields (sid, uuid, hash, created, updated) are filled automatically. `@increment` fields are assigned. `@unique` constraints are checked — insert fails with an error if violated.
+
+### Delete (soft) and Destroy (hard)
+
+```jade
+# By record — soft-deletes (sets deleted timestamp)
+users.delete(alice)
+
+# By sid
+users.delete(1)
+
+# By uuid
+users.delete('a1b2c3d4-...')
+
+# By filter — deletes all matching
+users.delete(last_name is 'Smith')
+
+# Record method — soft-delete self
+alice.delete()
+
+# Hard delete — permanently removes from disk
+users.destroy(alice)
+users.destroy(1)
+alice.destroy()
+
+# Restore a soft-deleted record
+users.restore(alice)
+alice.restore()
+```
+
+When `@cascade` is on a relation, delete/destroy propagates to related records.
+
+### Update — Direct Field Mutation
+
+```jade
+# Mutate a field directly on the record
+alice.age is 31
+
+# When store_persistence is 'always': this write is persisted immediately
+# When store_persistence is 'explicit': mutation held in memory until save
+
+# Explicit save (required when store_persistence is 'explicit')
+alice.save()
+
+# Save through the store
+users.save(alice)
+
+# Bulk save (flushes all dirty records for 'explicit' mode)
+users.save()
+```
+
+There is no separate `update` keyword. Mutating a store record's field IS the update. The compiler knows the variable holds a store record and intercepts the assignment to:
+1. Update the in-memory state
+2. Update the `updated` timestamp
+3. Recompute the `hash`
+4. If `store_persistence is 'always'`: write to WAL and flush
+5. If `store_persistence is 'explicit'`: mark record dirty, defer write
+
+This makes store records feel like regular structs. The persistence is transparent.
+
+### Batch Update — `.set()`
+
+For updating multiple fields at once, `.set()` avoids multiple individual writes (and multiple WAL entries / timestamp updates / hash recomputations):
+
+```jade
+# Named arguments — update multiple fields in one operation
+alice.set(age is 31, last_name is 'Jones')
+
+# From a map
+updates is {age: 31, last_name: 'Jones'}
+alice.set(updates)
+
+# On the store with a lookup — update by sid or uuid
+users.set(1, age is 31, last_name is 'Jones')
+users.set('a1b2c3d4-...', last_name is 'Jones')
+
+# Bulk set — update all matching records
+users.set(age gt 65, status is 'retired')
+```
+
+Semantics:
+- A single `.set()` call produces **one** WAL entry, **one** `updated` timestamp, **one** `hash` recomputation
+- For `store_persistence is 'always'`: one disk write, not N writes for N fields
+- For `@versioned` stores: one store version increment, not N
+- For `@versioned` fields: each versioned field in the set gets one new version entry
+- Compile-time validated: unknown field names or type mismatches are compile errors
+- `.set()` with a map is runtime-checked for key validity — unknown keys are ignored with a warning (debug builds) or silently skipped (release builds)
+
+### Select / Query
+
+```jade
+# By sid — returns single record
+alice is users.get(1)
+
+# By uuid — returns single record
+alice is users.get('a1b2c3d4-...')
+
+# Filter — returns Vec of matching records
+smiths is users.select(last_name is 'Smith')
+
+# Multiple conditions (AND)
+young_smiths is users.select(last_name is 'Smith', age lt 30)
+
+# Complex filters with comparison operators
+results is users.select(age gte 18, age lt 65, last_name neq 'Bot')
+
+# With limit, skip, sort
+page is users.select(age gt 18, limit is 10, skip is 20, sort is 'age')
+page is users.select(age gt 18, limit is 10, skip is 20, sort is '-age')  # descending
+
+# First matching record (returns single record or Nothing)
+first is users.first(last_name is 'Smith')
+
+# All records
+everyone is users.all()
+
+# Count
+total is users.count()
+active is users.count(age gt 18)
+
+# Exists check
+has_alice is users.exists(email is 'alice@test.com')
+
+# Distinct values for a field
+names is users.distinct(last_name)
+
+# Include soft-deleted records
+all_including_deleted is users.include_deleted().select(last_name is 'Smith')
+```
+
+### Complex Filters — OR, Grouping, Nesting
+
+Multiple arguments to `.select()` are AND'd. For OR and complex boolean logic, use `or()` groups:
+
+```jade
+# Simple OR — any condition matches
+results is users.select(or(age lt 18, age gt 65))
+
+# AND + OR — senior Smiths or anyone under 18
+results is users.select(last_name is 'Smith', or(age lt 18, age gt 65))
+
+# Nested groups — (Smith AND age > 30) OR (Jones AND age > 25)
+results is users.select(
+    or(
+        and(last_name is 'Smith', age gt 30),
+        and(last_name is 'Jones', age gt 25)
+    )
+)
+
+# OR across relations — users in Oregon or with unread messages
+results is users.select(
+    or(
+        address.state is 'OR',
+        messages.any(read is false)
+    )
+)
+
+# NOT — negate a condition
+results is users.select(not(last_name is 'Smith'))
+results is users.select(age gt 18, not(status is 'banned'))
+
+# IN — match against a set of values
+results is users.select(status in ['active', 'pending'])
+results is users.select(age in [21, 25, 30])
+
+# BETWEEN — range shorthand
+results is users.select(age between [18, 65])
+
+# LIKE — pattern matching on strings
+results is users.select(email like '%@test.com')
+results is users.select(last_name like 'Sm%')
+```
+
+`or()`, `and()`, `not()`, `in`, `between`, and `like` are compile-time constructs — the compiler translates them directly to native predicate code. They compose freely: `or(and(...), not(...))` nests arbitrarily. The optimizer flattens redundant nesting.
+
+### Paginator / Cursor
+
+For large result sets, a paginator provides batched iteration without loading all records into memory:
+
+```jade
+# Create a paginator — 50 records per page
+pages is users.paginate(50)
+
+# Advance through pages
+first_page is pages.next()       # Vec of up to 50 records
+second_page is pages.next()      # next 50
+third_page is pages.next()       # next 50 (or fewer if near end)
+
+# Check if more pages exist
+if pages.has_next()
+    more is pages.next()
+
+# With filters — paginate over a subset
+active_pages is users.paginate(25, age gt 18, sort is 'last_name')
+
+# With cursor — paginate through filtered + sorted results
+pages is users.paginate(100, status is 'active', sort is 'created')
+while pages.has_next()
+    batch is pages.next()
+    for user in batch
+        process(user)
+
+# Reset to beginning
+pages.reset()
+
+# Get total count (without loading all records)
+log pages.total()     # total matching records
+log pages.page_count() # total number of pages
+
+# Jump to a specific page
+page_5 is pages.page(5)
+```
+
+Paginator internals:
+- Backed by a **cursor** — an opaque position in the result set (record offset + filter state)
+- For indexed/sorted queries: cursor is a B-tree position — advancing is O(log n) seek + O(page_size) scan
+- For unindexed queries: cursor is a record offset — sequential scan with compiled predicate
+- The paginator holds a read snapshot — concurrent writes do not affect in-progress pagination (snapshot isolation)
+- Memory: only one page of records is in memory at a time (previous pages are released)
+- Paginators are first-class values — pass them to functions, store them in variables, send them across actors (the cursor state is serializable via JadePack)
+
+### Filter Operators
+
+Inside `.select()`, `.count()`, `.first()`, `.exists()`, `.paginate()`, and other query methods:
+
+| Syntax | Meaning |
+|--------|---------|
+| `field is value` | Equals |
+| `field neq value` | Not equals |
+| `field lt value` | Less than |
+| `field gt value` | Greater than |
+| `field lte value` | Less than or equal |
+| `field gte value` | Greater than or equal |
+| `field in [values]` | Set membership |
+| `field between [lo, hi]` | Range (inclusive) |
+| `field like 'pattern'` | String pattern match (`%` = wildcard) |
+| `or(...)` | OR group |
+| `and(...)` | AND group (explicit nesting) |
+| `not(...)` | Negation |
+| `limit is N` | Max results |
+| `skip is N` | Skip first N |
+| `sort is 'field'` | Sort ascending |
+| `sort is '-field'` | Sort descending |
+
+Multiple bare filters are AND'd. All filters compile to native code — index lookups when the field has `@index` or `@sorted`, sequential scan otherwise.
+
+### Aggregation
+
+```jade
+avg_age is users.avg(age)
+total is orders.sum(total)
+highest is scores.max(score)
+lowest is scores.min(score)
+
+# With filter
+avg_active is users.avg(age, active is true)
+
+# Grouped
+by_status is orders.group(status).sum(total)
+by_cat is products.group(category).avg(price)
+by_city is users.group(address.city).count()
+```
+
+Aggregation methods operate directly on column data when available (`@mem` stores or column files). SIMD-vectorizable for contiguous numeric arrays.
+
+### Projection
+
+```jade
+# Select specific fields — returns lightweight records with only those fields
+emails is users.pluck(email)
+names_and_ages is users.pluck(first_name, last_name, age, age gt 18)
+```
+
+`pluck` returns records with only the requested fields. For column stores, this reads only the relevant column files — no wasted I/O.
+
+---
+
+## Query Blocks — Inline SQL-Like Syntax
+
+Alongside the method-based API, Jade provides query blocks — an indentation-based query syntax that reads like SQL but compiles to the same native code. Query blocks are expressions that return results.
+
+### Basic Syntax
+
+```jade
+# Select with filter, sort, limit
+result is query users
+    where age gt 21
+    sort name
+    limit 10
+
+# Equivalent method call:
+result is users.select(age gt 21, sort is 'name', limit is 10)
+```
+
+### All Clauses
+
+```jade
+result is query users
+    where age gt 21 and last_name is 'Smith'
+    where email like '%@test.com'          # multiple where clauses AND together
+    sort -created                           # descending sort
+    sort last_name                          # secondary sort (ascending)
+    skip 20
+    limit 10
+
+# Complex OR in query blocks
+result is query users
+    where age lt 18 or age gt 65
+    where last_name is 'Smith' or last_name is 'Jones'
+    sort age
+    limit 100
+```
+
+### Query Block as Update
+
+```jade
+# Set (update) via query block
+query users
+    where last_name is 'Smith'
+    set age is 31
+    set status is 'active'
+
+# Delete via query block
+query users
+    where age lt 0
+    delete
+```
+
+### Query Block with Relations
+
+```jade
+# Filter through relations
+local is query users
+    where address.state is 'OR'
+    sort last_name
+
+# Nested relation filter
+high_value is query orders
+    where customer.age gt 30
+    where total gt 100.0
+    sort -total
+    limit 50
+```
+
+### Query Block Aggregation
+
+```jade
+avg is query users
+    where age gt 18
+    avg age
+
+totals is query orders
+    group status
+    sum total
+
+breakdown is query users
+    where active is true
+    group address.state
+    count
+```
+
+### Query Blocks vs Method API
+
+Both APIs compile to identical native code. The choice is stylistic:
+
+| Method API | Query Block |
+|------------|-------------|
+| `users.select(age gt 21, sort is 'name', limit is 10)` | `query users` / `where age gt 21` / `sort name` / `limit 10` |
+| Inline, composable, good for pipelines | Multi-line, readable, good for complex queries |
+| Programmatic — result is a function call | Declarative — reads like a query language |
+| Filters are arguments | Clauses are indented lines |
+
+Query blocks are parsed by `parse_query_block` (7 clause types: `where`, `sort`, `limit`, `take`, `skip`, `set`, `delete`). The compiler lowers both APIs to the same IR — store scan + predicate + sort + limit. No performance difference.
+
+---
+
+## Relationships
+
+### Syntax
+
+The `&` prefix on a field name declares a relationship to another store. The compiler resolves the target store by type name, generates a join table (`.rel` file), and auto-joins on query.
+
+```jade
+store Address
+    street as str
+    city as str
+    state as str
+    zip as str
+
+store Message
+    subject as str
+    body as text
+    read as bool
+
+store User @mem
+    first_name as str
+    last_name as str
+    email as str @index @unique
+    &address as Address          # has-one: User has one Address
+    &messages as [Message]       # has-many: User has many Messages
+```
+
+### What `&` generates
+
+**`&address as Address`** (has-one):
+- Generates a join table `.rel` file mapping user sid → address sid
+- On query, automatically joins the Address record: `user.address.city` works directly
+- On insert, accepts either an Address sid or an inline Address record (auto-inserted into the Address store)
+- If `@cascade`: deleting the User also deletes the Address
+
+**`&messages as [Message]`** (has-many):
+- Generates a join table `.rel` file mapping user sid → [message sids]
+- On query, automatically resolves all Messages for the User: `user.messages` is a Vec
+- Eager by default — loaded with the parent record
+- If `@lazy`: resolved on first access instead
+
+### Relationship Decorators
+
+```jade
+store User
+    &address as Address @cascade
+    &messages as [Message] @lazy
+    &manager as User @required
+    &tags as [Tag] @cascade @lazy
+```
+
+| Decorator | Effect |
+|-----------|--------|
+| `@cascade` | Delete/destroy propagates to related records. |
+| `@lazy` | Related records loaded on first access, not with parent. |
+| `@required` | Relationship must be set on insert. Compile-time enforced. |
+
+### Foreign Key Resolution
+
+The compiler resolves relationships at compile time:
+
+1. `&address as Address` — generates `address.rel` in `data/users/rels/` and `user.rel` in `data/addresses/rels/`
+2. `&messages as [Message]` — generates `messages.rel` in `data/users/rels/` and `user.rel` in `data/messages/rels/`
+3. Self-referential: `&manager as User` — generates `manager.rel` in `data/users/rels/`
+4. All `.rel` files are automatically indexed for O(1) lookups
+
+### Relation Access
+
+```jade
+# Relations are accessed as fields — joins happen automatically
+alice is users.first(email is 'alice@test.com')
+log alice.address.city                  # joins Address (eager or lazy depending on decorator)
+log alice.messages                      # resolves Vec of Messages
+
+# Filter through relations
+local is users.select(address.state is 'OR')
+
+# Deep traversal
+c is customers.first(name is 'Alice')
+for order in c.orders
+    for item in order.items
+        log '{item.product_name}: {item.quantity}'
+```
+
+### Insert with Relations
+
+```jade
+# Insert the related record first, then reference by sid
+addr is addresses.insert(street is '123 Main St', city is 'Portland', state is 'OR', zip is '97201')
+alice is users.insert(first_name is 'Alice', last_name is 'Smith', email is 'alice@test.com', age is 30, address is addr)
+
+# Or inline — the address is auto-inserted into the Address store
+alice is users.insert(
+    first_name is 'Alice',
+    last_name is 'Smith',
+    email is 'alice@test.com',
+    age is 30,
+    address is Address(street is '123 Main St', city is 'Portland', state is 'OR', zip is '97201')
+)
+
+# Add to has-many after creation
+msg is messages.insert(subject is 'Hello', body is 'Welcome!', read is false)
+alice.messages.add(msg)
+
+# Remove from has-many (does not delete the message, just unlinks)
+alice.messages.remove(msg)
+
+# Replace has-one
+new_addr is addresses.insert(street is '456 Oak Ave', city is 'Seattle', state is 'WA', zip is '98101')
+alice.address is new_addr
+```
+
+### Many-to-Many
+
+Many-to-many relationships use an explicit junction store:
+
+```jade
+store Student
+    name as str
+    &enrollments as [Enrollment]
+
+store Course
+    title as str
+    &enrollments as [Enrollment]
+
+store Enrollment @simple
+    &student as Student
+    &course as Course
+    grade as f64
+    enrolled_at as i64
+```
+
+The compiler sees both `Student` and `Course` referencing `Enrollment`, and `Enrollment` referencing both back. It generates the join tables and enables traversal in both directions:
+
+```jade
+s is students.first(name is 'Alice')
+for e in s.enrollments
+    log '{e.course.title}: {e.grade}'
+
+c is courses.first(title is 'Compilers')
+for e in c.enrollments
+    log '{e.student.name}: {e.grade}'
+```
+
+---
+
+## JadePack — Universal Wire Format
+
+JadePack is Jade's zero-overhead binary serialization format. It is the canonical encoding for:
+- **Store records** on disk
+- **Actor messages** (local and remote)
+- **Remote procedure calls** (future distributed actors)
+- **File export/import** (data interchange)
+- **Snapshot/checkpoint** data
+
+### Design Principles
+1. **Compiler-generated**: the compiler emits `pack()` and `unpack()` functions for every type. No reflection, no schema registry at runtime.
+2. **Zero-copy reads**: fixed-size fields are read directly from the buffer with pointer arithmetic. No parsing, no allocation.
+3. **Deterministic layout**: the same type always produces the same byte layout. Byte-for-byte reproducible. Enables content-addressable hashing.
+4. **Self-describing optional**: a compact type tag can be prepended for dynamic contexts (heterogeneous channels, debugger inspection). Omitted when both sides know the schema at compile time.
+5. **Platform-independent**: little-endian, explicit sizes. Portable across architectures.
+
+### Encoding Rules
+
+| Type | Wire Format | Size |
+|------|-------------|------|
+| `bool` | 1 byte (0x00 or 0x01) | 1B |
+| `i8`/`u8` | 1 byte | 1B |
+| `i16`/`u16` | 2 bytes LE | 2B |
+| `i32`/`u32` | 4 bytes LE | 4B |
+| `i64`/`u64` | 8 bytes LE | 8B |
+| `f32` | 4 bytes LE (IEEE 754) | 4B |
+| `f64` | 8 bytes LE (IEEE 754) | 8B |
+| `str` | `[8B len][248B data]` (fixed 256B) | 256B |
+| `text` | `[8B len][data...]` (variable) | 8B + len |
+| `enum` | `[4B tag][payload...]` | 4B + payload |
+| `Option` | `[1B tag][value if present]` | 1B + value |
+| `Vec` / `[T]` | `[8B count][elements...]` | 8B + count × sizeof(T) |
+| `Map` | `[8B count][key,value pairs...]` | 8B + count × (sizeof(K) + sizeof(V)) |
+| struct / type | fields concatenated in declaration order | sum of field sizes |
+
+Relations are NOT encoded in JadePack — they are resolved via join tables. A packed record contains only its own fields. This keeps the wire format flat, fixed-size for fixed-schema records, and free of recursive serialization.
+
+### Compile-Time Codegen
+
+For every type used in a store or actor message, the compiler generates:
+
+```
+# Pseudocode — what the compiler emits as LLVM IR
+
+*pack_User buf as %i8, u as User
+    memcpy buf, %u.first_name, 256       # fixed str
+    memcpy buf + 256, %u.last_name, 256
+    memcpy buf + 512, %u.email, 256
+    store i64 u.age at buf + 768         # i64 field
+
+*unpack_User buf as %i8 returns User
+    u as User
+    u.first_name is unpack_str(buf)
+    u.last_name is unpack_str(buf + 256)
+    u.email is unpack_str(buf + 512)
+    u.age is load_i64(buf + 768)
+    return u
+```
+
+No vtable. No type tag lookup. No allocation for fixed-size records. Direct `memcpy` in, direct pointer arithmetic out.
+
+### Shared with Actor Messages
+
+```jade
+actor OrderProcessor
+    @process_order order as Order
+        # `order` deserialized from JadePack automatically
+        log 'processing {order.customer.name}'
+
+*main
+    proc is spawn OrderProcessor
+    o is orders.get(42)
+    send proc, @process_order(o)   # `o` serialized to JadePack into mailbox
+```
+
+For local actors (same process), messages that fit in the mailbox ring buffer are copied directly — the pack/unpack is a `memcpy`. For remote actors (future), the same JadePack bytes go over the network with no additional serialization step.
+
+### Shared with Remote Processing (Future)
+
+```jade
+# Future: distributed actors
+remote_proc is connect OrderProcessor at 'worker-2:9090'
+send remote_proc, @process_order(o)   # same JadePack, sent over TCP
+```
+
+The wire format is identical whether the actor is local or remote. The compiler generates the same `pack()` / `unpack()` functions. The only difference is the transport: `memcpy` into a ring buffer vs. `send()` into a socket.
+
+### Export / Import
+
+```jade
+# Serialize a store to a portable binary file
+users.export('users_backup.jpack')
+
+# Import from a JadePack file
+users.import('users_backup.jpack')
+
+# Serialize a single record
+bytes is pack(alice)          # returns Vec of u8
+alice2 is unpack User bytes   # returns User
+```
+
+JadePack files have a header: `[8B magic "JADEPACK"][4B version][4B schema_hash][8B count][records...]`. The `schema_hash` is a compile-time hash of the schema — the compiler checks it on import and rejects incompatible schemas.
+
+---
+
+## Dual Storage Engine
+
+### Row Store (default)
+Optimized for:
+- Point queries (fetch one record by ID or indexed field)
+- Inserts and updates (append or overwrite in place)
+- Transactions (record-level locking)
+- OLTP workloads
+
+File layout:
+```
+[8B magic][4B version][4B schema_hash][8B count][8B record_size][8B flags][records...]
+```
+
+Flags byte encodes: has-WAL, has-column-store, @mem, @versioned, @simple.
+
+### Column Store (opt-in per field or per store)
+Each field stored in a separate file (`<field>.col`), optimized for:
+- Aggregation (sum, avg, min, max over millions of rows)
+- Analytics (scan one column without reading entire records)
+- Compression (same-type data compresses well with RLE, delta, dictionary encoding)
+
+The compiler maintains BOTH row and column representations for `@mem` stores. Writes go to the row store and column files are rebuilt in the background. For non-`@mem` stores, column files are maintained incrementally on write.
+
+This is the "best of all worlds" approach: point queries and mutations hit the row store, analytics hit the column store, and the programmer never has to choose.
+
+---
+
+## In-Memory Layer (`@mem`)
+
+When a store is marked `@mem`:
+
+1. **On program start**: entire store is loaded into memory (mmap'd or deserialized via JadePack)
+2. **Reads**: served from memory. Zero I/O. Zero syscalls.
+3. **Writes**: applied to memory immediately, queued for background persistence
+4. **Background flush**: a dedicated coroutine writes dirty pages to disk
+   - Flush on graceful shutdown
+   - WAL ensures crash safety between flushes
+5. **Memory pressure**: LRU eviction for stores that exceed a configurable memory budget
+
+For non-`@mem` stores, reads still go through an OS page cache (via mmap), so hot data is effectively cached by the kernel.
+
+### Relation Caching
+When a `@mem` store has relations without `@lazy`, the related records are loaded into memory alongside the parent. The in-memory representation is a full object graph — no join table lookups until cache miss.
+
+---
+
+## Indexing
+
+### Hash Index (`@index`)
+- Separate `<field>.idx` file in the store's `idx/` directory
+- Open-addressing hash table, power-of-2 sizing
+- Stores `(hash, record_offset)` pairs
+- Rebuild from store file on cold start (or from WAL replay)
+- Resize (double) when load factor exceeds 0.7
+
+### B-Tree Index (`@sorted`)
+- Separate `<field>.btree` file in the store's `idx/` directory
+- B+ tree with 4KB page size
+- Leaf nodes store `(key, record_offset)` pairs
+- Supports: range queries, ordered iteration, min/max in O(log n)
+- Bulk-load optimization for initial index creation
+
+### Bloom Filter (automatic)
+- For non-indexed fields queried more than once (tracked at compile time)
+- Compiler emits a bloom filter check before full scan
+- False positive rate ~1% with 10 bits/element
+- Rebuilt on startup, updated on insert
+
+### Composite Index
+- `@index(name, age)` — multi-field hash index
+- `@sorted(category, created)` — multi-field B-tree for compound range queries
+
+### Relation Index (automatic)
+- Every `.rel` join table file is itself an indexed structure
+- Bidirectional: parent→child and child→parent lookups are both O(1)
+- The compiler never generates a relationship without an index
+
+### Full-Text Index (`@search`) — future
+- Inverted index for text fields
+- `users.search(bio is 'compiler engineer')`
+- Trigram-based for prefix/substring matching
+
+---
+
+## Write-Ahead Log (WAL)
+
+Every persistent store gets a `<name>.wal` file:
+
+```
+[8B magic "JADEWAL\0"][entries...]
+Entry: [4B len][1B op][8B timestamp][payload bytes][4B CRC32]
+```
+
+- **Insert**: op=1, payload=full record (JadePack encoded)
+- **Update**: op=2, payload=record offset + new record (JadePack encoded)
+- **Delete**: op=3, payload=record offset + delete timestamp
+- **Destroy**: op=4, payload=record offset
+
+On startup:
+1. Check WAL for uncommitted entries
+2. Replay forward from last checkpoint
+3. Truncate WAL
+
+Checkpoint triggers:
+- WAL exceeds 16MB
+- On graceful shutdown
+- On explicit `.save()` call
+
+With `store_persistence is 'explicit'`, mutations accumulate in the WAL until `.save()` is called, which triggers a checkpoint.
+
+---
+
+## Query Compilation
+
+Queries are not interpreted — they compile to native loops, index lookups, and SIMD comparisons. Every `.select()`, `.first()`, `.count()` call is compiled to a function that directly reads store data.
+
+### Index Selection
+The compiler analyzes filter arguments at compile time:
+1. If a filter field has `@index` → hash lookup (O(1))
+2. If a filter field has `@sorted` → B-tree range scan (O(log n))
+3. If a filter field has a bloom filter → bloom check, then scan if positive
+4. Otherwise → sequential scan with compiled predicate
+
+### Join Strategy (for explicit joins and relation filters)
+- **Index lookup**: for `&` relationships — always O(1) via `.rel` join table (default)
+- **Hash join**: build hash table on smaller store, probe with larger
+- **Merge join**: when both sides have `@sorted` on the join key
+- **Nested loop**: fallback for small stores (< 1000 records)
+
+### Aggregation Optimization
+- `@mem` stores: aggregation runs on in-memory arrays — no I/O
+- Column store fields: contiguous type-homogeneous arrays — SIMD-vectorizable (sum/min/max on packed i64/f64)
+- `@sorted` fields: min/max in O(1) — read first/last B-tree leaf
+
+---
+
+## Computed Fields and Store Methods
+
+### `@transient` Fields
+Not persisted. Held in memory only, reset on restart. Useful for caches, session state, counters.
+
+```jade
+store User
+    first_name as str
+    last_name as str
+    views as i64 @transient   # in-memory only, resets on restart
+```
+
+### Store Methods
+Methods defined on a store type act as computed properties:
+
+```jade
+store User
+    first_name as str
+    last_name as str
+    &orders as [Order]
+
+    *full_name returns str
+        '{first_name} {last_name}'
+
+    *total_spent returns f64
+        orders.sum(total)
+```
+
+`user.full_name` is computed on access. `user.total_spent` triggers aggregation on the related orders. Methods are zero-cost — compiled to inline native code.
+
+---
+
+## Transactions
+
+```jade
+transaction
+    alice is users.insert(first_name is 'Alice', last_name is 'Smith', email is 'alice@test.com', age is 30)
+    orders.insert(total is 49.99, status is 'pending', customer is alice)
+    alice.age is 31
+```
+
+Transaction semantics:
+- All-or-nothing: if any operation fails, all are rolled back
+- WAL-backed: operations written to WAL, committed atomically
+- Isolation: serializable within a single process (file lock for multi-process)
+- Nested transactions: savepoints
+- Cascading deletes within a transaction are atomic
+
+---
+
+## Versioned Fields and Stores
+
+### Field-Level `@versioned`
+
+```jade
+store Document
+    title as str
+    body as text @versioned
+    author as str
+```
+
+Fields marked `@versioned` retain history. Updates create a new version instead of overwriting:
+
+```jade
+doc is documents.insert(title is 'Draft', body is 'Hello world', author is 'Alice')
+doc.body is 'Hello updated world'
+
+# Access version history for the versioned field
+history is doc.body.history()
+for ver in history
+    log 'v{ver.version}: {ver.value}'
+
+# Access specific version
+old_body is doc.body.at_version(1)
+
+# Diff between versions
+changes is doc.body.diff(1, 2)
+```
+
+Implementation: versioned fields are stored in a separate append-only segment (`<store>.<field>.versions`). The main record holds the latest value. History queries scan the version segment. Version numbers are per-record, not global.
+
+Compaction: `documents.compact(keep is 10)` — retains only the latest N versions per record.
+
+### Store-Level `@versioned`
+
+```jade
+store Config @versioned
+    key as str @unique
+    value as str
+```
+
+The entire store is an immutable log. Every mutation creates a new store version:
+
+```jade
+configs.insert(key is 'theme', value is 'dark')     # store version 1
+c is configs.first(key is 'theme')
+c.value is 'light'                                     # store version 2
+configs.insert(key is 'lang', value is 'en')          # store version 3
+
+# Query at a specific store version
+v1 is configs.at_version(1)
+log v1.count()                                         # 1
+
+# List all store versions
+for v in configs.versions()
+    log 'version {v.id} at {v.timestamp}: {v.record_count} records'
+
+# Diff between store versions
+delta is configs.diff(1, 3)    # returns inserted, updated, deleted records
+
+# Rollback to a previous store version
+configs.rollback(1)            # store is now at version 1 state (creates version 4)
+```
+
+Implementation: structural sharing. Unchanged records are referenced, not copied. Each store version is a manifest of record offsets. Storage cost is proportional to changes, not total store size.
+
+### Version Matrix (`@versioned` store + `@versioned` field)
+
+When both are present, the version matrix gives full temporal access:
+
+```jade
+store Document @versioned
+    title as str
+    body as text @versioned
+    author as str
+
+# Store version 1: initial insert
+doc is documents.insert(title is 'Draft', body is 'First draft', author is 'Alice')
+
+# Store version 2: update body (body field version 2, store version 2)
+doc.body is 'Second draft'
+
+# Store version 3: update title (store version 3, body still at field v2)
+doc.title is 'Final'
+
+# Store version 4: update body again (body field version 3, store version 4)
+doc.body is 'Final content'
+
+# Access the version matrix:
+# Field history at current store version
+doc.body.history()                    # [v1: 'First draft', v2: 'Second draft', v3: 'Final content']
+
+# Field history at a specific store version
+sv2 is documents.at_version(2)
+sv2_doc is sv2.get(doc.sid)
+sv2_doc.body.history()                # [v1: 'First draft', v2: 'Second draft'] — only versions that existed at sv2
+
+# Specific field version at specific store version
+sv2_doc.body.at_version(1)            # 'First draft'
+```
+
+On disk, the version matrix is stored as:
+```
+data/documents/
+    versions/
+        v1.manifest              # record offsets for store version 1
+        v2.manifest
+        v3.manifest
+        v4.manifest
+    data/
+        documents.store          # current (head) row data
+        body.versions            # append-only field version log
+    idx/
+        ...
+```
+
+Each manifest is a lightweight file of `(sid, record_offset)` pairs with structural sharing — unchanged records point to the same offset. The field version log is global (not per store version) with entries tagged by store version, enabling reconstruction of field history at any store snapshot.
+
+---
+
+## Schema Evolution
+
+### Compile-Time Detection
+The compiler knows the store schema from `store` declarations and the on-disk schema from the `.schema` file. When they diverge:
+
+1. **Field added**: auto-migrate with zero-value default (0 for numbers, "" for strings). Or `@default(value)`.
+2. **Field removed**: warning, data kept on disk (lazy cleanup), ignored in queries.
+3. **Field type changed**: compile error. Requires explicit migration.
+4. **Field renamed**: compile error. Requires explicit `rename` directive.
+5. **Relation added**: auto-migrate — `.rel` file created, empty for existing records.
+6. **Relation removed**: warning — `.rel` file retained, orphan records flagged.
+
+### Migration Syntax
+```jade
+migrate users
+    add verified as bool default false
+    rename username to name
+    drop legacy_field
+    add &profile as Profile
+```
+
+### Versioning
+The `.schema` file contains a hash of the field manifest. The compiler checks this on open. If it differs, auto-migration runs before first access.
+
+---
+
+## Concurrent Access
+
+### Single Process (default)
+- Reader-writer lock per store: multiple concurrent readers, exclusive writer
+- Lock-free reads for `@mem` stores (epoch-based snapshot isolation)
+- Write coalescing: batch multiple writes into a single disk I/O
+- Relation traversals acquire read locks on the target store automatically
+
+### Multi-Process
+- File-level `flock` for cross-process safety
+- WAL enables concurrent readers with a single writer
+- Future: shared-memory region for cross-process cache sharing
+
+### Actor Integration
+Stores integrate naturally with Jade's actor system:
+
+```jade
+actor UserService
+    @create_user first_name as str, last_name as str, email as str, age as i64
+        u is users.insert(first_name is first_name, last_name is last_name, email is email, age is age)
+        reply u   # JadePack-serialized — zero-copy if local actor
+
+    @find_user id as i64
+        reply users.get(id)
+```
+
+Each actor can own a store handle. The actor mailbox serializes writes. Multiple actors can read concurrently. JadePack is the serialization format for both the mailbox and the store, so passing a store record to an actor is a direct `memcpy` — no re-serialization.
+
+---
+
+## Reactive Queries
+
+```jade
+# Watch for changes — returns a channel
+changes is users.watch(age gt 21)
+
+for event in changes
+    match event
+        Insert row => log 'new user: {row.first_name}'
+        Update old, new => log 'updated: {old.first_name} -> {new.first_name}'
+        Delete row => log 'removed: {row.first_name}'
+```
+
+Implemented via trigger hooks on the store's write path. Insert/update/delete operations check registered watchers and push events to channels.
+
+### Relation Triggers
+
+```jade
+# Watch when related data changes
+order_events is customers.watch_related(orders)
+
+for event in order_events
+    match event
+        Insert customer, order => log '{customer.name} placed order #{order.sid}'
+```
+
+Combined with actors, this enables event-driven architectures without external message brokers.
+
+---
+
+## Specialized Store Types
+
+### Vector Store (`@vector(N)`)
+
+For semantic search, embeddings, similarity queries. Each record contains an N-dimensional float vector plus optional metadata fields.
+
+```jade
+store Embedding @vector(768)
+    label as str @index
+    source as str
+    category as str @index
+
+# Insert with vector data — the vector is the first positional argument
+embeddings.insert([0.1, 0.2, ...768 floats...], label is 'doc_42', source is 'corpus_a')
+
+# Or from a variable
+vec is compute_embedding(text)
+embeddings.insert(vec, label is 'doc_42', source is 'corpus_a')
+
+# Nearest-neighbor search — returns records sorted by distance
+similar is embeddings.nearest(query_vec, 10)               # top 10 nearest
+similar is embeddings.nearest(query_vec, 10, category is 'science')  # with filter
+
+# Distance metrics
+similar is embeddings.nearest(query_vec, 10, metric is 'cosine')      # default
+similar is embeddings.nearest(query_vec, 10, metric is 'euclidean')
+similar is embeddings.nearest(query_vec, 10, metric is 'dot')
+
+# Access distance from query
+for result in similar
+    log '{result.label}: distance {result.distance}'
+
+# Threshold-based search — all vectors within distance
+close is embeddings.within(query_vec, 0.5)                  # cosine distance < 0.5
+close is embeddings.within(query_vec, 0.5, metric is 'euclidean')
+
+# Query block syntax
+similar is query embeddings
+    nearest query_vec
+    where category is 'science'
+    limit 10
+```
+
+Implementation:
+- Vector data stored in a separate `.vec` file — contiguous `N × f32` arrays for SIMD-friendly access
+- Index: HNSW (Hierarchical Navigable Small World) graph for approximate nearest-neighbor (ANN)
+  - Build time: O(n log n), query time: O(log n) for k-NN
+  - Index file: `<store>.hnsw` in `idx/`
+- For small stores (< 10K vectors): exact brute-force scan with SIMD dot product
+- Metadata fields indexed normally (`@index`, `@sorted`) — combined with similarity search via pre-filter or post-filter
+- Vectors are NOT included in JadePack encoding of the record — they live in the `.vec` file and are referenced by offset. This keeps the row store flat and the vector data contiguous for SIMD
+- `@mem` vector stores load the HNSW index into memory — sub-millisecond k-NN on millions of vectors
+
+### Graph Store (`@graph`)
+
+For relationship-heavy data where traversal patterns are the primary access mode. Records are edges in a directed graph.
+
+```jade
+store Knows @graph
+    &from as Person
+    &to as Person
+    since as i64
+    strength as f64
+
+store Person
+    name as str @index
+    age as i64
+```
+
+Graph stores have `&from` and `&to` as required relationship fields. They define edges between nodes (which are records in other stores).
+
+```jade
+# Insert edges
+knows.insert(from is alice, to is bob, since is 2020, strength is 0.9)
+knows.insert(from is bob, to is carol, since is 2021, strength is 0.7)
+
+# Traverse — outgoing edges from a node
+alice_knows is knows.from(alice)
+for edge in alice_knows
+    log '{edge.to.name} since {edge.since}'
+
+# Incoming edges to a node
+who_knows_bob is knows.to(bob)
+
+# Pathfinding — shortest path between two nodes
+path is knows.path(alice, carol)
+for edge in path
+    log '{edge.from.name} -> {edge.to.name}'
+
+# Depth-limited traversal — all nodes within N hops
+network is knows.traverse(alice, depth is 3)
+
+# Filtered traversal — only strong connections
+close is knows.traverse(alice, depth is 2, strength gt 0.8)
+
+# Subgraph — extract a connected component
+component is knows.subgraph(alice)
+
+# Aggregation on graph — degree counts
+popular is knows.degree_in()       # returns records sorted by incoming edge count
+connectors is knows.degree_out()   # sorted by outgoing edge count
+
+# PageRank (iterative)
+ranks is knows.pagerank(iterations is 20, damping is 0.85)
+for r in ranks
+    log '{r.node.name}: {r.score}'
+
+# Query block syntax
+friends is query knows
+    from alice
+    where strength gt 0.5
+    sort -strength
+    limit 10
+```
+
+Implementation:
+- Edge list stored as row data (standard store format)
+- Adjacency index: two files per graph store — `<store>.adj_out` (from → edges) and `<store>.adj_in` (to → edges)
+- Adjacency indexes are compressed sparse row (CSR) format — O(1) lookup of all edges from/to a node
+- Traversal uses BFS/DFS with visited-set tracking — compiled to native loops, no interpreter
+- Pathfinding: bidirectional BFS for shortest path, A* when edge weights are present
+- PageRank: compiled to a tight SIMD loop over the adjacency matrix when `@mem`
+- All graph operations compose with standard store filters — `knows.from(alice, since gt 2020)` uses index + filter
+
+### Time-Series Store (`@timeseries(field)`)
+
+For temporal data with a designated timestamp field. Optimized for time-range queries, windowed aggregation, and retention policies.
+
+```jade
+store SensorReading @timeseries(timestamp)
+    timestamp as i64
+    device_id as str @index
+    temperature as f64
+    humidity as f64
+    pressure as f64
+```
+
+The `@timeseries(field)` decorator designates which field is the time axis. This field must be `i64` (unix timestamp) and is implicitly `@sorted`.
+
+```jade
+# Insert — timestamp can be explicit or auto-generated
+readings.insert(timestamp is now(), device_id is 'sensor_01', temperature is 22.5, humidity is 45.0, pressure is 1013.25)
+
+# Time range query
+recent is readings.range(now() - 3600, now())                            # last hour
+recent is readings.range(now() - 3600, now(), device_id is 'sensor_01')  # filtered
+
+# Windowed aggregation — bucket by time interval
+hourly is readings.window(3600).avg(temperature)                           # 1-hour buckets
+hourly is readings.window(3600, device_id is 'sensor_01').avg(temperature)
+daily is readings.window(86400).max(temperature)
+
+# Multiple aggregations per window
+stats is readings.window(3600)
+    .avg(temperature)
+    .max(humidity)
+    .min(pressure)
+    .count()
+
+# Downsampling — reduce resolution for long-term storage
+readings.downsample(source_window is 60, target_window is 3600, method is 'avg')
+
+# Retention policy — auto-delete records older than duration
+readings.retention(days is 90)         # records older than 90 days are auto-purged
+readings.retention(count is 1000000)   # keep at most 1M records
+
+# Latest value per group (last-value cache)
+latest is readings.latest(group is device_id)
+for r in latest
+    log '{r.device_id}: {r.temperature}°C'
+
+# Rate of change
+rate is readings.rate(temperature, device_id is 'sensor_01', window is 3600)
+
+# Query block syntax
+hot_days is query readings
+    where device_id is 'sensor_01'
+    where timestamp gt (now() - 86400 * 7)
+    where temperature gt 30.0
+    sort -timestamp
+    limit 100
+```
+
+Implementation:
+- Data stored in time-partitioned chunks — each chunk covers a configurable time range (default: 1 hour)
+- Chunk files: `<store>.<chunk_id>.ts` in `data/` — ordered by timestamp within each chunk
+- Time index: B-tree on the timestamp field (implicit `@sorted`) — range queries are O(log n) seek + sequential scan
+- Partition pruning: time-range queries skip chunks entirely when outside the range
+- Windowed aggregation:
+  - Column-oriented within each chunk for SIMD-friendly access
+  - Pre-computed rollups for common intervals (minute, hour, day) when `@mem`
+  - Incremental rollup: new inserts update the current window's aggregate without re-scanning
+- Retention: background coroutine checks chunk timestamps, deletes expired chunks — no per-record overhead
+- Downsampling: reads source chunks, computes aggregates, writes to new chunks at lower resolution, deletes originals
+- Compression: delta encoding on timestamps (high value), RLE on repeated device IDs, standard float compression on values
+- `@mem`: current chunk (and recent chunks up to memory budget) kept in memory for sub-microsecond latest-value queries
+
+### Key-Value Store (`@kv`)
+
+A persistent, in-memory-first key-value store. Replaces Redis, Consul, memcached, etcd — no external daemon, no TCP overhead, no serialization boundary. Keys are strings, values are any JadePack-serializable type. Compiled to native code like every other store.
+
+```jade
+store Cache @kv
+
+store Session @kv @mem          # force all data in memory (default is memory-first anyway)
+store Ephemeral @kv @transient  # pure in-memory, no persistence
+store Config @kv @versioned     # versioned KV — every mutation creates a snapshot
+```
+
+`@kv` stores have no field declarations. The store itself is the map.
+
+```jade
+# Basic get/set
+cache.set('user:42', alice)                # value is JadePack-serialized
+user is cache.get('user:42') as User       # type-annotated retrieval
+
+# With TTL (time-to-live) — auto-expires after duration
+cache.set('session:abc', token, ttl is 3600)     # expires in 1 hour
+cache.set('rate:ip:1.2.3.4', count, ttl is 60)   # expires in 60 seconds
+
+# Check existence and delete
+if cache.has('user:42')
+    cache.del('user:42')
+
+# Get with default — returns default if key missing or expired
+count is cache.get('counter', default is 0) as i64
+
+# Atomic increment/decrement (value must be numeric)
+cache.incr('counter')               # +1
+cache.incr('counter', 5)             # +5
+cache.decr('counter')                # -1
+
+# Atomic compare-and-swap
+success is cache.cas('lock:resource', expected is 'free', value is 'held')
+
+# Bulk operations
+cache.mset({'a': 1, 'b': 2, 'c': 3})
+values is cache.mget(['a', 'b', 'c'])       # returns map
+
+# Pattern matching on keys — glob-style
+user_keys is cache.keys('user:*')
+session_keys is cache.keys('session:*')
+
+# Delete by pattern
+cache.del('session:*')               # delete all sessions
+
+# Iterate all key-value pairs
+for key, value in cache.entries()
+    log '{key}: {value}'
+
+# Paginated iteration for large KV stores
+pages is cache.paginate(100)
+while pages.has_next()
+    batch is pages.next()            # Vec of (key, value) pairs
+```
+
+#### Lists, Sets, and Sorted Sets
+
+Like Redis, `@kv` stores support typed collection values:
+
+```jade
+# Lists — ordered, duplicates allowed
+cache.lpush('queue:jobs', job)           # push left
+cache.rpush('queue:jobs', job)           # push right
+job is cache.lpop('queue:jobs')          # pop left
+job is cache.rpop('queue:jobs')          # pop right
+len is cache.llen('queue:jobs')
+items is cache.lrange('queue:jobs', 0, 10)   # range slice
+
+# Sets — unordered, unique
+cache.sadd('tags:42', 'rust')
+cache.sadd('tags:42', 'compiler')
+members is cache.smembers('tags:42')     # {'rust', 'compiler'}
+is_member is cache.sismember('tags:42', 'rust')  # true
+cache.srem('tags:42', 'rust')            # remove member
+
+# Set operations
+union is cache.sunion('tags:42', 'tags:43')
+inter is cache.sinter('tags:42', 'tags:43')
+diff is cache.sdiff('tags:42', 'tags:43')
+
+# Sorted sets — scored members, ordered by score
+cache.zadd('leaderboard', 'alice', 1500.0)
+cache.zadd('leaderboard', 'bob', 1200.0)
+top is cache.zrange('leaderboard', 0, 10)            # top 10 by score
+top is cache.zrange('leaderboard', 0, 10, rev is true) # bottom 10
+score is cache.zscore('leaderboard', 'alice')         # 1500.0
+rank is cache.zrank('leaderboard', 'alice')            # 0 (highest)
+```
+
+#### Pub/Sub
+
+`@kv` stores support publish/subscribe channels — integrated with Jade's channel system:
+
+```jade
+# Subscribe — returns a Jade channel
+ch is cache.subscribe('events:user')
+
+# In an actor or coroutine
+for msg in ch
+    log 'received: {msg}'
+
+# Publish
+cache.publish('events:user', 'user:42:updated')
+
+# Pattern subscribe — glob on channel names
+ch is cache.psubscribe('events:*')
+```
+
+#### Expiry and Eviction
+
+```jade
+# Set TTL on an existing key
+cache.expire('user:42', 300)           # expire in 300 seconds
+cache.persist('user:42')               # remove TTL, keep forever
+
+# Check remaining TTL
+remaining is cache.ttl('user:42')      # seconds until expiry, -1 if no TTL
+
+# Eviction policy (store-level configuration)
+store HotCache @kv @mem
+    @maxmemory(256)                    # max 256MB memory usage
+    @eviction('lru')                   # evict least-recently-used when full
+    # policies: 'lru', 'lfu', 'random', 'ttl' (evict nearest-expiry first)
+```
+
+Implementation:
+- **Memory-first**: all data lives in a hash map in memory. Reads are O(1) pointer lookups — no syscalls, no I/O
+- **Persistent backend**: WAL + periodic snapshot to disk (same as `@mem` stores). Crash-safe. On restart, replay WAL then load snapshot
+- **TTL**: lazy expiry (checked on access) + active expiry (background coroutine sweeps expired keys every second)
+- **Pub/sub**: zero-copy delivery to local subscribers via Jade channels. No TCP, no serialization boundary
+- **Collections** (list/set/sorted set): stored as JadePack-encoded values under the key. Small collections inline in the value; large collections spill to an overflow segment
+- **Atomic ops**: `incr`, `decr`, `cas` are lock-free CAS loops on the in-memory hash map
+- **No external daemon**: the KV store is compiled into your program. No Redis server to manage, no connection pooling, no network latency. A `@kv` store in Jade is a native data structure with a disk backing
+- **Composable**: `@kv @versioned` gives a versioned KV store (undo/redo, config audit trails). `@kv @transient` gives pure in-memory (session caches). `@kv @mem` is redundant but valid (KV is memory-first by default)
+- **JadePack values**: values are JadePack-serialized. Any type the compiler knows how to pack can be a value — structs, enums, vecs, nested types. Type annotation on `.get()` tells the compiler which `unpack` function to call
+
+---
+
+## Hooks
+
+Pre/post hooks on store operations for validation, side effects, and derived data:
+
+```jade
+store User
+    first_name as str
+    last_name as str
+    email as str @index @unique
+    email_domain as str @transient
+
+    @before_insert self
+        if self.email.length equals 0
+            error 'email required'
+
+    @after_insert self
+        log 'user created: {self.email}'
+
+    @before_save self
+        self.email_domain is self.email.split('@').last
+
+    @after_delete self
+        log 'user deleted: {self.email}'
+```
+
+Hooks run inside the transaction. `@before_insert` can reject the operation by raising an error. `@before_save` fires before any write (insert or update). Hooks are compiled to inline native code — no dynamic dispatch.
+
+---
+
+## Compression (Column Store)
+
+For column store files:
+
+| Encoding | When Used | Benefit |
+|----------|-----------|---------|
+| Run-Length (RLE) | Low-cardinality columns (status, category) | 10-100x compression |
+| Delta | Sorted or sequential numeric columns (timestamps, IDs) | 5-20x compression |
+| Dictionary | String columns with < 65K distinct values | 3-10x + faster comparison |
+| Bit-packing | Small integers, booleans | 2-8x compression |
+
+Encoding selection is automatic based on column statistics collected during bulk-load or first N inserts.
+
+---
+
+## File Layout
+
+For a standard store named `users`:
+
+```
+data/
+  users/
+    users.schema              # field manifest, schema hash
+    users.metadata            # statistics, record count, index stats
+    data/
+        users.store           # row-oriented data (JadePack records)
+        users.wal             # write-ahead log
+        users.bio.text        # overflow pages for Text fields
+    rels/
+        address.rel           # has-one join table (user_sid → address_sid)
+        messages.rel          # has-many join table (user_sid → [message_sids])
+    cols/
+        age.col               # column file (if column store enabled)
+    idx/
+        email.idx             # hash index (@index)
+        age.btree             # B-tree index (@sorted)
+```
+
+For a `@versioned` store named `documents`:
+
+```
+data/
+  documents/
+    documents.schema
+    documents.metadata
+    data/
+        documents.store       # current (head) row data
+        body.versions         # append-only field version log (@versioned field)
+    versions/
+        v1.manifest           # record offsets for store version 1
+        v2.manifest           # structural sharing — unchanged records not duplicated
+        ...
+    rels/
+    cols/
+    idx/
+```
+
+For a `@vector(768)` store named `embeddings`:
+
+```
+data/
+  embeddings/
+    embeddings.schema
+    embeddings.metadata
+    data/
+        embeddings.store      # metadata fields (label, source, etc.)
+        embeddings.vec        # contiguous N×f32 vector data
+    idx/
+        embeddings.hnsw       # HNSW approximate nearest-neighbor index
+        label.idx             # standard hash index on metadata
+```
+
+For a `@graph` store named `knows`:
+
+```
+data/
+  knows/
+    knows.schema
+    knows.metadata
+    data/
+        knows.store           # edge records (from_sid, to_sid, fields...)
+    idx/
+        knows.adj_out         # from → [edge offsets] (CSR format)
+        knows.adj_in          # to → [edge offsets] (CSR format)
+```
+
+For a `@timeseries(timestamp)` store named `readings`:
+
+```
+data/
+  readings/
+    readings.schema
+    readings.metadata
+    data/
+        readings.1720000.ts   # time-partitioned chunk (chunk_id = start timestamp / interval)
+        readings.1723600.ts   # next hourly chunk
+        ...
+    idx/
+        timestamp.btree       # B-tree on timestamp (implicit @sorted)
+        device_id.idx         # standard hash index
+    rollups/
+        minute.rollup         # pre-computed 1-minute aggregates
+        hour.rollup           # pre-computed 1-hour aggregates
+```
+
+For a `@kv` store named `cache`:
+
+```
+data/
+  cache/
+    cache.schema              # KV store metadata (eviction policy, maxmemory)
+    cache.metadata            # key count, memory usage stats
+    data/
+        cache.kv              # snapshot file — serialized hash map (JadePack)
+        cache.wal             # write-ahead log for crash recovery
+        cache.overflow        # overflow segment for large collection values
+    idx/
+        cache.ttl             # TTL index — sorted by expiry timestamp for active sweep
+```
+
+All store directories live under the path specified by `store_path` in `project.jade`.
+
+---
+
+## Full Example
+
+```jade
+store_path is 'data'
+store_persistence is 'always'
+
+store Address
+    street as str
+    city as str
+    state as str @index
+    zip as str @index
+
+store Tag @simple
+    label as str @index @unique
+
+store User @mem
+    first_name as str
+    last_name as str @index
+    email as str @index @unique
+    age as i64 @sorted
+    bio as text
+    &address as Address @cascade
+    &tags as [Tag] @cascade
+    rank as i64 @increment
+
+    *full_name returns str
+        '{first_name} {last_name}'
+
+store Order
+    total as f64
+    status as str @index
+    notes as text @versioned
+    &customer as User @required
+    &items as [OrderItem] @cascade
+
+store OrderItem @simple
+    product_name as str
+    quantity as i64
+    price as f64
+
+store Embedding @vector(384)
+    label as str @index
+    source as str
+
+store Knows @graph
+    &from as User
+    &to as User
+    since as i64
+    strength as f64
+
+store Metric @timeseries(timestamp)
+    timestamp as i64
+    endpoint as str @index
+    latency_ms as f64
+    status_code as i64
+
+store AuditLog @versioned
+    action as str @index
+    entity as str
+    detail as text @versioned
+    &actor as User
+
+store Cache @kv
+
+store Session @kv @mem
+    @maxmemory(64)
+    @eviction('lru')
+
+*main
+    # --- Standard store operations ---
+
+    # Insert
+    addr is addresses.insert(street is '123 Main St', city is 'Portland', state is 'OR', zip is '97201')
+    alice is users.insert(first_name is 'Alice', last_name is 'Smith', email is 'alice@test.com', age is 30, address is addr)
+
+    # Access relation
+    log alice.full_name              # 'Alice Smith'
+    log alice.address.city           # 'Portland'
+
+    # Insert related records
+    order is orders.insert(total is 49.99, status is 'pending', customer is alice)
+    order.items.add(order_items.insert(product_name is 'Widget', quantity is 2, price is 24.99))
+    order.items.add(order_items.insert(product_name is 'Gadget', quantity is 1, price is 0.01))
+
+    # Direct field mutation (auto-persisted)
+    alice.age is 31
+
+    # Batch update with .set()
+    alice.set(age is 32, last_name is 'Jones')
+
+    # Query — method API
+    smiths is users.select(last_name is 'Smith')
+    alice is users.first(email is 'alice@test.com')
+    alice is users.get(1)            # by sid
+
+    # Complex filter with OR
+    results is users.select(
+        or(
+            and(last_name is 'Smith', age gt 30),
+            and(last_name is 'Jones', age gt 25)
+        )
+    )
+
+    # Query — query block syntax
+    local is query users
+        where address.state is 'OR'
+        sort last_name
+        limit 50
+
+    # Paginator
+    pages is users.paginate(25, age gt 18, sort is 'last_name')
+    while pages.has_next()
+        batch is pages.next()
+        for u in batch
+            log u.full_name
+
+    # Aggregation
+    avg_age is users.avg(age)
+    log 'average age: {avg_age}'
+    by_status is orders.group(status).sum(total)
+
+    # Versioned field
+    order.notes is 'Customer called — expedite shipping'
+    order.notes is 'Shipped via priority mail'
+    history is order.notes.history()
+
+    # Versioned store
+    log_entry is audit_logs.insert(action is 'create', entity is 'user', detail is 'Created Alice', actor is alice)
+    log 'audit log version: {audit_logs.versions().length}'
+
+    # Soft delete / restore
+    users.delete(last_name is 'Smith')
+    alice.restore()
+
+    # Transaction
+    transaction
+        bob is users.insert(first_name is 'Bob', last_name is 'Jones', email is 'bob@test.com', age is 25, address is addr)
+        orders.insert(total is 99.99, status is 'pending', customer is bob)
+
+    # --- Vector store ---
+
+    vec is compute_embedding('machine learning paper')
+    embeddings.insert(vec, label is 'paper_42', source is 'arxiv')
+
+    query_vec is compute_embedding('neural networks')
+    similar is embeddings.nearest(query_vec, 5, metric is 'cosine')
+    for s in similar
+        log '{s.label}: {s.distance}'
+
+    # --- Graph store ---
+
+    bob is users.first(first_name is 'Bob')
+    knows.insert(from is alice, to is bob, since is 2020, strength is 0.9)
+
+    path is knows.path(alice, bob)
+    network is knows.traverse(alice, depth is 2)
+
+    # --- Time-series store ---
+
+    metrics.insert(timestamp is now(), endpoint is '/api/users', latency_ms is 12.5, status_code is 200)
+
+    hourly_latency is metrics.window(3600, endpoint is '/api/users').avg(latency_ms)
+    latest is metrics.latest(group is endpoint)
+
+    # --- Key-value store ---
+
+    cache.set('user:42', alice)
+    cache.set('session:xyz', token, ttl is 3600)
+    cached_user is cache.get('user:42') as User
+
+    cache.incr('page_views')
+    cache.lpush('queue:emails', email_job)
+    cache.zadd('leaderboard', alice.full_name, alice.rank)
+
+    top_10 is cache.zrange('leaderboard', 0, 10)
+    for entry in top_10
+        log '{entry.member}: {entry.score}'
+
+    # Session store with TTL
+    sessions.set('sess:abc123', session_data, ttl is 1800)
+
+    # --- Export / import ---
+
+    users.export('users_backup.jpack')
+    bytes is pack(alice)
+    alice2 is unpack User bytes
+
+    # --- Reactive ---
+
+    changes is users.watch()
+    # ... consume in an actor or coroutine
+
+    log 'total users: {users.count()}'
+```
+
+---
+
+## Design Critique and Trade-Offs
+
+### Strengths
+- **Method API eliminates keyword pollution.** `users.insert()`, `users.select()`, `users.delete()` are regular method calls. No `insert`/`select`/`delete` reserved words. Composable with pipelines, variables, actor messages.
+- **Dual API (methods + query blocks).** Methods for programmatic use and pipelines; query blocks for readable multi-line queries. Same compiled output. No forced choice.
+- **Transparent persistence.** `alice.age is 31` looks like a normal assignment. The compiler intercepts it because `alice` is a store record. No explicit save calls needed in `'always'` mode. Feels like working with in-memory data.
+- **Compile-time everything.** Schema validation, index selection, join table generation, pack/unpack codegen, FK resolution, type checking of filters — all happen at compile time. Zero runtime overhead for structural decisions.
+- **JadePack unification.** One wire format for disk, mailbox, network. No impedance mismatch between "how data is stored" and "how data is sent." Content-addressable hashing falls out for free.
+- **Relations via join tables.** Decoupling FKs from the record itself means records are flat and fixed-size. Join tables are small, indexed, and cacheable. Adding/removing relations doesn't require record migration.
+- **Specialized stores as first-class citizens.** Vector, graph, time-series, and key-value are not bolt-on libraries — they share the same JadePack format, indexing infrastructure, decorator system, and query compilation pipeline. A graph edge IS a store record. A KV store IS a native hash map with a disk backing.
+- **KV store replaces Redis/Consul/memcached.** No external daemon, no TCP, no connection pool. O(1) in-memory reads compiled to native code. TTL, pub/sub, lists, sets, sorted sets — all the Redis primitives, but in-process with zero serialization boundary.
+- **Paginator with snapshot isolation.** Large result sets don't blow memory. Cursor-based traversal is safe under concurrent writes. Paginators are serializable via JadePack.
+
+### Trade-Offs
+- **Join tables add indirection.** Has-one lookups require a `.rel` file read instead of an inline FK. Mitigated by `@mem` (in-memory graph) and automatic indexing. For non-`@mem` stores, the `.rel` file is mmap'd and effectively free for hot data.
+- **256B string limit.** Strings that exceed 248 usable bytes must be `text`, which has overflow page overhead. This is a deliberate split — fixed-size fields enable O(1) record access and zero-copy reads. Most real-world strings (names, emails, codes) fit in 248 bytes.
+- **Eager relations by default.** Loading all related records up front can be wasteful for has-many with many children. `@lazy` mitigates this, but the programmer must opt in. Default-eager prevents N+1 query problems at the cost of potentially loading unused data.
+- **`@versioned` storage cost.** Versioned fields grow linearly with mutations. Store-level versioning adds one manifest file per mutation. Without compaction, a frequently-updated store with versioned fields could consume significant disk. Compaction is manual (`store.compact()`). Automatic compaction with retention policy is a future optimization.
+- **No partial updates on disk.** Updating one field rewrites the full record (JadePack is fixed-layout). For large records with many string fields, this means writing ~N×256 bytes even for a single i64 change. `.set()` mitigates by batching, but the full record is still rewritten. Column store mitigates for analytics; row store prioritizes simplicity and crash safety.
+- **HNSW index build cost.** Vector store insertions must update the HNSW graph — O(log n) per insert. Bulk loading should use batch construction. The index is approximate — exact k-NN requires brute-force fallback.
+- **Graph traversal unbounded.** Deep traversals without depth limits can touch the entire graph. The `depth` parameter is recommended but not enforced. Future: compile-time warning for unbounded traversals.
+- **Time-series chunk management.** Partition pruning requires sorted inserts. Out-of-order inserts force chunk splitting or merge. The `@timeseries` decorator assumes roughly monotonic timestamps — wildly out-of-order data degrades performance.
+- **OR clauses disable index optimization.** `or(a, b)` may require scanning both index paths and merging. The query planner handles this, but worst-case is two index lookups + merge vs one lookup for pure AND.
+- **KV type erasure.** Values in `@kv` stores are opaque JadePack blobs. The compiler cannot type-check `.get()` return values without the `as Type` annotation. A wrong annotation is a runtime unpack failure, not a compile error. Mitigation: typed KV wrappers (`store TypedCache @kv(User)`) are a future extension.
+
+### Why Not Inline FKs?
+Inline FKs (storing `address_id` directly in the User record) are simpler and faster for has-one. But join tables give us:
+- **Bidirectional traversal** without schema changes to the child store
+- **Many-to-many** with the same mechanism as one-to-many
+- **Relation add/remove** without record rewrite or schema migration
+- **Consistent model** — one concept (`&`) for all cardinalities
+
+The indirection cost is negligible for `@mem` stores (in-memory graph) and amortized by mmap for disk stores.
+
+---
+
+## Implementation Priority
+
+### Phase 1 — Foundation
+1. **Method API** — `.insert()`, `.get()`, `.select()`, `.first()`, `.delete()`, `.destroy()`, `.save()` on store objects
+2. **Built-in fields** (sid, uuid, hash, created, updated, deleted)
+3. **Store decorators** (@simple, @mem, @transient) in parser/AST/HIR
+4. **Field decorators** (@index, @unique, @sorted, @transient, @increment, @required, @versioned)
+5. **`store_path` / `store_persistence`** project configuration
+6. **Direct field mutation** — `record.field is value` intercepted for store records
+7. **`.set()` batch updates** — single WAL entry, single timestamp, single hash
+
+### Phase 2 — Persistence + Query Power
+8. **WAL + crash recovery**
+9. **Soft delete / destroy / restore** semantics
+10. **`store_persistence is 'explicit'`** — dirty tracking, `.save()` flush
+11. **Complex filters** — `or()`, `and()`, `not()`, `in`, `between`, `like`
+12. **Query blocks** — lower `query ... where ... sort ... limit` to same IR as method API
+13. **Paginator / cursor** — `.paginate(N)`, `.next()`, `.has_next()`, snapshot isolation
+
+### Phase 3 — Relationships
+14. **`&field as Type`** (has-one) — join table generation, auto-join
+15. **`&field as [Type]`** (has-many) — join table, `.add()` / `.remove()`
+16. **Relationship decorators** (@cascade, @lazy, @required)
+17. **Relation filters** — `users.select(address.state is 'OR')` and `query ... where address.state is 'OR'`
+
+### Phase 4 — JadePack
+18. **Wire format spec** — encoding rules, header format
+19. **Compiler-generated pack/unpack** — LLVM IR emission for every store type
+20. **Actor message integration** — replace ad-hoc mailbox packing with JadePack
+21. **`.export()` / `.import()`** methods, `.jpack` file format
+22. **`pack()` / `unpack()`** built-in functions
+23. **Paginator cursor serialization** via JadePack
+
+### Phase 5 — Indexing + Memory
+24. **Hash index** (`@index`)
+25. **B-tree index** (`@sorted`)
+26. **Uniqueness enforcement** (`@unique`)
+27. **`@mem`** — in-memory store with background flush
+28. **mmap** for non-`@mem` stores
+
+### Phase 6 — Advanced Queries + Aggregation
+29. **Aggregation** — `.sum()`, `.avg()`, `.min()`, `.max()`, `.count()`
+30. **Grouping** — `.group(field).sum(field)`
+31. **Projection** — `.pluck(field, field, ...)`
+32. **`.distinct()`**, `.exists()`
+33. **Schema migration** — auto-detect, auto-migrate, `migrate` syntax
+34. **Field-level versioning** — `@versioned`, `.history()`, `.at_version()`, `.diff()`
+
+### Phase 7 — Store-Level Versioning
+35. **Store `@versioned`** — immutable snapshots, `.at_version()`, `.versions()`, `.rollback()`
+36. **Version matrix** — `@versioned` store + `@versioned` fields, manifest-based structural sharing
+37. **Compaction** — `.compact(keep is N)`, retention policies
+
+### Phase 8 — Specialized Stores
+38. **Vector store** (`@vector(N)`) — `.vec` file, HNSW index, `.nearest()`, `.within()`, SIMD dot product
+39. **Graph store** (`@graph`) — adjacency indexes (CSR), `.from()`, `.to()`, `.path()`, `.traverse()`, `.pagerank()`
+40. **Time-series store** (`@timeseries(field)`) — chunked partitions, `.range()`, `.window()`, `.retention()`, `.downsample()`, rollups
+41. **Key-value store** (`@kv`) — in-memory hash map, WAL + snapshot persistence, `.set()`, `.get()`, `.del()`, TTL, `incr`/`decr`, `cas`
+42. **KV collections** — lists (`lpush`/`rpush`/`lpop`/`rpop`), sets (`sadd`/`srem`/`sunion`/`sinter`), sorted sets (`zadd`/`zrange`/`zrank`)
+43. **KV pub/sub** — `.publish()`, `.subscribe()`, `.psubscribe()`, integration with Jade channels
+44. **KV eviction** — `@maxmemory`, `@eviction('lru'|'lfu'|'random'|'ttl')`, active + lazy expiry
+
+### Phase 9 — Polish + Optimization
+45. **Store methods** — computed properties on store types
+46. **Text type** — variable-length overflow pages
+47. **Hooks** — `@before_insert`, `@after_insert`, `@before_save`, `@after_delete`
+48. **Column store** — per-field files, dual representation for `@mem`
+49. **Reactive queries** — `.watch()`, `.watch_related()`, channel integration
+50. **Bloom filters** — auto-generated for frequently queried non-indexed fields
+51. **Concurrent access** — reader-writer locks, actor store handles
+
+### Phase 10 — Optimization
+52. **SIMD aggregation** on column store data
+53. **Query planner** — index vs scan, join strategy selection, OR-clause index merging
+54. **Compression** — RLE, delta, dictionary, bit-packing for column files and time-series chunks
+55. **Full-text search** — `@search`, inverted index
+56. **Remote actor wire format** — JadePack over TCP
+57. **Cross-process shared memory cache**

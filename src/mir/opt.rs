@@ -855,7 +855,7 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
     }
 
     for (header, body) in &loops {
-        let header_idx = match block_index.get(header) {
+        let _header_idx = match block_index.get(header) {
             Some(&idx) => idx,
             None => continue,
         };

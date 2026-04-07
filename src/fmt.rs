@@ -72,7 +72,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                 }).collect();
                 out.push_str(&format!(" {}", params.join(", ")));
             }
-            out.push_str(&format!(" -> {}\n", format_type(&e.ret)));
+            out.push_str(&format!(" returns {}\n", format_type(&e.ret)));
         }
         Decl::Use(u) => {
             indent(out, level);
@@ -100,7 +100,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                     }
                 }
                 if let Some(ref ret) = m.ret {
-                    out.push_str(&format!(" -> {}", format_type(ret)));
+                    out.push_str(&format!(" returns {}", format_type(ret)));
                 }
                 out.push('\n');
                 if let Some(ref body) = m.default_body {
@@ -200,7 +200,7 @@ fn format_fn(out: &mut String, f: &Fn, level: usize) {
         }
     }
     if let Some(ref ret) = f.ret {
-        out.push_str(&format!(" -> {}", format_type(ret)));
+        out.push_str(&format!(" returns {}", format_type(ret)));
     }
     out.push('\n');
     format_block(out, &f.body, level + 1);
@@ -414,7 +414,7 @@ fn format_expr(e: &Expr) -> String {
                 BinOp::BitXor => "^",
                 BinOp::Shl => "<<",
                 BinOp::Shr => ">>",
-                BinOp::Exp => "**",
+                BinOp::Exp => "pow",
             };
             format!("{} {} {}", format_expr(l), ops, format_expr(r))
         }

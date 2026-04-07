@@ -103,7 +103,7 @@ impl<'ctx> Compiler<'ctx> {
                         .ok_or_else(|| format!("undefined variable: {name}"))?
                         .0
                         .into()
-                } else if let hir::ExprKind::Field(inner, _, _) = &obj.kind {
+                } else if let hir::ExprKind::Field(_inner, _, _) = &obj.kind {
                     // Nested field access — compile and store to a temp alloca
                     let val = self.compile_expr(obj)?;
                     let ty = val.get_type();

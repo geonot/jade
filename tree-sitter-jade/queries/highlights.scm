@@ -63,8 +63,6 @@
   "~"
   "?"
   "!"
-  "->"
-  "**"
 ] @operator
 
 ; ── Punctuation ───────────────────────────────────────────────
@@ -80,8 +78,7 @@
   name: (identifier) @function)
 
 (lambda_expression
-  "*" @keyword.function
-  "fn" @keyword.function)
+  "|" @keyword.function)
 
 (call_expression
   function: (identifier) @function.call)

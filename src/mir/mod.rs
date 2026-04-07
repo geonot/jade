@@ -305,7 +305,7 @@ impl fmt::Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Add => "+", Self::Sub => "-", Self::Mul => "*",
-            Self::Div => "/", Self::Mod => "%", Self::Exp => "**",
+            Self::Div => "/", Self::Mod => "%", Self::Exp => "pow",
             Self::BitAnd => "&", Self::BitOr => "|", Self::BitXor => "^",
             Self::Shl => "<<", Self::Shr => ">>",
             Self::And => "and", Self::Or => "or",

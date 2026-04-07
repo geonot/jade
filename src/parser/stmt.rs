@@ -226,9 +226,40 @@ impl Parser {
                 let val = self.parse_expr()?;
                 Ok(Stmt::ErrReturn(val, sp))
             }
+            Token::BangBang => {
+                let sp = self.span();
+                self.advance();
+                let val = self.parse_expr()?;
+                Ok(Stmt::ErrReturn(val, sp))
+            }
             Token::Use => {
                 let u = self.parse_use_decl()?;
                 Ok(Stmt::UseLocal(u))
+            }
+            Token::Atomic => {
+                let sp = self.span();
+                self.advance();
+                let name = self.ident()?;
+                if let Some(op) = self.aug_op() {
+                    let rhs = self.parse_expr()?;
+                    let rsp = rhs.span();
+                    return Ok(Stmt::Bind(Bind {
+                        name: name.clone(),
+                        value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
+                        ty: None,
+                        atomic: true,
+                        span: sp,
+                    }));
+                }
+                self.expect(Token::Is)?;
+                let value = self.parse_expr()?;
+                Ok(Stmt::Bind(Bind {
+                    name,
+                    value,
+                    ty: None,
+                    atomic: true,
+                    span: sp,
+                }))
             }
             _ => {
                 if self.is_tuple_bind() {
@@ -327,6 +358,7 @@ impl Parser {
                 name: name.clone(),
                 value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
                 ty: None,
+                atomic: false,
                 span: sp,
             }));
         }
@@ -375,6 +407,7 @@ impl Parser {
             name,
             value: self.parse_expr()?,
             ty: None,
+            atomic: false,
             span: sp,
         }))
     }

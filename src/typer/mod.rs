@@ -77,6 +77,7 @@ pub struct Typer {
     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
     pub(crate) fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
     pub(crate) current_method_type: Option<String>,
+    pub(crate) modules: std::collections::HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +132,7 @@ impl Typer {
             fn_param_names: HashMap::new(),
             fn_defaults: HashMap::new(),
             current_method_type: None,
+            modules: std::collections::HashSet::new(),
         }
     }
 
@@ -453,7 +455,7 @@ mod tests {
     #[test]
     fn test_function_call_typed() {
         let hir =
-            type_check("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+            type_check("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
         let add_fn = hir.fns.iter().find(|f| f.name == "add").unwrap();
         assert_eq!(add_fn.ret, Type::I64);
     }
@@ -461,7 +463,7 @@ mod tests {
     #[test]
     fn test_struct_typed() {
         let hir = type_check(
-            "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 1, y is 2)\n    log(p.x)\n    0\n",
+            "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 1, y is 2)\n    log(p.x)\n    0\n",
         );
         assert!(!hir.types.is_empty());
         let point = &hir.types[0];
@@ -472,7 +474,7 @@ mod tests {
     #[test]
     fn test_enum_typed() {
         let hir = type_check(
-            "enum Color\n    Red\n    Green\n    Blue\n\n*main() -> i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
+            "enum Color\n    Red\n    Green\n    Blue\n\n*main() returns i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
         );
         assert!(!hir.enums.is_empty());
         let color = &hir.enums[0];
@@ -482,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_generic_fn_monomorphized() {
-        let hir = type_check("*identity(x: T) -> T\n    x\n*main()\n    log(identity(42))\n");
+        let hir = type_check("*identity(x as T) returns T\n    x\n*main()\n    log(identity(42))\n");
         assert!(
             hir.fns.len() >= 2,
             "expected at least 2 fns, got {}",
@@ -506,7 +508,7 @@ mod tests {
     #[test]
     fn test_lambda_typed() {
         let hir =
-            type_check("*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(5))\n    0\n");
+            type_check("*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n");
         let main = &hir.fns[0];
         if let hir::Stmt::Bind(b) = &main.body[0] {
             assert!(matches!(b.ty, Type::Fn(_, _)));
@@ -535,7 +537,7 @@ mod tests {
     #[test]
     fn test_typevar_resolved_after_lowering() {
         let hir = type_check(
-            "type Pair\n    a: i64\n    b: f64\n\n*main() -> i32\n    p is Pair(a is 1, b is 2.0)\n    log(p.a)\n    0\n",
+            "type Pair\n    a as i64\n    b as f64\n\n*main() returns i32\n    p is Pair(a is 1, b is 2.0)\n    log(p.a)\n    0\n",
         );
         let pair = &hir.types[0];
         assert_eq!(pair.fields[0].ty, Type::I64);
@@ -566,7 +568,7 @@ mod tests {
     #[test]
     fn test_let_gen_fn_scheme_is_poly() {
         let prog =
-            parse("*main() -> i32\n    f is *fn(x: i64) -> i64 x + 1\n    log(f(5))\n    0\n");
+            parse("*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n");
         let mut typer = Typer::new();
         let _hir = typer.lower_program(&prog).unwrap();
     }
@@ -657,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_return_type_inferred_from_tail() {
-        let hir = type_check("*double(x: i64) -> i64\n    x * 2\n*main()\n    log(double(5))\n");
+        let hir = type_check("*double(x as i64) returns i64\n    x * 2\n*main()\n    log(double(5))\n");
         let double = hir.fns.iter().find(|f| f.name == "double").unwrap();
         assert_eq!(double.ret, Type::I64);
     }
@@ -665,7 +667,7 @@ mod tests {
     #[test]
     fn test_return_type_inferred_from_return_stmt() {
         let hir = type_check(
-            "*abs(x: i64) -> i64\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n",
+            "*abs(x as i64) returns i64\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n",
         );
         let abs_fn = hir.fns.iter().find(|f| f.name == "abs").unwrap();
         assert_eq!(abs_fn.ret, Type::I64);
@@ -674,7 +676,7 @@ mod tests {
     #[test]
     fn test_recursive_fn_return_type() {
         let hir = type_check(
-            "*fib(n: i64) -> i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n*main()\n    log(fib(10))\n",
+            "*fib(n as i64) returns i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n*main()\n    log(fib(10))\n",
         );
         let fib = hir.fns.iter().find(|f| f.name == "fib").unwrap();
         assert_eq!(fib.ret, Type::I64);
@@ -683,7 +685,7 @@ mod tests {
     #[test]
     fn test_deferred_field_no_typevars() {
         let hir = type_check(
-            "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
+            "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
         );
         let point = &hir.types[0];
         assert!(!point.fields[0].ty.has_type_var());
@@ -693,7 +695,7 @@ mod tests {
     #[test]
     fn test_vec_method_types_resolved() {
         let hir = type_check(
-            "*main() -> i32\n    v is vec(1, 2, 3)\n    v.push(4)\n    log(v.len())\n    0\n",
+            "*main() returns i32\n    v is vec(1, 2, 3)\n    v.push(4)\n    log(v.len())\n    0\n",
         );
         let main = &hir.fns[0];
         for stmt in &main.body {
@@ -796,7 +798,7 @@ mod tests {
     #[test]
     fn test_no_typevar_in_simple_fn() {
         let hir =
-            type_check("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+            type_check("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
         for f in &hir.fns {
             assert!(
                 !f.ret.has_type_var(),
@@ -819,7 +821,7 @@ mod tests {
     #[test]
     fn test_no_typevar_in_struct_fields() {
         let hir = type_check(
-            "type Point\n    x: i64\n    y: i64\n\n*main() -> i32\n    p is Point(x is 1, y is 2)\n    log(p.x)\n    0\n",
+            "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 1, y is 2)\n    log(p.x)\n    0\n",
         );
         for td in &hir.types {
             for f in &td.fields {
@@ -837,7 +839,7 @@ mod tests {
     #[test]
     fn test_no_typevar_in_enum_variants() {
         let hir = type_check(
-            "enum Shape\n    Circle(f64)\n    Rect(f64, f64)\n\n*main() -> i32\n    s is Circle(3.14)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w)\n    0\n",
+            "enum Shape\n    Circle(f64)\n    Rect(f64, f64)\n\n*main() returns i32\n    s is Circle(3.14)\n    match s\n        Circle(r) ? log(r)\n        Rect(w, h) ? log(w)\n    0\n",
         );
         for ed in &hir.enums {
             for v in &ed.variants {
@@ -1065,7 +1067,7 @@ mod tests {
 
     #[test]
     fn test_strict_types_integration_annotated_fn() {
-        let src = "*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n";
+        let src = "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
         typer.set_strict_types(true);
@@ -1409,7 +1411,7 @@ mod tests {
 
     #[test]
     fn test_hof_apply_infers_fn_param() {
-        let src = "*add1(x: i64) -> i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(add1, 42))\n";
+        let src = "*add1(x as i64) returns i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(add1, 42))\n";
         let hir = type_check(src);
         let apply_fn = hir
             .fns
@@ -1427,7 +1429,7 @@ mod tests {
 
     #[test]
     fn test_hof_compose_infers_two_fn_params() {
-        let src = "*inc(x: i64) -> i64\n    x + 1\n*dbl(x: i64) -> i64\n    x * 2\n*compose(f, g, x)\n    f(g(x))\n*main()\n    log(compose(inc, dbl, 20))\n";
+        let src = "*inc(x as i64) returns i64\n    x + 1\n*dbl(x as i64) returns i64\n    x * 2\n*compose(f, g, x)\n    f(g(x))\n*main()\n    log(compose(inc, dbl, 20))\n";
         let hir = type_check(src);
         let compose_fn = hir
             .fns
@@ -1450,7 +1452,7 @@ mod tests {
 
     #[test]
     fn test_hof_apply_twice() {
-        let src = "*inc(x: i64) -> i64\n    x + 1\n*apply_twice(f, x)\n    f(f(x))\n*main()\n    log(apply_twice(inc, 40))\n";
+        let src = "*inc(x as i64) returns i64\n    x + 1\n*apply_twice(f, x)\n    f(f(x))\n*main()\n    log(apply_twice(inc, 40))\n";
         let hir = type_check(src);
         let at_fn = hir
             .fns
@@ -1463,7 +1465,7 @@ mod tests {
 
     #[test]
     fn test_hof_no_typevars_remain() {
-        let src = "*inc(x: i64) -> i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(inc, 42))\n";
+        let src = "*inc(x as i64) returns i64\n    x + 1\n*apply(f, x)\n    f(x)\n*main()\n    log(apply(inc, 42))\n";
         let hir = type_check(src);
         for f in &hir.fns {
             assert!(
@@ -1486,7 +1488,7 @@ mod tests {
 
     #[test]
     fn test_lambda_standalone_unannotated_param_integer() {
-        let src = "*main()\n    f is *fn(x) x + 1\n    log(f(5))\n";
+        let src = "*main()\n    f is |x| x + 1\n    log(f(5))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
         let hir = typer.lower_program(&prog).unwrap();
@@ -1504,7 +1506,7 @@ mod tests {
 
     #[test]
     fn test_lambda_standalone_unannotated_param_float() {
-        let src = "*main()\n    f is *fn(x) x + 1.0\n    log(f(2.5))\n";
+        let src = "*main()\n    f is |x| x + 1.0\n    log(f(2.5))\n";
         let prog = parse(src);
         let mut typer = Typer::new();
         let hir = typer.lower_program(&prog).unwrap();
@@ -1522,7 +1524,7 @@ mod tests {
 
     #[test]
     fn test_lambda_let_bound_then_called() {
-        let src = "*main()\n    f is *fn(x) x + 1\n    result is f(42)\n    log(result)\n";
+        let src = "*main()\n    f is |x| x + 1\n    result is f(42)\n    log(result)\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
         if let hir::Stmt::Bind(b) = &main.body[1] {
@@ -1533,7 +1535,7 @@ mod tests {
 
     #[test]
     fn test_lambda_passed_to_hof_infers_type() {
-        let src = "*apply(f: (i64) -> i64, x: i64) -> i64\n    f(x)\n*main()\n    log(apply(*fn(x) x + 1, 5))\n";
+        let src = "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n*main()\n    log(apply(|x| x + 1, 5))\n";
         let hir = type_check(src);
         let apply_fn = hir.fns.iter().find(|f| f.name == "apply").unwrap();
         assert_eq!(apply_fn.ret, Type::I64);
@@ -1584,7 +1586,7 @@ mod tests {
 
     #[test]
     fn test_cross_function_constraint_flow() {
-        let src = "*inc(x: i64) -> i64\n    x + 1\n*apply_inc(x)\n    inc(x)\n*main()\n    log(apply_inc(5))\n";
+        let src = "*inc(x as i64) returns i64\n    x + 1\n*apply_inc(x)\n    inc(x)\n*main()\n    log(apply_inc(5))\n";
         let hir = type_check(src);
         let apply_inc = hir
             .fns
@@ -1616,7 +1618,7 @@ mod tests {
 
     #[test]
     fn test_return_type_inference_no_annotation() {
-        let src = "*square(x: i64)\n    x * x\n*main()\n    log(square(5))\n";
+        let src = "*square(x as i64)\n    x * x\n*main()\n    log(square(5))\n";
         let hir = type_check(src);
         let square = hir.fns.iter().find(|f| f.name == "square").unwrap();
         assert_eq!(
@@ -1629,7 +1631,7 @@ mod tests {
     #[test]
     fn test_multipath_return_type_inference() {
         let src =
-            "*abs(x: i64)\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n";
+            "*abs(x as i64)\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n";
         let hir = type_check(src);
         let abs_fn = hir.fns.iter().find(|f| f.name == "abs").unwrap();
         assert_eq!(abs_fn.ret, Type::I64);
@@ -1655,7 +1657,7 @@ mod tests {
 
     #[test]
     fn test_nested_lambda_inference() {
-        let src = "*main()\n    f is *fn(x) *fn(y) x + y\n    g is f(10)\n    log(g(20))\n";
+        let src = "*main()\n    f is |x| |y| x + y\n    g is f(10)\n    log(g(20))\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
         if let hir::Stmt::Bind(b) = &main.body[0] {
@@ -1678,7 +1680,7 @@ mod tests {
 
     #[test]
     fn test_poly_multi_use_identity() {
-        let src = "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n";
+        let src = "*main()\n    id is |x| x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n";
         let hir = type_check(src);
         let main = &hir.fns[0];
         for stmt in &main.body {
@@ -1694,7 +1696,7 @@ mod tests {
 
     #[test]
     fn test_strict_vs_lenient_comparison() {
-        let src = "*double(x: i64) -> i64\n    x + x\n*main()\n    log(double(21))\n";
+        let src = "*double(x as i64) returns i64\n    x + x\n*main()\n    log(double(21))\n";
         let prog = parse(src);
 
         let mut typer_lenient = Typer::new();
@@ -1732,7 +1734,7 @@ mod tests {
 
     #[test]
     fn test_scheme_instantiation_with_container() {
-        let src = "*wrap(x: i64)\n    v is vec()\n    v.push(x)\n    v\n*main()\n    w is wrap(42)\n    log(w.len())\n";
+        let src = "*wrap(x as i64)\n    v is vec()\n    v.push(x)\n    v\n*main()\n    w is wrap(42)\n    log(w.len())\n";
         let hir = type_check(src);
         let wrap_fn = hir.fns.iter().find(|f| f.name == "wrap").unwrap();
         assert_eq!(wrap_fn.params[0].ty, Type::I64);
@@ -1758,7 +1760,7 @@ mod tests {
 
     #[test]
     fn test_value_restriction_syntactic_value() {
-        let src = "*main()\n    id is *fn(x) x\n    a is id(42)\n    b is id(\"hi\")\n    log(a)\n    log(b)\n";
+        let src = "*main()\n    id is |x| x\n    a is id(42)\n    b is id(\"hi\")\n    log(a)\n    log(b)\n";
         let prog = parse(src);
         let mut typer = Typer::new();
         let hir = typer.lower_program(&prog).unwrap();

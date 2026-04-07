@@ -1,0 +1,8 @@
+# std.volatile — Volatile memory operations
+# Wraps volatile builtins for module-qualified dispatch
+
+*write(ptr as %i64, val as i64)
+    volatile_store(ptr, val)
+
+*read(ptr as %i64) returns i64
+    volatile_load(ptr)

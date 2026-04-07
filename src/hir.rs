@@ -257,6 +257,7 @@ pub struct Bind {
     pub value: Expr,
     pub ty: Type,
     pub ownership: Ownership,
+    pub atomic: bool,
     pub span: Span,
 }
 

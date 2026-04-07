@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn test_function_params_no_errors() {
-        let diags = verify("*add(a: i64, b: i64) -> i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+        let diags = verify("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
         assert!(diags.is_empty());
     }
 }

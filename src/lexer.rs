@@ -43,12 +43,7 @@ pub enum Token {
     By,
     Array,
     Asm,
-    Unsafe,
-    Volatile,
-    Signal,
-    Weak,
     Extern,
-    Fn,
     Do,
     End,
     Log,
@@ -74,7 +69,6 @@ pub enum Token {
     Close,
     Select,
     Stop,
-    Timeout,
     Default,
     Sim,
     Supervisor,
@@ -86,7 +80,6 @@ pub enum Token {
     Deque,
     Grad,
     Einsum,
-    Contract,
     Build,
     Syscall,
     Plus,
@@ -108,7 +101,7 @@ pub enum Token {
     GtEq,
     Question,
     Bang,
-    Arrow,
+    BangBang,
     Dollar,
     LParen,
     RParen,
@@ -118,7 +111,6 @@ pub enum Token {
     Colon,
     StarStar,
     Dot,
-    Hash,
     Newline,
     Indent,
     Dedent,
@@ -180,12 +172,7 @@ impl std::fmt::Display for Token {
             Self::By => f.write_str("by"),
             Self::Array => f.write_str("array"),
             Self::Asm => f.write_str("asm"),
-            Self::Unsafe => f.write_str("unsafe"),
-            Self::Volatile => f.write_str("volatile"),
-            Self::Signal => f.write_str("signal"),
-            Self::Weak => f.write_str("weak"),
             Self::Extern => f.write_str("extern"),
-            Self::Fn => f.write_str("fn"),
             Self::Do => f.write_str("do"),
             Self::End => f.write_str("end"),
             Self::Log => f.write_str("log"),
@@ -218,8 +205,8 @@ impl std::fmt::Display for Token {
             Self::GtEq => f.write_str(">="),
             Self::Question => f.write_str("?"),
             Self::Bang => f.write_str("!"),
-            Self::StarStar => f.write_str("**"),
-            Self::Arrow => f.write_str("->"),
+            Self::BangBang => f.write_str("!!"),
+            Self::StarStar => f.write_str("pow"),
             Self::LParen => f.write_str("("),
             Self::RParen => f.write_str(")"),
             Self::LBracket => f.write_str("["),
@@ -227,7 +214,6 @@ impl std::fmt::Display for Token {
             Self::Comma => f.write_str(","),
             Self::Colon => f.write_str(":"),
             Self::Dot => f.write_str("."),
-            Self::Hash => f.write_str("#"),
             Self::Newline => f.write_str("NEWLINE"),
             Self::Indent => f.write_str("INDENT"),
             Self::Dedent => f.write_str("DEDENT"),
@@ -258,7 +244,6 @@ impl std::fmt::Display for Token {
             Self::Close => f.write_str("close"),
             Self::Select => f.write_str("select"),
             Self::Stop => f.write_str("stop"),
-            Self::Timeout => f.write_str("timeout"),
             Self::Default => f.write_str("default"),
             Self::Sim => f.write_str("sim"),
             Self::Supervisor => f.write_str("supervisor"),
@@ -270,7 +255,6 @@ impl std::fmt::Display for Token {
             Self::Deque => f.write_str("deque"),
             Self::Grad => f.write_str("grad"),
             Self::Einsum => f.write_str("einsum"),
-            Self::Contract => f.write_str("contract"),
             Self::Build => f.write_str("build"),
             Self::Syscall => f.write_str("syscall"),
         }
@@ -345,12 +329,7 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("by", Token::By),
         ("array", Token::Array),
         ("asm", Token::Asm),
-        ("unsafe", Token::Unsafe),
-        ("volatile", Token::Volatile),
-        ("signal", Token::Signal),
-        ("weak", Token::Weak),
         ("extern", Token::Extern),
-        ("fn", Token::Fn),
         ("do", Token::Do),
         ("end", Token::End),
         ("log", Token::Log),
@@ -376,7 +355,6 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("close", Token::Close),
         ("select", Token::Select),
         ("stop", Token::Stop),
-        ("timeout", Token::Timeout),
         ("default", Token::Default),
         ("sim", Token::Sim),
         ("supervisor", Token::Supervisor),
@@ -388,9 +366,9 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("deque", Token::Deque),
         ("grad", Token::Grad),
         ("einsum", Token::Einsum),
-        ("contract", Token::Contract),
         ("build", Token::Build),
         ("syscall", Token::Syscall),
+        ("pow", Token::StarStar),
         ("true", Token::True),
         ("false", Token::False),
         ("none", Token::None),
@@ -578,12 +556,10 @@ impl<'s> Lexer<'s> {
 
         if self.pos + 1 < self.src.len() {
             let two = match (ch, self.src[self.pos + 1]) {
-                (b'*', b'*') => Some(Token::StarStar),
                 (b'<', b'<') => Some(Token::Shl),
                 (b'>', b'>') => Some(Token::Shr),
                 (b'<', b'=') => Some(Token::LtEq),
                 (b'>', b'=') => Some(Token::GtEq),
-                (b'-', b'>') => Some(Token::Arrow),
                 (b'+', b'=') => Some(Token::PlusEq),
                 (b'-', b'=') => Some(Token::MinusEq),
                 (b'*', b'=') => Some(Token::StarEq),
@@ -617,7 +593,14 @@ impl<'s> Lexer<'s> {
             b'<' => Token::Lt,
             b'>' => Token::Gt,
             b'?' => Token::Question,
-            b'!' => Token::Bang,
+            b'!' => {
+                if self.pos + 1 < self.src.len() && self.src[self.pos + 1] == b'!' {
+                    self.advance();
+                    Token::BangBang
+                } else {
+                    Token::Bang
+                }
+            }
             b'(' => Token::LParen,
             b')' => Token::RParen,
             b'[' => Token::LBracket,
@@ -1102,13 +1085,11 @@ mod tests {
 
     #[test]
     fn two_char_ops() {
-        let t = lex("<< >> <= >= -> **");
+        let t = lex("<< >> <= >=");
         assert_eq!(t[0], Token::Shl);
         assert_eq!(t[1], Token::Shr);
         assert_eq!(t[2], Token::LtEq);
         assert_eq!(t[3], Token::GtEq);
-        assert_eq!(t[4], Token::Arrow);
-        assert_eq!(t[5], Token::StarStar);
     }
 
     #[test]
@@ -1162,7 +1143,7 @@ mod tests {
     #[test]
     fn all_keywords() {
         let t = lex(
-            "if elif else while for in loop break continue return match when type enum err pub use as from to by array unsafe extern fn do end log",
+            "if elif else while for in loop break continue return match when type enum err pub use as from to by array extern do end log",
         );
         let expected = [
             Token::If,
@@ -1187,9 +1168,7 @@ mod tests {
             Token::To,
             Token::By,
             Token::Array,
-            Token::Unsafe,
             Token::Extern,
-            Token::Fn,
             Token::Do,
             Token::End,
             Token::Log,

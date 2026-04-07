@@ -216,6 +216,29 @@ impl Typer {
                 })
             }
 
+            ast::Expr::QualifiedIdent(type_name, variant_name, span) => {
+                // Handle ErrorType:Variant or EnumType:Variant
+                if let Some(variants) = self.enums.get(type_name) {
+                    if let Some((tag, (_, _))) = variants.iter().enumerate()
+                        .find(|(_, (vn, _))| vn == variant_name)
+                    {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::VariantRef(type_name.clone(), variant_name.clone(), tag as u32),
+                            ty: Type::Enum(type_name.clone()),
+                            span: *span,
+                        });
+                    }
+                    return Err(format!(
+                        "line {}:{}: '{}' has no variant '{}'",
+                        span.line, span.col, type_name, variant_name
+                    ));
+                }
+                Err(format!(
+                    "line {}:{}: '{}' is not an error or enum type",
+                    span.line, span.col, type_name
+                ))
+            }
+
             ast::Expr::BinOp(lhs, op, rhs, span) => {
                 let hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
@@ -401,6 +424,21 @@ impl Typer {
             }
 
             ast::Expr::Method(obj, method, args, span) => {
+                // Module-qualified dispatch: module.fn(args) → fn(args)
+                // Only if the name is NOT a local variable (variables shadow modules)
+                if let ast::Expr::Ident(ref name, _) = **obj {
+                    if self.modules.contains(name) && self.find_var(name).is_none() {
+                        // Rewrite module.fn(args) to a direct function call
+                        let callee = ast::Expr::Ident(method.clone(), *span);
+                        let result = self.lower_call(&callee, args, *span)?;
+                        if let Some(exp) = expected {
+                            let _ = self
+                                .infer_ctx
+                                .unify_at(exp, &result.ty, *span, "call result");
+                        }
+                        return Ok(result);
+                    }
+                }
                 let result = self.lower_method_call(obj, method, args, *span)?;
                 if let Some(exp) = expected {
                     let _ = self
@@ -1117,7 +1155,7 @@ impl Typer {
                 // if it somehow reaches lower_expr, just lower the inner expression
                 self.lower_expr_expected(inner, expected)
             }
-            ast::Expr::Spread(inner, span) => {
+            ast::Expr::Spread(inner, _span) => {
                 // Spread lowered to the inner expression — actual spreading
                 // is handled by lower_call
                 self.lower_expr(inner)
@@ -1190,6 +1228,98 @@ impl Typer {
                 })
             }
             ast::Expr::OfCall(func, arg, span) => {
+                // Comptime reflection: `fields of X`, `size of X`, `type of X`
+                if let ast::Expr::Ident(name, _) = func.as_ref() {
+                    match name.as_str() {
+                        "fields" => {
+                            let type_name = match arg.as_ref() {
+                                ast::Expr::Ident(s, _) => s.clone(),
+                                ast::Expr::Str(s, _) => s.clone(),
+                                _ => return Err("fields of expects a type name".into()),
+                            };
+                            let fields = self.structs.get(&type_name).cloned().unwrap_or_default();
+                            let field_exprs: Vec<hir::Expr> = fields
+                                .iter()
+                                .map(|(fname, _)| hir::Expr {
+                                    kind: hir::ExprKind::Str(fname.clone()),
+                                    ty: Type::String,
+                                    span: *span,
+                                })
+                                .collect();
+                            let len = field_exprs.len();
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::Array(field_exprs),
+                                ty: Type::Array(Box::new(Type::String), len),
+                                span: *span,
+                            });
+                        }
+                        "size" => {
+                            let size = match arg.as_ref() {
+                                ast::Expr::Ident(s, _) | ast::Expr::Str(s, _) => {
+                                    if let Some(fields) = self.structs.get(s) {
+                                        fields.len() as i64 * 8
+                                    } else {
+                                        match s.as_str() {
+                                            "i8" | "u8" | "bool" => 1,
+                                            "i16" | "u16" => 2,
+                                            "i32" | "u32" | "f32" => 4,
+                                            "i64" | "u64" | "f64" => 8,
+                                            "String" | "string" | "str" => 24,
+                                            _ => 0,
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    let harg = self.lower_expr(arg)?;
+                                    match &harg.ty {
+                                        Type::I8 | Type::U8 | Type::Bool => 1,
+                                        Type::I16 | Type::U16 => 2,
+                                        Type::I32 | Type::U32 | Type::F32 => 4,
+                                        Type::I64 | Type::U64 | Type::F64 => 8,
+                                        Type::String => 24,
+                                        Type::Struct(sname, _) => {
+                                            self.structs.get(sname)
+                                                .map(|f| f.len() as i64 * 8)
+                                                .unwrap_or(8)
+                                        }
+                                        _ => 8,
+                                    }
+                                }
+                            };
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::Int(size),
+                                ty: Type::I64,
+                                span: *span,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                // `type of expr` — return type name as string
+                if let ast::Expr::Ident(name, _) = func.as_ref() {
+                    if name == "type" {
+                        // Try to resolve via variable info first (for bound variables)
+                        if let ast::Expr::Ident(vname, _) = arg.as_ref() {
+                            if let Some(ty) = self.find_var(vname).map(|i| i.ty.clone()) {
+                                let resolved = self.infer_ctx.resolve(&ty);
+                                let ty_str = format!("{}", resolved);
+                                return Ok(hir::Expr {
+                                    kind: hir::ExprKind::Str(ty_str),
+                                    ty: Type::String,
+                                    span: *span,
+                                });
+                            }
+                        }
+                        let harg = self.lower_expr(arg)?;
+                        let resolved = self.infer_ctx.resolve(&harg.ty);
+                        let ty_str = format!("{}", resolved);
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::Str(ty_str),
+                            ty: Type::String,
+                            span: *span,
+                        });
+                    }
+                }
                 // `foo of bar` desugars to `foo(bar)`
                 let hfunc = self.lower_expr(func)?;
                 let harg = self.lower_expr(arg)?;

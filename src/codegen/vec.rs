@@ -1378,36 +1378,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(out_hdr.into())
     }
 
-    pub(crate) fn drop_vec(
-        &mut self,
-        header_alloca: inkwell::values::PointerValue<'ctx>,
-    ) -> Result<(), String> {
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let header_ty = self.vec_header_type();
-        let free = self.ensure_free();
-        let fv = self.cur_fn.unwrap();
-        let null = ptr_ty.const_null();
-        let header_ptr =
-            b!(self.bld.build_load(ptr_ty, header_alloca, "dv.hdr")).into_pointer_value();
-        let is_null =
-            b!(self
-                .bld
-                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dv.null"));
-        let free_bb = self.ctx.append_basic_block(fv, "dv.free");
-        let done_bb = self.ctx.append_basic_block(fv, "dv.done");
-        b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
-        self.bld.position_at_end(free_bb);
-        let data_gep = b!(self
-            .bld
-            .build_struct_gep(header_ty, header_ptr, 0, "dv.data"));
-        let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dv.buf"));
-        b!(self.bld.build_call(free, &[data_ptr.into()], ""));
-        b!(self.bld.build_call(free, &[header_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(done_bb));
-        self.bld.position_at_end(done_bb);
-        Ok(())
-    }
-
     fn vec_join(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,

@@ -251,7 +251,7 @@ impl Typer {
             "__file_exists" if args.len() == 1 && !self.fns.contains_key(name) => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::FileExists, Type::Bool, span))
             }
-            "vec" if !self.fns.contains_key(name) => {
+            "vec" | "vector" if !self.fns.contains_key(name) => {
                 let hargs = match self.lower_exprs(args) {
                     Ok(v) => v,
                     Err(e) => return Some(Err(e)),
@@ -504,6 +504,24 @@ impl Typer {
                 }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::AtomicCas(Box::new(hptr), Box::new(hexpected), Box::new(hnew)),
+                    ty: Type::I64,
+                    span,
+                }))
+            }
+            "atomic_sub" if args.len() == 2 && !self.fns.contains_key(name) => {
+                let hptr = match self.lower_expr(&args[0]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                let hval = match self.lower_expr(&args[1]) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                if !matches!(hptr.ty, Type::Ptr(_)) {
+                    return Some(Err(format!("atomic_sub() first arg must be a pointer, got {}", hptr.ty)));
+                }
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::AtomicSub(Box::new(hptr), Box::new(hval)),
                     ty: Type::I64,
                     span,
                 }))

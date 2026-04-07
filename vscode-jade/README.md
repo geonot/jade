@@ -17,7 +17,7 @@ Syntax highlighting and language support for the [Jade programming language](htt
 - Control flow: `if`/`elif`/`else`, `while`, `for`/`in`/`to`/`by`, `loop`, `match`
 - Pattern matching with `?` arms
 - Pipeline operator `~`
-- Lambda expressions (`*fn(...)`)
+- Lambda expressions (`|params| body`)
 - Bindings with `is`
 - Built-in types: `i8`–`u64`, `f32`, `f64`, `bool`, `str`, `void`
 - Literals: integers (decimal, hex, binary, octal), floats, strings, raw strings
