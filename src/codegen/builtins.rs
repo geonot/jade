@@ -186,21 +186,17 @@ impl<'ctx> Compiler<'ctx> {
             | hir::BuiltinFn::AtomicCas
             | hir::BuiltinFn::CompTimeTypeOf
             | hir::BuiltinFn::CompTimeFieldsOf
-            | hir::BuiltinFn::CompTimeSizeOf => {
-                Err(format!("builtin {:?} should not appear in codegen", builtin))
-            }
-            hir::BuiltinFn::CharMethod(method) => {
-                self.compile_char_method(method, args)
-            }
-            hir::BuiltinFn::Matmul => {
-                self.compile_matmul(args)
-            }
-            hir::BuiltinFn::RegexMatch | hir::BuiltinFn::RegexFindAll => {
-                Err(format!("builtin {:?} should be lowered to string methods", builtin))
-            }
-            hir::BuiltinFn::ConstantTimeEq => {
-                self.compile_constant_time_eq(args)
-            }
+            | hir::BuiltinFn::CompTimeSizeOf => Err(format!(
+                "builtin {:?} should not appear in codegen",
+                builtin
+            )),
+            hir::BuiltinFn::CharMethod(method) => self.compile_char_method(method, args),
+            hir::BuiltinFn::Matmul => self.compile_matmul(args),
+            hir::BuiltinFn::RegexMatch | hir::BuiltinFn::RegexFindAll => Err(format!(
+                "builtin {:?} should be lowered to string methods",
+                builtin
+            )),
+            hir::BuiltinFn::ConstantTimeEq => self.compile_constant_time_eq(args),
             hir::BuiltinFn::VecWithAlloc | hir::BuiltinFn::MapWithAlloc => {
                 // Allocator-aware collection: allocate {ptr, len, cap, alloc_ptr}
                 // For now, create the collection normally and store the allocator ref
@@ -214,35 +210,40 @@ impl<'ctx> Compiler<'ctx> {
                     .basic()
                     .unwrap()
                     .into_pointer_value();
-                let memset = self.module.get_function("llvm.memset.p0.i64").unwrap_or_else(|| {
-                    self.module.add_function(
-                        "llvm.memset.p0.i64",
-                        self.ctx.void_type().fn_type(
-                            &[ptr_t.into(), self.ctx.i8_type().into(), i64t.into(), self.ctx.bool_type().into()],
-                            false,
-                        ),
-                        None,
-                    )
-                });
+                let memset = self
+                    .module
+                    .get_function("llvm.memset.p0.i64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.memset.p0.i64",
+                            self.ctx.void_type().fn_type(
+                                &[
+                                    ptr_t.into(),
+                                    self.ctx.i8_type().into(),
+                                    i64t.into(),
+                                    self.ctx.bool_type().into(),
+                                ],
+                                false,
+                            ),
+                            None,
+                        )
+                    });
                 b!(self.bld.build_call(
                     memset,
-                    &[ptr.into(), self.ctx.i8_type().const_zero().into(), size.into(), self.ctx.bool_type().const_zero().into()],
+                    &[
+                        ptr.into(),
+                        self.ctx.i8_type().const_zero().into(),
+                        size.into(),
+                        self.ctx.bool_type().const_zero().into()
+                    ],
                     "",
                 ));
                 Ok(ptr.into())
             }
-            hir::BuiltinFn::DequeNew => {
-                Err("DequeNew should be handled via ExprKind".into())
-            }
-            hir::BuiltinFn::GradFn => {
-                Err("GradFn not yet implemented in codegen".into())
-            }
-            hir::BuiltinFn::Einsum => {
-                Err("Einsum should be handled via ExprKind".into())
-            }
-            hir::BuiltinFn::CowWrap => {
-                Err("CowWrap should be handled via ExprKind".into())
-            }
+            hir::BuiltinFn::DequeNew => Err("DequeNew should be handled via ExprKind".into()),
+            hir::BuiltinFn::GradFn => Err("GradFn not yet implemented in codegen".into()),
+            hir::BuiltinFn::Einsum => Err("Einsum should be handled via ExprKind".into()),
+            hir::BuiltinFn::CowWrap => Err("CowWrap should be handled via ExprKind".into()),
             hir::BuiltinFn::Likely | hir::BuiltinFn::Unlikely => {
                 if args.len() != 1 {
                     return Err("likely/unlikely takes exactly 1 boolean argument".into());
@@ -250,14 +251,19 @@ impl<'ctx> Compiler<'ctx> {
                 let cond = self.compile_expr(&args[0])?;
                 let i1ty = self.ctx.bool_type();
                 let ft = i1ty.fn_type(&[i1ty.into(), i1ty.into()], false);
-                let expect_fn = self.module.get_function("llvm.expect.i1")
+                let expect_fn = self
+                    .module
+                    .get_function("llvm.expect.i1")
                     .unwrap_or_else(|| self.module.add_function("llvm.expect.i1", ft, None));
                 let expected = match builtin {
                     hir::BuiltinFn::Likely => i1ty.const_int(1, false),
                     _ => i1ty.const_int(0, false),
                 };
-                let result = b!(self.bld.build_call(expect_fn, &[cond.into(), expected.into()], "expect"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                let result =
+                    b!(self
+                        .bld
+                        .build_call(expect_fn, &[cond.into(), expected.into()], "expect"));
+                Ok(self.call_result(result))
             }
             hir::BuiltinFn::PoolNew => self.compile_pool_new(args),
             hir::BuiltinFn::PoolAlloc => self.compile_pool_alloc(args),
@@ -285,9 +291,12 @@ impl<'ctx> Compiler<'ctx> {
             let func = self
                 .module
                 .get_function("__jade_constant_time_eq")
-                .unwrap_or_else(|| self.module.add_function("__jade_constant_time_eq", fn_type, None));
+                .unwrap_or_else(|| {
+                    self.module
+                        .add_function("__jade_constant_time_eq", fn_type, None)
+                });
             let result = b!(self.bld.build_call(func, &[a.into(), b.into()], "ct.eq"));
-            Ok(result.try_as_basic_value().basic().unwrap())
+            Ok(self.call_result(result))
         } else {
             // Integer constant-time: XOR then compare to zero
             let i64t = self.ctx.i64_type();
@@ -304,10 +313,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_matmul(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    fn compile_matmul(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
         // matmul(A, B) — both are NDArray pointers of f64
         // For 2D: result[i][j] = sum_k A[i][k] * B[k][j]
         // Gets dims from the type. Falls back to runtime stub.
@@ -326,18 +332,39 @@ impl<'ctx> Compiler<'ctx> {
 
         if m == 0 || k1 == 0 || k1 != k2 || n == 0 {
             // Fallback: call runtime stub
-            let rt_fn = self.module.get_function("__jade_matmul").unwrap_or_else(|| {
-                let i64t = self.ctx.i64_type();
-                let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                let ft = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into(), i64t.into(), i64t.into(), i64t.into()], false);
-                self.module.add_function("__jade_matmul", ft, None)
-            });
+            let rt_fn = self
+                .module
+                .get_function("__jade_matmul")
+                .unwrap_or_else(|| {
+                    let i64t = self.ctx.i64_type();
+                    let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                    let ft = ptr_t.fn_type(
+                        &[
+                            ptr_t.into(),
+                            ptr_t.into(),
+                            i64t.into(),
+                            i64t.into(),
+                            i64t.into(),
+                        ],
+                        false,
+                    );
+                    self.module.add_function("__jade_matmul", ft, None)
+                });
             let i64t = self.ctx.i64_type();
             let result = b!(self.bld.build_call(
                 rt_fn,
-                &[a_ptr.into(), b_ptr.into(), i64t.const_int(0, false).into(), i64t.const_int(0, false).into(), i64t.const_int(0, false).into()],
+                &[
+                    a_ptr.into(),
+                    b_ptr.into(),
+                    i64t.const_int(0, false).into(),
+                    i64t.const_int(0, false).into(),
+                    i64t.const_int(0, false).into()
+                ],
                 "matmul.rt"
-            )).try_as_basic_value().basic().unwrap();
+            ))
+            .try_as_basic_value()
+            .basic()
+            .unwrap();
             return Ok(result);
         }
 
@@ -357,17 +384,25 @@ impl<'ctx> Compiler<'ctx> {
         .into_pointer_value();
 
         // Zero-initialize result
-        let memset = self.module.get_function("llvm.memset.p0.i64").unwrap_or_else(|| {
-            let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
-            self.module.add_function(
-                "llvm.memset.p0.i64",
-                self.ctx.void_type().fn_type(
-                    &[ptr_t.into(), self.ctx.i8_type().into(), i64t.into(), self.ctx.bool_type().into()],
-                    false,
-                ),
-                None,
-            )
-        });
+        let memset = self
+            .module
+            .get_function("llvm.memset.p0.i64")
+            .unwrap_or_else(|| {
+                let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                self.module.add_function(
+                    "llvm.memset.p0.i64",
+                    self.ctx.void_type().fn_type(
+                        &[
+                            ptr_t.into(),
+                            self.ctx.i8_type().into(),
+                            i64t.into(),
+                            self.ctx.bool_type().into(),
+                        ],
+                        false,
+                    ),
+                    None,
+                )
+            });
         b!(self.bld.build_call(
             memset,
             &[
@@ -384,7 +419,7 @@ impl<'ctx> Compiler<'ctx> {
         let k_val = k1 as u64;
         let n_val = n as u64;
 
-        let fn_val = self.cur_fn.unwrap();
+        let fn_val = self.current_fn();
         let outer_bb = self.ctx.append_basic_block(fn_val, "mm.i");
         let mid_bb = self.ctx.append_basic_block(fn_val, "mm.j");
         let inner_bb = self.ctx.append_basic_block(fn_val, "mm.k");
@@ -403,7 +438,12 @@ impl<'ctx> Compiler<'ctx> {
         // Outer loop: i
         self.bld.position_at_end(outer_bb);
         let i = b!(self.bld.build_load(i64t, i_ptr, "i")).into_int_value();
-        let i_cmp = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, i, i64t.const_int(m as u64, false), "i.cmp"));
+        let i_cmp = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            i,
+            i64t.const_int(m as u64, false),
+            "i.cmp"
+        ));
         b!(self.bld.build_conditional_branch(i_cmp, mid_bb, outer_end));
 
         // Mid loop: j
@@ -413,8 +453,15 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(inner_bb);
         let j = b!(self.bld.build_load(i64t, j_ptr, "j")).into_int_value();
-        let j_cmp = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, j, i64t.const_int(n_val, false), "j.cmp"));
-        b!(self.bld.build_conditional_branch(j_cmp, inner_body, mid_end));
+        let j_cmp = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            j,
+            i64t.const_int(n_val, false),
+            "j.cmp"
+        ));
+        b!(self
+            .bld
+            .build_conditional_branch(j_cmp, inner_body, mid_end));
 
         // Inner loop body: k
         self.bld.position_at_end(inner_body);
@@ -427,42 +474,63 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(k_loop);
         let k = b!(self.bld.build_load(i64t, k_ptr, "k")).into_int_value();
-        let k_cmp = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, k, i64t.const_int(k_val, false), "k.cmp"));
+        let k_cmp = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            k,
+            i64t.const_int(k_val, false),
+            "k.cmp"
+        ));
         b!(self.bld.build_conditional_branch(k_cmp, k_body, k_end));
 
         self.bld.position_at_end(k_body);
         let i2 = b!(self.bld.build_load(i64t, i_ptr, "i2")).into_int_value();
         let j2 = b!(self.bld.build_load(i64t, j_ptr, "j2")).into_int_value();
         // A[i*k1+k]
-        let a_idx = b!(self.bld.build_int_mul(i2, i64t.const_int(k_val, false), "a.row"));
+        let a_idx = b!(self
+            .bld
+            .build_int_mul(i2, i64t.const_int(k_val, false), "a.row"));
         let a_idx = b!(self.bld.build_int_add(a_idx, k, "a.idx"));
         let a_ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[a_idx.into()], "a.ep")) };
         let a_val = b!(self.bld.build_load(f64t, a_ep, "a.val")).into_float_value();
         // B[k*n+j]
-        let b_idx = b!(self.bld.build_int_mul(k, i64t.const_int(n_val, false), "b.row"));
+        let b_idx = b!(self
+            .bld
+            .build_int_mul(k, i64t.const_int(n_val, false), "b.row"));
         let b_idx = b!(self.bld.build_int_add(b_idx, j2, "b.idx"));
         let b_ep = unsafe { b!(self.bld.build_gep(f64t, b_ptr, &[b_idx.into()], "b.ep")) };
         let b_val = b!(self.bld.build_load(f64t, b_ep, "b.val")).into_float_value();
         // result[i*n+j] += a * b
-        let r_idx = b!(self.bld.build_int_mul(i2, i64t.const_int(n_val, false), "r.row"));
+        let r_idx = b!(self
+            .bld
+            .build_int_mul(i2, i64t.const_int(n_val, false), "r.row"));
         let r_idx = b!(self.bld.build_int_add(r_idx, j2, "r.idx"));
-        let r_ep = unsafe { b!(self.bld.build_gep(f64t, result_ptr, &[r_idx.into()], "r.ep")) };
+        let r_ep = unsafe {
+            b!(self
+                .bld
+                .build_gep(f64t, result_ptr, &[r_idx.into()], "r.ep"))
+        };
         let r_val = b!(self.bld.build_load(f64t, r_ep, "r.cur")).into_float_value();
         let prod = b!(self.bld.build_float_mul(a_val, b_val, "mm.prod"));
         let sum = b!(self.bld.build_float_add(r_val, prod, "mm.sum"));
         b!(self.bld.build_store(r_ep, sum));
 
-        let k_next = b!(self.bld.build_int_add(k, i64t.const_int(1, false), "k.next"));
+        let k_next = b!(self
+            .bld
+            .build_int_add(k, i64t.const_int(1, false), "k.next"));
         b!(self.bld.build_store(k_ptr, k_next));
         b!(self.bld.build_unconditional_branch(k_loop));
 
         self.bld.position_at_end(k_end);
-        let j_next = b!(self.bld.build_int_add(j, i64t.const_int(1, false), "j.next"));
+        let j_next = b!(self
+            .bld
+            .build_int_add(j, i64t.const_int(1, false), "j.next"));
         b!(self.bld.build_store(j_ptr, j_next));
         b!(self.bld.build_unconditional_branch(inner_bb));
 
         self.bld.position_at_end(mid_end);
-        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        let i_next = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "i.next"));
         b!(self.bld.build_store(i_ptr, i_next));
         b!(self.bld.build_unconditional_branch(outer_bb));
 
@@ -505,10 +573,7 @@ impl<'ctx> Compiler<'ctx> {
         Err(format!("unsupported einsum pattern: {notation}"))
     }
 
-    fn compile_einsum_dot(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    fn compile_einsum_dot(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
         let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
         let b_ptr = self.compile_expr(&args[1])?.into_pointer_value();
         let n = match &args[0].ty {
@@ -517,7 +582,7 @@ impl<'ctx> Compiler<'ctx> {
         };
         let i64t = self.ctx.i64_type();
         let f64t = self.ctx.f64_type();
-        let fn_val = self.cur_fn.unwrap();
+        let fn_val = self.current_fn();
 
         let acc = self.entry_alloca(f64t.into(), "dot.acc");
         b!(self.bld.build_store(acc, f64t.const_float(0.0)));
@@ -531,7 +596,12 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, i, i64t.const_int(n, false), "dot.cmp"));
+        let cmp = b!(self.bld.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64t.const_int(n, false),
+            "dot.cmp"
+        ));
         b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);
@@ -543,7 +613,9 @@ impl<'ctx> Compiler<'ctx> {
         let cur = b!(self.bld.build_load(f64t, acc, "dot.cur")).into_float_value();
         let sum = b!(self.bld.build_float_add(cur, prod, "dot.sum"));
         b!(self.bld.build_store(acc, sum));
-        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        let i_next = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "i.next"));
         b!(self.bld.build_store(iv, i_next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -551,10 +623,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(f64t, acc, "dot.result")))
     }
 
-    fn compile_einsum_trace(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    fn compile_einsum_trace(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
         let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
         let n = match &args[0].ty {
             Type::NDArray(_, dims) if dims.len() == 2 && dims[0] == dims[1] => dims[0] as u64,
@@ -562,7 +631,7 @@ impl<'ctx> Compiler<'ctx> {
         };
         let i64t = self.ctx.i64_type();
         let f64t = self.ctx.f64_type();
-        let fn_val = self.cur_fn.unwrap();
+        let fn_val = self.current_fn();
 
         let acc = self.entry_alloca(f64t.into(), "tr.acc");
         b!(self.bld.build_store(acc, f64t.const_float(0.0)));
@@ -576,19 +645,28 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(IntPredicate::ULT, i, i64t.const_int(n, false), "tr.cmp"));
+        let cmp = b!(self.bld.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64t.const_int(n, false),
+            "tr.cmp"
+        ));
         b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);
         // A[i*n + i]
-        let idx = b!(self.bld.build_int_mul(i, i64t.const_int(n, false), "tr.row"));
+        let idx = b!(self
+            .bld
+            .build_int_mul(i, i64t.const_int(n, false), "tr.row"));
         let idx = b!(self.bld.build_int_add(idx, i, "tr.diag"));
         let ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[idx], "tr.ep")) };
         let val = b!(self.bld.build_load(f64t, ep, "tr.v")).into_float_value();
         let cur = b!(self.bld.build_load(f64t, acc, "tr.cur")).into_float_value();
         let sum = b!(self.bld.build_float_add(cur, val, "tr.sum"));
         b!(self.bld.build_store(acc, sum));
-        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        let i_next = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "i.next"));
         b!(self.bld.build_store(iv, i_next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -612,9 +690,12 @@ impl<'ctx> Compiler<'ctx> {
         let total = m * n;
         let byte_size = i64t.const_int(total * 8, false);
         let result_ptr = b!(self.bld.build_call(malloc, &[byte_size.into()], "tp.ptr"))
-            .try_as_basic_value().basic().unwrap().into_pointer_value();
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
 
-        let fn_val = self.cur_fn.unwrap();
+        let fn_val = self.current_fn();
         let iv = self.entry_alloca(i64t.into(), "tp.i");
         let jv = self.entry_alloca(i64t.into(), "tp.j");
         b!(self.bld.build_store(iv, i64t.const_zero()));
@@ -628,7 +709,12 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(i_loop);
         let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
-        let cmp_i = b!(self.bld.build_int_compare(IntPredicate::ULT, i, i64t.const_int(m, false), "tp.icmp"));
+        let cmp_i = b!(self.bld.build_int_compare(
+            IntPredicate::ULT,
+            i,
+            i64t.const_int(m, false),
+            "tp.icmp"
+        ));
         b!(self.bld.build_conditional_branch(cmp_i, j_loop, i_end));
 
         self.bld.position_at_end(j_loop);
@@ -638,7 +724,12 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(j_loop2);
         let j = b!(self.bld.build_load(i64t, jv, "j")).into_int_value();
-        let cmp_j = b!(self.bld.build_int_compare(IntPredicate::ULT, j, i64t.const_int(n, false), "tp.jcmp"));
+        let cmp_j = b!(self.bld.build_int_compare(
+            IntPredicate::ULT,
+            j,
+            i64t.const_int(n, false),
+            "tp.jcmp"
+        ));
         b!(self.bld.build_conditional_branch(cmp_j, body, j_end));
 
         self.bld.position_at_end(body);
@@ -652,12 +743,16 @@ impl<'ctx> Compiler<'ctx> {
         let dst_ep = unsafe { b!(self.bld.build_gep(f64t, result_ptr, &[dst_idx], "d.ep")) };
         b!(self.bld.build_store(dst_ep, val));
 
-        let j_next = b!(self.bld.build_int_add(j, i64t.const_int(1, false), "j.next"));
+        let j_next = b!(self
+            .bld
+            .build_int_add(j, i64t.const_int(1, false), "j.next"));
         b!(self.bld.build_store(jv, j_next));
         b!(self.bld.build_unconditional_branch(j_loop2));
 
         self.bld.position_at_end(j_end);
-        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "i.next"));
+        let i_next = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "i.next"));
         b!(self.bld.build_store(iv, i_next));
         b!(self.bld.build_unconditional_branch(i_loop));
 
@@ -826,7 +921,7 @@ impl<'ctx> Compiler<'ctx> {
         rhs: inkwell::values::IntValue<'ctx>,
         signed: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let bw = lhs.get_type().get_bit_width();
         let it = lhs.get_type();
         let intrinsic = if signed {
@@ -931,7 +1026,11 @@ impl<'ctx> Compiler<'ctx> {
         let signum = self.compile_expr(&args[0])?;
         let handler = self.compile_expr(&args[1])?;
         let signal_fn = self.ensure_signal();
-        let sig32 = b!(self.bld.build_int_truncate(signum.into_int_value(), self.ctx.i32_type(), "sig.trunc"));
+        let sig32 = b!(self.bld.build_int_truncate(
+            signum.into_int_value(),
+            self.ctx.i32_type(),
+            "sig.trunc"
+        ));
         b!(self
             .bld
             .build_call(signal_fn, &[sig32.into(), handler.into()], "sig"));
@@ -941,7 +1040,11 @@ impl<'ctx> Compiler<'ctx> {
     fn compile_signal_raise(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
         let signum = self.compile_expr(&args[0])?;
         let raise_fn = self.ensure_raise();
-        let sig32 = b!(self.bld.build_int_truncate(signum.into_int_value(), self.ctx.i32_type(), "sig.trunc"));
+        let sig32 = b!(self.bld.build_int_truncate(
+            signum.into_int_value(),
+            self.ctx.i32_type(),
+            "sig.trunc"
+        ));
         Ok(b!(self.bld.build_call(raise_fn, &[sig32.into()], "raise"))
             .try_as_basic_value()
             .basic()
@@ -954,7 +1057,11 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let signum = self.compile_expr(&args[0])?;
         let signal_fn = self.ensure_signal();
-        let sig32 = b!(self.bld.build_int_truncate(signum.into_int_value(), self.ctx.i32_type(), "sig.trunc"));
+        let sig32 = b!(self.bld.build_int_truncate(
+            signum.into_int_value(),
+            self.ctx.i32_type(),
+            "sig.trunc"
+        ));
         let sig_ign = self
             .bld
             .build_int_to_ptr(
@@ -971,7 +1078,7 @@ impl<'ctx> Compiler<'ctx> {
 
     fn compile_assert(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {
         let cond_expr = &args[0];
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let cond_val = self.compile_expr(cond_expr)?;
         let cond = self.to_bool(cond_val);
 
@@ -1055,89 +1162,214 @@ impl<'ctx> Compiler<'ctx> {
         match method {
             // Single-argument LLVM intrinsics
             "sqrt" => {
-                let f = self.module.get_function("llvm.sqrt.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.sqrt.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "sqrt")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.sqrt.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.sqrt.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "sqrt"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "abs" => {
-                let f = self.module.get_function("llvm.fabs.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.fabs.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "abs")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.fabs.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.fabs.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "abs"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "floor" => {
-                let f = self.module.get_function("llvm.floor.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.floor.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "floor")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.floor.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.floor.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "floor"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "ceil" => {
-                let f = self.module.get_function("llvm.ceil.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.ceil.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "ceil")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.ceil.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.ceil.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "ceil"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "round" => {
-                let f = self.module.get_function("llvm.round.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.round.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "round")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.round.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.round.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "round"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "trunc" => {
-                let f = self.module.get_function("llvm.trunc.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.trunc.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "trunc")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.trunc.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.trunc.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "trunc"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             // Trig via libm
             "sin" => {
                 let f = self.module.get_function("llvm.sin.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.sin.f64", f64t.fn_type(&[f64t.into()], false), None)
+                    self.module.add_function(
+                        "llvm.sin.f64",
+                        f64t.fn_type(&[f64t.into()], false),
+                        None,
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "sin")).try_as_basic_value().basic().unwrap())
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "sin"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "cos" => {
                 let f = self.module.get_function("llvm.cos.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.cos.f64", f64t.fn_type(&[f64t.into()], false), None)
+                    self.module.add_function(
+                        "llvm.cos.f64",
+                        f64t.fn_type(&[f64t.into()], false),
+                        None,
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "cos")).try_as_basic_value().basic().unwrap())
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "cos"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "cbrt" => {
                 let f = self.module.get_function(method).unwrap_or_else(|| {
-                    self.module.add_function(method, f64t.fn_type(&[f64t.into()], false), Some(Linkage::External))
+                    self.module.add_function(
+                        method,
+                        f64t.fn_type(&[f64t.into()], false),
+                        Some(Linkage::External),
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], method)).try_as_basic_value().basic().unwrap())
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], method))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "exp" => {
                 let f = self.module.get_function("llvm.exp.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.exp.f64", f64t.fn_type(&[f64t.into()], false), None)
+                    self.module.add_function(
+                        "llvm.exp.f64",
+                        f64t.fn_type(&[f64t.into()], false),
+                        None,
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp")).try_as_basic_value().basic().unwrap())
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "exp2" => {
-                let f = self.module.get_function("llvm.exp2.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.exp2.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp2")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.exp2.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.exp2.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp2"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "ln" => {
                 let f = self.module.get_function("llvm.log.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.log.f64", f64t.fn_type(&[f64t.into()], false), None)
+                    self.module.add_function(
+                        "llvm.log.f64",
+                        f64t.fn_type(&[f64t.into()], false),
+                        None,
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "ln")).try_as_basic_value().basic().unwrap())
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "ln"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "log2" => {
-                let f = self.module.get_function("llvm.log2.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.log2.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "log2")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.log2.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.log2.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "log2"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "log10" => {
-                let f = self.module.get_function("llvm.log10.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.log10.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into()], "log10")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.log10.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.log10.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self.bld.build_call(f, &[receiver.into()], "log10"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap())
             }
             "recip" => {
                 let one = f64t.const_float(1.0);
@@ -1148,98 +1380,246 @@ impl<'ctx> Compiler<'ctx> {
                 let zero = f64t.const_float(0.0);
                 let neg_one = f64t.const_float(-1.0);
                 let pos_one = f64t.const_float(1.0);
-                let is_pos = b!(self.bld.build_float_compare(inkwell::FloatPredicate::OGT, receiver, zero, "pos"));
-                let is_neg = b!(self.bld.build_float_compare(inkwell::FloatPredicate::OLT, receiver, zero, "neg"));
+                let is_pos = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::OGT,
+                    receiver,
+                    zero,
+                    "pos"
+                ));
+                let is_neg = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::OLT,
+                    receiver,
+                    zero,
+                    "neg"
+                ));
                 let sel1 = b!(self.bld.build_select(
                     is_neg,
                     BasicValueEnum::FloatValue(neg_one),
                     BasicValueEnum::FloatValue(zero),
                     "s1",
                 ))
-                    .into_float_value();
-                Ok(b!(self.bld.build_select(is_pos, BasicValueEnum::FloatValue(pos_one), BasicValueEnum::FloatValue(sel1), "signum")).into())
+                .into_float_value();
+                Ok(b!(self.bld.build_select(
+                    is_pos,
+                    BasicValueEnum::FloatValue(pos_one),
+                    BasicValueEnum::FloatValue(sel1),
+                    "signum"
+                ))
+                .into())
             }
             // Two-argument methods
             "pow" => {
-                if args.len() < 2 { return Err("pow() requires 1 argument".into()); }
+                if args.len() < 2 {
+                    return Err("pow() requires 1 argument".into());
+                }
                 let exp = self.compile_expr(&args[1])?.into_float_value();
                 let f = self.module.get_function("llvm.pow.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.pow.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
+                    self.module.add_function(
+                        "llvm.pow.f64",
+                        f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                        None,
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into(), exp.into()], "pow")).try_as_basic_value().basic().unwrap())
+                Ok(b!(self
+                    .bld
+                    .build_call(f, &[receiver.into(), exp.into()], "pow"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap())
             }
             "atan2" => {
-                if args.len() < 2 { return Err("atan2() requires 1 argument".into()); }
+                if args.len() < 2 {
+                    return Err("atan2() requires 1 argument".into());
+                }
                 let other = self.compile_expr(&args[1])?.into_float_value();
                 let f = self.module.get_function("atan2").unwrap_or_else(|| {
-                    self.module.add_function("atan2", f64t.fn_type(&[f64t.into(), f64t.into()], false), Some(Linkage::External))
+                    self.module.add_function(
+                        "atan2",
+                        f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                        Some(Linkage::External),
+                    )
                 });
-                Ok(b!(self.bld.build_call(f, &[receiver.into(), other.into()], "atan2")).try_as_basic_value().basic().unwrap())
+                Ok(b!(self
+                    .bld
+                    .build_call(f, &[receiver.into(), other.into()], "atan2"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap())
             }
             "copysign" => {
-                if args.len() < 2 { return Err("copysign() requires 1 argument".into()); }
+                if args.len() < 2 {
+                    return Err("copysign() requires 1 argument".into());
+                }
                 let sign = self.compile_expr(&args[1])?.into_float_value();
-                let f = self.module.get_function("llvm.copysign.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.copysign.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into(), sign.into()], "copysign")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.copysign.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.copysign.f64",
+                            f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self
+                    .bld
+                    .build_call(f, &[receiver.into(), sign.into()], "copysign"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap())
             }
             "min" => {
-                if args.len() < 2 { return Err("min() requires 1 argument".into()); }
+                if args.len() < 2 {
+                    return Err("min() requires 1 argument".into());
+                }
                 let other = self.compile_expr(&args[1])?.into_float_value();
-                let f = self.module.get_function("llvm.minnum.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.minnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into(), other.into()], "fmin")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.minnum.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.minnum.f64",
+                            f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self
+                    .bld
+                    .build_call(f, &[receiver.into(), other.into()], "fmin"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap())
             }
             "max" => {
-                if args.len() < 2 { return Err("max() requires 1 argument".into()); }
+                if args.len() < 2 {
+                    return Err("max() requires 1 argument".into());
+                }
                 let other = self.compile_expr(&args[1])?.into_float_value();
-                let f = self.module.get_function("llvm.maxnum.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.maxnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
-                });
-                Ok(b!(self.bld.build_call(f, &[receiver.into(), other.into()], "fmax")).try_as_basic_value().basic().unwrap())
+                let f = self
+                    .module
+                    .get_function("llvm.maxnum.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.maxnum.f64",
+                            f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                            None,
+                        )
+                    });
+                Ok(b!(self
+                    .bld
+                    .build_call(f, &[receiver.into(), other.into()], "fmax"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap())
             }
             // Boolean predicates
             "is_nan" => {
-                let result = b!(self.bld.build_float_compare(inkwell::FloatPredicate::UNO, receiver, receiver, "isnan"));
+                let result = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::UNO,
+                    receiver,
+                    receiver,
+                    "isnan"
+                ));
                 Ok(result.into())
             }
             "is_infinite" => {
-                let abs_f = self.module.get_function("llvm.fabs.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.fabs.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs")).try_as_basic_value().basic().unwrap().into_float_value();
+                let abs_f = self
+                    .module
+                    .get_function("llvm.fabs.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.fabs.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap()
+                    .into_float_value();
                 let inf = f64t.const_float(f64::INFINITY);
-                let result = b!(self.bld.build_float_compare(inkwell::FloatPredicate::OEQ, abs_val, inf, "isinf"));
+                let result = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::OEQ,
+                    abs_val,
+                    inf,
+                    "isinf"
+                ));
                 Ok(result.into())
             }
             "is_finite" => {
-                let abs_f = self.module.get_function("llvm.fabs.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.fabs.f64", f64t.fn_type(&[f64t.into()], false), None)
-                });
-                let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs")).try_as_basic_value().basic().unwrap().into_float_value();
+                let abs_f = self
+                    .module
+                    .get_function("llvm.fabs.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.fabs.f64",
+                            f64t.fn_type(&[f64t.into()], false),
+                            None,
+                        )
+                    });
+                let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap()
+                    .into_float_value();
                 let inf = f64t.const_float(f64::INFINITY);
-                let not_inf = b!(self.bld.build_float_compare(inkwell::FloatPredicate::ONE, abs_val, inf, "notinf"));
-                let not_nan = b!(self.bld.build_float_compare(inkwell::FloatPredicate::ORD, receiver, receiver, "notnan"));
+                let not_inf = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::ONE,
+                    abs_val,
+                    inf,
+                    "notinf"
+                ));
+                let not_nan = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::ORD,
+                    receiver,
+                    receiver,
+                    "notnan"
+                ));
                 Ok(b!(self.bld.build_and(not_inf, not_nan, "isfinite")).into())
             }
             "clamp" => {
-                if args.len() < 3 { return Err("clamp() takes 2 arguments (lo, hi)".into()); }
+                if args.len() < 3 {
+                    return Err("clamp() takes 2 arguments (lo, hi)".into());
+                }
                 let lo = self.compile_expr(&args[1])?.into_float_value();
                 let hi = self.compile_expr(&args[2])?.into_float_value();
-                let min_f = self.module.get_function("llvm.minnum.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.minnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
-                });
-                let max_f = self.module.get_function("llvm.maxnum.f64").unwrap_or_else(|| {
-                    self.module.add_function("llvm.maxnum.f64", f64t.fn_type(&[f64t.into(), f64t.into()], false), None)
-                });
-                let min_val = b!(self.bld.build_call(min_f, &[receiver.into(), hi.into()], "clamp.min")).try_as_basic_value().basic().unwrap().into_float_value();
-                Ok(b!(self.bld.build_call(max_f, &[min_val.into(), lo.into()], "clamp.max")).try_as_basic_value().basic().unwrap())
+                let min_f = self
+                    .module
+                    .get_function("llvm.minnum.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.minnum.f64",
+                            f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                            None,
+                        )
+                    });
+                let max_f = self
+                    .module
+                    .get_function("llvm.maxnum.f64")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "llvm.maxnum.f64",
+                            f64t.fn_type(&[f64t.into(), f64t.into()], false),
+                            None,
+                        )
+                    });
+                let min_val =
+                    b!(self
+                        .bld
+                        .build_call(min_f, &[receiver.into(), hi.into()], "clamp.min"))
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap()
+                    .into_float_value();
+                Ok(b!(self
+                    .bld
+                    .build_call(max_f, &[min_val.into(), lo.into()], "clamp.max"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap())
             }
-            "to_int" => {
-                Ok(b!(self.bld.build_float_to_signed_int(receiver, i64t, "ftoi")).into())
-            }
+            "to_int" => Ok(b!(self.bld.build_float_to_signed_int(receiver, i64t, "ftoi")).into()),
             _ => Err(format!("unknown float method '{method}'")),
         }
     }
@@ -1297,14 +1677,16 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
-        let argc_g = self
-            .module
-            .get_global("__jade_argc")
-            .ok_or("__jade_argc global not found")?;
-        let argv_g = self
-            .module
-            .get_global("__jade_argv")
-            .ok_or("__jade_argv global not found")?;
+        let argc_g = self.module.get_global("__jade_argc").unwrap_or_else(|| {
+            let g = self.module.add_global(i32t, None, "__jade_argc");
+            g.set_initializer(&i32t.const_int(0, false));
+            g
+        });
+        let argv_g = self.module.get_global("__jade_argv").unwrap_or_else(|| {
+            let g = self.module.add_global(ptr_ty, None, "__jade_argv");
+            g.set_initializer(&ptr_ty.const_null());
+            g
+        });
         let argc =
             b!(self.bld.build_load(i32t, argc_g.as_pointer_value(), "argc")).into_int_value();
         let argc64 = b!(self.bld.build_int_s_extend(argc, i64t, "argc64"));
@@ -1318,7 +1700,7 @@ impl<'ctx> Compiler<'ctx> {
         let st = self.string_type();
         let str_size: u64 = 24;
 
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let loop_bb = self.ctx.append_basic_block(fv, "args.loop");
         let body_bb = self.ctx.append_basic_block(fv, "args.body");
         let done_bb = self.ctx.append_basic_block(fv, "args.done");
@@ -1446,13 +1828,11 @@ impl<'ctx> Compiler<'ctx> {
         }
         let cap = self.compile_expr(&args[0])?.into_int_value();
         let malloc = self.ensure_malloc();
-        let base = b!(self
-            .bld
-            .build_call(malloc, &[cap.into()], "arena.buf"))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_pointer_value();
+        let base = b!(self.bld.build_call(malloc, &[cap.into()], "arena.buf"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
 
         let arena_ty = self.arena_type();
         let ptr = self.entry_alloca(arena_ty.into(), "arena");
@@ -1493,25 +1873,18 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
         let off_gep = b!(self.bld.build_struct_gep(arena_ty, spill, 2, "a.off.p"));
-        let offset = b!(self
-            .bld
-            .build_load(self.ctx.i64_type(), off_gep, "a.off"))
-        .into_int_value();
+        let offset =
+            b!(self.bld.build_load(self.ctx.i64_type(), off_gep, "a.off")).into_int_value();
 
         // result = base + offset
         let result = unsafe {
-            b!(self.bld.build_gep(
-                self.ctx.i8_type(),
-                base,
-                &[offset],
-                "arena.ptr"
-            ))
+            b!(self
+                .bld
+                .build_gep(self.ctx.i8_type(), base, &[offset], "arena.ptr"))
         };
 
         // new_offset = offset + nbytes
-        let new_off = b!(self
-            .bld
-            .build_int_add(offset, nbytes, "arena.new_off"));
+        let new_off = b!(self.bld.build_int_add(offset, nbytes, "arena.new_off"));
         b!(self.bld.build_store(off_gep, new_off));
 
         // Write back to original variable if possible
@@ -1556,9 +1929,14 @@ impl<'ctx> Compiler<'ctx> {
 
     // ── Pool allocator builtins ─────────────────────────────────────
 
-    fn ensure_pool_fn(&self, name: &str, fn_type: inkwell::types::FunctionType<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+    fn ensure_pool_fn(
+        &self,
+        name: &str,
+        fn_type: inkwell::types::FunctionType<'ctx>,
+    ) -> inkwell::values::FunctionValue<'ctx> {
         self.module.get_function(name).unwrap_or_else(|| {
-            self.module.add_function(name, fn_type, Some(Linkage::External))
+            self.module
+                .add_function(name, fn_type, Some(Linkage::External))
         })
     }
 
@@ -1575,8 +1953,10 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let ft = ptr_t.fn_type(&[i64t.into(), i64t.into()], false);
         let func = self.ensure_pool_fn("jade_pool_create", ft);
-        let result = b!(self.bld.build_call(func, &[obj_size.into(), count.into()], "pool.new"));
-        Ok(result.try_as_basic_value().basic().unwrap())
+        let result = b!(self
+            .bld
+            .build_call(func, &[obj_size.into(), count.into()], "pool.new"));
+        Ok(self.call_result(result))
     }
 
     pub(crate) fn compile_pool_alloc(
@@ -1591,7 +1971,7 @@ impl<'ctx> Compiler<'ctx> {
         let ft = ptr_t.fn_type(&[ptr_t.into()], false);
         let func = self.ensure_pool_fn("jade_pool_alloc", ft);
         let result = b!(self.bld.build_call(func, &[pool_ptr.into()], "pool.alloc"));
-        Ok(result.try_as_basic_value().basic().unwrap())
+        Ok(self.call_result(result))
     }
 
     pub(crate) fn compile_pool_free(
@@ -1607,7 +1987,9 @@ impl<'ctx> Compiler<'ctx> {
         let void_t = self.ctx.void_type();
         let ft = void_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
         let func = self.ensure_pool_fn("jade_pool_free", ft);
-        b!(self.bld.build_call(func, &[pool_ptr.into(), obj_ptr.into()], ""));
+        b!(self
+            .bld
+            .build_call(func, &[pool_ptr.into(), obj_ptr.into()], ""));
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
@@ -1641,10 +2023,16 @@ impl<'ctx> Compiler<'ctx> {
             "is_digit" => {
                 // 0x30..=0x39 ('0'..='9')
                 let ge = b!(self.bld.build_int_compare(
-                    IntPredicate::SGE, char_val, i64t.const_int(0x30, false), "ch.ge0"
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x30, false),
+                    "ch.ge0"
                 ));
                 let le = b!(self.bld.build_int_compare(
-                    IntPredicate::SLE, char_val, i64t.const_int(0x39, false), "ch.le9"
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x39, false),
+                    "ch.le9"
                 ));
                 let result = b!(self.bld.build_and(ge, le, "ch.isdigit"));
                 Ok(result.into())
@@ -1652,17 +2040,29 @@ impl<'ctx> Compiler<'ctx> {
             "is_alpha" => {
                 // A-Z (0x41..=0x5A) or a-z (0x61..=0x7A)
                 let ge_a = b!(self.bld.build_int_compare(
-                    IntPredicate::SGE, char_val, i64t.const_int(0x41, false), "ch.geA"
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x41, false),
+                    "ch.geA"
                 ));
                 let le_z = b!(self.bld.build_int_compare(
-                    IntPredicate::SLE, char_val, i64t.const_int(0x5A, false), "ch.leZ"
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x5A, false),
+                    "ch.leZ"
                 ));
                 let upper = b!(self.bld.build_and(ge_a, le_z, "ch.isupper"));
                 let ge_la = b!(self.bld.build_int_compare(
-                    IntPredicate::SGE, char_val, i64t.const_int(0x61, false), "ch.gea"
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x61, false),
+                    "ch.gea"
                 ));
                 let le_lz = b!(self.bld.build_int_compare(
-                    IntPredicate::SLE, char_val, i64t.const_int(0x7A, false), "ch.lez"
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x7A, false),
+                    "ch.lez"
                 ));
                 let lower = b!(self.bld.build_and(ge_la, le_lz, "ch.islower"));
                 let result = b!(self.bld.build_or(upper, lower, "ch.isalpha"));
@@ -1670,54 +2070,156 @@ impl<'ctx> Compiler<'ctx> {
             }
             "is_alphanumeric" => {
                 // Combination of is_alpha and is_digit
-                let ge_0 = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x30, false), "ch.ge0"));
-                let le_9 = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x39, false), "ch.le9"));
+                let ge_0 = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x30, false),
+                    "ch.ge0"
+                ));
+                let le_9 = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x39, false),
+                    "ch.le9"
+                ));
                 let digit = b!(self.bld.build_and(ge_0, le_9, "ch.dig"));
-                let ge_a = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x41, false), "ch.geA"));
-                let le_z = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x5A, false), "ch.leZ"));
+                let ge_a = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x41, false),
+                    "ch.geA"
+                ));
+                let le_z = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x5A, false),
+                    "ch.leZ"
+                ));
                 let upper = b!(self.bld.build_and(ge_a, le_z, "ch.up"));
-                let ge_la = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x61, false), "ch.gea"));
-                let le_lz = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x7A, false), "ch.lez"));
+                let ge_la = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x61, false),
+                    "ch.gea"
+                ));
+                let le_lz = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x7A, false),
+                    "ch.lez"
+                ));
                 let lower = b!(self.bld.build_and(ge_la, le_lz, "ch.lo"));
                 let alpha = b!(self.bld.build_or(upper, lower, "ch.al"));
                 let result = b!(self.bld.build_or(digit, alpha, "ch.alnum"));
                 Ok(result.into())
             }
             "is_upper" => {
-                let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x41, false), "ch.geA"));
-                let le = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x5A, false), "ch.leZ"));
+                let ge = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x41, false),
+                    "ch.geA"
+                ));
+                let le = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x5A, false),
+                    "ch.leZ"
+                ));
                 Ok(b!(self.bld.build_and(ge, le, "ch.isupper")).into())
             }
             "is_lower" => {
-                let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x61, false), "ch.gea"));
-                let le = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x7A, false), "ch.lez"));
+                let ge = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x61, false),
+                    "ch.gea"
+                ));
+                let le = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x7A, false),
+                    "ch.lez"
+                ));
                 Ok(b!(self.bld.build_and(ge, le, "ch.islower")).into())
             }
             "is_whitespace" => {
                 // space(0x20), tab(0x09), newline(0x0A), carriage return(0x0D)
-                let is_sp = b!(self.bld.build_int_compare(IntPredicate::EQ, char_val, i64t.const_int(0x20, false), "ch.sp"));
-                let is_tab = b!(self.bld.build_int_compare(IntPredicate::EQ, char_val, i64t.const_int(0x09, false), "ch.tab"));
-                let is_nl = b!(self.bld.build_int_compare(IntPredicate::EQ, char_val, i64t.const_int(0x0A, false), "ch.nl"));
-                let is_cr = b!(self.bld.build_int_compare(IntPredicate::EQ, char_val, i64t.const_int(0x0D, false), "ch.cr"));
+                let is_sp = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    char_val,
+                    i64t.const_int(0x20, false),
+                    "ch.sp"
+                ));
+                let is_tab = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    char_val,
+                    i64t.const_int(0x09, false),
+                    "ch.tab"
+                ));
+                let is_nl = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    char_val,
+                    i64t.const_int(0x0A, false),
+                    "ch.nl"
+                ));
+                let is_cr = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    char_val,
+                    i64t.const_int(0x0D, false),
+                    "ch.cr"
+                ));
                 let t1 = b!(self.bld.build_or(is_sp, is_tab, "ch.ws1"));
                 let t2 = b!(self.bld.build_or(is_nl, is_cr, "ch.ws2"));
                 Ok(b!(self.bld.build_or(t1, t2, "ch.isws")).into())
             }
             "to_upper" => {
                 // If lowercase (0x61..=0x7A), subtract 0x20
-                let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x61, false), "ch.gea"));
-                let le = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x7A, false), "ch.lez"));
+                let ge = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x61, false),
+                    "ch.gea"
+                ));
+                let le = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x7A, false),
+                    "ch.lez"
+                ));
                 let is_lower = b!(self.bld.build_and(ge, le, "ch.islo"));
-                let upper = b!(self.bld.build_int_nsw_sub(char_val, i64t.const_int(0x20, false), "ch.toU"));
-                Ok(b!(self.bld.build_select(is_lower, upper, char_val, "ch.toupper")).into())
+                let upper =
+                    b!(self
+                        .bld
+                        .build_int_nsw_sub(char_val, i64t.const_int(0x20, false), "ch.toU"));
+                Ok(b!(self
+                    .bld
+                    .build_select(is_lower, upper, char_val, "ch.toupper"))
+                .into())
             }
             "to_lower" => {
                 // If uppercase (0x41..=0x5A), add 0x20
-                let ge = b!(self.bld.build_int_compare(IntPredicate::SGE, char_val, i64t.const_int(0x41, false), "ch.geA"));
-                let le = b!(self.bld.build_int_compare(IntPredicate::SLE, char_val, i64t.const_int(0x5A, false), "ch.leZ"));
+                let ge = b!(self.bld.build_int_compare(
+                    IntPredicate::SGE,
+                    char_val,
+                    i64t.const_int(0x41, false),
+                    "ch.geA"
+                ));
+                let le = b!(self.bld.build_int_compare(
+                    IntPredicate::SLE,
+                    char_val,
+                    i64t.const_int(0x5A, false),
+                    "ch.leZ"
+                ));
                 let is_upper = b!(self.bld.build_and(ge, le, "ch.isup"));
-                let lower = b!(self.bld.build_int_add(char_val, i64t.const_int(0x20, false), "ch.toL"));
-                Ok(b!(self.bld.build_select(is_upper, lower, char_val, "ch.tolower")).into())
+                let lower =
+                    b!(self
+                        .bld
+                        .build_int_add(char_val, i64t.const_int(0x20, false), "ch.toL"));
+                Ok(b!(self
+                    .bld
+                    .build_select(is_upper, lower, char_val, "ch.tolower"))
+                .into())
             }
             "to_float" => {
                 let f64t = self.ctx.f64_type();
@@ -1727,7 +2229,12 @@ impl<'ctx> Compiler<'ctx> {
             "abs" => {
                 // x < 0 ? -x : x
                 let neg = b!(self.bld.build_int_neg(char_val, "int.neg"));
-                let is_neg = b!(self.bld.build_int_compare(IntPredicate::SLT, char_val, i64t.const_zero(), "int.isneg"));
+                let is_neg = b!(self.bld.build_int_compare(
+                    IntPredicate::SLT,
+                    char_val,
+                    i64t.const_zero(),
+                    "int.isneg"
+                ));
                 Ok(b!(self.bld.build_select(is_neg, neg, char_val, "int.abs")).into())
             }
             "min" => {
@@ -1735,7 +2242,10 @@ impl<'ctx> Compiler<'ctx> {
                     return Err("min() takes 1 argument".into());
                 }
                 let other = self.compile_expr(&args[1])?.into_int_value();
-                let cmp = b!(self.bld.build_int_compare(IntPredicate::SLT, char_val, other, "int.lt"));
+                let cmp =
+                    b!(self
+                        .bld
+                        .build_int_compare(IntPredicate::SLT, char_val, other, "int.lt"));
                 Ok(b!(self.bld.build_select(cmp, char_val, other, "int.min")).into())
             }
             "max" => {
@@ -1743,7 +2253,10 @@ impl<'ctx> Compiler<'ctx> {
                     return Err("max() takes 1 argument".into());
                 }
                 let other = self.compile_expr(&args[1])?.into_int_value();
-                let cmp = b!(self.bld.build_int_compare(IntPredicate::SGT, char_val, other, "int.gt"));
+                let cmp =
+                    b!(self
+                        .bld
+                        .build_int_compare(IntPredicate::SGT, char_val, other, "int.gt"));
                 Ok(b!(self.bld.build_select(cmp, char_val, other, "int.max")).into())
             }
             "clamp" => {
@@ -1753,14 +2266,19 @@ impl<'ctx> Compiler<'ctx> {
                 let lo = self.compile_expr(&args[1])?.into_int_value();
                 let hi = self.compile_expr(&args[2])?.into_int_value();
                 // max(lo, min(x, hi))
-                let cmp_hi = b!(self.bld.build_int_compare(IntPredicate::SLT, char_val, hi, "clamp.lthi"));
-                let min_val = b!(self.bld.build_select(cmp_hi, char_val, hi, "clamp.min")).into_int_value();
-                let cmp_lo = b!(self.bld.build_int_compare(IntPredicate::SGT, min_val, lo, "clamp.gtlo"));
+                let cmp_hi =
+                    b!(self
+                        .bld
+                        .build_int_compare(IntPredicate::SLT, char_val, hi, "clamp.lthi"));
+                let min_val =
+                    b!(self.bld.build_select(cmp_hi, char_val, hi, "clamp.min")).into_int_value();
+                let cmp_lo =
+                    b!(self
+                        .bld
+                        .build_int_compare(IntPredicate::SGT, min_val, lo, "clamp.gtlo"));
                 Ok(b!(self.bld.build_select(cmp_lo, min_val, lo, "clamp.max")).into())
             }
-            "to_str" => {
-                self.compile_to_string(&args[0])
-            }
+            "to_str" => self.compile_to_string(&args[0]),
             _ => Err(format!("unknown char method '{method}'")),
         }
     }

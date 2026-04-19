@@ -131,23 +131,103 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        for (i, (field_def, val_expr)) in sd.fields.iter().zip(values.iter()).enumerate() {
+        // Read current count for sid assignment
+        let fseek_fn = self.module.get_function("fseek").unwrap();
+        let fread_fn = self.module.get_function("fread").unwrap();
+        let count_buf = self.entry_alloca(i64t.into(), "ins.count");
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                i64t.const_int(8, false).into(),
+                i32t.const_int(0, false).into()
+            ],
+            ""
+        ));
+        b!(self.bld.build_call(
+            fread_fn,
+            &[
+                count_buf.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                fp.into()
+            ],
+            ""
+        ));
+        let old_count = b!(self.bld.build_load(i64t, count_buf, "old.count")).into_int_value();
+        let new_sid = b!(self
+            .bld
+            .build_int_add(old_count, i64t.const_int(1, false), "new.sid"));
+
+        // Get current time via time(NULL)
+        self.ensure_time_fn();
+        let time_fn = self.module.get_function("time").unwrap();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let now = self
+            .call_result(b!(self.bld.build_call(
+                time_fn,
+                &[ptr_ty.const_null().into()],
+                "now"
+            )))
+            .into_int_value();
+
+        // Determine which fields are built-in vs user-defined
+        let builtin_names = [
+            "sid",
+            "uuid",
+            "hash",
+            "created",
+            "updated",
+            "deleted",
+            "__version",
+        ];
+        let mut user_val_idx = 0usize;
+        for (i, field_def) in sd.fields.iter().enumerate() {
             let gep = b!(self
                 .bld
                 .build_struct_gep(st, rec_ptr, i as u32, &field_def.name));
-            match &field_def.ty {
-                Type::String => {
-                    let val = self.compile_expr(val_expr)?;
-                    self.copy_string_to_fixed_buf(val, gep)?;
+            if builtin_names.contains(&field_def.name.as_str()) {
+                // Auto-populate built-in fields
+                match field_def.name.as_str() {
+                    "sid" => {
+                        b!(self.bld.build_store(gep, new_sid));
+                    }
+                    "uuid" => {
+                        // Generate a simple UUID-like string from sid + time
+                        let uuid_str = self.gen_store_uuid(new_sid, now)?;
+                        self.copy_string_to_fixed_buf(uuid_str, gep)?;
+                    }
+                    "hash" => {
+                        // Placeholder empty hash — will be recomputed after all fields set
+                        let empty = self.compile_str_literal("")?;
+                        self.copy_string_to_fixed_buf(empty, gep)?;
+                    }
+                    "created" | "updated" => {
+                        b!(self.bld.build_store(gep, now));
+                    }
+                    "deleted" => {
+                        b!(self.bld.build_store(gep, i64t.const_int(0, false)));
+                    }
+                    _ => {}
                 }
-                _ => {
-                    let val = self.compile_expr(val_expr)?;
-                    b!(self.bld.build_store(gep, val));
+            } else {
+                // User-defined field
+                if user_val_idx < values.len() {
+                    match &field_def.ty {
+                        Type::String => {
+                            let val = self.compile_expr(&values[user_val_idx])?;
+                            self.copy_string_to_fixed_buf(val, gep)?;
+                        }
+                        _ => {
+                            let val = self.compile_expr(&values[user_val_idx])?;
+                            b!(self.bld.build_store(gep, val));
+                        }
+                    }
+                    user_val_idx += 1;
                 }
             }
         }
 
-        let fseek_fn = self.module.get_function("fseek").unwrap();
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -181,25 +261,8 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         let count_buf = self.entry_alloca(i64t.into(), "count.buf");
-        let fread_fn = self.module.get_function("fread").unwrap();
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into(),
-            ],
-            ""
-        ));
-
-        let old_count = b!(self.bld.build_load(i64t, count_buf, "old.count"));
-        let new_count = b!(self.bld.build_int_add(
-            old_count.into_int_value(),
-            i64t.const_int(1, false),
-            "new.count"
-        ));
-        b!(self.bld.build_store(count_buf, new_count));
+        b!(self.bld.build_store(count_buf, new_sid)); // new_sid = old_count + 1 = new count
+        let fwrite_fn = self.module.get_function("fwrite").unwrap();
 
         b!(self.bld.build_call(
             fseek_fn,
@@ -260,7 +323,28 @@ impl<'ctx> Compiler<'ctx> {
         let (fi, ft, fv, extras) = self.precompile_filter_values(filter, sd)?;
 
         let count = self.store_read_count(fp)?;
-        let buf = self.store_load_records(fp, count, rec_size)?;
+
+        // Seek past header to first record
+        let fseek_fn = self.module.get_function("fseek").unwrap();
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                i64t.const_int(HEADER_SIZE, false).into(),
+                i32t.const_int(0, false).into(),
+            ],
+            ""
+        ));
+
+        // Allocate a single-record buffer for streaming reads
+        let malloc_fn = self.ensure_malloc();
+        let rec_buf = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(rec_size, false).into()],
+                "q.recbuf"
+            )))
+            .into_pointer_value();
 
         let result_ptr = self.entry_alloca(st.into(), "q.result");
         let memset_fn = self.module.get_function("memset").unwrap();
@@ -274,7 +358,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fv_fn = self.cur_fn.unwrap();
+        let fv_fn = self.current_fn();
         let idx_ptr = self.entry_alloca(i64t.into(), "q.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
@@ -294,16 +378,20 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
-        let offset = b!(self
-            .bld
-            .build_int_mul(idx, i64t.const_int(rec_size, false), "q.off"));
-        let rec_ptr = unsafe {
-            b!(self
-                .bld
-                .build_gep(self.ctx.i8_type(), buf, &[offset], "q.rec"))
-        };
+        // Read one record from file (fread advances file position)
+        let fread_fn = self.module.get_function("fread").unwrap();
+        b!(self.bld.build_call(
+            fread_fn,
+            &[
+                rec_buf.into(),
+                i64t.const_int(rec_size, false).into(),
+                i64t.const_int(1, false).into(),
+                fp.into(),
+            ],
+            ""
+        ));
 
-        let cond = self.eval_store_filter(rec_ptr, st, fi, &ft, filter.op, fv, &extras)?;
+        let cond = self.eval_store_filter(rec_buf, st, fi, &ft, filter.op, fv, &extras)?;
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
         self.bld.position_at_end(match_bb);
@@ -312,7 +400,7 @@ impl<'ctx> Compiler<'ctx> {
             memcpy_fn,
             &[
                 result_ptr.into(),
-                rec_ptr.into(),
+                rec_buf.into(),
                 i64t.const_int(rec_size, false).into()
             ],
             ""
@@ -328,7 +416,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
-        b!(self.bld.build_call(free_fn, &[buf.into()], ""));
+        b!(self.bld.build_call(free_fn, &[rec_buf.into()], ""));
         let result = self.load_store_record_as_jade(st, result_ptr, sd)?;
         Ok(result)
     }
@@ -384,7 +472,7 @@ impl<'ctx> Compiler<'ctx> {
         let has_strings = sd.fields.iter().any(|f| matches!(f.ty, Type::String));
 
         if has_strings {
-            let fv = self.cur_fn.unwrap();
+            let fv = self.current_fn();
             let idx_ptr = self.entry_alloca(i64t.into(), "all.idx");
             b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
@@ -473,27 +561,31 @@ impl<'ctx> Compiler<'ctx> {
         let buf = self.store_load_records(fp, count, rec_size)?;
         let fseek_fn = self.module.get_function("fseek").unwrap();
 
-        let fclose_fn = self.module.get_function("fclose").unwrap();
-        b!(self.bld.build_call(fclose_fn, &[fp.into()], ""));
-
-        let filename = format!("{store_name}.store\0");
-        let file_str = b!(self.bld.build_global_string_ptr(&filename, "del.path"));
-        let mode_wb = b!(self.bld.build_global_string_ptr("w+b\0", "del.mode"));
-        let fopen_fn = self.module.get_function("fopen").unwrap();
-        let new_fp = self
-            .call_result(b!(self.bld.build_call(
-                fopen_fn,
-                &[
-                    file_str.as_pointer_value().into(),
-                    mode_wb.as_pointer_value().into()
-                ],
-                "del.fp"
-            )))
-            .into_pointer_value();
-
-        let global_name = format!("__store_{store_name}_fp");
-        let global = self.module.get_global(&global_name).unwrap();
-        b!(self.bld.build_store(global.as_pointer_value(), new_fp));
+        // Rewind and truncate the file in-place (keeps the lock held)
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                i64t.const_int(0, false).into(),
+                i32t.const_int(0, false).into()  // SEEK_SET
+            ],
+            ""
+        ));
+        let fileno_fn = self.module.get_function("fileno").unwrap();
+        let fd = self
+            .call_result(b!(self.bld.build_call(fileno_fn, &[fp.into()], "del.fd")))
+            .into_int_value();
+        // Declare ftruncate if needed
+        let ftruncate_fn = self.module.get_function("ftruncate").unwrap_or_else(|| {
+            let ft = i32t.fn_type(&[i32t.into(), i64t.into()], false);
+            self.module.add_function("ftruncate", ft, Some(inkwell::module::Linkage::External))
+        });
+        b!(self.bld.build_call(
+            ftruncate_fn,
+            &[fd.into(), i64t.const_int(0, false).into()],
+            ""
+        ));
+        let new_fp = fp;
 
         let fwrite_fn = self.module.get_function("fwrite").unwrap();
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "del.magic"));
@@ -538,7 +630,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fv_fn = self.cur_fn.unwrap();
+        let fv_fn = self.current_fn();
         let idx_ptr = self.entry_alloca(i64t.into(), "del.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
@@ -658,7 +750,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = self.store_load_records(fp, count, rec_size)?;
 
         let (fi, ft, fval, extras) = self.precompile_filter_values(filter, sd)?;
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let idx_ptr = self.entry_alloca(i64t.into(), "set.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 

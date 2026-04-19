@@ -4,10 +4,8 @@
 *main
     n is 1000000
     total is 0
-    i is 0
-    while i < n
+    for i in 0 to n
         g is dispatch
             yield 1
         total is total + g.next()
-        i is i + 1
     log(total)

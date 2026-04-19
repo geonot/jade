@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
 use crate::types::Type;
+use std::collections::HashMap;
 
 pub fn fold_program(prog: &mut hir::Program) {
     // Build a map of pure functions for comptime evaluation
@@ -45,8 +45,12 @@ fn is_pure_stmt(stmt: &Stmt) -> bool {
         Stmt::If(i) => {
             is_pure_expr(&i.cond)
                 && i.then.iter().all(|s| is_pure_stmt(s))
-                && i.elifs.iter().all(|(c, b)| is_pure_expr(c) && b.iter().all(|s| is_pure_stmt(s)))
-                && i.els.as_ref().map_or(true, |b| b.iter().all(|s| is_pure_stmt(s)))
+                && i.elifs
+                    .iter()
+                    .all(|(c, b)| is_pure_expr(c) && b.iter().all(|s| is_pure_stmt(s)))
+                && i.els
+                    .as_ref()
+                    .map_or(true, |b| b.iter().all(|s| is_pure_stmt(s)))
         }
         Stmt::Expr(e) => is_pure_expr(e),
         _ => false,
@@ -55,8 +59,13 @@ fn is_pure_stmt(stmt: &Stmt) -> bool {
 
 fn is_pure_expr(expr: &Expr) -> bool {
     match &expr.kind {
-        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
-        | ExprKind::Str(_) | ExprKind::Var(_, _) | ExprKind::None | ExprKind::Void => true,
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Bool(_)
+        | ExprKind::Str(_)
+        | ExprKind::Var(_, _)
+        | ExprKind::None
+        | ExprKind::Void => true,
         ExprKind::BinOp(l, _, r) => is_pure_expr(l) && is_pure_expr(r),
         ExprKind::UnaryOp(_, e) => is_pure_expr(e),
         ExprKind::Call(_, _, args) => args.iter().all(|a| is_pure_expr(a)),
@@ -65,8 +74,12 @@ fn is_pure_expr(expr: &Expr) -> bool {
         ExprKind::IfExpr(i) => {
             is_pure_expr(&i.cond)
                 && i.then.iter().all(|s| is_pure_stmt(s))
-                && i.elifs.iter().all(|(c, b)| is_pure_expr(c) && b.iter().all(|s| is_pure_stmt(s)))
-                && i.els.as_ref().map_or(true, |b| b.iter().all(|s| is_pure_stmt(s)))
+                && i.elifs
+                    .iter()
+                    .all(|(c, b)| is_pure_expr(c) && b.iter().all(|s| is_pure_stmt(s)))
+                && i.els
+                    .as_ref()
+                    .map_or(true, |b| b.iter().all(|s| is_pure_stmt(s)))
         }
         _ => false,
     }
@@ -100,8 +113,20 @@ fn try_eval_pure_call(
         env.insert(param.def_id, val.clone());
     }
 
-    eval_block(&func.body, &mut env, pure_fns, depth + 1)
-        .map(|val| val.to_expr(func.ret.clone(), args.first().map_or(Span { start: 0, end: 0, line: 0, col: 0 }, |a| a.span)))
+    eval_block(&func.body, &mut env, pure_fns, depth + 1).map(|val| {
+        val.to_expr(
+            func.ret.clone(),
+            args.first().map_or(
+                Span {
+                    start: 0,
+                    end: 0,
+                    line: 0,
+                    col: 0,
+                },
+                |a| a.span,
+            ),
+        )
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -201,8 +226,7 @@ fn eval_expr(
             let eval_args: Vec<Expr> = args
                 .iter()
                 .map(|a| {
-                    eval_expr(a, env, pure_fns, depth)
-                        .map(|v| v.to_expr(a.ty.clone(), a.span))
+                    eval_expr(a, env, pure_fns, depth).map(|v| v.to_expr(a.ty.clone(), a.span))
                 })
                 .collect::<Option<Vec<_>>>()?;
             let result = try_eval_pure_call(name, &eval_args, pure_fns, depth)?;
@@ -284,8 +308,12 @@ fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<String, hir::Fn>) {
         }
         Stmt::For(f) => {
             fold_expr_with_fns(&mut f.iter, pure_fns);
-            if let Some(e) = &mut f.end { fold_expr_with_fns(e, pure_fns); }
-            if let Some(e) = &mut f.step { fold_expr_with_fns(e, pure_fns); }
+            if let Some(e) = &mut f.end {
+                fold_expr_with_fns(e, pure_fns);
+            }
+            if let Some(e) = &mut f.step {
+                fold_expr_with_fns(e, pure_fns);
+            }
             fold_block_with_fns(&mut f.body, pure_fns);
         }
         Stmt::Loop(l) => fold_block_with_fns(&mut l.body, pure_fns),
@@ -295,28 +323,47 @@ fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<String, hir::Fn>) {
             fold_expr_with_fns(&mut m.subject, pure_fns);
             for arm in &mut m.arms {
                 fold_block_with_fns(&mut arm.body, pure_fns);
-                if let Some(g) = &mut arm.guard { fold_expr_with_fns(g, pure_fns); }
+                if let Some(g) = &mut arm.guard {
+                    fold_expr_with_fns(g, pure_fns);
+                }
             }
         }
         Stmt::ErrReturn(e, _, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::StoreInsert(_, exprs, _) => {
-            for e in exprs { fold_expr_with_fns(e, pure_fns); }
+            for e in exprs {
+                fold_expr_with_fns(e, pure_fns);
+            }
         }
         Stmt::StoreSet(_, pairs, _, _) => {
-            for (_, e) in pairs { fold_expr_with_fns(e, pure_fns); }
+            for (_, e) in pairs {
+                fold_expr_with_fns(e, pure_fns);
+            }
         }
         Stmt::Transaction(b, _) => fold_block_with_fns(b, pure_fns),
         Stmt::ChannelClose(e, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::Stop(e, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::SimFor(f, _) => {
             fold_expr_with_fns(&mut f.iter, pure_fns);
-            if let Some(e) = &mut f.end { fold_expr_with_fns(e, pure_fns); }
-            if let Some(e) = &mut f.step { fold_expr_with_fns(e, pure_fns); }
+            if let Some(e) = &mut f.end {
+                fold_expr_with_fns(e, pure_fns);
+            }
+            if let Some(e) = &mut f.step {
+                fold_expr_with_fns(e, pure_fns);
+            }
             fold_block_with_fns(&mut f.body, pure_fns);
         }
         Stmt::SimBlock(b, _) => fold_block_with_fns(b, pure_fns),
-        Stmt::Drop(_, _, _, _) | Stmt::Continue(_) | Stmt::Ret(None, _, _)
-        | Stmt::Break(None, _) | Stmt::Asm(_) | Stmt::StoreDelete(_, _, _) | Stmt::UseLocal(_, _, _, _) => {}
+        Stmt::Drop(_, _, _, _)
+        | Stmt::Continue(_)
+        | Stmt::Ret(None, _, _)
+        | Stmt::Break(None, _)
+        | Stmt::Asm(_)
+        | Stmt::StoreDelete(_, _, _)
+        | Stmt::StoreDestroy(_, _, _)
+        | Stmt::StoreRestore(_, _, _)
+        | Stmt::StoreSave(_, _)
+        | Stmt::UseLocal(_, _, _, _) => {}
+        Stmt::GlobalStore(_, e, _) => fold_expr_with_fns(e, pure_fns),
     }
 }
 
@@ -326,7 +373,12 @@ fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<String, hir::Fn>) {
 
     // Then try pure function call evaluation
     if let ExprKind::Call(_, name, args) = &expr.kind {
-        if args.iter().all(|a| matches!(a.kind, ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_))) {
+        if args.iter().all(|a| {
+            matches!(
+                a.kind,
+                ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
+            )
+        }) {
             if let Some(result) = try_eval_pure_call(name, args, pure_fns, 0) {
                 *expr = result;
             }
@@ -399,6 +451,9 @@ fn fold_stmt(stmt: &mut Stmt) {
             }
         }
         Stmt::StoreDelete(_, _, _) => {}
+        Stmt::StoreDestroy(_, _, _) => {}
+        Stmt::StoreRestore(_, _, _) => {}
+        Stmt::StoreSave(_, _) => {}
         Stmt::StoreSet(_, pairs, _, _) => {
             for (_, e) in pairs {
                 fold_expr(e);
@@ -409,11 +464,16 @@ fn fold_stmt(stmt: &mut Stmt) {
         Stmt::Stop(e, _) => fold_expr(e),
         Stmt::SimFor(f, _) => {
             fold_expr(&mut f.iter);
-            if let Some(e) = &mut f.end { fold_expr(e); }
-            if let Some(e) = &mut f.step { fold_expr(e); }
+            if let Some(e) = &mut f.end {
+                fold_expr(e);
+            }
+            if let Some(e) = &mut f.step {
+                fold_expr(e);
+            }
             fold_block(&mut f.body);
         }
         Stmt::SimBlock(b, _) => fold_block(b),
+        Stmt::GlobalStore(_, e, _) => fold_expr(e),
     }
 }
 
@@ -458,7 +518,9 @@ fn fold_expr(expr: &mut Expr) {
                 fold_expr(a);
             }
         }
-        ExprKind::MapMethod(obj, _, args) | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args) => {
+        ExprKind::MapMethod(obj, _, args)
+        | ExprKind::SetMethod(obj, _, args)
+        | ExprKind::PQMethod(obj, _, args) => {
             fold_expr(obj);
             for a in args {
                 fold_expr(a);
@@ -569,7 +631,9 @@ fn fold_expr(expr: &mut Expr) {
         }
         ExprKind::CoroutineNext(e) | ExprKind::Yield(e) => fold_expr(e),
         ExprKind::Unreachable => {}
-        ExprKind::StrictCast(e, _) | ExprKind::AsFormat(e, _) | ExprKind::AtomicLoad(e) => fold_expr(e),
+        ExprKind::StrictCast(e, _) | ExprKind::AsFormat(e, _) | ExprKind::AtomicLoad(e) => {
+            fold_expr(e)
+        }
         ExprKind::AtomicStore(a, b) | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
             fold_expr(a);
             fold_expr(b);
@@ -599,25 +663,70 @@ fn fold_expr(expr: &mut Expr) {
         | ExprKind::NDArrayNew(_)
         | ExprKind::SIMDNew(_)
         | ExprKind::Spawn(_)
+        | ExprKind::GlobalLoad(_)
         | ExprKind::StoreQuery(_, _)
         | ExprKind::StoreCount(_)
         | ExprKind::StoreAll(_)
+        | ExprKind::ViewCount(_, _)
+        | ExprKind::ViewAll(_, _)
+        | ExprKind::StoreGet(_, _)
+        | ExprKind::StoreFirst(_, _)
+        | ExprKind::StoreExists(_, _)
+        | ExprKind::StoreDistinct(_, _)
+        | ExprKind::StoreSum(_, _)
+        | ExprKind::StoreAvg(_, _)
+        | ExprKind::StoreMin(_, _)
+        | ExprKind::StoreMax(_, _)
+        | ExprKind::StoreVersionCount(_, _)
+        | ExprKind::StoreHistory(_, _)
+        | ExprKind::StoreAtVersion(_, _, _)
         | ExprKind::IterNext(_, _, _)
         | ExprKind::DequeNew => {}
         ExprKind::DequeMethod(obj, _, args) => {
             fold_expr(obj);
-            for a in args { fold_expr(a); }
+            for a in args {
+                fold_expr(a);
+            }
         }
-        ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => fold_expr(e),
+        ExprKind::Grad(e)
+        | ExprKind::CowWrap(e)
+        | ExprKind::CowClone(e)
+        | ExprKind::GeneratorNext(e)
+        | ExprKind::EnumUnwrap(e, _, _)
+        | ExprKind::EnumIs(e, _) => fold_expr(e),
         ExprKind::Einsum(_, args) => {
-            for a in args { fold_expr(a); }
+            for a in args {
+                fold_expr(a);
+            }
         }
         ExprKind::Builder(_, fields) => {
-            for (_, v) in fields { fold_expr(v); }
+            for (_, v) in fields {
+                fold_expr(v);
+            }
         }
         ExprKind::GeneratorCreate(_, _, stmts) => {
-            for s in stmts { fold_stmt(s); }
+            for s in stmts {
+                fold_stmt(s);
+            }
         }
+        // KV / specialized store ops – fold inner exprs
+        ExprKind::KvGet(_, e) | ExprKind::KvHas(_, e) | ExprKind::KvDel(_, e) => fold_expr(e),
+        ExprKind::KvSet(_, k, v) | ExprKind::KvIncr(_, k, v) => {
+            fold_expr(k);
+            fold_expr(v);
+        }
+        ExprKind::KvCount(_) => {}
+        ExprKind::VecNearest(_, v, k) => {
+            fold_expr(v);
+            fold_expr(k);
+        }
+        ExprKind::VecInsert(_, v) => fold_expr(v),
+        ExprKind::VecCount(_) => {}
+        ExprKind::BloomTest(_, _, v) => fold_expr(v),
+        ExprKind::FtsSearch(_, _, v) => fold_expr(v),
+        ExprKind::FtsCount(_, _) => {}
+        ExprKind::GraphFrom(_, e) | ExprKind::GraphTo(_, e) => fold_expr(e),
+        ExprKind::TsLatest(_) => {}
     }
 
     if let Some(folded) = try_fold(expr) {
@@ -668,6 +777,7 @@ fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
         BinOp::Mod if b != 0 => Some(ExprKind::Int(a % b)),
         BinOp::Shl if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shl(b as u32))),
         BinOp::Shr if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shr(b as u32))),
+        BinOp::Ushr if b >= 0 && b < 64 => Some(ExprKind::Int((a as u64).wrapping_shr(b as u32) as i64)),
         BinOp::BitAnd => Some(ExprKind::Int(a & b)),
         BinOp::BitOr => Some(ExprKind::Int(a | b)),
         BinOp::BitXor => Some(ExprKind::Int(a ^ b)),

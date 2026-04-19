@@ -605,7 +605,7 @@ err FileError
 When `!` might be ambiguous with the ternary `!` (else branch), use `!! ErrorType:Variant` to make intent explicit:
 
 ```jade
-result is condition ? value ! fallback     # ternary: condition ? then ! else
+result eq condition ? value ! fallback     # ternary: condition ? then ! else
 !! FileError:NotFound                      # error return (unambiguous)
 ```
 

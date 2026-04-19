@@ -28,11 +28,17 @@ fn resolve_named_args<'a>(
             Expr::NamedArg(name, inner, _) => {
                 if let Some(idx) = param_names.iter().position(|p| p == name) {
                     if result[idx].is_some() {
-                        return Err(format!("duplicate named argument '{name}' at line {}", span.line));
+                        return Err(format!(
+                            "duplicate named argument '{name}' at line {}",
+                            span.line
+                        ));
                     }
                     result[idx] = Some(inner.as_ref());
                 } else {
-                    return Err(format!("unknown named argument '{name}' at line {}", span.line));
+                    return Err(format!(
+                        "unknown named argument '{name}' at line {}",
+                        span.line
+                    ));
                 }
             }
             _ => {
@@ -40,7 +46,10 @@ fn resolve_named_args<'a>(
                     pos_idx += 1;
                 }
                 if pos_idx >= param_names.len() {
-                    return Err(format!("too many positional arguments at line {}", span.line));
+                    return Err(format!(
+                        "too many positional arguments at line {}",
+                        span.line
+                    ));
                 }
                 result[pos_idx] = Some(arg);
                 pos_idx += 1;
@@ -436,6 +445,7 @@ impl Typer {
                                 span: lspan,
                                 generic_origin: Some(name.to_string()),
                                 is_generator: false,
+                                attrs: crate::ast::FnAttrs::default(),
                             };
                             self.mono_fns.push(mono_fn);
 
@@ -556,6 +566,575 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
+        // Store aggregation methods: store.avg(field), store.sum(field), etc.
+        if let ast::Expr::Ident(name, _) = obj {
+            if self.store_schemas.contains_key(name.as_str()) {
+                // @kv store methods: .set(), .get(), .del(), .has(), .incr(), .count()
+                let is_kv = self
+                    .store_decorators
+                    .get(name.as_str())
+                    .map(|decs| decs.iter().any(|d| *d == crate::ast::StoreDecorator::Kv))
+                    .unwrap_or(false);
+                if is_kv {
+                    match method {
+                        "set" => {
+                            if args.len() != 2 {
+                                return Err("kv.set() requires 2 arguments (key, value)".into());
+                            }
+                            let key_expr =
+                                self.lower_expr_expected(&args[0], Some(&Type::String))?;
+                            let val_expr = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvSet(
+                                    name.clone(),
+                                    Box::new(key_expr),
+                                    Box::new(val_expr),
+                                ),
+                                ty: Type::Void,
+                                span,
+                            });
+                        }
+                        "get" => {
+                            if args.len() != 1 {
+                                return Err("kv.get() requires 1 argument (key)".into());
+                            }
+                            let key_expr =
+                                self.lower_expr_expected(&args[0], Some(&Type::String))?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvGet(name.clone(), Box::new(key_expr)),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        "has" => {
+                            if args.len() != 1 {
+                                return Err("kv.has() requires 1 argument (key)".into());
+                            }
+                            let key_expr =
+                                self.lower_expr_expected(&args[0], Some(&Type::String))?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvHas(name.clone(), Box::new(key_expr)),
+                                ty: Type::Bool,
+                                span,
+                            });
+                        }
+                        "count" => {
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvCount(name.clone()),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        "del" => {
+                            if args.len() != 1 {
+                                return Err("kv.del() requires 1 argument (key)".into());
+                            }
+                            let key_expr =
+                                self.lower_expr_expected(&args[0], Some(&Type::String))?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvDel(name.clone(), Box::new(key_expr)),
+                                ty: Type::Void,
+                                span,
+                            });
+                        }
+                        "incr" => {
+                            let (key_expr, delta_expr) = if args.len() == 1 {
+                                let k = self.lower_expr_expected(&args[0], Some(&Type::String))?;
+                                let d = hir::Expr {
+                                    kind: hir::ExprKind::Int(1),
+                                    ty: Type::I64,
+                                    span,
+                                };
+                                (k, d)
+                            } else if args.len() == 2 {
+                                let k = self.lower_expr_expected(&args[0], Some(&Type::String))?;
+                                let d = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
+                                (k, d)
+                            } else {
+                                return Err(
+                                    "kv.incr() requires 1-2 arguments (key [, delta])".into()
+                                );
+                            };
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvIncr(
+                                    name.clone(),
+                                    Box::new(key_expr),
+                                    Box::new(delta_expr),
+                                ),
+                                ty: Type::Void,
+                                span,
+                            });
+                        }
+                        "decr" => {
+                            let key_expr = if args.len() >= 1 {
+                                self.lower_expr_expected(&args[0], Some(&Type::String))?
+                            } else {
+                                return Err(
+                                    "kv.decr() requires 1-2 arguments (key [, delta])".into()
+                                );
+                            };
+                            let delta_expr = if args.len() == 2 {
+                                // Negate the delta
+                                let d = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
+                                hir::Expr {
+                                    kind: hir::ExprKind::BinOp(
+                                        Box::new(hir::Expr {
+                                            kind: hir::ExprKind::Int(0),
+                                            ty: Type::I64,
+                                            span,
+                                        }),
+                                        crate::ast::BinOp::Sub,
+                                        Box::new(d),
+                                    ),
+                                    ty: Type::I64,
+                                    span,
+                                }
+                            } else {
+                                hir::Expr {
+                                    kind: hir::ExprKind::Int(-1),
+                                    ty: Type::I64,
+                                    span,
+                                }
+                            };
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::KvIncr(
+                                    name.clone(),
+                                    Box::new(key_expr),
+                                    Box::new(delta_expr),
+                                ),
+                                ty: Type::Void,
+                                span,
+                            });
+                        }
+                        _ => {
+                            return Err(format!(
+                                "@kv store supports .set(), .get(), .del(), .has(), .incr(), .decr(), .count(); got .{method}()"
+                            ));
+                        }
+                    }
+                }
+
+                // @graph store methods
+                let is_graph = self
+                    .store_decorators
+                    .get(name.as_str())
+                    .map(|decs| decs.iter().any(|d| *d == crate::ast::StoreDecorator::Graph))
+                    .unwrap_or(false);
+                if is_graph {
+                    match method {
+                        "from" => {
+                            if args.len() != 1 {
+                                return Err("graph.from() requires 1 argument (node)".into());
+                            }
+                            // .from(node) queries the first user field of the graph store
+                            let schema = self.store_schemas.get(name.as_str()).unwrap();
+                            let builtin = [
+                                "sid",
+                                "uuid",
+                                "hash",
+                                "created",
+                                "updated",
+                                "deleted",
+                                "__version",
+                            ];
+                            let user_fields: Vec<_> = schema
+                                .iter()
+                                .filter(|(n, _)| !builtin.contains(&n.as_str()))
+                                .collect();
+                            let first_ty = user_fields
+                                .first()
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or(Type::I64);
+                            let node_expr = self.lower_expr_expected(&args[0], Some(&first_ty))?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::GraphFrom(name.clone(), Box::new(node_expr)),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        "to" => {
+                            if args.len() != 1 {
+                                return Err("graph.to() requires 1 argument (node)".into());
+                            }
+                            // .to(node) queries the second user field of the graph store
+                            let schema = self.store_schemas.get(name.as_str()).unwrap();
+                            let builtin = [
+                                "sid",
+                                "uuid",
+                                "hash",
+                                "created",
+                                "updated",
+                                "deleted",
+                                "__version",
+                            ];
+                            let user_fields: Vec<_> = schema
+                                .iter()
+                                .filter(|(n, _)| !builtin.contains(&n.as_str()))
+                                .collect();
+                            let second_ty = user_fields
+                                .get(1)
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or(Type::I64);
+                            let node_expr = self.lower_expr_expected(&args[0], Some(&second_ty))?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::GraphTo(name.clone(), Box::new(node_expr)),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        _ => {} // fall through to aggregation methods
+                    }
+                }
+
+                // @timeseries store methods
+                let is_ts = self
+                    .store_decorators
+                    .get(name.as_str())
+                    .map(|decs| {
+                        decs.iter()
+                            .any(|d| matches!(d, crate::ast::StoreDecorator::TimeSeries(_)))
+                    })
+                    .unwrap_or(false);
+                if is_ts {
+                    match method {
+                        "latest" => {
+                            if !args.is_empty() {
+                                return Err("timeseries.latest() takes no arguments".into());
+                            }
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::TsLatest(name.clone()),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        _ => {} // fall through
+                    }
+                }
+
+                // @vector store methods
+                let vec_dims = self.store_decorators.get(name.as_str()).and_then(|decs| {
+                    decs.iter().find_map(|d| match d {
+                        crate::ast::StoreDecorator::Vector(dims) => Some(*dims),
+                        _ => None,
+                    })
+                });
+                if let Some(_dims) = vec_dims {
+                    match method {
+                        "nearest" => {
+                            if args.len() != 2 {
+                                return Err(
+                                    "vector.nearest() requires 2 arguments (query_array, k)".into(),
+                                );
+                            }
+                            let query_expr = self.lower_expr(&args[0])?;
+                            let k_expr = self.lower_expr(&args[1])?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::VecNearest(
+                                    name.clone(),
+                                    Box::new(query_expr),
+                                    Box::new(k_expr),
+                                ),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        "insert" => {
+                            if args.len() != 1 {
+                                return Err(
+                                    "vector.insert() requires 1 argument (vector array)".into()
+                                );
+                            }
+                            let vec_expr = self.lower_expr(&args[0])?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::VecInsert(name.clone(), Box::new(vec_expr)),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        "count" => {
+                            if !args.is_empty() {
+                                return Err("vector.count() takes no arguments".into());
+                            }
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::VecCount(name.clone()),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        _ => {} // fall through
+                    }
+                }
+
+                // @bloom field methods: store.maybe(field, value)
+                if method == "maybe" {
+                    if args.len() != 2 {
+                        return Err("maybe() requires 2 arguments (field_name, value)".into());
+                    }
+                    let field = match &args[0] {
+                        ast::Expr::Ident(f, _) => f.clone(),
+                        _ => return Err("maybe() first argument must be a field name".into()),
+                    };
+                    let val_expr = self.lower_expr(&args[1])?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::BloomTest(name.clone(), field, Box::new(val_expr)),
+                        ty: Type::Bool,
+                        span,
+                    });
+                }
+
+                // @search field methods: store.search(field, term)
+                if method == "search" {
+                    if args.len() != 2 {
+                        return Err("search() requires 2 arguments (field_name, query)".into());
+                    }
+                    let field = match &args[0] {
+                        ast::Expr::Ident(f, _) => f.clone(),
+                        _ => return Err("search() first argument must be a field name".into()),
+                    };
+                    let query_expr = self.lower_expr(&args[1])?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::FtsSearch(name.clone(), field, Box::new(query_expr)),
+                        ty: Type::I64,
+                        span,
+                    });
+                }
+                if method == "search_count" {
+                    if args.len() != 1 {
+                        return Err("search_count() requires 1 argument (field_name)".into());
+                    }
+                    let field = match &args[0] {
+                        ast::Expr::Ident(f, _) => f.clone(),
+                        _ => return Err("search_count() argument must be a field name".into()),
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::FtsCount(name.clone(), field),
+                        ty: Type::I64,
+                        span,
+                    });
+                }
+
+                match method {
+                    "sum" | "avg" | "min" | "max" => {
+                        if args.len() != 1 {
+                            return Err(format!("{method}() requires exactly 1 field argument"));
+                        }
+                        let field = match &args[0] {
+                            ast::Expr::Ident(f, _) => f.clone(),
+                            _ => return Err(format!("{method}() argument must be a field name")),
+                        };
+                        let kind = match method {
+                            "sum" => hir::ExprKind::StoreSum(name.clone(), field.clone()),
+                            "avg" => hir::ExprKind::StoreAvg(name.clone(), field.clone()),
+                            "min" => hir::ExprKind::StoreMin(name.clone(), field.clone()),
+                            "max" => hir::ExprKind::StoreMax(name.clone(), field.clone()),
+                            _ => unreachable!(),
+                        };
+                        let field_ty = self.store_schemas.get(name.as_str()).and_then(|schema| {
+                            schema
+                                .iter()
+                                .find(|(n, _)| n == &field)
+                                .map(|(_, t)| t.clone())
+                        });
+                        let ret_ty = if method == "avg" {
+                            Type::F64
+                        } else {
+                            match field_ty {
+                                Some(Type::F64) | Some(Type::F32) => Type::F64,
+                                _ => Type::I64,
+                            }
+                        };
+                        return Ok(hir::Expr {
+                            kind,
+                            ty: ret_ty,
+                            span,
+                        });
+                    }
+                    "distinct" => {
+                        if args.len() != 1 {
+                            return Err("distinct() requires exactly 1 field argument".into());
+                        }
+                        let field = match &args[0] {
+                            ast::Expr::Ident(f, _) => f.clone(),
+                            _ => return Err("distinct() argument must be a field name".into()),
+                        };
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreDistinct(name.clone(), field),
+                            ty: Type::I64,
+                            span,
+                        });
+                    }
+                    "count" => {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreCount(name.clone()),
+                            ty: Type::I64,
+                            span,
+                        });
+                    }
+                    "version_count" => {
+                        if args.len() != 1 {
+                            return Err("version_count() requires exactly 1 argument (sid)".into());
+                        }
+                        let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreVersionCount(
+                                name.clone(),
+                                Box::new(sid_expr),
+                            ),
+                            ty: Type::I64,
+                            span,
+                        });
+                    }
+                    "history" => {
+                        if args.len() != 1 {
+                            return Err("history() requires exactly 1 argument (sid)".into());
+                        }
+                        let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreHistory(name.clone(), Box::new(sid_expr)),
+                            ty: Type::I64, // returns count of versions written
+                            span,
+                        });
+                    }
+                    "at_version" => {
+                        if args.len() != 2 {
+                            return Err("at_version() requires 2 arguments (sid, version)".into());
+                        }
+                        let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
+                        let ver_expr = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreAtVersion(
+                                name.clone(),
+                                Box::new(sid_expr),
+                                Box::new(ver_expr),
+                            ),
+                            ty: Type::I64, // returns 1 if found, 0 if not
+                            span,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // View method dispatch: view_name.count(), view_name.all()
+        if let ast::Expr::Ident(name, _) = obj {
+            if let Some((source, clauses)) = self.view_defs.get(name.as_str()).cloned() {
+                let schema = self
+                    .store_schemas
+                    .get(&source)
+                    .ok_or_else(|| format!("view '{name}' references unknown store '{source}'"))?
+                    .clone();
+
+                // Build filter from view's where clauses
+                let where_exprs: Vec<(ast::Expr, ast::Span)> = clauses
+                    .iter()
+                    .filter_map(|c| {
+                        if let ast::QueryClause::Where(expr, cspan) = c {
+                            Some((expr.clone(), *cspan))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if where_exprs.is_empty() {
+                    // View with no filter — delegate to source store
+                    match method {
+                        "count" => {
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::StoreCount(source),
+                                ty: Type::I64,
+                                span,
+                            });
+                        }
+                        "all" => {
+                            let struct_name = format!("__store_{source}");
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::StoreAll(source),
+                                ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
+                                span,
+                            });
+                        }
+                        "select" | "first" => {
+                            // delegate to StoreQuery on source (returns first match)
+                            if args.is_empty() {
+                                return Err(format!("view .{method}() requires a filter argument"));
+                            }
+                            let filter_expr = &args[0];
+                            let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
+                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source)?;
+                            let struct_name = format!("__store_{source}");
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
+                                ty: Type::Struct(struct_name, vec![]),
+                                span,
+                            });
+                        }
+                        "exists" => {
+                            if args.is_empty() {
+                                return Err("view .exists() requires a filter argument".into());
+                            }
+                            let filter_expr = &args[0];
+                            let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
+                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source)?;
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
+                                ty: Type::Bool,
+                                span,
+                            });
+                        }
+                        _ => {
+                            return Err(format!(
+                                "views support .count(), .all(), .select(), .first(), .exists(); got .{method}()"
+                            ));
+                        }
+                    }
+                }
+
+                let ast_filter = Self::merge_where_clauses(&where_exprs)?;
+                let hfilter = self.lower_store_filter(&ast_filter, &schema, &source)?;
+
+                match method {
+                    "count" => {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::ViewCount(source, Box::new(hfilter)),
+                            ty: Type::I64,
+                            span,
+                        });
+                    }
+                    "all" => {
+                        let struct_name = format!("__store_{source}");
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::ViewAll(source, Box::new(hfilter)),
+                            ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
+                            span,
+                        });
+                    }
+                    "select" | "first" => {
+                        // For filtered views, the view's filter is already the query filter
+                        let struct_name = format!("__store_{source}");
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreQuery(source.clone(), Box::new(hfilter)),
+                            ty: Type::Struct(struct_name, vec![]),
+                            span,
+                        });
+                    }
+                    "exists" => {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreExists(source.clone(), Box::new(hfilter)),
+                            ty: Type::Bool,
+                            span,
+                        });
+                    }
+                    _ => {
+                        return Err(format!(
+                            "views support .count(), .all(), .select(), .first(), .exists(); got .{method}()"
+                        ));
+                    }
+                }
+            }
+        }
+
         let hobj = self.lower_expr(obj)?;
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
@@ -586,9 +1165,12 @@ impl Typer {
                         return Err("map() requires exactly 1 argument".into());
                     }
                     let ret_elem = self.infer_ctx.fresh_var();
-                    let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(ret_elem.clone()));
+                    let fn_ty =
+                        Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(ret_elem.clone()));
                     let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
-                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "map callback");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&fn_ty, &harg.ty, span, "map callback");
                     let ret_ty = Type::Vec(Box::new(ret_elem));
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::VecMethod(Box::new(hobj), "map".into(), vec![harg]),
@@ -602,7 +1184,9 @@ impl Typer {
                     }
                     let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(Type::Bool));
                     let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
-                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "filter callback");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&fn_ty, &harg.ty, span, "filter callback");
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::VecMethod(Box::new(hobj), "filter".into(), vec![harg]),
                         ty: Type::Vec(elem_ty.clone()),
@@ -615,11 +1199,20 @@ impl Typer {
                     }
                     let hinit = self.lower_expr(&args[0])?;
                     let acc_ty = hinit.ty.clone();
-                    let fn_ty = Type::Fn(vec![acc_ty.clone(), elem_ty.as_ref().clone()], Box::new(acc_ty.clone()));
+                    let fn_ty = Type::Fn(
+                        vec![acc_ty.clone(), elem_ty.as_ref().clone()],
+                        Box::new(acc_ty.clone()),
+                    );
                     let hfn = self.lower_expr_expected(&args[1], Some(&fn_ty))?;
-                    let _ = self.infer_ctx.unify_at(&fn_ty, &hfn.ty, span, "fold callback");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&fn_ty, &hfn.ty, span, "fold callback");
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::VecMethod(Box::new(hobj), "fold".into(), vec![hinit, hfn]),
+                        kind: hir::ExprKind::VecMethod(
+                            Box::new(hobj),
+                            "fold".into(),
+                            vec![hinit, hfn],
+                        ),
                         ty: acc_ty,
                         span,
                     });
@@ -630,9 +1223,15 @@ impl Typer {
                     }
                     let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(Type::Bool));
                     let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
-                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "predicate callback");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&fn_ty, &harg.ty, span, "predicate callback");
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::VecMethod(Box::new(hobj), method.to_string(), vec![harg]),
+                        kind: hir::ExprKind::VecMethod(
+                            Box::new(hobj),
+                            method.to_string(),
+                            vec![harg],
+                        ),
                         ty: Type::Bool,
                         span,
                     });
@@ -643,7 +1242,9 @@ impl Typer {
                     }
                     let fn_ty = Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(Type::Bool));
                     let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
-                    let _ = self.infer_ctx.unify_at(&fn_ty, &harg.ty, span, "find callback");
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&fn_ty, &harg.ty, span, "find callback");
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::VecMethod(Box::new(hobj), "find".into(), vec![harg]),
                         ty: elem_ty.as_ref().clone(),
@@ -656,9 +1257,15 @@ impl Typer {
                     }
                     let harg = self.lower_expr(&args[0])?;
                     if method == "chain" {
-                        let _ = self.infer_ctx.unify_at(&obj_ty, &harg.ty, span, "chain argument");
+                        let _ = self
+                            .infer_ctx
+                            .unify_at(&obj_ty, &harg.ty, span, "chain argument");
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::VecMethod(Box::new(hobj), "chain".into(), vec![harg]),
+                            kind: hir::ExprKind::VecMethod(
+                                Box::new(hobj),
+                                "chain".into(),
+                                vec![harg],
+                            ),
                             ty: obj_ty.clone(),
                             span,
                         });
@@ -801,7 +1408,17 @@ impl Typer {
         }
 
         // Char/Unicode methods on integer types (char codepoints)
-        if matches!(obj_ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::U8 | Type::U16 | Type::U32 | Type::U64) {
+        if matches!(
+            obj_ty,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+        ) {
             let char_ret = match method {
                 "is_digit" | "is_alpha" | "is_alphanumeric" | "is_upper" | "is_lower"
                 | "is_whitespace" => Some(Type::Bool),
@@ -810,7 +1427,10 @@ impl Typer {
             };
             if let Some(ret_ty) = char_ret {
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::CharMethod(method.to_string()), vec![hobj]),
+                    kind: hir::ExprKind::Builtin(
+                        hir::BuiltinFn::CharMethod(method.to_string()),
+                        vec![hobj],
+                    ),
                     ty: ret_ty,
                     span,
                 });
@@ -820,11 +1440,9 @@ impl Typer {
         // Float math methods on f64/f32 types
         if matches!(obj_ty, Type::F64 | Type::F32) {
             let float_ret = match method {
-                "sqrt" | "abs" | "floor" | "ceil" | "round" | "trunc"
-                | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
-                | "sinh" | "cosh" | "tanh"
-                | "exp" | "exp2" | "ln" | "log2" | "log10"
-                | "cbrt" | "recip" | "signum" => Some(obj_ty.clone()),
+                "sqrt" | "abs" | "floor" | "ceil" | "round" | "trunc" | "sin" | "cos" | "tan"
+                | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "exp2" | "ln"
+                | "log2" | "log10" | "cbrt" | "recip" | "signum" => Some(obj_ty.clone()),
                 "pow" | "atan2" | "copysign" | "min" | "max" => Some(obj_ty.clone()),
                 "is_nan" | "is_infinite" | "is_finite" => Some(Type::Bool),
                 "to_int" => Some(Type::I64),
@@ -838,7 +1456,10 @@ impl Typer {
                 let mut all_args = vec![hobj];
                 all_args.extend(hargs);
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::FloatMethod(method.to_string()), all_args),
+                    kind: hir::ExprKind::Builtin(
+                        hir::BuiltinFn::FloatMethod(method.to_string()),
+                        all_args,
+                    ),
                     ty: ret_ty,
                     span,
                 });
@@ -851,7 +1472,9 @@ impl Typer {
                 .map(|e| self.lower_expr_expected(e, Some(&Type::I64)))
                 .collect::<Result<_, _>>()?;
             for ha in &hargs {
-                let _ = self.infer_ctx.unify_at(&ha.ty, &Type::I64, span, "arena method argument");
+                let _ = self
+                    .infer_ctx
+                    .unify_at(&ha.ty, &Type::I64, span, "arena method argument");
             }
             let (builtin, ret_ty) = match method {
                 "alloc" => (hir::BuiltinFn::ArenaAlloc, Type::Ptr(Box::new(Type::I8))),
@@ -925,6 +1548,91 @@ impl Typer {
                 ty: ret_ty,
                 span,
             });
+        }
+
+        // ── Option / Result enum methods ──
+        if let Type::Enum(ref enum_name) = obj_ty {
+            let is_option = enum_name.starts_with("Option_") || enum_name == "Option";
+            let is_result = enum_name.starts_with("Result_") || enum_name == "Result";
+            if is_option || is_result {
+                let variants = self.enums.get(enum_name).cloned().unwrap_or_default();
+                match method {
+                    "unwrap" => {
+                        // Some/Ok is tag 0, inner type is field 0
+                        let inner_ty = variants
+                            .first()
+                            .and_then(|(_, ftys)| ftys.first().cloned())
+                            .unwrap_or(Type::I64);
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), enum_name.clone(), 0),
+                            ty: inner_ty,
+                            span,
+                        });
+                    }
+                    "is_some" if is_option => {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::EnumIs(Box::new(hobj), 0),
+                            ty: Type::Bool,
+                            span,
+                        });
+                    }
+                    "is_nothing" if is_option => {
+                        let nothing_tag = variants
+                            .iter()
+                            .position(|(n, _)| n == "Nothing")
+                            .unwrap_or(1) as u32;
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::EnumIs(Box::new(hobj), nothing_tag),
+                            ty: Type::Bool,
+                            span,
+                        });
+                    }
+                    "is_ok" if is_result => {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::EnumIs(Box::new(hobj), 0),
+                            ty: Type::Bool,
+                            span,
+                        });
+                    }
+                    "is_err" if is_result => {
+                        let err_tag =
+                            variants.iter().position(|(n, _)| n == "Err").unwrap_or(1) as u32;
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::EnumIs(Box::new(hobj), err_tag),
+                            ty: Type::Bool,
+                            span,
+                        });
+                    }
+                    "unwrap_or" if args.len() == 1 => {
+                        let inner_ty = variants
+                            .first()
+                            .and_then(|(_, ftys)| ftys.first().cloned())
+                            .unwrap_or(Type::I64);
+                        // Lower the default argument, then use a ternary: is_some ? unwrap : default
+                        let default_arg = self.lower_expr_expected(&args[0], Some(&inner_ty))?;
+                        let is_check = hir::Expr {
+                            kind: hir::ExprKind::EnumIs(Box::new(hobj.clone()), 0),
+                            ty: Type::Bool,
+                            span,
+                        };
+                        let unwrap_expr = hir::Expr {
+                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), enum_name.clone(), 0),
+                            ty: inner_ty.clone(),
+                            span,
+                        };
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::Ternary(
+                                Box::new(is_check),
+                                Box::new(unwrap_expr),
+                                Box::new(default_arg),
+                            ),
+                            ty: inner_ty,
+                            span,
+                        });
+                    }
+                    _ => {} // Fall through for other methods
+                }
+            }
         }
 
         let struct_type_name = match &obj_ty {
@@ -1120,8 +1828,9 @@ impl Typer {
                     type_map.entry(tp.clone()).or_insert(Type::I64);
                 }
                 let mangled = self.monomorphize_fn(name, &type_map)?;
-                let (id, _, ret) = self.fns.get(&mangled).cloned()
-                    .unwrap_or_else(|| panic!("ICE: monomorphized fn '{mangled}' not found after instantiation"));
+                let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
+                    panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
+                });
                 let mut all_args = vec![hleft];
                 for a in extra_args {
                     all_args.push(self.lower_expr(a)?);
@@ -1204,8 +1913,9 @@ impl Typer {
                         type_map.entry(tp.clone()).or_insert(Type::I64);
                     }
                     let mangled = self.monomorphize_fn(name, &type_map)?;
-                    let (id, _, ret) = self.fns.get(&mangled).cloned()
-                        .unwrap_or_else(|| panic!("ICE: monomorphized fn '{mangled}' not found after instantiation"));
+                    let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
+                        panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
+                    });
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Call(id, mangled, all_args),
                         ty: ret,
@@ -1283,8 +1993,9 @@ impl Typer {
         coerce: bool,
     ) -> Result<hir::Expr, String> {
         let mangled = self.monomorphize_fn(name, type_map)?;
-        let (id, mono_param_tys, ret) = self.fns.get(&mangled).cloned()
-            .unwrap_or_else(|| panic!("ICE: monomorphized fn '{mangled}' not found after instantiation"));
+        let (id, mono_param_tys, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
+            panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
+        });
         if coerce {
             for (i, ha) in hargs.iter_mut().enumerate() {
                 if let Some(pt) = mono_param_tys.get(i) {

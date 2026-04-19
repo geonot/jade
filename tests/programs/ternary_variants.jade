@@ -1,0 +1,30 @@
+# Test ternary expression variants
+
+*abs(x)
+    x >= 0 ? x ! 0 - x
+
+*main
+    # Full ternary
+    log(abs(-10))
+    log(abs(10))
+
+    # Full ternary with assignment
+    x is 5
+    r is x > 3 ? "big" ! "small"
+    log(r)
+
+    # Nested ternary (right-associative)
+    grade is x > 8 ? "A" ! x > 3 ? "B" ! "C"
+    log(grade)
+
+    # If-only ternary (side effect)
+    x > 3 ? log("if-only-yes")
+    x < 3 ? log("if-only-no")
+
+    # Else-only with ?!
+    x > 3 ? ! log("qbang-no")
+    x < 3 ? ! log("qbang-yes")
+
+    # Else-only with standalone !
+    x > 3 ! log("bang-no")
+    x < 3 ! log("bang-yes")

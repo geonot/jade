@@ -69,6 +69,7 @@ jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity) {
 
 void jade_chan_destroy(jade_chan_t *ch) {
     if (!ch) return;
+    jade_chan_close(ch);
     free(ch->buffer);
     free(ch);
 }

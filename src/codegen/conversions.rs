@@ -90,7 +90,12 @@ impl<'ctx> Compiler<'ctx> {
             Type::Struct(name, _) => {
                 let fn_name = format!("{name}_display");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let first_param_is_ptr = fv.get_type().get_param_types().first().map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let first_param_is_ptr = fv
+                        .get_type()
+                        .get_param_types()
+                        .first()
+                        .map(|t| t.is_pointer_type())
+                        .unwrap_or(false);
                     let self_arg: BasicValueEnum = if first_param_is_ptr {
                         let tmp = self.entry_alloca(self.llvm_ty(&ty), "display.self");
                         b!(self.bld.build_store(tmp, val));
@@ -148,7 +153,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let true_str = b!(self.bld.build_global_string_ptr("true", "ts.true"));
         let false_str = b!(self.bld.build_global_string_ptr("false", "ts.false"));
         let cond = self.to_bool(val);

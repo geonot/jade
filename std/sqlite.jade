@@ -1,0 +1,223 @@
+# std.sqlite — SQLite3 database bindings
+#
+# Usage:
+#   db is sqlite.open("app.db")
+#   db.exec("create table users (id integer primary key, name text, age integer)")
+#   db.exec("insert into users (name, age) values ('alice', 30)")
+#
+#   rows is db.query("select name, age from users where age > ?", [25])
+#   loop rows
+#       print($.get_text("name") + " is " + $.get_int("age").to_string)
+#
+#   db.close()
+
+# ── Extern bindings to runtime/sqlite.c ─────────────────────
+
+extern *jade_sqlite_open(path as %i8) returns %i8
+extern *jade_sqlite_close(db as %i8) returns i32
+extern *jade_sqlite_exec(db as %i8, sql as %i8) returns i32
+extern *jade_sqlite_errmsg(db as %i8) returns %i8
+extern *jade_sqlite_last_insert_id(db as %i8) returns i64
+extern *jade_sqlite_changes(db as %i8) returns i64
+extern *jade_sqlite_prepare(db as %i8, sql as %i8) returns %i8
+extern *jade_sqlite_finalize(stmt as %i8)
+extern *jade_sqlite_reset(stmt as %i8) returns i32
+extern *jade_sqlite_bind_int(stmt as %i8, idx as i32, val as i64) returns i32
+extern *jade_sqlite_bind_float(stmt as %i8, idx as i32, val as f64) returns i32
+extern *jade_sqlite_bind_text(stmt as %i8, idx as i32, val as %i8, len as i64) returns i32
+extern *jade_sqlite_bind_null(stmt as %i8, idx as i32) returns i32
+extern *jade_sqlite_step(stmt as %i8) returns i32
+extern *jade_sqlite_column_count(stmt as %i8) returns i32
+extern *jade_sqlite_column_name(stmt as %i8, idx as i32) returns %i8
+extern *jade_sqlite_column_type(stmt as %i8, idx as i32) returns i32
+extern *jade_sqlite_column_int(stmt as %i8, idx as i32) returns i64
+extern *jade_sqlite_column_float(stmt as %i8, idx as i32) returns f64
+extern *jade_sqlite_column_text(stmt as %i8, idx as i32) returns %i8
+extern *jade_sqlite_column_text_len(stmt as %i8, idx as i32) returns i64
+extern *jade_sqlite_begin(db as %i8) returns i32
+extern *jade_sqlite_commit(db as %i8) returns i32
+extern *jade_sqlite_rollback(db as %i8) returns i32
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+# ── Column type constants ────────────────────────────────────
+
+SQLITE_INTEGER is 1
+SQLITE_FLOAT is 2
+SQLITE_TEXT is 3
+SQLITE_BLOB is 4
+SQLITE_NULL is 5
+
+# ── Row type ─────────────────────────────────────────────────
+
+type Row
+    names as [String]
+    int_vals as [i64]
+    float_vals as [f64]
+    text_vals as [String]
+    type_tags as [i32]
+
+    # Find column index by name. Returns -1 if not found.
+    *col_index(name as String) returns i64
+        i is 0
+        loop self.names
+            if $ equals name
+                return i
+            i is i + 1
+        0 - 1
+
+    # Get an integer column by name.
+    *get_int(name as String) returns i64
+        idx is self.col_index(name)
+        if idx < 0
+            return 0
+        self.int_vals[idx]
+
+    # Get a float column by name.
+    *get_float(name as String) returns f64
+        idx is self.col_index(name)
+        if idx < 0
+            return 0.0
+        self.float_vals[idx]
+
+    # Get a text column by name.
+    *get_text(name as String) returns String
+        idx is self.col_index(name)
+        if idx < 0
+            return ""
+        self.text_vals[idx]
+
+    # Check if a column is null.
+    *is_null(name as String) returns bool
+        idx is self.col_index(name)
+        if idx < 0
+            return true
+        self.type_tags[idx] equals 5
+
+# ── Database handle ──────────────────────────────────────────
+
+type Db
+    handle as %i8
+
+    # Execute SQL with no result rows (DDL, INSERT, UPDATE, DELETE).
+    *exec(sql as String) returns bool
+        extern.jade_sqlite_exec(self.handle, %sql) equals 0
+
+    # Get the last error message.
+    *error returns String
+        ptr is extern.jade_sqlite_errmsg(self.handle)
+        __string_from_ptr(ptr)
+
+    # Get the rowid of the last INSERT.
+    *last_insert_id returns i64
+        extern.jade_sqlite_last_insert_id(self.handle)
+
+    # Get the number of rows affected by last INSERT/UPDATE/DELETE.
+    *changes returns i64
+        extern.jade_sqlite_changes(self.handle)
+
+    # Execute a parameterized query and return all result rows.
+    # Parameters are bound positionally (?1, ?2, ...).
+    *query(sql as String, params as [String]) returns [Row]
+        stmt is extern.jade_sqlite_prepare(self.handle, %sql)
+        if stmt as i64 equals 0
+            return []
+
+        # Bind parameters
+        i is 0
+        loop params
+            extern.jade_sqlite_bind_text(stmt, (i + 1) as i32, %$, $.length)
+            i is i + 1
+
+        # Collect rows
+        rows is [] as [Row]
+        ncols is extern.jade_sqlite_column_count(stmt)
+
+        while extern.jade_sqlite_step(stmt) equals 1
+            names is [] as [String]
+            int_vals is [] as [i64]
+            float_vals is [] as [f64]
+            text_vals is [] as [String]
+            type_tags is [] as [i32]
+
+            j is 0
+            while j < ncols
+                cname is extern.jade_sqlite_column_name(stmt, j)
+                names is names + [__string_from_ptr(cname)]
+
+                ctype is extern.jade_sqlite_column_type(stmt, j)
+                type_tags is type_tags + [ctype]
+
+                if ctype equals 1
+                    int_vals is int_vals + [extern.jade_sqlite_column_int(stmt, j)]
+                    float_vals is float_vals + [0.0]
+                    text_vals is text_vals + [""]
+                elif ctype equals 2
+                    int_vals is int_vals + [0]
+                    float_vals is float_vals + [extern.jade_sqlite_column_float(stmt, j)]
+                    text_vals is text_vals + [""]
+                elif ctype equals 3
+                    txt_ptr is extern.jade_sqlite_column_text(stmt, j)
+                    txt_len is extern.jade_sqlite_column_text_len(stmt, j)
+                    int_vals is int_vals + [0]
+                    float_vals is float_vals + [0.0]
+                    text_vals is text_vals + [__string_from_ptr(txt_ptr)]
+                else
+                    int_vals is int_vals + [0]
+                    float_vals is float_vals + [0.0]
+                    text_vals is text_vals + [""]
+
+                j is j + 1
+
+            row is Row { names is names, int_vals is int_vals, float_vals is float_vals, text_vals is text_vals, type_tags is type_tags }
+            rows is rows + [row]
+
+        extern.jade_sqlite_finalize(stmt)
+        rows
+
+    # Execute a query with no parameters.
+    *query_simple(sql as String) returns [Row]
+        self.query(sql, [])
+
+    # Execute a parameterized SQL statement that returns no rows.
+    # Returns true on success.
+    *run(sql as String, params as [String]) returns bool
+        stmt is extern.jade_sqlite_prepare(self.handle, %sql)
+        if stmt as i64 equals 0
+            return false
+
+        i is 0
+        loop params
+            extern.jade_sqlite_bind_text(stmt, (i + 1) as i32, %$, $.length)
+            i is i + 1
+
+        rc is extern.jade_sqlite_step(stmt)
+        extern.jade_sqlite_finalize(stmt)
+        rc >= 0
+
+    # Begin a transaction.
+    *begin returns bool
+        extern.jade_sqlite_begin(self.handle) equals 0
+
+    # Commit a transaction.
+    *commit returns bool
+        extern.jade_sqlite_commit(self.handle) equals 0
+
+    # Rollback a transaction.
+    *rollback returns bool
+        extern.jade_sqlite_rollback(self.handle) equals 0
+
+    # Close the database.
+    *close
+        extern.jade_sqlite_close(self.handle)
+
+# ── Module-level functions ───────────────────────────────────
+
+# Open a database file. Creates the file if it does not exist.
+*open(path as String) returns Db
+    handle is extern.jade_sqlite_open(%path)
+    Db { handle is handle }
+
+# Open an in-memory database.
+*memory returns Db
+    open(":memory:")

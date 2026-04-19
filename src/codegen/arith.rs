@@ -44,7 +44,9 @@ impl<'ctx> Compiler<'ctx> {
                     _ => return Err(format!("unsupported SIMD int binop: {op:?}")),
                 }
             };
-            if inner.is_float() { self.tag_fast_math(result); }
+            if inner.is_float() {
+                self.tag_fast_math(result);
+            }
             return Ok(result);
         }
         if matches!(op, BinOp::And) {
@@ -90,7 +92,12 @@ impl<'ctx> Compiler<'ctx> {
             if let Type::Struct(name, _) = ety {
                 let fn_name = format!("{name}_equal");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let first_param_is_ptr = fv.get_type().get_param_types().first().map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let first_param_is_ptr = fv
+                        .get_type()
+                        .get_param_types()
+                        .first()
+                        .map(|t| t.is_pointer_type())
+                        .unwrap_or(false);
                     let self_arg: BasicValueEnum = if first_param_is_ptr {
                         let tmp = self.entry_alloca(self.llvm_ty(ety), "eq.self");
                         b!(self.bld.build_store(tmp, lhs));
@@ -98,12 +105,13 @@ impl<'ctx> Compiler<'ctx> {
                     } else {
                         lhs
                     };
-                    let result = b!(self
-                        .bld
-                        .build_call(fv, &[self_arg.into(), rhs.into()], "eq.call"))
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap();
+                    let result =
+                        b!(self
+                            .bld
+                            .build_call(fv, &[self_arg.into(), rhs.into()], "eq.call"))
+                        .try_as_basic_value()
+                        .basic()
+                        .unwrap();
                     return if matches!(op, BinOp::Ne) {
                         Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
                     } else {
@@ -127,7 +135,12 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(method) = trait_name {
                 let fn_name = format!("{name}_{method}");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let first_param_is_ptr = fv.get_type().get_param_types().first().map(|t| t.is_pointer_type()).unwrap_or(false);
+                    let first_param_is_ptr = fv
+                        .get_type()
+                        .get_param_types()
+                        .first()
+                        .map(|t| t.is_pointer_type())
+                        .unwrap_or(false);
                     let self_arg: BasicValueEnum = if first_param_is_ptr {
                         let tmp = self.entry_alloca(self.llvm_ty(ety), "op.self");
                         b!(self.bld.build_store(tmp, lhs));
@@ -277,6 +290,7 @@ impl<'ctx> Compiler<'ctx> {
             BinOp::BitXor => b!(self.bld.build_xor(l, r, "xor")).into(),
             BinOp::Shl => b!(self.bld.build_left_shift(l, r, "shl")).into(),
             BinOp::Shr => b!(self.bld.build_right_shift(l, r, s, "shr")).into(),
+            BinOp::Ushr => b!(self.bld.build_right_shift(l, r, false, "ushr")).into(),
             BinOp::Exp => self.compile_int_pow(l, r)?,
             _ => return Err(format!("unsupported int op: {op:?}")),
         })
@@ -289,7 +303,7 @@ impl<'ctx> Compiler<'ctx> {
         signed: bool,
         is_div: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let prefix = if is_div { "div" } else { "rem" };
         let zero = r.get_type().const_int(0, false);
         let is_zero =
@@ -383,7 +397,7 @@ impl<'ctx> Compiler<'ctx> {
         idx: inkwell::values::IntValue<'ctx>,
         len: u64,
     ) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let len_val = idx.get_type().const_int(len, false);
         let oob = b!(self
             .bld
@@ -402,7 +416,7 @@ impl<'ctx> Compiler<'ctx> {
         base: inkwell::values::IntValue<'ctx>,
         exp: inkwell::values::IntValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let result_ptr = self.entry_alloca(i64t.into(), "pow.res");
         let base_ptr = self.entry_alloca(i64t.into(), "pow.base");
@@ -486,7 +500,7 @@ impl<'ctx> Compiler<'ctx> {
         .into_pointer_value();
 
         // Loop over elements
-        let fn_val = self.cur_fn.unwrap();
+        let fn_val = self.current_fn();
         let loop_bb = self.ctx.append_basic_block(fn_val, "bcast.loop");
         let body_bb = self.ctx.append_basic_block(fn_val, "bcast.body");
         let end_bb = self.ctx.append_basic_block(fn_val, "bcast.end");
@@ -497,12 +511,10 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "bcast.i")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::ULT,
-            idx,
-            total_v,
-            "bcast.cmp"
-        ));
+        let cmp =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::ULT, idx, total_v, "bcast.cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);
@@ -519,10 +531,16 @@ impl<'ctx> Compiler<'ctx> {
             _ => b!(self.bld.build_float_add(lv, rv, "bcast.fallback")),
         };
 
-        let oep = unsafe { b!(self.bld.build_gep(f64t, result_ptr, &[idx.into()], "bcast.oep")) };
+        let oep = unsafe {
+            b!(self
+                .bld
+                .build_gep(f64t, result_ptr, &[idx.into()], "bcast.oep"))
+        };
         b!(self.bld.build_store(oep, result_elem));
 
-        let next = b!(self.bld.build_int_add(idx, i64t.const_int(1, false), "bcast.next"));
+        let next = b!(self
+            .bld
+            .build_int_add(idx, i64t.const_int(1, false), "bcast.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 

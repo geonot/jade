@@ -62,7 +62,9 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             let i64t = self.ctx.i64_type();
             let old = b!(self.bld.build_load(i64t, rc_gep, "rc.cnt.ld")).into_int_value();
-            let inc = b!(self.bld.build_int_nuw_add(old, i64t.const_int(1, false), "rc.inc"));
+            let inc = b!(self
+                .bld
+                .build_int_nuw_add(old, i64t.const_int(1, false), "rc.inc"));
             b!(self.bld.build_store(rc_gep, inc));
         }
         Ok(())
@@ -73,7 +75,7 @@ impl<'ctx> Compiler<'ctx> {
         ptr: BasicValueEnum<'ctx>,
         inner: &Type,
     ) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let layout = self.rc_layout_ty(inner);
         let i64t = self.ctx.i64_type();
         let heap_ptr = ptr.into_pointer_value();
@@ -87,7 +89,9 @@ impl<'ctx> Compiler<'ctx> {
             ))
         } else {
             let loaded = b!(self.bld.build_load(i64t, rc_gep, "rc.cnt.ld")).into_int_value();
-            let dec = b!(self.bld.build_int_nsw_sub(loaded, i64t.const_int(1, false), "rc.dec"));
+            let dec = b!(self
+                .bld
+                .build_int_nsw_sub(loaded, i64t.const_int(1, false), "rc.dec"));
             b!(self.bld.build_store(rc_gep, dec));
             loaded
         };
@@ -162,7 +166,7 @@ impl<'ctx> Compiler<'ctx> {
         weak_ptr: BasicValueEnum<'ctx>,
         inner: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let layout = self.weak_layout_ty(inner);
         let i64t = self.ctx.i64_type();
         let heap_ptr = weak_ptr.into_pointer_value();
@@ -206,7 +210,7 @@ impl<'ctx> Compiler<'ctx> {
         ptr: BasicValueEnum<'ctx>,
         inner: &Type,
     ) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let layout = self.weak_layout_ty(inner);
         let i64t = self.ctx.i64_type();
         let heap_ptr = ptr.into_pointer_value();

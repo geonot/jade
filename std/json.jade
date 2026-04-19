@@ -1,0 +1,445 @@
+# std.json — JSON parsing and serialization
+#
+# Usage:
+#   data is json.parse('\{"name": "jade"\}')
+#   text is json.stringify(data)
+
+# ── Types ────────────────────────────────────────────────────
+
+type JsonArray
+    items as Vec of JsonValue
+
+type JsonObject
+    keys as Vec of String
+    vals as Vec of JsonValue
+
+enum JsonValue
+    Str(String)
+    Num(f64)
+    JBool(bool)
+    JNull
+    JArray(JsonArray)
+    JObject(JsonObject)
+
+# Byte constants for fast comparison
+QUOTE is 34
+BACKSLASH is 92
+LBRACE is 123
+RBRACE is 125
+LBRACKET is 91
+RBRACKET is 93
+COLON is 58
+COMMA is 44
+SPACE is 32
+TAB is 9
+CR is 13
+LF is 10
+MINUS is 45
+DOT is 46
+ZERO is 48
+NINE is 57
+LOWER_E is 101
+UPPER_E is 69
+PLUS is 43
+LOWER_T is 116
+LOWER_F is 102
+LOWER_N is 110
+LOWER_R is 114
+LOWER_B is 98
+LOWER_U is 117
+
+# ── Parser type ──────────────────────────────────────────────
+
+type JsonParser
+    src as String
+    pos as i64
+
+    *peek_byte
+        if self.pos >= self.src.length
+            return -1
+        self.src.char_at(self.pos)
+
+    *advance_byte
+        ch is self.src.char_at(self.pos)
+        self.pos is self.pos + 1
+        ch
+
+    *skip_ws
+        while self.pos < self.src.length
+            ch is self.src.char_at(self.pos)
+            match ch
+                SPACE ? self.pos is self.pos + 1
+                LF ? self.pos is self.pos + 1
+                CR ? self.pos is self.pos + 1
+                TAB ? self.pos is self.pos + 1
+                _ ? return
+
+    *expect_byte(expected)
+        got is self.advance_byte()
+        if got neq expected
+            assert(false)
+
+    *parse_value returns JsonValue
+        self.skip_ws()
+        ch is self.peek_byte()
+        match ch
+            QUOTE ? Str(self.parse_string())
+            LBRACE ? self.parse_object()
+            LBRACKET ? self.parse_array()
+            LOWER_T ? self.parse_true()
+            LOWER_F ? self.parse_false()
+            LOWER_N ? self.parse_null()
+            _ ? self.parse_number()
+
+    *parse_string returns String
+        self.expect_byte(QUOTE)
+        result is ''
+        while self.pos < self.src.length
+            ch is self.advance_byte()
+            if ch equals QUOTE
+                return result
+            if ch equals BACKSLASH
+                esc is self.advance_byte()
+                match esc
+                    QUOTE ? result is result + '"'
+                    BACKSLASH ? result is result + "\\"
+                    47 ? result is result + "/"
+                    LOWER_N ? result is result + "\n"
+                    LOWER_R ? result is result + "\r"
+                    LOWER_T ? result is result + "\t"
+                    LOWER_B ? result is result + ""
+                    LOWER_F ? result is result + ""
+                    LOWER_U ?
+                        # \uXXXX — parse 4 hex digits as a Unicode code point
+                        hex is self.src.slice(self.pos, self.pos + 4)
+                        self.pos is self.pos + 4
+                        code is __json_hex_to_int(hex)
+                        if code >= 32 and code < 127
+                            result is result + __json_ascii_char(code)
+                        else if code equals 9
+                            result is result + "\t"
+                        else if code equals 10
+                            result is result + "\n"
+                        else if code equals 13
+                            result is result + "\r"
+                        else
+                            result is result + "?"
+                    _ ? result is result + self.src.slice(self.pos - 1, self.pos)
+            else
+                result is result + self.src.slice(self.pos - 1, self.pos)
+        assert(false)
+        ""
+
+    *parse_number returns JsonValue
+        start is self.pos
+        if self.peek_byte() equals MINUS
+            self.pos is self.pos + 1
+        while self.pos < self.src.length
+            ch is self.src.char_at(self.pos)
+            if ch >= ZERO and ch <= NINE
+                self.pos is self.pos + 1
+            else
+                break
+        if self.pos < self.src.length and self.peek_byte() equals DOT
+            self.pos is self.pos + 1
+            while self.pos < self.src.length
+                ch is self.src.char_at(self.pos)
+                if ch >= ZERO and ch <= NINE
+                    self.pos is self.pos + 1
+                else
+                    break
+        if self.pos < self.src.length
+            ch is self.peek_byte()
+            if ch equals LOWER_E or ch equals UPPER_E
+                self.pos is self.pos + 1
+                if self.peek_byte() equals PLUS or self.peek_byte() equals MINUS
+                    self.pos is self.pos + 1
+                while self.pos < self.src.length
+                    ch is self.src.char_at(self.pos)
+                    if ch >= ZERO and ch <= NINE
+                        self.pos is self.pos + 1
+                    else
+                        break
+        num_str is self.src.slice(start, self.pos)
+        Num(parse_float(num_str))
+
+    *parse_object returns JsonValue
+        self.expect_byte(LBRACE)
+        keys is vec()
+        vals is vec()
+        self.skip_ws()
+        if self.peek_byte() equals RBRACE
+            self.advance_byte()
+            return JObject(JsonObject(keys is keys, vals is vals))
+        loop
+            self.skip_ws()
+            key is self.parse_string()
+            self.skip_ws()
+            self.expect_byte(COLON)
+            value is self.parse_value()
+            keys.push(key)
+            vals.push(value)
+            self.skip_ws()
+            if self.peek_byte() equals RBRACE
+                self.advance_byte()
+                return JObject(JsonObject(keys is keys, vals is vals))
+            self.expect_byte(COMMA)
+
+    *parse_array returns JsonValue
+        self.expect_byte(LBRACKET)
+        items is vec()
+        self.skip_ws()
+        if self.peek_byte() equals RBRACKET
+            self.advance_byte()
+            return JArray(JsonArray(items is items))
+        loop
+            items.push(self.parse_value())
+            self.skip_ws()
+            if self.peek_byte() equals RBRACKET
+                self.advance_byte()
+                return JArray(JsonArray(items is items))
+            self.expect_byte(COMMA)
+
+    *parse_true returns JsonValue
+        self.pos is self.pos + 4
+        JBool(true)
+
+    *parse_false returns JsonValue
+        self.pos is self.pos + 5
+        JBool(false)
+
+    *parse_null returns JsonValue
+        self.pos is self.pos + 4
+        JNull
+
+# ── Public parse function ────────────────────────────────────
+
+*parse(text as String) returns JsonValue
+    p is JsonParser(src is text, pos is 0)
+    p.skip_ws()
+    p.parse_value()
+
+# ── Serialization ────────────────────────────────────────────
+
+*stringify(value as JsonValue) returns String
+    match value
+        Str(s) ? __escape(s)
+        Num(n) ? to_string(n)
+        JBool(b) ?
+            if b
+                return "true"
+            "false"
+        JNull ? "null"
+        JArray(a) ? __stringify_array(a.items)
+        JObject(o) ? __stringify_object(o.keys, o.vals)
+
+*__escape(s as String) returns String
+    result is '"'
+    i is 0
+    while i < s.length
+        ch is s.char_at(i)
+        match ch
+            QUOTE ? result is result + '\\"'
+            BACKSLASH ? result is result + "\\\\"
+            LF ? result is result + "\\n"
+            CR ? result is result + "\\r"
+            TAB ? result is result + "\\t"
+            _ ?
+                if ch < 32
+                    result is result + "\\u00" + __json_hex_byte(ch)
+                else
+                    result is result + s.slice(i, i + 1)
+        i is i + 1
+    result + '"'
+
+*__stringify_array(items as Vec of JsonValue) returns String
+    if items.length equals 0
+        return "[]"
+    result is "["
+    loop items
+        if $$ > 0
+            result is result + ","
+        result is result + stringify($)
+    result + "]"
+
+*__stringify_object(keys as Vec of String, vals as Vec of JsonValue) returns String
+    if keys.length equals 0
+        return "\{\}"
+    result is "\{"
+    loop keys
+        if $$ > 0
+            result is result + ","
+        result is result + __escape($) + ":" + stringify(vals.get($$))
+    result + "\}"
+
+# ── Pretty printing ─────────────────────────────────────────
+
+*pretty(value as JsonValue) returns String
+    __pretty_indent(value, 0)
+
+*__pretty_indent(value as JsonValue, depth) returns String
+    ind is "  "
+    match value
+        Str(s) ? __escape(s)
+        Num(n) ? to_string(n)
+        JBool(b) ?
+            if b
+                return "true"
+            "false"
+        JNull ? "null"
+        JArray(a) ?
+            if a.items.length equals 0
+                return "[]"
+            result is "[\n"
+            loop a.items
+                if $$ > 0
+                    result is result + ",\n"
+                for j in 0 to depth + 1
+                    result is result + ind
+                result is result + __pretty_indent($, depth + 1)
+            result is result + "\n"
+            for j in 0 to depth
+                result is result + ind
+            result + "]"
+        JObject(o) ?
+            if o.keys.length equals 0
+                return "\{\}"
+            result is "\{\n"
+            loop o.keys
+                if $$ > 0
+                    result is result + ",\n"
+                for j in 0 to depth + 1
+                    result is result + ind
+                result is result + __escape($) + ": " + __pretty_indent(o.vals.get($$), depth + 1)
+            result is result + "\n"
+            for j in 0 to depth
+                result is result + ind
+            result + "\}"
+
+# ── Access helpers ───────────────────────────────────────────
+
+*get(obj as JsonValue, key as String) returns JsonValue
+    match obj
+        JObject(o) ?
+            loop o.keys
+                if $ equals key
+                    return o.vals.get($$)
+            JNull
+        _ ? JNull
+
+*get_str(obj as JsonValue, key as String) returns String
+    val is get(obj, key)
+    match val
+        Str(s) ? s
+        _ ? ""
+
+*get_num(obj as JsonValue, key as String) returns f64
+    val is get(obj, key)
+    match val
+        Num(n) ? n
+        _ ? 0.0
+
+*get_bool(obj as JsonValue, key as String) returns bool
+    val is get(obj, key)
+    match val
+        JBool(b) ? b
+        _ ? false
+
+*index(arr as JsonValue, idx) returns JsonValue
+    match arr
+        JArray(a) ?
+            if idx >= 0 and idx < a.items.length
+                return a.items.get(idx)
+            JNull
+        _ ? JNull
+
+*length(value as JsonValue)
+    match value
+        JArray(a) ? a.items.length
+        JObject(o) ? o.keys.length
+        Str(s) ? s.length
+        _ ? 0
+
+# ── Mutation helpers ─────────────────────────────────────────
+
+*set(obj as JsonValue, key as String, value as JsonValue) returns JsonValue
+    match obj
+        JObject(o) ?
+            # Check if key already exists
+            loop o.keys
+                if $ equals key
+                    o.vals.set($$, value)
+                    return JObject(o)
+            # Key not found — add it
+            o.keys.push(key)
+            o.vals.push(value)
+            JObject(o)
+        _ ? obj
+
+*has(obj as JsonValue, key as String) returns bool
+    match obj
+        JObject(o) ?
+            loop o.keys
+                if $ equals key
+                    return true
+            false
+        _ ? false
+
+*keys(obj as JsonValue)
+    match obj
+        JObject(o) ? o.keys
+        _ ? vec()
+
+*remove(obj as JsonValue, key as String) returns JsonValue
+    match obj
+        JObject(o) ?
+            new_keys is vec()
+            new_vals is vec()
+            loop o.keys
+                if $ neq key
+                    new_keys.push($)
+                    new_vals.push(o.vals.get($$))
+            JObject(JsonObject(keys is new_keys, vals is new_vals))
+        _ ? obj
+
+*push(arr as JsonValue, value as JsonValue) returns JsonValue
+    match arr
+        JArray(a) ?
+            a.items.push(value)
+            JArray(a)
+        _ ? arr
+
+# ── Constructor helpers ──────────────────────────────────────
+
+*obj
+    JObject(JsonObject(keys is vec(), vals is vec()))
+
+*arr
+    JArray(JsonArray(items is vec()))
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*__json_hex_to_int(s as String) returns i64
+    result is 0
+    for i in 0 to s.length
+        ch is s.char_at(i)
+        if ch >= 48 and ch <= 57
+            result is result * 16 + (ch - 48)
+        else if ch >= 65 and ch <= 70
+            result is result * 16 + (ch - 55)
+        else if ch >= 97 and ch <= 102
+            result is result * 16 + (ch - 87)
+    result
+
+*__json_ascii_char(code as i64) returns String
+    chars is " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz\{|\}~"
+    if code >= 32 and code < 127
+        idx is code - 32
+        return chars.slice(idx, idx + 1)
+    "?"
+
+*__json_hex_byte(n as i64) returns String
+    hex_chars is "0123456789abcdef"
+    hi is n / 16
+    lo is n % 16
+    hex_chars.slice(hi, hi + 1) + hex_chars.slice(lo, lo + 1)

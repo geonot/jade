@@ -1,0 +1,134 @@
+# std.glob — Glob pattern matching
+#
+# Usage:
+#   if glob.matches("*.jade", "main.jade")   # true
+#   files is glob.find("src/**/*.jade")
+
+extern *c_opendir(path as %i8) returns %i8
+extern *c_readdir_name(d as %i8) returns %i8
+extern *c_closedir(d as %i8)
+extern *c_is_dir(path as %i8) returns i32
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+extern *strlen(s as %i8) returns i64
+extern *opendir(path as %i8) returns %i8
+extern *closedir(dir as %i8) returns i32
+extern *readdir(dir as %i8) returns %i8
+extern *jade_dirent_name(ent as %i8) returns %i8
+
+# Match a glob pattern against a string.
+# Supports: * (any chars), ? (single char), ** (recursive), [abc] char classes.
+*matches(pattern as String, text as String) returns bool
+    __glob_match(pattern, 0, text, 0)
+
+*__glob_match(pattern as String, pi, text as String, ti) returns bool
+    while pi < pattern.length and ti < text.length
+        pc is pattern.char_at(pi)
+        if pc equals 42
+            # Check for **
+            if pi + 1 < pattern.length and pattern.char_at(pi + 1) equals 42
+                pi is pi + 2
+                # Skip path separator after **
+                if pi < pattern.length and pattern.char_at(pi) equals 47
+                    pi is pi + 1
+                # ** matches everything including path separators
+                t is ti
+                while t <= text.length
+                    if __glob_match(pattern, pi, text, t)
+                        return true
+                    t is t + 1
+                return false
+            # Single * matches any chars except /
+            pi is pi + 1
+            t is ti
+            while t <= text.length
+                if __glob_match(pattern, pi, text, t)
+                    return true
+                if t < text.length and text.char_at(t) equals 47
+                    break
+                t is t + 1
+            return false
+        elif pc equals 63
+            # ? matches any single char except /
+            if text.char_at(ti) equals 47
+                return false
+            pi is pi + 1
+            ti is ti + 1
+        elif pc equals 91
+            # Character class [abc] or [a-z]
+            pi is pi + 1
+            negate is false
+            if pi < pattern.length and pattern.char_at(pi) equals 33
+                negate is true
+                pi is pi + 1
+            found is false
+            tc is text.char_at(ti)
+            while pi < pattern.length and pattern.char_at(pi) neq 93
+                if pi + 2 < pattern.length and pattern.char_at(pi + 1) equals 45
+                    lo is pattern.char_at(pi)
+                    hi is pattern.char_at(pi + 2)
+                    if tc >= lo and tc <= hi
+                        found is true
+                    pi is pi + 3
+                else
+                    if tc equals pattern.char_at(pi)
+                        found is true
+                    pi is pi + 1
+            if pi < pattern.length
+                pi is pi + 1
+            if negate
+                found is not found
+            if found is false
+                return false
+            ti is ti + 1
+        else
+            # Literal character
+            if text.char_at(ti) neq pc
+                return false
+            pi is pi + 1
+            ti is ti + 1
+    # Consume trailing *s
+    while pi < pattern.length and pattern.char_at(pi) equals 42
+        pi is pi + 1
+    pi >= pattern.length and ti >= text.length
+
+# Find all files matching a glob pattern under a directory.
+*find(pattern as String) returns Vec of String
+    find_in(".", pattern)
+
+# Find all files matching a glob pattern under a given root directory.
+*find_in(root as String, pattern as String) returns Vec of String
+    all_files is vec()
+    __walk(root, all_files)
+    result is vec()
+    loop all_files
+        rel is __strip_root(root, $)
+        if matches(pattern, rel)
+            result.push($)
+    result
+
+*__strip_root(root as String, path as String) returns String
+    if root equals "."
+        return path
+    prefix is root + "/"
+    if path.starts_with(prefix)
+        return path.slice(root.length + 1, path.length)
+    path
+
+*__walk(dir as String, result as Vec of String)
+    d is extern.opendir(%dir)
+    if d as i64 equals 0
+        return
+    loop
+        ent is extern.readdir(d)
+        if ent as i64 equals 0
+            break
+        name_ptr is extern.jade_dirent_name(ent)
+        name is __string_from_ptr(name_ptr)
+        if name neq "." and name neq ".."
+            full is dir + "/" + name
+            if extern.c_is_dir(%full) equals 1
+                __walk(full, result)
+            else
+                result.push(full)
+    extern.closedir(d)

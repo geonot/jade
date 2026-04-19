@@ -99,7 +99,7 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let n = arms.len();
 
         let case_struct_ty = self
@@ -191,7 +191,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for (i, (arm, bb)) in arms.iter().zip(arm_bbs.iter()).enumerate() {
             self.bld.position_at_end(*bb);
-            self.vars.push(std::collections::HashMap::new());
+            self.push_var_scope();
 
             if !arm.is_send {
                 if let Some(ref bind_name) = arm.binding {
@@ -207,7 +207,7 @@ impl<'ctx> Compiler<'ctx> {
 
             self.compile_block(&arm.body)?;
 
-            self.vars.pop();
+            self.pop_var_scope();
             if self.no_term() {
                 b!(self.bld.build_unconditional_branch(merge_bb));
             }

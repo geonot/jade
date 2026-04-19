@@ -5,11 +5,7 @@
             total is total + 1
     log(total)
     sum is 0
-    i is 0
-    while i < 5
-        j is 0
-        while j < 5
+    for i in 0 to 5
+        for j in 0 to 5
             sum is sum + i * j
-            j is j + 1
-        i is i + 1
     log(sum)

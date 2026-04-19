@@ -1,0 +1,125 @@
+# std.codec — Byte encoding utilities (hex, base64)
+#
+# Usage:
+#   hex_str is codec.to_hex("hello")
+#   bytes is codec.from_hex("48656c6c6f")
+#   b64 is codec.to_base64("hello")
+#   decoded is codec.from_base64(b64)
+
+# ── Hex encoding ─────────────────────────────────────────────
+
+HEX_CHARS is "0123456789abcdef"
+
+*to_hex(data as String) returns String
+    result is ""
+    i is 0
+    while i < data.length
+        b is data.char_at(i)
+        hi is b / 16
+        lo is b mod 16
+        result is result + HEX_CHARS.slice(hi, hi + 1) + HEX_CHARS.slice(lo, lo + 1)
+        i is i + 1
+    result
+
+*__hex_digit(ch) returns i64
+    if ch >= 48 and ch <= 57
+        return ch - 48
+    if ch >= 97 and ch <= 102
+        return ch - 87
+    if ch >= 65 and ch <= 70
+        return ch - 55
+    0
+
+*from_hex(hex as String) returns String
+    result is ""
+    i is 0
+    while i < hex.length - 1
+        hi is __hex_digit(hex.char_at(i))
+        lo is __hex_digit(hex.char_at(i + 1))
+        val is hi * 16 + lo
+        result is result + __char_from_code(val)
+        i is i + 2
+    result
+
+*__char_from_code(code) returns String
+    # Build single-byte string from character code
+    if code equals 0
+        return ""
+    # Use the string builder approach with comparison
+    chars is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\t\n\r"
+    lookup is vec()
+    for j in 0 to chars.length
+        lookup.push(chars.char_at(j))
+    loop lookup
+        if $ equals code
+            return chars.slice($$, $$ + 1)
+    "?"
+
+# ── Base64 encoding ──────────────────────────────────────────
+
+B64_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+*to_base64(data as String) returns String
+    result is ""
+    i is 0
+    len is data.length
+    while i < len
+        b0 is data.char_at(i)
+        b1 is 0
+        b2 is 0
+        if i + 1 < len
+            b1 is data.char_at(i + 1)
+        if i + 2 < len
+            b2 is data.char_at(i + 2)
+        idx0 is b0 >> 2
+        idx1 is ((b0 & 3) << 4) | (b1 >> 4)
+        idx2 is ((b1 & 15) << 2) | (b2 >> 6)
+        idx3 is b2 & 63
+        result is result + B64_TABLE.slice(idx0, idx0 + 1)
+        result is result + B64_TABLE.slice(idx1, idx1 + 1)
+        if i + 1 < len
+            result is result + B64_TABLE.slice(idx2, idx2 + 1)
+        else
+            result is result + "="
+        if i + 2 < len
+            result is result + B64_TABLE.slice(idx3, idx3 + 1)
+        else
+            result is result + "="
+        i is i + 3
+    result
+
+*__b64_val(ch) returns i64
+    if ch >= 65 and ch <= 90
+        return ch - 65
+    if ch >= 97 and ch <= 122
+        return ch - 71
+    if ch >= 48 and ch <= 57
+        return ch + 4
+    if ch equals 43
+        return 62
+    if ch equals 47
+        return 63
+    0
+
+*from_base64(encoded as String) returns String
+    result is ""
+    i is 0
+    while i < encoded.length
+        c0 is __b64_val(encoded.char_at(i))
+        c1 is __b64_val(encoded.char_at(i + 1))
+        c2 is __b64_val(encoded.char_at(i + 2))
+        c3 is __b64_val(encoded.char_at(i + 3))
+        b0 is (c0 << 2) | (c1 >> 4)
+        result is result + __char_from_code(b0)
+        if i + 2 < encoded.length
+            ch2 is encoded.char_at(i + 2)
+            if ch2 neq 61
+                b1 is ((c1 & 15) << 4) | (c2 >> 2)
+                result is result + __char_from_code(b1)
+        if i + 3 < encoded.length
+            ch3 is encoded.char_at(i + 3)
+            if ch3 neq 61
+                b2 is ((c2 & 3) << 6) | c3
+                result is result + __char_from_code(b2)
+        i is i + 4
+    result

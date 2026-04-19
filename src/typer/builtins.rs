@@ -307,7 +307,10 @@ impl Typer {
                 };
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::MapWithAlloc, vec![halloc]),
-                    ty: Type::Map(Box::new(self.infer_ctx.fresh_var()), Box::new(self.infer_ctx.fresh_var())),
+                    ty: Type::Map(
+                        Box::new(self.infer_ctx.fresh_var()),
+                        Box::new(self.infer_ctx.fresh_var()),
+                    ),
                     span,
                 }))
             }
@@ -316,7 +319,9 @@ impl Typer {
                     Ok(e) => e,
                     Err(e) => return Some(Err(e)),
                 };
-                let _ = self.infer_ctx.unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
+                let _ = self
+                    .infer_ctx
+                    .unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::ArenaNew, vec![harg]),
                     ty: Type::Arena,
@@ -442,7 +447,10 @@ impl Typer {
                     Err(e) => return Some(Err(e)),
                 };
                 if !matches!(harg.ty, Type::Ptr(_)) {
-                    return Some(Err(format!("atomic_load() requires a pointer, got {}", harg.ty)));
+                    return Some(Err(format!(
+                        "atomic_load() requires a pointer, got {}",
+                        harg.ty
+                    )));
                 }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::AtomicLoad(Box::new(harg)),
@@ -460,7 +468,10 @@ impl Typer {
                     Err(e) => return Some(Err(e)),
                 };
                 if !matches!(hptr.ty, Type::Ptr(_)) {
-                    return Some(Err(format!("atomic_store() first arg must be a pointer, got {}", hptr.ty)));
+                    return Some(Err(format!(
+                        "atomic_store() first arg must be a pointer, got {}",
+                        hptr.ty
+                    )));
                 }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::AtomicStore(Box::new(hptr), Box::new(hval)),
@@ -478,7 +489,10 @@ impl Typer {
                     Err(e) => return Some(Err(e)),
                 };
                 if !matches!(hptr.ty, Type::Ptr(_)) {
-                    return Some(Err(format!("atomic_add() first arg must be a pointer, got {}", hptr.ty)));
+                    return Some(Err(format!(
+                        "atomic_add() first arg must be a pointer, got {}",
+                        hptr.ty
+                    )));
                 }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::AtomicAdd(Box::new(hptr), Box::new(hval)),
@@ -500,10 +514,17 @@ impl Typer {
                     Err(e) => return Some(Err(e)),
                 };
                 if !matches!(hptr.ty, Type::Ptr(_)) {
-                    return Some(Err(format!("atomic_cas() first arg must be a pointer, got {}", hptr.ty)));
+                    return Some(Err(format!(
+                        "atomic_cas() first arg must be a pointer, got {}",
+                        hptr.ty
+                    )));
                 }
                 Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::AtomicCas(Box::new(hptr), Box::new(hexpected), Box::new(hnew)),
+                    kind: hir::ExprKind::AtomicCas(
+                        Box::new(hptr),
+                        Box::new(hexpected),
+                        Box::new(hnew),
+                    ),
                     ty: Type::I64,
                     span,
                 }))
@@ -518,7 +539,10 @@ impl Typer {
                     Err(e) => return Some(Err(e)),
                 };
                 if !matches!(hptr.ty, Type::Ptr(_)) {
-                    return Some(Err(format!("atomic_sub() first arg must be a pointer, got {}", hptr.ty)));
+                    return Some(Err(format!(
+                        "atomic_sub() first arg must be a pointer, got {}",
+                        hptr.ty
+                    )));
                 }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::AtomicSub(Box::new(hptr), Box::new(hval)),

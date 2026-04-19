@@ -1,5 +1,5 @@
-use inkwell::values::BasicValueEnum;
 use inkwell::AddressSpace;
+use inkwell::values::BasicValueEnum;
 
 use crate::hir;
 use crate::types::Type;
@@ -28,9 +28,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_struct_gep(header_ty, header_ptr, 0, "set.ptr"));
         b!(self.bld.build_store(
             ptr_gep,
-            self.ctx
-                .ptr_type(AddressSpace::default())
-                .const_null()
+            self.ctx.ptr_type(AddressSpace::default()).const_null()
         ));
 
         let len_gep = b!(self
@@ -98,10 +96,8 @@ impl<'ctx> Compiler<'ctx> {
                 let result = b!(self.bld.build_call(func, &arg_metas, &rt_name));
 
                 match method {
-                    "add" | "remove" | "clear" => {
-                        Ok(self.ctx.i64_type().const_zero().into())
-                    }
-                    _ => Ok(result.try_as_basic_value().basic().unwrap()),
+                    "add" | "remove" | "clear" => Ok(self.ctx.i64_type().const_zero().into()),
+                    _ => Ok(self.call_result(result)),
                 }
             }
             _ => Err(format!("no method '{method}' on Set")),
@@ -135,21 +131,24 @@ impl<'ctx> Compiler<'ctx> {
         .into_pointer_value();
 
         // Zero-initialize
-        let memset = self.module.get_function("llvm.memset.p0.i64").unwrap_or_else(|| {
-            self.module.add_function(
-                "llvm.memset.p0.i64",
-                self.ctx.void_type().fn_type(
-                    &[
-                        self.ctx.ptr_type(AddressSpace::default()).into(),
-                        self.ctx.i8_type().into(),
-                        i64t.into(),
-                        self.ctx.bool_type().into(),
-                    ],
-                    false,
-                ),
-                None,
-            )
-        });
+        let memset = self
+            .module
+            .get_function("llvm.memset.p0.i64")
+            .unwrap_or_else(|| {
+                self.module.add_function(
+                    "llvm.memset.p0.i64",
+                    self.ctx.void_type().fn_type(
+                        &[
+                            self.ctx.ptr_type(AddressSpace::default()).into(),
+                            self.ctx.i8_type().into(),
+                            i64t.into(),
+                            self.ctx.bool_type().into(),
+                        ],
+                        false,
+                    ),
+                    None,
+                )
+            });
         b!(self.bld.build_call(
             memset,
             &[
@@ -183,9 +182,7 @@ impl<'ctx> Compiler<'ctx> {
         for (i, elem) in elems.iter().enumerate() {
             let val = self.compile_expr(elem)?;
             let idx = self.ctx.i32_type().const_int(i as u64, false);
-            vec_val = b!(self
-                .bld
-                .build_insert_element(vec_val, val, idx, "simd.ins"));
+            vec_val = b!(self.bld.build_insert_element(vec_val, val, idx, "simd.ins"));
         }
         Ok(vec_val.into())
     }
@@ -211,19 +208,17 @@ impl<'ctx> Compiler<'ctx> {
             "push" => {
                 let val = self.compile_expr(&args[0])?;
                 let priority = self.compile_expr(&args[1])?;
-                let fn_type = self.ctx.void_type().fn_type(
-                    &[ptr_t.into(), i64t.into(), i64t.into()],
-                    false,
-                );
+                let fn_type = self
+                    .ctx
+                    .void_type()
+                    .fn_type(&[ptr_t.into(), i64t.into(), i64t.into()], false);
                 let func = self
                     .module
                     .get_function(&rt_name)
                     .unwrap_or_else(|| self.module.add_function(&rt_name, fn_type, None));
-                b!(self.bld.build_call(
-                    func,
-                    &[obj_val.into(), val.into(), priority.into()],
-                    "",
-                ));
+                b!(self
+                    .bld
+                    .build_call(func, &[obj_val.into(), val.into(), priority.into()], "",));
                 Ok(self.ctx.i64_type().const_zero().into())
             }
             "pop" | "peek" => {
@@ -233,7 +228,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get_function(&rt_name)
                     .unwrap_or_else(|| self.module.add_function(&rt_name, fn_type, None));
                 let result = b!(self.bld.build_call(func, &[obj_val.into()], "pq.result"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                Ok(self.call_result(result))
             }
             "len" => {
                 let fn_type = i64t.fn_type(&[ptr_t.into()], false);
@@ -242,7 +237,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get_function(&rt_name)
                     .unwrap_or_else(|| self.module.add_function(&rt_name, fn_type, None));
                 let result = b!(self.bld.build_call(func, &[obj_val.into()], "pq.len"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                Ok(self.call_result(result))
             }
             "is_empty" => {
                 let fn_type = self.ctx.bool_type().fn_type(&[ptr_t.into()], false);
@@ -251,7 +246,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get_function(&rt_name)
                     .unwrap_or_else(|| self.module.add_function(&rt_name, fn_type, None));
                 let result = b!(self.bld.build_call(func, &[obj_val.into()], "pq.empty"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                Ok(self.call_result(result))
             }
             "clear" => {
                 let fn_type = self.ctx.void_type().fn_type(&[ptr_t.into()], false);

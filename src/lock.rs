@@ -30,7 +30,7 @@ impl Lockfile {
                 let entry = Self::parse_entry(line)?;
                 let mut top = entry;
                 i += 1;
-                while i < lines.len() && lines[i].starts_with("  ") {
+                while i < lines.len() && lines[i].starts_with(|c: char| c.is_whitespace()) {
                     let child_line = lines[i].trim();
                     if !child_line.is_empty() && !child_line.starts_with('#') {
                         top.deps.push(Self::parse_entry(child_line)?);

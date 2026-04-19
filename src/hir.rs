@@ -38,6 +38,14 @@ impl std::fmt::Display for Ownership {
 }
 
 #[derive(Debug, Clone)]
+pub struct Global {
+    pub name: String,
+    pub init: Expr,
+    pub ty: Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct Program {
     pub fns: Vec<Fn>,
     pub types: Vec<TypeDef>,
@@ -50,6 +58,8 @@ pub struct Program {
     pub supervisors: Vec<SupervisorDef>,
     pub type_aliases: Vec<(String, Type, Span)>,
     pub newtypes: Vec<(String, Type, Span)>,
+    pub migrations: Vec<crate::ast::MigrationDef>,
+    pub globals: Vec<Global>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +81,7 @@ pub struct Fn {
     pub span: Span,
     pub generic_origin: Option<String>,
     pub is_generator: bool,
+    pub attrs: crate::ast::FnAttrs,
 }
 
 #[derive(Debug, Clone)]
@@ -171,10 +182,23 @@ pub struct HandlerDef {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoreField {
+    pub name: String,
+    pub ty: Type,
+    pub default: Option<Expr>,
+    pub decorators: Vec<ast::FieldDecorator>,
+    pub is_relation: bool,
+    pub is_has_many: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoreDef {
     pub def_id: DefId,
     pub name: String,
-    pub fields: Vec<Field>,
+    pub decorators: Vec<ast::StoreDecorator>,
+    pub fields: Vec<StoreField>,
+    pub methods: Vec<Fn>,
     pub span: Span,
 }
 
@@ -229,13 +253,18 @@ pub enum Stmt {
     ErrReturn(Expr, Type, Span),
     StoreInsert(String, Vec<Expr>, Span),
     StoreDelete(String, Box<StoreFilter>, Span),
+    StoreDestroy(String, Box<StoreFilter>, Span),
     StoreSet(String, Vec<(String, Expr)>, Box<StoreFilter>, Span),
+    StoreRestore(String, Box<StoreFilter>, Span),
+    StoreSave(String, Span),
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     SimFor(For, Span),
     SimBlock(Block, Span),
     UseLocal(Vec<String>, Option<Vec<String>>, Option<String>, Span),
+    /// Store a value into a global mutable variable.
+    GlobalStore(String, Expr, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -337,6 +366,40 @@ pub enum ExprKind {
     StoreQuery(String, Box<StoreFilter>),
     StoreCount(String),
     StoreAll(String),
+    StoreGet(String, Box<Expr>),
+    StoreFirst(String, Box<StoreFilter>),
+    StoreExists(String, Box<StoreFilter>),
+    StoreDistinct(String, String),
+    StoreSum(String, String),
+    StoreAvg(String, String),
+    StoreMin(String, String),
+    StoreMax(String, String),
+    StoreVersionCount(String, Box<Expr>), // store_name, sid_expr
+    StoreHistory(String, Box<Expr>),      // store_name, sid_expr
+    StoreAtVersion(String, Box<Expr>, Box<Expr>), // store_name, sid_expr, version_expr
+    ViewCount(String, Box<StoreFilter>),  // source_store, filter
+    ViewAll(String, Box<StoreFilter>),    // source_store, filter
+    // @kv store operations
+    KvGet(String, Box<Expr>),             // store_name, key_expr → i64
+    KvHas(String, Box<Expr>),             // store_name, key_expr → bool
+    KvCount(String),                      // store_name → i64
+    KvSet(String, Box<Expr>, Box<Expr>),  // store_name, key_expr, val_expr → void
+    KvDel(String, Box<Expr>),             // store_name, key_expr → void
+    KvIncr(String, Box<Expr>, Box<Expr>), // store_name, key_expr, delta_expr → void
+    // @vector store operations
+    VecNearest(String, Box<Expr>, Box<Expr>), // store_name, query_vec, k → count
+    VecInsert(String, Box<Expr>),             // store_name, vec_expr → void
+    VecCount(String),                         // store_name → i64
+    // @bloom filter operations
+    BloomTest(String, String, Box<Expr>), // store_name, field_name, value → bool
+    // @fts operations
+    FtsSearch(String, String, Box<Expr>), // store_name, field_name, query → count
+    FtsCount(String, String),             // store_name, field_name → count
+    // @graph store operations
+    GraphFrom(String, Box<Expr>), // store_name, node_sid → ptr (edges from)
+    GraphTo(String, Box<Expr>),   // store_name, node_sid → ptr (edges to)
+    // @timeseries operations
+    TsLatest(String), // store_name → record (latest entry)
     IterNext(String, String, String),
     ChannelCreate(Type, Box<Expr>),
     ChannelSend(Box<Expr>, Box<Expr>),
@@ -360,6 +423,14 @@ pub enum ExprKind {
     CowClone(Box<Expr>),
     GeneratorCreate(DefId, String, Vec<Stmt>),
     GeneratorNext(Box<Expr>),
+    /// Unwrap an Option/Result enum — extract inner value or abort.
+    /// Fields: (expr, enum_name, success_tag)
+    EnumUnwrap(Box<Expr>, String, u32),
+    /// Check an enum tag — returns bool.
+    /// Fields: (expr, tag_to_check)
+    EnumIs(Box<Expr>, u32),
+    /// Load from a global mutable variable.
+    GlobalLoad(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -487,6 +558,9 @@ pub struct For {
     pub bind_id: DefId,
     pub bind: String,
     pub bind_ty: Type,
+    pub bind2_id: Option<DefId>,
+    pub bind2: Option<String>,
+    pub bind2_ty: Option<Type>,
     pub iter: Expr,
     pub end: Option<Expr>,
     pub step: Option<Expr>,
@@ -867,6 +941,15 @@ impl PrettyPrinter {
             Stmt::StoreDelete(name, _, _) => {
                 self.line(&format!("store_delete {name} ..."));
             }
+            Stmt::StoreDestroy(name, _, _) => {
+                self.line(&format!("store_destroy {name} ..."));
+            }
+            Stmt::StoreRestore(name, _, _) => {
+                self.line(&format!("store_restore {name} ..."));
+            }
+            Stmt::StoreSave(name, _) => {
+                self.line(&format!("store_save {name}"));
+            }
             Stmt::StoreSet(name, _, _, _) => {
                 self.line(&format!("store_set {name} ..."));
             }
@@ -883,9 +966,24 @@ impl PrettyPrinter {
                 self.line(&format!("stop {}", self.expr_str(e)));
             }
             Stmt::SimFor(f, _) => {
-                let end = f.end.as_ref().map(|e| format!(" to {}", self.expr_str(e))).unwrap_or_default();
-                let step = f.step.as_ref().map(|e| format!(" step {}", self.expr_str(e))).unwrap_or_default();
-                self.line(&format!("sim for {} [d{}] in {}{}{}:", f.bind, f.bind_id.0, self.expr_str(&f.iter), end, step));
+                let end = f
+                    .end
+                    .as_ref()
+                    .map(|e| format!(" to {}", self.expr_str(e)))
+                    .unwrap_or_default();
+                let step = f
+                    .step
+                    .as_ref()
+                    .map(|e| format!(" step {}", self.expr_str(e)))
+                    .unwrap_or_default();
+                self.line(&format!(
+                    "sim for {} [d{}] in {}{}{}:",
+                    f.bind,
+                    f.bind_id.0,
+                    self.expr_str(&f.iter),
+                    end,
+                    step
+                ));
                 self.push();
                 self.block(&f.body);
                 self.pop();
@@ -898,9 +996,18 @@ impl PrettyPrinter {
             }
             Stmt::UseLocal(path, imports, alias, _) => {
                 let p = path.join(".");
-                let i = imports.as_ref().map(|is| format!(" import {}", is.join(", "))).unwrap_or_default();
-                let a = alias.as_ref().map(|a| format!(" as {a}")).unwrap_or_default();
+                let i = imports
+                    .as_ref()
+                    .map(|is| format!(" import {}", is.join(", ")))
+                    .unwrap_or_default();
+                let a = alias
+                    .as_ref()
+                    .map(|a| format!(" as {a}"))
+                    .unwrap_or_default();
                 self.line(&format!("use {p}{i}{a}"));
+            }
+            Stmt::GlobalStore(name, e, _) => {
+                self.line(&format!("global_store {name} = {}", self.expr_str(e)));
             }
         }
     }
@@ -958,6 +1065,7 @@ impl PrettyPrinter {
             ExprKind::None => "none".into(),
             ExprKind::Void => "void".into(),
             ExprKind::Var(id, name) => format!("{name}[d{}]", id.0),
+            ExprKind::GlobalLoad(name) => format!("global {name}"),
             ExprKind::FnRef(id, name) => format!("&fn {name}[d{}]", id.0),
             ExprKind::VariantRef(enum_n, var_n, tag) => format!("{enum_n}::{var_n}#{tag}"),
             ExprKind::BinOp(l, op, r) => {
@@ -1008,10 +1116,23 @@ impl PrettyPrinter {
             ExprKind::SetNew => "set{}".into(),
             ExprKind::PQNew => "pq{}".into(),
             ExprKind::NDArrayNew(dims) => {
-                format!("ndarray[{}]", dims.iter().map(|d| self.expr_str(d)).collect::<Vec<_>>().join(" by "))
+                format!(
+                    "ndarray[{}]",
+                    dims.iter()
+                        .map(|d| self.expr_str(d))
+                        .collect::<Vec<_>>()
+                        .join(" by ")
+                )
             }
             ExprKind::SIMDNew(elems) => {
-                format!("simd({})", elems.iter().map(|e| self.expr_str(e)).collect::<Vec<_>>().join(", "))
+                format!(
+                    "simd({})",
+                    elems
+                        .iter()
+                        .map(|e| self.expr_str(e))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
             ExprKind::SetMethod(recv, meth, args) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
@@ -1123,6 +1244,34 @@ impl PrettyPrinter {
             ExprKind::StoreQuery(name, _) => format!("store_query {name} ..."),
             ExprKind::StoreCount(name) => format!("store_count {name}"),
             ExprKind::StoreAll(name) => format!("store_all {name}"),
+            ExprKind::StoreGet(name, key) => format!("store_get {name} {}", self.expr_str(key)),
+            ExprKind::StoreFirst(name, _) => format!("store_first {name} ..."),
+            ExprKind::StoreExists(name, _) => format!("store_exists {name} ..."),
+            ExprKind::StoreDistinct(name, field) => format!("store_distinct {name}.{field}"),
+            ExprKind::StoreSum(name, field) => format!("store_sum {name}.{field}"),
+            ExprKind::StoreAvg(name, field) => format!("store_avg {name}.{field}"),
+            ExprKind::StoreMin(name, field) => format!("store_min {name}.{field}"),
+            ExprKind::StoreMax(name, field) => format!("store_max {name}.{field}"),
+            ExprKind::StoreVersionCount(name, _) => format!("store_version_count {name}"),
+            ExprKind::StoreHistory(name, _) => format!("store_history {name}"),
+            ExprKind::StoreAtVersion(name, _, _) => format!("store_at_version {name}"),
+            ExprKind::ViewCount(name, _) => format!("view_count {name}"),
+            ExprKind::ViewAll(name, _) => format!("view_all {name}"),
+            ExprKind::KvGet(name, _) => format!("kv_get {name}"),
+            ExprKind::KvHas(name, _) => format!("kv_has {name}"),
+            ExprKind::KvCount(name) => format!("kv_count {name}"),
+            ExprKind::KvSet(name, _, _) => format!("kv_set {name}"),
+            ExprKind::KvDel(name, _) => format!("kv_del {name}"),
+            ExprKind::KvIncr(name, _, _) => format!("kv_incr {name}"),
+            ExprKind::VecNearest(name, _, _) => format!("vec_nearest {name}"),
+            ExprKind::VecInsert(name, _) => format!("vec_insert {name}"),
+            ExprKind::VecCount(name) => format!("vec_count {name}"),
+            ExprKind::BloomTest(store, field, _) => format!("bloom_test {store}.{field}"),
+            ExprKind::FtsSearch(store, field, _) => format!("fts_search {store}.{field}"),
+            ExprKind::FtsCount(store, field) => format!("fts_count {store}.{field}"),
+            ExprKind::GraphFrom(name, _) => format!("graph_from {name}"),
+            ExprKind::GraphTo(name, _) => format!("graph_to {name}"),
+            ExprKind::TsLatest(name) => format!("ts_latest {name}"),
             ExprKind::CoroutineCreate(name, _) => format!("coroutine {name}"),
             ExprKind::CoroutineNext(e) => format!("{}.next()", self.expr_str(e)),
             ExprKind::Yield(e) => format!("yield {}", self.expr_str(e)),
@@ -1151,11 +1300,27 @@ impl PrettyPrinter {
             ExprKind::StrictCast(e, ty) => format!("strict_cast<{ty}>({})", self.expr_str(e)),
             ExprKind::AsFormat(e, fmt) => format!("{} as {fmt}", self.expr_str(e)),
             ExprKind::AtomicLoad(e) => format!("atomic_load({})", self.expr_str(e)),
-            ExprKind::AtomicStore(p, v) => format!("atomic_store({}, {})", self.expr_str(p), self.expr_str(v)),
-            ExprKind::AtomicAdd(p, v) => format!("atomic_add({}, {})", self.expr_str(p), self.expr_str(v)),
-            ExprKind::AtomicSub(p, v) => format!("atomic_sub({}, {})", self.expr_str(p), self.expr_str(v)),
-            ExprKind::AtomicCas(p, e, n) => format!("atomic_cas({}, {}, {})", self.expr_str(p), self.expr_str(e), self.expr_str(n)),
-            ExprKind::Slice(obj, start, end) => format!("{}[{} .. {}]", self.expr_str(obj), self.expr_str(start), self.expr_str(end)),
+            ExprKind::AtomicStore(p, v) => {
+                format!("atomic_store({}, {})", self.expr_str(p), self.expr_str(v))
+            }
+            ExprKind::AtomicAdd(p, v) => {
+                format!("atomic_add({}, {})", self.expr_str(p), self.expr_str(v))
+            }
+            ExprKind::AtomicSub(p, v) => {
+                format!("atomic_sub({}, {})", self.expr_str(p), self.expr_str(v))
+            }
+            ExprKind::AtomicCas(p, e, n) => format!(
+                "atomic_cas({}, {}, {})",
+                self.expr_str(p),
+                self.expr_str(e),
+                self.expr_str(n)
+            ),
+            ExprKind::Slice(obj, start, end) => format!(
+                "{}[{} .. {}]",
+                self.expr_str(obj),
+                self.expr_str(start),
+                self.expr_str(end)
+            ),
             ExprKind::DequeNew => "deque()".into(),
             ExprKind::DequeMethod(recv, meth, args) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
@@ -1167,13 +1332,18 @@ impl PrettyPrinter {
                 format!("einsum '{spec}' ({})", a.join(", "))
             }
             ExprKind::Builder(name, fields) => {
-                let fs: Vec<String> = fields.iter().map(|(n, v)| format!("{n}: {}", self.expr_str(v))).collect();
+                let fs: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("{n}: {}", self.expr_str(v)))
+                    .collect();
                 format!("builder {name} {{ {} }}", fs.join(", "))
             }
             ExprKind::CowWrap(e) => format!("cow({})", self.expr_str(e)),
             ExprKind::CowClone(e) => format!("cow_clone({})", self.expr_str(e)),
             ExprKind::GeneratorCreate(_, name, _) => format!("generator {name}"),
             ExprKind::GeneratorNext(e) => format!("{}.next()", self.expr_str(e)),
+            ExprKind::EnumUnwrap(e, _, _) => format!("{}.unwrap()", self.expr_str(e)),
+            ExprKind::EnumIs(e, tag) => format!("{}.is_tag({})", self.expr_str(e), tag),
         }
     }
 }

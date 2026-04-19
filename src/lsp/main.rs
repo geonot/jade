@@ -75,6 +75,22 @@ fn main() {
                 let result = handlers::handle_completion(&state, req.params);
                 send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
             }
+            "textDocument/references" if initialized => {
+                let result = handlers::handle_references(&state, req.params);
+                send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
+            }
+            "textDocument/rename" if initialized => {
+                let result = handlers::handle_rename(&state, req.params);
+                send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
+            }
+            "textDocument/semanticTokens/full" if initialized => {
+                let result = handlers::handle_semantic_tokens(&state, req.params);
+                send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
+            }
+            "textDocument/signatureHelp" if initialized => {
+                let result = handlers::handle_signature_help(&state, req.params);
+                send_response(&mut writer, req.id.unwrap_or(Value::Null), result);
+            }
             _ => {
                 if let Some(id) = req.id {
                     let err = serde_json::json!({

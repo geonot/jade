@@ -1,0 +1,290 @@
+# std.http — HTTP/1.1 client (HTTP and HTTPS)
+#
+# Usage:
+#   resp is http.fetch("https://example.com/api/data")
+#   log(resp.status)
+#   log(resp.body)
+#
+#   resp is http.post_json("https://example.com/api", '...')
+
+use net
+use tls
+use strings
+
+# ── Types ────────────────────────────────────────────────────
+
+type HttpResponse
+    status as i64
+    headers as Vec of HttpHeader
+    body as String
+
+type HttpHeader
+    name as String
+    value as String
+
+# ── URL parsing ──────────────────────────────────────────────
+
+type ParsedUrl
+    scheme as String
+    host as String
+    port as i64
+    path as String
+
+*parse_url(url as String) returns ParsedUrl
+    rest is url
+    scheme is "http"
+    if url.starts_with("https://")
+        scheme is "https"
+        rest is url.slice(8, url.length)
+    elif url.starts_with("http://")
+        rest is url.slice(7, url.length)
+    slash_pos is rest.find("/")
+    host_part is rest
+    the_path is "/"
+    if slash_pos >= 0
+        host_part is rest.slice(0, slash_pos)
+        the_path is rest.slice(slash_pos, rest.length)
+    colon_pos is host_part.find(":")
+    the_host is host_part
+    the_port is 80
+    if scheme equals "https"
+        the_port is 443
+    if colon_pos >= 0
+        the_host is host_part.slice(0, colon_pos)
+        the_port is parse_int(host_part.slice(colon_pos + 1, host_part.length))
+    ParsedUrl(scheme is scheme, host is the_host, port is the_port, path is the_path)
+
+# ── Core request ─────────────────────────────────────────────
+
+*request(method as String, url as String, body as String, extra_headers as Vec of HttpHeader) returns HttpResponse
+    parsed is parse_url(url)
+    
+    # Build the HTTP request
+    sb is strings.string_builder()
+    sb.write(method + " " + parsed.path + " HTTP/1.1\r\n")
+    sb.write("Host: " + parsed.host + "\r\n")
+    sb.write("Connection: close\r\n")
+    sb.write("User-Agent: jade/0.5\r\n")
+    if body.length > 0
+        sb.write("Content-Length: " + to_string(body.length) + "\r\n")
+    loop extra_headers
+        sb.write($.name + ": " + $.value + "\r\n")
+    sb.write("\r\n")
+    if body.length > 0
+        sb.write(body)
+    req_str is sb.to_string()
+
+    if parsed.scheme equals "https"
+        return __request_tls(parsed, req_str)
+    __request_plain(parsed, req_str)
+
+*__request_tls(parsed as ParsedUrl, req_str as String) returns HttpResponse
+    conn is tls.connect(parsed.host, parsed.port)
+    if tls.is_valid(conn) is false
+        return HttpResponse(status is 0, headers is vec(), body is "TLS connection failed")
+    
+    conn.write_all(req_str)
+    response is conn.read_all()
+    conn.shut()
+    parse_response(response)
+
+*__request_plain(parsed as ParsedUrl, req_str as String) returns HttpResponse
+    fd is extern.jade_socket(2, 1, 0)
+    if fd < 0
+        return HttpResponse(status is 0, headers is vec(), body is "connection failed")
+    addr is net.__make_sockaddr(parsed.host, parsed.port)
+    if extern.connect(fd, addr, 16) < 0
+        extern.free(addr)
+        extern.jade_close(fd)
+        return HttpResponse(status is 0, headers is vec(), body is "connection failed")
+    extern.free(addr)
+
+    # Send request
+    sent is 0
+    while sent < req_str.length
+        remaining is req_str.slice(sent, req_str.length)
+        n is extern.jade_send(fd, %remaining, remaining.length, 0)
+        if n <= 0
+            break
+        sent is sent + n
+
+    # Read response
+    response is ""
+    loop
+        buf is extern.malloc(8193)
+        n is extern.jade_recv(fd, buf, 8192, 0)
+        if n <= 0
+            extern.free(buf)
+            break
+        chunk is __string_from_raw(buf, n, 8193)
+        response is response + chunk
+
+    extern.shutdown(fd, 2)
+    extern.jade_close(fd)
+    parse_response(response)
+
+*parse_response(raw as String) returns HttpResponse
+    sep_pos is raw.find("\r\n\r\n")
+    if sep_pos < 0
+        return HttpResponse(status is 0, headers is vec(), body is raw)
+
+    header_section is raw.slice(0, sep_pos)
+    resp_body is raw.slice(sep_pos + 4, raw.length)
+
+    lines is header_section.split("\r\n")
+    status_line is lines.get(0)
+    sp1 is status_line.find(" ")
+    if sp1 < 0
+        return HttpResponse(status is 0, headers is vec(), body is resp_body)
+    rest is status_line.slice(sp1 + 1, status_line.length)
+    sp2 is rest.find(" ")
+    if sp2 < 0
+        sp2 is rest.length
+    status_str is rest.slice(0, sp2)
+    status_code is parse_int(status_str)
+
+    headers is vec()
+    loop lines
+        if $$ > 0
+            colon is $.find(":")
+            if colon > 0
+                hname is $.slice(0, colon).trim()
+                hvalue is $.slice(colon + 1, $.length).trim()
+                headers.push(HttpHeader(name is hname, value is hvalue))
+
+    HttpResponse(status is status_code, headers is headers, body is resp_body)
+
+# ── Convenience methods ──────────────────────────────────────
+
+*fetch(url as String) returns HttpResponse
+    request("GET", url, "", vec())
+
+*post_json(url as String, body as String) returns HttpResponse
+    headers is vec()
+    headers.push(HttpHeader(name is "Content-Type", value is "application/json"))
+    request("POST", url, body, headers)
+
+*put_json(url as String, body as String) returns HttpResponse
+    headers is vec()
+    headers.push(HttpHeader(name is "Content-Type", value is "application/json"))
+    request("PUT", url, body, headers)
+
+*del(url as String) returns HttpResponse
+    request("DELETE", url, "", vec())
+
+*get_header(resp as HttpResponse, hname as String) returns String
+    loop resp.headers
+        if $.name.to_lower() equals hname.to_lower()
+            return $.value
+    ""
+
+# ── Connection Pool ──────────────────────────────────────────
+
+type PoolEntry
+    host as String
+    port as i64
+    fd as i64
+    is_tls as bool
+
+type ConnectionPool
+    entries as Vec of PoolEntry
+    max_size as i64
+
+    *request(method as String, url as String, body as String, extra_headers as Vec of HttpHeader) returns HttpResponse
+        parsed is parse_url(url)
+
+        # Build request with keep-alive
+        sb is strings.string_builder()
+        sb.write(method + " " + parsed.path + " HTTP/1.1\r\n")
+        sb.write("Host: " + parsed.host + "\r\n")
+        sb.write("Connection: keep-alive\r\n")
+        sb.write("User-Agent: jade/0.5\r\n")
+        if body.length > 0
+            sb.write("Content-Length: " + to_string(body.length) + "\r\n")
+        loop extra_headers
+            sb.write($.name + ": " + $.value + "\r\n")
+        sb.write("\r\n")
+        if body.length > 0
+            sb.write(body)
+        req_str is sb.to_string()
+
+        if parsed.scheme equals "https"
+            return __pool_request_tls(parsed, req_str)
+        __pool_request_plain(self, parsed, req_str)
+
+    *close
+        loop self.entries
+            if $.is_tls is false
+                extern.shutdown($.fd, 2)
+                extern.jade_close($.fd)
+        self.entries is vec()
+
+*pool(max as i64) returns ConnectionPool
+    ConnectionPool(entries is vec(), max_size is max)
+
+*__pool_request_plain(p as ConnectionPool, parsed as ParsedUrl, req_str as String) returns HttpResponse
+    # Try to find an existing connection
+    idx is -1
+    loop p.entries
+        if $.host equals parsed.host and $.port equals parsed.port and $.is_tls is false
+            idx is $$
+            break
+    fd is -1
+    if idx >= 0
+        fd is p.entries.get(idx).fd
+    else
+        fd is extern.jade_socket(2, 1, 0)
+        if fd < 0
+            return HttpResponse(status is 0, headers is vec(), body is "connection failed")
+        addr is net.__make_sockaddr(parsed.host, parsed.port)
+        if extern.connect(fd, addr, 16) < 0
+            extern.free(addr)
+            extern.jade_close(fd)
+            return HttpResponse(status is 0, headers is vec(), body is "connection failed")
+        extern.free(addr)
+        if p.entries.length >= p.max_size
+            old is p.entries.get(0)
+            extern.shutdown(old.fd, 2)
+            extern.jade_close(old.fd)
+            # Remove first entry by rebuilding
+            new_entries is vec()
+            loop p.entries
+                if $$ > 0
+                    new_entries.push($)
+            p.entries is new_entries
+        p.entries.push(PoolEntry(host is parsed.host, port is parsed.port, fd is fd, is_tls is false))
+
+    # Send request
+    sent is 0
+    while sent < req_str.length
+        remaining is req_str.slice(sent, req_str.length)
+        n is extern.jade_send(fd, %remaining, remaining.length, 0)
+        if n <= 0
+            break
+        sent is sent + n
+
+    # Read response
+    response is ""
+    loop
+        buf is extern.malloc(8193)
+        n is extern.jade_recv(fd, buf, 8192, 0)
+        if n <= 0
+            extern.free(buf)
+            break
+        chunk is __string_from_raw(buf, n, 8193)
+        response is response + chunk
+        # Check if we got the full response (Content-Length or end of chunked)
+        if response.find("\r\n\r\n") >= 0
+            break
+
+    parse_response(response)
+
+*__pool_request_tls(parsed as ParsedUrl, req_str as String) returns HttpResponse
+    # TLS connections are not pooled (managed by TLS layer)
+    conn is tls.connect(parsed.host, parsed.port)
+    if tls.is_valid(conn) is false
+        return HttpResponse(status is 0, headers is vec(), body is "TLS connection failed")
+    conn.write_all(req_str)
+    response is conn.read_all()
+    conn.shut()
+    parse_response(response)

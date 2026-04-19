@@ -1,11 +1,14 @@
 //! Pretty-printer for MIR.
 
-use std::fmt::Write;
 use super::*;
+use std::fmt::Write;
 
 /// Format a comma-separated list of displayable values.
 fn fmt_args(args: &[impl std::fmt::Display]) -> String {
-    args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", ")
+    args.iter()
+        .map(|a| a.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Print the entire MIR program.
@@ -23,7 +26,9 @@ pub fn print_program(prog: &Program) -> String {
     for ext in &prog.externs {
         write!(out, "extern fn {}(", ext.name).unwrap();
         for (i, p) in ext.params.iter().enumerate() {
-            if i > 0 { write!(out, ", ").unwrap(); }
+            if i > 0 {
+                write!(out, ", ").unwrap();
+            }
             write!(out, "{:?}", p).unwrap();
         }
         writeln!(out, ") -> {:?}\n", ext.ret).unwrap();
@@ -43,7 +48,9 @@ pub fn print_function(func: &Function) -> String {
 
     write!(out, "fn {}(", func.name).unwrap();
     for (i, p) in func.params.iter().enumerate() {
-        if i > 0 { write!(out, ", ").unwrap(); }
+        if i > 0 {
+            write!(out, ", ").unwrap();
+        }
         write!(out, "{}: {:?} = {}", p.name, p.ty, p.value).unwrap();
     }
     writeln!(out, ") -> {:?} {{", func.ret_ty).unwrap();
@@ -54,7 +61,9 @@ pub fn print_function(func: &Function) -> String {
         for phi in &block.phis {
             write!(out, "    {} = phi {:?} ", phi.dest, phi.ty).unwrap();
             for (i, (bb, val)) in phi.incoming.iter().enumerate() {
-                if i > 0 { write!(out, ", ").unwrap(); }
+                if i > 0 {
+                    write!(out, ", ").unwrap();
+                }
                 write!(out, "[{}: {}]", bb, val).unwrap();
             }
             writeln!(out).unwrap();
@@ -93,12 +102,16 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::Cmp(op, l, r, _) => format!("{op} {l} {r}"),
 
         InstKind::Call(name, args) => format!("call {name}({})", fmt_args(args)),
-        InstKind::MethodCall(obj, name, args) => format!("method_call {obj}.{name}({})", fmt_args(args)),
+        InstKind::MethodCall(obj, name, args) => {
+            format!("method_call {obj}.{name}({})", fmt_args(args))
+        }
         InstKind::IndirectCall(f, args) => format!("indirect_call {f}({})", fmt_args(args)),
 
         InstKind::FnRef(name) => format!("fn_ref {name}"),
         InstKind::Load(name) => format!("load {name}"),
         InstKind::Store(name, val) => format!("store {name} {val}"),
+        InstKind::GlobalLoad(name) => format!("global_load {name}"),
+        InstKind::GlobalStore(name, val) => format!("global_store {name} {val}"),
 
         InstKind::FieldGet(obj, field) => format!("field_get {obj}.{field}"),
         InstKind::FieldSet(obj, field, val) => format!("field_set {obj}.{field} = {val}"),
@@ -109,11 +122,18 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::IndexStore(var, idx, val) => format!("index_store ${var}[{idx}] = {val}"),
 
         InstKind::StructInit(name, fields) => {
-            let fs = fields.iter().map(|(n, v)| format!("{n}: {v}")).collect::<Vec<_>>().join(", ");
+            let fs = fields
+                .iter()
+                .map(|(n, v)| format!("{n}: {v}"))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("struct_init {name} {{ {fs} }}")
         }
         InstKind::VariantInit(enum_name, variant, tag, args) => {
-            format!("variant_init {enum_name}::{variant} (tag={tag}) ({})", fmt_args(args))
+            format!(
+                "variant_init {enum_name}::{variant} (tag={tag}) ({})",
+                fmt_args(args)
+            )
         }
         InstKind::ArrayInit(vals) => format!("array [{}]", fmt_args(vals)),
 
@@ -138,7 +158,9 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::DequeInit => "deque_init".into(),
 
         // Closures
-        InstKind::ClosureCreate(name, captures) => format!("closure_create {name}({})", fmt_args(captures)),
+        InstKind::ClosureCreate(name, captures) => {
+            format!("closure_create {name}({})", fmt_args(captures))
+        }
         InstKind::ClosureCall(f, args) => format!("closure_call {f}({})", fmt_args(args)),
 
         // RC
@@ -159,7 +181,10 @@ fn format_inst_kind(kind: &InstKind) -> String {
 
         // Dynamic dispatch
         InstKind::DynDispatch(obj, trait_name, method, args) => {
-            format!("dyn_dispatch {obj}.{trait_name}::{method}({})", fmt_args(args))
+            format!(
+                "dyn_dispatch {obj}.{trait_name}::{method}({})",
+                fmt_args(args)
+            )
         }
         InstKind::DynCoerce(v, type_name, trait_name) => {
             format!("dyn_coerce {v} as {type_name}:{trait_name}")
@@ -178,7 +203,11 @@ fn format_terminator(term: &Terminator) -> String {
         Terminator::Return(Some(v)) => format!("return {v}"),
         Terminator::Return(None) => "return void".into(),
         Terminator::Switch(val, arms, default) => {
-            let arms_str = arms.iter().map(|(n, bb)| format!("{n} => {bb}")).collect::<Vec<_>>().join(", ");
+            let arms_str = arms
+                .iter()
+                .map(|(n, bb)| format!("{n} => {bb}"))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("switch {val} [{arms_str}] default {default}")
         }
         Terminator::Unreachable => "unreachable".into(),

@@ -18,62 +18,66 @@ extern *pcre2_match_8(code as %void, subject as %i8, length as i64, startoffset 
 extern *pcre2_match_data_create_from_pattern_8(code as %void, ctx as %void) returns %void
 extern *pcre2_match_data_free_8(match_data as %void)
 extern *pcre2_code_free_8(code as %void)
-extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %i64
+extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %void
+extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
 
 # Compile a regex pattern, returns opaque handle
-*compile(pattern as String) returns %void
+*compile(pattern as String) returns i64
     errcode is 0
     erroffset is 0 as i64
-    code is pcre2_compile_8(%pattern, pattern.length, 0, %errcode, %erroffset, 0 as %void)
+    code is extern.pcre2_compile_8(%pattern, pattern.length, 0, %errcode, %erroffset, 0 as %void) as i64
     code
 
 # Test if a string matches a pattern
 *is_match(text as String, pattern as String) returns Bool
     code is compile(pattern)
-    if code equals 0 as %void
+    if code equals 0
         return false
-    md is pcre2_match_data_create_from_pattern_8(code, 0 as %void)
-    rc is pcre2_match_8(code, %text, text.length, 0, 0, md, 0 as %void)
-    pcre2_match_data_free_8(md)
-    pcre2_code_free_8(code)
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
     rc > 0
 
 # Find the first match in a string
 *find(text as String, pattern as String) returns String
     code is compile(pattern)
-    if code equals 0 as %void
+    if code equals 0
         return ''
-    md is pcre2_match_data_create_from_pattern_8(code, 0 as %void)
-    rc is pcre2_match_8(code, %text, text.length, 0, 0, md, 0 as %void)
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
     if rc < 1
-        pcre2_match_data_free_8(md)
-        pcre2_code_free_8(code)
+        extern.pcre2_match_data_free_8(md)
+        extern.pcre2_code_free_8(code as %void)
         return ''
-    ovector is pcre2_get_ovector_pointer_8(md)
-    start is @ovector
-    end_pos is @(ovector + 1)
+    ovector is extern.pcre2_get_ovector_pointer_8(md)
+    start is extern.jade_ovector_get(ovector, 0)
+    end_pos is extern.jade_ovector_get(ovector, 1)
     result is text.slice(start, end_pos)
-    pcre2_match_data_free_8(md)
-    pcre2_code_free_8(code)
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
     result
 
 # Find all non-overlapping matches
 *find_all(text as String, pattern as String) returns Vec of String
     results is vec()
     code is compile(pattern)
-    if code equals 0 as %void
+    if code equals 0
         return results
-    md is pcre2_match_data_create_from_pattern_8(code, 0 as %void)
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
     offset is 0
     while offset < text.length
-        rc is pcre2_match_8(code, %text, text.length, offset, 0, md, 0 as %void)
+        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
         if rc < 1
             break
-        ovector is pcre2_get_ovector_pointer_8(md)
-        start is @ovector
-        end_pos is @(ovector + 1)
-        results.push text.slice(start, end_pos)
-        offset is end_pos
-    pcre2_match_data_free_8(md)
-    pcre2_code_free_8(code)
+        ovector is extern.pcre2_get_ovector_pointer_8(md)
+        start is extern.jade_ovector_get(ovector, 0)
+        end_pos is extern.jade_ovector_get(ovector, 1)
+        results.push(text.slice(start, end_pos))
+        if end_pos equals offset
+            offset is offset + 1
+        else
+            offset is end_pos
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
     results

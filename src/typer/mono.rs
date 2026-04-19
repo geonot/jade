@@ -46,9 +46,15 @@ impl Typer {
         type_params: &[String],
     ) -> String {
         let mut name = base.to_string();
-        for tp in type_params {
+        name.push_str("__G_");
+        for (i, tp) in type_params.iter().enumerate() {
+            if i > 0 {
+                name.push('_');
+            }
             if let Some(ty) = type_map.get(tp) {
-                name = format!("{name}_{ty}");
+                // Encode type name to avoid collisions with user identifiers
+                let encoded = ty.to_string().replace('_', "U").replace(' ', "");
+                name.push_str(&encoded);
             }
         }
         name
@@ -356,6 +362,7 @@ impl Typer {
             span: gf.span,
             generic_origin: Some(origin.to_string()),
             is_generator: false,
+            attrs: gf.attrs.clone(),
         })
     }
 

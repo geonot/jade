@@ -1,0 +1,332 @@
+# std.stats — Statistical functions
+#
+# Usage:
+#   data is [10, 20, 30, 40, 50]
+#   log(stats.mean(data))      # 30.0
+#   log(stats.median(data))    # 30
+#   log(stats.stdev(data))     # ~15.81
+
+extern *sqrt(x as f64) returns f64
+
+# inline insertion sort for median/percentile (avoids importing sort module)
+*__stats_sort(arr as Vec of i64)
+    i is 1
+    while i < arr.length
+        key is arr.get(i)
+        j is i - 1
+        while j >= 0
+            if arr.get(j) > key
+                arr.set(j + 1, arr.get(j))
+                j is j - 1
+            else
+                j is -1
+        arr.set(j + 1, key)
+        i is i + 1
+
+*sum(data as Vec of i64) returns f64
+    total is 0.0
+    loop data
+        total is total + $ as f64
+    total
+
+*mean(data as Vec of i64) returns f64
+    if data.length equals 0
+        return 0.0
+    sum(data) / data.length as f64
+
+*min_val(data as Vec of i64) returns i64
+    if data.length equals 0
+        return 0
+    m is data.get(0)
+    loop data
+        if $ < m
+            m is $
+    m
+
+*max_val(data as Vec of i64) returns i64
+    if data.length equals 0
+        return 0
+    m is data.get(0)
+    loop data
+        if $ > m
+            m is $
+    m
+
+*variance(data as Vec of i64) returns f64
+    if data.length < 2
+        return 0.0
+    s is 0.0
+    loop data
+        s is s + $ as f64
+    avg is s / data.length as f64
+    total is 0.0
+    loop data
+        val is $ as f64
+        diff is val - avg
+        total is total + diff * diff
+    total / (data.length - 1) as f64
+
+*stdev(data as Vec of i64) returns f64
+    extern.sqrt(variance(data))
+
+*median(data as Vec of i64) returns i64
+    if data.length equals 0
+        return 0
+    sorted is vec()
+    loop data
+        sorted.push($)
+    __stats_sort(sorted)
+    n is sorted.length
+    n mod 2 equals 1 ? sorted.get(n / 2) ! (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2
+
+*percentile(data as Vec of i64, p as f64) returns f64
+    if data.length equals 0
+        return 0.0
+    sorted is vec()
+    i is 0
+    while i < data.length
+        sorted.push(data.get(i))
+        i is i + 1
+    __stats_sort(sorted)
+    n is sorted.length
+    idx is p / 100.0 * (n - 1) as f64
+    lo is idx as i64
+    hi is lo + 1
+    if hi >= n
+        return sorted.get(n - 1) as f64
+    frac is idx - lo as f64
+    sorted.get(lo) as f64 * (1.0 - frac) + sorted.get(hi) as f64 * frac
+
+*data_range(data as Vec of i64) returns i64
+    max_val(data) - min_val(data)
+
+*count(data)
+    data.length
+
+# ── Correlation ──────────────────────────────────────────────
+
+# Pearson correlation coefficient between two datasets.
+*pearson(x as Vec of i64, y as Vec of i64) returns f64
+    n is x.length
+    if n < 2 or y.length neq n
+        return 0.0
+    sx is 0.0
+    sy is 0.0
+    sxy is 0.0
+    sxx is 0.0
+    syy is 0.0
+    loop x
+        xi is $ as f64
+        yi is y.get($$) as f64
+        sx is sx + xi
+        sy is sy + yi
+        sxy is sxy + xi * yi
+        sxx is sxx + xi * xi
+        syy is syy + yi * yi
+    nf is n as f64
+    num is nf * sxy - sx * sy
+    den is extern.sqrt((nf * sxx - sx * sx) * (nf * syy - sy * sy))
+    if den equals 0.0
+        return 0.0
+    num / den
+
+# Spearman rank correlation.
+*spearman(x as Vec of i64, y as Vec of i64) returns f64
+    n is x.length
+    if n < 2 or y.length neq n
+        return 0.0
+    rx is __ranks(x)
+    ry is __ranks(y)
+    # Compute Pearson on ranks (as f64 values in i64 vecs × 1000)
+    d2_sum is 0.0
+    loop rx
+        d is $ as f64 / 1000.0 - ry.get($$) as f64 / 1000.0
+        d2_sum is d2_sum + d * d
+    nf is n as f64
+    1.0 - 6.0 * d2_sum / (nf * (nf * nf - 1.0))
+
+# Covariance.
+*covariance(x as Vec of i64, y as Vec of i64) returns f64
+    n is x.length
+    if n < 2 or y.length neq n
+        return 0.0
+    mx is mean(x)
+    my is mean(y)
+    total is 0.0
+    loop x
+        total is total + ($ as f64 - mx) * (y.get($$) as f64 - my)
+    total / (n - 1) as f64
+
+# ── Online statistics (Welford's algorithm) ──────────────────
+
+type OnlineStats
+    n as i64
+    mean_val as f64
+    m2 as f64
+    min_v as f64
+    max_v as f64
+
+    # Add a new observation.
+    *update(x as f64)
+        self.n is self.n + 1
+        delta is x - self.mean_val
+        self.mean_val is self.mean_val + delta / self.n as f64
+        delta2 is x - self.mean_val
+        self.m2 is self.m2 + delta * delta2
+        if self.n equals 1
+            self.min_v is x
+            self.max_v is x
+        else
+            if x < self.min_v
+                self.min_v is x
+            if x > self.max_v
+                self.max_v is x
+
+    *current_mean returns f64
+        self.mean_val
+
+    *current_variance returns f64
+        if self.n < 2
+            return 0.0
+        self.m2 / (self.n - 1) as f64
+
+    *current_stdev returns f64
+        extern.sqrt(self.current_variance())
+
+    *current_min returns f64
+        self.min_v
+
+    *current_max returns f64
+        self.max_v
+
+    *current_count returns i64
+        self.n
+
+*online_new returns OnlineStats
+    OnlineStats(n is 0, mean_val is 0.0, m2 is 0.0, min_v is 0.0, max_v is 0.0)
+
+# ── Distribution sampling ────────────────────────────────────
+
+# z-score: how many standard deviations from mean.
+*z_score(value as f64, data as Vec of i64) returns f64
+    m is mean(data)
+    s is stdev(data)
+    if s equals 0.0
+        return 0.0
+    (value - m) / s
+
+# z-scores for all values.
+*z_scores(data as Vec of i64) returns Vec of f64
+    m is mean(data)
+    s is stdev(data)
+    result is vec()
+    loop data
+        if s equals 0.0
+            result.push(0.0)
+        else
+            result.push(($ as f64 - m) / s)
+    result
+
+# Interquartile range.
+*iqr(data as Vec of i64) returns f64
+    percentile(data, 75.0) - percentile(data, 25.0)
+
+# Skewness (Fisher's).
+*skewness(data as Vec of i64) returns f64
+    n is data.length
+    if n < 3
+        return 0.0
+    m is mean(data)
+    s is stdev(data)
+    if s equals 0.0
+        return 0.0
+    total is 0.0
+    loop data
+        d is ($ as f64 - m) / s
+        total is total + d * d * d
+    nf is n as f64
+    total * nf / ((nf - 1.0) * (nf - 2.0))
+
+# Kurtosis (excess, Fisher's definition).
+*kurtosis(data as Vec of i64) returns f64
+    n is data.length
+    if n < 4
+        return 0.0
+    m is mean(data)
+    s is stdev(data)
+    if s equals 0.0
+        return 0.0
+    total is 0.0
+    loop data
+        d is ($ as f64 - m) / s
+        total is total + d * d * d * d
+    nf is n as f64
+    (nf * (nf + 1.0)) / ((nf - 1.0) * (nf - 2.0) * (nf - 3.0)) * total - 3.0 * (nf - 1.0) * (nf - 1.0) / ((nf - 2.0) * (nf - 3.0))
+
+# ── Histogram ────────────────────────────────────────────────
+
+# Generate histogram bin counts.
+*histogram(data as Vec of i64, num_bins as i64) returns Vec of i64
+    if data.length equals 0 or num_bins <= 0
+        return vec()
+    lo is min_val(data) as f64
+    hi is max_val(data) as f64
+    if lo equals hi
+        bins is vec()
+        for i in 0 to num_bins
+            bins.push(0)
+        bins.set(0, data.length)
+        return bins
+    width is (hi - lo) / num_bins as f64
+    bins is vec()
+    for i in 0 to num_bins
+        bins.push(0)
+    loop data
+        idx is (($ as f64 - lo) / width) as i64
+        if idx >= num_bins
+            idx is num_bins - 1
+        bins.set(idx, bins.get(idx) + 1)
+    bins
+
+# ── Internal helpers ─────────────────────────────────────────
+
+# Compute ranks (× 1000 to preserve decimal precision in i64).
+*__ranks(data as Vec of i64) returns Vec of i64
+    n is data.length
+    # Build (value, original_index) and sort by value
+    indices is vec()
+    for i in 0 to n
+        indices.push(i)
+    # Sort indices by data values
+    __sort_by_data(indices, data)
+    # Assign ranks (average for ties), scaled by 1000
+    ranks is vec()
+    for i in 0 to n
+        ranks.push(0)
+    i is 0
+    while i < n
+        j is i
+        while j < n - 1 and data.get(indices.get(j)) equals data.get(indices.get(j + 1))
+            j is j + 1
+        avg_rank is (i + j) as f64 / 2.0 + 1.0
+        k is i
+        while k <= j
+            ranks.set(indices.get(k), (avg_rank * 1000.0) as i64)
+            k is k + 1
+        i is j + 1
+    ranks
+
+*__sort_by_data(indices as Vec of i64, data as Vec of i64)
+    i is 1
+    while i < indices.length
+        key_idx is indices.get(i)
+        key_val is data.get(key_idx)
+        j is i - 1
+        while j >= 0
+            if data.get(indices.get(j)) > key_val
+                indices.set(j + 1, indices.get(j))
+                j is j - 1
+            else
+                j is -1
+        indices.set(j + 1, key_idx)
+        i is i + 1

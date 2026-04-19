@@ -40,9 +40,12 @@ pub enum Decl {
     Test(TestBlock),
     Actor(ActorDef),
     Store(StoreDef),
+    Migration(MigrationDef),
+    View(ViewDef),
     Trait(TraitDef),
     Impl(ImplBlock),
     Const(String, Expr, Span),
+    Global(String, Expr, Span),
     Supervisor(SupervisorDef),
     TypeAlias(String, Type, Span),
     Newtype(String, Type, Span),
@@ -70,6 +73,7 @@ pub enum BinOp {
     BitAnd,
     Shl,
     Shr,
+    Ushr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,7 +101,10 @@ pub enum Stmt {
     ErrReturn(Expr, Span),
     StoreInsert(String, Vec<Expr>, Span),
     StoreDelete(String, StoreFilter, Span),
+    StoreDestroy(String, StoreFilter, Span),
     StoreSet(String, Vec<(String, Expr)>, StoreFilter, Span),
+    StoreRestore(String, StoreFilter, Span),
+    StoreSave(String, Span),
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
@@ -125,7 +132,10 @@ impl Stmt {
             Stmt::ErrReturn(_, s) => *s,
             Stmt::StoreInsert(_, _, s) => *s,
             Stmt::StoreDelete(_, _, s) => *s,
+            Stmt::StoreDestroy(_, _, s) => *s,
             Stmt::StoreSet(_, _, _, s) => *s,
+            Stmt::StoreRestore(_, _, s) => *s,
+            Stmt::StoreSave(_, s) => *s,
             Stmt::Transaction(_, s) => *s,
             Stmt::ChannelClose(_, s) => *s,
             Stmt::Stop(_, s) => *s,
@@ -188,6 +198,7 @@ pub enum Expr {
     Block(Block, Span),
     Lambda(Vec<Param>, Option<Type>, Block, Span),
     Placeholder(Span),
+    IndexPlaceholder(Span),
     Ref(Box<Expr>, Span),
     Deref(Box<Expr>, Span),
     Embed(String, Span),
@@ -204,6 +215,10 @@ pub enum Expr {
     StoreQuery(String, Box<StoreFilter>, Span),
     StoreCount(String, Span),
     StoreAll(String, Span),
+    StoreGet(String, Box<Expr>, Span),
+    StoreFirst(String, Box<StoreFilter>, Span),
+    StoreExists(String, Box<StoreFilter>, Span),
+    StoreDistinct(String, String, Span),
     Spawn(String, Span),
     Send(Box<Expr>, String, Vec<Expr>, Span),
     Receive(Vec<ReceiveArm>, Span),
@@ -227,6 +242,7 @@ pub enum Expr {
     Deque(Vec<Expr>, Span),
     OfCall(Box<Expr>, Box<Expr>, Span),
     QualifiedIdent(String, String, Span),
+    Try(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -254,6 +270,7 @@ impl Expr {
             | Self::Block(_, s)
             | Self::Lambda(_, _, _, s)
             | Self::Placeholder(s)
+            | Self::IndexPlaceholder(s)
             | Self::Ref(_, s)
             | Self::Deref(_, s)
             | Self::Embed(_, s)
@@ -263,6 +280,10 @@ impl Expr {
             | Self::StoreQuery(_, _, s)
             | Self::StoreCount(_, s)
             | Self::StoreAll(_, s)
+            | Self::StoreGet(_, _, s)
+            | Self::StoreFirst(_, _, s)
+            | Self::StoreExists(_, _, s)
+            | Self::StoreDistinct(_, _, s)
             | Self::Spawn(_, s)
             | Self::Send(_, _, _, s)
             | Self::Receive(_, s)
@@ -286,7 +307,8 @@ impl Expr {
             | Self::Builder(_, _, s)
             | Self::Deque(_, s)
             | Self::OfCall(_, _, s)
-            | Self::QualifiedIdent(_, _, s) => *s,
+            | Self::QualifiedIdent(_, _, s)
+            | Self::Try(_, s) => *s,
         }
     }
 }
@@ -305,7 +327,17 @@ pub struct Fn {
     pub ret: Option<Type>,
     pub body: Block,
     pub is_generator: bool,
+    pub attrs: FnAttrs,
     pub span: Span,
+}
+
+/// Function attributes from `@inline`, `@noinline`, `@cold`, `@hot` annotations.
+#[derive(Debug, Clone, Default)]
+pub struct FnAttrs {
+    pub inline: bool,
+    pub noinline: bool,
+    pub cold: bool,
+    pub hot: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -520,10 +552,95 @@ pub struct SelectArm {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreDecorator {
+    Simple,
+    Mem,
+    Transient,
+    Versioned,
+    Vector(u64),
+    Graph,
+    TimeSeries(String),
+    Kv,
+    BeforeInsert(String),
+    AfterInsert(String),
+    BeforeDelete(String),
+    AfterDelete(String),
+    Column,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldDecorator {
+    Index,
+    Unique,
+    Sorted,
+    Transient,
+    Increment,
+    Required,
+    Versioned,
+    Default(String),
+    Cascade,
+    Lazy,
+    Bloom,
+    Search,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoreField {
+    pub name: String,
+    pub ty: Option<Type>,
+    pub default: Option<Expr>,
+    pub decorators: Vec<FieldDecorator>,
+    pub is_relation: bool,
+    pub is_has_many: bool,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoreDef {
     pub name: String,
-    pub fields: Vec<Field>,
+    pub decorators: Vec<StoreDecorator>,
+    pub fields: Vec<StoreField>,
+    pub methods: Vec<Fn>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct MigrationDef {
+    pub name: String,
+    pub version: i64,
+    pub up: Vec<AlterOp>,
+    pub down: Vec<AlterOp>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct AlterOp {
+    pub store_name: String,
+    pub actions: Vec<AlterAction>,
+}
+
+#[derive(Debug, Clone)]
+pub enum AlterAction {
+    Add {
+        name: String,
+        ty: Type,
+        default: Option<Expr>,
+    },
+    Drop {
+        name: String,
+    },
+    Rename {
+        from: String,
+        to: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewDef {
+    pub name: String,
+    pub source: String,
+    pub clauses: Vec<QueryClause>,
     pub span: Span,
 }
 

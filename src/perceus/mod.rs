@@ -240,8 +240,9 @@ mod tests {
 
     #[test]
     fn test_function_params_analyzed() {
-        let hints =
-            analyze("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+        let hints = analyze(
+            "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n",
+        );
         assert!(hints.stats.drops_elided >= 2);
     }
 

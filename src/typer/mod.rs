@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -38,46 +39,55 @@ pub(crate) mod unify;
 pub struct Typer {
     pub(crate) next_id: u32,
     pub(crate) scopes: Vec<HashMap<String, VarInfo>>,
-    pub(crate) fns: HashMap<String, (DefId, Vec<Type>, Type)>,
-    pub(crate) structs: HashMap<String, Vec<(String, Type)>>,
-    pub(crate) enums: HashMap<String, Vec<(String, Vec<Type>)>>,
-    pub(crate) variant_tags: HashMap<String, (String, u32)>,
-    pub(crate) generic_fns: HashMap<String, ast::Fn>,
-    pub(crate) generic_enums: HashMap<String, ast::EnumDef>,
-    pub(crate) generic_types: HashMap<String, ast::TypeDef>,
-    pub(crate) methods: HashMap<String, Vec<ast::Fn>>,
+    pub(crate) fns: IndexMap<String, (DefId, Vec<Type>, Type)>,
+    pub(crate) structs: IndexMap<String, Vec<(String, Type)>>,
+    pub(crate) enums: IndexMap<String, Vec<(String, Vec<Type>)>>,
+    pub(crate) variant_tags: IndexMap<String, (String, u32)>,
+    pub(crate) generic_fns: IndexMap<String, ast::Fn>,
+    pub(crate) generic_enums: IndexMap<String, ast::EnumDef>,
+    pub(crate) generic_types: IndexMap<String, ast::TypeDef>,
+    pub(crate) methods: IndexMap<String, Vec<ast::Fn>>,
     pub(crate) mono_fns: Vec<hir::Fn>,
     pub(crate) mono_enums: Vec<hir::EnumDef>,
     pub(crate) mono_types: Vec<hir::TypeDef>,
     pub(crate) inferred_field_structs: std::collections::HashSet<String>,
     pub(crate) source_dir: Option<PathBuf>,
     pub(crate) test_mode: bool,
-    pub(crate) actors: HashMap<String, (DefId, Vec<(String, Type)>, Vec<(String, Vec<Type>, u32)>)>,
-    pub(crate) store_schemas: HashMap<String, Vec<(String, Type)>>,
+    pub(crate) actors: IndexMap<String, (DefId, Vec<(String, Type)>, Vec<(String, Vec<Type>, u32)>)>,
+    pub(crate) store_schemas: IndexMap<String, Vec<(String, Type)>>,
+    pub(crate) store_decorators: IndexMap<String, Vec<crate::ast::StoreDecorator>>,
+    pub(crate) view_defs: IndexMap<String, (String, Vec<crate::ast::QueryClause>)>,
     pub(crate) mono_depth: u32,
-    pub(crate) traits: HashMap<String, Vec<TraitMethodSig>>,
-    pub(crate) trait_impls: HashMap<String, Vec<String>>,
-    pub(crate) generic_bounds: HashMap<String, Vec<(String, Vec<String>)>>,
-    pub(crate) trait_impl_type_args: HashMap<(String, String), Vec<Type>>,
-    pub(crate) assoc_types: HashMap<(String, String), Type>,
-    pub(crate) trait_assoc_types: HashMap<String, Vec<String>>,
-    pub(crate) consts: HashMap<String, ast::Expr>,
+    pub(crate) traits: IndexMap<String, Vec<TraitMethodSig>>,
+    pub(crate) trait_impls: IndexMap<String, Vec<String>>,
+    pub(crate) generic_bounds: IndexMap<String, Vec<(String, Vec<String>)>>,
+    pub(crate) trait_impl_type_args: IndexMap<(String, String), Vec<Type>>,
+    pub(crate) assoc_types: IndexMap<(String, String), Type>,
+    pub(crate) trait_assoc_types: IndexMap<String, Vec<String>>,
+    pub(crate) consts: IndexMap<String, ast::Expr>,
+    pub(crate) globals: IndexMap<String, (ast::Expr, ast::Span)>,
     pub(crate) infer_ctx: unify::InferCtx,
     pub(crate) debug_types: bool,
     pub(crate) warnings: Vec<String>,
     pub(crate) deferred_methods: Vec<DeferredMethod>,
     pub(crate) deferred_fields: Vec<DeferredField>,
     pub(crate) deferred_quantified_vars: Vec<u32>,
-    pub(crate) field_constraints: HashMap<u32, Vec<(String, Type)>>,
-    pub(crate) inferable_fns: HashMap<String, ast::Fn>,
-    pub(crate) fn_schemes: HashMap<String, (Vec<u32>, Vec<Type>, Type)>,
+    pub(crate) field_constraints: IndexMap<u32, Vec<(String, Type)>>,
+    pub(crate) inferable_fns: IndexMap<String, ast::Fn>,
+    pub(crate) fn_schemes: IndexMap<String, (Vec<u32>, Vec<Type>, Type)>,
     pub(crate) unannotated_struct_fields: Vec<(String, String, Type, Span)>,
-    pub(crate) poly_lambda_asts: HashMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
+    pub(crate) poly_lambda_asts: IndexMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
     pub(crate) type_errors: Vec<String>,
-    pub(crate) fn_param_names: HashMap<String, Vec<String>>,
-    pub(crate) fn_defaults: HashMap<String, Vec<Option<ast::Expr>>>,
+    pub(crate) fn_param_names: IndexMap<String, Vec<String>>,
+    pub(crate) fn_defaults: IndexMap<String, Vec<Option<ast::Expr>>>,
     pub(crate) current_method_type: Option<String>,
     pub(crate) modules: std::collections::HashSet<String>,
+    /// Extern functions tracked separately from Jade functions.
+    /// Key: C symbol name. Value: (DefId, param types, return type).
+    /// Externs are NOT module-prefixed — they keep their C symbol names.
+    pub(crate) externs: IndexMap<String, (DefId, Vec<Type>, Type)>,
+    /// Current function's return type, used by `try` desugaring.
+    pub(crate) current_fn_ret_ty: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,46 +103,51 @@ impl Typer {
         Self {
             next_id: 1,
             scopes: Vec::new(),
-            fns: HashMap::new(),
-            structs: HashMap::new(),
-            enums: HashMap::new(),
-            variant_tags: HashMap::new(),
-            generic_fns: HashMap::new(),
-            generic_enums: HashMap::new(),
-            generic_types: HashMap::new(),
-            methods: HashMap::new(),
+            fns: IndexMap::new(),
+            structs: IndexMap::new(),
+            enums: IndexMap::new(),
+            variant_tags: IndexMap::new(),
+            generic_fns: IndexMap::new(),
+            generic_enums: IndexMap::new(),
+            generic_types: IndexMap::new(),
+            methods: IndexMap::new(),
             mono_fns: Vec::new(),
             mono_enums: Vec::new(),
             mono_types: Vec::new(),
             inferred_field_structs: std::collections::HashSet::new(),
             source_dir: None,
             test_mode: false,
-            actors: HashMap::new(),
-            store_schemas: HashMap::new(),
+            actors: IndexMap::new(),
+            store_schemas: IndexMap::new(),
+            store_decorators: IndexMap::new(),
+            view_defs: IndexMap::new(),
             mono_depth: 0,
-            traits: HashMap::new(),
-            trait_impls: HashMap::new(),
-            generic_bounds: HashMap::new(),
-            trait_impl_type_args: HashMap::new(),
-            assoc_types: HashMap::new(),
-            trait_assoc_types: HashMap::new(),
-            consts: HashMap::new(),
+            traits: IndexMap::new(),
+            trait_impls: IndexMap::new(),
+            generic_bounds: IndexMap::new(),
+            trait_impl_type_args: IndexMap::new(),
+            assoc_types: IndexMap::new(),
+            trait_assoc_types: IndexMap::new(),
+            consts: IndexMap::new(),
+            globals: IndexMap::new(),
             infer_ctx: unify::InferCtx::new(),
             debug_types: false,
             warnings: Vec::new(),
             deferred_methods: Vec::new(),
             deferred_fields: Vec::new(),
             deferred_quantified_vars: Vec::new(),
-            field_constraints: HashMap::new(),
-            inferable_fns: HashMap::new(),
-            fn_schemes: HashMap::new(),
+            field_constraints: IndexMap::new(),
+            inferable_fns: IndexMap::new(),
+            fn_schemes: IndexMap::new(),
             unannotated_struct_fields: Vec::new(),
-            poly_lambda_asts: HashMap::new(),
+            poly_lambda_asts: IndexMap::new(),
             type_errors: Vec::new(),
-            fn_param_names: HashMap::new(),
-            fn_defaults: HashMap::new(),
+            fn_param_names: IndexMap::new(),
+            fn_defaults: IndexMap::new(),
             current_method_type: None,
             modules: std::collections::HashSet::new(),
+            externs: IndexMap::new(),
+            current_fn_ret_ty: None,
         }
     }
 
@@ -227,6 +242,25 @@ impl Typer {
         }
     }
 
+    /// Unify expected type with a call/method result type, but only when the
+    /// result type has already resolved to a concrete type.  When the result is
+    /// still an unresolved TypeVar (i.e. the callee's return type hasn't been
+    /// inferred from its body yet), we skip the unification to prevent the
+    /// caller's expected type from backward-propagating into the callee's return
+    /// type variable.
+    pub(crate) fn unify_call_result(
+        &mut self,
+        expected: &Type,
+        result_ty: &Type,
+        span: crate::ast::Span,
+        ctx: &'static str,
+    ) {
+        let resolved = self.infer_ctx.shallow_resolve(result_ty);
+        if !matches!(resolved, Type::TypeVar(_)) {
+            let _ = self.infer_ctx.unify_at(expected, result_ty, span, ctx);
+        }
+    }
+
     pub(crate) fn make_coerce(
         expr: hir::Expr,
         coercion: hir::CoercionKind,
@@ -296,9 +330,8 @@ impl Typer {
             "contains" | "starts_with" | "ends_with" => Some(Type::Bool),
             "matches" => Some(Type::Bool),
             "char_at" | "len" | "find" => Some(Type::I64),
-            "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower" | "repeat" | "replace_re" => {
-                Some(Type::String)
-            }
+            "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower"
+            | "repeat" | "replace_re" => Some(Type::String),
             "split" | "lines" => Some(Type::Vec(Box::new(Type::String))),
             "find_all" => Some(Type::Vec(Box::new(Type::String))),
             "is_empty" => Some(Type::Bool),
@@ -344,9 +377,10 @@ impl Typer {
             "sum" => Some(elem_ty.clone()),
             "contains" => Some(Type::Bool),
             "join" => Some(Type::String),
-            "enumerate" => {
-                Some(Type::Vec(Box::new(Type::Tuple(vec![Type::I64, elem_ty.clone()]))))
-            }
+            "enumerate" => Some(Type::Vec(Box::new(Type::Tuple(vec![
+                Type::I64,
+                elem_ty.clone(),
+            ])))),
             _ => None,
         }
     }
@@ -454,8 +488,9 @@ mod tests {
 
     #[test]
     fn test_function_call_typed() {
-        let hir =
-            type_check("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+        let hir = type_check(
+            "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n",
+        );
         let add_fn = hir.fns.iter().find(|f| f.name == "add").unwrap();
         assert_eq!(add_fn.ret, Type::I64);
     }
@@ -484,7 +519,8 @@ mod tests {
 
     #[test]
     fn test_generic_fn_monomorphized() {
-        let hir = type_check("*identity(x as T) returns T\n    x\n*main()\n    log(identity(42))\n");
+        let hir =
+            type_check("*identity(x as T) returns T\n    x\n*main()\n    log(identity(42))\n");
         assert!(
             hir.fns.len() >= 2,
             "expected at least 2 fns, got {}",
@@ -507,8 +543,9 @@ mod tests {
 
     #[test]
     fn test_lambda_typed() {
-        let hir =
-            type_check("*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n");
+        let hir = type_check(
+            "*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n",
+        );
         let main = &hir.fns[0];
         if let hir::Stmt::Bind(b) = &main.body[0] {
             assert!(matches!(b.ty, Type::Fn(_, _)));
@@ -567,8 +604,9 @@ mod tests {
 
     #[test]
     fn test_let_gen_fn_scheme_is_poly() {
-        let prog =
-            parse("*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n");
+        let prog = parse(
+            "*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n",
+        );
         let mut typer = Typer::new();
         let _hir = typer.lower_program(&prog).unwrap();
     }
@@ -659,7 +697,8 @@ mod tests {
 
     #[test]
     fn test_return_type_inferred_from_tail() {
-        let hir = type_check("*double(x as i64) returns i64\n    x * 2\n*main()\n    log(double(5))\n");
+        let hir =
+            type_check("*double(x as i64) returns i64\n    x * 2\n*main()\n    log(double(5))\n");
         let double = hir.fns.iter().find(|f| f.name == "double").unwrap();
         assert_eq!(double.ret, Type::I64);
     }
@@ -797,8 +836,9 @@ mod tests {
 
     #[test]
     fn test_no_typevar_in_simple_fn() {
-        let hir =
-            type_check("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+        let hir = type_check(
+            "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n",
+        );
         for f in &hir.fns {
             assert!(
                 !f.ret.has_type_var(),

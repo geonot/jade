@@ -56,6 +56,9 @@ impl PerceusPass {
                     self.count_uses_expr(step, uses);
                 }
                 uses.insert(f.bind_id, UseInfo::new(f.bind_ty.clone(), Ownership::Owned));
+                if let (Some(id2), Some(ty2)) = (f.bind2_id, &f.bind2_ty) {
+                    uses.insert(id2, UseInfo::new(ty2.clone(), Ownership::Owned));
+                }
                 self.count_uses_block_conservative(&f.body, uses);
             }
             Stmt::Loop(l) => {
@@ -101,6 +104,9 @@ impl PerceusPass {
                 }
             }
             Stmt::StoreDelete(_, _, _) => {}
+            Stmt::StoreDestroy(_, _, _) => {}
+            Stmt::StoreRestore(_, _, _) => {}
+            Stmt::StoreSave(_, _) => {}
             Stmt::StoreSet(_, assigns, _, _) => {
                 for (_, e) in assigns {
                     self.count_uses_expr_escaping(e, uses);
@@ -117,8 +123,12 @@ impl PerceusPass {
             }
             Stmt::SimFor(f, _) => {
                 self.count_uses_expr(&f.iter, uses);
-                if let Some(end) = &f.end { self.count_uses_expr(end, uses); }
-                if let Some(step) = &f.step { self.count_uses_expr(step, uses); }
+                if let Some(end) = &f.end {
+                    self.count_uses_expr(end, uses);
+                }
+                if let Some(step) = &f.step {
+                    self.count_uses_expr(step, uses);
+                }
                 uses.insert(f.bind_id, UseInfo::new(f.bind_ty.clone(), Ownership::Owned));
                 self.count_uses_block_conservative(&f.body, uses);
             }
@@ -126,6 +136,9 @@ impl PerceusPass {
                 self.count_uses_block(b, uses);
             }
             Stmt::UseLocal(_, _, _, _) => {}
+            Stmt::GlobalStore(_, e, _) => {
+                self.count_uses_expr_escaping(e, uses);
+            }
         }
     }
 
@@ -204,6 +217,9 @@ impl PerceusPass {
                 }
             }
             Stmt::StoreDelete(_, _, _) => {}
+            Stmt::StoreDestroy(_, _, _) => {}
+            Stmt::StoreRestore(_, _, _) => {}
+            Stmt::StoreSave(_, _) => {}
             Stmt::StoreSet(_, assigns, _, _) => {
                 for (_, e) in assigns {
                     self.collect_refs_expr(e, refs);
@@ -226,6 +242,9 @@ impl PerceusPass {
                 self.collect_refs_block(b, refs);
             }
             Stmt::UseLocal(_, _, _, _) => {}
+            Stmt::GlobalStore(_, e, _) => {
+                self.collect_refs_expr(e, refs);
+            }
         }
     }
 
@@ -371,6 +390,21 @@ impl PerceusPass {
                     self.collect_refs_expr(&cond.value, refs);
                 }
             }
+            ExprKind::ViewCount(_, filter) | ExprKind::ViewAll(_, filter) => {
+                self.collect_refs_expr(&filter.value, refs);
+                for (_, cond) in &filter.extra {
+                    self.collect_refs_expr(&cond.value, refs);
+                }
+            }
+            ExprKind::StoreFirst(_, filter) | ExprKind::StoreExists(_, filter) => {
+                self.collect_refs_expr(&filter.value, refs);
+                for (_, cond) in &filter.extra {
+                    self.collect_refs_expr(&cond.value, refs);
+                }
+            }
+            ExprKind::StoreGet(_, key) => {
+                self.collect_refs_expr(key, refs);
+            }
             ExprKind::Int(_)
             | ExprKind::Float(_)
             | ExprKind::Str(_)
@@ -381,7 +415,16 @@ impl PerceusPass {
             | ExprKind::Spawn(_)
             | ExprKind::StoreCount(_)
             | ExprKind::StoreAll(_)
+            | ExprKind::StoreDistinct(_, _)
+            | ExprKind::StoreSum(_, _)
+            | ExprKind::StoreAvg(_, _)
+            | ExprKind::StoreMin(_, _)
+            | ExprKind::StoreMax(_, _)
+            | ExprKind::StoreVersionCount(_, _)
+            | ExprKind::StoreHistory(_, _)
+            | ExprKind::StoreAtVersion(_, _, _)
             | ExprKind::IterNext(_, _, _) => {}
+            ExprKind::GlobalLoad(_) => {}
             ExprKind::Unreachable => {}
             ExprKind::StrictCast(e, _) | ExprKind::AsFormat(e, _) | ExprKind::AtomicLoad(e) => {
                 self.collect_refs_expr(e, refs);
@@ -403,20 +446,48 @@ impl PerceusPass {
             ExprKind::DequeNew => {}
             ExprKind::DequeMethod(obj, _, args) => {
                 self.collect_refs_expr(obj, refs);
-                for a in args { self.collect_refs_expr(a, refs); }
+                for a in args {
+                    self.collect_refs_expr(a, refs);
+                }
             }
-            ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => {
+            ExprKind::Grad(e)
+            | ExprKind::CowWrap(e)
+            | ExprKind::CowClone(e)
+            | ExprKind::GeneratorNext(e)
+            | ExprKind::EnumUnwrap(e, _, _)
+            | ExprKind::EnumIs(e, _) => {
                 self.collect_refs_expr(e, refs);
             }
             ExprKind::Einsum(_, args) => {
-                for a in args { self.collect_refs_expr(a, refs); }
+                for a in args {
+                    self.collect_refs_expr(a, refs);
+                }
             }
             ExprKind::Builder(_, fields) => {
-                for (_, v) in fields { self.collect_refs_expr(v, refs); }
+                for (_, v) in fields {
+                    self.collect_refs_expr(v, refs);
+                }
             }
             ExprKind::GeneratorCreate(_, _, stmts) => {
                 self.collect_refs_block(stmts, refs);
             }
+            ExprKind::KvGet(_, e) | ExprKind::KvHas(_, e) | ExprKind::KvDel(_, e) => {
+                self.collect_refs_expr(e, refs)
+            }
+            ExprKind::KvSet(_, k, v) | ExprKind::KvIncr(_, k, v) => {
+                self.collect_refs_expr(k, refs);
+                self.collect_refs_expr(v, refs);
+            }
+            ExprKind::KvCount(_) | ExprKind::TsLatest(_) => {}
+            ExprKind::VecNearest(_, v, k) => {
+                self.collect_refs_expr(v, refs);
+                self.collect_refs_expr(k, refs);
+            }
+            ExprKind::VecInsert(_, v) => self.collect_refs_expr(v, refs),
+            ExprKind::VecCount(_) | ExprKind::FtsCount(_, _) => {}
+            ExprKind::BloomTest(_, _, v) => self.collect_refs_expr(v, refs),
+            ExprKind::FtsSearch(_, _, v) => self.collect_refs_expr(v, refs),
+            ExprKind::GraphFrom(_, e) | ExprKind::GraphTo(_, e) => self.collect_refs_expr(e, refs),
         }
     }
 
@@ -517,7 +588,8 @@ impl PerceusPass {
                     }
                 }
             }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            ExprKind::Method(obj, _, _, args)
+            | ExprKind::StringMethod(obj, _, args)
             | ExprKind::DeferredMethod(obj, _, args) => {
                 self.count_uses_expr(obj, uses);
                 for a in args {
@@ -612,7 +684,9 @@ impl PerceusPass {
             }
             ExprKind::Spawn(_) => {}
             ExprKind::Unreachable => {}
-            ExprKind::StrictCast(inner, _) | ExprKind::AsFormat(inner, _) | ExprKind::AtomicLoad(inner) => {
+            ExprKind::StrictCast(inner, _)
+            | ExprKind::AsFormat(inner, _)
+            | ExprKind::AtomicLoad(inner) => {
                 self.count_uses_expr(inner, uses);
             }
             ExprKind::AtomicStore(a, b) | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
@@ -635,7 +709,23 @@ impl PerceusPass {
                     self.count_uses_expr_escaping(a, uses);
                 }
             }
-            ExprKind::StoreQuery(_, _) | ExprKind::StoreCount(_) | ExprKind::StoreAll(_) => {}
+            ExprKind::StoreQuery(_, _)
+            | ExprKind::StoreCount(_)
+            | ExprKind::StoreAll(_)
+            | ExprKind::ViewCount(_, _)
+            | ExprKind::ViewAll(_, _)
+            | ExprKind::StoreDistinct(_, _)
+            | ExprKind::StoreSum(_, _)
+            | ExprKind::StoreAvg(_, _)
+            | ExprKind::StoreMin(_, _)
+            | ExprKind::StoreMax(_, _)
+            | ExprKind::StoreVersionCount(_, _)
+            | ExprKind::StoreHistory(_, _)
+            | ExprKind::StoreAtVersion(_, _, _) => {}
+            ExprKind::StoreGet(_, key) => {
+                self.count_uses_expr(key, uses);
+            }
+            ExprKind::StoreFirst(_, _) | ExprKind::StoreExists(_, _) => {}
             ExprKind::CoroutineCreate(_, body) => {
                 self.count_uses_block(body, uses);
             }
@@ -662,7 +752,10 @@ impl PerceusPass {
                 }
             }
             ExprKind::IterNext(_, _, _) => {}
-            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args) => {
+            ExprKind::VecMethod(obj, _, args)
+            | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args)
+            | ExprKind::PQMethod(obj, _, args) => {
                 self.count_uses_expr(obj, uses);
                 for a in args {
                     self.count_uses_expr_escaping(a, uses);
@@ -701,20 +794,49 @@ impl PerceusPass {
             ExprKind::DequeNew => {}
             ExprKind::DequeMethod(obj, _, args) => {
                 self.count_uses_expr(obj, uses);
-                for a in args { self.count_uses_expr_escaping(a, uses); }
+                for a in args {
+                    self.count_uses_expr_escaping(a, uses);
+                }
             }
-            ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => {
+            ExprKind::Grad(e)
+            | ExprKind::CowWrap(e)
+            | ExprKind::CowClone(e)
+            | ExprKind::GeneratorNext(e)
+            | ExprKind::EnumUnwrap(e, _, _)
+            | ExprKind::EnumIs(e, _) => {
                 self.count_uses_expr(e, uses);
             }
             ExprKind::Einsum(_, args) => {
-                for a in args { self.count_uses_expr(a, uses); }
+                for a in args {
+                    self.count_uses_expr(a, uses);
+                }
             }
             ExprKind::Builder(_, fields) => {
-                for (_, v) in fields { self.count_uses_expr_escaping(v, uses); }
+                for (_, v) in fields {
+                    self.count_uses_expr_escaping(v, uses);
+                }
             }
             ExprKind::GeneratorCreate(_, _, stmts) => {
                 self.count_uses_block(stmts, uses);
             }
+            ExprKind::KvGet(_, e) | ExprKind::KvHas(_, e) | ExprKind::KvDel(_, e) => {
+                self.count_uses_expr(e, uses)
+            }
+            ExprKind::KvSet(_, k, v) | ExprKind::KvIncr(_, k, v) => {
+                self.count_uses_expr(k, uses);
+                self.count_uses_expr(v, uses);
+            }
+            ExprKind::KvCount(_) | ExprKind::TsLatest(_) => {}
+            ExprKind::VecNearest(_, v, k) => {
+                self.count_uses_expr(v, uses);
+                self.count_uses_expr(k, uses);
+            }
+            ExprKind::VecInsert(_, v) => self.count_uses_expr(v, uses),
+            ExprKind::VecCount(_) | ExprKind::FtsCount(_, _) => {}
+            ExprKind::BloomTest(_, _, v) => self.count_uses_expr(v, uses),
+            ExprKind::FtsSearch(_, _, v) => self.count_uses_expr(v, uses),
+            ExprKind::GraphFrom(_, e) | ExprKind::GraphTo(_, e) => self.count_uses_expr(e, uses),
+            ExprKind::GlobalLoad(_) => {}
         }
     }
 

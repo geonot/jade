@@ -241,8 +241,8 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
             v
         }
 
-        InstKind::Load(_) | InstKind::FnRef(_) => vec![],
-        InstKind::Store(_, val) => vec![*val],
+        InstKind::Load(_) | InstKind::FnRef(_) | InstKind::GlobalLoad(_) => vec![],
+        InstKind::Store(_, val) | InstKind::GlobalStore(_, val) => vec![*val],
 
         InstKind::FieldGet(obj, _) => vec![*obj],
         InstKind::FieldSet(obj, _, val) => vec![*obj, *val],
@@ -402,7 +402,9 @@ fn analyze_pool_hints(func: &mir::Function, hints: &mut PerceusHints) {
     // For simplicity, we check each block's successors — if any target has a lower index,
     // the blocks between the target and current form a loop.
     let block_ids: Vec<mir::BlockId> = func.blocks.iter().map(|b| b.id).collect();
-    let block_index: HashMap<mir::BlockId, usize> = block_ids.iter().enumerate()
+    let block_index: HashMap<mir::BlockId, usize> = block_ids
+        .iter()
+        .enumerate()
         .map(|(i, id)| (*id, i))
         .collect();
 

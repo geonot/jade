@@ -69,23 +69,31 @@ impl<'ctx> Compiler<'ctx> {
         match method {
             "len" => self.vec_len(header_ptr),
             "set" => {
-                if args.len() < 2 { return Err("map.set() requires key and value".into()); }
+                if args.len() < 2 {
+                    return Err("map.set() requires key and value".into());
+                }
                 let key_val = self.compile_expr(&args[0])?;
                 let val_val = self.compile_expr(&args[1])?;
                 self.map_set_val(header_ptr, key_val, val_val)
             }
             "get" => {
-                if args.is_empty() { return Err("map.get() requires a key".into()); }
+                if args.is_empty() {
+                    return Err("map.get() requires a key".into());
+                }
                 let key_val = self.compile_expr(&args[0])?;
                 self.map_get_val(header_ptr, key_val)
             }
             "has" | "contains" => {
-                if args.is_empty() { return Err("map.has() requires a key".into()); }
+                if args.is_empty() {
+                    return Err("map.has() requires a key".into());
+                }
                 let key_val = self.compile_expr(&args[0])?;
                 self.map_has_val(header_ptr, key_val)
             }
             "remove" => {
-                if args.is_empty() { return Err("map.remove() requires a key".into()); }
+                if args.is_empty() {
+                    return Err("map.remove() requires a key".into());
+                }
                 let key_val = self.compile_expr(&args[0])?;
                 self.map_remove_val(header_ptr, key_val)
             }
@@ -112,7 +120,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let header_ty = self.vec_header_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let cap_gep = b!(self
             .bld
@@ -136,7 +144,7 @@ impl<'ctx> Compiler<'ctx> {
         let loop_bb = self.ctx.append_basic_block(fv, "mp.loop");
         let check_bb = self.ctx.append_basic_block(fv, "mp.check");
         let next_bb = self.ctx.append_basic_block(fv, "mp.next");
-        let pre_bb = self.bld.get_insert_block().unwrap();
+        let pre_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(loop_bb);
@@ -192,7 +200,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let header_ty = self.vec_header_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let hash = self.fnv_hash_string(key_val)?;
 
         let overwrite_bb = self.ctx.append_basic_block(fv, "ms.overwrite");
@@ -261,7 +269,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let hash = self.fnv_hash_string(key_val)?;
 
         let found_bb = self.ctx.append_basic_block(fv, "mg.found");
@@ -292,7 +300,7 @@ impl<'ctx> Compiler<'ctx> {
         header_ptr: inkwell::values::PointerValue<'ctx>,
         key_val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let hash = self.fnv_hash_string(key_val)?;
 
         let found_bb = self.ctx.append_basic_block(fv, "mh.found");
@@ -324,7 +332,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let header_ty = self.vec_header_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let hash = self.fnv_hash_string(key_val)?;
 
         let found_bb = self.ctx.append_basic_block(fv, "mr.found");
@@ -408,7 +416,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let header_ty = self.vec_header_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         // Read map capacity and entries pointer
         let cap_gep = b!(self
@@ -439,13 +447,11 @@ impl<'ctx> Compiler<'ctx> {
         let elem_size = i64t.const_int(8, false);
         let buf_bytes = b!(self.bld.build_int_nsw_mul(map_len, elem_size, "mk.bufsz"));
         let malloc = self.ensure_malloc();
-        let buf = b!(self
-            .bld
-            .build_call(malloc, &[buf_bytes.into()], "mk.buf"))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_pointer_value();
+        let buf = b!(self.bld.build_call(malloc, &[buf_bytes.into()], "mk.buf"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
         let r_ptr_gep = b!(self
             .bld
             .build_struct_gep(header_ty, result_ptr, 0, "mk.rptrp"));
@@ -458,9 +464,7 @@ impl<'ctx> Compiler<'ctx> {
         // Loop through all entries
         let entry_size = i64t.const_int(48, false);
         let idx_alloca = self.entry_alloca(i64t.into(), "mk.idx");
-        b!(self
-            .bld
-            .build_store(idx_alloca, i64t.const_int(0, false)));
+        b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
         let out_idx_alloca = self.entry_alloca(i64t.into(), "mk.oidx");
         b!(self
             .bld
@@ -481,9 +485,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
-        let byte_off = b!(self
-            .bld
-            .build_int_nsw_mul(cur_idx, entry_size, "mk.off"));
+        let byte_off = b!(self.bld.build_int_nsw_mul(cur_idx, entry_size, "mk.off"));
         let ep = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "mk.ep")) };
         let occ_ptr = unsafe {
             b!(self
@@ -501,12 +503,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(store_bb);
         let field_ptr = unsafe {
-            b!(self.bld.build_gep(
-                i8t,
-                ep,
-                &[i64t.const_int(field_offset, false)],
-                "mk.fp"
-            ))
+            b!(self
+                .bld
+                .build_gep(i8t, ep, &[i64t.const_int(field_offset, false)], "mk.fp"))
         };
         // For keys (offset 8), load 24 bytes (String SSO). For values (offset 32), load i64.
         let field_val = if field_offset == 8 {
@@ -517,13 +516,8 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_load(i64t, field_ptr, "mk.val"))
         };
 
-        let out_idx = b!(self
-            .bld
-            .build_load(i64t, out_idx_alloca, "mk.oi"))
-        .into_int_value();
-        let out_off = b!(self
-            .bld
-            .build_int_nsw_mul(out_idx, elem_size, "mk.ooff"));
+        let out_idx = b!(self.bld.build_load(i64t, out_idx_alloca, "mk.oi")).into_int_value();
+        let out_off = b!(self.bld.build_int_nsw_mul(out_idx, elem_size, "mk.ooff"));
         let dest = unsafe { b!(self.bld.build_gep(i8t, buf, &[out_off], "mk.dest")) };
 
         if field_offset == 8 {
@@ -532,31 +526,23 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_store(tmp, field_val));
             b!(self.bld.build_call(
                 memcpy,
-                &[
-                    dest.into(),
-                    tmp.into(),
-                    i64t.const_int(24, false).into()
-                ],
+                &[dest.into(), tmp.into(), i64t.const_int(24, false).into()],
                 ""
             ));
         } else {
             b!(self.bld.build_store(dest, field_val));
         }
 
-        let new_oi = b!(self.bld.build_int_nsw_add(
-            out_idx,
-            i64t.const_int(1, false),
-            "mk.noi"
-        ));
+        let new_oi = b!(self
+            .bld
+            .build_int_nsw_add(out_idx, i64t.const_int(1, false), "mk.noi"));
         b!(self.bld.build_store(out_idx_alloca, new_oi));
         b!(self.bld.build_unconditional_branch(inc_bb));
 
         self.bld.position_at_end(inc_bb);
-        let next = b!(self.bld.build_int_nsw_add(
-            cur_idx,
-            i64t.const_int(1, false),
-            "mk.next"
-        ));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(cur_idx, i64t.const_int(1, false), "mk.next"));
         b!(self.bld.build_store(idx_alloca, next));
         b!(self.bld.build_unconditional_branch(cond_bb));
 
@@ -565,10 +551,7 @@ impl<'ctx> Compiler<'ctx> {
         let r_len_gep = b!(self
             .bld
             .build_struct_gep(header_ty, result_ptr, 1, "mk.rlenp"));
-        let final_oi = b!(self
-            .bld
-            .build_load(i64t, out_idx_alloca, "mk.flen"))
-        .into_int_value();
+        let final_oi = b!(self.bld.build_load(i64t, out_idx_alloca, "mk.flen")).into_int_value();
         b!(self.bld.build_store(r_len_gep, final_oi));
 
         Ok(result_ptr.into())
@@ -580,7 +563,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let data = self.string_data(str_val)?.into_pointer_value();
         let len = self.string_len(str_val)?.into_int_value();
@@ -591,7 +574,7 @@ impl<'ctx> Compiler<'ctx> {
         let cond_bb = self.ctx.append_basic_block(fv, "fnv.cond");
         let body_bb = self.ctx.append_basic_block(fv, "fnv.body");
         let done_bb = self.ctx.append_basic_block(fv, "fnv.done");
-        let entry_bb = self.bld.get_insert_block().unwrap();
+        let entry_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(cond_bb);

@@ -1,0 +1,51 @@
+# std.convert — String/number type conversions
+#
+# Usage:
+#   n is convert.parse_int("42")
+#   f is convert.parse_float("3.14")
+
+extern *atof(s as %i8) returns f64
+
+# Parse a string into a float (f64). Returns 0.0 on invalid input.
+*parse_float(s as String) returns f64
+    extern.atof(%s)
+
+# Parse a string into an integer (i64). Returns 0 on invalid input.
+# Handles optional leading '-' sign and base-10 digits.
+# Stops at the first non-digit character after the sign.
+*parse_int(s as String) returns i64
+    result is 0
+    negative is false
+    i is 0
+    if s.length > 0 and s.char_at(0) equals 45
+        negative is true
+        i is 1
+    while i < s.length
+        c is s.char_at(i)
+        if c >= 48 and c <= 57
+            result is result * 10 + (c - 48)
+        else
+            break
+        i is i + 1
+    negative ? 0 - result ! result
+
+# Parse an integer from a hex string (e.g. "ff" -> 255).
+*parse_hex(s as String) returns i64
+    result is 0
+    i is 0
+    # Skip optional 0x prefix
+    if s.length > 1 and s.char_at(0) equals 48
+        if s.char_at(1) equals 120 or s.char_at(1) equals 88
+            i is 2
+    while i < s.length
+        c is s.char_at(i)
+        if c >= 48 and c <= 57
+            result is result * 16 + (c - 48)
+        elif c >= 97 and c <= 102
+            result is result * 16 + (c - 87)
+        elif c >= 65 and c <= 70
+            result is result * 16 + (c - 55)
+        else
+            break
+        i is i + 1
+    result

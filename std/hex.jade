@@ -1,0 +1,182 @@
+# std.hex — Hex encoding/decoding utilities
+#
+# Usage:
+#   encoded is hex.encode("Hello")        # "48656c6c6f"
+#   decoded is hex.decode("48656c6c6f")   # "Hello"
+#   hex.is_valid("deadbeef")              # true
+#   hex.format(255)                       # "ff"
+#   hex.format_upper(255)                 # "FF"
+
+HEX_LOWER is "0123456789abcdef"
+HEX_UPPER is "0123456789ABCDEF"
+
+# Encode a string to its hex representation.
+*encode(data as String) returns String
+    result is ""
+    i is 0
+    while i < data.length
+        b is data.char_at(i)
+        hi is b / 16
+        lo is b mod 16
+        result is result + HEX_LOWER.slice(hi, hi + 1) + HEX_LOWER.slice(lo, lo + 1)
+        i is i + 1
+    result
+
+# Decode a hex string back to raw string.
+*decode(hex_str as String) returns String
+    result is ""
+    i is 0
+    while i < hex_str.length - 1
+        hi is __hex_val(hex_str.char_at(i))
+        lo is __hex_val(hex_str.char_at(i + 1))
+        val is hi * 16 + lo
+        result is result + __char(val)
+        i is i + 2
+    result
+
+# Format an integer as lowercase hex.
+*format(n as i64) returns String
+    if n equals 0
+        return "0"
+    result is ""
+    val is n
+    if val < 0
+        val is 0 - val
+    while val > 0
+        digit is val mod 16
+        result is HEX_LOWER.slice(digit, digit + 1) + result
+        val is val / 16
+    if n < 0
+        return "-" + result
+    result
+
+# Format an integer as uppercase hex.
+*format_upper(n as i64) returns String
+    if n equals 0
+        return "0"
+    result is ""
+    val is n
+    if val < 0
+        val is 0 - val
+    while val > 0
+        digit is val mod 16
+        result is HEX_UPPER.slice(digit, digit + 1) + result
+        val is val / 16
+    if n < 0
+        return "-" + result
+    result
+
+# Format an integer as hex with a 0x prefix.
+*format_prefixed(n as i64) returns String
+    "0x" + format(n)
+
+# Format with zero-padding to a specific width.
+*format_padded(n as i64, width as i64) returns String
+    result is format(n)
+    while result.length < width
+        result is "0" + result
+    result
+
+# Parse a hex string to an integer.
+*parse(hex_str as String) returns i64
+    result is 0
+    start is 0
+    if hex_str.length > 2 and hex_str.char_at(0) equals 48
+        c1 is hex_str.char_at(1)
+        if c1 equals 120 or c1 equals 88
+            start is 2
+    i is start
+    while i < hex_str.length
+        result is result * 16 + __hex_val(hex_str.char_at(i))
+        i is i + 1
+    result
+
+# Check if a string is valid hex.
+*is_valid(s as String) returns bool
+    if s.length equals 0
+        return false
+    start is 0
+    if s.length > 2 and s.char_at(0) equals 48
+        c1 is s.char_at(1)
+        if c1 equals 120 or c1 equals 88
+            start is 2
+    i is start
+    while i < s.length
+        ch is s.char_at(i)
+        if ch >= 48 and ch <= 57
+            i is i + 1
+        elif ch >= 97 and ch <= 102
+            i is i + 1
+        elif ch >= 65 and ch <= 70
+            i is i + 1
+        else
+            return false
+    true
+
+# Encode integer to hex bytes (little-endian).
+*encode_le_i32(n as i64) returns String
+    b0 is n & 255
+    b1 is (n >> 8) & 255
+    b2 is (n >> 16) & 255
+    b3 is (n >> 24) & 255
+    format_padded(b0, 2) + format_padded(b1, 2) + format_padded(b2, 2) + format_padded(b3, 2)
+
+# Encode integer to hex bytes (big-endian).
+*encode_be_i32(n as i64) returns String
+    b3 is (n >> 24) & 255
+    b2 is (n >> 16) & 255
+    b1 is (n >> 8) & 255
+    b0 is n & 255
+    format_padded(b3, 2) + format_padded(b2, 2) + format_padded(b1, 2) + format_padded(b0, 2)
+
+# Dump a string as a hex dump (16 bytes per line with ASCII).
+*dump(data as String) returns String
+    result is ""
+    i is 0
+    while i < data.length
+        # Offset
+        result is result + format_padded(i, 8) + "  "
+        # Hex bytes
+        for j in 0 to 16
+            if i + j < data.length
+                result is result + format_padded(data.char_at(i + j), 2) + " "
+            else
+                result is result + "   "
+            if j equals 7
+                result is result + " "
+        result is result + " |"
+        # ASCII
+        for j in 0 to 16
+            if i + j < data.length
+                ch is data.char_at(i + j)
+                if ch >= 32 and ch <= 126
+                    result is result + data.slice(i + j, i + j + 1)
+                else
+                    result is result + "."
+        result is result + "|\n"
+        i is i + 16
+    result
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*__hex_val(ch as i64) returns i64
+    if ch >= 48 and ch <= 57
+        return ch - 48
+    if ch >= 97 and ch <= 102
+        return ch - 87
+    if ch >= 65 and ch <= 70
+        return ch - 55
+    0
+
+*__char(code as i64) returns String
+    chars is " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+    match code
+        10 ? "\n"
+        9 ? "\t"
+        13 ? "\r"
+        0 ? ""
+        _ ?
+            if code < 32 or code > 126
+                return "?"
+            idx is code - 32
+            chars.slice(idx, idx + 1)

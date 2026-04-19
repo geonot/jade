@@ -1,6 +1,6 @@
+use inkwell::AddressSpace;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
-use inkwell::AddressSpace;
 
 use crate::types::Type;
 
@@ -98,24 +98,21 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Drop a Vec, recursively destroying elements if they are non-trivially
     /// droppable. O(n) in element count, O(1) for POD elements.
-    fn drop_vec_deep(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        elem: &Type,
-    ) -> Result<(), String> {
+    fn drop_vec_deep(&mut self, val: BasicValueEnum<'ctx>, elem: &Type) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
         let i64t = self.ctx.i64_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let free = self.ensure_free();
 
         // val is the header pointer itself (already loaded from alloca)
         let header_ptr = val.into_pointer_value();
 
         let null = ptr_ty.const_null();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, header_ptr, null, "dvd.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dvd.null"));
         let drop_bb = self.ctx.append_basic_block(fv, "dvd.drop");
         let done_bb = self.ctx.append_basic_block(fv, "dvd.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
@@ -124,7 +121,8 @@ impl<'ctx> Compiler<'ctx> {
         // If elements need dropping, iterate and drop each
         if !elem.is_trivially_droppable() {
             let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
-            let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf")).into_pointer_value();
+            let data_ptr =
+                b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf")).into_pointer_value();
             let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "dvd.l"));
             let len = b!(self.bld.build_load(i64t, len_gep, "dvd.len")).into_int_value();
 
@@ -141,27 +139,36 @@ impl<'ctx> Compiler<'ctx> {
             let phi = b!(self.bld.build_phi(i64t, "dvd.i"));
             phi.add_incoming(&[(&i64t.const_int(0, false), drop_bb)]);
             let i = phi.as_basic_value().into_int_value();
-            let cond = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, i, len, "dvd.cmp"));
+            let cond =
+                b!(self
+                    .bld
+                    .build_int_compare(inkwell::IntPredicate::ULT, i, len, "dvd.cmp"));
             b!(self.bld.build_conditional_branch(cond, body_bb, post_bb));
 
             self.bld.position_at_end(body_bb);
             let offset = b!(self.bld.build_int_mul(i, elem_size, "dvd.off"));
             let elem_ptr = unsafe {
-                b!(self.bld.build_gep(self.ctx.i8_type(), data_ptr, &[offset], "dvd.ep"))
+                b!(self
+                    .bld
+                    .build_gep(self.ctx.i8_type(), data_ptr, &[offset], "dvd.ep"))
             };
             let elem_val = b!(self.bld.build_load(elem_llvm, elem_ptr, "dvd.ev"));
             self.drop_value(elem_val, elem)?;
             // After drop_value, the builder may be in a different BB (e.g., if
             // the element type has its own control flow). Use the actual current
             // block for the phi incoming edge.
-            let after_drop_bb = self.bld.get_insert_block().unwrap();
-            let next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "dvd.next"));
+            let after_drop_bb = self.current_bb();
+            let next = b!(self
+                .bld
+                .build_int_add(i, i64t.const_int(1, false), "dvd.next"));
             phi.add_incoming(&[(&next, after_drop_bb)]);
             b!(self.bld.build_unconditional_branch(loop_bb));
 
             self.bld.position_at_end(post_bb);
             // Free data buffer and header
-            let data_gep2 = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d2"));
+            let data_gep2 = b!(self
+                .bld
+                .build_struct_gep(header_ty, header_ptr, 0, "dvd.d2"));
             let data_ptr2 = b!(self.bld.build_load(ptr_ty, data_gep2, "dvd.buf2"));
             b!(self.bld.build_call(free, &[data_ptr2.into()], ""));
             b!(self.bld.build_call(free, &[header_ptr.into()], ""));
@@ -195,14 +202,15 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let free = self.ensure_free();
         let null = ptr_ty.const_null();
 
         let header_ptr = val.into_pointer_value();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, header_ptr, null, "dmd.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dmd.null"));
         let drop_bb = self.ctx.append_basic_block(fv, "dmd.drop");
         let done_bb = self.ctx.append_basic_block(fv, "dmd.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
@@ -226,46 +234,51 @@ impl<'ctx> Compiler<'ctx> {
         let phi = b!(self.bld.build_phi(i64t, "dmd.i"));
         phi.add_incoming(&[(&i64t.const_int(0, false), drop_bb)]);
         let i = phi.as_basic_value().into_int_value();
-        let cond = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dmd.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dmd.cmp"));
         b!(self.bld.build_conditional_branch(cond, check_bb, post_bb));
 
         // Check occupancy marker at bucket offset 40
         self.bld.position_at_end(check_bb);
         let offset = b!(self.bld.build_int_mul(i, bucket_size, "dmd.off"));
-        let _entry_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, data_ptr, &[offset], "dmd.ep"))
-        };
-        let occ_off = b!(self.bld.build_int_add(offset, i64t.const_int(40, false), "dmd.ooff"));
-        let occ_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dmd.ocp"))
-        };
+        let _entry_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[offset], "dmd.ep")) };
+        let occ_off = b!(self
+            .bld
+            .build_int_add(offset, i64t.const_int(40, false), "dmd.ooff"));
+        let occ_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dmd.ocp")) };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "dmd.occ")).into_int_value();
         let is_occupied = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::NE, occ, i8t.const_int(0, false), "dmd.occ_ne"
+            inkwell::IntPredicate::NE,
+            occ,
+            i8t.const_int(0, false),
+            "dmd.occ_ne"
         ));
-        b!(self.bld.build_conditional_branch(is_occupied, body_bb, inc_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_occupied, body_bb, inc_bb));
 
         // Drop key (at offset 8) and value (at offset 32) if non-trivially-droppable
         self.bld.position_at_end(body_bb);
         if !kt.is_trivially_droppable() {
-            let key_off = b!(self.bld.build_int_add(offset, i64t.const_int(8, false), "dmd.koff"));
-            let key_ptr = unsafe {
-                b!(self.bld.build_gep(i8t, data_ptr, &[key_off], "dmd.kp"))
-            };
+            let key_off = b!(self
+                .bld
+                .build_int_add(offset, i64t.const_int(8, false), "dmd.koff"));
+            let key_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[key_off], "dmd.kp")) };
             let key_llvm = self.llvm_ty(kt);
             let key_val = b!(self.bld.build_load(key_llvm, key_ptr, "dmd.kv"));
             self.drop_value(key_val, kt)?;
         }
         if !vt.is_trivially_droppable() {
-            let val_off = b!(self.bld.build_int_add(offset, i64t.const_int(32, false), "dmd.voff"));
-            let val_ptr = unsafe {
-                b!(self.bld.build_gep(i8t, data_ptr, &[val_off], "dmd.vp"))
-            };
+            let val_off = b!(self
+                .bld
+                .build_int_add(offset, i64t.const_int(32, false), "dmd.voff"));
+            let val_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[val_off], "dmd.vp")) };
             let val_llvm = self.llvm_ty(vt);
             let val_val = b!(self.bld.build_load(val_llvm, val_ptr, "dmd.vv"));
             self.drop_value(val_val, vt)?;
         }
-        let after_drop_bb = self.bld.get_insert_block().unwrap();
+        let after_drop_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(inc_bb));
 
         self.bld.position_at_end(inc_bb);
@@ -290,11 +303,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Drop a Set, recursively destroying elements if they are non-trivially
     /// droppable. Same bucket layout as Map: 48-byte entries, occupancy at offset 40,
     /// element at offset 8.
-    fn drop_set_deep(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        elem: &Type,
-    ) -> Result<(), String> {
+    fn drop_set_deep(&mut self, val: BasicValueEnum<'ctx>, elem: &Type) -> Result<(), String> {
         if elem.is_trivially_droppable() {
             return self.drop_container_simple(val);
         }
@@ -303,14 +312,15 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let free = self.ensure_free();
         let null = ptr_ty.const_null();
 
         let header_ptr = val.into_pointer_value();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, header_ptr, null, "dsd.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dsd.null"));
         let drop_bb = self.ctx.append_basic_block(fv, "dsd.drop");
         let done_bb = self.ctx.append_basic_block(fv, "dsd.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
@@ -334,30 +344,37 @@ impl<'ctx> Compiler<'ctx> {
         let phi = b!(self.bld.build_phi(i64t, "dsd.i"));
         phi.add_incoming(&[(&i64t.const_int(0, false), drop_bb)]);
         let i = phi.as_basic_value().into_int_value();
-        let cond = b!(self.bld.build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dsd.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dsd.cmp"));
         b!(self.bld.build_conditional_branch(cond, check_bb, post_bb));
 
         self.bld.position_at_end(check_bb);
         let offset = b!(self.bld.build_int_mul(i, bucket_size, "dsd.off"));
-        let occ_off = b!(self.bld.build_int_add(offset, i64t.const_int(40, false), "dsd.ooff"));
-        let occ_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dsd.ocp"))
-        };
+        let occ_off = b!(self
+            .bld
+            .build_int_add(offset, i64t.const_int(40, false), "dsd.ooff"));
+        let occ_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dsd.ocp")) };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "dsd.occ")).into_int_value();
         let is_occupied = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::NE, occ, i8t.const_int(0, false), "dsd.occ_ne"
+            inkwell::IntPredicate::NE,
+            occ,
+            i8t.const_int(0, false),
+            "dsd.occ_ne"
         ));
-        b!(self.bld.build_conditional_branch(is_occupied, body_bb, inc_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_occupied, body_bb, inc_bb));
 
         self.bld.position_at_end(body_bb);
-        let elem_off = b!(self.bld.build_int_add(offset, i64t.const_int(8, false), "dsd.eoff"));
-        let elem_ptr = unsafe {
-            b!(self.bld.build_gep(i8t, data_ptr, &[elem_off], "dsd.ep"))
-        };
+        let elem_off = b!(self
+            .bld
+            .build_int_add(offset, i64t.const_int(8, false), "dsd.eoff"));
+        let elem_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[elem_off], "dsd.ep")) };
         let elem_llvm = self.llvm_ty(elem);
         let elem_val = b!(self.bld.build_load(elem_llvm, elem_ptr, "dsd.ev"));
         self.drop_value(elem_val, elem)?;
-        let after_drop_bb = self.bld.get_insert_block().unwrap();
+        let after_drop_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(inc_bb));
 
         self.bld.position_at_end(inc_bb);
@@ -384,21 +401,24 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
         let free = self.ensure_free();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let null = ptr_ty.const_null();
 
         // val is the header pointer itself (already loaded from alloca)
         let header_ptr = val.into_pointer_value();
 
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, header_ptr, null, "dcs.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dcs.null"));
         let free_bb = self.ctx.append_basic_block(fv, "dcs.free");
         let done_bb = self.ctx.append_basic_block(fv, "dcs.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
 
         self.bld.position_at_end(free_bb);
-        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dcs.data"));
+        let data_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "dcs.data"));
         let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dcs.buf"));
         b!(self.bld.build_call(free, &[data_ptr.into()], ""));
         b!(self.bld.build_call(free, &[header_ptr.into()], ""));
@@ -438,7 +458,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Null-check, then free.
     fn drop_ptr_allocated(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let free = self.ensure_free();
 
         let ptr = if val.is_pointer_value() {
@@ -448,9 +468,10 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         let null = ptr_ty.const_null();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, ptr, null, "dpa.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, ptr, null, "dpa.null"));
         let free_bb = self.ctx.append_basic_block(fv, "dpa.free");
         let done_bb = self.ctx.append_basic_block(fv, "dpa.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
@@ -466,7 +487,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Drop a generator: calls jade_gen_destroy to free coroutine stack + gen block.
     fn drop_generator(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let ptr = if val.is_pointer_value() {
             val.into_pointer_value()
@@ -478,9 +499,10 @@ impl<'ctx> Compiler<'ctx> {
         let gen_destroy = self.module.get_function("jade_gen_destroy").unwrap();
 
         let null = ptr_ty.const_null();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ, ptr, null, "dg.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, ptr, null, "dg.null"));
         let free_bb = self.ctx.append_basic_block(fv, "dg.free");
         let done_bb = self.ctx.append_basic_block(fv, "dg.done");
         b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
@@ -494,11 +516,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Drop a tuple: recursively drop each non-trivially-droppable element.
-    fn drop_tuple(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        tys: &[Type],
-    ) -> Result<(), String> {
+    fn drop_tuple(&mut self, val: BasicValueEnum<'ctx>, tys: &[Type]) -> Result<(), String> {
         let st = self.ctx.struct_type(
             &tys.iter().map(|t| self.llvm_ty(t)).collect::<Vec<_>>(),
             false,
@@ -517,11 +535,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Drop a struct by dropping each field that needs it.
-    fn drop_struct_fields(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        name: &str,
-    ) -> Result<(), String> {
+    /// For recursive structs (e.g. Value containing Vec of Value), we
+    /// generate a named drop function `__drop_<Name>` and call it to
+    /// break infinite codegen recursion.
+    fn drop_struct_fields(&mut self, val: BasicValueEnum<'ctx>, name: &str) -> Result<(), String> {
         let fields = match self.structs.get(name) {
             Some(f) => f.clone(),
             None => return Ok(()), // unknown struct — can't drop fields
@@ -534,17 +551,85 @@ impl<'ctx> Compiler<'ctx> {
             Some(s) => s,
             None => return Ok(()),
         };
-        let ptr = self.entry_alloca(st.into(), "ds.tmp");
-        b!(self.bld.build_store(ptr, val));
+
+        // Check if a recursive struct type needs an out-of-line drop function.
+        let drop_fn_name = format!("__drop_{}", name);
+
+        // If the drop function already exists, just call it.
+        if let Some(dfn) = self.module.get_function(&drop_fn_name) {
+            let ptr = self.entry_alloca(st.into(), "ds.tmp");
+            b!(self.bld.build_store(ptr, val));
+            b!(self.bld.build_call(dfn, &[ptr.into()], ""));
+            return Ok(());
+        }
+
+        // Check if this struct has self-referencing fields (directly or via Vec/Map).
+        let is_recursive = fields.iter().any(|(_, ty)| Self::type_references_struct(ty, name));
+
+        if !is_recursive {
+            // Inline the drop as before.
+            let ptr = self.entry_alloca(st.into(), "ds.tmp");
+            b!(self.bld.build_store(ptr, val));
+            for (i, (_, ty)) in fields.iter().enumerate() {
+                if ty.is_trivially_droppable() {
+                    continue;
+                }
+                let gep = b!(self.bld.build_struct_gep(st, ptr, i as u32, "ds.f"));
+                let fval = b!(self.bld.build_load(self.llvm_ty(ty), gep, "ds.fv"));
+                self.drop_value(fval, ty)?;
+            }
+            return Ok(());
+        }
+
+        // Recursive struct: generate __drop_<Name>(ptr) function and call it.
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+        let dfn = self.module.add_function(&drop_fn_name, fn_ty, None);
+
+        // Save current state.
+        let saved_fn = self.cur_fn;
+        let saved_bb = self.bld.get_insert_block();
+
+        self.cur_fn = Some(dfn);
+        let entry = self.ctx.append_basic_block(dfn, "entry");
+        self.bld.position_at_end(entry);
+
+        let param_ptr = dfn.get_first_param().unwrap().into_pointer_value();
         for (i, (_, ty)) in fields.iter().enumerate() {
             if ty.is_trivially_droppable() {
                 continue;
             }
-            let gep = b!(self.bld.build_struct_gep(st, ptr, i as u32, "ds.f"));
+            let gep = b!(self.bld.build_struct_gep(st, param_ptr, i as u32, "ds.f"));
             let fval = b!(self.bld.build_load(self.llvm_ty(ty), gep, "ds.fv"));
             self.drop_value(fval, ty)?;
         }
+        b!(self.bld.build_return(None));
+
+        // Restore state.
+        self.cur_fn = saved_fn;
+        if let Some(bb) = saved_bb {
+            self.bld.position_at_end(bb);
+        }
+
+        // Now call the generated function.
+        let ptr = self.entry_alloca(st.into(), "ds.tmp");
+        b!(self.bld.build_store(ptr, val));
+        b!(self.bld.build_call(dfn, &[ptr.into()], ""));
         Ok(())
+    }
+
+    /// Check if a type references a named struct (directly or nested in containers).
+    fn type_references_struct(ty: &Type, name: &str) -> bool {
+        match ty {
+            Type::Struct(n, _) => n == name,
+            Type::Vec(inner) => Self::type_references_struct(inner, name),
+            Type::Map(k, v) => Self::type_references_struct(k, name) || Self::type_references_struct(v, name),
+            Type::Set(inner) => Self::type_references_struct(inner, name),
+            Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
+            Type::Rc(inner) | Type::Weak(inner) | Type::Cow(inner) => Self::type_references_struct(inner, name),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_references_struct(inner, name),
+            _ => false,
+        }
     }
 
     /// Drop array elements one by one.
@@ -561,9 +646,7 @@ impl<'ctx> Compiler<'ctx> {
         for i in 0..count {
             let idx = self.ctx.i64_type().const_int(i as u64, false);
             let zero = self.ctx.i64_type().const_int(0, false);
-            let gep = unsafe {
-                b!(self.bld.build_gep(arr_ty, ptr, &[zero, idx], "dae.e"))
-            };
+            let gep = unsafe { b!(self.bld.build_gep(arr_ty, ptr, &[zero, idx], "dae.e")) };
             let ev = b!(self.bld.build_load(elem_llvm, gep, "dae.v"));
             self.drop_value(ev, elem)?;
         }
@@ -572,11 +655,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Drop an enum: switch on the discriminant, then drop the active variant's
     /// payload fields. This is the enum analog of drop_struct_fields.
-    fn drop_enum_variants(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        name: &str,
-    ) -> Result<(), String> {
+    fn drop_enum_variants(&mut self, val: BasicValueEnum<'ctx>, name: &str) -> Result<(), String> {
         let variants = match self.enums.get(name) {
             Some(v) => v.clone(),
             None => return Ok(()),
@@ -593,7 +672,7 @@ impl<'ctx> Compiler<'ctx> {
             Some(s) => s,
             None => return Ok(()),
         };
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i32t = self.ctx.i32_type();
 
         let ptr = self.entry_alloca(st.into(), "de.tmp");
@@ -629,7 +708,9 @@ impl<'ctx> Compiler<'ctx> {
         let case_bbs: Vec<_> = drop_variants
             .iter()
             .map(|vd| {
-                let bb = self.ctx.append_basic_block(fv, &format!("de.v{}", vd.tag_val));
+                let bb = self
+                    .ctx
+                    .append_basic_block(fv, &format!("de.v{}", vd.tag_val));
                 (i32t.const_int(vd.tag_val as u64, false), bb)
             })
             .collect();
@@ -663,7 +744,7 @@ impl<'ctx> Compiler<'ctx> {
         ptr: BasicValueEnum<'ctx>,
         inner: &Type,
     ) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let layout = self.rc_layout_ty(inner);
         let i64t = self.ctx.i64_type();
         let heap_ptr = ptr.into_pointer_value();
@@ -677,7 +758,9 @@ impl<'ctx> Compiler<'ctx> {
             ))
         } else {
             let loaded = b!(self.bld.build_load(i64t, rc_gep, "rc.cnt.ld")).into_int_value();
-            let dec = b!(self.bld.build_int_nsw_sub(loaded, i64t.const_int(1, false), "rc.dec"));
+            let dec = b!(self
+                .bld
+                .build_int_nsw_sub(loaded, i64t.const_int(1, false), "rc.dec"));
             b!(self.bld.build_store(rc_gep, dec));
             loaded
         };
@@ -694,8 +777,12 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(free_bb);
         // Drop the inner value before freeing the Rc allocation
         if !inner.is_trivially_droppable() {
-            let val_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.val.drop"));
-            let inner_val = b!(self.bld.build_load(self.llvm_ty(inner), val_gep, "rc.inner"));
+            let val_gep = b!(self
+                .bld
+                .build_struct_gep(layout, heap_ptr, 1, "rc.val.drop"));
+            let inner_val = b!(self
+                .bld
+                .build_load(self.llvm_ty(inner), val_gep, "rc.inner"));
             self.drop_value(inner_val, inner)?;
         }
         let free_fn = self.ensure_free();

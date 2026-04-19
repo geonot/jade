@@ -16,8 +16,6 @@ actor Worker
 *main
     n is 64
     w is spawn Worker
-    i is 0
-    while i < n
+    for i in 0 to n
         send w, @work(35)
-        i is i + 1
     log(0)

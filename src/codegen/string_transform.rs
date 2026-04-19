@@ -10,7 +10,7 @@ impl<'ctx> Compiler<'ctx> {
         haystack: BasicValueEnum<'ctx>,
         needle: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let hlen = self.string_len(haystack)?.into_int_value();
@@ -31,7 +31,7 @@ impl<'ctx> Compiler<'ctx> {
             i64t.const_int(0, false),
             "sf.nz"
         ));
-        let pre_check_bb = self.bld.get_insert_block().unwrap();
+        let pre_check_bb = self.current_bb();
         b!(self.bld.build_conditional_branch(nz, found_bb, check_bb));
 
         self.bld.position_at_end(check_bb);
@@ -97,7 +97,7 @@ impl<'ctx> Compiler<'ctx> {
         left: bool,
         right: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let data = self.string_data(s)?.into_pointer_value();
@@ -106,7 +106,7 @@ impl<'ctx> Compiler<'ctx> {
         let left_idx = if left {
             let loop_bb = self.ctx.append_basic_block(fv, "tl.loop");
             let done_bb = self.ctx.append_basic_block(fv, "tl.done");
-            let entry_bb = self.bld.get_insert_block().unwrap();
+            let entry_bb = self.current_bb();
             b!(self.bld.build_unconditional_branch(loop_bb));
 
             self.bld.position_at_end(loop_bb);
@@ -140,7 +140,7 @@ impl<'ctx> Compiler<'ctx> {
         let right_idx = if right {
             let loop_bb = self.ctx.append_basic_block(fv, "tr.loop");
             let done_bb = self.ctx.append_basic_block(fv, "tr.done");
-            let entry_bb = self.bld.get_insert_block().unwrap();
+            let entry_bb = self.current_bb();
             b!(self.bld.build_unconditional_branch(loop_bb));
 
             self.bld.position_at_end(loop_bb);
@@ -217,7 +217,7 @@ impl<'ctx> Compiler<'ctx> {
         s: BasicValueEnum<'ctx>,
         upper: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let data = self.string_data(s)?.into_pointer_value();
@@ -233,7 +233,7 @@ impl<'ctx> Compiler<'ctx> {
         let loop_bb = self.ctx.append_basic_block(fv, "sc.loop");
         let body_bb = self.ctx.append_basic_block(fv, "sc.body");
         let done_bb = self.ctx.append_basic_block(fv, "sc.done");
-        let entry_bb = self.bld.get_insert_block().unwrap();
+        let entry_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(loop_bb);
@@ -289,7 +289,7 @@ impl<'ctx> Compiler<'ctx> {
         old: BasicValueEnum<'ctx>,
         new: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let sdata = self.string_data(s)?.into_pointer_value();
@@ -337,7 +337,7 @@ impl<'ctx> Compiler<'ctx> {
         let cap_alloca = self.entry_alloca(i64t.into(), "rep.ca");
         b!(self.bld.build_store(cap_alloca, init_cap_min));
 
-        let entry_bb = self.bld.get_insert_block().unwrap();
+        let entry_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(cond_bb);
@@ -437,7 +437,7 @@ impl<'ctx> Compiler<'ctx> {
         s: BasicValueEnum<'ctx>,
         count: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
 
@@ -447,35 +447,39 @@ impl<'ctx> Compiler<'ctx> {
 
         let total_len = b!(self.bld.build_int_nsw_mul(slen, n, "rpt.tlen"));
         let malloc = self.ensure_malloc();
-        let buf = b!(self
-            .bld
-            .build_call(malloc, &[total_len.into()], "rpt.buf"))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_pointer_value();
+        let buf = b!(self.bld.build_call(malloc, &[total_len.into()], "rpt.buf"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
 
         let memcpy = self.ensure_memcpy();
         let cond_bb = self.ctx.append_basic_block(fv, "rpt.cond");
         let body_bb = self.ctx.append_basic_block(fv, "rpt.body");
         let done_bb = self.ctx.append_basic_block(fv, "rpt.done");
 
-        let entry_bb = self.bld.get_insert_block().unwrap();
+        let entry_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(cond_bb);
         let phi_i = b!(self.bld.build_phi(i64t, "rpt.i"));
         phi_i.add_incoming(&[(&i64t.const_int(0, false), entry_bb)]);
         let i = phi_i.as_basic_value().into_int_value();
-        let done = b!(self.bld.build_int_compare(IntPredicate::SGE, i, n, "rpt.done"));
+        let done = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SGE, i, n, "rpt.done"));
         b!(self.bld.build_conditional_branch(done, done_bb, body_bb));
 
         self.bld.position_at_end(body_bb);
         let offset = b!(self.bld.build_int_nsw_mul(i, slen, "rpt.off"));
         let dst = unsafe { b!(self.bld.build_gep(i8t, buf, &[offset], "rpt.dst")) };
-        b!(self.bld.build_call(memcpy, &[dst.into(), sdata.into(), slen.into()], ""));
-        let next_i = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "rpt.ni"));
-        phi_i.add_incoming(&[(&next_i, self.bld.get_insert_block().unwrap())]);
+        b!(self
+            .bld
+            .build_call(memcpy, &[dst.into(), sdata.into(), slen.into()], ""));
+        let next_i = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "rpt.ni"));
+        phi_i.add_incoming(&[(&next_i, self.current_bb())]);
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(done_bb);
@@ -487,7 +491,7 @@ impl<'ctx> Compiler<'ctx> {
         s: BasicValueEnum<'ctx>,
         delim: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
         let sdata = self.string_data(s)?.into_pointer_value();
@@ -505,7 +509,7 @@ impl<'ctx> Compiler<'ctx> {
         let skip_bb = self.ctx.append_basic_block(fv, "spl.skip");
         let done_bb = self.ctx.append_basic_block(fv, "spl.done");
 
-        let entry_bb = self.bld.get_insert_block().unwrap();
+        let entry_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(cond_bb);
@@ -558,8 +562,8 @@ impl<'ctx> Compiler<'ctx> {
         let esz = self.type_store_size(lty);
         self.vec_push_raw(vec_ptr, slice, lty, esz)?;
         let new_si = b!(self.bld.build_int_add(si, dlen, "spl.nsi"));
-        phi_si.add_incoming(&[(&new_si, self.bld.get_insert_block().unwrap())]);
-        phi_start.add_incoming(&[(&new_si, self.bld.get_insert_block().unwrap())]);
+        phi_si.add_incoming(&[(&new_si, self.current_bb())]);
+        phi_start.add_incoming(&[(&new_si, self.current_bb())]);
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(skip_bb);
@@ -580,7 +584,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn drop_string(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let st = self.string_type();
         let ptr = self.entry_alloca(st.into(), "ds.tmp");
         b!(self.bld.build_store(ptr, val));

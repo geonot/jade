@@ -1,0 +1,105 @@
+# std.rational — Rational number arithmetic (exact fractions)
+#
+# Usage:
+#   a is rational.new(1, 3)     # 1/3
+#   b is rational.new(2, 5)     # 2/5
+#   c is rational.add(a, b)     # 11/15
+#   log(rational.to_string(c))
+
+type Rational
+    num as i64
+    den as i64
+
+*__gcd(a as i64, b as i64) returns i64
+    x is a
+    y is b
+    if x < 0
+        x is 0 - x
+    if y < 0
+        y is 0 - y
+    while y neq 0
+        t is y
+        y is x mod y
+        x is t
+    x
+
+*__reduce(num as i64, den as i64) returns Rational
+    if den equals 0
+        return Rational(num is 0, den is 1)
+    g is __gcd(num, den)
+    n is num / g
+    d is den / g
+    if d < 0
+        n is 0 - n
+        d is 0 - d
+    Rational(num is n, den is d)
+
+*new(num as i64, den as i64)
+    __reduce(num, den)
+
+*from_int(n as i64)
+    Rational(num is n, den is 1)
+
+*add(a as Rational, b as Rational)
+    __reduce(a.num * b.den + b.num * a.den, a.den * b.den)
+
+*sub(a as Rational, b as Rational)
+    __reduce(a.num * b.den - b.num * a.den, a.den * b.den)
+
+*mul(a as Rational, b as Rational)
+    __reduce(a.num * b.num, a.den * b.den)
+
+*div(a as Rational, b as Rational)
+    __reduce(a.num * b.den, a.den * b.num)
+
+*negate(r as Rational)
+    Rational(num is 0 - r.num, den is r.den)
+
+*reciprocal(r as Rational)
+    __reduce(r.den, r.num)
+
+*abs(r as Rational)
+    n is r.num
+    if n < 0
+        n is 0 - n
+    Rational(num is n, den is r.den)
+
+*is_equal(a as Rational, b as Rational) returns bool
+    a.num equals b.num and a.den equals b.den
+
+*less_than(a as Rational, b as Rational) returns bool
+    a.num * b.den < b.num * a.den
+
+*to_f64(r as Rational) returns f64
+    r.num as f64 / r.den as f64
+
+*to_string(r as Rational) returns String
+    r.den equals 1 ? to_string(r.num) ! to_string(r.num) + "/" + to_string(r.den)
+
+*is_zero(r as Rational) returns bool
+    r.num equals 0
+
+*is_positive(r as Rational) returns bool
+    r.num > 0
+
+*is_negative(r as Rational) returns bool
+    r.num < 0
+
+*zero
+    Rational(num is 0, den is 1)
+
+*one
+    Rational(num is 1, den is 1)
+
+*ipow(r as Rational, n as i64)
+    if n equals 0
+        return one()
+    if n < 0
+        return ipow(reciprocal(r), 0 - n)
+    result is one()
+    for i in 0 to n
+        result is mul(result, r)
+    result
+
+*mediant(a as Rational, b as Rational)
+    __reduce(a.num + b.num, a.den + b.den)

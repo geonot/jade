@@ -87,12 +87,10 @@
     if x equals 1 or x equals n - 1
         return true
 
-    i is 0
-    while i < r - 1
+    for i in 0 to r - 1
         x is (x * x) mod n
         if x equals n - 1
             return true
-        i is i + 1
     false
 
 *main

@@ -52,8 +52,36 @@ fn hash_function(func: &hir::Fn, h: &mut StableHasher) {
 }
 
 fn hash_type(ty: &Type, h: &mut StableHasher) {
-    // Debug repr as hash source — sufficient for cache invalidation.
-    format!("{ty:?}").hash(h);
+    std::mem::discriminant(ty).hash(h);
+    match ty {
+        Type::I64 | Type::I32 | Type::I16 | Type::I8
+        | Type::U64 | Type::U32 | Type::U16 | Type::U8
+        | Type::F64 | Type::F32 | Type::Bool | Type::String
+        | Type::Void | Type::Arena | Type::Pool => {}
+        Type::Struct(n, args) => {
+            n.hash(h);
+            for a in args { hash_type(a, h); }
+        }
+        Type::Enum(n) | Type::ActorRef(n) | Type::DynTrait(n) => n.hash(h),
+        Type::Vec(inner) | Type::Rc(inner) | Type::Weak(inner) | Type::Ptr(inner)
+        | Type::Channel(inner) | Type::Coroutine(inner) | Type::Set(inner)
+        | Type::Deque(inner) | Type::Cow(inner) | Type::Generator(inner)
+        | Type::PriorityQueue(inner) => hash_type(inner, h),
+        Type::Map(k, v) => { hash_type(k, h); hash_type(v, h); }
+        Type::Array(inner, n) => { hash_type(inner, h); n.hash(h); }
+        Type::NDArray(inner, dims) => { hash_type(inner, h); dims.hash(h); }
+        Type::SIMD(inner, n) => { hash_type(inner, h); n.hash(h); }
+        Type::Tuple(elems) => { for e in elems { hash_type(e, h); } }
+        Type::Fn(params, ret) => {
+            for p in params { hash_type(p, h); }
+            hash_type(ret, h);
+        }
+        Type::TypeVar(id) => id.hash(h),
+        Type::Alias(n, inner) | Type::Newtype(n, inner) => {
+            n.hash(h); hash_type(inner, h);
+        }
+        _ => { format!("{ty:?}").hash(h); }
+    }
 }
 
 fn hash_stmt(stmt: &hir::Stmt, h: &mut StableHasher) {
@@ -109,11 +137,7 @@ impl ArtifactCache {
     /// Look up a cached bitcode file. Returns `Some(path)` if valid.
     pub fn lookup(&self, func_name: &str, key: u64) -> Option<PathBuf> {
         let path = self.artifact_path(func_name, key);
-        if path.exists() {
-            Some(path)
-        } else {
-            None
-        }
+        if path.exists() { Some(path) } else { None }
     }
 
     /// Store a bitcode artifact for the given function.
@@ -160,7 +184,13 @@ impl ArtifactCache {
 
 fn sanitize_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 

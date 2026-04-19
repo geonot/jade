@@ -53,10 +53,12 @@ pub enum Token {
     Assert,
     Query,
     Store,
+    Migration,
     Insert,
     Delete,
     Set,
     Transaction,
+    View,
     Actor,
     Spawn,
     Send,
@@ -77,11 +79,13 @@ pub enum Token {
     Xor,
     Unreachable,
     Alias,
+    Try,
     Deque,
     Grad,
     Einsum,
     Build,
     Syscall,
+    Global,
     Plus,
     Minus,
     Star,
@@ -95,6 +99,7 @@ pub enum Token {
     Tilde,
     Shl,
     Shr,
+    Ushr,
     Lt,
     Gt,
     LtEq,
@@ -103,6 +108,7 @@ pub enum Token {
     Bang,
     BangBang,
     Dollar,
+    DollarDollar,
     LParen,
     RParen,
     LBracket,
@@ -126,6 +132,7 @@ pub enum Token {
     CaretEq,
     ShlEq,
     ShrEq,
+    UshrEq,
     CharLit(i64),
     DotDotDot,
 }
@@ -182,9 +189,11 @@ impl std::fmt::Display for Token {
             Self::Assert => f.write_str("assert"),
             Self::Query => f.write_str("query"),
             Self::Store => f.write_str("store"),
+            Self::Migration => f.write_str("migration"),
             Self::Insert => f.write_str("insert"),
             Self::Delete => f.write_str("delete"),
             Self::Transaction => f.write_str("transaction"),
+            Self::View => f.write_str("view"),
             Self::Plus => f.write_str("+"),
             Self::Minus => f.write_str("-"),
             Self::Star => f.write_str("*"),
@@ -197,8 +206,10 @@ impl std::fmt::Display for Token {
             Self::AtKw => f.write_str("at"),
             Self::Tilde => f.write_str("~"),
             Self::Dollar => f.write_str("$"),
+            Self::DollarDollar => f.write_str("$$"),
             Self::Shl => f.write_str("<<"),
             Self::Shr => f.write_str(">>"),
+            Self::Ushr => f.write_str(">>>"),
             Self::Lt => f.write_str("<"),
             Self::Gt => f.write_str(">"),
             Self::LtEq => f.write_str("<="),
@@ -229,6 +240,7 @@ impl std::fmt::Display for Token {
             Self::CaretEq => f.write_str("^="),
             Self::ShlEq => f.write_str("<<="),
             Self::ShrEq => f.write_str(">>="),
+            Self::UshrEq => f.write_str(">>>="),
             Self::CharLit(c) => write!(f, ":{}", char::from(*c as u8)),
             Self::DotDotDot => f.write_str("..."),
             Self::Actor => f.write_str("actor"),
@@ -252,11 +264,13 @@ impl std::fmt::Display for Token {
             Self::Xor => f.write_str("xor"),
             Self::Unreachable => f.write_str("unreachable"),
             Self::Alias => f.write_str("alias"),
+            Self::Try => f.write_str("try"),
             Self::Deque => f.write_str("deque"),
             Self::Grad => f.write_str("grad"),
             Self::Einsum => f.write_str("einsum"),
             Self::Build => f.write_str("build"),
             Self::Syscall => f.write_str("syscall"),
+            Self::Global => f.write_str("global"),
         }
     }
 }
@@ -339,10 +353,12 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("assert", Token::Assert),
         ("query", Token::Query),
         ("store", Token::Store),
+        ("migration", Token::Migration),
         ("insert", Token::Insert),
         ("delete", Token::Delete),
         ("set", Token::Set),
         ("transaction", Token::Transaction),
+        ("view", Token::View),
         ("actor", Token::Actor),
         ("spawn", Token::Spawn),
         ("send", Token::Send),
@@ -363,11 +379,13 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("xor", Token::Xor),
         ("unreachable", Token::Unreachable),
         ("alias", Token::Alias),
+        ("try", Token::Try),
         ("deque", Token::Deque),
         ("grad", Token::Grad),
         ("einsum", Token::Einsum),
         ("build", Token::Build),
         ("syscall", Token::Syscall),
+        ("global", Token::Global),
         ("pow", Token::StarStar),
         ("true", Token::True),
         ("false", Token::False),
@@ -396,6 +414,20 @@ impl<'s> Lexer<'s> {
 
     pub fn tokenize(&mut self) -> Result<Vec<Spanned>, LexError> {
         let mut out = Vec::new();
+
+        // Skip shebang line (e.g. #!/usr/bin/env jadec run)
+        if self.pos == 0 && self.src.len() >= 2 && self.src[0] == b'#' && self.src[1] == b'!' {
+            while self.pos < self.src.len() && self.src[self.pos] != b'\n' {
+                self.advance();
+            }
+            if self.pos < self.src.len() {
+                // consume the newline
+                self.line += 1;
+                self.col = 0;
+                self.pos += 1;
+            }
+        }
+
         loop {
             if !self.pending.is_empty() {
                 out.append(&mut self.pending);
@@ -537,10 +569,22 @@ impl<'s> Lexer<'s> {
             return self.lex_ident();
         }
 
+        // Four-character tokens
+        if self.pos + 3 < self.src.len() {
+            if let (b'>', b'>', b'>', b'=') = (ch, self.src[self.pos + 1], self.src[self.pos + 2], self.src[self.pos + 3]) {
+                self.advance(); self.advance(); self.advance(); self.advance();
+                return Ok(Spanned {
+                    token: Token::UshrEq,
+                    span: Span::new(start, self.pos, self.line, sc),
+                });
+            }
+        }
+
         if self.pos + 2 < self.src.len() {
             let three = match (ch, self.src[self.pos + 1], self.src[self.pos + 2]) {
                 (b'<', b'<', b'=') => Some(Token::ShlEq),
                 (b'>', b'>', b'=') => Some(Token::ShrEq),
+                (b'>', b'>', b'>') => Some(Token::Ushr),
                 _ => Option::None,
             };
             if let Some(tok) = three {
@@ -589,7 +633,14 @@ impl<'s> Lexer<'s> {
             b'&' => Token::Ampersand,
             b'@' => Token::At,
             b'~' => Token::Tilde,
-            b'$' => Token::Dollar,
+            b'$' => {
+                if self.pos + 1 < self.src.len() && self.src[self.pos + 1] == b'$' {
+                    self.advance();
+                    Token::DollarDollar
+                } else {
+                    Token::Dollar
+                }
+            }
             b'<' => Token::Lt,
             b'>' => Token::Gt,
             b'?' => Token::Question,
@@ -644,9 +695,14 @@ impl<'s> Lexer<'s> {
                             || after == b'\r'
                             || after == b')'
                             || after == b']'
+                            || after == b'}'
                             || after == b','
                             || after == b':'
                             || after == b'\t'
+                            || after == b'!'
+                            || after == b'?'
+                            || after == b';'
+                            || after == b'.'
                             || self.pos + 2 >= self.src.len();
                         if is_boundary {
                             let val = next as i64;
@@ -902,6 +958,7 @@ impl<'s> Lexer<'s> {
                     b'r' => val.push('\r'),
                     b'\\' => val.push('\\'),
                     b'\'' => val.push('\''),
+                    b'"' => val.push('"'),
                     b'0' => val.push('\0'),
                     b'{' => val.push('{'),
                     b'}' => val.push('}'),
@@ -967,8 +1024,11 @@ impl<'s> Lexer<'s> {
     }
 
     fn advance(&mut self) {
+        // Only count column for non-continuation UTF-8 bytes
+        if self.pos < self.src.len() && (self.src[self.pos] & 0xC0) != 0x80 {
+            self.col += 1;
+        }
         self.pos += 1;
-        self.col += 1;
     }
     fn skip_line(&mut self) {
         while self.pos < self.src.len() && self.src[self.pos] != b'\n' {

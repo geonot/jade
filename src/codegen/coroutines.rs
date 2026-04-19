@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
@@ -49,8 +50,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for name in &["jade_gen_resume", "jade_gen_suspend", "jade_gen_destroy"] {
             if self.module.get_function(name).is_none() {
-                self.module
-                    .add_function(name, ft, Some(Linkage::External));
+                self.module.add_function(name, ft, Some(Linkage::External));
             }
         }
     }
@@ -78,7 +78,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let saved_fn = self.cur_fn;
         let saved_bb = self.bld.get_insert_block();
-        let saved_vars = std::mem::replace(&mut self.vars, vec![std::collections::HashMap::new()]);
+        let saved_vars = std::mem::replace(&mut self.vars, IndexMap::new());
+        let saved_shadows = std::mem::replace(&mut self.var_shadows, Vec::new());
+        let saved_markers = std::mem::replace(&mut self.var_scope_markers, Vec::new());
         let saved_loop_stack = std::mem::replace(&mut self.loop_stack, Vec::new());
 
         self.cur_fn = Some(coro_fn);
@@ -90,11 +92,7 @@ impl<'ctx> Compiler<'ctx> {
         let gen_ptr_alloca = self.entry_alloca(ptr.into(), "__coro_ctx");
         b!(self.bld.build_store(gen_ptr_alloca, gen_ptr_param));
 
-        self.set_var(
-            "__coro_ctx",
-            gen_ptr_alloca,
-            Type::Ptr(Box::new(Type::I64)),
-        );
+        self.set_var("__coro_ctx", gen_ptr_alloca, Type::Ptr(Box::new(Type::I64)));
 
         self.compile_coroutine_body(body)?;
 
@@ -105,18 +103,18 @@ impl<'ctx> Compiler<'ctx> {
             let done_ptr = self.gen_field_ptr(gen_ptr_val, Self::GEN_DONE_OFF, "gen.done")?;
             b!(self.bld.build_store(done_ptr, i8t.const_int(1, false)));
             let gen_suspend = self.module.get_function("jade_gen_suspend").unwrap();
-            b!(self
-                .bld
-                .build_call(gen_suspend, &[gen_ptr_val.into()], ""));
+            b!(self.bld.build_call(gen_suspend, &[gen_ptr_val.into()], ""));
             b!(self.bld.build_unreachable());
         }
 
         // Restore caller context
         self.cur_fn = saved_fn;
         self.vars = saved_vars;
+        self.var_shadows = saved_shadows;
+        self.var_scope_markers = saved_markers;
         self.loop_stack = saved_loop_stack;
 
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let bb = saved_bb.unwrap_or_else(|| self.ctx.append_basic_block(fv, "coro.after"));
         self.bld.position_at_end(bb);
 
@@ -239,6 +237,7 @@ impl<'ctx> Compiler<'ctx> {
         let val = self.compile_expr(val_expr)?;
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i8t = self.ctx.i8_type();
+        let i64t = self.ctx.i64_type();
 
         let (gen_alloca, _) = self
             .find_var("__coro_ctx")
@@ -246,10 +245,18 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or("internal: no __coro_ctx in coroutine body")?;
         let gen_ptr = b!(self.bld.build_load(ptr, gen_alloca, "gen.ctx")).into_pointer_value();
 
-        // Write value
+        // Write value — store directly as raw bytes (8 bytes for i64/f64/ptr)
         let value_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_VALUE_OFF, "gen.y.val")?;
-        let i64_val = self.coerce_to_i64(val);
-        b!(self.bld.build_store(value_ptr, i64_val));
+        match val {
+            BasicValueEnum::FloatValue(fv) => {
+                // Store f64 directly — load side will read as f64
+                b!(self.bld.build_store(value_ptr, fv));
+            }
+            _ => {
+                let i64_val = self.coerce_to_i64(val);
+                b!(self.bld.build_store(value_ptr, i64_val));
+            }
+        }
 
         // Set has_value = 1
         let has_val_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_HAS_VALUE_OFF, "gen.y.hv")?;
@@ -257,14 +264,15 @@ impl<'ctx> Compiler<'ctx> {
 
         // Suspend back to caller via direct context swap
         let gen_suspend = self.module.get_function("jade_gen_suspend").unwrap();
-        b!(self
-            .bld
-            .build_call(gen_suspend, &[gen_ptr.into()], ""));
+        b!(self.bld.build_call(gen_suspend, &[gen_ptr.into()], ""));
 
         Ok(())
     }
 
-    pub(crate) fn coerce_to_i64(&self, val: BasicValueEnum<'ctx>) -> inkwell::values::IntValue<'ctx> {
+    pub(crate) fn coerce_to_i64(
+        &self,
+        val: BasicValueEnum<'ctx>,
+    ) -> inkwell::values::IntValue<'ctx> {
         let i64t = self.ctx.i64_type();
         match val {
             BasicValueEnum::IntValue(iv) => {
@@ -290,6 +298,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn compile_coroutine_next(
         &mut self,
         coro_expr: &hir::Expr,
+        yield_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let gen_ptr = self.compile_expr(coro_expr)?.into_pointer_value();
         let i8t = self.ctx.i8_type();
@@ -297,14 +306,26 @@ impl<'ctx> Compiler<'ctx> {
 
         // Resume the producer coroutine (direct context swap)
         let gen_resume = self.module.get_function("jade_gen_resume").unwrap();
-        b!(self
-            .bld
-            .build_call(gen_resume, &[gen_ptr.into()], ""));
+        b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // After resume returns, the producer has either yielded a value or finished.
         // Read the value (0 if done without yielding).
         let value_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_VALUE_OFF, "gen.n.val")?;
-        let result = b!(self.bld.build_load(i64t, value_ptr, "gen.result"));
+        let raw = b!(self.bld.build_load(i64t, value_ptr, "gen.result"));
+
+        // Convert back from i64 to the expected type
+        let result = match yield_ty {
+            Type::F64 => {
+                let f64t = self.ctx.f64_type();
+                b!(self.bld.build_load(f64t, value_ptr, "gen.result.f"))
+            }
+            Type::String => {
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let iv = raw.into_int_value();
+                b!(self.bld.build_int_to_ptr(iv, ptr_ty, "i2p")).into()
+            }
+            _ => raw,
+        };
 
         // Clear has_value
         let has_val_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_HAS_VALUE_OFF, "gen.n.hv")?;
@@ -314,7 +335,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile_coroutine_for(&mut self, f: &hir::For) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
 
         // Handle `for i in N` (means 0..N) vs `for i from A to B`
@@ -346,11 +367,11 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cond_bb));
         self.bld.position_at_end(cond_bb);
 
-        let cur =
-            b!(self.bld.build_load(self.llvm_ty(&f.bind_ty), lvar, "cur")).into_int_value();
-        let cmp = b!(self
-            .bld
-            .build_int_compare(IntPredicate::SLT, cur, end_val.into_int_value(), "cmp"));
+        let cur = b!(self.bld.build_load(self.llvm_ty(&f.bind_ty), lvar, "cur")).into_int_value();
+        let cmp =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::SLT, cur, end_val.into_int_value(), "cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);
@@ -378,7 +399,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile_coroutine_while(&mut self, w: &hir::While) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let cond_bb = self.ctx.append_basic_block(fv, "coro.while.cond");
         let body_bb = self.ctx.append_basic_block(fv, "coro.while.body");
         let end_bb = self.ctx.append_basic_block(fv, "coro.while.end");
@@ -408,7 +429,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile_coroutine_loop(&mut self, l: &hir::Loop) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let body_bb = self.ctx.append_basic_block(fv, "coro.loop.body");
         let end_bb = self.ctx.append_basic_block(fv, "coro.loop.end");
 

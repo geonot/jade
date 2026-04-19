@@ -1,5 +1,6 @@
 use crate::ast::Span;
 use crate::types::Type;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -37,7 +38,7 @@ pub(crate) struct InferCtx {
     quantified_vars: std::collections::HashSet<u32>,
     /// Maps type_name -> list of trait names it implements.
     /// Used to enforce Trait constraints during unification.
-    trait_impls: HashMap<String, Vec<String>>,
+    trait_impls: IndexMap<String, Vec<String>>,
 }
 
 impl InferCtx {
@@ -56,12 +57,12 @@ impl InferCtx {
             strict_errors: Vec::new(),
             pedantic: false,
             quantified_vars: std::collections::HashSet::new(),
-            trait_impls: HashMap::new(),
+            trait_impls: IndexMap::new(),
         }
     }
 
     /// Update the trait implementation map (called from Typer after trait registration).
-    pub(crate) fn set_trait_impls(&mut self, impls: HashMap<String, Vec<String>>) {
+    pub(crate) fn set_trait_impls(&mut self, impls: IndexMap<String, Vec<String>>) {
         self.trait_impls = impls;
     }
 
@@ -198,10 +199,13 @@ impl InferCtx {
             (TypeConstraint::Addable, TypeConstraint::Float)
             | (TypeConstraint::Float, TypeConstraint::Addable) => Ok(TypeConstraint::Float),
             (TypeConstraint::Addable, TypeConstraint::Addable) => Ok(TypeConstraint::Addable),
-            (TypeConstraint::Integer, _) | (_, TypeConstraint::Integer) => {
-                Ok(TypeConstraint::Integer)
-            }
-            (TypeConstraint::Float, _) | (_, TypeConstraint::Float) => Ok(TypeConstraint::Float),
+            // Numeric + Integer/Float narrows to the stricter constraint
+            (TypeConstraint::Numeric, TypeConstraint::Integer)
+            | (TypeConstraint::Integer, TypeConstraint::Numeric) => Ok(TypeConstraint::Integer),
+            (TypeConstraint::Numeric, TypeConstraint::Float)
+            | (TypeConstraint::Float, TypeConstraint::Numeric) => Ok(TypeConstraint::Float),
+            (TypeConstraint::Integer, TypeConstraint::Integer) => Ok(TypeConstraint::Integer),
+            (TypeConstraint::Float, TypeConstraint::Float) => Ok(TypeConstraint::Float),
             (TypeConstraint::Numeric, TypeConstraint::Numeric) => Ok(TypeConstraint::Numeric),
         }
     }
@@ -464,9 +468,7 @@ impl InferCtx {
                             let impl_traits = self.trait_impls.get(&name);
                             let missing: Vec<&String> = required_traits
                                 .iter()
-                                .filter(|rt| {
-                                    impl_traits.map_or(true, |impls| !impls.contains(rt))
-                                })
+                                .filter(|rt| impl_traits.map_or(true, |impls| !impls.contains(rt)))
                                 .collect();
                             if !missing.is_empty() {
                                 let missing_str = missing
@@ -666,7 +668,9 @@ impl InferCtx {
             let constraint = &self.constraints[root as usize];
             match constraint {
                 TypeConstraint::Float => Type::F64,
-                TypeConstraint::None | TypeConstraint::Numeric | TypeConstraint::Addable => Type::I64,
+                TypeConstraint::None | TypeConstraint::Numeric | TypeConstraint::Addable => {
+                    Type::I64
+                }
                 TypeConstraint::Integer => Type::I64,
                 TypeConstraint::Trait(_) => {
                     // Trait-constrained container elements should still error

@@ -1,0 +1,187 @@
+# std.decimal — Fixed-point decimal arithmetic (4 decimal places)
+#
+# Usage:
+#   a is decimal.new(10, 50)   # 10.50  → stored as 105000
+#   b is decimal.parse("3.14") # 3.14   → stored as 31400
+#   c is decimal.add(a, b)
+#   log(decimal.to_string(c))  # "13.6400"
+
+# Internal representation: integer scaled by 10000 (4 decimal places)
+SCALE is 10000
+
+type Decimal
+    raw as i64   # value * 10000
+
+*new(whole as i64, frac as i64)
+    # frac is in hundredths, e.g. 50 means .50
+    Decimal(raw is whole * SCALE + frac * 100)
+
+*from_raw(raw as i64)
+    Decimal(raw is raw)
+
+*from_int(n as i64)
+    Decimal(raw is n * SCALE)
+
+*parse(s as String)
+    neg is false
+    i is 0
+    if s.length > 0 and s.char_at(0) equals 45
+        neg is true
+        i is 1
+    whole is 0
+    while i < s.length
+        ch is s.char_at(i)
+        if ch equals 46
+            i is i + 1
+            break
+        if ch >= 48 and ch <= 57
+            whole is whole * 10 + (ch - 48)
+        i is i + 1
+    frac is 0
+    places is 0
+    while i < s.length and places < 4
+        ch is s.char_at(i)
+        if ch >= 48 and ch <= 57
+            frac is frac * 10 + (ch - 48)
+            places is places + 1
+        i is i + 1
+    # Pad remaining places
+    while places < 4
+        frac is frac * 10
+        places is places + 1
+    raw is whole * SCALE + frac
+    if neg
+        raw is 0 - raw
+    Decimal(raw is raw)
+
+*add(a as Decimal, b as Decimal)
+    Decimal(raw is a.raw + b.raw)
+
+*sub(a as Decimal, b as Decimal)
+    Decimal(raw is a.raw - b.raw)
+
+*mul(a as Decimal, b as Decimal)
+    Decimal(raw is (a.raw * b.raw) / SCALE)
+
+*div(a as Decimal, b as Decimal)
+    Decimal(raw is (a.raw * SCALE) / b.raw)
+
+*negate(d as Decimal)
+    Decimal(raw is 0 - d.raw)
+
+*abs(d as Decimal)
+    if d.raw < 0
+        return Decimal(raw is 0 - d.raw)
+    d
+
+*compare(a as Decimal, b as Decimal) returns i64
+    if a.raw < b.raw
+        return -1
+    if a.raw > b.raw
+        return 1
+    0
+
+*is_equal(a as Decimal, b as Decimal) returns bool
+    a.raw equals b.raw
+
+*less_than(a as Decimal, b as Decimal) returns bool
+    a.raw < b.raw
+
+*is_zero(d as Decimal) returns bool
+    d.raw equals 0
+
+*to_f64(d as Decimal) returns f64
+    d.raw as f64 / SCALE as f64
+
+*to_int(d as Decimal) returns i64
+    d.raw / SCALE
+
+*format(d as Decimal) returns String
+    raw is d.raw
+    neg is false
+    if raw < 0
+        neg is true
+        raw is 0 - raw
+    whole is raw / SCALE
+    frac is raw mod SCALE
+    # Pad fraction to 4 digits
+    ws is '{whole}'
+    fs is '{frac}'
+    while fs.length < 4
+        fs is '0' + fs
+    result is ws + '.' + fs
+    if neg
+        return '-' + result
+    result
+
+*zero
+    Decimal(raw is 0)
+
+*one
+    Decimal(raw is SCALE)
+
+*round_to(d as Decimal, places as i64)
+    # Round to n decimal places (0-4), half-up
+    if places >= 4
+        return d
+    divisor is 1
+    for i in 0 to 4 - places
+        divisor is divisor * 10
+    rounded is ((d.raw + divisor / 2) / divisor) * divisor
+    Decimal(raw is rounded)
+
+# ── Rounding modes ───────────────────────────────────────────
+
+ROUND_HALF_UP   is 0
+ROUND_HALF_DOWN is 1
+ROUND_HALF_EVEN is 2   # Banker's rounding
+ROUND_FLOOR     is 3
+ROUND_CEIL      is 4
+ROUND_TRUNCATE  is 5
+
+*round_with(d as Decimal, places as i64, mode as i64)
+    if places >= 4
+        return d
+    divisor is 1
+    for i in 0 to 4 - places
+        divisor is divisor * 10
+    raw is d.raw
+    neg is raw < 0
+    if neg
+        raw is 0 - raw
+    quotient is raw / divisor
+    remainder is raw mod divisor
+    half is divisor / 2
+    rounded is quotient
+    if mode equals ROUND_HALF_UP
+        if remainder >= half
+            rounded is quotient + 1
+    elif mode equals ROUND_HALF_DOWN
+        if remainder > half
+            rounded is quotient + 1
+    elif mode equals ROUND_HALF_EVEN
+        if remainder > half
+            rounded is quotient + 1
+        elif remainder equals half
+            if quotient mod 2 neq 0
+                rounded is quotient + 1
+    elif mode equals ROUND_FLOOR
+        rounded is quotient
+    elif mode equals ROUND_CEIL
+        if remainder > 0
+            rounded is quotient + 1
+    elif mode equals ROUND_TRUNCATE
+        rounded is quotient
+    result is rounded * divisor
+    if neg
+        result is 0 - result
+    Decimal(raw is result)
+
+*floor(d as Decimal)
+    Decimal(raw is (d.raw / SCALE) * SCALE)
+
+*ceil(d as Decimal)
+    whole is d.raw / SCALE
+    if d.raw mod SCALE > 0
+        whole is whole + 1
+    Decimal(raw is whole * SCALE)

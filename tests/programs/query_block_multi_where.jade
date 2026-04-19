@@ -1,0 +1,15 @@
+store users
+    name as String
+    age as i64
+
+*main
+    insert users 'Alice', 30
+    insert users 'Bob', 25
+    insert users 'Charlie', 35
+    insert users 'Diana', 28
+
+    r is users query
+        where age > 20
+        where name equals 'Charlie'
+    log r.name
+    log r.age

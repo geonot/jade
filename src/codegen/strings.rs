@@ -100,9 +100,15 @@ impl<'ctx> Compiler<'ctx> {
                 let func = self
                     .module
                     .get_function("__jade_regex_match")
-                    .unwrap_or_else(|| self.module.add_function("__jade_regex_match", fn_type, None));
-                let result = b!(self.bld.build_call(func, &[sv_data.into(), pat_data.into()], "re.match"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                    .unwrap_or_else(|| {
+                        self.module
+                            .add_function("__jade_regex_match", fn_type, None)
+                    });
+                let result =
+                    b!(self
+                        .bld
+                        .build_call(func, &[sv_data.into(), pat_data.into()], "re.match"));
+                Ok(self.call_result(result))
             }
             "find_all" => {
                 if args.len() != 1 {
@@ -116,9 +122,15 @@ impl<'ctx> Compiler<'ctx> {
                 let func = self
                     .module
                     .get_function("__jade_regex_find_all")
-                    .unwrap_or_else(|| self.module.add_function("__jade_regex_find_all", fn_type, None));
-                let result = b!(self.bld.build_call(func, &[sv_data.into(), pat_data.into()], "re.findall"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                    .unwrap_or_else(|| {
+                        self.module
+                            .add_function("__jade_regex_find_all", fn_type, None)
+                    });
+                let result =
+                    b!(self
+                        .bld
+                        .build_call(func, &[sv_data.into(), pat_data.into()], "re.findall"));
+                Ok(self.call_result(result))
             }
             "replace_re" => {
                 if args.len() != 2 {
@@ -134,13 +146,18 @@ impl<'ctx> Compiler<'ctx> {
                 let func = self
                     .module
                     .get_function("__jade_regex_replace")
-                    .unwrap_or_else(|| self.module.add_function("__jade_regex_replace", fn_type, None));
-                let result = b!(self.bld.build_call(func, &[sv_data.into(), pat_data.into(), rep_data.into()], "re.replace"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                    .unwrap_or_else(|| {
+                        self.module
+                            .add_function("__jade_regex_replace", fn_type, None)
+                    });
+                let result = b!(self.bld.build_call(
+                    func,
+                    &[sv_data.into(), pat_data.into(), rep_data.into()],
+                    "re.replace"
+                ));
+                Ok(self.call_result(result))
             }
-            _ => {
-                Err(format!("no method '{m}' on String"))
-            }
+            _ => Err(format!("no method '{m}' on String")),
         }
     }
 
@@ -230,7 +247,7 @@ impl<'ctx> Compiler<'ctx> {
         let st = self.string_type();
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let ptr = self.entry_alloca(st.into(), "s.tmp");
         b!(self.bld.build_store(ptr, val));
         let tag_ptr = unsafe {
@@ -280,7 +297,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_or(len_i8, i8t.const_int(0x80, false), &format!("{prefix}.tag")));
         b!(self.bld.build_store(tag_ptr, tag));
         let val = b!(self.bld.build_load(st, alloca, &format!("{prefix}.ssov")));
-        let exit_bb = self.bld.get_insert_block().unwrap();
+        let exit_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
         Ok((val, exit_bb))
     }
@@ -294,7 +311,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let st = self.string_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let fits = b!(self.bld.build_int_compare(
             IntPredicate::ULE,
@@ -338,7 +355,7 @@ impl<'ctx> Compiler<'ctx> {
             buf
         };
         let heap_val = self.build_string(heap_buf, len, len, &format!("{prefix}.hv"))?;
-        let heap_exit = self.bld.get_insert_block().unwrap();
+        let heap_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(merge_bb);

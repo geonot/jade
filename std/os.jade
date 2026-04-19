@@ -1,62 +1,168 @@
 # std.os — Operating system interface
+#
+# Usage:
+#   home is os.env("HOME")
+#   os.set_env("DEBUG", "1")
+#   os.exit(0)
 
 extern *getenv(name as %i8) returns %i8
 extern *setenv(name as %i8, value as %i8, overwrite as i32) returns i32
-extern *getcwd(buf as %i8, size as i64) returns %i8
-extern *chdir(path as %i8) returns i32
+extern *unsetenv(name as %i8) returns i32
 extern *exit(code as i32)
 extern *getpid() returns i32
-extern *system(cmd as %i8) returns i32
-extern *malloc(size as i64) returns %i8
-extern *free(ptr as %i8)
-extern *strlen(s as %i8) returns i64
-extern *mkdir(path as %i8, mode as i32) returns i32
-extern *rmdir(path as %i8) returns i32
+extern *jade_hostname() returns %i8
+extern *jade_cwd() returns %i8
+extern *sysconf(name as i32) returns i64
+extern *mmap(addr as %i8, length as i64, prot as i32, flags as i32, fd as i32, offset as i64) returns %i8
+extern *munmap(addr as %i8, length as i64) returns i32
+extern *mprotect(addr as %i8, length as i64, prot as i32) returns i32
+extern *msync(addr as %i8, length as i64, flags as i32) returns i32
+extern *open(path as %i8, flags as i32, mode as i32) returns i32
+extern *jade_fd_close(fd as i32) returns i32
+extern *fstat_size(fd as i32) returns i64
 
-*env(name)
-    ptr is getenv(%name)
+*env(name as String)
+    ptr is extern.getenv(%name)
     if ptr as i64 equals 0
         return ""
     __string_from_ptr(ptr)
 
-*set_env(name, value)
-    setenv(%name, %value, 1)
+*set_env(name as String, value as String)
+    extern.setenv(%name, %value, 1)
 
-*cwd
-    buf is malloc(4096)
-    result is getcwd(buf, 4096)
-    if result as i64 equals 0
-        free(buf)
-        return ""
-    len is strlen(buf)
-    __string_from_raw(buf, len, 4096)
+*unset_env(name as String)
+    extern.unsetenv(%name) equals 0
 
 *args
     __get_args()
 
 *has_flag(flag as String) returns bool
     a is args()
-    i is 0
-    while i < a.length
-        if a[i] equals flag
+    loop a
+        if $ equals flag
             return true
-        i += 1
     false
 
 *get_option(flag as String) returns String
     a is args()
     i is 0
     while i < a.length - 1
-        if a[i] equals flag
+        cur is a[i]
+        # Handle --flag=value
+        eq_pos is cur.find("=")
+        if eq_pos > 0
+            prefix is cur.slice(0, eq_pos)
+            if prefix equals flag
+                return cur.slice(eq_pos + 1, cur.length)
+        # Handle --flag value
+        if cur equals flag
             return a[i + 1]
         i += 1
     ""
 
 *pid
-    getpid()
+    extern.getpid()
 
-*make_dir(path)
-    mkdir(%path, 493)
+*hostname
+    ptr is extern.jade_hostname()
+    if ptr as i64 equals 0
+        return ""
+    __string_from_ptr(ptr)
 
-*remove_dir(path)
-    rmdir(%path)
+*cwd
+    ptr is extern.jade_cwd()
+    if ptr as i64 equals 0
+        return ""
+    __string_from_ptr(ptr)
+
+*cpu_count
+    extern.sysconf(84)
+
+*home
+    env("HOME")
+
+*temp_dir
+    t is env("TMPDIR")
+    if t.length > 0
+        return t
+    "/tmp"
+
+# ── Memory-mapped I/O ───────────────────────────────────────
+#
+# Usage:
+#   mm is os.mmap_file("/path/to/file")
+#   os.mmap_sync(mm)
+#   os.mmap_close(mm)
+
+PROT_NONE  is 0
+PROT_READ  is 1
+PROT_WRITE is 2
+PROT_EXEC  is 4
+
+MAP_SHARED  is 1
+MAP_PRIVATE is 2
+
+MS_SYNC  is 4
+MS_ASYNC is 1
+
+O_RDONLY is 0
+O_RDWR   is 2
+
+type MmapRegion
+    addr as %i8
+    length as i64
+    fd as i32
+    ok as bool
+
+# Map a file read-only into memory. Returns MmapRegion.
+*mmap_file(path as String) returns MmapRegion
+    fd is extern.open(%path, O_RDONLY, 0)
+    if fd < 0
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    size is extern.fstat_size(fd)
+    if size <= 0
+        extern.jade_fd_close(fd)
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    ptr is extern.mmap(0 as %i8, size, PROT_READ, MAP_PRIVATE, fd, 0)
+    if ptr as i64 equals -1
+        extern.jade_fd_close(fd)
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    MmapRegion(addr is ptr, length is size, fd is fd, ok is true)
+
+# Map a file read-write (shared). Changes are written back to disk.
+*mmap_file_rw(path as String) returns MmapRegion
+    fd is extern.open(%path, O_RDWR, 0)
+    if fd < 0
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    size is extern.fstat_size(fd)
+    if size <= 0
+        extern.jade_fd_close(fd)
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    ptr is extern.mmap(0 as %i8, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
+    if ptr as i64 equals -1
+        extern.jade_fd_close(fd)
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    MmapRegion(addr is ptr, length is size, fd is fd, ok is true)
+
+# Anonymous mapping (not backed by a file).
+*mmap_anon(size as i64) returns MmapRegion
+    MAP_ANONYMOUS is 32
+    ptr is extern.mmap(0 as %i8, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+    if ptr as i64 equals -1
+        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+    MmapRegion(addr is ptr, length is size, fd is -1, ok is true)
+
+# Sync mapped memory to disk.
+*mmap_sync(region as MmapRegion) returns bool
+    if not region.ok
+        return false
+    extern.msync(region.addr, region.length, MS_SYNC) equals 0
+
+# Unmap and close.
+*mmap_close(region as MmapRegion) returns bool
+    if not region.ok
+        return false
+    rc is extern.munmap(region.addr, region.length)
+    if region.fd >= 0
+        extern.jade_fd_close(region.fd)
+    rc equals 0

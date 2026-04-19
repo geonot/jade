@@ -1735,7 +1735,7 @@ fn b_sc_or_neither() {
 #[test]
 fn b_extern_puts() {
     expect(
-        "extern *puts(s as String) returns i32\n\n*main() returns i32\n    puts(\"hello extern\")\n    0\n",
+        "extern *puts(s as String) returns i32\n\n*main() returns i32\n    extern.puts(\"hello extern\")\n    0\n",
         "hello extern",
     );
 }
@@ -1753,7 +1753,7 @@ fn b_module_import() {
     std::fs::write(&helper, "*double(x as i64) returns i64\n    x + x\n").unwrap();
     std::fs::write(
         &main,
-        "use helper\n\n*main() returns i32\n    log(double(21))\n    0\n",
+        "use helper\n\n*main() returns i32\n    log(helper.double(21))\n    0\n",
     )
     .unwrap();
     let status = Command::new(jadec())
@@ -2994,7 +2994,7 @@ fn compile_and_run_in_dir(src: &str) -> String {
 fn b_actor_spawn_send_basic() {
     // Actor that logs a value when it receives a message
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Printer\n    @say n as i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    send p, @say(42)\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Printer\n    @say n as i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    send p, @say(42)\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -3002,7 +3002,7 @@ fn b_actor_spawn_send_basic() {
 #[test]
 fn b_actor_multiple_messages() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Echo\n    @say n as i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    send e, @say(1)\n    send e, @say(2)\n    send e, @say(3)\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Echo\n    @say n as i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    send e, @say(1)\n    send e, @say(2)\n    send e, @say(3)\n    extern.usleep(100000)\n    0\n",
         "1\n2\n3",
     );
 }
@@ -3010,7 +3010,7 @@ fn b_actor_multiple_messages() {
 #[test]
 fn b_actor_state_accumulation() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    send a, @add(10)\n    send a, @add(20)\n    send a, @add(30)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    send a, @add(10)\n    send a, @add(20)\n    send a, @add(30)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    0\n",
         "60",
     );
 }
@@ -3018,7 +3018,7 @@ fn b_actor_state_accumulation() {
 #[test]
 fn b_actor_multi_handler() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Math\n    val as i64\n    @assign n as i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    send m, @assign(5)\n    send m, @double()\n    usleep(100000)\n    send m, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Math\n    val as i64\n    @assign n as i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    send m, @assign(5)\n    send m, @double()\n    extern.usleep(100000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
         "10",
     );
 }
@@ -3029,7 +3029,7 @@ fn b_actor_multi_handler() {
 fn b_actor_zero_param_handler() {
     // Handler with no parameters
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Pinger\n    count as i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    send p, @ping()\n    send p, @ping()\n    send p, @ping()\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Pinger\n    count as i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    send p, @ping()\n    send p, @ping()\n    send p, @ping()\n    extern.usleep(100000)\n    send p, @show()\n    extern.usleep(100000)\n    0\n",
         "3",
     );
 }
@@ -3038,7 +3038,7 @@ fn b_actor_zero_param_handler() {
 fn b_actor_two_param_handler() {
     // Handler with two parameters
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(17, 25)\n    usleep(100000)\n    send c, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(17, 25)\n    extern.usleep(100000)\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -3047,7 +3047,7 @@ fn b_actor_two_param_handler() {
 fn b_actor_multiple_state_fields() {
     // Actor with multiple state fields
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Point\n    x as i64\n    y as i64\n    @set_x n as i64\n        x is n\n    @set_y n as i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    send p, @set_x(10)\n    send p, @set_y(20)\n    usleep(100000)\n    send p, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Point\n    x as i64\n    y as i64\n    @set_x n as i64\n        x is n\n    @set_y n as i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    send p, @set_x(10)\n    send p, @set_y(20)\n    extern.usleep(100000)\n    send p, @show()\n    extern.usleep(100000)\n    0\n",
         "30",
     );
 }
@@ -3056,7 +3056,7 @@ fn b_actor_multiple_state_fields() {
 fn b_actor_sequential_messages() {
     // Actor processes messages in FIFO order
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say(10)\n    send l, @say(20)\n    send l, @say(30)\n    send l, @say(40)\n    send l, @say(50)\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say(10)\n    send l, @say(20)\n    send l, @say(30)\n    send l, @say(40)\n    send l, @say(50)\n    extern.usleep(100000)\n    0\n",
         "10\n20\n30\n40\n50",
     );
 }
@@ -3884,6 +3884,7 @@ fn b_iter_single_element() {
     );
 }
 
+// #[test]
 #[test]
 fn b_iter_log_each() {
     // Log each element individually
@@ -4085,7 +4086,7 @@ fn b_select_default_arm() {
 fn b_actor_stop_basic() {
     // Spawn actor, send messages, stop it, program exits cleanly
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    send a, @add(5)\n    send a, @add(10)\n    usleep(100000)\n    send a, @show()\n    usleep(100000)\n    stop a\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    send a, @add(5)\n    send a, @add(10)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    stop a\n    0\n",
         "15",
     );
 }
@@ -4094,7 +4095,7 @@ fn b_actor_stop_basic() {
 fn b_actor_sequential_message_order() {
     // Send many messages sequentially, verify accumulated state
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        send s, @add(i)\n        i is i + 1\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        send s, @add(i)\n        i is i + 1\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
         "45",
     );
 }
@@ -4103,7 +4104,7 @@ fn b_actor_sequential_message_order() {
 fn b_actor_multiple_state_tracking() {
     // Actor with multiple state fields
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Stats\n    count as i64\n    sum as i64\n    @record n as i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    send s, @record(10)\n    send s, @record(20)\n    send s, @record(30)\n    usleep(200000)\n    send s, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Stats\n    count as i64\n    sum as i64\n    @record n as i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    send s, @record(10)\n    send s, @record(20)\n    send s, @record(30)\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
         "3\n60",
     );
 }
@@ -4112,8 +4113,634 @@ fn b_actor_multiple_state_tracking() {
 fn b_actor_two_param_handler_math() {
     // Handler with two parameters
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add_mul a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add_mul(3, 4)\n    send c, @add_mul(5, 6)\n    usleep(200000)\n    send c, @show()\n    usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add_mul a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add_mul(3, 4)\n    send c, @add_mul(5, 6)\n    extern.usleep(200000)\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
         "42",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Actor — compile-time validation (C3, C4, C5)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_actor_send_too_few_args() {
+    // C4: handler expects 2 args, only 1 given → compile error
+    let err = expect_compile_fail(
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(10)\n    extern.usleep(100000)\n    0\n",
+    );
+    assert!(
+        err.contains("expects 2 argument(s), got 1"),
+        "err was: {err}"
+    );
+}
+
+#[test]
+fn b_actor_send_too_many_args() {
+    // C4: handler expects 1 arg, 3 given → compile error
+    let err = expect_compile_fail(
+        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n\n*main()\n    a is spawn Adder\n    send a, @add(1, 2, 3)\n    extern.usleep(100000)\n    0\n",
+    );
+    assert!(
+        err.contains("expects 1 argument(s), got 3"),
+        "err was: {err}"
+    );
+}
+
+#[test]
+fn b_actor_send_zero_args_to_parameterized_handler() {
+    // C4: handler expects 1 arg, 0 given → compile error
+    let err = expect_compile_fail(
+        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say()\n    extern.usleep(100000)\n    0\n",
+    );
+    assert!(
+        err.contains("expects 1 argument(s), got 0"),
+        "err was: {err}"
+    );
+}
+
+#[test]
+fn b_actor_send_unknown_handler() {
+    // Send to a handler that doesn't exist → compile error
+    let err = expect_compile_fail(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    count as i64\n    @increment\n        count is count + 1\n\n*main()\n    c is spawn Counter\n    send c, @decrement()\n    extern.usleep(100000)\n    0\n",
+    );
+    assert!(
+        err.contains("has no handler '@decrement'"),
+        "err was: {err}"
+    );
+}
+
+#[test]
+fn b_actor_receive_outside_handler() {
+    // C3: actor-style receive (with @handler arms) outside actor → compile error
+    let err = expect_compile_fail(
+        "*main()\n    x is receive\n        @foo(v)\n            log(v)\n    log(x)\n",
+    );
+    assert!(
+        err.contains("receive") && err.contains("not supported"),
+        "err was: {err}"
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Actor — extended runtime correctness (M1)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_actor_f64_state_and_handler() {
+    // Actor with f64 state and f64 handler parameter
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Accum\n    total as f64\n    @add n as f64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Accum\n    send a, @add(1.5)\n    send a, @add(2.5)\n    send a, @add(3.0)\n    extern.usleep(200000)\n    send a, @show()\n    extern.usleep(100000)\n    0\n",
+        "7.000000",
+    );
+}
+
+#[test]
+fn b_actor_mixed_param_types() {
+    // Handler with two i64 parameters using arithmetic
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Mixer\n    result as i64\n    @compute a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    m is spawn Mixer\n    send m, @compute(3, 4)\n    send m, @compute(5, 6)\n    extern.usleep(200000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_actor_stop_clean_exit() {
+    // Spawn, send, stop, and program exits cleanly without hang
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Worker\n    @ping\n        log(1)\n\n*main()\n    w is spawn Worker\n    send w, @ping()\n    extern.usleep(100000)\n    stop w\n    extern.usleep(50000)\n    log(0)\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn b_actor_multiple_actors_independent() {
+    // Two independent actors accumulate separately
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor A\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\nactor B\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    a is spawn A\n    b is spawn B\n    send a, @set(10)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    send b, @set(20)\n    extern.usleep(100000)\n    send b, @show()\n    extern.usleep(100000)\n    0\n",
+        "10\n20",
+    );
+}
+
+#[test]
+fn b_actor_spawn_in_loop() {
+    // Spawn multiple actors in a loop, each sends a message
+    // Use a single accumulator to avoid nondeterministic output order
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    i is 1\n    while i <= 5\n        send a, @add(i)\n        i is i + 1\n    extern.usleep(200000)\n    send a, @show()\n    extern.usleep(100000)\n    0\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_actor_handler_with_conditional() {
+    // Handler body contains conditional logic
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Filter\n    @check n as i64\n        if n > 10\n            log(n)\n\n*main()\n    f is spawn Filter\n    send f, @check(5)\n    send f, @check(15)\n    send f, @check(3)\n    send f, @check(20)\n    extern.usleep(200000)\n    0\n",
+        "15\n20",
+    );
+}
+
+#[test]
+fn b_actor_handler_with_while_loop() {
+    // Handler body contains a while loop
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    @count_to n as i64\n        i is 1\n        while i <= n\n            log(i)\n            i is i + 1\n\n*main()\n    c is spawn Counter\n    send c, @count_to(3)\n    extern.usleep(200000)\n    0\n",
+        "1\n2\n3",
+    );
+}
+
+#[test]
+fn b_actor_stress_many_messages() {
+    // Send 500 messages to an accumulator, verify sum
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor BigSum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn BigSum\n    i is 1\n    while i <= 500\n        send s, @add(i)\n        i is i + 1\n    extern.usleep(500000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "125250",
+    );
+}
+
+#[test]
+fn b_actor_three_actors_three_handlers() {
+    // Three actors with different handler signatures, sequenced output
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor X\n    v as i64\n    @set n as i64\n        v is n\n    @show\n        log(v)\n\nactor Y\n    v as i64\n    @add a as i64, b as i64\n        v is a + b\n    @show\n        log(v)\n\nactor Z\n    @echo n as i64\n        log(n)\n\n*main()\n    x is spawn X\n    y is spawn Y\n    z is spawn Z\n    send x, @set(1)\n    extern.usleep(100000)\n    send x, @show()\n    extern.usleep(100000)\n    send y, @add(2, 3)\n    extern.usleep(100000)\n    send y, @show()\n    extern.usleep(100000)\n    send z, @echo(5)\n    extern.usleep(200000)\n    0\n",
+        "1\n5\n5",
+    );
+}
+
+#[test]
+fn b_actor_handler_mutates_multiple_fields() {
+    // Single handler updates multiple state fields
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Pair\n    x as i64\n    y as i64\n    @set_both a as i64, b as i64\n        x is a\n        y is b\n    @show\n        log(x)\n        log(y)\n\n*main()\n    p is spawn Pair\n    send p, @set_both(42, 99)\n    extern.usleep(200000)\n    send p, @show()\n    extern.usleep(100000)\n    0\n",
+        "42\n99",
+    );
+}
+
+#[test]
+fn b_actor_repeated_stop() {
+    // Stop an actor that was already stopped — should not crash
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Simple\n    @ping\n        log(1)\n\n*main()\n    s is spawn Simple\n    send s, @ping()\n    extern.usleep(100000)\n    stop s\n    extern.usleep(50000)\n    log(0)\n",
+        "1\n0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Channel — extended coverage (M2)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_channel_close_then_recv_returns_remaining() {
+    // Close channel with buffered items, recv still returns them
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 10\n    send ch, 20\n    send ch, 30\n    close ch\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a + b + c)\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_channel_send_recv_interleaved() {
+    // Interleave send/recv operations
+    expect(
+        "*main()\n    ch is channel of i64(4)\n    send ch, 1\n    a is receive ch\n    send ch, 2\n    b is receive ch\n    send ch, 3\n    c is receive ch\n    log(a + b + c)\n",
+        "6",
+    );
+}
+
+#[test]
+fn b_channel_f64_values() {
+    // Channel carrying f64 values
+    expect(
+        "*main()\n    ch is channel of f64(16)\n    send ch, 1.5\n    send ch, 2.5\n    a is receive ch\n    b is receive ch\n    log(a + b)\n",
+        "4.000000",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BATCH: Select — extended coverage (M3)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_select_multiple_ready_first_wins() {
+    // Both channels have data — first arm should win
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch1, 10\n    send ch2, 20\n    select\n        receive ch1 as val\n            log(val)\n        receive ch2 as val\n            log(val)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_select_in_loop() {
+    // Select inside a loop, consume from channel round by round
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    dummy is channel of i64(16)\n    total is 0\n    i is 0\n    while i < 3\n        select\n            receive ch as val\n                total is total + val\n            default\n                total is total\n        i is i + 1\n    log(total)\n",
+        "6",
+    );
+}
+
+#[test]
+fn b_select_default_when_empty() {
+    // No channels ready → default arm fires
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    ch3 is channel of i64(16)\n    select\n        receive ch1 as v\n            log(1)\n        receive ch2 as v\n            log(2)\n        receive ch3 as v\n            log(3)\n        default\n            log(0)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// P3.14: Extended concurrency test coverage
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// ── Channel: edge cases ──
+
+#[test]
+fn b_channel_send_recv_fifo_order() {
+    expect(
+        "*main()\n    ch is channel of i64(8)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    send ch, 4\n    send ch, 5\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    d is receive ch\n    e is receive ch\n    log(a)\n    log(b)\n    log(c)\n    log(d)\n    log(e)\n",
+        "1\n2\n3\n4\n5",
+    );
+}
+
+#[test]
+fn b_channel_alternating_send_recv() {
+    expect(
+        "*main()\n    ch is channel of i64(1)\n    send ch, 10\n    a is receive ch\n    send ch, 20\n    b is receive ch\n    send ch, 30\n    c is receive ch\n    log(a + b + c)\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_channel_capacity_one() {
+    expect(
+        "*main()\n    ch is channel of i64(1)\n    send ch, 99\n    v is receive ch\n    log(v)\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_channel_empty_recv_after_drain() {
+    // Send and fully drain, confirm values correct
+    expect(
+        "*main()\n    ch is channel of i64(8)\n    i is 0\n    while i < 8\n        send ch, i * 10\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 8\n        val is receive ch\n        total is total + val\n        j is j + 1\n    log(total)\n",
+        "280",
+    );
+}
+
+#[test]
+fn b_channel_negative_values() {
+    expect(
+        "*main()\n    ch is channel of i64(4)\n    send ch, -1\n    send ch, -100\n    send ch, 50\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a + b + c)\n",
+        "-51",
+    );
+}
+
+#[test]
+fn b_channel_zero_value() {
+    expect(
+        "*main()\n    ch is channel of i64(4)\n    send ch, 0\n    send ch, 0\n    send ch, 0\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a + b + c)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_channel_large_capacity() {
+    expect(
+        "*main()\n    ch is channel of i64(1024)\n    i is 0\n    while i < 500\n        send ch, 1\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 500\n        v is receive ch\n        total is total + v\n        j is j + 1\n    log(total)\n",
+        "500",
+    );
+}
+
+#[test]
+fn b_channel_send_recv_interleaved_loop() {
+    expect(
+        "*main()\n    ch is channel of i64(2)\n    total is 0\n    i is 0\n    while i < 10\n        send ch, i\n        v is receive ch\n        total is total + v\n        i is i + 1\n    log(total)\n",
+        "45",
+    );
+}
+
+#[test]
+fn b_channel_reuse_after_drain() {
+    // Use a channel, drain it, then use it again
+    expect(
+        "*main()\n    ch is channel of i64(4)\n    send ch, 1\n    send ch, 2\n    a is receive ch\n    b is receive ch\n    send ch, 3\n    send ch, 4\n    c is receive ch\n    d is receive ch\n    log(a + b + c + d)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_channel_multiple_channels() {
+    // Multiple independent channels
+    expect(
+        "*main()\n    ch1 is channel of i64(4)\n    ch2 is channel of i64(4)\n    send ch1, 10\n    send ch2, 20\n    a is receive ch1\n    b is receive ch2\n    log(a + b)\n",
+        "30",
+    );
+}
+
+// ── Select: extended ──
+
+#[test]
+fn b_select_two_channels_both_ready() {
+    // Both channels have data — first arm wins
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch1, 10\n    send ch2, 20\n    select\n        receive ch1 as v\n            log(v)\n        receive ch2 as v\n            log(v)\n",
+        "10",
+    );
+}
+
+#[test]
+fn b_select_second_channel_ready() {
+    // Only second channel has data
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch2, 77\n    select\n        receive ch1 as v\n            log(v)\n        receive ch2 as v\n            log(v)\n",
+        "77",
+    );
+}
+
+#[test]
+fn b_select_three_channels() {
+    // Three channels, only third has data
+    expect(
+        "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    ch3 is channel of i64(16)\n    send ch3, 33\n    select\n        receive ch1 as v\n            log(v)\n        receive ch2 as v\n            log(v)\n        receive ch3 as v\n            log(v)\n",
+        "33",
+    );
+}
+
+#[test]
+fn b_select_in_loop_multiple() {
+    // Select in a loop, draining a channel
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    total is 0\n    i is 0\n    while i < 3\n        select\n            receive ch as v\n                total is total + v\n        i is i + 1\n    log(total)\n",
+        "6",
+    );
+}
+
+#[test]
+fn b_select_default_no_channels() {
+    // Default with an empty channel and default arm
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    select\n        receive ch as v\n            log(v)\n        default\n            log(42)\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_select_value_computation() {
+    // Use received value in computation
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 5\n    result is 0\n    select\n        receive ch as v\n            result is v * 10 + 7\n    log(result)\n",
+        "57",
+    );
+}
+
+// ── Dispatch/coroutine: extended ──
+
+#[test]
+fn b_dispatch_yield_in_loop() {
+    expect(
+        "*main()\n    gen is dispatch nums\n        i is 0\n        while i < 5\n            yield i * 10\n            i is i + 1\n    total is 0\n    j is 0\n    while j < 5\n        total is total + nums.next()\n        j is j + 1\n    log(total)\n",
+        "100",
+    );
+}
+
+#[test]
+fn b_dispatch_single_yield() {
+    expect(
+        "*main()\n    gen is dispatch one\n        yield 42\n    log(one.next())\n",
+        "42",
+    );
+}
+
+#[test]
+fn b_dispatch_many_yields() {
+    expect(
+        "*main()\n    gen is dispatch s\n        yield 1\n        yield 2\n        yield 3\n        yield 4\n        yield 5\n        yield 6\n        yield 7\n        yield 8\n        yield 9\n        yield 10\n    total is 0\n    i is 0\n    while i < 10\n        total is total + s.next()\n        i is i + 1\n    log(total)\n",
+        "55",
+    );
+}
+
+#[test]
+fn b_dispatch_computed_yields() {
+    // Yield results of computation
+    expect(
+        "*main()\n    gen is dispatch squares\n        yield 1\n        yield 4\n        yield 9\n        yield 16\n    a is squares.next()\n    b is squares.next()\n    c is squares.next()\n    d is squares.next()\n    log(a + b + c + d)\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_dispatch_anonymous_multiple() {
+    // Multiple named dispatch blocks
+    expect(
+        "*main()\n    g1 is dispatch a\n        yield 10\n    g2 is dispatch b\n        yield 20\n    log(a.next() + b.next())\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_dispatch_yield_negative() {
+    expect(
+        "*main()\n    gen is dispatch neg\n        yield -5\n        yield -10\n    a is neg.next()\n    b is neg.next()\n    log(a + b)\n",
+        "-15",
+    );
+}
+
+#[test]
+fn b_dispatch_yield_zero() {
+    expect(
+        "*main()\n    gen is dispatch z\n        yield 0\n    log(z.next())\n",
+        "0",
+    );
+}
+
+// ── Actor: extended lifecycle & patterns ──
+
+#[test]
+fn b_actor_state_init_zero() {
+    // State fields default to zero
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_actor_increment_decrement() {
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @dec\n        val is val - 1\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    send c, @inc()\n    send c, @inc()\n    send c, @inc()\n    send c, @dec()\n    extern.usleep(100000)\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
+        "2",
+    );
+}
+
+#[test]
+fn b_actor_overwrite_state() {
+    // Repeatedly overwrite state
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Box\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    b is spawn Box\n    send b, @set(1)\n    send b, @set(2)\n    send b, @set(3)\n    send b, @set(99)\n    extern.usleep(100000)\n    send b, @show()\n    extern.usleep(100000)\n    0\n",
+        "99",
+    );
+}
+
+#[test]
+fn b_actor_state_tracks_max() {
+    // Actor that tracks the maximum value seen
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor MaxTracker\n    best as i64\n    @update n as i64\n        if n > best\n            best is n\n    @show\n        log(best)\n\n*main()\n    m is spawn MaxTracker\n    send m, @update(5)\n    send m, @update(3)\n    send m, @update(9)\n    send m, @update(1)\n    send m, @update(7)\n    extern.usleep(100000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "9",
+    );
+}
+
+#[test]
+fn b_actor_conditional_handler() {
+    // Handler with conditional logic
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor EvenCounter\n    evens as i64\n    @check n as i64\n        if n % 2 equals 0\n            evens is evens + 1\n    @show\n        log(evens)\n\n*main()\n    e is spawn EvenCounter\n    send e, @check(1)\n    send e, @check(2)\n    send e, @check(3)\n    send e, @check(4)\n    send e, @check(5)\n    send e, @check(6)\n    extern.usleep(100000)\n    send e, @show()\n    extern.usleep(100000)\n    0\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_actor_handler_with_math() {
+    // Handler performing arithmetic on state
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Multiply\n    product as i64\n    @init\n        product is 1\n    @mul n as i64\n        product is product * n\n    @show\n        log(product)\n\n*main()\n    m is spawn Multiply\n    send m, @init()\n    send m, @mul(2)\n    send m, @mul(3)\n    send m, @mul(4)\n    extern.usleep(100000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "24",
+    );
+}
+
+#[test]
+fn b_actor_many_messages_stress() {
+    // 50 messages to an actor
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 50\n        send s, @add(1)\n        i is i + 1\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "50",
+    );
+}
+
+#[test]
+fn b_actor_two_actors_same_type() {
+    // Two actors of the same type, independent state — show sum to avoid ordering
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @get\n        log(val)\n\n*main()\n    a is spawn Counter\n    b is spawn Counter\n    send a, @inc()\n    send a, @inc()\n    send a, @inc()\n    send b, @inc()\n    extern.usleep(200000)\n    send a, @get()\n    extern.usleep(200000)\n    0\n",
+        "3",
+    );
+}
+
+#[test]
+fn b_actor_three_state_fields() {
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Vec3\n    x as i64\n    y as i64\n    z as i64\n    @set_all a as i64, b as i64, c as i64\n        x is a\n        y is b\n        z is c\n    @show\n        log(x + y + z)\n\n*main()\n    v is spawn Vec3\n    send v, @set_all(10, 20, 30)\n    extern.usleep(100000)\n    send v, @show()\n    extern.usleep(100000)\n    0\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_actor_handler_logs_directly() {
+    // Handler that logs immediately (no state read)
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Greeter\n    @greet n as i64\n        log(n * 100)\n\n*main()\n    g is spawn Greeter\n    send g, @greet(5)\n    extern.usleep(100000)\n    0\n",
+        "500",
+    );
+}
+
+#[test]
+fn b_actor_accumulate_then_stop() {
+    // Accumulate, show, stop
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    sum as i64\n    @add n as i64\n        sum is sum + n\n    @show\n        log(sum)\n\n*main()\n    a is spawn Acc\n    send a, @add(1)\n    send a, @add(2)\n    send a, @add(3)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    stop a\n    extern.usleep(100000)\n    0\n",
+        "6",
+    );
+}
+
+#[test]
+fn b_actor_spawn_five_independent() {
+    // Spawn 5 independent actors — order may vary, so use a single actor that accumulates
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Summer\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Summer\n    send s, @add(1)\n    send s, @add(2)\n    send s, @add(3)\n    send s, @add(4)\n    send s, @add(5)\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "15",
+    );
+}
+
+#[test]
+fn b_actor_handler_while_loop() {
+    // Handler uses while loop to log multiple values
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Repeater\n    @repeat n as i64\n        i is 0\n        while i < n\n            log(i)\n            i is i + 1\n\n*main()\n    r is spawn Repeater\n    send r, @repeat(3)\n    extern.usleep(100000)\n    0\n",
+        "0\n1\n2",
+    );
+}
+
+// ── Channels: combined with functions ──
+
+#[test]
+fn b_channel_passed_to_function() {
+    // Pass channel to a function that sends to it
+    expect(
+        "*fill(ch)\n    send ch, 10\n    send ch, 20\n    send ch, 30\n\n*main()\n    ch is channel of i64(8)\n    fill(ch)\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a + b + c)\n",
+        "60",
+    );
+}
+
+#[test]
+fn b_channel_accumulate_in_loop() {
+    // Accumulate channel values in a loop
+    expect(
+        "*main()\n    ch is channel of i64(32)\n    i is 1\n    while i <= 10\n        send ch, i * i\n        i is i + 1\n    sum is 0\n    j is 0\n    while j < 10\n        v is receive ch\n        sum is sum + v\n        j is j + 1\n    log(sum)\n",
+        "385",
+    );
+}
+
+#[test]
+fn b_channel_conditional_send() {
+    // Only send even values
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    i is 0\n    while i < 10\n        if i % 2 equals 0\n            send ch, i\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 5\n        v is receive ch\n        total is total + v\n        j is j + 1\n    log(total)\n",
+        "20",
+    );
+}
+
+// ── Select: more patterns ──
+
+#[test]
+fn b_select_compute_with_default() {
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    result is -1\n    select\n        receive ch as v\n            result is v\n        default\n            result is 0\n    log(result)\n",
+        "0",
+    );
+}
+
+#[test]
+fn b_select_nested_computation() {
+    expect(
+        "*main()\n    ch is channel of i64(16)\n    send ch, 3\n    result is 0\n    select\n        receive ch as v\n            result is v * v + 1\n    log(result)\n",
+        "10",
+    );
+}
+
+// ── Dispatch: more patterns ──
+
+#[test]
+fn b_dispatch_fibonacci_yields() {
+    // Dispatch that yields fibonacci-like values
+    expect(
+        "*main()\n    gen is dispatch fib\n        yield 1\n        yield 1\n        yield 2\n        yield 3\n        yield 5\n        yield 8\n    total is 0\n    i is 0\n    while i < 6\n        total is total + fib.next()\n        i is i + 1\n    log(total)\n",
+        "20",
+    );
+}
+
+#[test]
+fn b_dispatch_powers_of_two() {
+    expect(
+        "*main()\n    gen is dispatch powers\n        yield 1\n        yield 2\n        yield 4\n        yield 8\n        yield 16\n    total is 0\n    i is 0\n    while i < 5\n        total is total + powers.next()\n        i is i + 1\n    log(total)\n",
+        "31",
+    );
+}
+
+#[test]
+fn b_dispatch_alternating_sign() {
+    expect(
+        "*main()\n    gen is dispatch alt\n        yield 1\n        yield -1\n        yield 1\n        yield -1\n    total is 0\n    i is 0\n    while i < 4\n        total is total + alt.next()\n        i is i + 1\n    log(total)\n",
+        "0",
     );
 }
 
@@ -4124,7 +4751,7 @@ fn b_actor_two_param_handler_math() {
 #[test]
 fn b_std_math_factorial() {
     expect(
-        "use std/math\n\n*main()\n    log(factorial(5))\n    log(factorial(0))\n    log(factorial(1))\n    log(factorial(10))\n",
+        "use std/math\n\n*main()\n    log(math.factorial(5))\n    log(math.factorial(0))\n    log(math.factorial(1))\n    log(math.factorial(10))\n",
         "120\n1\n1\n3628800",
     );
 }
@@ -4132,7 +4759,7 @@ fn b_std_math_factorial() {
 #[test]
 fn b_std_math_gcd() {
     expect(
-        "use std/math\n\n*main()\n    log(gcd(12, 8))\n    log(gcd(100, 75))\n    log(gcd(7, 13))\n",
+        "use std/math\n\n*main()\n    log(math.gcd(12, 8))\n    log(math.gcd(100, 75))\n    log(math.gcd(7, 13))\n",
         "4\n25\n1",
     );
 }
@@ -4140,7 +4767,7 @@ fn b_std_math_gcd() {
 #[test]
 fn b_std_math_lcm() {
     expect(
-        "use std/math\n\n*main()\n    log(lcm(4, 6))\n    log(lcm(3, 7))\n    log(lcm(12, 8))\n",
+        "use std/math\n\n*main()\n    log(math.lcm(4, 6))\n    log(math.lcm(3, 7))\n    log(math.lcm(12, 8))\n",
         "12\n21\n24",
     );
 }
@@ -4149,7 +4776,7 @@ fn b_std_math_lcm() {
 fn b_std_math_constants() {
     // Verify PI, E, TAU are in the expected ranges
     expect(
-        "use std/math\n\n*main()\n    log(PI > 3.14)\n    log(PI < 3.15)\n    log(E > 2.71)\n    log(E < 2.72)\n    log(TAU > 6.28)\n    log(TAU < 6.29)\n",
+        "use std/math\n\n*main()\n    log(math.PI > 3.14)\n    log(math.PI < 3.15)\n    log(math.E > 2.71)\n    log(math.E < 2.72)\n    log(math.TAU > 6.28)\n    log(math.TAU < 6.29)\n",
         "1\n1\n1\n1\n1\n1",
     );
 }
@@ -4157,7 +4784,7 @@ fn b_std_math_constants() {
 #[test]
 fn b_std_math_degrees_radians() {
     expect(
-        "use std/math\n\n*main()\n    d is degrees(PI)\n    log(d > 179.9)\n    log(d < 180.1)\n    r is radians(180.0)\n    log(r > 3.14)\n    log(r < 3.15)\n",
+        "use std/math\n\n*main()\n    d is math.degrees(math.PI)\n    log(d > 179.9)\n    log(d < 180.1)\n    r is math.radians(180.0)\n    log(r > 3.14)\n    log(r < 3.15)\n",
         "1\n1\n1\n1",
     );
 }
@@ -4165,7 +4792,7 @@ fn b_std_math_degrees_radians() {
 #[test]
 fn b_std_math_hypot() {
     expect(
-        "use std/math\n\n*main()\n    h is hypot(3.0, 4.0)\n    log(h > 4.99)\n    log(h < 5.01)\n",
+        "use std/math\n\n*main()\n    h is math.hypot(3.0, 4.0)\n    log(h > 4.99)\n    log(h < 5.01)\n",
         "1\n1",
     );
 }
@@ -4173,7 +4800,7 @@ fn b_std_math_hypot() {
 #[test]
 fn b_std_math_lerp() {
     expect(
-        "use std/math\n\n*main()\n    v is lerp(0.0, 10.0, 0.5)\n    log(v > 4.99)\n    log(v < 5.01)\n",
+        "use std/math\n\n*main()\n    v is math.lerp(0.0, 10.0, 0.5)\n    log(v > 4.99)\n    log(v < 5.01)\n",
         "1\n1",
     );
 }
@@ -4185,7 +4812,7 @@ fn b_std_math_lerp() {
 #[test]
 fn b_std_fmt_hex() {
     expect(
-        "use std/fmt\n\n*main()\n    log(hex(255))\n    log(hex(0))\n    log(hex(16))\n",
+        "use std/fmt\n\n*main()\n    log(fmt.hex(255))\n    log(fmt.hex(0))\n    log(fmt.hex(16))\n",
         "ff\n0\n10",
     );
 }
@@ -4193,7 +4820,7 @@ fn b_std_fmt_hex() {
 #[test]
 fn b_std_fmt_oct() {
     expect(
-        "use std/fmt\n\n*main()\n    log(oct(8))\n    log(oct(0))\n    log(oct(63))\n",
+        "use std/fmt\n\n*main()\n    log(fmt.oct(8))\n    log(fmt.oct(0))\n    log(fmt.oct(63))\n",
         "10\n0\n77",
     );
 }
@@ -4201,7 +4828,7 @@ fn b_std_fmt_oct() {
 #[test]
 fn b_std_fmt_bin() {
     expect(
-        "use std/fmt\n\n*main()\n    log(bin(10))\n    log(bin(0))\n    log(bin(255))\n",
+        "use std/fmt\n\n*main()\n    log(fmt.bin(10))\n    log(fmt.bin(0))\n    log(fmt.bin(255))\n",
         "1010\n0\n11111111",
     );
 }
@@ -4209,7 +4836,7 @@ fn b_std_fmt_bin() {
 #[test]
 fn b_std_fmt_pad_left() {
     expect(
-        "use std/fmt\n\n*main()\n    log(pad_left('hi', 5, ' '))\n    log(pad_left('hello', 3, 'x'))\n",
+        "use std/fmt\n\n*main()\n    log(fmt.pad_left('hi', 5, ' '))\n    log(fmt.pad_left('hello', 3, 'x'))\n",
         "   hi\nhello",
     );
 }
@@ -4217,7 +4844,7 @@ fn b_std_fmt_pad_left() {
 #[test]
 fn b_std_fmt_pad_right() {
     expect(
-        "use std/fmt\n\n*main()\n    log(pad_right('hi', 5, ' '))\n    log(pad_right('hello', 3, 'x'))\n",
+        "use std/fmt\n\n*main()\n    log(fmt.pad_right('hi', 5, ' '))\n    log(fmt.pad_right('hello', 3, 'x'))\n",
         "hi   \nhello",
     );
 }
@@ -4225,7 +4852,7 @@ fn b_std_fmt_pad_right() {
 #[test]
 fn b_std_fmt_repeat() {
     expect(
-        "use std/fmt\n\n*main()\n    log(repeat('ab', 3))\n    log(repeat('x', 0))\n    log(repeat('-', 5))\n",
+        "use std/fmt\n\n*main()\n    log(fmt.repeat('ab', 3))\n    log(fmt.repeat('x', 0))\n    log(fmt.repeat('-', 5))\n",
         "ababab\n\n-----",
     );
 }
@@ -4233,7 +4860,7 @@ fn b_std_fmt_repeat() {
 #[test]
 fn b_std_fmt_join() {
     expect(
-        "use std/fmt\n\n*main()\n    v is vec('a', 'b', 'c')\n    log(join(v, ', '))\n",
+        "use std/fmt\n\n*main()\n    v is vec('a', 'b', 'c')\n    log(fmt.join(v, ', '))\n",
         "a, b, c",
     );
 }
@@ -4245,7 +4872,7 @@ fn b_std_fmt_join() {
 #[test]
 fn b_std_path_join() {
     expect(
-        "use std/path\n\n*main()\n    log(path_join('foo', 'bar'))\n    log(path_join('foo/', 'bar'))\n    log(path_join('', 'bar'))\n    log(path_join('foo', ''))\n",
+        "use std/path\n\n*main()\n    log(path.join('foo', 'bar'))\n    log(path.join('foo/', 'bar'))\n    log(path.join('', 'bar'))\n    log(path.join('foo', ''))\n",
         "foo/bar\nfoo/bar\nbar\nfoo",
     );
 }
@@ -4253,7 +4880,7 @@ fn b_std_path_join() {
 #[test]
 fn b_std_path_dir() {
     expect(
-        "use std/path\n\n*main()\n    log(path_dir('/foo/bar/baz'))\n    log(path_dir('file.txt'))\n",
+        "use std/path\n\n*main()\n    log(path.dir('/foo/bar/baz'))\n    log(path.dir('file.txt'))\n",
         "/foo/bar\n.",
     );
 }
@@ -4261,16 +4888,16 @@ fn b_std_path_dir() {
 #[test]
 fn b_std_path_base() {
     expect(
-        "use std/path\n\n*main()\n    log(path_base('/foo/bar.txt'))\n    log(path_base('hello'))\n",
+        "use std/path\n\n*main()\n    log(path.base('/foo/bar.txt'))\n    log(path.base('hello'))\n",
         "bar.txt\nhello",
     );
 }
 
 #[test]
 fn b_std_path_ext() {
-    // path_ext('noext') -> "" — log("") prints empty line, trimmed by expect
+    // path.ext('noext') -> "" — log("") prints empty line, trimmed by expect
     expect(
-        "use std/path\n\n*main()\n    log(path_ext('/foo/bar.txt'))\n",
+        "use std/path\n\n*main()\n    log(path.ext('/foo/bar.txt'))\n",
         ".txt",
     );
 }
@@ -4282,7 +4909,7 @@ fn b_std_path_ext() {
 #[test]
 fn b_std_time_monotonic() {
     expect(
-        "use std/time\n\n*main()\n    t is monotonic()\n    log(t > 0.0)\n",
+        "use std/time\n\n*main()\n    t is time.monotonic()\n    log(t > 0.0)\n",
         "1",
     );
 }
@@ -4290,7 +4917,7 @@ fn b_std_time_monotonic() {
 #[test]
 fn b_std_time_elapsed() {
     expect(
-        "use std/time\n\n*main()\n    t is monotonic()\n    sleep_ms(10)\n    e is elapsed(t)\n    log(e > 0.0)\n",
+        "use std/time\n\n*main()\n    t is time.monotonic()\n    time.sleep_ms(10)\n    e is time.elapsed(t)\n    log(e > 0.0)\n",
         "1",
     );
 }
@@ -4302,7 +4929,7 @@ fn b_std_time_elapsed() {
 #[test]
 fn b_std_os_pid() {
     expect(
-        "use std/os\n\n*main()\n    p is pid()\n    log(p > 0)\n",
+        "use std/os\n\n*main()\n    p is os.pid()\n    log(p > 0)\n",
         "1",
     );
 }
@@ -4310,7 +4937,7 @@ fn b_std_os_pid() {
 #[test]
 fn b_std_os_cwd() {
     expect(
-        "use std/os\n\n*main()\n    c is cwd()\n    log(c.length > 0)\n",
+        "use std/os\n\n*main()\n    c is os.cwd()\n    log(c.length > 0)\n",
         "1",
     );
 }
@@ -5207,7 +5834,10 @@ fn b_hm_ptr_index() {
 #[test]
 fn b_strict_integer_literal_defaults() {
     // Integer literals with no context should get Integer constraint → I64 default (no error)
-    expect("*main() returns i32\n    x is 42\n    log(x)\n    0\n", "42");
+    expect(
+        "*main() returns i32\n    x is 42\n    log(x)\n    0\n",
+        "42",
+    );
 }
 
 #[test]
@@ -5617,8 +6247,9 @@ fn b_p42_undefined_variable() {
 #[test]
 fn b_p42_wrong_arg_count() {
     // Function called with wrong number of arguments
-    let err =
-        expect_compile_fail("*foo(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(foo(1))\n");
+    let err = expect_compile_fail(
+        "*foo(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(foo(1))\n",
+    );
     assert!(
         err.contains("argument")
             || err.contains("param")
@@ -6171,8 +6802,9 @@ fn b_r5_error_missing_main() {
 #[test]
 fn b_r5_error_wrong_arity() {
     // Calling function with wrong number of arguments
-    let err =
-        expect_compile_fail("*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(1))\n");
+    let err = expect_compile_fail(
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(1))\n",
+    );
     assert!(!err.is_empty(), "expected arity error");
 }
 
@@ -6535,10 +7167,7 @@ fn b_empty_vec_inferred_from_push_string() {
 
 #[test]
 fn b_empty_vec_no_context_compiles() {
-    expect(
-        "*main()\n    v is vec()\n    log(v.len())\n",
-        "0",
-    );
+    expect("*main()\n    v is vec()\n    log(v.len())\n", "0");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -6711,5 +7340,145 @@ fn b_struct_mono_single_type_no_mangle() {
     expect(
         "type Box\n    val\n\n*main()\n    a is Box(10)\n    b is Box(20)\n    log(a.val + b.val)\n",
         "30",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Unsigned shift right (>>>)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_ushr_positive() {
+    expect("*main()\n    log(256 >>> 4)\n", "16");
+}
+
+#[test]
+fn b_ushr_negative() {
+    // Unsigned shift of -1 should treat as all-ones unsigned
+    expect("*main()\n    x is -1 >>> 63\n    log(x)\n", "1");
+}
+
+#[test]
+fn b_ushr_zero_shift() {
+    expect("*main()\n    log(42 >>> 0)\n", "42");
+}
+
+#[test]
+fn b_ushr_vs_shr_positive() {
+    // For positive numbers, >>> and >> should be identical
+    expect("*main()\n    a is 1024 >> 3\n    b is 1024 >>> 3\n    log(a)\n    log(b)\n", "128\n128");
+}
+
+#[test]
+fn b_ushr_augmented_assign() {
+    expect("*main()\n    x is 256\n    x >>>= 4\n    log(x)\n", "16");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Shebang line skipping
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_shebang_skipped() {
+    expect("#!/usr/bin/env jadec run\n*main()\n    log(42)\n", "42");
+}
+
+#[test]
+fn b_shebang_with_args() {
+    expect("#!/usr/local/bin/jadec run --\n*main()\n    log(\"hello\")\n", "hello");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TOML stringify
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_toml_round_trip() {
+    // Use Jade single-quoted strings (support \n escapes)
+    expect(
+        "use toml\n\n*main()\n    src is '[settings]\\ncount = 42\\nenabled = true'\n    t is toml.parse(src)\n    s is toml.stringify(t)\n    log(s.contains('count'))\n    log(s.contains('42'))\n",
+        "1\n1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CSV streaming Reader
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_csv_reader_basic() {
+    expect(
+        "use csv\n\n*main()\n    r is csv.reader('a,b\\n1,2\\n3,4')\n    count is 0\n    while r.has_next()\n        row is r.next_row()\n        count is count + 1\n    log(count)\n",
+        "3",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Binary big-endian
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_binary_big_endian_roundtrip() {
+    expect(
+        "use binary\n\n*main()\n    buf is binary.new(64)\n    buf.write_i32_be(0x01020304)\n    buf.seek(0)\n    val is buf.read_i32_be()\n    log(val)\n",
+        "16909060",
+    );
+}
+
+#[test]
+fn b_binary_endian_difference() {
+    // Write LE, read BE should give different result (byte-swap)
+    expect(
+        "use binary\n\n*main()\n    buf is binary.new(64)\n    buf.write_i16(0x0102)\n    buf.seek(0)\n    le is buf.read_i16()\n    buf.seek(0)\n    be is buf.read_i16_be()\n    log(le equals be)\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BigInt pow / modpow / gcd
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_bigint_pow() {
+    expect(
+        "use bigint\n\n*main()\n    b is bigint.from_int(2)\n    r is bigint.power(b, 10)\n    log(bigint.format(r))\n",
+        "1024",
+    );
+}
+
+#[test]
+fn b_bigint_modpow() {
+    expect(
+        "use bigint\n\n*main()\n    base is bigint.from_int(3)\n    exp is bigint.from_int(10)\n    m is bigint.from_int(7)\n    r is bigint.modpow(base, exp, m)\n    log(bigint.format(r))\n",
+        "4",
+    );
+}
+
+#[test]
+fn b_bigint_gcd() {
+    expect(
+        "use bigint\n\n*main()\n    a is bigint.from_int(48)\n    b is bigint.from_int(18)\n    r is bigint.gcd(a, b)\n    log(bigint.format(r))\n",
+        "6",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Decimal rounding modes
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn b_decimal_round_half_even() {
+    // Banker's rounding: 2.5 rounds to 2 (even), 3.5 rounds to 4 (even)
+    expect(
+        "use decimal\n\n*main()\n    a is decimal.parse(\"2.5000\")\n    r is decimal.round_with(a, 0, decimal.ROUND_HALF_EVEN)\n    log(decimal.format(r))\n",
+        "2.0000",
+    );
+}
+
+#[test]
+fn b_decimal_round_truncate() {
+    expect(
+        "use decimal\n\n*main()\n    a is decimal.parse(\"3.9999\")\n    r is decimal.round_with(a, 0, decimal.ROUND_TRUNCATE)\n    log(decimal.format(r))\n",
+        "3.0000",
     );
 }

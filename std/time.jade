@@ -1,10 +1,102 @@
 # std.time — Clock, duration, sleep
+#
+# Usage:
+#   start is time.monotonic()
+#   time.sleep_ms(100)
+#   log("elapsed: " + to_string(time.elapsed(start)) + " ns")
+#
+#   epoch is time.now()    # seconds since Unix epoch
+
+extern *time(t as %i8) returns i64
 
 *monotonic
     __time_monotonic()
 
+*now
+    extern.time(0 as %i8)
+
 *sleep_ms(ms)
     __sleep_ms(ms)
 
+*sleep(seconds)
+    __sleep_ms(seconds * 1000)
+
 *elapsed(start)
     __time_monotonic() - start
+
+*elapsed_ms(start)
+    ((__time_monotonic() - start) / 1000000.0) as i64
+
+# ── Date/time calendar utilities ─────────────────────────────
+
+*is_leap_year(year)
+    if year mod 400 equals 0
+        return true
+    if year mod 100 equals 0
+        return false
+    year mod 4 equals 0
+
+*days_in_month(month, year)
+    if month equals 2
+        if is_leap_year(year)
+            return 29
+        return 28
+    if month equals 4
+        return 30
+    if month equals 6
+        return 30
+    if month equals 9
+        return 30
+    if month equals 11
+        return 30
+    31
+
+*days_in_year(year)
+    if is_leap_year(year)
+        return 366
+    365
+
+# Day of week for a date (0=Sunday ... 6=Saturday) - Zeller's congruence
+*day_of_week(year, month, day)
+    y is year
+    m is month
+    if m < 3
+        m is m + 12
+        y is y - 1
+    q is day
+    k is y mod 100
+    j is y / 100
+    h is (q + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 - 2 * j) mod 7
+    if h < 0
+        h is h + 7
+    # Convert: 0=Sat → 0=Sun
+    (h + 6) mod 7
+
+*day_name(dow)
+    if dow equals 0
+        return "Sunday"
+    if dow equals 1
+        return "Monday"
+    if dow equals 2
+        return "Tuesday"
+    if dow equals 3
+        return "Wednesday"
+    if dow equals 4
+        return "Thursday"
+    if dow equals 5
+        return "Friday"
+    "Saturday"
+
+# Days since Unix epoch (Jan 1 1970) for a given date
+*epoch_days(year, month, day)
+    # Count days from 1970-01-01
+    total is 0
+    y is 1970
+    while y < year
+        total is total + days_in_year(y)
+        y is y + 1
+    m is 1
+    while m < month
+        total is total + days_in_month(m, year)
+        m is m + 1
+    total + day - 1

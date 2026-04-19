@@ -10,6 +10,30 @@ use super::b;
 
 use super::stores::STRING_BUF_SIZE;
 
+/// Normalize store field types: the parser produces `Type::Struct("I64", [])`
+/// for uppercase type names like `I64`, `F64`, etc. Map them to the
+/// canonical primitive types so filter/agg code can match uniformly.
+pub(crate) fn normalize_store_field_type(ty: &Type) -> Type {
+    match ty {
+        Type::Struct(name, args) if args.is_empty() => match name.as_str() {
+            "I64" | "i64" | "int" => Type::I64,
+            "I32" | "i32" => Type::I32,
+            "I16" | "i16" => Type::I16,
+            "I8" | "i8" => Type::I8,
+            "U64" | "u64" => Type::U64,
+            "U32" | "u32" => Type::U32,
+            "U16" | "u16" => Type::U16,
+            "U8" | "u8" => Type::U8,
+            "F64" | "f64" | "float" => Type::F64,
+            "F32" | "f32" => Type::F32,
+            "Bool" | "bool" => Type::Bool,
+            "String" | "str" => Type::String,
+            _ => ty.clone(),
+        },
+        _ => ty.clone(),
+    }
+}
+
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn copy_string_to_fixed_buf(
         &mut self,
@@ -35,10 +59,33 @@ impl<'ctx> Compiler<'ctx> {
         let data = self.string_data(string_val)?.into_pointer_value();
 
         let max_data = i64t.const_int(STRING_BUF_SIZE - 8, false);
-        let clamped = b!(self.bld.build_select(
+        let is_truncated =
             b!(self
                 .bld
-                .build_int_compare(IntPredicate::UGT, len, max_data, "str.clamp")),
+                .build_int_compare(IntPredicate::UGT, len, max_data, "str.clamp"));
+
+        // Emit a runtime stderr warning when truncation occurs.
+        let cur_fn = self
+            .bld
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap();
+        let trunc_bb = self.ctx.append_basic_block(cur_fn, "str.trunc_warn");
+        let cont_bb = self.ctx.append_basic_block(cur_fn, "str.cont");
+        b!(self.bld.build_conditional_branch(is_truncated, trunc_bb, cont_bb));
+        self.bld.position_at_end(trunc_bb);
+        let warn_fn = self.module.get_function("jade_store_truncation_warn").unwrap_or_else(|| {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[i64t.into(), i64t.into()], false);
+            self.module.add_function("jade_store_truncation_warn", ft, Some(inkwell::module::Linkage::External))
+        });
+        b!(self.bld.build_call(warn_fn, &[len.into(), max_data.into()], ""));
+        b!(self.bld.build_unconditional_branch(cont_bb));
+        self.bld.position_at_end(cont_bb);
+
+        let clamped = b!(self.bld.build_select(
+            is_truncated,
             max_data,
             len,
             "str.len"
@@ -224,6 +271,7 @@ impl<'ctx> Compiler<'ctx> {
         op: BinOp,
         filter_val: BasicValueEnum<'ctx>,
     ) -> Result<IntValue<'ctx>, String> {
+        let field_ty = &normalize_store_field_type(field_ty);
         match field_ty {
             Type::String => {
                 let i64t = self.ctx.i64_type();
@@ -241,7 +289,7 @@ impl<'ctx> Compiler<'ctx> {
                 let filter_len = self.string_len(filter_val)?.into_int_value();
                 let filter_data = self.string_data(filter_val)?.into_pointer_value();
 
-                let fv = self.cur_fn.unwrap();
+                let fv = self.current_fn();
                 let len_eq_bb = self.ctx.append_basic_block(fv, "cmp.len_eq");
                 let result_bb = self.ctx.append_basic_block(fv, "cmp.result");
 
@@ -285,7 +333,7 @@ impl<'ctx> Compiler<'ctx> {
                             "cmp.m"
                         ));
                         b!(self.bld.build_unconditional_branch(result_bb));
-                        let len_eq_end = self.bld.get_insert_block().unwrap();
+                        let len_eq_end = self.current_bb();
 
                         self.bld.position_at_end(result_bb);
                         let phi = b!(self.bld.build_phi(self.ctx.bool_type(), "cmp.str"));

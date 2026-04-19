@@ -45,6 +45,26 @@ pub struct ServerCapabilities {
     pub document_symbol_provider: bool,
     #[serde(rename = "completionProvider", skip_serializing_if = "Option::is_none")]
     pub completion_provider: Option<CompletionOptions>,
+    #[serde(rename = "referencesProvider")]
+    pub references_provider: bool,
+    #[serde(rename = "renameProvider")]
+    pub rename_provider: bool,
+    #[serde(
+        rename = "semanticTokensProvider",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub semantic_tokens_provider: Option<SemanticTokensOptions>,
+    #[serde(
+        rename = "signatureHelpProvider",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub signature_help_provider: Option<SignatureHelpOptions>,
+}
+
+#[derive(Serialize)]
+pub struct SignatureHelpOptions {
+    #[serde(rename = "triggerCharacters")]
+    pub trigger_characters: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -208,3 +228,77 @@ pub const CK_VARIABLE: i32 = 6;
 pub const CK_KEYWORD: i32 = 14;
 pub const CK_STRUCT: i32 = 22;
 pub const CK_ENUM_MEMBER: i32 = 20;
+
+// ── References / Rename ────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ReferenceParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentIdentifier,
+    pub position: Position,
+}
+
+#[derive(Deserialize)]
+pub struct RenameParams {
+    #[serde(rename = "textDocument")]
+    pub text_document: TextDocumentIdentifier,
+    pub position: Position,
+    #[serde(rename = "newName")]
+    pub new_name: String,
+}
+
+#[derive(Serialize)]
+pub struct WorkspaceEdit {
+    pub changes: std::collections::HashMap<String, Vec<TextEdit>>,
+}
+
+#[derive(Serialize)]
+pub struct TextEdit {
+    pub range: Range,
+    #[serde(rename = "newText")]
+    pub new_text: String,
+}
+
+// ── Semantic tokens ────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct SemanticTokensOptions {
+    pub legend: SemanticTokensLegend,
+    pub full: bool,
+}
+
+#[derive(Serialize)]
+pub struct SemanticTokensLegend {
+    #[serde(rename = "tokenTypes")]
+    pub token_types: Vec<&'static str>,
+    #[serde(rename = "tokenModifiers")]
+    pub token_modifiers: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+pub struct SemanticTokensResult {
+    pub data: Vec<u32>,
+}
+
+// ── Signature help ─────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct SignatureHelp {
+    pub signatures: Vec<SignatureInformation>,
+    #[serde(rename = "activeSignature")]
+    pub active_signature: u32,
+    #[serde(rename = "activeParameter")]
+    pub active_parameter: u32,
+}
+
+#[derive(Serialize)]
+pub struct SignatureInformation {
+    pub label: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ParameterInformation>,
+}
+
+#[derive(Serialize)]
+pub struct ParameterInformation {
+    pub label: String,
+}

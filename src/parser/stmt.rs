@@ -1,7 +1,10 @@
 use crate::ast::*;
 use crate::lexer::Token;
 
-use super::expr::{contains_placeholder_in_block, replace_placeholder_in_block};
+use super::expr::{
+    contains_index_placeholder_in_block, contains_placeholder_in_block,
+    replace_index_placeholder_in_block, replace_placeholder_in_block,
+};
 use super::{ParseError, Parser};
 
 impl Parser {
@@ -124,16 +127,19 @@ impl Parser {
                         None
                     };
                     self.expect(Token::Newline)?;
-                    Ok(Stmt::SimFor(For {
-                        label: None,
-                        bind,
-                        bind2: None,
-                        iter,
-                        end,
-                        step,
-                        body: self.parse_block()?,
-                        span: sp,
-                    }, sp))
+                    Ok(Stmt::SimFor(
+                        For {
+                            label: None,
+                            bind,
+                            bind2: None,
+                            iter,
+                            end,
+                            step,
+                            body: self.parse_block()?,
+                            span: sp,
+                        },
+                        sp,
+                    ))
                 } else {
                     // sim block: run statements in parallel
                     self.expect(Token::Newline)?;
@@ -144,24 +150,53 @@ impl Parser {
             Token::Loop => {
                 let sp = self.span();
                 self.advance();
-                // `loop items` → desugar to `for __ph in items` with $ → __ph
+                // `loop items` → desugar to `for __ph_N in items` with $ → __ph_N, $$ → __ph_N_idx
                 if !self.check(Token::Newline) && !self.check(Token::Indent) && !self.eof() {
                     let iter = self.parse_expr()?;
+                    // `loop start to end` → range loop with $ as value, $$ as index
+                    let (end, step) = if self.check(Token::To) {
+                        self.advance();
+                        self.suppress_by = true;
+                        let e = self.parse_expr()?;
+                        self.suppress_by = false;
+                        let s = if self.check(Token::By) {
+                            self.advance();
+                            Some(self.parse_expr()?)
+                        } else {
+                            None
+                        };
+                        (Some(e), s)
+                    } else {
+                        (None, None)
+                    };
                     self.expect(Token::Newline)?;
                     let body = self.parse_block()?;
-                    // Replace any $ in the body with __ph
+                    let ph_name = self.gensym("ph");
+                    let ph_idx_name = format!("{ph_name}_idx");
+                    // Replace any $ in the body with the unique placeholder
                     let body = if contains_placeholder_in_block(&body) {
-                        replace_placeholder_in_block(&body, "__ph")
+                        replace_placeholder_in_block(&body, &ph_name)
+                    } else {
+                        body
+                    };
+                    // Replace any $$ in the body with the unique index placeholder
+                    let has_idx = contains_index_placeholder_in_block(&body);
+                    let body = if has_idx {
+                        replace_index_placeholder_in_block(&body, &ph_idx_name)
                     } else {
                         body
                     };
                     return Ok(Stmt::For(For {
                         label: None,
-                        bind: "__ph".into(),
-                        bind2: None,
+                        bind: ph_name,
+                        bind2: if has_idx {
+                            Some(ph_idx_name)
+                        } else {
+                            None
+                        },
                         iter,
-                        end: None,
-                        step: None,
+                        end,
+                        step,
                         body,
                         span: sp,
                     }));
@@ -262,6 +297,16 @@ impl Parser {
                 }))
             }
             _ => {
+                // Store statement keywords parsed as identifiers
+                if let Token::Ident(kw) = self.peek() {
+                    let kw = kw.clone();
+                    match kw.as_str() {
+                        "destroy" => return self.parse_destroy_stmt(),
+                        "restore" => return self.parse_restore_stmt(),
+                        "save" => return self.parse_save_stmt(),
+                        _ => {}
+                    }
+                }
                 if self.is_tuple_bind() {
                     self.parse_tuple_bind()
                 } else if self.is_bind() {
@@ -296,6 +341,7 @@ impl Parser {
                     | Token::CaretEq
                     | Token::ShlEq
                     | Token::ShrEq
+                    | Token::UshrEq
             )
     }
 
@@ -342,6 +388,7 @@ impl Parser {
             Token::CaretEq => BinOp::BitXor,
             Token::ShlEq => BinOp::Shl,
             Token::ShrEq => BinOp::Shr,
+            Token::UshrEq => BinOp::Ushr,
             _ => return None,
         };
         self.advance();
@@ -567,10 +614,20 @@ impl Parser {
             let mut line = String::new();
             while !self.check(Token::Newline) && !self.check(Token::Dedent) && !self.eof() {
                 let t = &self.tok[self.pos];
+                let tok_str = t.token.to_string();
                 if !line.is_empty() {
-                    line.push(' ');
+                    // Don't insert space before closing delimiters or comma
+                    let no_space_before = matches!(
+                        t.token,
+                        Token::RParen | Token::RBracket | Token::Comma
+                    );
+                    // Don't insert space after opening delimiters
+                    let no_space_after = line.ends_with('(') || line.ends_with('[');
+                    if !no_space_before && !no_space_after {
+                        line.push(' ');
+                    }
                 }
-                line.push_str(&t.token.to_string());
+                line.push_str(&tok_str);
                 self.advance();
             }
             if !line.is_empty() {
@@ -650,7 +707,7 @@ impl Parser {
         }
         let field = self.ident()?;
         let op = self.parse_filter_op()?;
-        let value = self.parse_add()?;
+        let value = self.parse_bitor()?;
         let mut extra = Vec::new();
         loop {
             let logical = match self.peek() {
@@ -661,7 +718,7 @@ impl Parser {
             self.advance();
             let f = self.ident()?;
             let o = self.parse_filter_op()?;
-            let v = self.parse_add()?;
+            let v = self.parse_bitor()?;
             extra.push((
                 logical,
                 StoreFilterCond {
@@ -692,5 +749,28 @@ impl Parser {
         };
         self.advance();
         Ok(op)
+    }
+
+    fn parse_destroy_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.advance(); // consume 'destroy'
+        let store = self.ident()?;
+        let filter = self.parse_store_filter()?;
+        Ok(Stmt::StoreDestroy(store, filter, sp))
+    }
+
+    fn parse_restore_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.advance(); // consume 'restore'
+        let store = self.ident()?;
+        let filter = self.parse_store_filter()?;
+        Ok(Stmt::StoreRestore(store, filter, sp))
+    }
+
+    fn parse_save_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.advance(); // consume 'save'
+        let store = self.ident()?;
+        Ok(Stmt::StoreSave(store, sp))
     }
 }

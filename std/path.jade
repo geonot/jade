@@ -1,37 +1,109 @@
 # std.path — Path manipulation
+#
+# Usage:
+#   full is path.join("src", "main.jade")
+#   dir is path.dir("/home/user/file.txt")   # "/home/user"
+#   base is path.base("/home/user/file.txt")  # "file.txt"
+#   ext is path.ext("file.txt")               # ".txt"
 
-*path_join(a as String, b as String)
+SLASH is 47   # /
+DOT is 46     # .
+
+*join(a as String, b as String)
     if a.length equals 0
         return b
     if b.length equals 0
         return a
-    last is a.char_at(a.length - 1)
-    if last equals 47
-        a + b
-    else
-        a + "/" + b
+    a.char_at(a.length - 1) equals SLASH ? a + b ! a + "/" + b
 
-*path_dir(path as String)
-    i is path.length - 1
+*join3(a as String, b as String, c as String)
+    join(join(a, b), c)
+
+*dir(path as String)
+    if path.length equals 0
+        return "."
+    # Strip trailing slashes
+    last is path.length
+    while last > 1 and path.char_at(last - 1) equals SLASH
+        last is last - 1
+    i is last - 1
     while i >= 0
-        if path.char_at(i) equals 47
+        if path.char_at(i) equals SLASH
+            if i equals 0
+                return "/"
             return path.slice(0, i)
         i is i - 1
     "."
 
-*path_base(path as String)
-    i is path.length - 1
+*base(path as String)
+    if path.length equals 0
+        return ""
+    # Strip trailing slashes
+    last is path.length
+    while last > 1 and path.char_at(last - 1) equals SLASH
+        last is last - 1
+    i is last - 1
     while i >= 0
-        if path.char_at(i) equals 47
-            return path.slice(i + 1, path.length)
+        if path.char_at(i) equals SLASH
+            return path.slice(i + 1, last)
         i is i - 1
-    path
+    path.slice(0, last)
 
-*path_ext(path as String)
-    base is path_base(path)
-    i is base.length - 1
-    while i >= 0
-        if base.char_at(i) equals 46
-            return base.slice(i, base.length)
+*ext(path as String)
+    b is base(path)
+    i is b.length - 1
+    while i > 0
+        if b.char_at(i) equals DOT
+            return b.slice(i, b.length)
         i is i - 1
     ""
+
+*stem(path as String)
+    b is base(path)
+    i is b.length - 1
+    while i > 0
+        if b.char_at(i) equals DOT
+            return b.slice(0, i)
+        i is i - 1
+    b
+
+*with_ext(path as String, new_ext as String)
+    s is stem(path)
+    d is dir(path)
+    if new_ext.length equals 0
+        return join(d, s)
+    if new_ext.char_at(0) neq DOT
+        return join(d, s + "." + new_ext)
+    join(d, s + new_ext)
+
+*is_absolute(path as String)
+    path.length > 0 and path.char_at(0) equals SLASH
+
+*is_relative(path as String)
+    not is_absolute(path)
+
+*normalize(p as String) returns String
+    parts is p.split("/")
+    result is vec()
+    loop parts
+        __normalize_part(result, $)
+    out is ""
+    loop result
+        if $$ > 0
+            out is out + "/"
+        out is out + $
+    if p.length > 0 and p.char_at(0) equals SLASH
+        return "/" + out
+    if out.length equals 0
+        return "."
+    out
+
+*__normalize_part(result as Vec of String, part as String)
+    if part equals ".."
+        if result.length > 0 and result.get(result.length - 1) neq ".."
+            result.pop()
+            return
+        result.push(part)
+        return
+    if part neq "." and part.length > 0
+        result.push(part)

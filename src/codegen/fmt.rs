@@ -51,7 +51,7 @@ impl<'ctx> Compiler<'ctx> {
         .unwrap();
         let buf_ptr = buf.into_pointer_value();
 
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let loop_bb = self.ctx.append_basic_block(fv, "fb.loop");
         let body_bb = self.ctx.append_basic_block(fv, "fb.body");
         let done_bb = self.ctx.append_basic_block(fv, "fb.done");

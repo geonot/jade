@@ -4,17 +4,19 @@
 ///
 /// Handles: function declarations, typedefs (ignored), structs (comments), macros (ignored).
 /// Does NOT handle: templates, C++ features, complex macros, inline functions.
-
 use std::fs;
 use std::path::Path;
 
 pub fn bind_header(path: &Path) -> Result<String, String> {
-    let src = fs::read_to_string(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let src =
+        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
 
     let cleaned = strip_preprocessor(&strip_comments(&src));
     let mut out = String::new();
-    out.push_str(&format!("// Auto-generated Jade bindings from {}\n\n", path.display()));
+    out.push_str(&format!(
+        "// Auto-generated Jade bindings from {}\n\n",
+        path.display()
+    ));
 
     for decl in parse_declarations(&cleaned) {
         match decl {
@@ -200,18 +202,31 @@ fn join_declarations(src: &str) -> String {
 fn try_parse_struct_name(line: &str) -> Option<String> {
     let line = line.trim();
     // "struct Foo {" or "typedef struct Foo {"
-    let rest = line.strip_prefix("typedef").map(|s| s.trim()).unwrap_or(line);
+    let rest = line
+        .strip_prefix("typedef")
+        .map(|s| s.trim())
+        .unwrap_or(line);
     let rest = rest.strip_prefix("struct")?.trim();
-    let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next()?;
-    if name.is_empty() { return None; }
+    let name = rest
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .next()?;
+    if name.is_empty() {
+        return None;
+    }
     Some(name.to_string())
 }
 
 fn try_parse_typedef_name(line: &str) -> Option<String> {
     // "typedef ... name;"
-    let line = line.strip_prefix("typedef")?.trim().strip_suffix(';')?.trim();
+    let line = line
+        .strip_prefix("typedef")?
+        .trim()
+        .strip_suffix(';')?
+        .trim();
     let name = line.rsplit_once(|c: char| c.is_whitespace() || c == '*')?.1;
-    if name.is_empty() { return None; }
+    if name.is_empty() {
+        return None;
+    }
     Some(name.to_string())
 }
 
@@ -223,7 +238,9 @@ fn try_parse_function(line: &str) -> Option<CFn> {
     // Find the function name and params: "ret_type name(params)"
     let lparen = line.find('(')?;
     let rparen = line.rfind(')')?;
-    if rparen <= lparen { return None; }
+    if rparen <= lparen {
+        return None;
+    }
 
     let before_paren = line[..lparen].trim();
     let params_str = line[lparen + 1..rparen].trim();
@@ -240,13 +257,26 @@ fn try_parse_function(line: &str) -> Option<CFn> {
     let ret = parse_c_type(ret_str.trim());
     let params = parse_params(params_str);
 
-    Some(CFn { name: name.to_string(), ret, params })
+    Some(CFn {
+        name: name.to_string(),
+        ret,
+        params,
+    })
 }
 
 fn strip_qualifiers(line: &str) -> &str {
     let mut line = line;
-    for q in &["extern", "static", "inline", "__attribute__((visibility(\"default\")))",
-               "const", "__restrict", "restrict", "__inline", "__extern_always_inline"] {
+    for q in &[
+        "extern",
+        "static",
+        "inline",
+        "__attribute__((visibility(\"default\")))",
+        "const",
+        "__restrict",
+        "restrict",
+        "__inline",
+        "__extern_always_inline",
+    ] {
         line = line.strip_prefix(q).map(|s| s.trim_start()).unwrap_or(line);
     }
     line
@@ -260,7 +290,9 @@ fn split_ret_and_name(s: &str) -> Option<(&str, &str)> {
     let last_space = s.rfind(|c: char| c.is_whitespace() || c == '*')?;
     let name = s[last_space + 1..].trim();
     let ret = s[..last_space + 1].trim();
-    if name.is_empty() { return None; }
+    if name.is_empty() {
+        return None;
+    }
     Some((ret, name))
 }
 
@@ -381,15 +413,29 @@ fn parse_single_param(s: &str) -> Option<CParam> {
 }
 
 fn is_type_keyword(s: &str) -> bool {
-    matches!(s, "int" | "char" | "void" | "short" | "long" | "float" | "double"
-        | "signed" | "unsigned" | "struct" | "enum" | "union")
+    matches!(
+        s,
+        "int"
+            | "char"
+            | "void"
+            | "short"
+            | "long"
+            | "float"
+            | "double"
+            | "signed"
+            | "unsigned"
+            | "struct"
+            | "enum"
+            | "union"
+    )
 }
 
 fn sanitize_name(name: &str) -> String {
     // Jade reserved words get suffixed with _
-    let reserved = ["fn", "let", "if", "else", "for", "while", "loop", "match",
-                     "return", "break", "continue", "type", "enum", "use", "as",
-                     "true", "false", "none", "and", "or", "not", "in", "is"];
+    let reserved = [
+        "fn", "let", "if", "else", "for", "while", "loop", "match", "return", "break", "continue",
+        "type", "enum", "use", "as", "true", "false", "none", "and", "or", "not", "in", "is",
+    ];
     let name = name.trim_start_matches('*');
     if reserved.contains(&name) {
         format!("{name}_")
@@ -407,8 +453,13 @@ fn ctype_to_jade(ty: &CType) -> String {
         CType::UShort | CType::UInt16 => "i16".to_string(),
         CType::Int | CType::Int32 => "i32".to_string(),
         CType::UInt | CType::UInt32 => "i32".to_string(),
-        CType::Long | CType::LongLong | CType::ULong | CType::ULongLong
-        | CType::SizeT | CType::Int64 | CType::UInt64 => "i64".to_string(),
+        CType::Long
+        | CType::LongLong
+        | CType::ULong
+        | CType::ULongLong
+        | CType::SizeT
+        | CType::Int64
+        | CType::UInt64 => "i64".to_string(),
         CType::Float => "f32".to_string(),
         CType::Double => "f64".to_string(),
         CType::Ptr(inner) => format!("%{}", ctype_to_jade(inner)),
@@ -421,7 +472,9 @@ fn emit_extern(f: &CFn) -> String {
     out.push_str(&f.name);
     out.push('(');
     for (i, p) in f.params.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         out.push_str(&p.name);
         out.push_str(" as ");
         out.push_str(&ctype_to_jade(&p.ty));

@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use inkwell::module::Linkage;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
@@ -14,7 +15,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         w: &hir::While,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let cond_bb = self.ctx.append_basic_block(fv, "wh.cond");
         let body_bb = self.ctx.append_basic_block(fv, "wh.body");
         let end_bb = self.ctx.append_basic_block(fv, "wh.end");
@@ -64,7 +65,7 @@ impl<'ctx> Compiler<'ctx> {
                 return self.compile_for_string(f);
             }
         }
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let start_val = if f.end.is_some() {
             self.compile_expr(&f.iter)?
@@ -172,7 +173,7 @@ impl<'ctx> Compiler<'ctx> {
         array_gep_ty: Option<inkwell::types::ArrayType<'ctx>>,
         prefix: &str,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
 
@@ -244,7 +245,7 @@ impl<'ctx> Compiler<'ctx> {
         f: &hir::For,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
         self.declare_gen_runtime();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
 
@@ -259,9 +260,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Resume the generator
         let gen_resume = self.module.get_function("jade_gen_resume").unwrap();
-        b!(self
-            .bld
-            .build_call(gen_resume, &[gen_ptr.into()], ""));
+        b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // Check if done
         let done_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_DONE_OFF, "forgen.done")?;
@@ -304,7 +303,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile_for_string(&mut self, f: &hir::For) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i8t = self.ctx.i8_type();
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
@@ -358,13 +357,13 @@ impl<'ctx> Compiler<'ctx> {
         let cp_trunc = i64t.const_int(0xFFFD, false);
         let adv_trunc = i64t.const_int(1, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
-        let trunc_bb_end = self.bld.get_insert_block().unwrap();
+        let trunc_bb_end = self.current_bb();
 
         self.bld.position_at_end(ascii_bb);
         let cp_ascii = b!(self.bld.build_int_z_extend(b0_32, i64t, "cp_a"));
         let adv_ascii = i64t.const_int(1, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
-        let ascii_bb_end = self.bld.get_insert_block().unwrap();
+        let ascii_bb_end = self.current_bb();
 
         self.bld.position_at_end(multi_bb);
         let is_2byte = b!(self.bld.build_int_compare(
@@ -409,7 +408,7 @@ impl<'ctx> Compiler<'ctx> {
         let cp_2b = b!(self.bld.build_int_z_extend(cp_2b_32, i64t, "cp2"));
         let adv_2 = i64t.const_int(2, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
-        let two_bb_end = self.bld.get_insert_block().unwrap();
+        let two_bb_end = self.current_bb();
 
         self.bld.position_at_end(three_plus_bb);
         let is_3byte = b!(self.bld.build_int_compare(
@@ -466,7 +465,7 @@ impl<'ctx> Compiler<'ctx> {
         let cp_3b = b!(self.bld.build_int_z_extend(cp3_32, i64t, "cp3"));
         let adv_3 = i64t.const_int(3, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
-        let three_bb_end = self.bld.get_insert_block().unwrap();
+        let three_bb_end = self.current_bb();
 
         self.bld.position_at_end(four_bb);
         let need_4 = b!(self
@@ -523,7 +522,7 @@ impl<'ctx> Compiler<'ctx> {
         let cp_4b = b!(self.bld.build_int_z_extend(cp4_32, i64t, "cp4"));
         let adv_4 = i64t.const_int(4, false);
         b!(self.bld.build_unconditional_branch(merge_bb));
-        let four_bb_end = self.bld.get_insert_block().unwrap();
+        let four_bb_end = self.current_bb();
 
         self.bld.position_at_end(merge_bb);
         let cp_phi = b!(self.bld.build_phi(i64t, "cp"));
@@ -571,7 +570,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         l: &hir::Loop,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let body_bb = self.ctx.append_basic_block(fv, "loop");
         let end_bb = self.ctx.append_basic_block(fv, "loop.end");
         b!(self.bld.build_unconditional_branch(body_bb));
@@ -607,7 +606,7 @@ impl<'ctx> Compiler<'ctx> {
         let _i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
         let void = self.ctx.void_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         // Compute range bounds
         let start_val = if f.end.is_some() {
@@ -637,7 +636,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let saved_fn = self.cur_fn;
         let saved_bb = self.bld.get_insert_block();
-        let saved_vars = std::mem::replace(&mut self.vars, vec![std::collections::HashMap::new()]);
+        let saved_vars = std::mem::replace(&mut self.vars, IndexMap::new());
+        let saved_shadows = std::mem::replace(&mut self.var_shadows, Vec::new());
+        let saved_markers = std::mem::replace(&mut self.var_scope_markers, Vec::new());
         let saved_loop_stack = std::mem::replace(&mut self.loop_stack, Vec::new());
 
         self.cur_fn = Some(iter_fn);
@@ -659,7 +660,8 @@ impl<'ctx> Compiler<'ctx> {
                 "counter_pp"
             ))
         };
-        let counter_ptr = b!(self.bld.build_load(ptr, counter_ptr_ptr, "counter_ptr")).into_pointer_value();
+        let counter_ptr =
+            b!(self.bld.build_load(ptr, counter_ptr_ptr, "counter_ptr")).into_pointer_value();
 
         // Set up the loop variable
         let lvar = self.entry_alloca(i64t.into(), &f.bind);
@@ -686,6 +688,8 @@ impl<'ctx> Compiler<'ctx> {
         // Restore caller context
         self.cur_fn = saved_fn;
         self.vars = saved_vars;
+        self.var_shadows = saved_shadows;
+        self.var_scope_markers = saved_markers;
         self.loop_stack = saved_loop_stack;
 
         let bb = saved_bb.unwrap_or_else(|| self.ctx.append_basic_block(fv, "sim.after"));
@@ -693,7 +697,9 @@ impl<'ctx> Compiler<'ctx> {
 
         // Allocate atomic counter
         let counter_alloca = self.entry_alloca(i64t.into(), "sim.counter");
-        b!(self.bld.build_store(counter_alloca, i64t.const_int(0, false)));
+        b!(self
+            .bld
+            .build_store(counter_alloca, i64t.const_int(0, false)));
 
         let malloc_fn = self.ensure_malloc();
         let coro_create = self.module.get_function("jade_coro_create").unwrap();
@@ -711,8 +717,12 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(spawn_cond));
         self.bld.position_at_end(spawn_cond);
         let cur_i = b!(self.bld.build_load(i64t, spawn_var, "si")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(IntPredicate::SLT, cur_i, end_val, "sim.cmp"));
-        b!(self.bld.build_conditional_branch(cmp, spawn_body, spawn_done));
+        let cmp = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, cur_i, end_val, "sim.cmp"));
+        b!(self
+            .bld
+            .build_conditional_branch(cmp, spawn_body, spawn_done));
 
         self.bld.position_at_end(spawn_body);
 
@@ -725,15 +735,14 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         // Allocate arg struct (16 bytes: i64 iter_val, ptr counter)
-        let arg_mem = b!(self.bld.build_call(
-            malloc_fn,
-            &[i64t.const_int(16, false).into()],
-            "sim.arg"
-        ))
-        .try_as_basic_value()
-        .basic()
-        .unwrap()
-        .into_pointer_value();
+        let arg_mem =
+            b!(self
+                .bld
+                .build_call(malloc_fn, &[i64t.const_int(16, false).into()], "sim.arg"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
 
         // Store iter_val at offset 0
         b!(self.bld.build_store(arg_mem, cur_i));
@@ -784,7 +793,9 @@ impl<'ctx> Compiler<'ctx> {
             "sim.alldone"
         ));
         let wait_yield = self.ctx.append_basic_block(fv, "sim.wait.yield");
-        b!(self.bld.build_conditional_branch(all_done, wait_done, wait_yield));
+        b!(self
+            .bld
+            .build_conditional_branch(all_done, wait_done, wait_yield));
 
         self.bld.position_at_end(wait_yield);
         let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
@@ -811,7 +822,7 @@ impl<'ctx> Compiler<'ctx> {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i64t = self.ctx.i64_type();
         let void = self.ctx.void_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         static SIM_BLK_COUNTER: std::sync::atomic::AtomicUsize =
             std::sync::atomic::AtomicUsize::new(0);
@@ -828,8 +839,9 @@ impl<'ctx> Compiler<'ctx> {
 
             let saved_fn = self.cur_fn;
             let saved_bb = self.bld.get_insert_block();
-            let saved_vars =
-                std::mem::replace(&mut self.vars, vec![std::collections::HashMap::new()]);
+            let saved_vars = std::mem::replace(&mut self.vars, IndexMap::new());
+            let saved_shadows = std::mem::replace(&mut self.var_shadows, Vec::new());
+            let saved_markers = std::mem::replace(&mut self.var_scope_markers, Vec::new());
             let saved_loop_stack = std::mem::replace(&mut self.loop_stack, Vec::new());
 
             self.cur_fn = Some(wrapper);
@@ -860,6 +872,8 @@ impl<'ctx> Compiler<'ctx> {
 
             self.cur_fn = saved_fn;
             self.vars = saved_vars;
+            self.var_shadows = saved_shadows;
+            self.var_scope_markers = saved_markers;
             self.loop_stack = saved_loop_stack;
             if let Some(bb) = saved_bb {
                 self.bld.position_at_end(bb);
@@ -871,7 +885,9 @@ impl<'ctx> Compiler<'ctx> {
         // Back in the caller: allocate atomic counter, spawn all, wait
         let counter_alloca = self.entry_alloca(i64t.into(), "simb.counter");
         let n = stmts.len() as u64;
-        b!(self.bld.build_store(counter_alloca, i64t.const_int(n, false)));
+        b!(self
+            .bld
+            .build_store(counter_alloca, i64t.const_int(n, false)));
 
         let malloc_fn = self.ensure_malloc();
         let coro_create = self.module.get_function("jade_coro_create").unwrap();
@@ -879,15 +895,14 @@ impl<'ctx> Compiler<'ctx> {
 
         for wrapper in &stmt_fns {
             // Allocate arg struct (8 bytes: just a pointer to counter)
-            let arg_mem = b!(self.bld.build_call(
-                malloc_fn,
-                &[i64t.const_int(8, false).into()],
-                "simb.arg"
-            ))
-            .try_as_basic_value()
-            .basic()
-            .unwrap()
-            .into_pointer_value();
+            let arg_mem =
+                b!(self
+                    .bld
+                    .build_call(malloc_fn, &[i64t.const_int(8, false).into()], "simb.arg"))
+                .try_as_basic_value()
+                .basic()
+                .unwrap()
+                .into_pointer_value();
 
             // Store counter_ptr
             b!(self.bld.build_store(arg_mem, counter_alloca));
@@ -913,8 +928,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(wait_cond));
 
         self.bld.position_at_end(wait_cond);
-        let remaining =
-            b!(self.bld.build_load(i64t, counter_alloca, "simb.rem")).into_int_value();
+        let remaining = b!(self.bld.build_load(i64t, counter_alloca, "simb.rem")).into_int_value();
         let all_done = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
             remaining,
@@ -922,7 +936,9 @@ impl<'ctx> Compiler<'ctx> {
             "simb.alldone"
         ));
         let wait_yield = self.ctx.append_basic_block(fv, "simb.wait.yield");
-        b!(self.bld.build_conditional_branch(all_done, wait_done, wait_yield));
+        b!(self
+            .bld
+            .build_conditional_branch(all_done, wait_done, wait_yield));
 
         self.bld.position_at_end(wait_yield);
         let sched_yield = self.module.get_function("jade_sched_yield").unwrap();

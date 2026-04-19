@@ -21,11 +21,17 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
         | ast::Expr::Ref(e, _)
         | ast::Expr::Deref(e, _)
         | ast::Expr::Yield(e, _)
+        | ast::Expr::Try(e, _)
         | ast::Expr::ChannelRecv(e, _)
         | ast::Expr::Field(e, _, _) => {
             collect_calls_expr(e, calls);
         }
-        ast::Expr::Method(recv, _, args, _) | ast::Expr::Send(recv, _, args, _) => {
+        ast::Expr::Method(recv, method, args, _) | ast::Expr::Send(recv, method, args, _) => {
+            // For module-qualified calls like math.factorial(x),
+            // add "math_factorial" as a call dependency
+            if let ast::Expr::Ident(name, _) = recv.as_ref() {
+                calls.insert(format!("{}_{}", name, method));
+            }
             collect_calls_expr(recv, calls);
             for a in args {
                 collect_calls_expr(a, calls);

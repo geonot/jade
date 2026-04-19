@@ -89,7 +89,7 @@ impl Cache {
         }
         let commit = if let Some(lock) = existing_lock {
             if let Some(entry) = lock.find(&dep.name) {
-                if entry.version.to_string() == dep.version.to_string() {
+                if entry.version == dep.version {
                     if !self.is_cached(dep) {
                         self.fetch(dep)?;
                     }

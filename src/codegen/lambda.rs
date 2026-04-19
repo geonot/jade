@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
+use inkwell::AddressSpace;
 use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType};
 use inkwell::values::BasicValueEnum;
-use inkwell::AddressSpace;
 
 use crate::hir;
 use crate::types::Type;
@@ -50,7 +49,10 @@ impl<'ctx> Compiler<'ctx> {
         // Build lambda function with env_ptr as first parameter
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let mut lp: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()]; // env_ptr
-        lp.extend(ptys.iter().map(|t| BasicMetadataTypeEnum::from(self.llvm_ty(t))));
+        lp.extend(
+            ptys.iter()
+                .map(|t| BasicMetadataTypeEnum::from(self.llvm_ty(t))),
+        );
         let ft = self.mk_fn_type(&ret_ty, &lp, false);
         let lambda_fv = self.module.add_function(&lambda_name, ft, None);
         lambda_fv.add_attribute(
@@ -78,7 +80,10 @@ impl<'ctx> Compiler<'ctx> {
                 .into_pointer_value();
             // Store captured values into environment
             for (i, (_, val, _)) in captures.iter().enumerate() {
-                let field_ptr = b!(self.bld.build_struct_gep(env_struct_ty, ep, i as u32, "env.field"));
+                let field_ptr =
+                    b!(self
+                        .bld
+                        .build_struct_gep(env_struct_ty, ep, i as u32, "env.field"));
                 b!(self.bld.build_store(field_ptr, *val));
             }
             ep
@@ -92,13 +97,16 @@ impl<'ctx> Compiler<'ctx> {
         self.cur_fn = Some(lambda_fv);
         let entry = self.ctx.append_basic_block(lambda_fv, "entry");
         self.bld.position_at_end(entry);
-        self.vars.push(HashMap::new());
+        self.push_var_scope();
 
         // Load captures from env struct (param 0 is env_ptr)
         let env_param = lambda_fv.get_nth_param(0).unwrap().into_pointer_value();
         for (i, (name, _, ty)) in captures.iter().enumerate() {
             let lt = self.llvm_ty(ty);
-            let field_ptr = b!(self.bld.build_struct_gep(env_struct_ty, env_param, i as u32, "env.load"));
+            let field_ptr =
+                b!(self
+                    .bld
+                    .build_struct_gep(env_struct_ty, env_param, i as u32, "env.load"));
             let val = b!(self.bld.build_load(lt, field_ptr, name));
             let a = self.entry_alloca(lt, name);
             b!(self.bld.build_store(a, val));
@@ -130,7 +138,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
         }
-        self.vars.pop();
+        self.pop_var_scope();
         self.cur_fn = saved_fn;
         if let Some(bb) = saved_bb {
             self.bld.position_at_end(bb);
@@ -148,10 +156,8 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ct = self.closure_type();
         let mut sv = ct.const_zero();
-        sv = b!(self.bld.build_insert_value(sv, fn_ptr, 0, "cl.fn"))
-            .into_struct_value();
-        sv = b!(self.bld.build_insert_value(sv, env_ptr, 1, "cl.env"))
-            .into_struct_value();
+        sv = b!(self.bld.build_insert_value(sv, fn_ptr, 0, "cl.fn")).into_struct_value();
+        sv = b!(self.bld.build_insert_value(sv, env_ptr, 1, "cl.env")).into_struct_value();
         Ok(sv.into())
     }
 
@@ -205,7 +211,7 @@ impl<'ctx> Compiler<'ctx> {
         match original_type.get_return_type() {
             Some(_) => {
                 self.bld
-                    .build_return(Some(&result.try_as_basic_value().basic().unwrap()))
+                    .build_return(Some(&self.call_result(result)))
                     .unwrap();
             }
             None => {

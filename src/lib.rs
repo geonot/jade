@@ -8,6 +8,7 @@ pub mod fmt;
 pub mod hir;
 pub mod hir_validate;
 pub mod incr;
+pub mod intern;
 pub mod interface;
 pub mod lexer;
 pub mod lock;
@@ -17,6 +18,7 @@ pub mod ownership;
 pub mod parser;
 pub mod perceus;
 pub mod pkg;
+pub mod resolve;
 pub mod typer;
 pub mod types;
 

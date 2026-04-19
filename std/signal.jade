@@ -1,5 +1,26 @@
 # std.signal — POSIX signal handling
-# Wraps signal builtins for module-qualified dispatch
+#
+# Usage:
+#   signal.handle(signal.SIGINT, fn() { log("interrupted") })
+#   signal.ignore(signal.SIGPIPE)
+
+# Signal constants (POSIX)
+SIGHUP is 1
+SIGINT is 2
+SIGQUIT is 3
+SIGILL is 4
+SIGABRT is 6
+SIGFPE is 8
+SIGKILL is 9
+SIGSEGV is 11
+SIGPIPE is 13
+SIGALRM is 14
+SIGTERM is 15
+SIGUSR1 is 10
+SIGUSR2 is 12
+SIGCHLD is 17
+SIGCONT is 18
+SIGSTOP is 19
 
 *handle(sig as i32, handler)
     signal_handle(sig, handler)

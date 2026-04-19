@@ -167,9 +167,16 @@ impl Typer {
     }
 
     pub(crate) fn declare_extern_sig(&mut self, ef: &ast::ExternFn) {
+        // Deduplicate externs by C symbol name
+        if self.externs.contains_key(&ef.name) {
+            return;
+        }
         let ptys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
         let id = self.fresh_id();
-        self.fns.insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
+        // Externs are ONLY registered in self.externs — accessed via extern.fn() syntax.
+        // They are never registered in self.fns to avoid namespace collisions.
+        self.externs
+            .insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
     }
 
     pub(crate) fn declare_err_def_sig(&mut self, ed: &ast::ErrDef) {
@@ -265,8 +272,12 @@ impl Typer {
                 }
             }
 
-            let trait_sigs = self.traits.get(trait_name).cloned()
-                .unwrap_or_else(|| panic!("ICE: trait '{}' not found during impl validation", trait_name));
+            let trait_sigs = self.traits.get(trait_name).cloned().unwrap_or_else(|| {
+                panic!(
+                    "ICE: trait '{}' not found during impl validation",
+                    trait_name
+                )
+            });
             let impl_method_names: Vec<&str> = ib.methods.iter().map(|m| m.name.as_str()).collect();
             for sig in &trait_sigs {
                 if !sig.has_default && !impl_method_names.contains(&sig.name.as_str()) {

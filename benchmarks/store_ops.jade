@@ -4,18 +4,14 @@ store records
 
 *main
     # Insert 10000 records
-    i is 0
-    while i < 10000
+    for i in 0 to 10000
         insert records i, i * 7
-        i is i + 1
 
     # Query 1000 times
     total is 0
-    j is 0
-    while j < 1000
+    for j in 0 to 1000
         r is records where key equals j
         total is total + r.value
-        j is j + 1
 
     log(total)
 

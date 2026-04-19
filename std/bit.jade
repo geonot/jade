@@ -1,0 +1,214 @@
+# std.bit — Bitwise operation utilities
+#
+# Provides rotate, popcount, leading/trailing zeros, bit field
+# extraction and manipulation, and other common bit operations.
+#
+# Usage:
+#   use bit
+#   x is bit.rotate_left(0xFF00, 8)
+#   n is bit.popcount(0xAA)
+#   bit.test(flags, 3)                 # test bit 3
+#   flags is bit.set(flags, 3)         # set bit 3
+#   flags is bit.clear(flags, 3)       # clear bit 3
+#   flags is bit.toggle(flags, 3)      # toggle bit 3
+
+# ── Rotation ─────────────────────────────────────────────────
+
+# Rotate left by n bits (64-bit).
+*rotate_left(val as i64, n as i64) returns i64
+    shift is n mod 64
+    if shift equals 0
+        return val
+    (val << shift) | ((val >> (64 - shift)) & ((1 << shift) - 1))
+
+# Rotate right by n bits (64-bit).
+*rotate_right(val as i64, n as i64) returns i64
+    shift is n mod 64
+    if shift equals 0
+        return val
+    ((val >> shift) & ((1 << (64 - shift)) - 1)) | (val << (64 - shift))
+
+# Rotate left by n bits (32-bit, lower 32 bits only).
+*rotate_left_32(val as i64, n as i64) returns i64
+    v is val & 4294967295
+    shift is n mod 32
+    if shift equals 0
+        return v
+    ((v << shift) | ((v >> (32 - shift)) & ((1 << shift) - 1))) & 4294967295
+
+# Rotate right by n bits (32-bit, lower 32 bits only).
+*rotate_right_32(val as i64, n as i64) returns i64
+    v is val & 4294967295
+    shift is n mod 32
+    if shift equals 0
+        return v
+    (((v >> shift) & ((1 << (32 - shift)) - 1)) | (v << (32 - shift))) & 4294967295
+
+# ── Bit counting ─────────────────────────────────────────────
+
+# Count the number of set bits (population count / Hamming weight).
+*popcount(val as i64) returns i64
+    n is val
+    count is 0
+    while n neq 0
+        count is count + (n & 1)
+        n is (n >> 1) & 9223372036854775807
+    count
+
+# Count leading zeros in lower 64 bits.
+*leading_zeros(val as i64) returns i64
+    if val equals 0
+        return 64
+    n is 0
+    x is val
+    if (x & -4294967296) equals 0
+        n is n + 32
+        x is x << 32
+    if (x & -281474976710656) equals 0
+        n is n + 16
+        x is x << 16
+    if (x & -72057594037927936) equals 0
+        n is n + 8
+        x is x << 8
+    if (x & -1152921504606846976) equals 0
+        n is n + 4
+        x is x << 4
+    if (x & -4611686018427387904) equals 0
+        n is n + 2
+        x is x << 2
+    if (x & -9223372036854775808) equals 0
+        n is n + 1
+    n
+
+# Count trailing zeros.
+*trailing_zeros(val as i64) returns i64
+    if val equals 0
+        return 64
+    n is 0
+    x is val
+    if (x & 4294967295) equals 0
+        n is n + 32
+        x is x >> 32
+    if (x & 65535) equals 0
+        n is n + 16
+        x is x >> 16
+    if (x & 255) equals 0
+        n is n + 8
+        x is x >> 8
+    if (x & 15) equals 0
+        n is n + 4
+        x is x >> 4
+    if (x & 3) equals 0
+        n is n + 2
+        x is x >> 2
+    if (x & 1) equals 0
+        n is n + 1
+    n
+
+# ── Single-bit operations ───────────────────────────────────
+
+# Test if bit at position pos is set.
+*test(val as i64, pos as i64) returns bool
+    (val & (1 << pos)) neq 0
+
+# Set bit at position pos.
+*set(val as i64, pos as i64) returns i64
+    val | (1 << pos)
+
+# Clear bit at position pos.
+*clear(val as i64, pos as i64) returns i64
+    val & (0 - 1 - (1 << pos))
+
+# Toggle bit at position pos.
+*toggle(val as i64, pos as i64) returns i64
+    val ^ (1 << pos)
+
+# ── Bit field operations ────────────────────────────────────
+
+# Extract a field of 'width' bits starting at bit position 'start'.
+*extract(val as i64, start as i64, width as i64) returns i64
+    (val >> start) & ((1 << width) - 1)
+
+# Insert a field value at bit position 'start' with given width.
+*insert(val as i64, start as i64, width as i64, field_val as i64) returns i64
+    mask is ((1 << width) - 1) << start
+    (val & (0 - 1 - mask)) | ((field_val & ((1 << width) - 1)) << start)
+
+# ── Byte operations ─────────────────────────────────────────
+
+# Reverse the bytes of a 32-bit value (endian swap).
+*byte_swap_32(val as i64) returns i64
+    v is val & 4294967295
+    b0 is v & 255
+    b1 is (v >> 8) & 255
+    b2 is (v >> 16) & 255
+    b3 is (v >> 24) & 255
+    (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+
+# Reverse the bytes of a 64-bit value (endian swap).
+*byte_swap_64(val as i64) returns i64
+    b0 is val & 255
+    b1 is (val >> 8) & 255
+    b2 is (val >> 16) & 255
+    b3 is (val >> 24) & 255
+    b4 is (val >> 32) & 255
+    b5 is (val >> 40) & 255
+    b6 is (val >> 48) & 255
+    b7 is (val >> 56) & 255
+    (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32) | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7
+
+# Reverse the bits of an 8-bit value.
+*reverse_bits_8(val as i64) returns i64
+    v is val & 255
+    v is ((v & 0xF0) >> 4) | ((v & 0x0F) << 4)
+    v is ((v & 0xCC) >> 2) | ((v & 0x33) << 2)
+    ((v & 0xAA) >> 1) | ((v & 0x55) << 1)
+
+# ── Power-of-two utilities ──────────────────────────────────
+
+# Check if a value is a power of two.
+*is_power_of_two(val as i64) returns bool
+    val > 0 and (val & (val - 1)) equals 0
+
+# Round up to the next power of two.
+*next_power_of_two(val as i64) returns i64
+    if val <= 1
+        return 1
+    v is val - 1
+    v is v | (v >> 1)
+    v is v | (v >> 2)
+    v is v | (v >> 4)
+    v is v | (v >> 8)
+    v is v | (v >> 16)
+    v is v | (v >> 32)
+    v + 1
+
+# Calculate floor(log2(val)).
+*log2(val as i64) returns i64
+    if val <= 0
+        return -1
+    63 - leading_zeros(val)
+
+# ── Masking utilities ───────────────────────────────────────
+
+# Create a bitmask of n consecutive 1-bits.
+*mask(n as i64) returns i64
+    if n >= 64
+        return -1
+    (1 << n) - 1
+
+# Create a bitmask from bit position lo to hi (inclusive).
+*range_mask(lo as i64, hi as i64) returns i64
+    width is hi - lo + 1
+    ((1 << width) - 1) << lo
+
+# ── Sign extension ──────────────────────────────────────────
+
+# Sign-extend a value from 'bits' width to 64 bits.
+*sign_extend(val as i64, bits as i64) returns i64
+    shift is 64 - bits
+    (val << shift) >> shift
+
+# Zero-extend (mask to n bits).
+*zero_extend(val as i64, bits as i64) returns i64
+    val & ((1 << bits) - 1)

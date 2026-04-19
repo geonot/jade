@@ -1,0 +1,239 @@
+# std.crypto — Cryptographic primitives
+#
+# Wraps OpenSSL libcrypto for hashing, HMAC, AES-GCM, and secure random.
+#
+# Usage:
+#   hash is crypto.sha256("hello")
+#   mac  is crypto.hmac_sha256(key, message)
+#   ct   is crypto.aes_encrypt(key, iv, plaintext)
+#   pt   is crypto.aes_decrypt(key, iv, ct.ciphertext, ct.tag)
+#   rand is crypto.random_bytes(32)
+
+# ── Extern bindings to runtime/crypto.c ─────────────────────
+
+extern *jade_sha256(data as %i8, len as i64, out as %i8) returns i32
+extern *jade_sha512(data as %i8, len as i64, out as %i8) returns i32
+extern *jade_hmac_sha256(key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i32
+extern *jade_aes_gcm_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
+extern *jade_aes_gcm_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
+extern *jade_random_bytes(buf as %i8, n as i64) returns i32
+extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+# ── Types ────────────────────────────────────────────────────
+
+type CipherResult
+    ciphertext as String
+    tag as String
+    ok as bool
+
+# ── Hashing ──────────────────────────────────────────────────
+
+# SHA-256 hash of a string. Returns 64-char hex digest.
+*sha256(data as String) returns String
+    out_buf is extern.malloc(32)
+    hex_buf is extern.malloc(65)
+    rc is extern.jade_sha256(%data, data.length, out_buf)
+    if rc neq 0
+        extern.free(out_buf)
+        extern.free(hex_buf)
+        return ""
+    extern.jade_bytes_to_hex(out_buf, 32, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(out_buf)
+    extern.free(hex_buf)
+    result
+
+# SHA-512 hash of a string. Returns 128-char hex digest.
+*sha512(data as String) returns String
+    out_buf is extern.malloc(64)
+    hex_buf is extern.malloc(129)
+    rc is extern.jade_sha512(%data, data.length, out_buf)
+    if rc neq 0
+        extern.free(out_buf)
+        extern.free(hex_buf)
+        return ""
+    extern.jade_bytes_to_hex(out_buf, 64, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(out_buf)
+    extern.free(hex_buf)
+    result
+
+# ── HMAC ─────────────────────────────────────────────────────
+
+# HMAC-SHA256. Returns 64-char hex digest.
+*hmac_sha256(key as String, data as String) returns String
+    out_buf is extern.malloc(32)
+    hex_buf is extern.malloc(65)
+    rc is extern.jade_hmac_sha256(%key, key.length, %data, data.length, out_buf)
+    if rc neq 0
+        extern.free(out_buf)
+        extern.free(hex_buf)
+        return ""
+    extern.jade_bytes_to_hex(out_buf, 32, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(out_buf)
+    extern.free(hex_buf)
+    result
+
+# ── AES-256-GCM ─────────────────────────────────────────────
+
+# Encrypt with AES-256-GCM.
+# key: 32-byte string, iv: 12-byte string.
+# Returns CipherResult with hex-encoded ciphertext and tag.
+*aes_encrypt(key as String, iv as String, plaintext as String) returns CipherResult
+    if key.length neq 32
+        return CipherResult(ciphertext is "", tag is "", ok is false)
+    if iv.length neq 12
+        return CipherResult(ciphertext is "", tag is "", ok is false)
+    ct_buf is extern.malloc(plaintext.length + 16)
+    tag_buf is extern.malloc(16)
+    ct_hex is extern.malloc(plaintext.length * 2 + 33)
+    tag_hex is extern.malloc(33)
+
+    ct_len is extern.jade_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %"", 0, ct_buf, tag_buf)
+    if ct_len < 0
+        extern.free(ct_buf)
+        extern.free(tag_buf)
+        extern.free(ct_hex)
+        extern.free(tag_hex)
+        return CipherResult(ciphertext is "", tag is "", ok is false)
+
+    extern.jade_bytes_to_hex(ct_buf, ct_len, ct_hex)
+    extern.jade_bytes_to_hex(tag_buf, 16, tag_hex)
+
+    ct_str is __string_from_ptr(ct_hex)
+    tag_str is __string_from_ptr(tag_hex)
+
+    extern.free(ct_buf)
+    extern.free(tag_buf)
+    extern.free(ct_hex)
+    extern.free(tag_hex)
+
+    CipherResult(ciphertext is ct_str, tag is tag_str, ok is true)
+
+# Encrypt with additional authenticated data (AAD).
+*aes_encrypt_aad(key as String, iv as String, plaintext as String, aad as String) returns CipherResult
+    if key.length neq 32
+        return CipherResult(ciphertext is "", tag is "", ok is false)
+    if iv.length neq 12
+        return CipherResult(ciphertext is "", tag is "", ok is false)
+    ct_buf is extern.malloc(plaintext.length + 16)
+    tag_buf is extern.malloc(16)
+    ct_hex is extern.malloc(plaintext.length * 2 + 33)
+    tag_hex is extern.malloc(33)
+
+    ct_len is extern.jade_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    if ct_len < 0
+        extern.free(ct_buf)
+        extern.free(tag_buf)
+        extern.free(ct_hex)
+        extern.free(tag_hex)
+        return CipherResult(ciphertext is "", tag is "", ok is false)
+
+    extern.jade_bytes_to_hex(ct_buf, ct_len, ct_hex)
+    extern.jade_bytes_to_hex(tag_buf, 16, tag_hex)
+
+    ct_str is __string_from_ptr(ct_hex)
+    tag_str is __string_from_ptr(tag_hex)
+
+    extern.free(ct_buf)
+    extern.free(tag_buf)
+    extern.free(ct_hex)
+    extern.free(tag_hex)
+
+    CipherResult(ciphertext is ct_str, tag is tag_str, ok is true)
+
+# Decrypt with AES-256-GCM.
+# key: 32-byte string, iv: 12-byte string
+# ciphertext: hex-encoded, tag: hex-encoded (32 hex chars = 16 bytes)
+# Returns decrypted plaintext or empty string on failure/auth error.
+*aes_decrypt(key as String, iv as String, ciphertext_hex as String, tag_hex as String) returns String
+    if key.length neq 32
+        return ""
+    if iv.length neq 12
+        return ""
+    ct_len is ciphertext_hex.length / 2
+    ct_buf is extern.malloc(ct_len)
+    tag_buf is extern.malloc(16)
+    pt_buf is extern.malloc(ct_len + 1)
+
+    # Decode hex to raw bytes
+    __hex_decode_into(ciphertext_hex, ct_buf)
+    __hex_decode_into(tag_hex, tag_buf)
+
+    pt_len is extern.jade_aes_gcm_decrypt(%key, %iv, ct_buf, ct_len, %"", 0, tag_buf, pt_buf)
+
+    if pt_len < 0
+        extern.free(ct_buf)
+        extern.free(tag_buf)
+        extern.free(pt_buf)
+        return ""
+
+    # Build string from decrypted bytes
+    result is __string_from_ptr_len(pt_buf, pt_len)
+
+    extern.free(ct_buf)
+    extern.free(tag_buf)
+    extern.free(pt_buf)
+    result
+
+# ── Random ───────────────────────────────────────────────────
+
+# Generate n random bytes as a hex string.
+*random_hex(n as i64) returns String
+    buf is extern.malloc(n)
+    hex_buf is extern.malloc(n * 2 + 1)
+    rc is extern.jade_random_bytes(buf, n)
+    if rc neq 0
+        extern.free(buf)
+        extern.free(hex_buf)
+        return ""
+    extern.jade_bytes_to_hex(buf, n, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(buf)
+    extern.free(hex_buf)
+    result
+
+# Generate a random 32-byte (256-bit) key as hex.
+*random_key returns String
+    random_hex(32)
+
+# Generate a random 12-byte IV (nonce) as hex.
+*random_iv returns String
+    random_hex(12)
+
+# ── Utilities ────────────────────────────────────────────────
+
+# Constant-time string comparison (to prevent timing attacks).
+*secure_compare(a as String, b as String) returns bool
+    if a.length neq b.length
+        return false
+    result is 0
+    i is 0
+    while i < a.length
+        result is result | (a.char_at(i) ^ b.char_at(i))
+        i is i + 1
+    result equals 0
+
+# ── Internal hex decode ──────────────────────────────────────
+
+*__hex_val(ch as i64) returns i64
+    # '0'-'9' = 48-57, 'a'-'f' = 97-102, 'A'-'F' = 65-70
+    if ch >= 48 and ch <= 57
+        return ch - 48
+    if ch >= 97 and ch <= 102
+        return ch - 87
+    if ch >= 65 and ch <= 70
+        return ch - 55
+    0
+
+*__hex_decode_into(hex as String, buf as %i8)
+    i is 0
+    while i < hex.length / 2
+        hi is __hex_val(hex.char_at(i * 2))
+        lo is __hex_val(hex.char_at(i * 2 + 1))
+        # Store byte via write to pointer offset
+        __ptr_set_byte(buf, i, (hi << 4) | lo)
+        i is i + 1

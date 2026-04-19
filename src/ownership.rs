@@ -230,6 +230,9 @@ impl OwnershipVerifier {
                 }
             }
             Stmt::StoreDelete(_, _, _) => {}
+            Stmt::StoreDestroy(_, _, _) => {}
+            Stmt::StoreRestore(_, _, _) => {}
+            Stmt::StoreSave(_, _) => {}
             Stmt::StoreSet(_, assigns, _, _) => {
                 for (_, e) in assigns {
                     self.verify_expr(e);
@@ -246,8 +249,12 @@ impl OwnershipVerifier {
             }
             Stmt::SimFor(f, _) => {
                 self.verify_expr(&f.iter);
-                if let Some(end) = &f.end { self.verify_expr(end); }
-                if let Some(step) = &f.step { self.verify_expr(step); }
+                if let Some(end) = &f.end {
+                    self.verify_expr(end);
+                }
+                if let Some(step) = &f.step {
+                    self.verify_expr(step);
+                }
                 self.push_scope();
                 self.define(
                     f.bind_id,
@@ -267,6 +274,9 @@ impl OwnershipVerifier {
                 self.verify_block_no_scope(b);
             }
             Stmt::UseLocal(_, _, _, _) => {}
+            Stmt::GlobalStore(_, e, _) => {
+                self.verify_expr(e);
+            }
         }
     }
 
@@ -284,6 +294,8 @@ impl OwnershipVerifier {
             }
 
             ExprKind::FnRef(_, _) => {}
+
+            ExprKind::GlobalLoad(_) => {}
 
             ExprKind::VariantRef(_, _, _) => {}
 
@@ -326,7 +338,8 @@ impl OwnershipVerifier {
                 }
             }
 
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            ExprKind::Method(obj, _, _, args)
+            | ExprKind::StringMethod(obj, _, args)
             | ExprKind::DeferredMethod(obj, _, args) => {
                 self.verify_expr(obj);
                 for a in args {
@@ -415,6 +428,9 @@ impl OwnershipVerifier {
                                 span: expr.span,
                                 message: "lambda captures already-moved value".into(),
                             });
+                        } else if state.ownership == Ownership::Owned {
+                            // Capturing an owned variable constitutes a move
+                            self.record_move(*cap_id, expr.span);
                         }
                     }
                 }
@@ -431,6 +447,25 @@ impl OwnershipVerifier {
                             move_span: None,
                         },
                     );
+                }
+                // Define captured variables as available in the lambda scope
+                for cap_id in &captured_ids {
+                    if param_ids.contains(cap_id) || *cap_id == DefId::BUILTIN {
+                        continue;
+                    }
+                    if let Some(state) = self.lookup(*cap_id) {
+                        self.define(
+                            *cap_id,
+                            VarState {
+                                ownership: state.ownership,
+                                ty: state.ty.clone(),
+                                moved: false,
+                                borrow_count: 0,
+                                mut_borrowed: false,
+                                move_span: None,
+                            },
+                        );
+                    }
                 }
                 self.verify_block_no_scope(body);
                 self.pop_scope();
@@ -475,7 +510,23 @@ impl OwnershipVerifier {
                 }
             }
 
-            ExprKind::StoreQuery(_, _) | ExprKind::StoreCount(_) | ExprKind::StoreAll(_) => {}
+            ExprKind::StoreQuery(_, _)
+            | ExprKind::StoreCount(_)
+            | ExprKind::StoreAll(_)
+            | ExprKind::ViewCount(_, _)
+            | ExprKind::ViewAll(_, _)
+            | ExprKind::StoreDistinct(_, _)
+            | ExprKind::StoreSum(_, _)
+            | ExprKind::StoreAvg(_, _)
+            | ExprKind::StoreMin(_, _)
+            | ExprKind::StoreMax(_, _)
+            | ExprKind::StoreVersionCount(_, _)
+            | ExprKind::StoreHistory(_, _)
+            | ExprKind::StoreAtVersion(_, _, _) => {}
+            ExprKind::StoreGet(_, key) => {
+                self.verify_expr(key);
+            }
+            ExprKind::StoreFirst(_, _) | ExprKind::StoreExists(_, _) => {}
             ExprKind::CoroutineCreate(_, body) => {
                 self.verify_block(body);
             }
@@ -496,8 +547,15 @@ impl OwnershipVerifier {
                     self.verify_expr(a);
                 }
             }
-            ExprKind::MapNew | ExprKind::SetNew | ExprKind::PQNew | ExprKind::NDArrayNew(_) | ExprKind::SIMDNew(_) => {}
-            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args) => {
+            ExprKind::MapNew
+            | ExprKind::SetNew
+            | ExprKind::PQNew
+            | ExprKind::NDArrayNew(_)
+            | ExprKind::SIMDNew(_) => {}
+            ExprKind::VecMethod(obj, _, args)
+            | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args)
+            | ExprKind::PQMethod(obj, _, args) => {
                 self.verify_expr(obj);
                 for a in args {
                     self.verify_expr(a);
@@ -513,6 +571,8 @@ impl OwnershipVerifier {
                 // Sending through a channel constitutes a move
                 if let ExprKind::Var(def_id, _name) = &val.kind {
                     self.record_move(*def_id, val.span);
+                } else if let Some((root_id, _)) = Self::extract_root_var(val) {
+                    self.record_move(root_id, val.span);
                 }
             }
             ExprKind::ChannelRecv(ch) => {
@@ -531,7 +591,9 @@ impl OwnershipVerifier {
                 }
             }
             ExprKind::Unreachable => {}
-            ExprKind::StrictCast(inner, _) | ExprKind::AsFormat(inner, _) | ExprKind::AtomicLoad(inner) => {
+            ExprKind::StrictCast(inner, _)
+            | ExprKind::AsFormat(inner, _)
+            | ExprKind::AtomicLoad(inner) => {
                 self.verify_expr(inner);
             }
             ExprKind::AtomicStore(a, b) | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
@@ -551,20 +613,48 @@ impl OwnershipVerifier {
             ExprKind::DequeNew => {}
             ExprKind::DequeMethod(obj, _, args) => {
                 self.verify_expr(obj);
-                for a in args { self.verify_expr(a); }
+                for a in args {
+                    self.verify_expr(a);
+                }
             }
-            ExprKind::Grad(e) | ExprKind::CowWrap(e) | ExprKind::CowClone(e) | ExprKind::GeneratorNext(e) => {
+            ExprKind::Grad(e)
+            | ExprKind::CowWrap(e)
+            | ExprKind::CowClone(e)
+            | ExprKind::GeneratorNext(e)
+            | ExprKind::EnumUnwrap(e, _, _)
+            | ExprKind::EnumIs(e, _) => {
                 self.verify_expr(e);
             }
             ExprKind::Einsum(_, args) => {
-                for a in args { self.verify_expr(a); }
+                for a in args {
+                    self.verify_expr(a);
+                }
             }
             ExprKind::Builder(_, fields) => {
-                for (_, v) in fields { self.verify_expr(v); }
+                for (_, v) in fields {
+                    self.verify_expr(v);
+                }
             }
             ExprKind::GeneratorCreate(_, _, stmts) => {
                 self.verify_block(stmts);
             }
+            ExprKind::KvGet(_, e) | ExprKind::KvHas(_, e) | ExprKind::KvDel(_, e) => {
+                self.verify_expr(e)
+            }
+            ExprKind::KvSet(_, k, v) | ExprKind::KvIncr(_, k, v) => {
+                self.verify_expr(k);
+                self.verify_expr(v);
+            }
+            ExprKind::KvCount(_) | ExprKind::TsLatest(_) => {}
+            ExprKind::VecNearest(_, v, k) => {
+                self.verify_expr(v);
+                self.verify_expr(k);
+            }
+            ExprKind::VecInsert(_, v) => self.verify_expr(v),
+            ExprKind::VecCount(_) | ExprKind::FtsCount(_, _) => {}
+            ExprKind::BloomTest(_, _, v) => self.verify_expr(v),
+            ExprKind::FtsSearch(_, _, v) => self.verify_expr(v),
+            ExprKind::GraphFrom(_, e) | ExprKind::GraphTo(_, e) => self.verify_expr(e),
         }
     }
 
@@ -722,8 +812,8 @@ impl OwnershipVerifier {
 
     fn check_return_borrows(&mut self, expr: &Expr, span: crate::ast::Span) {
         if let ExprKind::Ref(inner) = &expr.kind {
-            if let ExprKind::Var(def_id, name) = &inner.kind {
-                if let Some(state) = self.lookup(*def_id) {
+            if let Some((def_id, name)) = Self::extract_root_var(inner) {
+                if let Some(state) = self.lookup(def_id) {
                     if state.ownership == Ownership::Owned {
                         self.diagnostics.push(OwnershipDiag {
                             kind: DiagKind::ReturnOfBorrowed,
@@ -736,6 +826,16 @@ impl OwnershipVerifier {
                     }
                 }
             }
+        }
+    }
+
+    /// Extract the root variable from an expression (follows field access and index chains).
+    fn extract_root_var(expr: &Expr) -> Option<(DefId, String)> {
+        match &expr.kind {
+            ExprKind::Var(def_id, name) => Some((*def_id, name.clone())),
+            ExprKind::Field(obj, _, _) => Self::extract_root_var(obj),
+            ExprKind::Index(obj, _) => Self::extract_root_var(obj),
+            _ => None,
         }
     }
 
@@ -792,27 +892,40 @@ impl OwnershipVerifier {
 
     fn collect_var_ids_expr(e: &Expr, out: &mut std::collections::HashSet<DefId>) {
         match &e.kind {
-            ExprKind::Var(def_id, _) => { out.insert(*def_id); }
+            ExprKind::Var(def_id, _) => {
+                out.insert(*def_id);
+            }
             ExprKind::BinOp(l, _, r) | ExprKind::Index(l, r) => {
                 Self::collect_var_ids_expr(l, out);
                 Self::collect_var_ids_expr(r, out);
             }
-            ExprKind::UnaryOp(_, inner) | ExprKind::Coerce(inner, _)
-            | ExprKind::Cast(inner, _) | ExprKind::Ref(inner) | ExprKind::Deref(inner) => {
+            ExprKind::UnaryOp(_, inner)
+            | ExprKind::Coerce(inner, _)
+            | ExprKind::Cast(inner, _)
+            | ExprKind::Ref(inner)
+            | ExprKind::Deref(inner) => {
                 Self::collect_var_ids_expr(inner, out);
             }
             ExprKind::Call(_, _, args) | ExprKind::Builtin(_, args) | ExprKind::Syscall(args) => {
-                for a in args { Self::collect_var_ids_expr(a, out); }
+                for a in args {
+                    Self::collect_var_ids_expr(a, out);
+                }
             }
             ExprKind::IndirectCall(callee, args) => {
                 Self::collect_var_ids_expr(callee, out);
-                for a in args { Self::collect_var_ids_expr(a, out); }
+                for a in args {
+                    Self::collect_var_ids_expr(a, out);
+                }
             }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
+            ExprKind::Method(obj, _, _, args)
+            | ExprKind::StringMethod(obj, _, args)
             | ExprKind::DeferredMethod(obj, _, args)
-            | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
+            | ExprKind::VecMethod(obj, _, args)
+            | ExprKind::MapMethod(obj, _, args) => {
                 Self::collect_var_ids_expr(obj, out);
-                for a in args { Self::collect_var_ids_expr(a, out); }
+                for a in args {
+                    Self::collect_var_ids_expr(a, out);
+                }
             }
             ExprKind::Field(e, _, _) => Self::collect_var_ids_expr(e, out),
             ExprKind::Ternary(c, t, f) => {
@@ -821,12 +934,17 @@ impl OwnershipVerifier {
                 Self::collect_var_ids_expr(f, out);
             }
             ExprKind::Array(es) | ExprKind::Tuple(es) | ExprKind::VecNew(es) => {
-                for e in es { Self::collect_var_ids_expr(e, out); }
+                for e in es {
+                    Self::collect_var_ids_expr(e, out);
+                }
             }
             ExprKind::Struct(_, inits) | ExprKind::VariantCtor(_, _, _, inits) => {
-                for fi in inits { Self::collect_var_ids_expr(&fi.value, out); }
+                for fi in inits {
+                    Self::collect_var_ids_expr(&fi.value, out);
+                }
             }
-            ExprKind::Lambda(_, body) | ExprKind::CoroutineCreate(_, body)
+            ExprKind::Lambda(_, body)
+            | ExprKind::CoroutineCreate(_, body)
             | ExprKind::GeneratorCreate(_, _, body) => {
                 Self::collect_var_ids_block(body, out);
             }
@@ -844,7 +962,9 @@ impl OwnershipVerifier {
             }
             ExprKind::Pipe(left, _, _, extra) => {
                 Self::collect_var_ids_expr(left, out);
-                for a in extra { Self::collect_var_ids_expr(a, out); }
+                for a in extra {
+                    Self::collect_var_ids_expr(a, out);
+                }
             }
             ExprKind::ChannelSend(ch, val) => {
                 Self::collect_var_ids_expr(ch, out);
@@ -853,7 +973,9 @@ impl OwnershipVerifier {
             ExprKind::ChannelRecv(ch) => Self::collect_var_ids_expr(ch, out),
             ExprKind::Send(t, _, _, _, args) => {
                 Self::collect_var_ids_expr(t, out);
-                for a in args { Self::collect_var_ids_expr(a, out); }
+                for a in args {
+                    Self::collect_var_ids_expr(a, out);
+                }
             }
             ExprKind::Slice(o, s, e) => {
                 Self::collect_var_ids_expr(o, out);
@@ -863,8 +985,12 @@ impl OwnershipVerifier {
             ExprKind::ListComp(body, _, _, iter, cond, map) => {
                 Self::collect_var_ids_expr(iter, out);
                 Self::collect_var_ids_expr(body, out);
-                if let Some(c) = cond { Self::collect_var_ids_expr(c, out); }
-                if let Some(m) = map { Self::collect_var_ids_expr(m, out); }
+                if let Some(c) = cond {
+                    Self::collect_var_ids_expr(c, out);
+                }
+                if let Some(m) = map {
+                    Self::collect_var_ids_expr(m, out);
+                }
             }
             _ => {}
         }
@@ -908,7 +1034,9 @@ mod tests {
 
     #[test]
     fn test_function_params_no_errors() {
-        let diags = verify("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
+        let diags = verify(
+            "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n",
+        );
         assert!(diags.is_empty());
     }
 }

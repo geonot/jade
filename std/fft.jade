@@ -1,0 +1,254 @@
+# std.fft — Fast Fourier Transform (Cooley-Tukey radix-2)
+#
+# Usage:
+#   signal is [complex.new(1.0, 0.0), complex.new(0.0, 0.0), ...]
+#   spectrum is fft.forward(signal)
+#   recovered is fft.inverse(spectrum)
+#   magnitudes is fft.magnitudes(spectrum)
+#   freqs is fft.frequencies(n, sample_rate)
+
+use complex
+
+extern *sqrt(x as f64) returns f64
+extern *cos(x as f64) returns f64
+extern *sin(x as f64) returns f64
+extern *fabs(x as f64) returns f64
+extern *log2(x as f64) returns f64
+extern *floor(x as f64) returns f64
+
+PI is 3.14159265358979323846
+
+# ── FFT core ─────────────────────────────────────────────────
+
+# Forward FFT (DIT Cooley-Tukey radix-2).
+# Input length must be a power of 2.
+*forward(signal as Vec of Complex) returns Vec of Complex
+    n is signal.length
+    if n <= 1
+        return signal
+    # Bit-reversal permutation
+    result is __bit_reverse_copy(signal, n)
+    # Butterfly stages
+    stage_len is 2
+    while stage_len <= n
+        half is stage_len / 2
+        angle is -2.0 * PI / stage_len as f64
+        w_base is complex.new(extern.cos(angle), extern.sin(angle))
+        k is 0
+        while k < n
+            w is complex.one()
+            j is 0
+            while j < half
+                u is result.get(k + j)
+                t is complex.mul(w, result.get(k + j + half))
+                result.set(k + j, complex.add(u, t))
+                result.set(k + j + half, complex.sub(u, t))
+                w is complex.mul(w, w_base)
+                j is j + 1
+            k is k + stage_len
+        stage_len is stage_len * 2
+    result
+
+# Inverse FFT.
+*inverse(spectrum as Vec of Complex) returns Vec of Complex
+    n is spectrum.length
+    if n <= 1
+        return spectrum
+    # Conjugate, forward FFT, conjugate, scale by 1/N
+    conj is vec()
+    loop spectrum
+        conj.push(complex.conjugate($))
+    transformed is forward(conj)
+    result is vec()
+    scale is 1.0 / n as f64
+    loop transformed
+        c is complex.conjugate($)
+        result.push(complex.scale(c, scale))
+    result
+
+# ── Analysis utilities ───────────────────────────────────────
+
+# Get magnitude spectrum.
+*magnitudes(spectrum as Vec of Complex) returns Vec of f64
+    result is vec()
+    loop spectrum
+        result.push(complex.magnitude($))
+    result
+
+# Get power spectrum (magnitude squared).
+*power_spectrum(spectrum as Vec of Complex) returns Vec of f64
+    result is vec()
+    loop spectrum
+        m is complex.magnitude($)
+        result.push(m * m)
+    result
+
+# Get phase spectrum (in radians).
+*phases(spectrum as Vec of Complex) returns Vec of f64
+    result is vec()
+    loop spectrum
+        result.push(complex.phase($))
+    result
+
+# Frequency bins for a given sample rate.
+*frequencies(n as i64, sample_rate as f64) returns Vec of f64
+    result is vec()
+    for i in 0 to n
+        result.push(i <= n / 2 ? i as f64 * sample_rate / n as f64 ! (i as f64 - n as f64) * sample_rate / n as f64)
+    result
+
+# Find dominant frequency (index of max magnitude, excluding DC).
+*dominant_freq(spectrum as Vec of Complex) returns i64
+    mags is magnitudes(spectrum)
+    max_idx is 1
+    max_val is 0.0
+    half is mags.length / 2
+    for i in 1 to half
+        if mags.get(i) > max_val
+            max_val is mags.get(i)
+            max_idx is i
+    max_idx
+
+# ── Signal generation ────────────────────────────────────────
+
+# Generate a real signal from values (imaginary = 0).
+*from_reals(values as Vec of f64) returns Vec of Complex
+    result is vec()
+    loop values
+        result.push(complex.new($, 0.0))
+    result
+
+# Generate a sine wave signal.
+*sine_wave(freq as f64, sample_rate as f64, n as i64) returns Vec of Complex
+    result is vec()
+    for i in 0 to n
+        t is i as f64 / sample_rate
+        result.push(complex.new(extern.sin(2.0 * PI * freq * t), 0.0))
+    result
+
+# Generate a cosine wave signal.
+*cosine_wave(freq as f64, sample_rate as f64, n as i64) returns Vec of Complex
+    result is vec()
+    for i in 0 to n
+        t is i as f64 / sample_rate
+        result.push(complex.new(extern.cos(2.0 * PI * freq * t), 0.0))
+    result
+
+# Zero-pad a signal to the next power of 2.
+*zero_pad(signal as Vec of Complex) returns Vec of Complex
+    n is signal.length
+    target is next_pow2(n)
+    result is vec()
+    loop signal
+        result.push($)
+    for i in n to target
+        result.push(complex.zero())
+    result
+
+# ── Window functions ─────────────────────────────────────────
+
+# Apply Hann window.
+*hann_window(signal as Vec of Complex) returns Vec of Complex
+    n is signal.length
+    result is vec()
+    loop signal
+        w is 0.5 * (1.0 - extern.cos(2.0 * PI * $$ as f64 / (n as f64 - 1.0)))
+        result.push(complex.new($.re * w, $.im * w))
+    result
+
+# Apply Hamming window.
+*hamming_window(signal as Vec of Complex) returns Vec of Complex
+    n is signal.length
+    result is vec()
+    loop signal
+        w is 0.54 - 0.46 * extern.cos(2.0 * PI * $$ as f64 / (n as f64 - 1.0))
+        result.push(complex.new($.re * w, $.im * w))
+    result
+
+# Apply Blackman window.
+*blackman_window(signal as Vec of Complex) returns Vec of Complex
+    n is signal.length
+    result is vec()
+    loop signal
+        a0 is 0.42
+        a1 is 0.5
+        a2 is 0.08
+        ratio is $$ as f64 / (n as f64 - 1.0)
+        w is a0 - a1 * extern.cos(2.0 * PI * ratio) + a2 * extern.cos(4.0 * PI * ratio)
+        result.push(complex.new($.re * w, $.im * w))
+    result
+
+# ── Convolution ──────────────────────────────────────────────
+
+# Circular convolution via FFT: conv(a, b) = IFFT(FFT(a) * FFT(b)).
+*convolve(a as Vec of Complex, b as Vec of Complex) returns Vec of Complex
+    # Pad both to same power of 2
+    n is a.length
+    if b.length > n
+        n is b.length
+    target is next_pow2(n * 2)
+    pa is __pad_to(a, target)
+    pb is __pad_to(b, target)
+    fa is forward(pa)
+    fb is forward(pb)
+    # Pointwise multiply
+    fc is vec()
+    loop fa
+        fc.push(complex.mul($, fb.get($$)))
+    inverse(fc)
+
+# Cross-correlation via FFT: corr(a, b) = IFFT(FFT(a) * conj(FFT(b))).
+*cross_correlate(a as Vec of Complex, b as Vec of Complex) returns Vec of Complex
+    n is a.length
+    if b.length > n
+        n is b.length
+    target is next_pow2(n * 2)
+    pa is __pad_to(a, target)
+    pb is __pad_to(b, target)
+    fa is forward(pa)
+    fb is forward(pb)
+    fc is vec()
+    loop fa
+        fc.push(complex.mul($, complex.conjugate(fb.get($$))))
+    inverse(fc)
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*next_pow2(n as i64) returns i64
+    p is 1
+    while p < n
+        p is p * 2
+    p
+
+*__bit_reverse_copy(a as Vec of Complex, n as i64) returns Vec of Complex
+    result is vec()
+    for i in 0 to n
+        result.push(complex.zero())
+    bits is __log2_int(n)
+    for i in 0 to n
+        rev is __bit_reverse(i, bits)
+        result.set(rev, a.get(i))
+    result
+
+*__bit_reverse(x as i64, bits as i64) returns i64
+    result is 0
+    for i in 0 to bits
+        result is (result << 1) | (x & 1)
+        x is x >> 1
+    result
+
+*__log2_int(n as i64) returns i64
+    result is 0
+    v is n >> 1
+    while v > 0
+        result is result + 1
+        v is v >> 1
+    result
+
+*__pad_to(signal as Vec of Complex, target as i64) returns Vec of Complex
+    result is vec()
+    loop signal
+        result.push($)
+    for i in signal.length to target
+        result.push(complex.zero())
+    result

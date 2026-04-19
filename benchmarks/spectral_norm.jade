@@ -4,17 +4,11 @@
 *main
     n is 1000
     sum is 0
-    iter is 0
-    while iter < 2000
-        i is 0
-        while i < n
-            j is 0
+    for iter in 0 to 2000
+        for i in 0 to n
             acc is 0
-            while j < n
+            for j in 0 to n
                 acc is acc + a_elem(i, j) * (j + 1)
-                j is j + 1
             sum is sum + acc mod 1000000
-            i is i + 1
-        iter is iter + 1
     log(sum)
     0

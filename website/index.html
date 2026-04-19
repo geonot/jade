@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Jade — Systems language. Scripting readability. C performance. A compiled language that reads like poetry and runs like lightning.">
+    <meta name="theme-color" content="#0B3D2E">
+    <title>Jade — Systems Language</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💎</text></svg>">
+</head>
+<body>
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- NAV                                         -->
+    <!-- ═══════════════════════════════════════════ -->
+    <nav class="nav" role="navigation" aria-label="Main navigation">
+        <div class="nav__inner">
+            <a href="#" class="nav__logo" aria-label="Jade home">
+                <svg class="nav__logo-icon" viewBox="0 0 40 40" aria-hidden="true">
+                    <path d="M20 2 L36 14 L30 38 L10 38 L4 14 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <path d="M20 8 L30 16 L26 32 L14 32 L10 16 Z" fill="currentColor" opacity="0.15"/>
+                </svg>
+                <span class="nav__logo-text">Jade</span>
+            </a>
+            <button class="nav__toggle" aria-label="Toggle menu" aria-expanded="false">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav__links" role="list">
+                <li><a href="#philosophy">Philosophy</a></li>
+                <li><a href="#code">Code</a></li>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#start">Get Started</a></li>
+                <li><a href="https://github.com/example/jade" class="nav__cta" aria-label="View Jade on GitHub">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- HERO                                        -->
+    <!-- ═══════════════════════════════════════════ -->
+    <header class="hero" id="hero">
+        <div class="hero__mist" aria-hidden="true"></div>
+        <div class="hero__bamboo" aria-hidden="true">
+            <div class="bamboo-stalk bamboo-stalk--1"></div>
+            <div class="bamboo-stalk bamboo-stalk--2"></div>
+            <div class="bamboo-stalk bamboo-stalk--3"></div>
+        </div>
+        <div class="hero__content">
+            <p class="hero__above">A Modern Systems Programming Language</p>
+            <h1 class="hero__title">
+                <span class="hero__title-line">Reads like <em>poetry.</em></span>
+                <span class="hero__title-line">Runs like <em>lightning.</em></span>
+            </h1>
+            <div class="hero__actions">
+                <a href="#start" class="btn btn--primary">Get Started</a>
+                <a href="#code" class="btn btn--ghost">See the Code</a>
+            </div>
+        </div>
+
+    </header>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- PHILOSOPHY                                  -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="philosophy" id="philosophy">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-header__kana" aria-hidden="true">道</span>
+                <h2 class="section-header__title">Principles</h2>
+            </div>
+            <div class="principles">
+                <article class="principle" data-reveal>
+                    <div class="principle__number" aria-hidden="true">一</div>
+                    <h3 class="principle__title">Complete Type Inference</h3>
+                    <p class="principle__text">Static typing without annotations. The compiler infers types automatically.</p>
+                </article>
+                <article class="principle" data-reveal>
+                    <div class="principle__number" aria-hidden="true">二</div>
+                    <h3 class="principle__title">Optimal Managed Memory</h3>
+                    <p class="principle__text">No Garbage Collector. Allocations and frees are handled intelligently.</p>
+                </article>
+                <article class="principle" data-reveal>
+                    <div class="principle__number" aria-hidden="true">三</div>
+                    <h3 class="principle__title">Readable Syntax</h3>
+                    <p class="principle__text">No arcane syntactical invocations or symbolic litter. Jade reads like pseudocode.</p>
+                </article>
+                <article class="principle" data-reveal>
+                    <div class="principle__number" aria-hidden="true">四</div>
+                    <h3 class="principle__title">Native Performance</h3>
+                    <p class="principle__text">Heavily optimized native binaries run as fast as C. Sometimes faster. </p>
+                </article>
+                <article class="principle" data-reveal>
+                    <div class="principle__number" aria-hidden="true">五</div>
+                    <h3 class="principle__title">Best of Both Worlds</h3>
+                    <p class="principle__text">Optimal developer efficiency and code readability combined with  native performance.</p>
+                </article>
+                <article class="principle" data-reveal>
+                    <div class="principle__number" aria-hidden="true">六</div>
+                    <h3 class="principle__title">Batteries Included</h3>
+                    <p class="principle__text">Persistent object storage, native actor framework, comprehensive standard library.</p>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- CODE SHOWCASE                               -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="code-showcase" id="code">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-header__kana" aria-hidden="true">筆</span>
+                <h2 class="section-header__title">Code</h2>
+                <p class="section-header__sub">An intuitive blend of object-oriented and functional styles.</p>
+            </div>
+
+            <div class="showcase-grid">
+                <!-- Example 1: Functions & Pipelines -->
+                <div class="scroll-block" data-reveal>
+                    <div class="scroll-block__rod scroll-block__rod--top" aria-hidden="true"></div>
+                    <div class="scroll-block__header">
+                        <span class="scroll-block__tag">Functions</span>
+                        <span class="scroll-block__title">Patterns &amp; Pipelines</span>
+                    </div>
+                    <div class="scroll-block__body">
+                        <pre class="code-block"><code class="jade"><span class="c-comment"># Pattern-directed functions</span>
+<span class="c-keyword">*</span><span class="c-fn">fib</span>(<span class="c-number">0</span>) <span class="c-keyword">is</span> <span class="c-number">0</span>
+<span class="c-keyword">*</span><span class="c-fn">fib</span>(<span class="c-number">1</span>) <span class="c-keyword">is</span> <span class="c-number">1</span>
+<span class="c-keyword">*</span><span class="c-fn">fib</span>(n) <span class="c-keyword">is</span> <span class="c-fn">fib</span>(n - <span class="c-number">1</span>) + <span class="c-fn">fib</span>(n - <span class="c-number">2</span>)
+
+<span class="c-comment"># Higher-order functions</span>
+<span class="c-keyword">*</span><span class="c-fn">apply</span>(f, x) <span class="c-keyword">is</span> <span class="c-fn">f</span>(x)
+<span class="c-keyword">*</span><span class="c-fn">double</span>(x) <span class="c-keyword">is</span> x * <span class="c-number">2</span>
+<span class="c-keyword">*</span><span class="c-fn">add_one</span>(x) <span class="c-keyword">is</span> x + <span class="c-number">1</span>
+
+<span class="c-comment"># Pipelines chain naturally</span>
+result <span class="c-keyword">is</span> <span class="c-number">5</span> <span class="c-operator">~</span> <span class="c-fn">double</span> <span class="c-operator">~</span> <span class="c-fn">add_one</span>
+<span class="c-fn">log</span>(result)  <span class="c-comment"># 11</span></code></pre>
+                    </div>
+                    <div class="scroll-block__rod scroll-block__rod--bottom" aria-hidden="true"></div>
+                </div>
+
+                <!-- Example 2: Types & Enums -->
+                <div class="scroll-block" data-reveal>
+                    <div class="scroll-block__rod scroll-block__rod--top" aria-hidden="true"></div>
+                    <div class="scroll-block__header">
+                        <span class="scroll-block__tag">Type System</span>
+                        <span class="scroll-block__title">Structs &amp; Enums</span>
+                    </div>
+                    <div class="scroll-block__body">
+                        <pre class="code-block"><code class="jade"><span class="c-keyword">type</span> <span class="c-type">Vec3</span>
+    x <span class="c-keyword">as</span> <span class="c-type">f64</span>
+    y <span class="c-keyword">as</span> <span class="c-type">f64</span>
+    z <span class="c-keyword">as</span> <span class="c-type">f64</span>
+
+<span class="c-keyword">*</span><span class="c-fn">dot</span>(a, b)
+    a.x * b.x + a.y * b.y + a.z * b.z
+
+<span class="c-keyword">enum</span> <span class="c-type">Op</span>
+    Add(<span class="c-type">i64</span>, <span class="c-type">i64</span>)
+    Mul(<span class="c-type">i64</span>, <span class="c-type">i64</span>)
+    Neg(<span class="c-type">i64</span>)
+
+<span class="c-keyword">*</span><span class="c-fn">eval</span>(op <span class="c-keyword">as</span> <span class="c-type">Op</span>)
+    <span class="c-keyword">match</span> op
+        Add(a, b) <span class="c-operator">?</span> a + b
+        Mul(a, b) <span class="c-operator">?</span> a * b
+        Neg(a)    <span class="c-operator">?</span> <span class="c-number">0</span> - a</code></pre>
+                    </div>
+                    <div class="scroll-block__rod scroll-block__rod--bottom" aria-hidden="true"></div>
+                </div>
+
+                <!-- Example 3: Concurrency -->
+                <div class="scroll-block" data-reveal>
+                    <div class="scroll-block__rod scroll-block__rod--top" aria-hidden="true"></div>
+                    <div class="scroll-block__header">
+                        <span class="scroll-block__tag">Concurrency</span>
+                        <span class="scroll-block__title">Actors &amp; Channels</span>
+                    </div>
+                    <div class="scroll-block__body">
+                        <pre class="code-block"><code class="jade"><span class="c-keyword">actor</span> <span class="c-type">Counter</span>
+    count <span class="c-keyword">is</span> <span class="c-number">0</span>
+
+    <span class="c-decorator">@ping</span> n
+        count <span class="c-keyword">is</span> count + n
+
+<span class="c-keyword">*</span><span class="c-fn">main</span>
+    w <span class="c-keyword">is</span> <span class="c-keyword">spawn</span> <span class="c-type">Counter</span>
+    <span class="c-keyword">send</span> w, <span class="c-decorator">@ping</span>(<span class="c-number">1</span>)
+    <span class="c-keyword">send</span> w, <span class="c-decorator">@ping</span>(<span class="c-number">5</span>)
+
+    <span class="c-comment"># Typed buffered channels</span>
+    ch <span class="c-keyword">is</span> <span class="c-keyword">channel</span> <span class="c-keyword">of</span> <span class="c-type">i64</span>(<span class="c-number">1024</span>)
+    <span class="c-keyword">send</span> ch, <span class="c-number">42</span>
+    val <span class="c-keyword">is</span> <span class="c-keyword">receive</span> ch
+    <span class="c-fn">log</span>(val)  <span class="c-comment"># 42</span></code></pre>
+                    </div>
+                    <div class="scroll-block__rod scroll-block__rod--bottom" aria-hidden="true"></div>
+                </div>
+
+                <!-- Example 4: Persistence -->
+                <div class="scroll-block" data-reveal>
+                    <div class="scroll-block__rod scroll-block__rod--top" aria-hidden="true"></div>
+                    <div class="scroll-block__header">
+                        <span class="scroll-block__tag">Persistence</span>
+                        <span class="scroll-block__title">Built-in Stores</span>
+                    </div>
+                    <div class="scroll-block__body">
+                        <pre class="code-block"><code class="jade"><span class="c-keyword">store</span> <span class="c-type">records</span>
+    key
+    value
+
+<span class="c-keyword">*</span><span class="c-fn">main</span>
+    i <span class="c-keyword">is</span> <span class="c-number">0</span>
+    <span class="c-keyword">while</span> i &lt; <span class="c-number">100</span>
+        <span class="c-keyword">insert</span> records i, i * <span class="c-number">7</span>
+        i <span class="c-keyword">is</span> i + <span class="c-number">1</span>
+
+    <span class="c-comment"># Compile-time validated queries</span>
+    r <span class="c-keyword">is</span> records <span class="c-keyword">where</span> key <span class="c-keyword">equals</span> <span class="c-number">42</span>
+    <span class="c-fn">log</span>(r.value)  <span class="c-comment"># 294</span>
+
+    c <span class="c-keyword">is</span> <span class="c-keyword">count</span> records
+    <span class="c-fn">log</span>(c)  <span class="c-comment"># 100</span></code></pre>
+                    </div>
+                    <div class="scroll-block__rod scroll-block__rod--bottom" aria-hidden="true"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- FEATURES                                    -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="features" id="features">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-header__kana" aria-hidden="true">器</span>
+                <h2 class="section-header__title">Features</h2>
+            </div>
+            <div class="features-grid">
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M24 4L4 24l20 20 20-20z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="24" r="6" fill="currentColor" opacity="0.2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Perceus Reference Counting</h3>
+                    <p class="feature-card__text">Compile-time optimized memory management. Statically inserted drops, no GC pauses.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M8 24h32M24 8v32" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Type Inference</h3>
+                    <p class="feature-card__text">Hindley-Milner + bidirectional inference. Write code, not annotations.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M12 12l24 24M36 12L12 36" stroke="currentColor" stroke-width="2"/><rect x="8" y="8" width="32" height="32" rx="4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Pattern Matching</h3>
+                    <p class="feature-card__text">Exhaustive match with destructuring, guards, nested patterns, and or-patterns.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M6 24c0-10 8-18 18-18s18 8 18 18" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 24c0 10 8 18 18 18s18-8 18-18" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 4"/><circle cx="24" cy="24" r="4" fill="currentColor"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Actors &amp; Channels</h3>
+                    <p class="feature-card__text">Lightweight actors on a work-stealing scheduler. Typed channels. Message-passing with <code>send</code>.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M8 38V10l16 14L8 38z" fill="currentColor" opacity="0.2"/><path d="M24 38V10l16 14L24 38z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">C FFI</h3>
+                    <p class="feature-card__text">Direct <code>extern</code> declarations. Automatic header binding with <code>jade bind</code>.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><rect x="8" y="8" width="14" height="14" rx="2" fill="currentColor" opacity="0.2"/><rect x="26" y="8" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="8" y="26" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="26" y="26" width="14" height="14" rx="2" fill="currentColor" opacity="0.2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Persistent Stores</h3>
+                    <p class="feature-card__text">Typed, file-backed data stores with compile-time validated queries and transactions.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M24 4v40M4 24h40" stroke="currentColor" stroke-width="1" opacity="0.3"/><path d="M24 14l10 10-10 10-10-10z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Generics &amp; Traits</h3>
+                    <p class="feature-card__text">Monomorphized generics with <code>of</code> syntax. Trait-based polymorphism with dyn dispatch.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" stroke-width="2"/><path d="M24 6a18 18 0 0 1 0 36" fill="currentColor" opacity="0.1"/><path d="M18 18l12 12M30 18L18 30" stroke="currentColor" stroke-width="2"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Coroutines &amp; Generators</h3>
+                    <p class="feature-card__text">Cooperative context switching with <code>yield</code>. Lazy sequences that produce values on demand.</p>
+                </article>
+
+                <article class="feature-card" data-reveal>
+                    <div class="feature-card__icon" aria-hidden="true">
+                        <svg viewBox="0 0 48 48"><path d="M4 40L24 8l20 32z" fill="none" stroke="currentColor" stroke-width="2"/><line x1="24" y1="20" x2="24" y2="30" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="34" r="1.5" fill="currentColor"/></svg>
+                    </div>
+                    <h3 class="feature-card__title">Error Values</h3>
+                    <p class="feature-card__text">Errors are values, not exceptions. Define with <code>err</code>, return with <code>!</code>, handle with <code>match</code>.</p>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- SYNTAX AT A GLANCE                          -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="glance" id="glance">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-header__kana" aria-hidden="true">文</span>
+                <h2 class="section-header__title">Syntax</h2>
+            </div>
+            <div class="glance-grid">
+                <div class="glance-item" data-reveal>
+                    <div class="glance-item__label">Bindings &amp; Control Flow</div>
+                    <pre class="glance-item__code"><code>x <span class="c-keyword">is</span> <span class="c-number">42</span>
+name <span class="c-keyword">is</span> <span class="c-string">'jade'</span>
+result <span class="c-keyword">is</span> x &gt; <span class="c-number">0</span> <span class="c-operator">?</span> <span class="c-string">'yes'</span> <span class="c-operator">!</span> <span class="c-string">'no'</span>
+
+<span class="c-keyword">if</span> x &gt; <span class="c-number">10</span>
+    <span class="c-fn">log</span>(<span class="c-string">'big'</span>)
+<span class="c-keyword">unless</span> x <span class="c-keyword">equals</span> <span class="c-number">0</span>
+    <span class="c-fn">log</span>(<span class="c-string">'nonzero'</span>)</code></pre>
+                </div>
+                <div class="glance-item" data-reveal>
+                    <div class="glance-item__label">Functions &amp; Lambdas</div>
+                    <pre class="glance-item__code"><code><span class="c-keyword">*</span><span class="c-fn">add</span>(a, b) <span class="c-keyword">is</span> a + b
+<span class="c-keyword">*</span><span class="c-fn">double</span>(x) <span class="c-keyword">is</span> x * <span class="c-number">2</span>
+<span class="c-keyword">*</span><span class="c-fn">apply</span>(f, x) <span class="c-keyword">is</span> <span class="c-fn">f</span>(x)
+
+<span class="c-comment"># Lambda syntax</span>
+square <span class="c-keyword">is</span> |x| x * x
+
+<span class="c-comment"># Pipeline operator</span>
+<span class="c-number">5</span> <span class="c-operator">~</span> <span class="c-fn">double</span> <span class="c-operator">~</span> <span class="c-fn">add_one</span></code></pre>
+                </div>
+                <div class="glance-item" data-reveal>
+                    <div class="glance-item__label">Types &amp; Generics</div>
+                    <pre class="glance-item__code"><code><span class="c-keyword">type</span> <span class="c-type">Point</span>
+    x <span class="c-keyword">as</span> <span class="c-type">f64</span>
+    y <span class="c-keyword">as</span> <span class="c-type">f64</span>
+
+<span class="c-keyword">*</span><span class="c-fn">max</span> <span class="c-keyword">of</span> <span class="c-type">T</span>(a <span class="c-keyword">as</span> <span class="c-type">T</span>, b <span class="c-keyword">as</span> <span class="c-type">T</span>)
+    a &gt; b <span class="c-operator">?</span> a <span class="c-operator">!</span> b
+
+<span class="c-keyword">for</span> i <span class="c-keyword">from</span> <span class="c-number">0</span> <span class="c-keyword">to</span> <span class="c-number">100</span>
+    <span class="c-fn">log</span>(i)</code></pre>
+                </div>
+                <div class="glance-item" data-reveal>
+                    <div class="glance-item__label">Enums &amp; Matching</div>
+                    <pre class="glance-item__code"><code><span class="c-keyword">enum</span> <span class="c-type">Shape</span>
+    Circle(<span class="c-type">f64</span>)
+    Rect(<span class="c-type">f64</span>, <span class="c-type">f64</span>)
+
+<span class="c-keyword">*</span><span class="c-fn">area</span>(s <span class="c-keyword">as</span> <span class="c-type">Shape</span>)
+    <span class="c-keyword">match</span> s
+        Circle(r) <span class="c-operator">?</span> <span class="c-number">3.14159</span> * r * r
+        Rect(w, h) <span class="c-operator">?</span> w * h</code></pre>
+                </div>
+                <div class="glance-item" data-reveal>
+                    <div class="glance-item__label">Actors &amp; Messages</div>
+                    <pre class="glance-item__code"><code><span class="c-keyword">actor</span> <span class="c-type">Worker</span>
+    count
+    <span class="c-decorator">@ping</span> n
+        count <span class="c-keyword">is</span> count + n
+
+c <span class="c-keyword">is</span> <span class="c-keyword">spawn</span> <span class="c-type">Worker</span>
+<span class="c-keyword">send</span> c, <span class="c-decorator">@ping</span>(<span class="c-number">5</span>)</code></pre>
+                </div>
+                <div class="glance-item" data-reveal>
+                    <div class="glance-item__label">Stores &amp; Queries</div>
+                    <pre class="glance-item__code"><code><span class="c-keyword">store</span> <span class="c-type">users</span>
+    name
+    age
+
+<span class="c-keyword">insert</span> users <span class="c-string">'Alice'</span>, <span class="c-number">30</span>
+r <span class="c-keyword">is</span> users <span class="c-keyword">where</span> name <span class="c-keyword">equals</span> <span class="c-string">'Alice'</span>
+<span class="c-fn">log</span>(r.age)  <span class="c-comment"># 30</span></code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- GET STARTED                                 -->
+    <!-- ═══════════════════════════════════════════ -->
+    <section class="start" id="start">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-header__kana" aria-hidden="true">始</span>
+                <h2 class="section-header__title">Get Started</h2>
+            </div>
+
+            <div class="start-steps">
+                <div class="start-step" data-reveal>
+                    <div class="start-step__number" aria-hidden="true">
+                        <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="28" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="30" y="36" text-anchor="middle" fill="currentColor" font-size="20" font-family="var(--font-display)">1</text></svg>
+                    </div>
+                    <h3 class="start-step__title">Build the Compiler</h3>
+                    <div class="start-step__code">
+                        <pre class="code-block code-block--terminal"><code><span class="c-comment"># Requires Rust and LLVM 21</span>
+<span class="c-prompt">$</span> git clone https://github.com/example/jade
+<span class="c-prompt">$</span> cd jade
+<span class="c-prompt">$</span> cargo build --release</code></pre>
+                    </div>
+                </div>
+
+                <div class="start-step" data-reveal>
+                    <div class="start-step__number" aria-hidden="true">
+                        <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="28" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="30" y="36" text-anchor="middle" fill="currentColor" font-size="20" font-family="var(--font-display)">2</text></svg>
+                    </div>
+                    <h3 class="start-step__title">Write Your First Program</h3>
+                    <div class="start-step__code">
+                        <pre class="code-block code-block--terminal"><code class="jade"><span class="c-comment"># hello.jade</span>
+<span class="c-keyword">*</span><span class="c-fn">greet</span>(name)
+    <span class="c-string">'hello, {name}'</span>
+
+<span class="c-keyword">*</span><span class="c-fn">main</span>
+    <span class="c-fn">log</span> <span class="c-fn">greet</span>(<span class="c-string">'world'</span>)</code></pre>
+                    </div>
+                </div>
+
+                <div class="start-step" data-reveal>
+                    <div class="start-step__number" aria-hidden="true">
+                        <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="28" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="30" y="36" text-anchor="middle" fill="currentColor" font-size="20" font-family="var(--font-display)">3</text></svg>
+                    </div>
+                    <h3 class="start-step__title">Compile &amp; Run</h3>
+                    <div class="start-step__code">
+                        <pre class="code-block code-block--terminal"><code><span class="c-prompt">$</span> jadec hello.jade -o hello
+<span class="c-prompt">$</span> ./hello
+<span class="c-output">hello, world</span></code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- FOOTER                                      -->
+    <!-- ═══════════════════════════════════════════ -->
+    <footer class="footer">
+        <div class="footer__inner">
+            <div class="footer__brand">
+                <svg class="footer__logo" viewBox="0 0 40 40" aria-hidden="true">
+                    <path d="M20 2 L36 14 L30 38 L10 38 L4 14 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                    <path d="M20 8 L30 16 L26 32 L14 32 L10 16 Z" fill="currentColor" opacity="0.15"/>
+                </svg>
+                <div>
+                    <p class="footer__name">Jade</p>
+                    <p class="footer__tagline">Systems language. Scripting readability. C performance.</p>
+                </div>
+            </div>
+            <div class="footer__links">
+                <div class="footer__col">
+                    <h4>Language</h4>
+                    <ul>
+                        <li><a href="#philosophy">Philosophy</a></li>
+                        <li><a href="#features">Features</a></li>
+                        <li><a href="#code">Examples</a></li>
+                    </ul>
+                </div>
+                <div class="footer__col">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="#start">Getting Started</a></li>
+                        <li><a href="#">Documentation</a></li>
+                        <li><a href="#">Standard Library</a></li>
+                        <li><a href="#">Language Reference</a></li>
+                    </ul>
+                </div>
+                <div class="footer__col">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="#">GitHub</a></li>
+                        <li><a href="#">Discord</a></li>
+                        <li><a href="#">Blog</a></li>
+                        <li><a href="#">Contributing</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer__bottom">
+                <p class="footer__copy">Jade Programming Language</p>
+                <p class="footer__verse" aria-hidden="true">玉不琢，不成器 — Uncut jade is not a vessel</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

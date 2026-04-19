@@ -43,8 +43,7 @@
 
     steps is 80000000
 
-    step is 0
-    while step < steps
+    for step in 0 to steps
         d is dist_sq(x0, y0, z0, x1, y1, z1) + 1
         vx1 is vx1 + (x0 - x1) * m0 / d
         vy1 is vy1 + (y0 - y1) * m0 / d
@@ -68,8 +67,6 @@
         x4 is x4 + vx4
         y4 is y4 + vy4
         z4 is z4 + vz4
-
-        step is step + 1
 
     log(x0 + x1 + x2 + x3 + x4)
     0

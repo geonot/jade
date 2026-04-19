@@ -21,7 +21,9 @@ impl<'ctx> Compiler<'ctx> {
             Type::Void => self.ctx.i8_type().into(),
             Type::String => self.string_type().into(),
             Type::TypeVar(v) => {
-                panic!("ICE: unresolved TypeVar({v}) reached codegen — this indicates a monomorphization bug in the typer");
+                panic!(
+                    "ICE: unresolved TypeVar({v}) reached codegen — this indicates a monomorphization bug in the typer"
+                );
             }
             Type::Struct(name, _) | Type::Enum(name) => self
                 .module
@@ -29,7 +31,11 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|s| s.into())
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
-            Type::Vec(_) | Type::Map(_, _) | Type::Set(_) | Type::NDArray(_, _) | Type::PriorityQueue(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Vec(_)
+            | Type::Map(_, _)
+            | Type::Set(_)
+            | Type::NDArray(_, _)
+            | Type::PriorityQueue(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::SIMD(inner, lanes) => {
                 let elem = self.llvm_ty(inner);
                 if inner.is_float() {
@@ -61,9 +67,13 @@ impl<'ctx> Compiler<'ctx> {
             Type::Arena => self.arena_type().into(),
             Type::Pool => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Param(name) => {
-                panic!("ICE: unresolved type parameter '{name}' reached codegen — this indicates a monomorphization bug in the typer");
+                panic!(
+                    "ICE: unresolved type parameter '{name}' reached codegen — this indicates a monomorphization bug in the typer"
+                );
             }
-            Type::Deque(_) | Type::Cow(_) | Type::Generator(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Deque(_) | Type::Cow(_) | Type::Generator(_) => {
+                self.ctx.ptr_type(AddressSpace::default()).into()
+            }
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),
         }
     }
@@ -197,6 +207,15 @@ impl<'ctx> Compiler<'ctx> {
         val: BasicValueEnum<'ctx>,
         target: BasicTypeEnum<'ctx>,
     ) -> BasicValueEnum<'ctx> {
+        self.coerce_val_ex(val, target, false)
+    }
+
+    pub(crate) fn coerce_val_ex(
+        &self,
+        val: BasicValueEnum<'ctx>,
+        target: BasicTypeEnum<'ctx>,
+        signed: bool,
+    ) -> BasicValueEnum<'ctx> {
         if val.get_type() == target {
             return val;
         }
@@ -206,11 +225,17 @@ impl<'ctx> Compiler<'ctx> {
                 target.into_int_type().get_bit_width(),
             );
             if fb < tb {
-                return self
-                    .bld
-                    .build_int_z_extend(val.into_int_value(), target.into_int_type(), "ext")
-                    .unwrap()
-                    .into();
+                return if signed {
+                    self.bld
+                        .build_int_s_extend(val.into_int_value(), target.into_int_type(), "sext")
+                        .unwrap()
+                        .into()
+                } else {
+                    self.bld
+                        .build_int_z_extend(val.into_int_value(), target.into_int_type(), "ext")
+                        .unwrap()
+                        .into()
+                };
             } else if fb > tb {
                 return self
                     .bld

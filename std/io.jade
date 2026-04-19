@@ -1,4 +1,4 @@
-# std.io — File I/O
+# std.io — File I/O and standard streams
 
 extern *fopen(path as %i8, mode as %i8) returns %i8
 extern *fclose(fp as %i8) returns i32
@@ -15,6 +15,9 @@ extern *free(ptr as %i8)
 extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
 extern *strlen(s as %i8) returns i64
 extern *write(fd as i32, buf as %i8, count as i64) returns i64
+extern *read(fd as i32, buf as %i8, count as i64) returns i64
+
+# ── File type ────────────────────────────────────────────────
 
 type File
     handle as %i8
@@ -22,57 +25,108 @@ type File
     mode as String
 
     *read(size)
-        buf is malloc(size)
-        n is fread(buf, 1, size, self.handle)
-        __string_from_raw(buf, n, size)
+        buf is extern.malloc(size + 1)
+        n is extern.fread(buf, 1, size, self.handle)
+        __string_from_raw(buf, n, size + 1)
 
-    *write_data(data as String)
-        fwrite(%data, 1, data.length, self.handle)
+    *read_line
+        buf is extern.malloc(4096)
+        result is extern.fgets(buf, 4096, self.handle)
+        if result as i64 equals 0
+            extern.free(buf)
+            return ""
+        n is extern.strlen(buf)
+        __string_from_raw(buf, n, 4096)
 
-    *close_file
-        fclose(self.handle)
+    *write(data as String)
+        extern.fwrite(%data, 1, data.length, self.handle)
+
+    *write_line(data as String)
+        extern.fwrite(%data, 1, data.length, self.handle)
+        extern.fwrite("\n", 1, 1, self.handle)
+
+    *seek(offset, whence)
+        extern.fseek(self.handle, offset, whence)
+
+    *tell
+        extern.ftell(self.handle)
+
+    *shut
+        extern.fclose(self.handle)
 
     *eof
-        feof(self.handle) neq 0
+        extern.feof(self.handle) neq 0
+
+    *size
+        cur is extern.ftell(self.handle)
+        extern.fseek(self.handle, 0, 2)
+        sz is extern.ftell(self.handle)
+        extern.fseek(self.handle, cur, 0)
+        sz
+
+    *flush
+        extern.fflush(self.handle)
+
+extern *fflush(fp as %i8) returns i32
+
+# ── Convenience functions ────────────────────────────────────
+
+*open(path, mode)
+    fp is extern.fopen(%path, %mode)
+    if fp as i64 equals 0
+        return false
+    File(fp, path, mode)
 
 *read_file(path)
-    fp is fopen(%path, "r")
+    fp is extern.fopen(%path, "r")
     if fp as i64 equals 0
         return ""
-    fseek(fp, 0, 2)
-    size is ftell(fp)
-    fseek(fp, 0, 0)
-    buf is malloc(size + 1)
-    fread(buf, 1, size, fp)
-    fclose(fp)
+    extern.fseek(fp, 0, 2)
+    size is extern.ftell(fp)
+    extern.fseek(fp, 0, 0)
+    buf is extern.malloc(size + 1)
+    extern.fread(buf, 1, size, fp)
+    extern.fclose(fp)
     __string_from_raw(buf, size, size + 1)
 
 *write_file(path, content)
-    fp is fopen(%path, "w")
+    fp is extern.fopen(%path, "w")
     if fp as i64 equals 0
         return false
-    fwrite(%content, 1, content.length, fp)
-    fclose(fp)
+    extern.fwrite(%content, 1, content.length, fp)
+    extern.fclose(fp)
     true
 
 *append_file(path, content)
-    fp is fopen(%path, "a")
+    fp is extern.fopen(%path, "a")
     if fp as i64 equals 0
         return false
-    fwrite(%content, 1, content.length, fp)
-    fclose(fp)
+    extern.fwrite(%content, 1, content.length, fp)
+    extern.fclose(fp)
     true
 
-*open(path, mode)
-    fp is fopen(%path, %mode)
-    File(fp, path, mode)
+*read_lines(path)
+    content is read_file(path)
+    if content.length equals 0
+        return vec()
+    content.split("\n")
 
 *file_exists(path)
     __file_exists(path)
 
+# ── Standard streams ─────────────────────────────────────────
+
 *eprint(s as String)
-    write(2, %s, s.length)
+    extern.write(2, %s, s.length)
 
 *eprintln(s as String)
-    msg is s + '\n'
-    write(2, %msg, msg.length)
+    msg is s + "\n"
+    extern.write(2, %msg, msg.length)
+
+*read_stdin(max_bytes)
+    buf is extern.malloc(max_bytes)
+    n is extern.read(0, buf, max_bytes)
+    if n <= 0
+        extern.free(buf)
+        return ""
+    __string_from_raw(buf, n, max_bytes)

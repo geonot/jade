@@ -1,0 +1,108 @@
+# std.collections — Data structures beyond Vec and Map
+#
+# Provides: Stack, Queue, RingBuffer, Deque
+
+# ── Stack (LIFO) ────────────────────────────────────────────
+
+type Stack
+    items as Vec of i64
+
+    *push(val)
+        self.items.push(val)
+
+    *pop
+        self.items.pop()
+
+    *peek
+        self.items.get(self.items.length - 1)
+
+    *size
+        self.items.length
+
+    *is_empty
+        self.items.length equals 0
+
+*new_stack
+    Stack(items is vec())
+
+# ── Queue (FIFO) ────────────────────────────────────────────
+
+type Queue
+    items as Vec of i64
+    head as i64
+
+    *enqueue(val)
+        self.items.push(val)
+
+    *dequeue
+        if self.head >= self.items.length
+            return 0
+        val is self.items.get(self.head)
+        self.head is self.head + 1
+        # Compact when half the buffer is consumed
+        if self.head > self.items.length / 2 and self.head > 16
+            remaining is vec()
+            for i in self.head to self.items.length
+                remaining.push(self.items.get(i))
+            self.items is remaining
+            self.head is 0
+        val
+
+    *peek
+        if self.head >= self.items.length
+            return 0
+        self.items.get(self.head)
+
+    *size
+        self.items.length - self.head
+
+    *is_empty
+        self.head >= self.items.length
+
+*new_queue
+    Queue(items is vec(), head is 0)
+
+# ── Ring Buffer ─────────────────────────────────────────────
+
+type RingBuffer
+    data as Vec of i64
+    capacity as i64
+    head as i64
+    tail as i64
+    count as i64
+
+    *push(val)
+        self.data.set(self.tail, val)
+        self.tail is (self.tail + 1) mod self.capacity
+        if self.count < self.capacity
+            self.count is self.count + 1
+        else
+            self.head is (self.head + 1) mod self.capacity
+
+    *pop
+        if self.count equals 0
+            return None()
+        val is self.data.get(self.head)
+        self.head is (self.head + 1) mod self.capacity
+        self.count is self.count - 1
+        Some(val)
+
+    *peek
+        if self.count equals 0
+            return None()
+        Some(self.data.get(self.head))
+
+    *size
+        self.count
+
+    *is_empty
+        self.count equals 0
+
+    *is_full
+        self.count equals self.capacity
+
+*new_ring(cap)
+    data is vec()
+    for i in 0 to cap
+        data.push(0)
+    RingBuffer(data is data, capacity is cap, head is 0, tail is 0, count is 0)

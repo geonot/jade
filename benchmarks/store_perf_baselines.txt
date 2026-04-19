@@ -1,0 +1,43 @@
+# Store Performance Baselines
+#
+# Test: benchmarks/store_perf.jade
+# Store: 5000 records × 3 user fields (i64, i64, f64)
+# Measured: 2 consistent runs on development machine
+# Units: seconds
+# Methodology: each operation repeated ×100 iterations unless noted
+#
+# Operation          | Run 1     | Run 2     | Per-call (avg)
+# -------------------|-----------|-----------|---------------
+# insert_100         | 0.001069  | 0.001316  | 12µs/insert
+# insert_900         | 0.010478  | 0.013013  | 13µs/insert
+# insert_4000        | 0.049992  | 0.046671  | 12µs/insert
+# count_x100         | 0.059191  | 0.055808  | 575µs/count
+# query_eq_x100      | 0.045252  | 0.050531  | 479µs/query
+# query_gt_x100      | 0.055188  | 0.049592  | 524µs/query
+# query_and_x100     | 0.051013  | 0.054315  | 527µs/query
+# agg_sum_x100       | 0.052634  | 0.049803  | 512µs/sum
+# agg_avg_x100       | 0.048447  | 0.049007  | 487µs/avg
+# agg_min_x100       | 0.050922  | 0.050013  | 505µs/min
+# agg_max_x100       | 0.049486  | 0.051819  | 507µs/max
+# first_eq_x100      | 0.051373  | 0.051914  | 517µs/first
+# exists_eq_x100     | 0.048129  | 0.048139  | 481µs/exists
+# distinct_x100      | 0.072933  | 0.075283  | 741µs/distinct
+# set_eq_x100        | 0.094097  | 0.093900  | 940µs/set
+# delete_gt          | 0.000966  | 0.000947  | 957µs (single)
+# save               | 0.000402  | 0.000224  | 313µs (single)
+#
+# Performance profile (5000 records):
+#   Insert:  ~12µs/record  — fseek + fwrite + WAL
+#   Read:    ~500µs/call   — bulk fread + linear scan
+#   Write:   ~940µs/call   — bulk fread + scan + fwrite + WAL (~2× read)
+#   Distinct: ~740µs/call  — bulk fread + hash table dedup (~1.5× read)
+#
+# Fixed issues:
+#   distinct: was O(n²) linear scan dedup → now O(n) open-addressing hash table
+#   Before fix: ~5030µs/call (15× slower than reads)
+#   After fix:  ~741µs/call  (1.5× read cost) — 6.8× speedup
+#
+# Known characteristics (not bugs):
+#   All operations bulk-load entire store file (fread) before filtering.
+#   Early termination in scan loop doesn't eliminate I/O cost.
+#   With 5000 records × ~64B each = ~320KB per read.

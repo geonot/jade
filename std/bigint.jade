@@ -1,0 +1,361 @@
+# std.bigint — Arbitrary-precision integer arithmetic
+#
+# Usage:
+#   a is bigint.from_str("123456789012345678901234567890")
+#   b is bigint.from_int(42)
+#   c is bigint.add(a, b)
+#   log(bigint.to_string(c))
+
+# Stores digits as Vec of i64 in base 10^9. Least significant chunk first.
+# sign: 1 for positive/zero, -1 for negative
+
+BASE is 1000000000
+
+type BigInt
+    chunks as Vec of i64
+    sign as i64
+
+*from_int(n as i64)
+    if n equals 0
+        c0 is vec()
+        c0.push(0)
+        return BigInt(chunks is c0, sign is 1)
+    s is 1
+    val is n
+    if n < 0
+        s is -1
+        val is 0 - n
+    c1 is vec()
+    while val > 0
+        c1.push(val mod BASE)
+        val is val / BASE
+    BigInt(chunks is c1, sign is s)
+
+*from_str(s as String)
+    if s.length equals 0
+        return from_int(0)
+    start is 0
+    sign is 1
+    if s.char_at(0) equals 45
+        sign is -1
+        start is 1
+    # Parse from right to left in groups of 9
+    chunks is vec()
+    i is s.length
+    while i > start
+        lo is i - 9
+        if lo < start
+            lo is start
+        chunk is __parse_chunk(s, lo, i)
+        chunks.push(chunk)
+        i is lo
+    # Remove leading zero chunks
+    while chunks.length > 1 and chunks.get(chunks.length - 1) equals 0
+        chunks.pop()
+    if chunks.length equals 1 and chunks.get(0) equals 0
+        sign is 1
+    BigInt(chunks is chunks, sign is sign)
+
+*__parse_chunk(s as String, lo as i64, hi as i64) returns i64
+    result is 0
+    i is lo
+    while i < hi
+        ch is s.char_at(i)
+        if ch >= 48 and ch <= 57
+            result is result * 10 + (ch - 48)
+        i is i + 1
+    result
+
+*zero
+    from_int(0)
+
+*one
+    from_int(1)
+
+*is_zero(a as BigInt) returns bool
+    a.chunks.length equals 1 and a.chunks.get(0) equals 0
+
+*negate(a as BigInt)
+    if is_zero(a)
+        return a
+    BigInt(chunks is a.chunks, sign is 0 - a.sign)
+
+*absolute(a as BigInt)
+    BigInt(chunks is a.chunks, sign is 1)
+
+# Compare magnitudes: returns -1, 0, or 1
+*__cmp_mag(a as BigInt, b as BigInt) returns i64
+    if a.chunks.length neq b.chunks.length
+        if a.chunks.length > b.chunks.length
+            return 1
+        return -1
+    i is a.chunks.length - 1
+    while i >= 0
+        if a.chunks.get(i) > b.chunks.get(i)
+            return 1
+        if a.chunks.get(i) < b.chunks.get(i)
+            return -1
+        i is i - 1
+    0
+
+*__add_mag(a as BigInt, b as BigInt) returns Vec of i64
+    len is a.chunks.length
+    if b.chunks.length > len
+        len is b.chunks.length
+    result is vec()
+    carry is 0
+    i is 0
+    while i < len
+        va is 0
+        vb is 0
+        if i < a.chunks.length
+            va is a.chunks.get(i)
+        if i < b.chunks.length
+            vb is b.chunks.get(i)
+        s is va + vb + carry
+        carry is s / BASE
+        result.push(s mod BASE)
+        i is i + 1
+    if carry > 0
+        result.push(carry)
+    result
+
+*__sub_mag(a as BigInt, b as BigInt) returns Vec of i64
+    # Assumes |a| >= |b|
+    result is vec()
+    borrow is 0
+    i is 0
+    while i < a.chunks.length
+        va is a.chunks.get(i)
+        vb is 0
+        if i < b.chunks.length
+            vb is b.chunks.get(i)
+        diff is va - vb - borrow
+        if diff < 0
+            diff is diff + BASE
+            borrow is 1
+        else
+            borrow is 0
+        result.push(diff)
+        i is i + 1
+    # Strip leading zeros
+    while result.length > 1 and result.get(result.length - 1) equals 0
+        result.pop()
+    result
+
+*add(a as BigInt, b as BigInt)
+    if a.sign equals b.sign
+        c0 is __add_mag(a, b)
+        return BigInt(chunks is c0, sign is a.sign)
+    cmp is __cmp_mag(a, b)
+    if cmp equals 0
+        return zero()
+    if cmp > 0
+        c1 is __sub_mag(a, b)
+        return BigInt(chunks is c1, sign is a.sign)
+    c2 is __sub_mag(b, a)
+    BigInt(chunks is c2, sign is b.sign)
+
+*sub(a as BigInt, b as BigInt)
+    add(a, negate(b))
+
+*mul(a as BigInt, b as BigInt)
+    if is_zero(a) or is_zero(b)
+        return zero()
+    len is a.chunks.length + b.chunks.length
+    result is vec()
+    for i in 0 to len
+        result.push(0)
+    i is 0
+    while i < a.chunks.length
+        carry is 0
+        j is 0
+        while j < b.chunks.length
+            prod is a.chunks.get(i) * b.chunks.get(j) + result.get(i + j) + carry
+            result.set(i + j, prod mod BASE)
+            carry is prod / BASE
+            j is j + 1
+        if carry > 0
+            result.set(i + b.chunks.length, result.get(i + b.chunks.length) + carry)
+        i is i + 1
+    # Strip leading zeros
+    while result.length > 1 and result.get(result.length - 1) equals 0
+        result.pop()
+    s is a.sign * b.sign
+    BigInt(chunks is result, sign is s)
+
+*compare(a as BigInt, b as BigInt) returns i64
+    if a.sign neq b.sign
+        if a.sign > 0
+            return 1
+        return -1
+    cmp is __cmp_mag(a, b)
+    cmp * a.sign
+
+*is_equal(a as BigInt, b as BigInt) returns bool
+    compare(a, b) equals 0
+
+*less_than(a as BigInt, b as BigInt) returns bool
+    compare(a, b) < 0
+
+*format(a as BigInt) returns String
+    if is_zero(a)
+        return '0'
+    result is ''
+    # Most significant chunk first (no zero-padding)
+    i is a.chunks.length - 1
+    first is true
+    while i >= 0
+        chunk is a.chunks.get(i)
+        if first
+            result is result + '{chunk}'
+            first is false
+        else
+            # Pad to 9 digits
+            s is '{chunk}'
+            pad is 9 - s.length
+            for j in 0 to pad
+                result is result + '0'
+            result is result + s
+        i is i - 1
+    if a.sign < 0
+        return '-' + result
+    result
+
+*to_int(a as BigInt) returns i64
+    result is 0
+    i is a.chunks.length - 1
+    while i >= 0
+        result is result * BASE + a.chunks.get(i)
+        i is i - 1
+    result * a.sign
+
+# Division: returns DivResult with quotient and remainder.
+# Uses schoolbook long division on chunks.
+
+type DivResult
+    quot as BigInt
+    rem as BigInt
+
+*__divmod(a as BigInt, b as BigInt) returns DivResult
+    if is_zero(b)
+        return DivResult(quot is zero(), rem is zero())
+    cmp is __cmp_mag(a, b)
+    if cmp < 0
+        return DivResult(quot is zero(), rem is absolute(a))
+    if cmp equals 0
+        return DivResult(quot is one(), rem is zero())
+    # Single-chunk divisor: use simple loop
+    if b.chunks.length equals 1
+        d is b.chunks.get(0)
+        q is vec()
+        rv is 0
+        i is a.chunks.length - 1
+        while i >= 0
+            cur is rv * BASE + a.chunks.get(i)
+            q.push(cur / d)
+            rv is cur mod d
+            i is i - 1
+        # Reverse q (it was built most-significant first)
+        qr is vec()
+        j is q.length - 1
+        while j >= 0
+            qr.push(q.get(j))
+            j is j - 1
+        # Strip leading zeros
+        while qr.length > 1 and qr.get(qr.length - 1) equals 0
+            qr.pop()
+        rc is vec()
+        rc.push(rv)
+        return DivResult(quot is BigInt(chunks is qr, sign is 1), rem is BigInt(chunks is rc, sign is 1))
+    # Multi-chunk divisor: subtract-and-shift approach
+    remainder is absolute(a)
+    quotient_chunks is vec()
+    shift is a.chunks.length - b.chunks.length
+    while shift >= 0
+        # Find how many times b * BASE^shift fits into remainder
+        count is 0
+        loop
+            shifted is __shift_left(absolute(b), shift)
+            c is __cmp_mag(remainder, shifted)
+            if c < 0
+                break
+            remainder is BigInt(chunks is __sub_mag(remainder, shifted), sign is 1)
+            count is count + 1
+        quotient_chunks.push(count)
+        shift is shift - 1
+    # Reverse to get least-significant first
+    qr2 is vec()
+    k is quotient_chunks.length - 1
+    while k >= 0
+        qr2.push(quotient_chunks.get(k))
+        k is k - 1
+    while qr2.length > 1 and qr2.get(qr2.length - 1) equals 0
+        qr2.pop()
+    DivResult(quot is BigInt(chunks is qr2, sign is 1), rem is remainder)
+
+*__shift_left(a as BigInt, n as i64)
+    if is_zero(a)
+        return zero()
+    result is vec()
+    i is 0
+    while i < n
+        result.push(0)
+        i is i + 1
+    j is 0
+    while j < a.chunks.length
+        result.push(a.chunks.get(j))
+        j is j + 1
+    BigInt(chunks is result, sign is a.sign)
+
+*div(a as BigInt, b as BigInt)
+    dr is __divmod(a, b)
+    s is a.sign * b.sign
+    BigInt(chunks is dr.quot.chunks, sign is s)
+
+*modulo(a as BigInt, b as BigInt)
+    dr is __divmod(a, b)
+    dr.rem
+
+# ── Exponentiation ──────────────────────────────────────────
+
+*power(base as BigInt, exp as i64) returns BigInt
+    if exp equals 0
+        return one()
+    if exp < 0
+        return zero()
+    result is one()
+    b is base
+    e is exp
+    while e > 0
+        if e mod 2 equals 1
+            result is mul(result, b)
+        b is mul(b, b)
+        e is e / 2
+    result
+
+*modpow(base as BigInt, exp as BigInt, m as BigInt) returns BigInt
+    if is_zero(m)
+        return zero()
+    result is one()
+    b is modulo(base, m)
+    e is absolute(exp)
+    two is from_int(2)
+    while not is_zero(e)
+        # Check if least significant digit is odd
+        lsb is e.chunks.get(0)
+        if lsb mod 2 equals 1
+            result is modulo(mul(result, b), m)
+        b is modulo(mul(b, b), m)
+        # Divide exp by 2
+        e is div(e, two)
+    result
+
+*gcd(a as BigInt, b as BigInt) returns BigInt
+    x is absolute(a)
+    y is absolute(b)
+    while not is_zero(y)
+        r is modulo(x, y)
+        x is y
+        y is r
+    x

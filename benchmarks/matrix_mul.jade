@@ -1,17 +1,11 @@
 *main
     n is 1500
     total is 0
-    i is 0
-    while i < n
-        j is 0
-        while j < n
+    for i in 0 to n
+        for j in 0 to n
             sum is 0
-            k is 0
-            while k < n
+            for k in 0 to n
                 sum is sum + (i * n + k) * (k * n + j) + (total xor k)
-                k is k + 1
             total is total + sum
-            j is j + 1
-        i is i + 1
     log(total)
     0

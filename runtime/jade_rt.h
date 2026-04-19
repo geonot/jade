@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -145,6 +147,9 @@ struct jade_sched {
     _Atomic(int32_t)   idle_count;
     /* Started flag */
     _Atomic(int32_t)   started;
+    /* Completion signaling — replaces usleep polling in jade_sched_run */
+    pthread_mutex_t    done_lock;
+    pthread_cond_t     done_cond;
 };
 
 void jade_sched_init(int num_workers);
@@ -217,11 +222,18 @@ size_t       jade_pool_capacity(jade_pool_t *pool);
 
 void jade_actor_park(void *mailbox_ptr);
 void jade_actor_wake(void *mailbox_ptr);
+void jade_actor_stop(void *mailbox_ptr);
+void jade_actor_destroy(void *mailbox_ptr);
 
 /* ── Global scheduler instance ───────────────────────────────────── */
 
 extern jade_sched_t g_sched;
 extern _Thread_local jade_worker_t *tl_worker;
+
+/* ── Checked allocation ──────────────────────────────────────────── */
+
+void *jade_xmalloc(size_t size);
+void jade_store_truncation_warn(int64_t original_len, int64_t max_len);
 
 #ifdef __cplusplus
 }

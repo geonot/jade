@@ -1,0 +1,15 @@
+store products
+    name as String @index
+    price as i64
+
+*main
+    insert products 'Apple', 100
+    insert products 'Banana', 50
+    insert products 'Cherry', 75
+
+    n is count products
+    log n
+
+    a is products where name == 'Apple'
+    log a.name
+    log a.price

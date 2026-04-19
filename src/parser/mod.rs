@@ -12,6 +12,8 @@ pub struct Parser {
     pos: usize,
     errors: Vec<ParseError>,
     suppress_by: bool,
+    gensym_counter: u32,
+    depth: u32,
 }
 
 macro_rules! binop {
@@ -33,7 +35,20 @@ mod stmt;
 
 impl Parser {
     pub fn new(tok: Vec<Spanned>) -> Self {
-        Self { tok, pos: 0, errors: Vec::new(), suppress_by: false }
+        Self {
+            tok,
+            pos: 0,
+            errors: Vec::new(),
+            suppress_by: false,
+            gensym_counter: 0,
+            depth: 0,
+        }
+    }
+
+    pub(crate) fn gensym(&mut self, prefix: &str) -> String {
+        let id = self.gensym_counter;
+        self.gensym_counter += 1;
+        format!("__{prefix}_{id}")
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
@@ -59,17 +74,19 @@ impl Parser {
             return Err(ParseError::Error {
                 line: 0,
                 col: 0,
-                msg: format!(
-                    "{} parse error(s):\n{}",
-                    msgs.len(),
-                    msgs.join("\n")
-                ),
+                msg: format!("{} parse error(s):\n{}", msgs.len(), msgs.join("\n")),
             });
         }
         let mut prog = Program { decls };
         // If there are top-level statements and no explicit *main, wrap them into an implicit *main
-        let has_explicit_main = prog.decls.iter().any(|d| matches!(d, Decl::Fn(f) if f.name == "main"));
-        let has_top_stmts = prog.decls.iter().any(|d| matches!(d, Decl::TopStmt(_) | Decl::Const(..)));
+        let has_explicit_main = prog
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Fn(f) if f.name == "main"));
+        let has_top_stmts = prog
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::TopStmt(_) | Decl::Const(..)));
         if has_top_stmts && !has_explicit_main {
             let mut body_stmts: Vec<Stmt> = Vec::new();
             let mut remaining_decls: Vec<Decl> = Vec::new();
@@ -77,32 +94,35 @@ impl Parser {
             for d in prog.decls.drain(..) {
                 match d {
                     Decl::TopStmt(stmt) => {
-                        if main_span.line == 0 { main_span = stmt.span(); }
+                        if main_span.line == 0 {
+                            main_span = stmt.span();
+                        }
                         body_stmts.push(stmt);
                     }
                     Decl::Const(name, val, sp) => {
-                        if main_span.line == 0 { main_span = sp; }
-                        body_stmts.push(Stmt::Bind(Bind {
-                            name,
-                            value: val,
-                            ty: None,
-                            atomic: false,
-                            span: sp,
-                        }));
+                        // Keep constants as top-level Decl::Const so the typer
+                        // registers them in self.consts (visible to type methods).
+                        if main_span.line == 0 {
+                            main_span = sp;
+                        }
+                        remaining_decls.push(Decl::Const(name, val, sp));
                     }
                     other => remaining_decls.push(other),
                 }
             }
-            remaining_decls.push(Decl::Fn(Fn {
-                name: "main".to_string(),
-                type_params: Vec::new(),
-                type_bounds: Vec::new(),
-                params: Vec::new(),
-                ret: None,
-                body: body_stmts,
-                is_generator: false,
-                span: main_span,
-            }));
+            if !body_stmts.is_empty() {
+                remaining_decls.push(Decl::Fn(Fn {
+                    name: "main".to_string(),
+                    type_params: Vec::new(),
+                    type_bounds: Vec::new(),
+                    params: Vec::new(),
+                    ret: None,
+                    body: body_stmts,
+                    is_generator: false,
+                    span: main_span,
+                    attrs: FnAttrs::default(),
+                }));
+            }
             prog.decls = remaining_decls;
         }
         desugar_multi_clause_fns(&mut prog);
@@ -117,9 +137,18 @@ impl Parser {
             }
             match self.peek() {
                 // Declaration-starting tokens
-                Token::Star | Token::Type | Token::Enum | Token::Extern
-                | Token::Use | Token::Actor | Token::Store | Token::Trait
-                | Token::Impl | Token::Test | Token::Pub | Token::Supervisor
+                Token::Star
+                | Token::Type
+                | Token::Enum
+                | Token::Extern
+                | Token::Use
+                | Token::Actor
+                | Token::Store
+                | Token::Trait
+                | Token::Impl
+                | Token::Test
+                | Token::Pub
+                | Token::Supervisor
                 | Token::Alias => break,
                 Token::Newline => {
                     self.advance();
@@ -128,14 +157,25 @@ impl Parser {
                         break;
                     }
                     match self.peek() {
-                        Token::Star | Token::Type | Token::Enum | Token::Extern
-                        | Token::Use | Token::Actor | Token::Store | Token::Trait
-                        | Token::Impl | Token::Test | Token::Pub | Token::Supervisor
+                        Token::Star
+                        | Token::Type
+                        | Token::Enum
+                        | Token::Extern
+                        | Token::Use
+                        | Token::Actor
+                        | Token::Store
+                        | Token::Trait
+                        | Token::Impl
+                        | Token::Test
+                        | Token::Pub
+                        | Token::Supervisor
                         | Token::Alias => break,
                         _ => {}
                     }
                 }
-                _ => { self.advance(); }
+                _ => {
+                    self.advance();
+                }
             }
         }
     }
@@ -225,6 +265,18 @@ impl Parser {
                 Token::Build => {
                     self.advance();
                     return Ok("build".into());
+                }
+                Token::From => {
+                    self.advance();
+                    return Ok("from".into());
+                }
+                Token::To => {
+                    self.advance();
+                    return Ok("to".into());
+                }
+                Token::Insert => {
+                    self.advance();
+                    return Ok("insert".into());
                 }
                 _ => {}
             }
@@ -330,6 +382,15 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
     let param_count = first.params.len();
     let sp = first.span;
 
+    for (i, c) in clauses.iter().enumerate().skip(1) {
+        if c.params.len() != param_count {
+            panic!(
+                "line {}:{}: multi-clause function `{}` clause {} has {} parameters, but first clause has {}",
+                c.span.line, c.span.col, first.name, i + 1, c.params.len(), param_count
+            );
+        }
+    }
+
     let mut unified_params: Vec<Param> = Vec::new();
     for pi in 0..param_count {
         let real_name = clauses
@@ -434,6 +495,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         body,
         is_generator: false,
         span: sp,
+        attrs: FnAttrs::default(),
     }
 }
 
@@ -755,7 +817,8 @@ mod tests {
 
     #[test]
     fn pipeline_simple() {
-        let p = parse("*double(x as i64) returns i64\n    x * 2\n\n*main()\n    x is 10 ~ double\n");
+        let p =
+            parse("*double(x as i64) returns i64\n    x * 2\n\n*main()\n    x is 10 ~ double\n");
         if let Decl::Fn(f) = &p.decls[1] {
             if let Stmt::Bind(b) = &f.body[0] {
                 assert!(matches!(b.value, Expr::Pipe(_, _, _, _)));
@@ -783,7 +846,9 @@ mod tests {
 
     #[test]
     fn pipeline_with_call() {
-        let p = parse("*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n");
+        let p = parse(
+            "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n",
+        );
         if let Decl::Fn(f) = &p.decls[1] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::Pipe(_, right, _, _) = &b.value {
@@ -797,8 +862,9 @@ mod tests {
 
     #[test]
     fn placeholder_in_call() {
-        let p =
-            parse("*mul(a as i64, b as i64) returns i64\n    a * b\n\n*main()\n    x is 10 ~ mul($, 3)\n");
+        let p = parse(
+            "*mul(a as i64, b as i64) returns i64\n    a * b\n\n*main()\n    x is 10 ~ mul($, 3)\n",
+        );
         if let Decl::Fn(f) = &p.decls[1] {
             if let Stmt::Bind(b) = &f.body[0] {
                 if let Expr::Pipe(_, right, _, _) = &b.value {

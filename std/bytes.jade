@@ -1,0 +1,230 @@
+# std.bytes — Raw byte buffer type for binary data
+#
+# Distinct from String: no UTF-8 assumption, supports arbitrary byte values.
+# Used for network protocols, file formats, cryptography, and binary I/O.
+#
+# Usage:
+#   buf is bytes.new(1024)
+#   buf.set(0, 0xFF)
+#   buf.set(1, 0x00)
+#   val is buf.get(0)
+#   slice is buf.slice(0, 10)
+
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
+extern *memset(s as %i8, c as i32, n as i64) returns %i8
+extern *memcmp(a as %i8, b as %i8, n as i64) returns i32
+
+type Bytes
+    data as Vec of i64
+    len as i64
+
+    # Get byte at index.
+    *get(idx as i64) returns i64
+        if idx < 0 or idx >= self.len
+            return 0
+        self.data.get(idx)
+
+    # Set byte at index.
+    *set(idx as i64, val as i64)
+        if idx >= 0 and idx < self.len
+            self.data.set(idx, val & 255)
+
+    # Append a byte.
+    *push(val as i64)
+        if self.len >= self.data.length
+            self.data.push(val & 255)
+        else
+            self.data.set(self.len, val & 255)
+        self.len is self.len + 1
+
+    # Append multiple bytes from another Bytes.
+    *append(other as Bytes)
+        i is 0
+        while i < other.len
+            self.push(other.get(i))
+            i is i + 1
+
+    # Get a slice as a new Bytes.
+    *slice(start as i64, end as i64) returns Bytes
+        result is new(end - start)
+        i is start
+        while i < end and i < self.len
+            result.set(i - start, self.get(i))
+            i is i + 1
+        result.len is end - start
+        result
+
+    # Length of valid data.
+    *length returns i64
+        self.len
+
+    # Convert to hex string.
+    *to_hex returns String
+        result is ""
+        chars is "0123456789abcdef"
+        i is 0
+        while i < self.len
+            b is self.get(i)
+            hi is b / 16
+            lo is b mod 16
+            result is result + chars.slice(hi, hi + 1) + chars.slice(lo, lo + 1)
+            i is i + 1
+        result
+
+    # Convert to string (treating bytes as ASCII/UTF-8).
+    *to_string returns String
+        result is ""
+        i is 0
+        while i < self.len
+            result is result + __byte_char(self.get(i))
+            i is i + 1
+        result
+
+    # Check equality with another Bytes.
+    *equals(other as Bytes) returns bool
+        if self.len neq other.len
+            return false
+        i is 0
+        while i < self.len
+            if self.get(i) neq other.get(i)
+                return false
+            i is i + 1
+        true
+
+    # Find a byte value, return index or -1.
+    *find_byte(val as i64) returns i64
+        i is 0
+        while i < self.len
+            if self.get(i) equals (val & 255)
+                return i
+            i is i + 1
+        -1
+
+    # Fill with a single byte value.
+    *fill(val as i64)
+        i is 0
+        while i < self.len
+            self.data.set(i, val & 255)
+            i is i + 1
+
+    # Write a little-endian i32 at offset.
+    *write_i32_le(offset as i64, val as i64)
+        self.set(offset, val & 255)
+        self.set(offset + 1, (val >> 8) & 255)
+        self.set(offset + 2, (val >> 16) & 255)
+        self.set(offset + 3, (val >> 24) & 255)
+
+    # Read a little-endian i32 at offset.
+    *read_i32_le(offset as i64) returns i64
+        b0 is self.get(offset)
+        b1 is self.get(offset + 1)
+        b2 is self.get(offset + 2)
+        b3 is self.get(offset + 3)
+        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+    # Write a big-endian i32 at offset.
+    *write_i32_be(offset as i64, val as i64)
+        self.set(offset, (val >> 24) & 255)
+        self.set(offset + 1, (val >> 16) & 255)
+        self.set(offset + 2, (val >> 8) & 255)
+        self.set(offset + 3, val & 255)
+
+    # Read a big-endian i32 at offset.
+    *read_i32_be(offset as i64) returns i64
+        b0 is self.get(offset)
+        b1 is self.get(offset + 1)
+        b2 is self.get(offset + 2)
+        b3 is self.get(offset + 3)
+        (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+
+    # Write a little-endian i64 at offset.
+    *write_i64_le(offset as i64, val as i64)
+        self.write_i32_le(offset, val & 4294967295)
+        self.write_i32_le(offset + 4, (val >> 32) & 4294967295)
+
+    # Read a little-endian i64 at offset.
+    *read_i64_le(offset as i64) returns i64
+        lo is self.read_i32_le(offset)
+        hi is self.read_i32_le(offset + 4)
+        lo | (hi << 32)
+
+# ── Constructors ─────────────────────────────────────────────
+
+# Create a new byte buffer of given capacity, filled with zeros.
+*new(capacity as i64) returns Bytes
+    data is vec()
+    for i in 0 to capacity
+        data.push(0)
+    Bytes(data is data, len is 0)
+
+# Create a Bytes filled with zeros of given length.
+*zeroed(n as i64) returns Bytes
+    buf is new(n)
+    buf.len is n
+    buf
+
+# Create a Bytes from a string's raw bytes.
+*from_string(s as String) returns Bytes
+    buf is new(s.length)
+    i is 0
+    while i < s.length
+        buf.push(s.char_at(i))
+        i is i + 1
+    buf
+
+# Create a Bytes from a hex string.
+*from_hex(hex_str as String) returns Bytes
+    buf is new(hex_str.length / 2)
+    i is 0
+    while i < hex_str.length - 1
+        hi is __hex_val(hex_str.char_at(i))
+        lo is __hex_val(hex_str.char_at(i + 1))
+        buf.push(hi * 16 + lo)
+        i is i + 2
+    buf
+
+# Create a Bytes from a vector of i64 values (each truncated to 0-255).
+*from_vec(v as Vec of i64) returns Bytes
+    buf is new(v.length)
+    loop v
+        buf.push($)
+    buf
+
+# Concatenate two Bytes.
+*concat(a as Bytes, b as Bytes) returns Bytes
+    result is new(a.len + b.len)
+    i is 0
+    while i < a.len
+        result.push(a.get(i))
+        i is i + 1
+    i is 0
+    while i < b.len
+        result.push(b.get(i))
+        i is i + 1
+    result
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*__hex_val(ch as i64) returns i64
+    if ch >= 48 and ch <= 57
+        return ch - 48
+    if ch >= 97 and ch <= 102
+        return ch - 87
+    if ch >= 65 and ch <= 70
+        return ch - 55
+    0
+
+*__byte_char(code as i64) returns String
+    if code equals 10
+        return "\n"
+    if code equals 9
+        return "\t"
+    if code equals 13
+        return "\r"
+    if code < 32 or code > 126
+        return "?"
+    chars is " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+    idx is code - 32
+    chars.slice(idx, idx + 1)

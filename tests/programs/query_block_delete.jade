@@ -1,0 +1,15 @@
+store items
+    name as String
+    value as i64
+
+*main
+    insert items 'Alpha', 10
+    insert items 'Beta', 20
+    insert items 'Gamma', 30
+
+    items query
+        where value equals 10
+        delete
+
+    c is count items
+    log c

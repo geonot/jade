@@ -866,7 +866,7 @@ fn generic_add() {
 #[test]
 fn extern_puts() {
     expect(
-        "extern *puts(s as String) returns i32\n\n*main() returns i32\n    puts(\"hello from extern\")\n    0\n",
+        "extern *puts(s as String) returns i32\n\n*main() returns i32\n    extern.puts(\"hello from extern\")\n    0\n",
         "hello from extern",
     );
 }
@@ -1093,7 +1093,7 @@ fn module_import() {
     std::fs::write(&helper, "*double(x as i64) returns i64\n    x + x\n").unwrap();
     std::fs::write(
         &main,
-        "use helper\n\n*main() returns i32\n    log(double(21))\n    0\n",
+        "use helper\n\n*main() returns i32\n    log(helper.double(21))\n    0\n",
     )
     .unwrap();
     let status = Command::new(jadec())
@@ -1404,6 +1404,88 @@ fn ternary_in_expr() {
     expect(
         "*main()\n    a is 10\n    b is 20\n    log(a > b ? a ! b)\n",
         "20",
+    );
+}
+
+#[test]
+fn ternary_if_only() {
+    expect(
+        "*main()\n    x is 5\n    x > 3 ? log(\"yes\")\n    x < 3 ? log(\"no\")\n",
+        "yes",
+    );
+}
+
+#[test]
+fn ternary_else_only_qbang() {
+    expect(
+        "*main()\n    x is 5\n    x > 3 ? ! log(\"no\")\n    x < 3 ? ! log(\"yes\")\n",
+        "yes",
+    );
+}
+
+#[test]
+fn ternary_else_only_bang() {
+    expect(
+        "*main()\n    x is 5\n    x > 3 ! log(\"no\")\n    x < 3 ! log(\"yes\")\n",
+        "yes",
+    );
+}
+
+#[test]
+fn ternary_variants() {
+    expect_file(
+        "tests/programs/ternary_variants.jade",
+        "10\n10\nbig\nB\nif-only-yes\nqbang-yes\nbang-yes",
+    );
+}
+
+// ── Loop patterns ───────────────────────────────────────────────────
+
+#[test]
+fn loop_collection_placeholder() {
+    expect(
+        "*main()\n    v is vec()\n    v.push(10)\n    v.push(20)\n    v.push(30)\n    loop v\n        log($)\n",
+        "10\n20\n30",
+    );
+}
+
+#[test]
+fn loop_collection_index() {
+    expect(
+        "*main()\n    v is vec()\n    v.push(\"a\")\n    v.push(\"b\")\n    loop v\n        log(to_string($$) + \":\" + $)\n",
+        "0:a\n1:b",
+    );
+}
+
+#[test]
+fn loop_range_basic() {
+    expect(
+        "*main()\n    loop 0 to 3\n        log(to_string($))\n",
+        "0\n1\n2",
+    );
+}
+
+#[test]
+fn loop_range_offset() {
+    expect(
+        "*main()\n    loop 1 to 4\n        log(to_string($$) + \"=\" + to_string($))\n",
+        "0=1\n1=2\n2=3",
+    );
+}
+
+#[test]
+fn loop_range_step() {
+    expect(
+        "*main()\n    loop 0 to 10 by 3\n        log(to_string($))\n",
+        "0\n3\n6\n9",
+    );
+}
+
+#[test]
+fn loop_patterns() {
+    expect_file(
+        "tests/programs/loop_patterns.jade",
+        "a\nb\nc\n0:a\n1:b\n2:c\n0\n1\n2\n0=5\n1=6\n2=7\n0\n3\n6\n9\n0>1\n1>2\n2>3\n0\n1\n2",
     );
 }
 
@@ -2316,26 +2398,17 @@ fn comptime_size_of_type() {
 
 #[test]
 fn comptime_size_of_primitive() {
-    expect(
-        "*main\n    log(size of i64)\n    log(size of i8)\n",
-        "8\n1",
-    );
+    expect("*main\n    log(size of i64)\n    log(size of i8)\n", "8\n1");
 }
 
 #[test]
 fn comptime_type_of_expr() {
-    expect(
-        "*main\n    x is 42\n    log(type of x)\n",
-        "i64",
-    );
+    expect("*main\n    x is 42\n    log(type of x)\n", "i64");
 }
 
 #[test]
 fn comptime_type_of_string() {
-    expect(
-        "*main\n    s is 'hello'\n    log(type of s)\n",
-        "String",
-    );
+    expect("*main\n    s is 'hello'\n    log(type of s)\n", "String");
 }
 
 // ── Atomic Keyword Binding ──────────────────────────────────────
@@ -2364,4 +2437,908 @@ fn atomic_builtin_sub() {
         "*main\n    x is 100\n    old is atomic_sub(%x, 30)\n    log old\n",
         "100",
     );
+}
+
+// ── Query Blocks ─────────────────────────────────────────────────────
+
+#[test]
+fn query_block_select() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n\n    r is users query\n        where age > 28\n    log r.name\n",
+        "Alice",
+    );
+}
+
+#[test]
+fn query_block_and() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n\n    r is users query\n        where age > 28 and name equals 'Charlie'\n    log r.name\n    log r.age\n",
+        "Charlie\n35",
+    );
+}
+
+#[test]
+fn query_block_delete() {
+    expect_store(
+        "store items\n    name as String\n    value as i64\n\n*main\n    insert items 'Alpha', 10\n    insert items 'Beta', 20\n    insert items 'Gamma', 30\n\n    items query\n        where value equals 10\n        delete\n\n    c is count items\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn query_block_set() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n\n    users query\n        where name equals 'Bob'\n        set age is 99\n\n    r is users where name equals 'Bob'\n    log r.age\n",
+        "99",
+    );
+}
+
+#[test]
+fn query_block_multi_where() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    insert users 'Diana', 28\n\n    r is users query\n        where age > 20\n        where name equals 'Charlie'\n    log r.name\n    log r.age\n",
+        "Charlie\n35",
+    );
+}
+
+#[test]
+fn store_index_basic() {
+    expect_store(
+        "store products\n    name as String @index\n    price as i64\n\n*main\n    insert products 'Apple', 100\n    insert products 'Banana', 50\n    insert products 'Cherry', 75\n    n is count products\n    log n\n    a is products where name equals 'Apple'\n    log a.name\n    log a.price\n",
+        "3\nApple\n100",
+    );
+}
+
+#[test]
+fn store_index_int_field() {
+    expect_store(
+        "store scores\n    player as String\n    pts as i64 @index\n\n*main\n    insert scores 'Alice', 100\n    insert scores 'Bob', 200\n    insert scores 'Charlie', 150\n    n is count scores\n    log n\n    r is scores where pts > 120\n    log r.player\n",
+        "3\nBob",
+    );
+}
+
+#[test]
+fn store_agg_sum() {
+    expect_store(
+        "store vals\n    x as i64\n\n*main\n    insert vals 10\n    insert vals 20\n    insert vals 30\n    s is vals.sum(x)\n    log s\n",
+        "60",
+    );
+}
+
+#[test]
+fn store_agg_min_max() {
+    expect_store(
+        "store vals\n    x as i64\n\n*main\n    insert vals 50\n    insert vals 10\n    insert vals 30\n    lo is vals.min(x)\n    hi is vals.max(x)\n    log lo\n    log hi\n",
+        "10\n50",
+    );
+}
+
+#[test]
+fn store_versioned_basic() {
+    // Test that @versioned stores track version_count correctly
+    expect_store(
+        "store posts @versioned\n    title as String\n    body as String\n\n*main\n    insert posts 'Draft', 'Hello'\n    set posts where title equals 'Draft' body 'Hello World'\n    set posts where title equals 'Draft' body 'Hello Updated'\n    vc is posts.version_count(1)\n    log vc\n",
+        "3",
+    );
+}
+
+#[test]
+fn store_versioned_at_version() {
+    // Test at_version returns 1 (found) for version 1, 0 for non-existent
+    expect_store(
+        "store docs @versioned\n    title as String\n    body as String\n\n*main\n    insert docs 'Test', 'First'\n    set docs where title equals 'Test' body 'Second'\n    f1 is docs.at_version(1, 1)\n    f2 is docs.at_version(1, 99)\n    log f1\n    log f2\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn store_versioned_history_count() {
+    // history() returns the number of old versions in the versions file
+    expect_store(
+        "store notes @versioned\n    text as String\n\n*main\n    insert notes 'v1'\n    set notes where text equals 'v1' text 'v2'\n    set notes where text equals 'v2' text 'v3'\n    h is notes.history(1)\n    log h\n",
+        "2",
+    );
+}
+
+// ── @unique enforcement ──────────────────────────────────────────────
+
+#[test]
+fn store_unique_skips_duplicate() {
+    // Second insert with same @unique field should be silently skipped
+    expect_store(
+        "store emails\n    addr as String @unique\n    name as String\n\n*main\n    insert emails 'a@b.com', 'Alice'\n    insert emails 'a@b.com', 'Bob'\n    c is count emails\n    log c\n",
+        "1",
+    );
+}
+
+#[test]
+fn store_unique_allows_different() {
+    // Different values should both be inserted
+    expect_store(
+        "store emails\n    addr as String @unique\n    name as String\n\n*main\n    insert emails 'a@b.com', 'Alice'\n    insert emails 'c@d.com', 'Bob'\n    c is count emails\n    log c\n",
+        "2",
+    );
+}
+
+// ── distinct ─────────────────────────────────────────────────────
+
+#[test]
+fn store_distinct_i64() {
+    expect_store(
+        "store scores @simple\n    val as I64\n\n*main\n    insert scores 10\n    insert scores 20\n    insert scores 10\n    insert scores 30\n    d is scores.distinct(val)\n    log d\n",
+        "3",
+    );
+}
+
+#[test]
+fn store_distinct_string() {
+    expect_store(
+        "store items @simple\n    name as String\n    cat as String\n\n*main\n    insert items 'a', 'fruit'\n    insert items 'b', 'fruit'\n    insert items 'c', 'veggie'\n    d is items.distinct(cat)\n    log d\n",
+        "2",
+    );
+}
+
+// ── migration ────────────────────────────────────────────────────
+
+#[test]
+fn store_migration_fresh_install() {
+    // Migration on a store that doesn't exist yet — should be a no-op,
+    // store created with current schema, migration recorded as applied.
+    expect_store(
+        "store items @simple\n    name as String\n    price as I64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as I64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n",
+        "1",
+    );
+}
+
+#[test]
+fn store_migration_idempotent() {
+    // Running twice should NOT apply the migration a second time.
+    expect_store(
+        "store items @simple\n    name as String\n    price as I64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as I64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n",
+        "1",
+    );
+}
+
+// ── Views ────────────────────────────────────────────────────────────
+
+#[test]
+fn store_view_count_basic() {
+    // View with a where clause filters records; count returns matching count.
+    expect_store(
+        "store items @simple\n    name as String\n    price as i64\n\nview expensive from items\n    where price > 5\n\n*main\n    insert items 'apple', 3\n    insert items 'laptop', 999\n    insert items 'pen', 1\n    insert items 'phone', 500\n    c is expensive.count()\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_view_count_no_match() {
+    // View where no records match returns 0.
+    expect_store(
+        "store items @simple\n    name as String\n    price as i64\n\nview cheap from items\n    where price < 0\n\n*main\n    insert items 'apple', 3\n    insert items 'laptop', 999\n    c is cheap.count()\n    log c\n",
+        "0",
+    );
+}
+
+#[test]
+fn store_view_count_no_filter() {
+    // View without a where clause delegates to source store count.
+    expect_store(
+        "store items @simple\n    name as String\n    price as i64\n\nview everything from items\n\n*main\n    insert items 'apple', 3\n    insert items 'laptop', 999\n    c is everything.count()\n    log c\n",
+        "2",
+    );
+}
+
+// ── @kv Store Tests ──────────────────────────────────────────────────
+
+#[test]
+fn kv_set_get() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('x', 42)\n    v is cache.get('x')\n    log v\n",
+        "42",
+    );
+}
+
+#[test]
+fn kv_has() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('k', 10)\n    h is cache.has('k')\n    log h\n    m is cache.has('missing')\n    log m\n",
+        "1\n0",
+    );
+}
+
+#[test]
+fn kv_count() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('a', 1)\n    cache.set('b', 2)\n    cache.set('c', 3)\n    n is cache.count()\n    log n\n",
+        "3",
+    );
+}
+
+#[test]
+fn kv_del() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('x', 99)\n    cache.del('x')\n    h is cache.has('x')\n    log h\n    n is cache.count()\n    log n\n",
+        "0\n0",
+    );
+}
+
+#[test]
+fn kv_incr() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('hits', 0)\n    cache.incr('hits')\n    cache.incr('hits')\n    cache.incr('hits')\n    v is cache.get('hits')\n    log v\n",
+        "3",
+    );
+}
+
+#[test]
+fn kv_incr_delta() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('score', 10)\n    cache.incr('score', 5)\n    v is cache.get('score')\n    log v\n",
+        "15",
+    );
+}
+
+#[test]
+fn kv_overwrite() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('x', 1)\n    cache.set('x', 2)\n    v is cache.get('x')\n    log v\n    n is cache.count()\n    log n\n",
+        "2\n1",
+    );
+}
+
+// ── @graph Store Tests ───────────────────────────────────────────────
+
+#[test]
+fn graph_from_count() {
+    expect_store(
+        "store edges @graph\n    src as i64\n    dst as i64\n    weight as i64\n\n*main\n    insert edges 1, 2, 10\n    insert edges 1, 3, 20\n    insert edges 2, 3, 30\n    n is edges.from(1)\n    log n\n",
+        "2",
+    );
+}
+
+#[test]
+fn graph_to_count() {
+    expect_store(
+        "store edges @graph\n    src as i64\n    dst as i64\n\n*main\n    insert edges 1, 3\n    insert edges 2, 3\n    insert edges 3, 1\n    n is edges.to(3)\n    log n\n",
+        "2",
+    );
+}
+
+#[test]
+fn graph_from_empty() {
+    expect_store(
+        "store edges @graph\n    src as i64\n    dst as i64\n\n*main\n    insert edges 1, 2\n    n is edges.from(99)\n    log n\n",
+        "0",
+    );
+}
+
+// ── @timeseries Store Tests ──────────────────────────────────────────
+
+#[test]
+fn ts_latest_count() {
+    expect_store(
+        "store temps @timeseries(ts)\n    ts as i64\n    value as i64\n\n*main\n    insert temps 100, 72\n    insert temps 200, 75\n    insert temps 300, 68\n    n is temps.latest()\n    log n\n",
+        "3",
+    );
+}
+
+// ── @vector Store Tests ──────────────────────────────────────────────
+
+#[test]
+fn vec_insert_count() {
+    expect_store(
+        "store vecs @vector(3)\n\n*main\n    vecs.insert([1.0, 2.0, 3.0])\n    vecs.insert([4.0, 5.0, 6.0])\n    n is vecs.count()\n    log n\n",
+        "2",
+    );
+}
+
+#[test]
+fn vec_nearest_basic() {
+    expect_store(
+        "store vecs @vector(3)\n\n*main\n    vecs.insert([1.0, 0.0, 0.0])\n    vecs.insert([0.0, 1.0, 0.0])\n    vecs.insert([0.0, 0.0, 1.0])\n    k is vecs.nearest([1.0, 0.0, 0.0], 1)\n    log k\n",
+        "1",
+    );
+}
+
+#[test]
+fn vec_nearest_topk() {
+    expect_store(
+        "store vecs @vector(2)\n\n*main\n    vecs.insert([1.0, 0.0])\n    vecs.insert([2.0, 0.0])\n    vecs.insert([10.0, 10.0])\n    k is vecs.nearest([1.5, 0.0], 2)\n    log k\n",
+        "2",
+    );
+}
+
+#[test]
+fn vec_count_after_insert() {
+    expect_store(
+        "store emb @vector(4)\n\n*main\n    emb.insert([1.0, 2.0, 3.0, 4.0])\n    emb.insert([5.0, 6.0, 7.0, 8.0])\n    emb.insert([9.0, 10.0, 11.0, 12.0])\n    n is emb.count()\n    log n\n",
+        "3",
+    );
+}
+
+// ── Hook decorator tests ─────────────────────────────────────────────
+
+#[test]
+fn hook_before_insert() {
+    expect_store(
+        "*on_before\n    log('before')\n\nstore items @simple @before_insert(on_before)\n    name as String\n\n*main\n    insert items 'alice'\n",
+        "before",
+    );
+}
+
+#[test]
+fn hook_after_insert() {
+    expect_store(
+        "*on_after\n    log('after')\n\nstore items @simple @after_insert(on_after)\n    name as String\n\n*main\n    insert items 'bob'\n",
+        "after",
+    );
+}
+
+#[test]
+fn hook_before_after_insert() {
+    expect_store(
+        "*on_before\n    log('before')\n\n*on_after\n    log('after')\n\nstore items @simple @before_insert(on_before) @after_insert(on_after)\n    name as String\n\n*main\n    insert items 'x'\n",
+        "before\nafter",
+    );
+}
+
+#[test]
+fn hook_before_delete() {
+    expect_store(
+        "*on_del\n    log('deleting')\n\nstore items @simple @before_delete(on_del)\n    name as String\n\n*main\n    insert items 'alice'\n    delete items where name equals 'alice'\n",
+        "deleting",
+    );
+}
+
+#[test]
+fn hook_after_delete() {
+    expect_store(
+        "*on_del\n    log('deleted')\n\nstore items @simple @after_delete(on_del)\n    name as String\n\n*main\n    insert items 'alice'\n    delete items where name equals 'alice'\n",
+        "deleted",
+    );
+}
+
+#[test]
+fn hook_multiple_inserts() {
+    expect_store(
+        "*on_ins\n    log('ins')\n\nstore items @simple @before_insert(on_ins)\n    val as i64\n\n*main\n    insert items 1\n    insert items 2\n    insert items 3\n",
+        "ins\nins\nins",
+    );
+}
+
+// ── Column store tests ───────────────────────────────────────────────
+
+#[test]
+fn column_sum() {
+    expect_store(
+        "store nums @simple @column\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 20\n    insert nums 30\n    s is nums.sum(val)\n    log s\n",
+        "60",
+    );
+}
+
+#[test]
+fn column_min() {
+    expect_store(
+        "store nums @simple @column\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 5\n    insert nums 30\n    m is nums.min(val)\n    log m\n",
+        "5",
+    );
+}
+
+#[test]
+fn column_max() {
+    expect_store(
+        "store nums @simple @column\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 5\n    insert nums 30\n    m is nums.max(val)\n    log m\n",
+        "30",
+    );
+}
+
+// ── Bloom filter tests ──────────────────────────────────────────────
+
+#[test]
+fn bloom_test_present() {
+    expect_store(
+        "store items @simple\n    val as i64 @bloom\n\n*main\n    insert items 42\n    b is items.maybe(val, 42)\n    if b\n        log 1\n    else\n        log 0\n",
+        "1",
+    );
+}
+
+#[test]
+fn bloom_test_absent() {
+    expect_store(
+        "store items @simple\n    val as i64 @bloom\n\n*main\n    insert items 42\n    b is items.maybe(val, 99)\n    if b\n        log 1\n    else\n        log 0\n",
+        "0",
+    );
+}
+
+#[test]
+fn bloom_multiple_inserts() {
+    expect_store(
+        "store items @simple\n    val as i64 @bloom\n\n*main\n    insert items 10\n    insert items 20\n    insert items 30\n    a is items.maybe(val, 20)\n    b is items.maybe(val, 99)\n    if a\n        log 1\n    else\n        log 0\n    if b\n        log 1\n    else\n        log 0\n",
+        "1\n0",
+    );
+}
+
+// ── FTS (full-text search) tests ────────────────────────────────────
+
+#[test]
+fn fts_search_basic() {
+    expect_store(
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'goodbye world'\n    n is docs.search(text, 'hello')\n    log n\n",
+        "1",
+    );
+}
+
+#[test]
+fn fts_search_multiple_matches() {
+    expect_store(
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'hello again'\n    n is docs.search(text, 'hello')\n    log n\n",
+        "2",
+    );
+}
+
+#[test]
+fn fts_search_no_match() {
+    expect_store(
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    n is docs.search(text, 'missing')\n    log n\n",
+        "0",
+    );
+}
+
+#[test]
+fn fts_posting_count() {
+    expect_store(
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'foo bar'\n    c is docs.search_count(text)\n    log c\n",
+        "4",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: get by sid
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_get_by_sid() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    r is get users 2\n    log r.name\n    log r.age\n",
+        "Bob\n25",
+    );
+}
+
+#[test]
+fn store_get_by_sid_first() {
+    expect_store(
+        "store items\n    val as i64\n\n*main\n    insert items 10\n    insert items 20\n    r is get items 1\n    log r.val\n",
+        "10",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: first (returns first matching record)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_first_match() {
+    expect_store(
+        "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    insert people 'Charlie', 35\n    r is first people where age > 20\n    log r.name\n",
+        "Alice",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: exists (boolean check)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_exists_found() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    e is exists users where name equals 'Bob'\n    log e\n",
+        "1",
+    );
+}
+
+#[test]
+fn store_exists_not_found() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    e is exists users where name equals 'Zara'\n    log e\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: destroy (hard delete)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_destroy_removes_record() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    destroy users where name equals 'Bob'\n    c is count users\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_destroy_then_query() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    destroy users where name equals 'Bob'\n    r is users where name equals 'Charlie'\n    log r.name\n    log r.age\n",
+        "Charlie\n35",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: restore (undelete soft-deleted records)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_restore_basic() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    delete users where name equals 'Bob'\n    c1 is count users\n    log c1\n    restore users where name equals 'Bob'\n    c2 is count users\n    log c2\n",
+        "2\n3",
+    );
+}
+
+#[test]
+fn store_restore_query_after() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Bob'\n    restore users where name equals 'Bob'\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "Bob\n25",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: save (explicit flush)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_save_basic() {
+    expect_store(
+        "store data\n    val as i64\n\n*main\n    insert data 42\n    save data\n    c is count data\n    log c\n",
+        "1",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: float aggregations
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_agg_sum_float() {
+    expect_store(
+        "store meas\n    val as f64\n\n*main\n    insert meas 1.5\n    insert meas 2.5\n    insert meas 3.0\n    s is meas.sum(val)\n    log s\n",
+        "7.000000",
+    );
+}
+
+#[test]
+fn store_agg_min_max_float() {
+    expect_store(
+        "store meas\n    val as f64\n\n*main\n    insert meas 3.14\n    insert meas 1.41\n    insert meas 2.72\n    lo is meas.min(val)\n    hi is meas.max(val)\n    log lo\n    log hi\n",
+        "1.410000\n3.140000",
+    );
+}
+
+#[test]
+fn store_agg_avg_int() {
+    expect_store(
+        "store scores\n    val as i64\n\n*main\n    insert scores 10\n    insert scores 20\n    insert scores 30\n    a is scores.avg(val)\n    log a\n",
+        "20.000000",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: delete + exists interaction
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_exists_after_delete() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Bob'\n    e is exists users where name equals 'Bob'\n    log e\n",
+        "0",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: get skips deleted records
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_get_skips_deleted() {
+    // After soft-deleting sid=2, get with sid=3 should still work
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    delete users where name equals 'Bob'\n    r is get users 3\n    log r.name\n    log r.age\n",
+        "Charlie\n35",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: destroy with compound filter
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_destroy_and_filter() {
+    expect_store(
+        "store products\n    name as String\n    price as i64\n    stock as i64\n\n*main\n    insert products 'Apple', 100, 50\n    insert products 'Banana', 50, 100\n    insert products 'Cherry', 100, 10\n    destroy products where price equals 100 and stock < 20\n    c is count products\n    log c\n",
+        "2",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: set after delete (only updates non-deleted records)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_set_skips_deleted() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Alice'\n    set users where age < 50 age 99\n    r is users where name equals 'Bob'\n    log r.age\n",
+        "99",
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Store: performance regression suite
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Store performance regression test — runs the full perf suite and
+/// verifies all operations complete within generous upper bounds.
+/// Run with: cargo test store_perf_regression -- --ignored --nocapture
+#[test]
+#[ignore]
+fn store_perf_regression() {
+    use std::time::Instant;
+
+    let src = r#"
+use std/time
+
+store bench
+    key as i64
+    value as i64
+    score as f64
+
+*main
+    i is 0
+    while i < 5000
+        insert bench i, i * 7, 3.14
+        i is i + 1
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        c is count bench
+        j is j + 1
+    log('count_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        r1 is bench where key equals 2500
+        j is j + 1
+    log('query_eq_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        s is bench.sum(value)
+        j is j + 1
+    log('agg_sum_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        d is bench.distinct(value)
+        j is j + 1
+    log('distinct_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        set bench where key equals 500 value 999
+        j is j + 1
+    log('set_eq_x100')
+    log(elapsed(t0))
+
+    log('done')
+"#;
+
+    let wall_start = Instant::now();
+    let output = compile_and_run_in_dir(src);
+    let wall_total = wall_start.elapsed();
+
+    // Parse timing results
+    let lines: Vec<&str> = output.trim().lines().collect();
+    assert_eq!(
+        lines.last().copied(),
+        Some("done"),
+        "benchmark did not complete"
+    );
+
+    let mut timings: Vec<(&str, f64)> = Vec::new();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if let Ok(t) = lines[i + 1].parse::<f64>() {
+            timings.push((lines[i], t));
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    eprintln!("\n=== Store Performance Results (5000 records × 100 iterations) ===");
+    for (name, secs) in &timings {
+        let per_call_us = secs * 1_000_000.0 / 100.0;
+        eprintln!("  {name:<20} {secs:.6}s  ({per_call_us:.0}µs/call)");
+    }
+    eprintln!("  wall total: {:.3}s", wall_total.as_secs_f64());
+
+    // Regression bounds: 2× baseline with generous margin for CI variance.
+    // Baselines (per ×100 batch): count ~0.06s, query ~0.05s, sum ~0.05s,
+    //   distinct ~0.08s, set ~0.10s
+    let max_allowed = 0.5; // 500ms per ×100 batch — 5× headroom over typical
+    for (name, secs) in &timings {
+        assert!(
+            *secs < max_allowed,
+            "PERF REGRESSION: {name} took {secs:.3}s (limit {max_allowed}s)"
+        );
+    }
+
+    // Distinct should NOT regress to O(n²) behavior (was 0.5s, now ~0.07s)
+    if let Some((_, distinct_time)) = timings.iter().find(|(n, _)| *n == "distinct_x100") {
+        assert!(
+            *distinct_time < 0.25,
+            "PERF REGRESSION: distinct is too slow ({distinct_time:.3}s) — may have regressed to O(n²)"
+        );
+    }
+}
+
+// ── try keyword (error propagation) ─────────────────────────────────
+
+#[test]
+fn try_option_some() {
+    expect(
+        "enum Option\n    Some(i64)\n    Nothing\n\n*get_val() returns Option\n    Some(42)\n\n*do_thing() returns Option\n    v is try get_val()\n    Some(v + 1)\n\n*main()\n    match do_thing()\n        Some(v) ? log(v)\n        Nothing ? log(0)\n",
+        "43",
+    );
+}
+
+#[test]
+fn try_option_nothing() {
+    expect(
+        "enum Option\n    Some(i64)\n    Nothing\n\n*get_val() returns Option\n    Nothing\n\n*do_thing() returns Option\n    v is try get_val()\n    Some(v + 1)\n\n*main()\n    match do_thing()\n        Some(v) ? log(v)\n        Nothing ? log(-1)\n",
+        "-1",
+    );
+}
+
+#[test]
+fn try_result_ok() {
+    expect(
+        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*get_val() returns Result\n    Ok(10)\n\n*do_thing() returns Result\n    v is try get_val()\n    Ok(v * 2)\n\n*main()\n    match do_thing()\n        Ok(v) ? log(v)\n        Err(e) ? log(e)\n",
+        "20",
+    );
+}
+
+#[test]
+fn try_result_err() {
+    expect(
+        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*get_val() returns Result\n    Err(99)\n\n*do_thing() returns Result\n    v is try get_val()\n    Ok(v * 2)\n\n*main()\n    match do_thing()\n        Ok(v) ? log(v)\n        Err(e) ? log(e)\n",
+        "99",
+    );
+}
+
+// ── SQLite auto-linking ─────────────────────────────────────────────
+
+#[test]
+fn sqlite_basic() {
+    let src = r#"
+extern *jade_sqlite_open(path as %i8) returns %i8
+extern *jade_sqlite_close(db as %i8) returns i32
+extern *jade_sqlite_exec(db as %i8, sql as %i8) returns i32
+extern *jade_sqlite_prepare(db as %i8, sql as %i8) returns %i8
+extern *jade_sqlite_finalize(stmt as %i8)
+extern *jade_sqlite_step(stmt as %i8) returns i32
+extern *jade_sqlite_bind_text(stmt as %i8, idx as i32, val as %i8, len as i64) returns i32
+extern *jade_sqlite_column_int(stmt as %i8, idx as i32) returns i64
+extern *jade_sqlite_column_text(stmt as %i8, idx as i32) returns %i8
+extern *jade_sqlite_last_insert_id(db as %i8) returns i64
+
+*main()
+    db is extern.jade_sqlite_open(":memory:")
+    extern.jade_sqlite_exec(db, "create table t (id integer primary key, name text)")
+    extern.jade_sqlite_exec(db, "insert into t (name) values ('alice')")
+    extern.jade_sqlite_exec(db, "insert into t (name) values ('bob')")
+
+    stmt is extern.jade_sqlite_prepare(db, "select id, name from t order by id")
+    total is 0
+    while extern.jade_sqlite_step(stmt) equals 1
+        total is total + extern.jade_sqlite_column_int(stmt, 0)
+    extern.jade_sqlite_finalize(stmt)
+    log(total)
+    extern.jade_sqlite_close(db)
+"#;
+    expect(src, "3");
+}
+
+#[test]
+fn inline_annotation() {
+    let src = r#"
+@inline
+*add(a as i64, b as i64) returns i64
+    a + b
+
+*main()
+    log(add(10, 20))
+"#;
+    expect(src, "30");
+}
+
+#[test]
+fn noinline_annotation() {
+    let src = r#"
+@noinline
+*square(x as i64) returns i64
+    x * x
+
+*main()
+    log(square(7))
+"#;
+    expect(src, "49");
+}
+
+#[test]
+fn cold_hot_annotations() {
+    let src = r#"
+@hot
+*fast_path(x as i64) returns i64
+    x + 1
+
+@cold
+*slow_path(x as i64) returns i64
+    x - 1
+
+*main()
+    log(fast_path(10))
+    log(slow_path(10))
+"#;
+    expect(src, "11\n9");
+}
+
+#[test]
+fn global_variable_basic() {
+    let src = r#"
+global counter is 0
+
+*main()
+    counter is 10
+    log(counter)
+"#;
+    expect(src, "10");
+}
+
+#[test]
+fn global_variable_mutation() {
+    let src = r#"
+global count is 0
+
+*increment()
+    count is count + 1
+
+*main()
+    increment()
+    increment()
+    increment()
+    log(count)
+"#;
+    expect(src, "3");
+}
+
+#[test]
+fn global_variable_initial_value() {
+    let src = r#"
+global x is 42
+
+*main()
+    log(x)
+"#;
+    expect(src, "42");
 }

@@ -4,9 +4,7 @@
 *main
     ch is channel of i64(1024)
     n is 1000000
-    i is 0
-    while i < n
+    for i in 0 to n
         send ch, i
         val is receive ch
-        i is i + 1
     log(0)

@@ -1,0 +1,343 @@
+# std.binary — Binary serialization (little-endian byte packing)
+#
+# Usage:
+#   buf is binary.new(1024)
+#   buf.write_i32(42)
+#   buf.write_f64(3.14)
+#   buf.seek(0)
+#   n is buf.read_i32()
+
+extern *jade_f64_to_bits(val as f64) returns i64
+extern *jade_bits_to_f64(bits as i64) returns f64
+
+type Buffer
+    data as Vec of i64
+    pos as i64
+
+    *write_i8(val as i64)
+        byte is val & 255
+        if self.pos < self.data.length
+            self.data.set(self.pos, byte)
+        else
+            while self.data.length < self.pos
+                self.data.push(0)
+            self.data.push(byte)
+        self.pos is self.pos + 1
+
+    *write_i16(val as i64)
+        self.write_i8(val & 255)
+        self.write_i8((val >> 8) & 255)
+
+    *write_i32(val as i64)
+        self.write_i8(val & 255)
+        self.write_i8((val >> 8) & 255)
+        self.write_i8((val >> 16) & 255)
+        self.write_i8((val >> 24) & 255)
+
+    *write_i64(val as i64)
+        self.write_i32(val & 4294967295)
+        self.write_i32((val >> 32) & 4294967295)
+
+    *write_str(s as String)
+        self.write_i32(s.length)
+        i is 0
+        while i < s.length
+            self.write_i8(s.char_at(i))
+            i is i + 1
+
+    *read_i8 returns i64
+        if self.pos >= self.data.length
+            return 0
+        val is self.data.get(self.pos)
+        self.pos is self.pos + 1
+        val & 255
+
+    *read_i16 returns i64
+        b0 is self.read_i8()
+        b1 is self.read_i8()
+        b0 | (b1 << 8)
+
+    *read_i32 returns i64
+        b0 is self.read_i8()
+        b1 is self.read_i8()
+        b2 is self.read_i8()
+        b3 is self.read_i8()
+        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+    *read_i64 returns i64
+        lo is self.read_i32()
+        hi is self.read_i32()
+        lo | (hi << 32)
+
+    *read_str returns String
+        len is self.read_i32()
+        result is ""
+        i is 0
+        while i < len
+            ch is self.read_i8()
+            result is result + __buf_char(ch)
+            i is i + 1
+        result
+
+    *seek(offset as i64)
+        self.pos is offset
+
+    *tell returns i64
+        self.pos
+
+    *length returns i64
+        self.data.length
+
+    *reset
+        self.pos is 0
+        self.data is vec()
+
+    # ── Float support ──────────────────────────────────────
+
+    *write_f64(val as f64)
+        # Store as i64 bit-pattern via reinterpret
+        bits is extern.jade_f64_to_bits(val)
+        self.write_i64(bits)
+
+    *read_f64 returns f64
+        bits is self.read_i64()
+        extern.jade_bits_to_f64(bits)
+
+    # ── Big-endian variants ──────────────────────────────
+
+    *write_i16_be(val as i64)
+        self.write_i8((val >> 8) & 255)
+        self.write_i8(val & 255)
+
+    *write_i32_be(val as i64)
+        self.write_i8((val >> 24) & 255)
+        self.write_i8((val >> 16) & 255)
+        self.write_i8((val >> 8) & 255)
+        self.write_i8(val & 255)
+
+    *write_i64_be(val as i64)
+        self.write_i32_be((val >> 32) & 4294967295)
+        self.write_i32_be(val & 4294967295)
+
+    *read_i16_be returns i64
+        b0 is self.read_i8()
+        b1 is self.read_i8()
+        (b0 << 8) | b1
+
+    *read_i32_be returns i64
+        b0 is self.read_i8()
+        b1 is self.read_i8()
+        b2 is self.read_i8()
+        b3 is self.read_i8()
+        (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+
+    *read_i64_be returns i64
+        hi is self.read_i32_be()
+        lo is self.read_i32_be()
+        (hi << 32) | lo
+
+    *write_f64_be(val as f64)
+        bits is extern.jade_f64_to_bits(val)
+        self.write_i64_be(bits)
+
+    *read_f64_be returns f64
+        bits is self.read_i64_be()
+        extern.jade_bits_to_f64(bits)
+
+    # ── Bulk operations ──────────────────────────────────
+
+    *write_bytes(src as Vec of i64, count as i64)
+        i is 0
+        while i < count and i < src.length
+            self.write_i8(src.get(i))
+            i is i + 1
+
+    *read_bytes(count as i64) returns Vec of i64
+        result is vec()
+        for i in 0 to count
+            result.push(self.read_i8())
+        result
+
+    # ── Remaining ────────────────────────────────────────
+
+    *remaining returns i64
+        self.data.length - self.pos
+
+    *to_vec returns Vec of i64
+        result is vec()
+        loop self.data
+            result.push($)
+        result
+
+*new(capacity as i64)
+    data is vec()
+    Buffer(data is data, pos is 0)
+
+*from_vec(data as Vec of i64) returns Buffer
+    Buffer(data is data, pos is 0)
+
+# ── JadePack: compact binary serialization ───────────────────
+#
+# Type tags (1 byte):
+#   0x00 = nil
+#   0x01 = bool false
+#   0x02 = bool true
+#   0x03 = i64
+#   0x04 = f64
+#   0x05 = string (length-prefixed)
+#   0x06 = array (length-prefixed)
+#   0x07 = map (length-prefixed, key-value pairs)
+#
+# This is Jade's native wire format, used by actors, channels,
+# and persistent storage.
+
+TAG_NIL    is 0
+TAG_FALSE  is 1
+TAG_TRUE   is 2
+TAG_I64    is 3
+TAG_F64    is 4
+TAG_STRING is 5
+TAG_ARRAY  is 6
+TAG_MAP    is 7
+
+type Value
+    tag as i64
+    int_val as i64
+    float_val as f64
+    str_val as String
+    array_val as Vec of Value
+    map_keys as Vec of String
+    map_vals as Vec of Value
+
+# ── Value constructors ───────────────────────────────────────
+
+*nil_val returns Value
+    Value(tag is TAG_NIL, int_val is 0, float_val is 0.0, str_val is "", array_val is vec(), map_keys is vec(), map_vals is vec())
+
+*bool_val(b as bool) returns Value
+    t is TAG_FALSE
+    if b
+        t is TAG_TRUE
+    Value(tag is t, int_val is 0, float_val is 0.0, str_val is "", array_val is vec(), map_keys is vec(), map_vals is vec())
+
+*int_val(n as i64) returns Value
+    Value(tag is TAG_I64, int_val is n, float_val is 0.0, str_val is "", array_val is vec(), map_keys is vec(), map_vals is vec())
+
+*float_val(f as f64) returns Value
+    Value(tag is TAG_F64, int_val is 0, float_val is f, str_val is "", array_val is vec(), map_keys is vec(), map_vals is vec())
+
+*str_val(s as String) returns Value
+    Value(tag is TAG_STRING, int_val is 0, float_val is 0.0, str_val is s, array_val is vec(), map_keys is vec(), map_vals is vec())
+
+*array_val(items as Vec of Value) returns Value
+    Value(tag is TAG_ARRAY, int_val is 0, float_val is 0.0, str_val is "", array_val is items, map_keys is vec(), map_vals is vec())
+
+*map_val(keys as Vec of String, vals as Vec of Value) returns Value
+    Value(tag is TAG_MAP, int_val is 0, float_val is 0.0, str_val is "", array_val is vec(), map_keys is keys, map_vals is vals)
+
+# ── Serialization (Value → Buffer) ──────────────────────────
+
+*pack(val as Value) returns Buffer
+    buf is new(256)
+    __pack_into(buf, val)
+    buf
+
+*__pack_into(buf as Buffer, val as Value)
+    if val.tag equals TAG_NIL
+        buf.write_i8(TAG_NIL)
+    elif val.tag equals TAG_FALSE
+        buf.write_i8(TAG_FALSE)
+    elif val.tag equals TAG_TRUE
+        buf.write_i8(TAG_TRUE)
+    elif val.tag equals TAG_I64
+        buf.write_i8(TAG_I64)
+        buf.write_i64(val.int_val)
+    elif val.tag equals TAG_F64
+        buf.write_i8(TAG_F64)
+        buf.write_f64(val.float_val)
+    elif val.tag equals TAG_STRING
+        buf.write_i8(TAG_STRING)
+        buf.write_str(val.str_val)
+    elif val.tag equals TAG_ARRAY
+        buf.write_i8(TAG_ARRAY)
+        buf.write_i32(val.array_val.length)
+        loop val.array_val
+            __pack_into(buf, $)
+    elif val.tag equals TAG_MAP
+        buf.write_i8(TAG_MAP)
+        buf.write_i32(val.map_keys.length)
+        loop val.map_keys
+            buf.write_str($)
+            __pack_into(buf, val.map_vals.get($$))
+
+# ── Deserialization (Buffer → Value) ─────────────────────────
+
+*unpack(buf as Buffer) returns Value
+    if buf.remaining() < 1
+        return nil_val()
+    tag is buf.read_i8()
+    if tag equals TAG_NIL
+        return nil_val()
+    if tag equals TAG_FALSE
+        return bool_val(false)
+    if tag equals TAG_TRUE
+        return bool_val(true)
+    if tag equals TAG_I64
+        return int_val(buf.read_i64())
+    if tag equals TAG_F64
+        return float_val(buf.read_f64())
+    if tag equals TAG_STRING
+        return str_val(buf.read_str())
+    if tag equals TAG_ARRAY
+        count is buf.read_i32()
+        items is vec()
+        for i in 0 to count
+            items.push(unpack(buf))
+        return array_val(items)
+    if tag equals TAG_MAP
+        count is buf.read_i32()
+        keys is vec()
+        vals is vec()
+        for i in 0 to count
+            keys.push(buf.read_str())
+            vals.push(unpack(buf))
+        return map_val(keys, vals)
+    nil_val()
+
+# ── Convenience: pack/unpack common types ────────────────────
+
+*pack_int(n as i64) returns Buffer
+    pack(int_val(n))
+
+*pack_float(f as f64) returns Buffer
+    pack(float_val(f))
+
+*pack_string(s as String) returns Buffer
+    pack(str_val(s))
+
+*pack_ints(nums as Vec of i64) returns Buffer
+    items is vec()
+    loop nums
+        items.push(int_val($))
+    pack(array_val(items))
+
+*pack_strings(strs as Vec of String) returns Buffer
+    items is vec()
+    loop strs
+        items.push(str_val($))
+    pack(array_val(items))
+
+*__buf_char(code) returns String
+    if code equals 10
+        return "\n"
+    if code equals 9
+        return "\t"
+    if code equals 13
+        return "\r"
+    if code < 32
+        return "?"
+    if code > 126
+        return "?"
+    chars is " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+    idx is code - 32
+    chars.slice(idx, idx + 1)

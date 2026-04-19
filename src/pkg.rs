@@ -1,7 +1,7 @@
 use crate::lexer::{Lexer, Token};
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemVer {
     pub major: u32,
     pub minor: u32,

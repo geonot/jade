@@ -144,9 +144,10 @@ impl From<&crate::types::Type> for IType {
                 IType::Struct(n.clone(), params.iter().map(|t| t.into()).collect())
             }
             Type::Enum(n) => IType::Enum(n.clone()),
-            Type::Fn(params, ret) => {
-                IType::Fn(params.iter().map(|t| t.into()).collect(), Box::new(ret.as_ref().into()))
-            }
+            Type::Fn(params, ret) => IType::Fn(
+                params.iter().map(|t| t.into()).collect(),
+                Box::new(ret.as_ref().into()),
+            ),
             Type::Param(n) => IType::Param(n.clone()),
             Type::Ptr(inner) => IType::Ptr(Box::new(inner.as_ref().into())),
             Type::Rc(inner) => IType::Rc(Box::new(inner.as_ref().into())),
@@ -195,9 +196,10 @@ impl From<&IType> for crate::types::Type {
                 Type::Struct(n.clone(), params.iter().map(|t| t.into()).collect())
             }
             IType::Enum(n) => Type::Enum(n.clone()),
-            IType::Fn(params, ret) => {
-                Type::Fn(params.iter().map(|t| t.into()).collect(), Box::new(ret.as_ref().into()))
-            }
+            IType::Fn(params, ret) => Type::Fn(
+                params.iter().map(|t| t.into()).collect(),
+                Box::new(ret.as_ref().into()),
+            ),
             IType::Param(n) => Type::Param(n.clone()),
             IType::Ptr(inner) => Type::Ptr(Box::new(inner.as_ref().into())),
             IType::Rc(inner) => Type::Rc(Box::new(inner.as_ref().into())),
@@ -454,8 +456,14 @@ mod tests {
             name: "add".into(),
             type_params: vec![],
             params: vec![
-                ParamSig { name: "a".into(), ty: IType::I64 },
-                ParamSig { name: "b".into(), ty: IType::I64 },
+                ParamSig {
+                    name: "a".into(),
+                    ty: IType::I64,
+                },
+                ParamSig {
+                    name: "b".into(),
+                    ty: IType::I64,
+                },
             ],
             ret: IType::I64,
         });
@@ -474,8 +482,14 @@ mod tests {
             name: "Point".into(),
             type_params: vec![],
             fields: vec![
-                FieldSig { name: "x".into(), ty: IType::F64 },
-                FieldSig { name: "y".into(), ty: IType::F64 },
+                FieldSig {
+                    name: "x".into(),
+                    ty: IType::F64,
+                },
+                FieldSig {
+                    name: "y".into(),
+                    ty: IType::F64,
+                },
             ],
         });
         let json = serde_json::to_string(&iface).unwrap();
@@ -491,8 +505,14 @@ mod tests {
             name: "Color".into(),
             type_params: vec![],
             variants: vec![
-                VariantSig { name: "Red".into(), fields: vec![] },
-                VariantSig { name: "Rgb".into(), fields: vec![IType::U8, IType::U8, IType::U8] },
+                VariantSig {
+                    name: "Red".into(),
+                    fields: vec![],
+                },
+                VariantSig {
+                    name: "Rgb".into(),
+                    fields: vec![IType::U8, IType::U8, IType::U8],
+                },
             ],
         });
         let json = serde_json::to_string(&iface).unwrap();
@@ -527,15 +547,24 @@ mod tests {
         iface.functions.push(FnSig {
             name: "greet".into(),
             type_params: vec![],
-            params: vec![ParamSig { name: "name".into(), ty: IType::String }],
+            params: vec![ParamSig {
+                name: "name".into(),
+                ty: IType::String,
+            }],
             ret: IType::String,
         });
         iface.types.push(TypeSig {
             name: "Pair".into(),
             type_params: vec!["T".into()],
             fields: vec![
-                FieldSig { name: "first".into(), ty: IType::Param("T".into()) },
-                FieldSig { name: "second".into(), ty: IType::Param("T".into()) },
+                FieldSig {
+                    name: "first".into(),
+                    ty: IType::Param("T".into()),
+                },
+                FieldSig {
+                    name: "second".into(),
+                    ty: IType::Param("T".into()),
+                },
             ],
         });
 

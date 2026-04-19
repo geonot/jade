@@ -1,0 +1,326 @@
+# std.bangle — Minimal HTTP server framework for Jade
+#
+# The Jade equivalent of Flask/Sinatra/Express. Takes the best of all
+# micro web frameworks: simplicity of Flask, middleware of Express,
+# pattern matching of Sinatra.
+#
+# Usage:
+#   use bangle
+#
+#   app is bangle.new()
+#   app.get "/", |req| bangle.text("Hello, world!")
+#   app.get "/users/:id", |req| bangle.json('{"id": ' + req.param("id") + '}')
+#   app.post "/data", |req| bangle.text("Got: " + req.body)
+#   app.use_middleware |req| log("Request: " + req.method + " " + req.path)
+#   app.listen 8080
+
+use net
+use strings
+use json
+
+# ── Types ────────────────────────────────────────────────────
+
+type Request
+    method as String
+    path as String
+    headers as Map of String
+    body as String
+    params as Map of String
+    query as Map of String
+    raw_query as String
+
+type Response
+    status as i64
+    content_type as String
+    body as String
+    headers as Vec of ResponseHeader
+
+type ResponseHeader
+    name as String
+    value as String
+
+type Route
+    method as String
+    pattern as String
+    segments as Vec of String
+    param_names as Vec of String
+
+type App
+    routes as Vec of Route
+    handlers as Vec of String
+    middleware as Vec of String
+    port as i64
+    host as String
+
+    *get(pattern as String, handler_name as String)
+        __add_route(self, "GET", pattern, handler_name)
+
+    *post(pattern as String, handler_name as String)
+        __add_route(self, "POST", pattern, handler_name)
+
+    *put(pattern as String, handler_name as String)
+        __add_route(self, "PUT", pattern, handler_name)
+
+    *delete(pattern as String, handler_name as String)
+        __add_route(self, "DELETE", pattern, handler_name)
+
+    *patch(pattern as String, handler_name as String)
+        __add_route(self, "PATCH", pattern, handler_name)
+
+    *use_middleware(name as String)
+        self.middleware.push(name)
+
+    *listen(port as i64)
+        self.port is port
+        __serve(self)
+
+# ── Constructors ─────────────────────────────────────────────
+
+*new
+    App(routes is vec(), 
+        handlers is vec(), 
+        middleware is vec(), 
+        port is 8080, 
+        host is "0.0.0.0")
+
+# ── Response builders ────────────────────────────────────────
+
+*text(body as String) returns Response
+    Response(status is 200, 
+             content_type is "text/plain", 
+             body is body, 
+             headers is vec())
+
+*html(body as String) returns Response
+    Response(status is 200, 
+             content_type is "text/html", 
+             body is body, 
+             headers is vec())
+
+*json_response(body as String) returns Response
+    Response(status is 200, 
+             content_type is "application/json", 
+             body is body, 
+             headers is vec())
+
+*redirect(location as String) returns Response
+    h is vec()
+    h.push(ResponseHeader(name is "Location", value is location))
+    Response(status is 302, 
+             content_type is "text/plain", 
+             body is "", 
+             headers is h)
+
+*not_found returns Response
+    Response(status is 404, 
+             content_type is "text/plain", 
+             body is "Not Found", 
+             headers is vec())
+
+*bad_request(msg as String) returns Response
+    Response(status is 400, 
+             content_type is "text/plain", 
+             body is msg, 
+             headers is vec())
+
+*server_error(msg as String) returns Response
+    Response(status is 500, 
+             content_type is "text/plain", 
+             body is msg, 
+             headers is vec())
+
+*with_status(status as i64, body as String) returns Response
+    Response(status is status, 
+             content_type is "text/plain", 
+             body is body, 
+             headers is vec())
+
+*with_header(resp as Response, name as String, value as String) returns Response
+    resp.headers.push(ResponseHeader(name is name, value is value))
+    resp
+
+# ── Route matching ───────────────────────────────────────────
+
+*__add_route(app as App, method as String, pattern as String, handler_name as String)
+    segments is __split_path(pattern)
+    param_names is vec()
+    loop segments
+        if $.length > 0 and $.char_at(0) equals 58
+            param_names.push($.slice(1, $.length))
+    route is Route(method is method, pattern is pattern, segments is segments, param_names is param_names)
+    app.routes.push(route)
+    app.handlers.push(handler_name)
+
+*__split_path(path as String) returns Vec of String
+    parts is vec()
+    if path.length equals 0
+        return parts
+    start is 0
+    if path.char_at(0) equals 47
+        start is 1
+    i is start
+    seg_start is start
+    while i < path.length
+        if path.char_at(i) equals 47
+            if i > seg_start
+                parts.push(path.slice(seg_start, i))
+            seg_start is i + 1
+        i is i + 1
+    if seg_start < path.length
+        parts.push(path.slice(seg_start, path.length))
+    parts
+
+*__match_route(route as Route, method as String, path_segments as Vec of String) returns Map of String
+    if route.method neq method
+        return map()
+    if route.segments.length neq path_segments.length
+        return map()
+    params is map()
+    matched is true
+    loop route.segments
+        pseg is path_segments.get($$)
+        if $.length > 0 and $.char_at(0) equals 58
+            params.set($.slice(1, $.length), pseg)
+        elif $ neq pseg
+            matched is false
+            break
+    if matched is false
+        return map()
+    params
+
+# ── HTTP parsing ─────────────────────────────────────────────
+
+*__parse_request(raw as String) returns Request
+    headers is map()
+    body is ""
+    method is "GET"
+    path is "/"
+    query_map is map()
+    raw_query is ""
+
+    # Split headers from body
+    sep is raw.find("\r\n\r\n")
+    header_section is raw
+    if sep >= 0
+        header_section is raw.slice(0, sep)
+        body is raw.slice(sep + 4, raw.length)
+
+    lines is header_section.split("\r\n")
+    if lines.length > 0
+        # Parse request line: METHOD PATH HTTP/1.1
+        request_line is lines.get(0)
+        parts is request_line.split(" ")
+        if parts.length >= 2
+            method is parts.get(0)
+            full_path is parts.get(1)
+            # Split path and query string
+            qmark is full_path.find("?")
+            if qmark >= 0
+                path is full_path.slice(0, qmark)
+                raw_query is full_path.slice(qmark + 1, full_path.length)
+                query_map is __parse_query(raw_query)
+            else
+                path is full_path
+
+    # Parse headers
+    loop lines
+        if $$ > 0
+            colon is $.find(":")
+            if colon > 0
+                hname is $.slice(0, colon).trim().to_lower()
+                hvalue is $.slice(colon + 1, $.length).trim()
+                headers.set(hname, hvalue)
+
+    Request(method is method, path is path, headers is headers, body is body, params is map(), query is query_map, raw_query is raw_query)
+
+*__parse_query(qs as String) returns Map of String
+    result is map()
+    pairs is qs.split("&")
+    loop pairs
+        eq is $.find("=")
+        if eq > 0
+            key is $.slice(0, eq)
+            val is $.slice(eq + 1, $.length)
+            result.set(key, val)
+    result
+
+# ── HTTP response serialization ──────────────────────────────
+
+*__status_text(code as i64) returns String
+    match code
+        200 ? "OK"
+        201 ? "Created"
+        204 ? "No Content"
+        301 ? "Moved Permanently"
+        302 ? "Found"
+        304 ? "Not Modified"
+        400 ? "Bad Request"
+        401 ? "Unauthorized"
+        403 ? "Forbidden"
+        404 ? "Not Found"
+        405 ? "Method Not Allowed"
+        500 ? "Internal Server Error"
+        _ ? "Unknown"
+
+*__serialize_response(resp as Response) returns String
+    sb is strings.string_builder()
+    sb.write("HTTP/1.1 " + to_string(resp.status) + " " + __status_text(resp.status) + "\r\n")
+    sb.write("Content-Type: " + resp.content_type + "\r\n")
+    sb.write("Content-Length: " + to_string(resp.body.length) + "\r\n")
+    sb.write("Connection: close\r\n")
+    sb.write("Server: bangle/jade\r\n")
+    loop resp.headers
+        sb.write($.name + ": " + $.value + "\r\n")
+    sb.write("\r\n")
+    sb.write(resp.body)
+    sb.to_string()
+
+# ── Server loop ──────────────────────────────────────────────
+
+*__serve(app as App)
+    log("bangle listening on " + app.host + ":" + to_string(app.port))
+    server is net.tcp_listen(app.host, app.port)
+    loop
+        client is server.accept_client()
+        __handle_connection(app, client)
+
+*__handle_connection(app as App, client as net.TcpStream)
+    raw is client.read(65536)
+    if raw.length equals 0
+        client.shut()
+        return
+
+    req is __parse_request(raw)
+    path_segs is __split_path(req.path)
+
+    # Try to match a route
+    resp is not_found()
+    matched is false
+    i is 0
+    while i < app.routes.length
+        route is app.routes.get(i)
+        params is __match_route(route, req.method, path_segs)
+        # Check if match succeeded (non-empty params map or exact match)
+        if route.segments.length equals path_segs.length
+            test_match is true
+            j is 0
+            while j < route.segments.length
+                rseg is route.segments.get(j)
+                pseg is path_segs.get(j)
+                if rseg.length > 0 and rseg.char_at(0) equals 58
+                    j is j + 1
+                elif rseg neq pseg
+                    test_match is false
+                    break
+                else
+                    j is j + 1
+            if test_match and route.method equals req.method
+                req.params is params
+                matched is true
+                break
+        i is i + 1
+
+    # Send response
+    resp_str is __serialize_response(resp)
+    client.write_all(resp_str)
+    client.shut()

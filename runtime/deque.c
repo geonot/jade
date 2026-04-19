@@ -11,6 +11,7 @@
 void jade_deque_init(jade_deque_t *dq) {
     dq->capacity = JADE_DEQUE_INIT_CAP;
     dq->buffer = (jade_coro_t **)calloc((size_t)dq->capacity, sizeof(jade_coro_t *));
+    if (!dq->buffer) { dq->capacity = 0; return; }
     atomic_store_explicit(&dq->top, 0, memory_order_relaxed);
     atomic_store_explicit(&dq->bottom, 0, memory_order_relaxed);
 }
@@ -24,6 +25,7 @@ static void jade_deque_grow(jade_deque_t *dq) {
     int64_t old_cap = dq->capacity;
     int64_t new_cap = old_cap * 2;
     jade_coro_t **new_buf = (jade_coro_t **)calloc((size_t)new_cap, sizeof(jade_coro_t *));
+    if (!new_buf) return;
     int64_t t = atomic_load_explicit(&dq->top, memory_order_relaxed);
     int64_t b = atomic_load_explicit(&dq->bottom, memory_order_relaxed);
     for (int64_t i = t; i < b; i++) {

@@ -1,38 +1,60 @@
 # std.rand — xoshiro256** PRNG
 
+*__rotl(x, k)
+    (x << k) | (x >> (64 - k))
+
 type RNG
     s0
     s1
     s2
     s3
 
+    *next_u64
+        result is __rotl(self.s1 * 5, 7) * 9
+        t is self.s1 << 17
+        self.s2 is self.s2 ^ self.s0
+        self.s3 is self.s3 ^ self.s1
+        self.s1 is self.s1 ^ self.s2
+        self.s0 is self.s0 ^ self.s3
+        self.s2 is self.s2 ^ t
+        self.s3 is __rotl(self.s3, 45)
+        result
+
+    *next_f64
+        (self.next_u64() >> 11) as f64 * 5.421010862427522e-20
+
+    *range(lo, hi)
+        span is hi - lo
+        r is self.next_u64()
+        if r < 0
+            r is 0 - r
+        lo + (r mod span)
+
+    *flip
+        self.next_u64() >> 63 equals 1
+
+*shuffle(rng as RNG, arr)
+    i is arr.length - 1
+    while i > 0
+        j is rng.range(0, i + 1)
+        tmp is arr.get(i)
+        arr.set(i, arr.get(j))
+        arr.set(j, tmp)
+        i is i - 1
+    arr
+
+*choice(rng as RNG, arr)
+    idx is rng.range(0, arr.length)
+    arr.get(idx)
+
 *seed(n)
     z is n
-    z is (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9 as u64
+    z is (z ^ (z >> 30)) * -4658895280553007687
     s0 is z
-    z is (z ^ (z >> 27)) * 0x94d049bb133111eb as u64
+    z is (z ^ (z >> 27)) * -7723592293110705685
     s1 is z
     z is z ^ (z >> 31)
     s2 is z
-    z is (z * 0xbf58476d1ce4e5b9 as u64) ^ (z >> 30)
+    z is (z * -4658895280553007687) ^ (z >> 30)
     s3 is z
     RNG(s0, s1, s2, s3)
-
-*RNG.next_u64(self)
-    result is rotate_left(self.s1 * 5, 7) * 9
-    t is self.s1 << 17
-    self.s2 is self.s2 ^ self.s0
-    self.s3 is self.s3 ^ self.s1
-    self.s1 is self.s1 ^ self.s2
-    self.s0 is self.s0 ^ self.s3
-    self.s2 is self.s2 ^ t
-    self.s3 is rotate_left(self.s3, 45)
-    result
-
-*RNG.next_f64(self)
-    (self.next_u64() >> 11) as f64 * 5.421010862427522e-20
-
-*RNG.range(self, lo, hi)
-    span is (hi - lo) as u64
-    r is self.next_u64()
-    lo + (r mod span) as i64

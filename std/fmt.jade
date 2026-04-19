@@ -1,6 +1,10 @@
 # std.fmt — String formatting
+#
+# Usage:
+#   fmt.hex(255)          # "ff"
+#   fmt.pad_left("5", 3, "0")  # "005"
 
-*float_to_string(x, decimals)
+*float(x, decimals)
     __fmt_float(x, decimals)
 
 *hex(n)
@@ -17,10 +21,8 @@
         return s
     padding is width - s.length
     result is ""
-    i is 0
-    while i < padding
+    for i in 0 to padding
         result is result + fill
-        i is i + 1
     result + s
 
 *pad_right(s as String, width, fill as String)
@@ -28,26 +30,41 @@
         return s
     padding is width - s.length
     result is s
-    i is 0
-    while i < padding
+    for i in 0 to padding
         result is result + fill
-        i is i + 1
     result
 
 *join(items, sep as String)
     if items.length equals 0
         return ""
-    result is items.get(0)
-    i is 1
-    while i < items.length
-        result is result + sep + items.get(i)
-        i is i + 1
+    result is ""
+    loop items
+        if $$ > 0
+            result is result + sep
+        result is result + $
     result
 
 *repeat(s as String, n)
     result is ""
-    i is 0
-    while i < n
+    for i in 0 to n
         result is result + s
-        i is i + 1
     result
+
+*center(s as String, width, fill as String)
+    if s.length >= width
+        return s
+    total_pad is width - s.length
+    left_pad is total_pad / 2
+    right_pad is total_pad - left_pad
+    result is ""
+    for i in 0 to left_pad
+        result is result + fill
+    result is result + s
+    for i in 0 to right_pad
+        result is result + fill
+    result
+
+*truncate(s as String, max_len, suffix as String)
+    if s.length <= max_len
+        return s
+    s.slice(0, max_len - suffix.length) + suffix

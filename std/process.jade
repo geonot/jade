@@ -1,0 +1,100 @@
+# std.process — Subprocess spawning and command execution
+#
+# Usage:
+#   result is process.run("ls -la")
+#   log(result.output)
+#   log(result.exit_code)
+#
+#   code is process.exec("make build")
+#   lines is process.lines("find . -name '*.jade'")
+
+extern *jade_popen_read(cmd as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jade_system(cmd as %i8) returns i32
+extern *jade_exec_capture(prog as %i8, argv as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+type ProcessResult
+    output as String
+    exit_code as i32
+
+    *ok returns bool
+        self.exit_code equals 0
+
+    *lines returns Vec of String
+        self.output.split("\n")
+
+# Run a shell command and capture its stdout.
+# Returns a ProcessResult with output and exit code.
+*run(cmd as String) returns ProcessResult
+    buf_size is 65536
+    buf is extern.malloc(buf_size)
+    exit_code is 0
+    n is extern.jade_popen_read(%cmd, buf, buf_size, %exit_code as %i32)
+    if n < 0
+        extern.free(buf)
+        return ProcessResult(output is "", exit_code is -1)
+    if n >= buf_size - 1
+        extern.free(buf)
+        return ProcessResult(output is "[output truncated at 64KB]", exit_code is exit_code)
+    out is __string_from_raw(buf, n, buf_size)
+    ProcessResult(output is out, exit_code is exit_code)
+
+# Run a shell command and return just its exit code.
+# Stdout/stderr go to the parent process's terminal.
+*exec(cmd as String) returns i32
+    extern.jade_system(%cmd)
+
+# Run a command and return its stdout as a string (trimmed).
+*capture(cmd as String) returns String
+    result is run(cmd)
+    out is result.output
+    if out.length > 0 and out.char_at(out.length - 1) equals 10
+        return out.slice(0, out.length - 1)
+    out
+
+# Run a command and return its stdout lines as a vector.
+*lines(cmd as String) returns Vec of String
+    result is run(cmd)
+    if result.exit_code neq 0
+        return vec()
+    out is result.output
+    if out.length > 0 and out.char_at(out.length - 1) equals 10
+        out is out.slice(0, out.length - 1)
+    out.split("\n")
+
+# Check if a command succeeds (exit code 0).
+*succeeds(cmd as String) returns bool
+    extern.jade_system(%cmd) equals 0
+
+# Run a command, return output on success or empty string on failure.
+*try_run(cmd as String) returns String
+    result is run(cmd)
+    if result.exit_code neq 0
+        return ""
+    result.output
+
+# Build a command string from parts (shell-safe joining).
+*cmd(parts as Vec of String) returns String
+    result is ""
+    loop parts
+        if $$ > 0
+            result is result + " "
+        if $.find(" ") >= 0 or $.find("'") >= 0
+            result is result + "'" + $.replace("'", "'\\''") + "'"
+        else
+            result is result + $
+    result
+
+# Run a pipeline of commands (cmd1 | cmd2 | cmd3).
+*pipe(commands as Vec of String) returns ProcessResult
+    joined is ""
+    loop commands
+        if $$ > 0
+            joined is joined + " | "
+        joined is joined + $
+    run(joined)
+
+# Run a command with environment variable set.
+*with_env(name as String, value as String, command as String) returns ProcessResult
+    run(name + "=" + value + " " + command)

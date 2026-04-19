@@ -10,7 +10,7 @@ pub mod printer;
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::ast::Span;
+use crate::ast::{FnAttrs, Span};
 use crate::hir::DefId;
 use crate::types::Type;
 
@@ -34,6 +34,7 @@ pub struct Function {
     pub span: Span,
     pub next_value: u32,
     pub next_block: u32,
+    pub attrs: FnAttrs,
 }
 
 impl Function {
@@ -48,7 +49,7 @@ impl Function {
         self.next_block += 1;
         self.blocks.push(BasicBlock {
             id,
-            label: label.to_string(),
+            label: format!("{}{}", label, id.0),
             phis: Vec::new(),
             insts: Vec::new(),
             terminator: Terminator::Unreachable,
@@ -57,13 +58,17 @@ impl Function {
     }
 
     pub fn block(&self, id: BlockId) -> &BasicBlock {
-        self.blocks.iter().find(|b| b.id == id)
-            .unwrap_or_else(|| panic!("block {} not found", id))
+        self.blocks
+            .iter()
+            .find(|b| b.id == id)
+            .unwrap_or_else(|| panic!("ICE: MIR block {} not found — possible compiler bug", id))
     }
 
     pub fn block_mut(&mut self, id: BlockId) -> &mut BasicBlock {
-        self.blocks.iter_mut().find(|b| b.id == id)
-            .unwrap_or_else(|| panic!("block {} not found", id))
+        self.blocks
+            .iter_mut()
+            .find(|b| b.id == id)
+            .unwrap_or_else(|| panic!("ICE: MIR block {} not found — possible compiler bug", id))
     }
 
     /// Build predecessor map for all blocks.
@@ -203,26 +208,48 @@ pub enum InstKind {
 
     // ── Inline assembly ──
     InlineAsm(String, Vec<ValueId>),
+
+    // ── Global variables ──
+    GlobalLoad(String),
+    GlobalStore(String, ValueId),
 }
 
 /// Binary operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Mod, Exp,
-    BitAnd, BitOr, BitXor, Shl, Shr,
-    And, Or,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Exp,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Ushr,
+    And,
+    Or,
 }
 
 /// Unary operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
-    Neg, Not, BitNot,
+    Neg,
+    Not,
+    BitNot,
 }
 
 /// Comparison operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmpOp {
-    Eq, Ne, Lt, Gt, Le, Ge,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 /// Block terminators.
@@ -254,16 +281,28 @@ impl Terminator {
     /// Replace all occurrences of old_block with new_block in successors.
     pub fn replace_successor(&mut self, old: BlockId, new: BlockId) {
         match self {
-            Terminator::Goto(b) => { if *b == old { *b = new; } }
+            Terminator::Goto(b) => {
+                if *b == old {
+                    *b = new;
+                }
+            }
             Terminator::Branch(_, t, f) => {
-                if *t == old { *t = new; }
-                if *f == old { *f = new; }
+                if *t == old {
+                    *t = new;
+                }
+                if *f == old {
+                    *f = new;
+                }
             }
             Terminator::Switch(_, cases, default) => {
                 for (_, b) in cases.iter_mut() {
-                    if *b == old { *b = new; }
+                    if *b == old {
+                        *b = new;
+                    }
                 }
-                if *default == old { *default = new; }
+                if *default == old {
+                    *default = new;
+                }
             }
             Terminator::Return(_) | Terminator::Unreachable => {}
         }
@@ -276,6 +315,14 @@ pub struct Program {
     pub functions: Vec<Function>,
     pub types: Vec<TypeDef>,
     pub externs: Vec<ExternDecl>,
+    pub globals: Vec<GlobalDef>,
+}
+
+/// Global variable definition in MIR.
+#[derive(Debug, Clone)]
+pub struct GlobalDef {
+    pub name: String,
+    pub ty: Type,
 }
 
 /// Type definition in MIR.
@@ -294,21 +341,34 @@ pub struct ExternDecl {
 }
 
 impl fmt::Display for ValueId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "v{}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "v{}", self.0)
+    }
 }
 
 impl fmt::Display for BlockId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "bb{}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "bb{}", self.0)
+    }
 }
 
 impl fmt::Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Add => "+", Self::Sub => "-", Self::Mul => "*",
-            Self::Div => "/", Self::Mod => "%", Self::Exp => "pow",
-            Self::BitAnd => "&", Self::BitOr => "|", Self::BitXor => "^",
-            Self::Shl => "<<", Self::Shr => ">>",
-            Self::And => "and", Self::Or => "or",
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Mod => "%",
+            Self::Exp => "pow",
+            Self::BitAnd => "&",
+            Self::BitOr => "|",
+            Self::BitXor => "^",
+            Self::Shl => "<<",
+            Self::Shr => ">>",
+            Self::Ushr => ">>>",
+            Self::And => "and",
+            Self::Or => "or",
         })
     }
 }
@@ -316,9 +376,12 @@ impl fmt::Display for BinOp {
 impl fmt::Display for CmpOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Eq => "==", Self::Ne => "!=",
-            Self::Lt => "<",  Self::Gt => ">",
-            Self::Le => "<=", Self::Ge => ">=",
+            Self::Eq => "==",
+            Self::Ne => "!=",
+            Self::Lt => "<",
+            Self::Gt => ">",
+            Self::Le => "<=",
+            Self::Ge => ">=",
         })
     }
 }

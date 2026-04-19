@@ -26,24 +26,15 @@ actor Worker
     f is spawn Worker
     g is spawn Worker
     h is spawn Worker
-    i is 0
-    while i < n
+    for i in 0 to n
         r is i % 8
-        if r eq 0
-            send a, @work(35)
-        if r eq 1
-            send b, @work(35)
-        if r eq 2
-            send c, @work(35)
-        if r eq 3
-            send d, @work(35)
-        if r eq 4
-            send e, @work(35)
-        if r eq 5
-            send f, @work(35)
-        if r eq 6
-            send g, @work(35)
-        if r eq 7
-            send h, @work(35)
-        i is i + 1
+        match r
+            0 ? send a, @work(35)
+            1 ? send b, @work(35)
+            2 ? send c, @work(35)
+            3 ? send d, @work(35)
+            4 ? send e, @work(35)
+            5 ? send f, @work(35)
+            6 ? send g, @work(35)
+            7 ? send h, @work(35)
     log(0)

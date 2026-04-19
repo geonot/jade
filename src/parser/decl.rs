@@ -19,7 +19,9 @@ fn stmt_has_yield(s: &Stmt) -> bool {
         Stmt::If(i) => {
             expr_has_yield(&i.cond)
                 || body_contains_yield(&i.then)
-                || i.elifs.iter().any(|(c, b)| expr_has_yield(c) || body_contains_yield(b))
+                || i.elifs
+                    .iter()
+                    .any(|(c, b)| expr_has_yield(c) || body_contains_yield(b))
                 || i.els.as_ref().is_some_and(|b| body_contains_yield(b))
         }
         Stmt::While(w) => expr_has_yield(&w.cond) || body_contains_yield(&w.body),
@@ -35,9 +37,37 @@ fn expr_has_yield(e: &Expr) -> bool {
 }
 
 impl Parser {
+    fn parse_fn_attrs(&mut self) -> Result<FnAttrs, ParseError> {
+        let mut attrs = FnAttrs::default();
+        while self.check(Token::At) {
+            self.advance();
+            let attr = self.ident()?;
+            match attr.as_str() {
+                "inline" => attrs.inline = true,
+                "noinline" => attrs.noinline = true,
+                "cold" => attrs.cold = true,
+                "hot" => attrs.hot = true,
+                _ => return Err(self.error(&format!("unknown function attribute: @{attr}"))),
+            }
+        }
+        Ok(attrs)
+    }
+
     pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match self.peek() {
             Token::Star => Ok(Decl::Fn(self.parse_fn()?)),
+            Token::At => {
+                // Function annotations: @inline, @noinline, @cold, @hot
+                let attrs = self.parse_fn_attrs()?;
+                self.skip_nl();
+                if self.check(Token::Star) {
+                    let mut f = self.parse_fn()?;
+                    f.attrs = attrs;
+                    Ok(Decl::Fn(f))
+                } else {
+                    Err(self.error("expected function declaration after @annotation"))
+                }
+            }
             Token::Type | Token::Pub => Ok(Decl::Type(self.parse_type_def()?)),
             Token::Enum => Ok(Decl::Enum(self.parse_enum_def()?)),
             Token::Extern => Ok(Decl::Extern(self.parse_extern()?)),
@@ -46,9 +76,22 @@ impl Parser {
             Token::Test => Ok(Decl::Test(self.parse_test_block()?)),
             Token::Actor => Ok(Decl::Actor(self.parse_actor_def()?)),
             Token::Store => Ok(Decl::Store(self.parse_store_def()?)),
+            Token::Migration => Ok(Decl::Migration(self.parse_migration_def()?)),
+            Token::View => Ok(Decl::View(self.parse_view_def()?)),
             Token::Trait => Ok(Decl::Trait(self.parse_trait_def()?)),
             Token::Impl => Ok(Decl::Impl(self.parse_impl_block()?)),
             Token::Supervisor => Ok(Decl::Supervisor(self.parse_supervisor_def()?)),
+            Token::Global => {
+                let sp = self.span();
+                self.advance(); // consume 'global'
+                let name = self.ident()?;
+                self.expect(Token::Is)?;
+                let val = self.parse_expr()?;
+                if self.check(Token::Newline) {
+                    self.advance();
+                }
+                Ok(Decl::Global(name, val, sp))
+            }
             Token::Alias => {
                 let sp = self.span();
                 self.advance();
@@ -224,13 +267,19 @@ impl Parser {
             ret,
             body,
             is_generator,
+            attrs: FnAttrs::default(),
             span: sp,
         })
     }
 
     fn parse_fn_param(&mut self, idx: usize, typed: bool) -> Result<Param, ParseError> {
         match self.peek() {
-            Token::Int(_) | Token::CharLit(_) | Token::Float(_) | Token::True | Token::False | Token::Str(_) => {
+            Token::Int(_)
+            | Token::CharLit(_)
+            | Token::Float(_)
+            | Token::True
+            | Token::False
+            | Token::Str(_) => {
                 let lit_sp = self.span();
                 let lit_expr = self.parse_literal_token()?;
                 Ok(Param {
@@ -454,12 +503,17 @@ impl Parser {
             while !self.check(Token::RBracket) && !self.eof() {
                 names.push(self.ident()?);
                 if !self.check(Token::RBracket) {
-                    if self.check(Token::Comma) { self.advance(); }
+                    if self.check(Token::Comma) {
+                        self.advance();
+                    }
                 }
             }
             self.expect(Token::RBracket)?;
             Some(names)
-        } else if !self.check(Token::Newline) && !self.eof() && matches!(self.peek(), Token::Ident(_)) {
+        } else if !self.check(Token::Newline)
+            && !self.eof()
+            && matches!(self.peek(), Token::Ident(_))
+        {
             Some(vec![self.ident()?])
         } else {
             None
@@ -471,7 +525,12 @@ impl Parser {
         } else {
             None
         };
-        Ok(UseDecl { path, imports, alias, span: sp })
+        Ok(UseDecl {
+            path,
+            imports,
+            alias,
+            span: sp,
+        })
     }
 
     fn parse_err_def(&mut self) -> Result<ErrDef, ParseError> {
@@ -579,16 +638,347 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Store)?;
         let name = self.ident()?;
+
+        // Parse store-level decorators: @simple, @mem, @transient, @versioned, @graph, @kv, @vector(N), @timeseries(field)
+        let mut decorators = Vec::new();
+        while self.check(Token::At) {
+            self.advance();
+            let attr = self.ident()?;
+            match attr.as_str() {
+                "simple" => decorators.push(crate::ast::StoreDecorator::Simple),
+                "mem" => decorators.push(crate::ast::StoreDecorator::Mem),
+                "transient" => decorators.push(crate::ast::StoreDecorator::Transient),
+                "versioned" => decorators.push(crate::ast::StoreDecorator::Versioned),
+                "graph" => decorators.push(crate::ast::StoreDecorator::Graph),
+                "kv" => decorators.push(crate::ast::StoreDecorator::Kv),
+                "vector" => {
+                    self.expect(Token::LParen)?;
+                    let n = match self.peek() {
+                        Token::Int(v) => {
+                            let n = *v as u64;
+                            self.advance();
+                            n
+                        }
+                        _ => return Err(self.error("expected vector dimension")),
+                    };
+                    self.expect(Token::RParen)?;
+                    decorators.push(crate::ast::StoreDecorator::Vector(n));
+                }
+                "timeseries" => {
+                    self.expect(Token::LParen)?;
+                    let field = self.ident()?;
+                    self.expect(Token::RParen)?;
+                    decorators.push(crate::ast::StoreDecorator::TimeSeries(field));
+                }
+                "before_insert" => {
+                    self.expect(Token::LParen)?;
+                    let fname = self.ident()?;
+                    self.expect(Token::RParen)?;
+                    decorators.push(crate::ast::StoreDecorator::BeforeInsert(fname));
+                }
+                "after_insert" => {
+                    self.expect(Token::LParen)?;
+                    let fname = self.ident()?;
+                    self.expect(Token::RParen)?;
+                    decorators.push(crate::ast::StoreDecorator::AfterInsert(fname));
+                }
+                "before_delete" => {
+                    self.expect(Token::LParen)?;
+                    let fname = self.ident()?;
+                    self.expect(Token::RParen)?;
+                    decorators.push(crate::ast::StoreDecorator::BeforeDelete(fname));
+                }
+                "after_delete" => {
+                    self.expect(Token::LParen)?;
+                    let fname = self.ident()?;
+                    self.expect(Token::RParen)?;
+                    decorators.push(crate::ast::StoreDecorator::AfterDelete(fname));
+                }
+                "column" => decorators.push(crate::ast::StoreDecorator::Column),
+                _ => return Err(self.error(&format!("unknown store decorator: @{attr}"))),
+            }
+        }
+
         self.expect(Token::Newline)?;
-        let fields = if self.check(Token::Indent) {
-            self.parse_indented(Self::parse_field)?
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        if self.check(Token::Indent) {
+            self.advance();
+            while !self.check(Token::Dedent) && !self.eof() {
+                self.skip_nl();
+                if self.check(Token::Dedent) || self.eof() {
+                    break;
+                }
+                if self.check(Token::Star) {
+                    methods.push(self.parse_fn()?);
+                } else {
+                    fields.push(self.parse_store_field()?);
+                    self.skip_nl();
+                }
+            }
+            if self.check(Token::Dedent) {
+                self.advance();
+            }
+        }
+        Ok(StoreDef {
+            name,
+            decorators,
+            fields,
+            methods,
+            span: sp,
+        })
+    }
+
+    fn parse_store_field(&mut self) -> Result<crate::ast::StoreField, ParseError> {
+        let sp = self.span();
+
+        // Check for relationship prefix: &
+        let is_relation = if self.check(Token::Ampersand) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        let name = self.ident()?;
+        let (ty, is_has_many) = if self.check(Token::As) {
+            self.advance();
+            // Check for [Type] (has-many relation)
+            if self.check(Token::LBracket) {
+                self.advance();
+                let inner = self.parse_type()?;
+                self.expect(Token::RBracket)?;
+                (Some(inner), true)
+            } else {
+                (Some(self.parse_type()?), false)
+            }
+        } else {
+            (None, false)
+        };
+
+        // Parse field-level decorators: @index, @unique, @sorted, @transient, @increment, @required, @versioned, @default(val)
+        // Also relation decorators: @cascade, @lazy
+        let mut field_decorators = Vec::new();
+        while self.check(Token::At) {
+            self.advance();
+            let attr = self.ident()?;
+            match attr.as_str() {
+                "index" => field_decorators.push(crate::ast::FieldDecorator::Index),
+                "unique" => field_decorators.push(crate::ast::FieldDecorator::Unique),
+                "sorted" => field_decorators.push(crate::ast::FieldDecorator::Sorted),
+                "transient" => field_decorators.push(crate::ast::FieldDecorator::Transient),
+                "increment" => field_decorators.push(crate::ast::FieldDecorator::Increment),
+                "required" => field_decorators.push(crate::ast::FieldDecorator::Required),
+                "versioned" => field_decorators.push(crate::ast::FieldDecorator::Versioned),
+                "cascade" => field_decorators.push(crate::ast::FieldDecorator::Cascade),
+                "lazy" => field_decorators.push(crate::ast::FieldDecorator::Lazy),
+                "bloom" => field_decorators.push(crate::ast::FieldDecorator::Bloom),
+                "search" => field_decorators.push(crate::ast::FieldDecorator::Search),
+                "default" => {
+                    self.expect(Token::LParen)?;
+                    // Read the default value as a string token
+                    let val = match self.peek() {
+                        Token::Str(s) => {
+                            let v = s.clone();
+                            self.advance();
+                            v
+                        }
+                        Token::Int(n) => {
+                            let v = n.to_string();
+                            self.advance();
+                            v
+                        }
+                        Token::Float(f) => {
+                            let v = f.to_string();
+                            self.advance();
+                            v
+                        }
+                        Token::True => {
+                            self.advance();
+                            "true".to_string()
+                        }
+                        Token::False => {
+                            self.advance();
+                            "false".to_string()
+                        }
+                        _ => return Err(self.error("expected default value")),
+                    };
+                    self.expect(Token::RParen)?;
+                    field_decorators.push(crate::ast::FieldDecorator::Default(val));
+                }
+                _ => return Err(self.error(&format!("unknown field decorator: @{attr}"))),
+            }
+        }
+
+        let default = if self.check(Token::Is) {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(crate::ast::StoreField {
+            name,
+            ty,
+            default,
+            decorators: field_decorators,
+            is_relation,
+            is_has_many,
+            span: sp,
+        })
+    }
+
+    /// Parse `migration 'name' version N` block with indented up/down containing alter ops.
+    fn parse_migration_def(&mut self) -> Result<crate::ast::MigrationDef, ParseError> {
+        use crate::ast::{AlterAction, AlterOp, MigrationDef};
+        let sp = self.span();
+        self.expect(Token::Migration)?;
+
+        // migration 'name' version N
+        let name = match self.peek() {
+            Token::Str(s) => {
+                let n = s.clone();
+                self.advance();
+                n
+            }
+            _ => return Err(self.error("expected migration name string")),
+        };
+
+        // expect 'version' identifier
+        match self.peek() {
+            Token::Ident(s) if s == "version" => {
+                self.advance();
+            }
+            _ => return Err(self.error("expected 'version'")),
+        }
+
+        let version = match self.peek() {
+            Token::Int(n) => {
+                let v = *n;
+                self.advance();
+                v
+            }
+            _ => return Err(self.error("expected version number")),
+        };
+
+        self.expect(Token::Newline)?;
+
+        let mut up = Vec::new();
+        let mut down = Vec::new();
+
+        if self.check(Token::Indent) {
+            let blocks = self.parse_indented(|p| {
+                let ident = p.ident()?;
+                p.expect(Token::Newline)?;
+                match ident.as_str() {
+                    "up" | "down" => {
+                        let mut alter_ops = Vec::new();
+                        if p.check(Token::Indent) {
+                            let ops = p.parse_indented(|p2| p2.parse_alter_op())?;
+                            alter_ops = ops;
+                        }
+                        Ok((ident, alter_ops))
+                    }
+                    _ => Err(p.error(&format!("expected 'up' or 'down', got '{ident}'"))),
+                }
+            })?;
+            for (dir, ops) in blocks {
+                match dir.as_str() {
+                    "up" => up = ops,
+                    "down" => down = ops,
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(MigrationDef {
+            name,
+            version,
+            up,
+            down,
+            span: sp,
+        })
+    }
+
+    /// Parse `view Name from source_store\n    where ...\n    ...`
+    fn parse_view_def(&mut self) -> Result<crate::ast::ViewDef, ParseError> {
+        let sp = self.span();
+        self.expect(Token::View)?;
+        let name = self.ident()?;
+        self.expect(Token::From)?;
+        let source = self.ident()?;
+        self.expect(Token::Newline)?;
+
+        let clauses = if self.check(Token::Indent) {
+            self.parse_indented(Self::parse_query_clause)?
         } else {
             Vec::new()
         };
-        Ok(StoreDef {
+
+        Ok(crate::ast::ViewDef {
             name,
-            fields,
+            source,
+            clauses,
             span: sp,
+        })
+    }
+
+    /// Parse `alter <store_name>` with indented add/drop/rename actions.
+    fn parse_alter_op(&mut self) -> Result<crate::ast::AlterOp, ParseError> {
+        use crate::ast::{AlterAction, AlterOp};
+        // expect 'alter' identifier
+        match self.peek() {
+            Token::Ident(s) if s == "alter" => {
+                self.advance();
+            }
+            _ => return Err(self.error("expected 'alter'")),
+        }
+        let store_name = self.ident()?;
+        self.expect(Token::Newline)?;
+
+        let mut actions = Vec::new();
+        if self.check(Token::Indent) {
+            let acts = self.parse_indented(|p| {
+                let action_name = p.ident()?;
+                match action_name.as_str() {
+                    "add" => {
+                        let field_name = p.ident()?;
+                        p.expect(Token::As)?;
+                        let ty = p.parse_type()?;
+                        // optional: default <value>
+                        let default = if p.check(Token::Default) {
+                            p.advance();
+                            Some(p.parse_expr()?)
+                        } else {
+                            None
+                        };
+                        Ok(AlterAction::Add {
+                            name: field_name,
+                            ty,
+                            default,
+                        })
+                    }
+                    "drop" => {
+                        let field_name = p.ident()?;
+                        Ok(AlterAction::Drop { name: field_name })
+                    }
+                    "rename" => {
+                        let from = p.ident()?;
+                        p.expect(Token::To)?;
+                        let to = p.ident()?;
+                        Ok(AlterAction::Rename { from, to })
+                    }
+                    _ => Err(p.error(&format!(
+                        "expected 'add', 'drop', or 'rename', got '{action_name}'"
+                    ))),
+                }
+            })?;
+            actions = acts;
+        }
+
+        Ok(AlterOp {
+            store_name,
+            actions,
         })
     }
 
@@ -766,9 +1156,11 @@ impl Parser {
                     self.expect(Token::Newline)?;
                     children = self.parse_indented(|p| p.ident())?;
                 }
-                _ => return Err(self.error(&format!(
-                    "unexpected supervisor field '{key}', expected 'strategy' or 'children'"
-                ))),
+                _ => {
+                    return Err(self.error(&format!(
+                        "unexpected supervisor field '{key}', expected 'strategy' or 'children'"
+                    )));
+                }
             }
             self.skip_nl();
         }

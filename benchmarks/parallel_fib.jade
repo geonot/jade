@@ -12,18 +12,18 @@ extern *jade_time_now_ns() returns i64
 
 *main
     # --- Sequential: compute fib(35)..fib(42) one at a time ---
-    t0 is jade_time_now_ns()
+    t0 is extern.jade_time_now_ns()
     for i in 8
         log(fib(35 + i))
-    t1 is jade_time_now_ns()
+    t1 is extern.jade_time_now_ns()
     seq_ms is (t1 - t0) / 1000000
     log(seq_ms)
 
     # --- Parallel: compute fib(35)..fib(42) via sim for ---
-    t2 is jade_time_now_ns()
+    t2 is extern.jade_time_now_ns()
     sim for i in 8
         log(fib(35 + i))
-    t3 is jade_time_now_ns()
+    t3 is extern.jade_time_now_ns()
     par_ms is (t3 - t2) / 1000000
     log(par_ms)
 

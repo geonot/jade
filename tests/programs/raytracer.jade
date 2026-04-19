@@ -23,7 +23,7 @@ type Vec3f
 
     *length(self) returns f64
         d is self.dot(self)
-        sqrt(d)
+        extern.sqrt(d)
 
     *normalize(self)
         len is self.length()
@@ -51,7 +51,7 @@ type Sphere
     if discriminant < 0.0
         return -1.0
 
-    sqrt_disc is sqrt(discriminant)
+    sqrt_disc is extern.sqrt(discriminant)
     t1 is (0.0 - b - sqrt_disc) / (2.0 * a)
     t2 is (0.0 - b + sqrt_disc) / (2.0 * a)
 

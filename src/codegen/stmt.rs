@@ -52,6 +52,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::ErrReturn(_, _, s) => *s,
             hir::Stmt::StoreInsert(_, _, s) => *s,
             hir::Stmt::StoreDelete(_, _, s) => *s,
+            hir::Stmt::StoreDestroy(_, _, s) => *s,
+            hir::Stmt::StoreRestore(_, _, s) => *s,
+            hir::Stmt::StoreSave(_, s) => *s,
             hir::Stmt::StoreSet(_, _, _, s) => *s,
             hir::Stmt::Transaction(_, s) => *s,
             hir::Stmt::ChannelClose(_, s) => *s,
@@ -59,6 +62,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::SimFor(_, s) => *s,
             hir::Stmt::SimBlock(_, s) => *s,
             hir::Stmt::UseLocal(_, _, _, s) => *s,
+            hir::Stmt::GlobalStore(_, _, s) => *s,
         };
         self.set_debug_location(span.line, span.col);
         match stmt {
@@ -73,8 +77,12 @@ impl<'ctx> Compiler<'ctx> {
                             if let hir::ExprKind::Var(_, ref vname) = lhs.kind {
                                 if vname == &bind.name {
                                     let rmw_op = match op {
-                                        crate::ast::BinOp::Add => Some(inkwell::AtomicRMWBinOp::Add),
-                                        crate::ast::BinOp::Sub => Some(inkwell::AtomicRMWBinOp::Sub),
+                                        crate::ast::BinOp::Add => {
+                                            Some(inkwell::AtomicRMWBinOp::Add)
+                                        }
+                                        crate::ast::BinOp::Sub => {
+                                            Some(inkwell::AtomicRMWBinOp::Sub)
+                                        }
                                         _ => None,
                                     };
                                     if let Some(rmw_op) = rmw_op {
@@ -162,13 +170,17 @@ impl<'ctx> Compiler<'ctx> {
                     let mut val = self.compile_expr(e)?;
                     // If returning an array, load from pointer to get the array value
                     if val.is_pointer_value() {
-                        if let Some(rt) = self.cur_fn.unwrap().get_type().get_return_type() {
+                        if let Some(rt) = self.current_fn().get_type().get_return_type() {
                             if rt.is_array_type() {
-                                val = b!(self.bld.build_load(rt, val.into_pointer_value(), "arr.ret"));
+                                val = b!(self.bld.build_load(
+                                    rt,
+                                    val.into_pointer_value(),
+                                    "arr.ret"
+                                ));
                             }
                         }
                     }
-                    let val = if let Some(rt) = self.cur_fn.unwrap().get_type().get_return_type() {
+                    let val = if let Some(rt) = self.current_fn().get_type().get_return_type() {
                         self.coerce_val(val, rt)
                     } else {
                         val
@@ -246,6 +258,15 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_store_delete(store_name, filter, &sd)?;
                 Ok(None)
             }
+            hir::Stmt::StoreDestroy(store_name, _filter, _) => {
+                return Err(format!("store.destroy is not yet implemented (store '{store_name}')"));
+            }
+            hir::Stmt::StoreRestore(store_name, _filter, _) => {
+                return Err(format!("store.restore is not yet implemented (store '{store_name}')"));
+            }
+            hir::Stmt::StoreSave(store_name, _) => {
+                return Err(format!("store.save is not yet implemented (store '{store_name}')"));
+            }
             hir::Stmt::StoreSet(store_name, assignments, filter, _) => {
                 let sd = self
                     .store_defs
@@ -277,6 +298,13 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(None)
             }
             hir::Stmt::UseLocal(_, _, _, _) => Ok(None),
+            hir::Stmt::GlobalStore(name, value, _) => {
+                let val = self.compile_expr(value)?;
+                if let Some((ptr, _)) = self.find_var(name).cloned() {
+                    b!(self.bld.build_store(ptr, val));
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -284,7 +312,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         i: &hir::If,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let merge = self.ctx.append_basic_block(fv, "merge");
         let cv = self.compile_expr(&i.cond)?;
         let cond = self.to_bool(cv);
@@ -298,7 +326,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(then_bb);
         let then_val = self.compile_block(&i.then)?;
         if self.no_term() {
-            let bb = self.bld.get_insert_block().unwrap();
+            let bb = self.current_bb();
             match then_val {
                 Some(v) => phi_in.push((v, bb)),
                 None => all_valued = false,
@@ -318,7 +346,7 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(elif_then);
             let elif_val = self.compile_block(elif_body)?;
             if self.no_term() {
-                let bb = self.bld.get_insert_block().unwrap();
+                let bb = self.current_bb();
                 match elif_val {
                     Some(v) => phi_in.push((v, bb)),
                     None => all_valued = false,
@@ -334,7 +362,7 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(ref els) = i.els {
             let else_val = self.compile_block(els)?;
             if self.no_term() {
-                let bb = self.bld.get_insert_block().unwrap();
+                let bb = self.current_bb();
                 match else_val {
                     Some(v) => phi_in.push((v, bb)),
                     None => all_valued = false,

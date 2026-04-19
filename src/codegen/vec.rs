@@ -132,13 +132,17 @@ impl<'ctx> Compiler<'ctx> {
             "len" => self.vec_len(header_ptr),
             "get" => self.vec_get(header_ptr, &elem_ty, args),
             "set" => {
-                if args.len() < 2 { return Err("set() requires index and value".into()); }
+                if args.len() < 2 {
+                    return Err("set() requires index and value".into());
+                }
                 let idx = self.compile_expr(&args[0])?.into_int_value();
                 let val = self.compile_expr(&args[1])?;
                 self.vec_set_val(header_ptr, &elem_ty, idx, val)
             }
             "remove" => {
-                if args.is_empty() { return Err("remove() requires an index".into()); }
+                if args.is_empty() {
+                    return Err("remove() requires an index".into());
+                }
                 let idx = self.compile_expr(&args[0])?.into_int_value();
                 self.vec_remove_val(header_ptr, &elem_ty, idx)
             }
@@ -203,7 +207,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<(), String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let len_gep = b!(self
             .bld
@@ -295,6 +299,26 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_struct_gep(header_ty, header_ptr, 1, "vpop.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vpop.len")).into_int_value();
+
+        // Bounds check: trap if len == 0
+        let fv = self.current_fn();
+        let is_nonzero = b!(self.bld.build_int_compare(
+            IntPredicate::SGT,
+            len,
+            i64t.const_int(0, false),
+            "vpop.nz"
+        ));
+        let ok_bb = self.ctx.append_basic_block(fv, "vpop.ok");
+        let fail_bb = self.ctx.append_basic_block(fv, "vpop.fail");
+        b!(self
+            .bld
+            .build_conditional_branch(is_nonzero, ok_bb, fail_bb));
+        self.bld.position_at_end(fail_bb);
+        let trap = self.get_or_declare_trap();
+        b!(self.bld.build_call(trap, &[], ""));
+        b!(self.bld.build_unreachable());
+        self.bld.position_at_end(ok_bb);
+
         let new_len = b!(self
             .bld
             .build_int_nsw_sub(len, i64t.const_int(1, false), "vpop.nl"));
@@ -458,7 +482,7 @@ impl<'ctx> Compiler<'ctx> {
         idx: inkwell::values::IntValue<'ctx>,
         len: inkwell::values::IntValue<'ctx>,
     ) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let ok = b!(self
             .bld
             .build_int_compare(IntPredicate::ULT, idx, len, "vbc.ok"));
@@ -534,13 +558,23 @@ impl<'ctx> Compiler<'ctx> {
     fn vec_data_and_len(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
-    ) -> Result<(inkwell::values::PointerValue<'ctx>, inkwell::values::IntValue<'ctx>), String> {
+    ) -> Result<
+        (
+            inkwell::values::PointerValue<'ctx>,
+            inkwell::values::IntValue<'ctx>,
+        ),
+        String,
+    > {
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vdl.ptrp"));
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vdl.ptrp"));
         let data_ptr = b!(self.bld.build_load(ptr_ty, ptr_gep, "vdl.data")).into_pointer_value();
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vdl.lenp"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vdl.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vdl.len")).into_int_value();
         Ok((data_ptr, len))
     }
@@ -551,13 +585,25 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
         let malloc = self.ensure_malloc();
-        let header_ptr = b!(self.bld.build_call(malloc, &[i64t.const_int(24, false).into()], "vn.hdr"))
-            .try_as_basic_value().basic().unwrap().into_pointer_value();
-        let ptr_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "vn.ptr"));
+        let header_ptr =
+            b!(self
+                .bld
+                .build_call(malloc, &[i64t.const_int(24, false).into()], "vn.hdr"))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "vn.ptr"));
         b!(self.bld.build_store(ptr_gep, ptr_ty.const_null()));
-        let len_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 1, "vn.len"));
+        let len_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 1, "vn.len"));
         b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "vn.cap"));
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "vn.cap"));
         b!(self.bld.build_store(cap_gep, i64t.const_int(0, false)));
         Ok(header_ptr)
     }
@@ -578,7 +624,7 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(elem_ty);
         let out_lty = self.llvm_ty(&out_elem_ty);
         let out_elem_size = self.type_store_size(out_lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
@@ -593,7 +639,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "map.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "map.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "map.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -601,7 +649,9 @@ impl<'ctx> Compiler<'ctx> {
         let elem = b!(self.bld.build_load(lty, elem_gep, "map.elem"));
         let mapped = self.indirect_call_vals(fn_val, fn_ty, &[elem])?;
         self.vec_push_raw(out_hdr, mapped, out_lty, out_elem_size)?;
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "map.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "map.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -620,7 +670,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
@@ -637,15 +687,26 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "filt.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "filt.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "filt.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "filt.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "filt.elem"));
-        let pred = self.indirect_call_vals(fn_val, fn_ty, &[elem])?.into_int_value();
-        let pred_bool = b!(self.bld.build_int_compare(IntPredicate::NE, pred, self.ctx.bool_type().const_int(0, false), "filt.bool"));
-        b!(self.bld.build_conditional_branch(pred_bool, push_bb, cont_bb));
+        let pred = self
+            .indirect_call_vals(fn_val, fn_ty, &[elem])?
+            .into_int_value();
+        let pred_bool = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            pred,
+            self.ctx.bool_type().const_int(0, false),
+            "filt.bool"
+        ));
+        b!(self
+            .bld
+            .build_conditional_branch(pred_bool, push_bb, cont_bb));
 
         self.bld.position_at_end(push_bb);
         // Reload elem since we may need it fresh
@@ -654,7 +715,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cont_bb));
 
         self.bld.position_at_end(cont_bb);
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "filt.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "filt.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -674,7 +737,7 @@ impl<'ctx> Compiler<'ctx> {
         let acc_lty = init_val.get_type();
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
@@ -690,7 +753,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "fold.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "fold.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "fold.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -699,7 +764,9 @@ impl<'ctx> Compiler<'ctx> {
         let elem = b!(self.bld.build_load(lty, elem_gep, "fold.elem"));
         let new_acc = self.indirect_call_vals(fn_val, fn_ty, &[cur_acc, elem])?;
         b!(self.bld.build_store(acc_ptr, new_acc));
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "fold.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "fold.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -719,7 +786,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let bool_ty = self.ctx.bool_type();
         let lty = self.llvm_ty(elem_ty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
@@ -727,7 +794,9 @@ impl<'ctx> Compiler<'ctx> {
         // For all: start true, short-circuit on false
         let init = if is_any { 0u64 } else { 1u64 };
         let result_ptr = self.entry_alloca(bool_ty.into(), "aa.res");
-        b!(self.bld.build_store(result_ptr, bool_ty.const_int(init, false)));
+        b!(self
+            .bld
+            .build_store(result_ptr, bool_ty.const_int(init, false)));
         let idx_ptr = self.entry_alloca(i64t.into(), "aa.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
@@ -738,34 +807,53 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "aa.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "aa.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "aa.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "aa.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "aa.elem"));
-        let pred = self.indirect_call_vals(fn_val, fn_ty, &[elem])?.into_int_value();
-        let pred_bool = b!(self.bld.build_int_compare(IntPredicate::NE, pred, bool_ty.const_int(0, false), "aa.pb"));
+        let pred = self
+            .indirect_call_vals(fn_val, fn_ty, &[elem])?
+            .into_int_value();
+        let pred_bool = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            pred,
+            bool_ty.const_int(0, false),
+            "aa.pb"
+        ));
         if is_any {
             // If true found, set result=true and exit
             let found_bb = self.ctx.append_basic_block(fv, "aa.found");
             let cont_bb = self.ctx.append_basic_block(fv, "aa.cont");
-            b!(self.bld.build_conditional_branch(pred_bool, found_bb, cont_bb));
+            b!(self
+                .bld
+                .build_conditional_branch(pred_bool, found_bb, cont_bb));
             self.bld.position_at_end(found_bb);
-            b!(self.bld.build_store(result_ptr, bool_ty.const_int(1, false)));
+            b!(self
+                .bld
+                .build_store(result_ptr, bool_ty.const_int(1, false)));
             b!(self.bld.build_unconditional_branch(done_bb));
             self.bld.position_at_end(cont_bb);
         } else {
             // If false found, set result=false and exit
             let fail_bb = self.ctx.append_basic_block(fv, "aa.fail");
             let cont_bb = self.ctx.append_basic_block(fv, "aa.cont");
-            b!(self.bld.build_conditional_branch(pred_bool, cont_bb, fail_bb));
+            b!(self
+                .bld
+                .build_conditional_branch(pred_bool, cont_bb, fail_bb));
             self.bld.position_at_end(fail_bb);
-            b!(self.bld.build_store(result_ptr, bool_ty.const_int(0, false)));
+            b!(self
+                .bld
+                .build_store(result_ptr, bool_ty.const_int(0, false)));
             b!(self.bld.build_unconditional_branch(done_bb));
             self.bld.position_at_end(cont_bb);
         }
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "aa.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "aa.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -784,7 +872,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let bool_ty = self.ctx.bool_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
@@ -799,17 +887,28 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "find.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "find.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "find.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "find.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "find.elem"));
-        let pred = self.indirect_call_vals(fn_val, fn_ty, &[elem])?.into_int_value();
-        let pred_bool = b!(self.bld.build_int_compare(IntPredicate::NE, pred, bool_ty.const_int(0, false), "find.pb"));
+        let pred = self
+            .indirect_call_vals(fn_val, fn_ty, &[elem])?
+            .into_int_value();
+        let pred_bool = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            pred,
+            bool_ty.const_int(0, false),
+            "find.pb"
+        ));
         let found_bb = self.ctx.append_basic_block(fv, "find.found");
         let cont_bb = self.ctx.append_basic_block(fv, "find.cont");
-        b!(self.bld.build_conditional_branch(pred_bool, found_bb, cont_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(pred_bool, found_bb, cont_bb));
 
         self.bld.position_at_end(found_bb);
         let elem2 = b!(self.bld.build_load(lty, elem_gep, "find.elem2"));
@@ -817,7 +916,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(cont_bb);
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "find.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "find.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -832,7 +933,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
@@ -852,7 +953,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "sum.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "sum.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "sum.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -860,11 +963,23 @@ impl<'ctx> Compiler<'ctx> {
         let elem = b!(self.bld.build_load(lty, elem_gep, "sum.elem"));
         let cur = b!(self.bld.build_load(lty, acc_ptr, "sum.cur"));
         let new_val: BasicValueEnum<'ctx> = match elem_ty {
-            Type::F64 => b!(self.bld.build_float_add(cur.into_float_value(), elem.into_float_value(), "sum.add")).into(),
-            _ => b!(self.bld.build_int_nsw_add(cur.into_int_value(), elem.into_int_value(), "sum.add")).into(),
+            Type::F64 => b!(self.bld.build_float_add(
+                cur.into_float_value(),
+                elem.into_float_value(),
+                "sum.add"
+            ))
+            .into(),
+            _ => b!(self.bld.build_int_nsw_add(
+                cur.into_int_value(),
+                elem.into_int_value(),
+                "sum.add"
+            ))
+            .into(),
         };
         b!(self.bld.build_store(acc_ptr, new_val));
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "sum.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "sum.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -883,7 +998,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
@@ -894,7 +1009,9 @@ impl<'ctx> Compiler<'ctx> {
             let min_bb = self.ctx.append_basic_block(fv, "ts.min");
             let use_n_bb = self.ctx.append_basic_block(fv, "ts.usen");
             let use_len_bb = self.ctx.append_basic_block(fv, "ts.uselen");
-            let cmp = b!(self.bld.build_int_compare(IntPredicate::SLT, n_val, len, "ts.cmp"));
+            let cmp = b!(self
+                .bld
+                .build_int_compare(IntPredicate::SLT, n_val, len, "ts.cmp"));
             b!(self.bld.build_conditional_branch(cmp, use_n_bb, use_len_bb));
             self.bld.position_at_end(use_n_bb);
             b!(self.bld.build_unconditional_branch(min_bb));
@@ -903,7 +1020,10 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(min_bb);
             let phi = b!(self.bld.build_phi(i64t, "ts.end"));
             phi.add_incoming(&[(&n_val, use_n_bb), (&len, use_len_bb)]);
-            (i64t.const_int(0, false), phi.as_basic_value().into_int_value())
+            (
+                i64t.const_int(0, false),
+                phi.as_basic_value().into_int_value(),
+            )
         } else {
             (n_val, len)
         };
@@ -918,14 +1038,18 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "ts.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, end, "ts.cmp2"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, end, "ts.cmp2"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "ts.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "ts.elem"));
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "ts.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "ts.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -950,7 +1074,7 @@ impl<'ctx> Compiler<'ctx> {
         // Tuple type: (A, B)
         let tuple_lty = self.ctx.struct_type(&[lty_a.into(), lty_b.into()], false);
         let tuple_size = self.type_store_size(tuple_lty.into());
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_a, len_a) = self.vec_data_and_len(header_ptr)?;
         let (data_b, len_b) = self.vec_data_and_len(other_val)?;
@@ -959,7 +1083,9 @@ impl<'ctx> Compiler<'ctx> {
         let min_bb = self.ctx.append_basic_block(fv, "zip.min");
         let use_a_bb = self.ctx.append_basic_block(fv, "zip.usea");
         let use_b_bb = self.ctx.append_basic_block(fv, "zip.useb");
-        let cmp = b!(self.bld.build_int_compare(IntPredicate::SLT, len_a, len_b, "zip.cmp"));
+        let cmp = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, len_a, len_b, "zip.cmp"));
         b!(self.bld.build_conditional_branch(cmp, use_a_bb, use_b_bb));
         self.bld.position_at_end(use_a_bb);
         b!(self.bld.build_unconditional_branch(min_bb));
@@ -981,7 +1107,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "zip.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, min_len, "zip.cmp2"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, min_len, "zip.cmp2"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -994,7 +1122,9 @@ impl<'ctx> Compiler<'ctx> {
         tup = b!(self.bld.build_insert_value(tup, a_val, 0, "zip.t0")).into_struct_value();
         tup = b!(self.bld.build_insert_value(tup, b_val, 1, "zip.t1")).into_struct_value();
         self.vec_push_raw(out_hdr, tup.into(), tuple_lty.into(), tuple_size)?;
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "zip.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "zip.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -1012,7 +1142,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let out_hdr = self.vec_alloc_empty()?;
 
@@ -1026,13 +1156,17 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop1));
         self.bld.position_at_end(loop1);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "chn.i1")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len_a, "chn.c1"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len_a, "chn.c1"));
         b!(self.bld.build_conditional_branch(cond, body1, mid));
         self.bld.position_at_end(body1);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_a, &[idx], "chn.g1")) };
         let elem = b!(self.bld.build_load(lty, gep, "chn.e1"));
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "chn.n1"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "chn.n1"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop1));
 
@@ -1047,13 +1181,17 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop2));
         self.bld.position_at_end(loop2);
         let idx2 = b!(self.bld.build_load(i64t, idx_ptr2, "chn.i2")).into_int_value();
-        let cond2 = b!(self.bld.build_int_compare(IntPredicate::SLT, idx2, len_b, "chn.c2"));
+        let cond2 = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx2, len_b, "chn.c2"));
         b!(self.bld.build_conditional_branch(cond2, body2, done));
         self.bld.position_at_end(body2);
         let gep2 = unsafe { b!(self.bld.build_gep(lty, data_b, &[idx2], "chn.g2")) };
         let elem2 = b!(self.bld.build_load(lty, gep2, "chn.e2"));
         self.vec_push_raw(out_hdr, elem2, lty, elem_size)?;
-        let next2 = b!(self.bld.build_int_nsw_add(idx2, i64t.const_int(1, false), "chn.n2"));
+        let next2 = b!(self
+            .bld
+            .build_int_nsw_add(idx2, i64t.const_int(1, false), "chn.n2"));
         b!(self.bld.build_store(idx_ptr2, next2));
         b!(self.bld.build_unconditional_branch(loop2));
 
@@ -1070,7 +1208,7 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(elem_ty);
         let tuple_lty = self.ctx.struct_type(&[i64t.into(), lty.into()], false);
         let tuple_size = self.type_store_size(tuple_lty.into());
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
@@ -1084,7 +1222,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "enum.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "enum.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "enum.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -1094,7 +1234,9 @@ impl<'ctx> Compiler<'ctx> {
         tup = b!(self.bld.build_insert_value(tup, idx, 0, "enum.t0")).into_struct_value();
         tup = b!(self.bld.build_insert_value(tup, elem, 1, "enum.t1")).into_struct_value();
         self.vec_push_raw(out_hdr, tup.into(), tuple_lty.into(), tuple_size)?;
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "enum.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "enum.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -1116,12 +1258,14 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let inner_lty = self.llvm_ty(&inner_ty);
         let inner_size = self.type_store_size(inner_lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
         let outer_idx_ptr = self.entry_alloca(i64t.into(), "flat.oidx");
-        b!(self.bld.build_store(outer_idx_ptr, i64t.const_int(0, false)));
+        b!(self
+            .bld
+            .build_store(outer_idx_ptr, i64t.const_int(0, false)));
 
         let outer_loop = self.ctx.append_basic_block(fv, "flat.oloop");
         let outer_body = self.ctx.append_basic_block(fv, "flat.obody");
@@ -1130,8 +1274,12 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(outer_loop);
         let oidx = b!(self.bld.build_load(i64t, outer_idx_ptr, "flat.oi")).into_int_value();
-        let ocond = b!(self.bld.build_int_compare(IntPredicate::SLT, oidx, len, "flat.oc"));
-        b!(self.bld.build_conditional_branch(ocond, outer_body, done_bb));
+        let ocond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, oidx, len, "flat.oc"));
+        b!(self
+            .bld
+            .build_conditional_branch(ocond, outer_body, done_bb));
 
         self.bld.position_at_end(outer_body);
         // Each element is a ptr to vec header
@@ -1140,7 +1288,9 @@ impl<'ctx> Compiler<'ctx> {
         let (inner_data, inner_len) = self.vec_data_and_len(inner_hdr)?;
 
         let inner_idx_ptr = self.entry_alloca(i64t.into(), "flat.iidx");
-        b!(self.bld.build_store(inner_idx_ptr, i64t.const_int(0, false)));
+        b!(self
+            .bld
+            .build_store(inner_idx_ptr, i64t.const_int(0, false)));
         let inner_loop = self.ctx.append_basic_block(fv, "flat.iloop");
         let inner_body = self.ctx.append_basic_block(fv, "flat.ibody");
         let inner_done = self.ctx.append_basic_block(fv, "flat.idone");
@@ -1148,19 +1298,31 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(inner_loop);
         let iidx = b!(self.bld.build_load(i64t, inner_idx_ptr, "flat.ii")).into_int_value();
-        let icond = b!(self.bld.build_int_compare(IntPredicate::SLT, iidx, inner_len, "flat.ic"));
-        b!(self.bld.build_conditional_branch(icond, inner_body, inner_done));
+        let icond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, iidx, inner_len, "flat.ic"));
+        b!(self
+            .bld
+            .build_conditional_branch(icond, inner_body, inner_done));
 
         self.bld.position_at_end(inner_body);
-        let elem_gep = unsafe { b!(self.bld.build_gep(inner_lty, inner_data, &[iidx], "flat.eg")) };
+        let elem_gep = unsafe {
+            b!(self
+                .bld
+                .build_gep(inner_lty, inner_data, &[iidx], "flat.eg"))
+        };
         let elem = b!(self.bld.build_load(inner_lty, elem_gep, "flat.e"));
         self.vec_push_raw(out_hdr, elem, inner_lty, inner_size)?;
-        let inext = b!(self.bld.build_int_nsw_add(iidx, i64t.const_int(1, false), "flat.in"));
+        let inext = b!(self
+            .bld
+            .build_int_nsw_add(iidx, i64t.const_int(1, false), "flat.in"));
         b!(self.bld.build_store(inner_idx_ptr, inext));
         b!(self.bld.build_unconditional_branch(inner_loop));
 
         self.bld.position_at_end(inner_done);
-        let onext = b!(self.bld.build_int_nsw_add(oidx, i64t.const_int(1, false), "flat.on"));
+        let onext = b!(self
+            .bld
+            .build_int_nsw_add(oidx, i64t.const_int(1, false), "flat.on"));
         b!(self.bld.build_store(outer_idx_ptr, onext));
         b!(self.bld.build_unconditional_branch(outer_loop));
 
@@ -1178,11 +1340,13 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let bool_ty = self.ctx.bool_type();
         let lty = self.llvm_ty(elem_ty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let result_ptr = self.entry_alloca(bool_ty.into(), "cont.res");
-        b!(self.bld.build_store(result_ptr, bool_ty.const_int(0, false)));
+        b!(self
+            .bld
+            .build_store(result_ptr, bool_ty.const_int(0, false)));
         let idx_ptr = self.entry_alloca(i64t.into(), "cont.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
@@ -1193,40 +1357,44 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "cont.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "cont.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "cont.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "cont.gep")) };
         let elem = b!(self.bld.build_load(lty, gep, "cont.elem"));
         let eq = match elem_ty {
-            Type::F64 => {
-                b!(self.bld.build_float_compare(
-                    inkwell::FloatPredicate::OEQ,
-                    elem.into_float_value(),
-                    needle.into_float_value(),
-                    "cont.eq"
-                )).into()
-            }
-            _ => {
-                b!(self.bld.build_int_compare(
-                    IntPredicate::EQ,
-                    elem.into_int_value(),
-                    needle.into_int_value(),
-                    "cont.eq"
-                )).into()
-            }
+            Type::F64 => b!(self.bld.build_float_compare(
+                inkwell::FloatPredicate::OEQ,
+                elem.into_float_value(),
+                needle.into_float_value(),
+                "cont.eq"
+            ))
+            .into(),
+            _ => b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                elem.into_int_value(),
+                needle.into_int_value(),
+                "cont.eq"
+            ))
+            .into(),
         };
         let found_bb = self.ctx.append_basic_block(fv, "cont.found");
         let cont_bb = self.ctx.append_basic_block(fv, "cont.cont");
         b!(self.bld.build_conditional_branch(eq, found_bb, cont_bb));
 
         self.bld.position_at_end(found_bb);
-        b!(self.bld.build_store(result_ptr, bool_ty.const_int(1, false)));
+        b!(self
+            .bld
+            .build_store(result_ptr, bool_ty.const_int(1, false)));
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(cont_bb);
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "cont.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "cont.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -1242,14 +1410,16 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
 
         // Iterate from len-1 down to 0
         let idx_ptr = self.entry_alloca(i64t.into(), "rev.idx");
-        let start = b!(self.bld.build_int_nsw_sub(len, i64t.const_int(1, false), "rev.start"));
+        let start = b!(self
+            .bld
+            .build_int_nsw_sub(len, i64t.const_int(1, false), "rev.start"));
         b!(self.bld.build_store(idx_ptr, start));
 
         let loop_bb = self.ctx.append_basic_block(fv, "rev.loop");
@@ -1259,14 +1429,21 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "rev.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SGE, idx, i64t.const_int(0, false), "rev.cmp"));
+        let cond = b!(self.bld.build_int_compare(
+            IntPredicate::SGE,
+            idx,
+            i64t.const_int(0, false),
+            "rev.cmp"
+        ));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "rev.gep")) };
         let elem = b!(self.bld.build_load(lty, gep, "rev.elem"));
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
-        let next = b!(self.bld.build_int_nsw_sub(idx, i64t.const_int(1, false), "rev.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_sub(idx, i64t.const_int(1, false), "rev.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -1283,7 +1460,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
@@ -1297,21 +1474,32 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cp_loop));
         self.bld.position_at_end(cp_loop);
         let ci = b!(self.bld.build_load(i64t, cp_idx, "sort.ci")).into_int_value();
-        let cc = b!(self.bld.build_int_compare(IntPredicate::SLT, ci, len, "sort.cc"));
+        let cc = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, ci, len, "sort.cc"));
         b!(self.bld.build_conditional_branch(cc, cp_body, cp_done));
         self.bld.position_at_end(cp_body);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[ci], "sort.cg")) };
         let elem = b!(self.bld.build_load(lty, gep, "sort.ce"));
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
-        let cn = b!(self.bld.build_int_nsw_add(ci, i64t.const_int(1, false), "sort.cn"));
+        let cn = b!(self
+            .bld
+            .build_int_nsw_add(ci, i64t.const_int(1, false), "sort.cn"));
         b!(self.bld.build_store(cp_idx, cn));
         b!(self.bld.build_unconditional_branch(cp_loop));
 
         self.bld.position_at_end(cp_done);
         // In-place insertion sort on out_hdr
         let header_ty = self.vec_header_type();
-        let out_ptr_gep = b!(self.bld.build_struct_gep(header_ty, out_hdr, 0, "sort.ptrp"));
-        let out_data = b!(self.bld.build_load(self.ctx.ptr_type(AddressSpace::default()), out_ptr_gep, "sort.data")).into_pointer_value();
+        let out_ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, out_hdr, 0, "sort.ptrp"));
+        let out_data = b!(self.bld.build_load(
+            self.ctx.ptr_type(AddressSpace::default()),
+            out_ptr_gep,
+            "sort.data"
+        ))
+        .into_pointer_value();
 
         let i_ptr = self.entry_alloca(i64t.into(), "sort.i");
         b!(self.bld.build_store(i_ptr, i64t.const_int(1, false)));
@@ -1322,14 +1510,18 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(outer_loop);
         let i = b!(self.bld.build_load(i64t, i_ptr, "sort.i")).into_int_value();
-        let ic = b!(self.bld.build_int_compare(IntPredicate::SLT, i, len, "sort.ic"));
+        let ic = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, i, len, "sort.ic"));
         b!(self.bld.build_conditional_branch(ic, outer_body, sort_done));
 
         self.bld.position_at_end(outer_body);
         let key_gep = unsafe { b!(self.bld.build_gep(lty, out_data, &[i], "sort.kg")) };
         let key = b!(self.bld.build_load(lty, key_gep, "sort.key"));
         let j_ptr = self.entry_alloca(i64t.into(), "sort.j");
-        let j_start = b!(self.bld.build_int_nsw_sub(i, i64t.const_int(1, false), "sort.js"));
+        let j_start = b!(self
+            .bld
+            .build_int_nsw_sub(i, i64t.const_int(1, false), "sort.js"));
         b!(self.bld.build_store(j_ptr, j_start));
 
         let inner_loop = self.ctx.append_basic_block(fv, "sort.il");
@@ -1339,38 +1531,63 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(inner_loop);
         let j = b!(self.bld.build_load(i64t, j_ptr, "sort.j")).into_int_value();
-        let jc = b!(self.bld.build_int_compare(IntPredicate::SGE, j, i64t.const_int(0, false), "sort.jc"));
-        b!(self.bld.build_conditional_branch(jc, inner_body, inner_done));
+        let jc = b!(self.bld.build_int_compare(
+            IntPredicate::SGE,
+            j,
+            i64t.const_int(0, false),
+            "sort.jc"
+        ));
+        b!(self
+            .bld
+            .build_conditional_branch(jc, inner_body, inner_done));
 
         self.bld.position_at_end(inner_body);
         let aj_gep = unsafe { b!(self.bld.build_gep(lty, out_data, &[j], "sort.ag")) };
         let aj = b!(self.bld.build_load(lty, aj_gep, "sort.aj"));
         let gt = match elem_ty {
             Type::F64 => b!(self.bld.build_float_compare(
-                inkwell::FloatPredicate::OGT, aj.into_float_value(), key.into_float_value(), "sort.gt"
-            )).into(),
-            _ => b!(self.bld.build_int_compare(IntPredicate::SGT, aj.into_int_value(), key.into_int_value(), "sort.gt")).into(),
+                inkwell::FloatPredicate::OGT,
+                aj.into_float_value(),
+                key.into_float_value(),
+                "sort.gt"
+            ))
+            .into(),
+            _ => b!(self.bld.build_int_compare(
+                IntPredicate::SGT,
+                aj.into_int_value(),
+                key.into_int_value(),
+                "sort.gt"
+            ))
+            .into(),
         };
         let shift_bb = self.ctx.append_basic_block(fv, "sort.shift");
         b!(self.bld.build_conditional_branch(gt, shift_bb, inner_done));
 
         self.bld.position_at_end(shift_bb);
         // a[j+1] = a[j]
-        let j1 = b!(self.bld.build_int_nsw_add(j, i64t.const_int(1, false), "sort.j1"));
+        let j1 = b!(self
+            .bld
+            .build_int_nsw_add(j, i64t.const_int(1, false), "sort.j1"));
         let dst_gep = unsafe { b!(self.bld.build_gep(lty, out_data, &[j1], "sort.dg")) };
         b!(self.bld.build_store(dst_gep, aj));
-        let jn = b!(self.bld.build_int_nsw_sub(j, i64t.const_int(1, false), "sort.jn"));
+        let jn = b!(self
+            .bld
+            .build_int_nsw_sub(j, i64t.const_int(1, false), "sort.jn"));
         b!(self.bld.build_store(j_ptr, jn));
         b!(self.bld.build_unconditional_branch(inner_loop));
 
         self.bld.position_at_end(inner_done);
         // a[j+1] = key
         let j_final = b!(self.bld.build_load(i64t, j_ptr, "sort.jf")).into_int_value();
-        let j1f = b!(self.bld.build_int_nsw_add(j_final, i64t.const_int(1, false), "sort.j1f"));
+        let j1f = b!(self
+            .bld
+            .build_int_nsw_add(j_final, i64t.const_int(1, false), "sort.j1f"));
         let insert_gep = unsafe { b!(self.bld.build_gep(lty, out_data, &[j1f], "sort.ig")) };
         b!(self.bld.build_store(insert_gep, key));
 
-        let in_ = b!(self.bld.build_int_nsw_add(i, i64t.const_int(1, false), "sort.in"));
+        let in_ = b!(self
+            .bld
+            .build_int_nsw_add(i, i64t.const_int(1, false), "sort.in"));
         b!(self.bld.build_store(i_ptr, in_));
         b!(self.bld.build_unconditional_branch(outer_loop));
 
@@ -1387,7 +1604,7 @@ impl<'ctx> Compiler<'ctx> {
             return Err("join() requires a separator argument".into());
         }
         let sep = self.compile_expr(&args[0])?;
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
         let st = self.string_type();
 
@@ -1403,12 +1620,14 @@ impl<'ctx> Compiler<'ctx> {
             i64t.const_int(0, false),
             "jn.isempty"
         ));
-        b!(self.bld.build_conditional_branch(is_empty, empty_bb, start_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_empty, empty_bb, start_bb));
 
         // Empty vec → empty string
         self.bld.position_at_end(empty_bb);
         let empty_str = self.compile_str_literal("")?;
-        let empty_exit = self.bld.get_insert_block().unwrap();
+        let empty_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         // Non-empty: start with first element
@@ -1427,33 +1646,26 @@ impl<'ctx> Compiler<'ctx> {
         phi_acc.add_incoming(&[(&first, start_bb)]);
         let i = phi_i.as_basic_value().into_int_value();
         let acc = phi_acc.as_basic_value();
-        let done = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::SGE,
-            i,
-            len,
-            "jn.done"
-        ));
+        let done = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::SGE, i, len, "jn.done"));
         b!(self.bld.build_conditional_branch(done, done_bb, body_bb));
 
         self.bld.position_at_end(body_bb);
-        let elem_ptr = unsafe {
-            b!(self
-                .bld
-                .build_gep(st, data_ptr, &[i], "jn.ep"))
-        };
+        let elem_ptr = unsafe { b!(self.bld.build_gep(st, data_ptr, &[i], "jn.ep")) };
         let elem = b!(self.bld.build_load(st, elem_ptr, "jn.elem"));
         // acc = acc + sep + elem
         let with_sep = self.string_concat(acc, sep)?;
         let with_elem = self.string_concat(with_sep, elem)?;
         let next_i = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "jn.ni"));
-        let body_exit = self.bld.get_insert_block().unwrap();
+        let body_exit = self.current_bb();
         phi_i.add_incoming(&[(&next_i, body_exit)]);
         phi_acc.add_incoming(&[(&with_elem, body_exit)]);
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(done_bb);
         let result = acc;
-        let done_exit = self.bld.get_insert_block().unwrap();
+        let done_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(merge_bb);
@@ -1476,10 +1688,12 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(elem_ty);
         let i64t = self.ctx.i64_type();
         let bool_ty = self.ctx.bool_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let result_ptr = self.entry_alloca(bool_ty.into(), "acont.res");
-        b!(self.bld.build_store(result_ptr, bool_ty.const_int(0, false)));
+        b!(self
+            .bld
+            .build_store(result_ptr, bool_ty.const_int(0, false)));
         let idx_ptr = self.entry_alloca(i64t.into(), "acont.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
         let len = i64t.const_int(arr_len as u64, false);
@@ -1492,7 +1706,9 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "acont.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(IntPredicate::SLT, idx, len, "acont.cmp"));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "acont.cmp"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -1526,11 +1742,15 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(eq, found_bb, cont_bb));
 
         self.bld.position_at_end(found_bb);
-        b!(self.bld.build_store(result_ptr, bool_ty.const_int(1, false)));
+        b!(self
+            .bld
+            .build_store(result_ptr, bool_ty.const_int(1, false)));
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(cont_bb);
-        let next = b!(self.bld.build_int_nsw_add(idx, i64t.const_int(1, false), "acont.next"));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "acont.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 

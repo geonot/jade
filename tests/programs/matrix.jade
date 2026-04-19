@@ -36,10 +36,8 @@ type Mat2
 # Matrix power (repeated multiplication)
 *mat_pow(m as Mat2, n as i64)
     result is Mat2(a is 1.0, b is 0.0, c is 0.0, d is 1.0)
-    i is 0
-    while i < n
+    for i in 0 to n
         result is mat_mul(result, m)
-        i is i + 1
     result
 
 *main

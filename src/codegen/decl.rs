@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use inkwell::attributes::AttributeLoc;
 use inkwell::module::Linkage;
-use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::types::BasicMetadataTypeEnum;
 
 use inkwell::AddressSpace;
 
@@ -10,9 +8,7 @@ use crate::hir;
 use crate::types::Type;
 
 use super::Compiler;
-use super::b;
 
-#[allow(dead_code)]
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn declare_builtins(&mut self) {
         let i32t = self.ctx.i32_type();
@@ -27,111 +23,6 @@ impl<'ctx> Compiler<'ctx> {
             .add_function("putchar", i32t.fn_type(&[i32t.into()], false), None);
         pc.add_attribute(AttributeLoc::Function, self.attr("nounwind"));
         pc.add_attribute(AttributeLoc::Function, self.attr("nofree"));
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn declare_fn(&mut self, f: &hir::Fn) -> Result<(), String> {
-        let ptys: Vec<Type> = f.params.iter().map(|p| p.ty.clone()).collect();
-        let ret = if f.name == "main" {
-            Type::I32
-        } else {
-            f.ret.clone()
-        };
-        let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
-            ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
-
-        if f.name == "main" && !self.lib_mode {
-            let ft = self.mk_fn_type(&ret, &lp, false);
-            let user_fv = self.module.add_function("__jade_user_main", ft, None);
-            if self.fn_may_recurse(f) {
-                self.tag_fn_noreturn_ok(user_fv);
-            } else {
-                self.tag_fn(user_fv);
-            }
-            user_fv.set_linkage(Linkage::Internal);
-            self.fns.insert(f.name.clone(), (user_fv, ptys, ret));
-
-            let i32t = self.ctx.i32_type();
-            let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-            let main_ft = i32t.fn_type(&[i32t.into(), ptr_ty.into()], false);
-            let main_fv = self.module.add_function("main", main_ft, None);
-
-            let argc_global = self.module.add_global(i32t, None, "__jade_argc");
-            argc_global.set_initializer(&i32t.const_int(0, false));
-            let argv_global = self.module.add_global(ptr_ty, None, "__jade_argv");
-            argv_global.set_initializer(&ptr_ty.const_null());
-
-            let entry = self.ctx.append_basic_block(main_fv, "entry");
-            self.bld.position_at_end(entry);
-            let argc_param = main_fv.get_nth_param(0).unwrap();
-            let argv_param = main_fv.get_nth_param(1).unwrap();
-            b!(self
-                .bld
-                .build_store(argc_global.as_pointer_value(), argc_param));
-            b!(self
-                .bld
-                .build_store(argv_global.as_pointer_value(), argv_param));
-
-            if let Some(sched_init) = self.module.get_function("jade_sched_init") {
-                b!(self
-                    .bld
-                    .build_call(sched_init, &[i32t.const_int(0, false).into()], ""));
-            }
-
-            let call_result = b!(self.bld.build_call(user_fv, &[], "user_main"));
-
-            if let Some(sched_run) = self.module.get_function("jade_sched_run") {
-                b!(self.bld.build_call(sched_run, &[], ""));
-            }
-            if let Some(sched_shutdown) = self.module.get_function("jade_sched_shutdown") {
-                b!(self.bld.build_call(sched_shutdown, &[], ""));
-            }
-            if let Some(rv) = call_result.try_as_basic_value().basic() {
-                let ret_i32 = if rv.is_int_value() {
-                    let iv = rv.into_int_value();
-                    if iv.get_type().get_bit_width() != 32 {
-                        b!(self.bld.build_int_truncate(iv, i32t, "ret32"))
-                    } else {
-                        iv
-                    }
-                } else {
-                    i32t.const_int(0, false)
-                };
-                b!(self.bld.build_return(Some(&ret_i32)));
-            } else {
-                b!(self.bld.build_return(Some(&i32t.const_int(0, false))));
-            }
-
-            return Ok(());
-        }
-
-        let ft = self.mk_fn_type(&ret, &lp, false);
-        let fv = self.module.add_function(&f.name, ft, None);
-        if self.fn_may_recurse(f) {
-            self.tag_fn_noreturn_ok(fv);
-        } else {
-            self.tag_fn(fv);
-        }
-        if !self.lib_mode {
-            fv.set_linkage(Linkage::Internal);
-        }
-        for (i, p) in f.params.iter().enumerate() {
-            if let Some(v) = fv.get_nth_param(i as u32) {
-                v.set_name(&p.name);
-            }
-            let loc = AttributeLoc::Param(i as u32);
-            fv.add_attribute(loc, self.attr("noundef"));
-            self.tag_param_ownership(fv, loc, &p.ownership, &p.ty);
-        }
-        self.fns.insert(f.name.clone(), (fv, ptys, ret));
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn fn_may_recurse(&self, f: &hir::Fn) -> bool {
-        let mut refs = std::collections::HashSet::new();
-        Self::collect_var_refs_block(&f.body, &mut refs);
-        refs.contains(&f.name)
     }
 
     pub(crate) fn declare_method(&mut self, _type_name: &str, m: &hir::Fn) -> Result<(), String> {
@@ -153,123 +44,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Like emit_body but injects tail-reuse tokens after param alloca setup.
-    fn emit_body_with_tail_reuse(
-        &mut self,
-        fv: inkwell::values::FunctionValue<'ctx>,
-        params: &[(String, Type)],
-        body: &hir::Block,
-        ret: &Type,
-        name: &str,
-        line: u32,
-        tail_reuse_params: &[(String, hir::DefId)],
-    ) -> Result<(), String> {
-        self.create_debug_function(fv, name, line);
-        self.cur_fn = Some(fv);
-        let entry = self.ctx.append_basic_block(fv, "entry");
-        self.bld.position_at_end(entry);
-        self.vars.push(HashMap::new());
-        for (i, (name, ty)) in params.iter().enumerate() {
-            let param_val = fv.get_nth_param(i as u32).unwrap();
-            let a = self.alloca_for_type(self.llvm_ty(ty), name, ty);
-            b!(self.bld.build_store(a, param_val));
-            self.set_var(name, a, ty.clone());
-        }
-
-        // Inject tail-reuse tokens: save param pointers (which are Rc/struct ptrs)
-        // so rc_alloc can reuse them instead of malloc for the return value
-        for (pname, def_id) in tail_reuse_params {
-            if let Some((ptr, ty)) = self.find_var(pname).cloned() {
-                if matches!(ty, Type::Rc(_) | Type::Enum(_)) {
-                    let val = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, "tail.reuse.load"));
-                    self.reuse_tokens.insert(*def_id, val.into_pointer_value());
-                }
-            }
-        }
-
-        let last = self.compile_block(body)?;
-        if self.no_term() {
-            match ret {
-                Type::Void => {
-                    b!(self.bld.build_return(None));
-                }
-                _ => {
-                    let rty = self.llvm_ty(ret);
-                    let v = match last {
-                        Some(v) => self.coerce_val(v, rty),
-                        _ => self.default_val(ret),
-                    };
-                    b!(self.bld.build_return(Some(&v)));
-                }
-            }
-        }
-        self.vars.pop();
-        self.cur_fn = None;
-        self.pop_debug_scope();
-        Ok(())
-    }
-
-    pub(crate) fn compile_fn(&mut self, f: &hir::Fn) -> Result<(), String> {
-        self.compile_fn_body(&f.name, f)
-    }
-
-    pub(crate) fn compile_method_body(
-        &mut self,
-        _type_name: &str,
-        mangled: &str,
-        m: &hir::Fn,
-    ) -> Result<(), String> {
-        self.compile_fn_body(mangled, m)
-    }
-
-    fn compile_fn_body(&mut self, key: &str, f: &hir::Fn) -> Result<(), String> {
-        let (fv, ptys, ret) = self
-            .fns
-            .get(key)
-            .ok_or_else(|| format!("undeclared: {key}"))?
-            .clone();
-        let params: Vec<_> = f
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.name.clone(), ptys[i].clone()))
-            .collect();
-
-        // Save tail reuse tokens: if Perceus identified params whose allocation
-        // can be reused for the return value, register them before compiling body.
-        let tail_reuse_params: Vec<(String, hir::DefId)> = f
-            .params
-            .iter()
-            .filter(|p| self.hints.tail_reuse.contains_key(&p.def_id))
-            .map(|p| (p.name.clone(), p.def_id))
-            .collect();
-
-        self.emit_body_with_tail_reuse(fv, &params, &f.body, &ret, &f.name, f.span.line, &tail_reuse_params)
-    }
-
-    pub(crate) fn declare_type(&mut self, td: &hir::TypeDef) -> Result<(), String> {
-        let fields: Vec<(String, Type)> = td
-            .fields
-            .iter()
-            .map(|f| (f.name.clone(), f.ty.clone()))
-            .collect();
-        let ltys: Vec<BasicTypeEnum<'ctx>> = fields.iter().map(|(_, t)| self.llvm_ty(t)).collect();
-        let st = self.ctx.opaque_struct_type(&td.name);
-        st.set_body(&ltys, td.layout.packed);
-        self.structs.insert(td.name.clone(), fields);
-        let defaults: HashMap<String, hir::Expr> = td
-            .fields
-            .iter()
-            .filter_map(|f| f.default.as_ref().map(|d| (f.name.clone(), d.clone())))
-            .collect();
-        if !defaults.is_empty() {
-            self.struct_defaults.insert(td.name.clone(), defaults);
-        }
-        self.struct_layouts
-            .insert(td.name.clone(), td.layout.clone());
-        Ok(())
-    }
-
     pub(crate) fn declare_enum(&mut self, ed: &hir::EnumDef) -> Result<(), String> {
         let variants: Vec<(String, Vec<Type>, u32)> = ed
             .variants
@@ -280,30 +54,6 @@ impl<'ctx> Compiler<'ctx> {
             })
             .collect();
         self.declare_tagged_union(&ed.name, &variants)
-    }
-
-    pub(crate) fn declare_extern(&mut self, ef: &hir::ExternFn) -> Result<(), String> {
-        let ptys: Vec<BasicMetadataTypeEnum<'ctx>> = ef
-            .params
-            .iter()
-            .map(|(_, t)| {
-                if matches!(t, Type::String) {
-                    self.ctx.ptr_type(inkwell::AddressSpace::default()).into()
-                } else {
-                    self.llvm_ty(t).into()
-                }
-            })
-            .collect();
-        let ret = &ef.ret;
-        let ft = self.mk_fn_type(ret, &ptys, ef.variadic);
-        let fv = self
-            .module
-            .add_function(&ef.name, ft, Some(Linkage::External));
-        fv.add_attribute(AttributeLoc::Function, self.attr("nounwind"));
-        let param_tys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
-        self.fns
-            .insert(ef.name.clone(), (fv, param_tys, ret.clone()));
-        Ok(())
     }
 
     pub(crate) fn declare_err_def(&mut self, ed: &hir::ErrDef) -> Result<(), String> {

@@ -43,7 +43,12 @@ impl Parser {
                     Ok(Pat::Ident(name, sp))
                 }
             }
-            Token::Int(_) | Token::CharLit(_) | Token::Float(_) | Token::Str(_) | Token::True | Token::False => {
+            Token::Int(_)
+            | Token::CharLit(_)
+            | Token::Float(_)
+            | Token::Str(_)
+            | Token::True
+            | Token::False => {
                 let lit = self.parse_primary()?;
                 if self.check(Token::To) {
                     self.advance();
@@ -82,6 +87,17 @@ impl Parser {
     }
 
     pub(super) fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.depth += 1;
+        if self.depth > 256 {
+            self.depth -= 1;
+            return Err(self.error("expression nesting depth limit exceeded (256 levels)"));
+        }
+        let result = self.parse_expr_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_expr_inner(&mut self) -> Result<Expr, ParseError> {
         let e = self.parse_ternary()?;
         if self.check(Token::Query) {
             return self.parse_query_block(e);
@@ -94,12 +110,47 @@ impl Parser {
         if self.check(Token::Question) {
             let sp = self.span();
             self.advance();
-            let t = self.parse_expr()?;
-            self.expect(Token::Bang)?;
+            // `cond ? ! false_expr` — else-only with explicit ?
+            if self.check(Token::Bang) {
+                self.advance();
+                let f = self.parse_pipeline()?;
+                Ok(Expr::Ternary(
+                    Box::new(e),
+                    Box::new(Expr::Void(sp)),
+                    Box::new(f),
+                    sp,
+                ))
+            } else {
+                // Use parse_pipeline for the true branch so `!` stays at this level
+                let t = self.parse_pipeline()?;
+                if self.check(Token::Bang) {
+                    // `cond ? true_expr ! false_expr` — full ternary
+                    self.advance();
+                    Ok(Expr::Ternary(
+                        Box::new(e),
+                        Box::new(t),
+                        Box::new(self.parse_expr()?),
+                        sp,
+                    ))
+                } else {
+                    // `cond ? true_expr` — if-only
+                    Ok(Expr::Ternary(
+                        Box::new(e),
+                        Box::new(t),
+                        Box::new(Expr::Void(sp)),
+                        sp,
+                    ))
+                }
+            }
+        } else if self.check(Token::Bang) {
+            // `cond ! false_expr` — else-only shorthand
+            let sp = self.span();
+            self.advance();
+            let f = self.parse_pipeline()?;
             Ok(Expr::Ternary(
                 Box::new(e),
-                Box::new(t),
-                Box::new(self.parse_expr()?),
+                Box::new(Expr::Void(sp)),
+                Box::new(f),
                 sp,
             ))
         } else {
@@ -176,7 +227,9 @@ impl Parser {
 
     pub(super) fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
         let mut l = self.parse_bitor()?;
-        let mut chained: Option<(Expr, BinOp, Expr)> = None;
+        // Track only the rightmost operand from the previous comparison to avoid
+        // quadratic cloning of the accumulated AND chain.
+        let mut prev_right: Option<Expr> = None;
         loop {
             let sp = self.span();
             let op = match self.peek() {
@@ -189,16 +242,14 @@ impl Parser {
             if let Some(op) = op {
                 self.advance();
                 let r = self.parse_bitor()?;
-                if let Some((prev_l, prev_op, ref prev_r)) = chained {
+                if let Some(pr) = prev_right.take() {
                     // Chained comparison: `a < b < c` → `a < b and b < c`
-                    let left = Expr::BinOp(Box::new(prev_l), prev_op, Box::new(prev_r.clone()), sp);
-                    let right = Expr::BinOp(Box::new(prev_r.clone()), op, Box::new(r.clone()), sp);
-                    l = Expr::BinOp(Box::new(left), BinOp::And, Box::new(right), sp);
-                    chained = Some((l.clone(), op, r));
+                    let right = Expr::BinOp(Box::new(pr), op, Box::new(r.clone()), sp);
+                    l = Expr::BinOp(Box::new(l), BinOp::And, Box::new(right), sp);
                 } else {
-                    chained = Some((l.clone(), op, r.clone()));
-                    l = Expr::BinOp(Box::new(l), op, Box::new(r), sp);
+                    l = Expr::BinOp(Box::new(l), op, Box::new(r.clone()), sp);
                 }
+                prev_right = Some(r);
                 continue;
             }
             match self.peek() {
@@ -216,7 +267,7 @@ impl Parser {
     binop!(parse_bitor,  parse_bitxor, { Token::Pipe => BinOp::BitOr });
     binop!(parse_bitxor, parse_bitand, { Token::Caret => BinOp::BitXor });
     binop!(parse_bitand, parse_shift,  { Token::Ampersand => BinOp::BitAnd });
-    binop!(parse_shift,  parse_add,    { Token::Shl => BinOp::Shl, Token::Shr => BinOp::Shr });
+    binop!(parse_shift,  parse_add,    { Token::Shl => BinOp::Shl, Token::Shr => BinOp::Shr, Token::Ushr => BinOp::Ushr });
     binop!(parse_add,    parse_mul,    { Token::Plus => BinOp::Add, Token::Minus => BinOp::Sub });
     binop!(parse_mul,    parse_exp,    { Token::Star => BinOp::Mul, Token::Slash => BinOp::Div, Token::Percent => BinOp::Mod });
 
@@ -262,6 +313,10 @@ impl Parser {
             Token::At => {
                 self.advance();
                 Ok(Expr::Deref(Box::new(self.parse_unary()?), sp))
+            }
+            Token::Try => {
+                self.advance();
+                Ok(Expr::Try(Box::new(self.parse_unary()?), sp))
             }
             _ => self.parse_postfix(),
         }
@@ -362,12 +417,27 @@ impl Parser {
     pub(super) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let sp = self.span();
         match self.peek() {
+            // `extern.fn(...)` — extern dispatch syntax
+            Token::Extern
+                if self.pos + 1 < self.tok.len()
+                    && matches!(self.tok[self.pos + 1].token, Token::Dot) =>
+            {
+                self.advance(); // consume `extern`
+                Ok(Expr::Ident("extern".into(), sp))
+            }
             // `type of expr` — comptime reflection
-            Token::Type if self.pos + 1 < self.tok.len() && matches!(self.tok[self.pos + 1].token, Token::Of) => {
+            Token::Type
+                if self.pos + 1 < self.tok.len()
+                    && matches!(self.tok[self.pos + 1].token, Token::Of) =>
+            {
                 self.advance(); // consume `type`
                 self.advance(); // consume `of`
                 let arg = self.parse_primary()?;
-                Ok(Expr::OfCall(Box::new(Expr::Ident("type".into(), sp)), Box::new(arg), sp))
+                Ok(Expr::OfCall(
+                    Box::new(Expr::Ident("type".into(), sp)),
+                    Box::new(arg),
+                    sp,
+                ))
             }
             Token::Int(n) => {
                 let n = *n;
@@ -609,7 +679,11 @@ impl Parser {
                         let fname = p.ident()?;
                         p.expect(Token::Is)?;
                         let fval = p.parse_expr()?;
-                        Ok(BuilderField { name: fname, value: fval, span: fsp })
+                        Ok(BuilderField {
+                            name: fname,
+                            value: fval,
+                            span: fsp,
+                        })
                     })?;
                     Ok(Expr::Builder(name, fields, sp))
                 }
@@ -622,7 +696,11 @@ impl Parser {
                     let elem_ty = self.parse_type()?;
                     self.expect(Token::Comma)?;
                     let lanes = match self.peek() {
-                        Token::Int(n) => { let n = *n; self.advance(); n as usize }
+                        Token::Int(n) => {
+                            let n = *n;
+                            self.advance();
+                            n as usize
+                        }
                         _ => return Err(self.error("expected lane count after SIMD of <type>,")),
                     };
                     self.expect(Token::LParen)?;
@@ -641,7 +719,9 @@ impl Parser {
                     let mut fields = Vec::new();
                     while !self.check(Token::RParen) && !self.eof() {
                         self.skip_ws();
-                        if self.check(Token::RParen) { break; }
+                        if self.check(Token::RParen) {
+                            break;
+                        }
                         if self.is_field_init() {
                             let n = self.ident()?;
                             self.expect(Token::Is)?;
@@ -675,6 +755,34 @@ impl Parser {
                     if let Token::Ident(_) = self.peek() {
                         let store = self.ident()?;
                         return Ok(Expr::StoreAll(store, sp));
+                    }
+                }
+                if name == "get" {
+                    if let Token::Ident(_) = self.peek() {
+                        let store = self.ident()?;
+                        let key = self.parse_expr()?;
+                        return Ok(Expr::StoreGet(store, Box::new(key), sp));
+                    }
+                }
+                if name == "first" {
+                    if let Token::Ident(_) = self.peek() {
+                        let store = self.ident()?;
+                        let filter = self.parse_store_filter()?;
+                        return Ok(Expr::StoreFirst(store, Box::new(filter), sp));
+                    }
+                }
+                if name == "exists" {
+                    if let Token::Ident(_) = self.peek() {
+                        let store = self.ident()?;
+                        let filter = self.parse_store_filter()?;
+                        return Ok(Expr::StoreExists(store, Box::new(filter), sp));
+                    }
+                }
+                if name == "distinct" {
+                    if let Token::Ident(_) = self.peek() {
+                        let store = self.ident()?;
+                        let field = self.ident()?;
+                        return Ok(Expr::StoreDistinct(store, field, sp));
                     }
                 }
                 // Qualified variant: ErrorType:VariantName
@@ -753,7 +861,9 @@ impl Parser {
                     args.push(self.parse_expr()?);
                     while self.check(Token::Comma) {
                         self.advance();
-                        if self.check(Token::RParen) { break; }
+                        if self.check(Token::RParen) {
+                            break;
+                        }
                         args.push(self.parse_expr()?);
                     }
                 }
@@ -763,6 +873,10 @@ impl Parser {
             Token::Dollar => {
                 self.advance();
                 Ok(Expr::Placeholder(sp))
+            }
+            Token::DollarDollar => {
+                self.advance();
+                Ok(Expr::IndexPlaceholder(sp))
             }
             Token::Percent => {
                 self.advance();
@@ -996,8 +1110,13 @@ impl Parser {
         Ok(Expr::Query(Box::new(source), clauses, sp))
     }
 
-    fn parse_query_clause(&mut self) -> Result<QueryClause, ParseError> {
+    pub(crate) fn parse_query_clause(&mut self) -> Result<QueryClause, ParseError> {
         let sp = self.span();
+        // Handle 'delete' keyword token directly since the lexer maps it to Token::Delete
+        if self.check(Token::Delete) {
+            self.advance();
+            return Ok(QueryClause::Delete(sp));
+        }
         let kw = self.ident()?;
         match kw.as_str() {
             "where" => {
@@ -1039,7 +1158,6 @@ impl Parser {
                 let val = self.parse_expr()?;
                 Ok(QueryClause::Set(field, val, sp))
             }
-            "delete" => Ok(QueryClause::Delete(sp)),
             _ => Err(self.error(&format!("unknown query clause: {kw}"))),
         }
     }
@@ -1076,7 +1194,9 @@ impl Parser {
         let mut a = Vec::new();
         while !self.check(Token::RParen) && !self.eof() {
             self.skip_ws();
-            if self.check(Token::RParen) { break; }
+            if self.check(Token::RParen) {
+                break;
+            }
             if self.check(Token::DotDotDot) {
                 let sp = self.span();
                 self.advance();
@@ -1125,6 +1245,12 @@ impl Parser {
                         let arg = self.parse_type()?;
                         if name == "Vec" {
                             return Ok(Type::Vec(Box::new(arg)));
+                        }
+                        if name == "Map" {
+                            return Ok(Type::Map(Box::new(Type::String), Box::new(arg)));
+                        }
+                        if name == "Set" {
+                            return Ok(Type::Set(Box::new(arg)));
                         }
                         let mangled = format!("{name}_{arg}");
                         Ok(Type::Struct(mangled, vec![]))
@@ -1211,15 +1337,13 @@ impl Parser {
     }
 }
 
-/// Check if an AST expression contains `$` (Placeholder) anywhere.
+/// Check if an AST expression contains `$` (Placeholder) or `$$` (IndexPlaceholder) anywhere.
 pub(super) fn contains_placeholder(expr: &Expr) -> bool {
     match expr {
-        Expr::Placeholder(_) => true,
+        Expr::Placeholder(_) | Expr::IndexPlaceholder(_) => true,
         Expr::BinOp(l, _, r, _) => contains_placeholder(l) || contains_placeholder(r),
         Expr::UnaryOp(_, e, _) => contains_placeholder(e),
-        Expr::Call(f, args, _) => {
-            contains_placeholder(f) || args.iter().any(contains_placeholder)
-        }
+        Expr::Call(f, args, _) => contains_placeholder(f) || args.iter().any(contains_placeholder),
         Expr::Method(obj, _, args, _) => {
             contains_placeholder(obj) || args.iter().any(contains_placeholder)
         }
@@ -1239,18 +1363,18 @@ pub(super) fn contains_placeholder(expr: &Expr) -> bool {
 }
 
 /// Replace all `$` (Placeholder) in an expression with `Ident(name)`.
+/// Does NOT replace `$$` (IndexPlaceholder).
 pub(super) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
     match expr {
         Expr::Placeholder(sp) => Expr::Ident(name.into(), *sp),
+        Expr::IndexPlaceholder(_) => expr.clone(),
         Expr::BinOp(l, op, r, sp) => Expr::BinOp(
             Box::new(replace_placeholder(l, name)),
             *op,
             Box::new(replace_placeholder(r, name)),
             *sp,
         ),
-        Expr::UnaryOp(op, e, sp) => {
-            Expr::UnaryOp(*op, Box::new(replace_placeholder(e, name)), *sp)
-        }
+        Expr::UnaryOp(op, e, sp) => Expr::UnaryOp(*op, Box::new(replace_placeholder(e, name)), *sp),
         Expr::Call(f, args, sp) => Expr::Call(
             Box::new(replace_placeholder(f, name)),
             args.iter().map(|a| replace_placeholder(a, name)).collect(),
@@ -1287,6 +1411,12 @@ pub(super) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
             elems.iter().map(|e| replace_placeholder(e, name)).collect(),
             *sp,
         ),
+        Expr::Pipe(l, r, extra, sp) => Expr::Pipe(
+            Box::new(replace_placeholder(l, name)),
+            Box::new(replace_placeholder(r, name)),
+            extra.iter().map(|e| replace_placeholder(e, name)).collect(),
+            *sp,
+        ),
         other => other.clone(),
     }
 }
@@ -1304,9 +1434,9 @@ fn contains_placeholder_in_stmt(stmt: &Stmt) -> bool {
         Stmt::If(i) => {
             contains_placeholder(&i.cond)
                 || i.then.iter().any(|s| contains_placeholder_in_stmt(s))
-                || i.elifs
-                    .iter()
-                    .any(|(c, b)| contains_placeholder(c) || b.iter().any(|s| contains_placeholder_in_stmt(s)))
+                || i.elifs.iter().any(|(c, b)| {
+                    contains_placeholder(c) || b.iter().any(|s| contains_placeholder_in_stmt(s))
+                })
                 || i.els
                     .as_ref()
                     .map_or(false, |b| b.iter().any(|s| contains_placeholder_in_stmt(s)))
@@ -1335,7 +1465,10 @@ fn contains_placeholder_in_stmt(stmt: &Stmt) -> bool {
 
 /// Replace all `$` in a block with `Ident(name)`.
 pub(super) fn replace_placeholder_in_block(block: &[Stmt], name: &str) -> Vec<Stmt> {
-    block.iter().map(|s| replace_placeholder_in_stmt(s, name)).collect()
+    block
+        .iter()
+        .map(|s| replace_placeholder_in_stmt(s, name))
+        .collect()
 }
 
 fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) -> Stmt {
@@ -1348,18 +1481,28 @@ fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) -> Stmt {
             atomic: b.atomic,
             span: b.span,
         }),
-        Stmt::Assign(lhs, rhs, sp) => {
-            Stmt::Assign(replace_placeholder(lhs, name), replace_placeholder(rhs, name), *sp)
-        }
+        Stmt::Assign(lhs, rhs, sp) => Stmt::Assign(
+            replace_placeholder(lhs, name),
+            replace_placeholder(rhs, name),
+            *sp,
+        ),
         Stmt::If(i) => Stmt::If(If {
             cond: replace_placeholder(&i.cond, name),
             then: replace_placeholder_in_block(&i.then, name),
             elifs: i
                 .elifs
                 .iter()
-                .map(|(c, b)| (replace_placeholder(c, name), replace_placeholder_in_block(b, name)))
+                .map(|(c, b)| {
+                    (
+                        replace_placeholder(c, name),
+                        replace_placeholder_in_block(b, name),
+                    )
+                })
                 .collect(),
-            els: i.els.as_ref().map(|b| replace_placeholder_in_block(b, name)),
+            els: i
+                .els
+                .as_ref()
+                .map(|b| replace_placeholder_in_block(b, name)),
             span: i.span,
         }),
         Stmt::While(w) => Stmt::While(While {
@@ -1394,6 +1537,262 @@ fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) -> Stmt {
                     pat: a.pat.clone(),
                     guard: a.guard.as_ref().map(|e| replace_placeholder(e, name)),
                     body: replace_placeholder_in_block(&a.body, name),
+                    span: a.span,
+                })
+                .collect(),
+            span: m.span,
+        }),
+        other => other.clone(),
+    }
+}
+
+/// Check if an AST expression contains `$$` (IndexPlaceholder) anywhere.
+pub(super) fn contains_index_placeholder(expr: &Expr) -> bool {
+    match expr {
+        Expr::IndexPlaceholder(_) => true,
+        Expr::BinOp(l, _, r, _) => contains_index_placeholder(l) || contains_index_placeholder(r),
+        Expr::UnaryOp(_, e, _) => contains_index_placeholder(e),
+        Expr::Call(f, args, _) => {
+            contains_index_placeholder(f) || args.iter().any(contains_index_placeholder)
+        }
+        Expr::Method(obj, _, args, _) => {
+            contains_index_placeholder(obj) || args.iter().any(contains_index_placeholder)
+        }
+        Expr::Field(e, _, _) => contains_index_placeholder(e),
+        Expr::Index(a, b, _) => contains_index_placeholder(a) || contains_index_placeholder(b),
+        Expr::Ternary(a, b, c, _) => {
+            contains_index_placeholder(a)
+                || contains_index_placeholder(b)
+                || contains_index_placeholder(c)
+        }
+        Expr::As(e, _, _) => contains_index_placeholder(e),
+        Expr::Ref(e, _) => contains_index_placeholder(e),
+        Expr::Deref(e, _) => contains_index_placeholder(e),
+        Expr::Array(elems, _) => elems.iter().any(contains_index_placeholder),
+        Expr::Tuple(elems, _) => elems.iter().any(contains_index_placeholder),
+        Expr::Pipe(l, r, _, _) => contains_index_placeholder(l) || contains_index_placeholder(r),
+        _ => false,
+    }
+}
+
+/// Replace all `$$` (IndexPlaceholder) in an expression with `Ident(name)`.
+pub(super) fn replace_index_placeholder(expr: &Expr, name: &str) -> Expr {
+    match expr {
+        Expr::IndexPlaceholder(sp) => Expr::Ident(name.into(), *sp),
+        Expr::BinOp(l, op, r, sp) => Expr::BinOp(
+            Box::new(replace_index_placeholder(l, name)),
+            *op,
+            Box::new(replace_index_placeholder(r, name)),
+            *sp,
+        ),
+        Expr::UnaryOp(op, e, sp) => {
+            Expr::UnaryOp(*op, Box::new(replace_index_placeholder(e, name)), *sp)
+        }
+        Expr::Call(f, args, sp) => Expr::Call(
+            Box::new(replace_index_placeholder(f, name)),
+            args.iter()
+                .map(|a| replace_index_placeholder(a, name))
+                .collect(),
+            *sp,
+        ),
+        Expr::Method(obj, m, args, sp) => Expr::Method(
+            Box::new(replace_index_placeholder(obj, name)),
+            m.clone(),
+            args.iter()
+                .map(|a| replace_index_placeholder(a, name))
+                .collect(),
+            *sp,
+        ),
+        Expr::Field(e, f, sp) => {
+            Expr::Field(Box::new(replace_index_placeholder(e, name)), f.clone(), *sp)
+        }
+        Expr::Index(a, b, sp) => Expr::Index(
+            Box::new(replace_index_placeholder(a, name)),
+            Box::new(replace_index_placeholder(b, name)),
+            *sp,
+        ),
+        Expr::Ternary(a, b, c, sp) => Expr::Ternary(
+            Box::new(replace_index_placeholder(a, name)),
+            Box::new(replace_index_placeholder(b, name)),
+            Box::new(replace_index_placeholder(c, name)),
+            *sp,
+        ),
+        Expr::As(e, t, sp) => {
+            Expr::As(Box::new(replace_index_placeholder(e, name)), t.clone(), *sp)
+        }
+        Expr::Ref(e, sp) => Expr::Ref(Box::new(replace_index_placeholder(e, name)), *sp),
+        Expr::Deref(e, sp) => Expr::Deref(Box::new(replace_index_placeholder(e, name)), *sp),
+        Expr::Array(elems, sp) => Expr::Array(
+            elems
+                .iter()
+                .map(|e| replace_index_placeholder(e, name))
+                .collect(),
+            *sp,
+        ),
+        Expr::Tuple(elems, sp) => Expr::Tuple(
+            elems
+                .iter()
+                .map(|e| replace_index_placeholder(e, name))
+                .collect(),
+            *sp,
+        ),
+        Expr::Pipe(l, r, extra, sp) => Expr::Pipe(
+            Box::new(replace_index_placeholder(l, name)),
+            Box::new(replace_index_placeholder(r, name)),
+            extra.iter().map(|e| replace_index_placeholder(e, name)).collect(),
+            *sp,
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Check if any statement in a block contains `$$`.
+pub(super) fn contains_index_placeholder_in_block(block: &[Stmt]) -> bool {
+    block
+        .iter()
+        .any(|s| contains_index_placeholder_in_stmt(s))
+}
+
+fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Expr(e) => contains_index_placeholder(e),
+        Stmt::Bind(b) => contains_index_placeholder(&b.value),
+        Stmt::Assign(lhs, rhs, _) => {
+            contains_index_placeholder(lhs) || contains_index_placeholder(rhs)
+        }
+        Stmt::If(i) => {
+            contains_index_placeholder(&i.cond)
+                || i.then
+                    .iter()
+                    .any(|s| contains_index_placeholder_in_stmt(s))
+                || i.elifs.iter().any(|(c, b)| {
+                    contains_index_placeholder(c)
+                        || b.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                })
+                || i.els.as_ref().map_or(false, |b| {
+                    b.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                })
+        }
+        Stmt::While(w) => {
+            contains_index_placeholder(&w.cond)
+                || w.body
+                    .iter()
+                    .any(|s| contains_index_placeholder_in_stmt(s))
+        }
+        Stmt::For(f) => {
+            contains_index_placeholder(&f.iter)
+                || f.body
+                    .iter()
+                    .any(|s| contains_index_placeholder_in_stmt(s))
+        }
+        Stmt::SimFor(f, _) => {
+            contains_index_placeholder(&f.iter)
+                || f.body
+                    .iter()
+                    .any(|s| contains_index_placeholder_in_stmt(s))
+        }
+        Stmt::Loop(l) => l
+            .body
+            .iter()
+            .any(|s| contains_index_placeholder_in_stmt(s)),
+        Stmt::Ret(Some(e), _) => contains_index_placeholder(e),
+        Stmt::Break(Some(e), _) => contains_index_placeholder(e),
+        Stmt::Match(m) => {
+            contains_index_placeholder(&m.subject)
+                || m.arms.iter().any(|a| {
+                    a.body
+                        .iter()
+                        .any(|s| contains_index_placeholder_in_stmt(s))
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Replace all `$$` in a block with `Ident(name)`.
+pub(super) fn replace_index_placeholder_in_block(block: &[Stmt], name: &str) -> Vec<Stmt> {
+    block
+        .iter()
+        .map(|s| replace_index_placeholder_in_stmt(s, name))
+        .collect()
+}
+
+fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &str) -> Stmt {
+    match stmt {
+        Stmt::Expr(e) => Stmt::Expr(replace_index_placeholder(e, name)),
+        Stmt::Bind(b) => Stmt::Bind(Bind {
+            name: b.name.clone(),
+            value: replace_index_placeholder(&b.value, name),
+            ty: b.ty.clone(),
+            atomic: b.atomic,
+            span: b.span,
+        }),
+        Stmt::Assign(lhs, rhs, sp) => Stmt::Assign(
+            replace_index_placeholder(lhs, name),
+            replace_index_placeholder(rhs, name),
+            *sp,
+        ),
+        Stmt::If(i) => Stmt::If(If {
+            cond: replace_index_placeholder(&i.cond, name),
+            then: replace_index_placeholder_in_block(&i.then, name),
+            elifs: i
+                .elifs
+                .iter()
+                .map(|(c, b)| {
+                    (
+                        replace_index_placeholder(c, name),
+                        replace_index_placeholder_in_block(b, name),
+                    )
+                })
+                .collect(),
+            els: i
+                .els
+                .as_ref()
+                .map(|b| replace_index_placeholder_in_block(b, name)),
+            span: i.span,
+        }),
+        Stmt::While(w) => Stmt::While(While {
+            cond: replace_index_placeholder(&w.cond, name),
+            body: replace_index_placeholder_in_block(&w.body, name),
+            span: w.span,
+        }),
+        Stmt::For(f) => Stmt::For(For {
+            label: f.label.clone(),
+            bind: f.bind.clone(),
+            bind2: f.bind2.clone(),
+            iter: replace_index_placeholder(&f.iter, name),
+            end: f.end.as_ref().map(|e| replace_index_placeholder(e, name)),
+            step: f
+                .step
+                .as_ref()
+                .map(|e| replace_index_placeholder(e, name)),
+            body: replace_index_placeholder_in_block(&f.body, name),
+            span: f.span,
+        }),
+        Stmt::Loop(l) => Stmt::Loop(Loop {
+            body: replace_index_placeholder_in_block(&l.body, name),
+            span: l.span,
+        }),
+        Stmt::Ret(val, sp) => Stmt::Ret(
+            val.as_ref().map(|e| replace_index_placeholder(e, name)),
+            *sp,
+        ),
+        Stmt::Break(val, sp) => Stmt::Break(
+            val.as_ref().map(|e| replace_index_placeholder(e, name)),
+            *sp,
+        ),
+        Stmt::Match(m) => Stmt::Match(Match {
+            subject: replace_index_placeholder(&m.subject, name),
+            arms: m
+                .arms
+                .iter()
+                .map(|a| Arm {
+                    pat: a.pat.clone(),
+                    guard: a
+                        .guard
+                        .as_ref()
+                        .map(|e| replace_index_placeholder(e, name)),
+                    body: replace_index_placeholder_in_block(&a.body, name),
                     span: a.span,
                 })
                 .collect(),

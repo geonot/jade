@@ -531,8 +531,8 @@ extern *printf(fmt as %i8, ...) returns i32
 extern *puts(s as %i8) returns i32
 
 *demo_ffi
-    printf('hello from C: %d\n', 42)
-    puts('puts says hi')
+    extern.printf('hello from C: %d\n', 42)
+    extern.puts('puts says hi')
 
 
 # ── 19. Systems Builtins ───────────────────────────────────────────────────
@@ -942,10 +942,8 @@ actor Counter
 # ── 39. Generators ────────────────────────────────────────────────────────
 
 *counter limit as i64
-    i is 0
-    while i < limit
+    for i in 0 to limit
         yield i
-        i is i + 1
 
 
 # ── 40. Enum Discriminants ────────────────────────────────────────────────

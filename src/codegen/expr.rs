@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
-use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum};
+use inkwell::{FloatPredicate, IntPredicate};
 
 use crate::ast::UnaryOp;
 use crate::hir;
@@ -32,10 +30,21 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(self.ctx.i64_type().const_int(0, false).into())
             }
             hir::ExprKind::Var(_, name) => self.load_var(name),
+            hir::ExprKind::GlobalLoad(name) => {
+                if let Some((gv, ty)) = self.globals.get(name).cloned() {
+                    let lt = self.llvm_ty(&ty);
+                    Ok(b!(self.bld.build_load(lt, gv.as_pointer_value(), &format!("global.{name}"))))
+                } else {
+                    Err(format!("undefined global `{name}`"))
+                }
+            }
             hir::ExprKind::FnRef(_, name) => {
                 if let Some(fv) = self.module.get_function(name) {
                     let wrapper = self.fn_ref_wrapper(fv);
-                    let null_env = self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null();
+                    let null_env = self
+                        .ctx
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null();
                     self.make_closure(wrapper, null_env)
                 } else {
                     Err(format!("undefined function: {name}"))
@@ -55,9 +64,9 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::StringMethod(obj, method, args) => {
                 self.compile_string_method(obj, method, args)
             }
-            hir::ExprKind::DeferredMethod(_obj, method, _args) => {
-                Err(format!("unresolved deferred method call '.{method}()' — type inference could not determine the receiver type"))
-            }
+            hir::ExprKind::DeferredMethod(_obj, method, _args) => Err(format!(
+                "unresolved deferred method call '.{method}()' — type inference could not determine the receiver type"
+            )),
             hir::ExprKind::Field(obj, field, idx) => self.compile_field(obj, field, *idx),
             hir::ExprKind::Index(arr, idx) => self.compile_index(arr, idx),
             hir::ExprKind::Ternary(c, t, e) => self.compile_ternary(c, t, e),
@@ -118,6 +127,55 @@ impl<'ctx> Compiler<'ctx> {
                     .clone();
                 self.compile_store_all(store_name, &sd)
             }
+            hir::ExprKind::ViewCount(store_name, filter) => {
+                let sd = self
+                    .store_defs
+                    .get(store_name)
+                    .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                    .clone();
+                self.compile_store_query(store_name, filter, &sd)
+            }
+            hir::ExprKind::ViewAll(store_name, _filter) => {
+                let sd = self
+                    .store_defs
+                    .get(store_name)
+                    .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                    .clone();
+                self.compile_store_all(store_name, &sd)
+            }
+            hir::ExprKind::StoreGet(store_name, _key_expr) => {
+                Err(format!("store.get is not yet implemented (store '{store_name}')"))
+            }
+            hir::ExprKind::StoreFirst(store_name, _filter) => {
+                Err(format!("store.first is not yet implemented (store '{store_name}')"))
+            }
+            hir::ExprKind::StoreExists(store_name, _filter) => {
+                Err(format!("store.exists is not yet implemented (store '{store_name}')"))
+            }
+            hir::ExprKind::StoreDistinct(store_name, _field) => {
+                Err(format!("store.distinct is not yet implemented (store '{store_name}')"))
+            }
+            hir::ExprKind::StoreSum(s, _) => {
+                Err(format!("store.sum is not yet implemented (store '{s}')"))
+            }
+            hir::ExprKind::StoreAvg(s, _) => {
+                Err(format!("store.avg is not yet implemented (store '{s}')"))
+            }
+            hir::ExprKind::StoreMin(s, _) => {
+                Err(format!("store.min is not yet implemented (store '{s}')"))
+            }
+            hir::ExprKind::StoreMax(s, _) => {
+                Err(format!("store.max is not yet implemented (store '{s}')"))
+            }
+            hir::ExprKind::StoreVersionCount(s, _) => {
+                Err(format!("store.version_count is not yet implemented (store '{s}')"))
+            }
+            hir::ExprKind::StoreHistory(s, _) => {
+                Err(format!("store.history is not yet implemented (store '{s}')"))
+            }
+            hir::ExprKind::StoreAtVersion(s, _, _) => {
+                Err(format!("store.at_version is not yet implemented (store '{s}')"))
+            }
             hir::ExprKind::VecNew(elems) => self.compile_vec_new(elems),
             hir::ExprKind::MapNew => self.compile_map_new(),
             hir::ExprKind::VecMethod(obj, method, args) => {
@@ -131,17 +189,11 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_set_method(obj, method, args)
             }
             hir::ExprKind::PQNew => self.compile_pq_new(),
-            hir::ExprKind::PQMethod(obj, method, args) => {
-                self.compile_pq_method(obj, method, args)
-            }
-            hir::ExprKind::NDArrayNew(dims) => {
-                self.compile_ndarray_new(dims)
-            }
-            hir::ExprKind::SIMDNew(elems) => {
-                self.compile_simd_new(elems, &expr.ty)
-            }
+            hir::ExprKind::PQMethod(obj, method, args) => self.compile_pq_method(obj, method, args),
+            hir::ExprKind::NDArrayNew(dims) => self.compile_ndarray_new(dims),
+            hir::ExprKind::SIMDNew(elems) => self.compile_simd_new(elems, &expr.ty),
             hir::ExprKind::CoroutineCreate(name, body) => self.compile_coroutine_create(name, body),
-            hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro),
+            hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro, &expr.ty),
             hir::ExprKind::Yield(_inner) => {
                 panic!("yield expression outside of coroutine body")
             }
@@ -165,7 +217,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_select(arms, default_body.as_ref())
             }
             hir::ExprKind::Unreachable => {
-                let fn_val = self.cur_fn.unwrap();
+                let fn_val = self.current_fn();
                 let unreachable_bb = self.ctx.append_basic_block(fn_val, "unreachable");
                 b!(self.bld.build_unconditional_branch(unreachable_bb));
                 self.bld.position_at_end(unreachable_bb);
@@ -176,12 +228,8 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::StrictCast(inner, target_ty) => {
                 self.compile_strict_cast(inner, target_ty)
             }
-            hir::ExprKind::AsFormat(inner, fmt) => {
-                self.compile_as_format(inner, fmt)
-            }
-            hir::ExprKind::AtomicLoad(ptr_expr) => {
-                self.compile_atomic_load(ptr_expr)
-            }
+            hir::ExprKind::AsFormat(inner, fmt) => self.compile_as_format(inner, fmt),
+            hir::ExprKind::AtomicLoad(ptr_expr) => self.compile_atomic_load(ptr_expr),
             hir::ExprKind::AtomicStore(ptr_expr, val_expr) => {
                 self.compile_atomic_store(ptr_expr, val_expr)
             }
@@ -194,40 +242,51 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::AtomicCas(ptr_expr, expected_expr, new_expr) => {
                 self.compile_atomic_cas(ptr_expr, expected_expr, new_expr)
             }
-            hir::ExprKind::Slice(obj, start, end) => {
-                self.compile_slice(obj, start, end)
-            }
-            hir::ExprKind::DequeNew => {
-                self.compile_deque_new()
-            }
+            hir::ExprKind::Slice(obj, start, end) => self.compile_slice(obj, start, end),
+            hir::ExprKind::DequeNew => self.compile_deque_new(),
             hir::ExprKind::DequeMethod(obj, method, args) => {
                 self.compile_deque_method(obj, method, args)
             }
-            hir::ExprKind::Grad(inner) => {
-                self.compile_grad(inner)
-            }
-            hir::ExprKind::Einsum(notation, args) => {
-                self.compile_einsum(notation, args)
-            }
+            hir::ExprKind::Grad(inner) => self.compile_grad(inner),
+            hir::ExprKind::Einsum(notation, args) => self.compile_einsum(notation, args),
             hir::ExprKind::Builder(name, fields) => {
                 // Desugar builder to struct init
-                let inits: Vec<hir::FieldInit> = fields.iter().map(|(fname, expr)| {
-                    hir::FieldInit { name: Some(fname.clone()), value: expr.clone() }
-                }).collect();
+                let inits: Vec<hir::FieldInit> = fields
+                    .iter()
+                    .map(|(fname, expr)| hir::FieldInit {
+                        name: Some(fname.clone()),
+                        value: expr.clone(),
+                    })
+                    .collect();
                 self.compile_struct(name, &inits)
             }
-            hir::ExprKind::CowWrap(inner) => {
-                self.compile_cow_wrap(inner)
-            }
-            hir::ExprKind::CowClone(inner) => {
-                self.compile_cow_clone(inner)
-            }
+            hir::ExprKind::CowWrap(inner) => self.compile_cow_wrap(inner),
+            hir::ExprKind::CowClone(inner) => self.compile_cow_clone(inner),
             hir::ExprKind::GeneratorCreate(_, name, body) => {
                 self.compile_coroutine_create(name, body)
             }
-            hir::ExprKind::GeneratorNext(gen_expr) => {
-                self.compile_coroutine_next(gen_expr)
-            }
+            hir::ExprKind::GeneratorNext(gen_expr) => self.compile_coroutine_next(gen_expr, &expr.ty),
+            // KV / specialized store ops are lowered through MIR magic calls, never reach HIR codegen
+            hir::ExprKind::KvGet(..)
+            | hir::ExprKind::KvHas(..)
+            | hir::ExprKind::KvCount(..)
+            | hir::ExprKind::KvSet(..)
+            | hir::ExprKind::KvDel(..)
+            | hir::ExprKind::KvIncr(..)
+            | hir::ExprKind::VecNearest(..)
+            | hir::ExprKind::VecInsert(..)
+            | hir::ExprKind::VecCount(..)
+            | hir::ExprKind::BloomTest(..)
+            | hir::ExprKind::FtsSearch(..)
+            | hir::ExprKind::FtsCount(..)
+            | hir::ExprKind::GraphFrom(..)
+            | hir::ExprKind::GraphTo(..)
+            | hir::ExprKind::TsLatest(..)
+            | hir::ExprKind::EnumUnwrap(..)
+            | hir::ExprKind::EnumIs(..) => Err(format!(
+                "ICE: specialized store expr {:?} should have been lowered in MIR",
+                expr.kind
+            )),
         }
     }
 
@@ -237,12 +296,12 @@ impl<'ctx> Compiler<'ctx> {
         right: &hir::Expr,
         is_and: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let lhs = self.compile_expr(left)?;
         let lbool = self.to_bool(lhs);
         let rhs_bb = self.ctx.append_basic_block(fv, "sc.rhs");
         let merge_bb = self.ctx.append_basic_block(fv, "sc.merge");
-        let lhs_bb = self.bld.get_insert_block().unwrap();
+        let lhs_bb = self.current_bb();
         if is_and {
             b!(self.bld.build_conditional_branch(lbool, rhs_bb, merge_bb));
         } else {
@@ -251,7 +310,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(rhs_bb);
         let rhs = self.compile_expr(right)?;
         let rbool = self.to_bool(rhs);
-        let rhs_end = self.bld.get_insert_block().unwrap();
+        let rhs_end = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
         self.bld.position_at_end(merge_bb);
         let phi = b!(self.bld.build_phi(self.ctx.bool_type(), "sc"));
@@ -289,7 +348,7 @@ impl<'ctx> Compiler<'ctx> {
         then_e: &hir::Expr,
         else_e: &hir::Expr,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let tv = self.compile_expr(cond)?;
         let cv = self.to_bool(tv);
         let tbb = self.ctx.append_basic_block(fv, "t.then");
@@ -298,11 +357,11 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cv, tbb, ebb));
         self.bld.position_at_end(tbb);
         let tv = self.compile_expr(then_e)?;
-        let tbb_end = self.bld.get_insert_block().unwrap();
+        let tbb_end = self.current_bb();
         b!(self.bld.build_unconditional_branch(mbb));
         self.bld.position_at_end(ebb);
         let ev = self.compile_expr(else_e)?;
-        let ebb_end = self.bld.get_insert_block().unwrap();
+        let ebb_end = self.current_bb();
         b!(self.bld.build_unconditional_branch(mbb));
         self.bld.position_at_end(mbb);
         let phi = b!(self.bld.build_phi(self.llvm_ty(&then_e.ty), "tern"));
@@ -658,11 +717,10 @@ impl<'ctx> Compiler<'ctx> {
         expr: &hir::Expr,
     ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
         match &expr.kind {
-            hir::ExprKind::Var(_, name) => {
-                self.find_var(name)
-                    .map(|(ptr, _)| *ptr)
-                    .ok_or_else(|| format!("undefined: {name}"))
-            }
+            hir::ExprKind::Var(_, name) => self
+                .find_var(name)
+                .map(|(ptr, _)| *ptr)
+                .ok_or_else(|| format!("undefined: {name}")),
             hir::ExprKind::Field(obj, field, _idx) => {
                 let obj_ty = &obj.ty;
                 let (ty_name, is_ptr) = match obj_ty {
@@ -756,7 +814,9 @@ impl<'ctx> Compiler<'ctx> {
             }
             Type::SIMD(_inner, _) => {
                 let vec_val = self.compile_expr(arr)?.into_vector_value();
-                let elem = b!(self.bld.build_extract_element(vec_val, idx_val, "simd.lane"));
+                let elem = b!(self
+                    .bld
+                    .build_extract_element(vec_val, idx_val, "simd.lane"));
                 Ok(elem)
             }
             Type::Vec(elem_ty) => {
@@ -775,12 +835,8 @@ impl<'ctx> Compiler<'ctx> {
                 let len_gep = b!(self
                     .bld
                     .build_struct_gep(header_ty, header_ptr, 1, "vi.lenp"));
-                let len = b!(self.bld.build_load(
-                    self.ctx.i64_type(),
-                    len_gep,
-                    "vi.len"
-                ))
-                .into_int_value();
+                let len = b!(self.bld.build_load(self.ctx.i64_type(), len_gep, "vi.len"))
+                    .into_int_value();
                 self.emit_vec_bounds_check(idx_val, len)?;
                 let elem_gep =
                     unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx_val], "vi.egep")) };
@@ -956,7 +1012,7 @@ impl<'ctx> Compiler<'ctx> {
         .basic()
         .unwrap()
         .into_pointer_value();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let loop_bb = self.ctx.append_basic_block(fv, "comp_loop");
         let body_bb = self.ctx.append_basic_block(fv, "comp_body");
         let skip_bb = if cond.is_some() {
@@ -977,7 +1033,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_int_compare(IntPredicate::SLT, cur_idx, end_val, "cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
         self.bld.position_at_end(body_bb);
-        self.vars.push(HashMap::new());
+        self.push_var_scope();
         let bind_alloca = self.entry_alloca(i64t.into(), bind);
         b!(self.bld.build_store(bind_alloca, cur_idx));
         self.set_var(bind, bind_alloca, Type::I64);
@@ -998,7 +1054,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_add(cur_cnt, i64t.const_int(1, false), "ncnt"));
         b!(self.bld.build_store(cnt_ptr, next_cnt));
-        self.vars.pop();
+        self.pop_var_scope();
         let next_idx = b!(self
             .bld
             .build_int_add(cur_idx, i64t.const_int(1, false), "nidx"));
@@ -1174,7 +1230,7 @@ impl<'ctx> Compiler<'ctx> {
                     extended,
                     "strict.ok"
                 ));
-                let fv = self.cur_fn.unwrap();
+                let fv = self.current_fn();
                 let pass_bb = self.ctx.append_basic_block(fv, "strict.pass");
                 let fail_bb = self.ctx.append_basic_block(fv, "strict.fail");
                 b!(self.bld.build_conditional_branch(ok, pass_bb, fail_bb));
@@ -1184,16 +1240,26 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(truncated.into());
             } else if sb < db {
                 return Ok(if src.is_signed() {
-                    b!(self.bld.build_int_s_extend(val.into_int_value(), dst.into_int_type(), "strict.sext")).into()
+                    b!(self.bld.build_int_s_extend(
+                        val.into_int_value(),
+                        dst.into_int_type(),
+                        "strict.sext"
+                    ))
+                    .into()
                 } else {
-                    b!(self.bld.build_int_z_extend(val.into_int_value(), dst.into_int_type(), "strict.zext")).into()
+                    b!(self.bld.build_int_z_extend(
+                        val.into_int_value(),
+                        dst.into_int_type(),
+                        "strict.zext"
+                    ))
+                    .into()
                 });
             }
             return Ok(val);
         }
         // Float→int strict cast: check for NaN, infinity, and out-of-range
         if src.is_float() && target.is_int() {
-            let fv = self.cur_fn.unwrap();
+            let fv = self.current_fn();
             let float_val = val.into_float_value();
             let dst_int_ty = self.llvm_ty(target).into_int_type();
             let src_float_ty = float_val.get_type();
@@ -1207,22 +1273,32 @@ impl<'ctx> Compiler<'ctx> {
             ));
             let nan_fail_bb = self.ctx.append_basic_block(fv, "strict.nan_fail");
             let nan_pass_bb = self.ctx.append_basic_block(fv, "strict.nan_pass");
-            b!(self.bld.build_conditional_branch(is_nan, nan_fail_bb, nan_pass_bb));
+            b!(self
+                .bld
+                .build_conditional_branch(is_nan, nan_fail_bb, nan_pass_bb));
             self.bld.position_at_end(nan_fail_bb);
             self.emit_trap("strict cast: cannot convert NaN to integer");
             self.bld.position_at_end(nan_pass_bb);
 
             // Convert float→int
             let int_val = if target.is_signed() {
-                b!(self.bld.build_float_to_signed_int(float_val, dst_int_ty, "strict.fptosi"))
+                b!(self
+                    .bld
+                    .build_float_to_signed_int(float_val, dst_int_ty, "strict.fptosi"))
             } else {
-                b!(self.bld.build_float_to_unsigned_int(float_val, dst_int_ty, "strict.fptoui"))
+                b!(self
+                    .bld
+                    .build_float_to_unsigned_int(float_val, dst_int_ty, "strict.fptoui"))
             };
             // Convert back int→float and compare: if not equal, value was out of range or fractional
             let roundtrip = if target.is_signed() {
-                b!(self.bld.build_signed_int_to_float(int_val, src_float_ty, "strict.sitofp"))
+                b!(self
+                    .bld
+                    .build_signed_int_to_float(int_val, src_float_ty, "strict.sitofp"))
             } else {
-                b!(self.bld.build_unsigned_int_to_float(int_val, src_float_ty, "strict.uitofp"))
+                b!(self
+                    .bld
+                    .build_unsigned_int_to_float(int_val, src_float_ty, "strict.uitofp"))
             };
             let ok = b!(self.bld.build_float_compare(
                 FloatPredicate::OEQ,
@@ -1256,10 +1332,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_as_json(
-        &mut self,
-        expr: &hir::Expr,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    fn compile_as_json(&mut self, expr: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
         let ty = self.resolve_ty(expr.ty.clone());
         match &ty {
             Type::Struct(name, _) => {
@@ -1267,7 +1340,9 @@ impl<'ctx> Compiler<'ctx> {
                 let val = self.compile_expr(expr)?;
                 // Build JSON: {"field1": val1, "field2": val2, ...}
                 let mut result = self.compile_str_literal("{")?;
-                let struct_ty = self.module.get_struct_type(name)
+                let struct_ty = self
+                    .module
+                    .get_struct_type(name)
                     .ok_or_else(|| format!("unknown struct type: {name}"))?;
                 for (i, (fname, fty)) in fields.iter().enumerate() {
                     // Add comma separator
@@ -1280,10 +1355,19 @@ impl<'ctx> Compiler<'ctx> {
                     result = self.string_concat(result, key_str)?;
                     // Extract field value
                     let field_val = if val.is_pointer_value() {
-                        let fgep = b!(self.bld.build_struct_gep(struct_ty, val.into_pointer_value(), i as u32, "json.fgep"));
+                        let fgep = b!(self.bld.build_struct_gep(
+                            struct_ty,
+                            val.into_pointer_value(),
+                            i as u32,
+                            "json.fgep"
+                        ));
                         b!(self.bld.build_load(self.llvm_ty(fty), fgep, "json.fld"))
                     } else {
-                        b!(self.bld.build_extract_value(val.into_struct_value(), i as u32, "json.fld"))
+                        b!(self.bld.build_extract_value(
+                            val.into_struct_value(),
+                            i as u32,
+                            "json.fld"
+                        ))
                     };
                     // Format field value based on type
                     let fval_str = match fty {
@@ -1293,8 +1377,12 @@ impl<'ctx> Compiler<'ctx> {
                             let s = self.string_concat(q.clone(), field_val)?;
                             self.string_concat(s, q)?
                         }
-                        Type::I64 | Type::I32 | Type::I16 | Type::I8 => self.int_to_string(field_val, false)?,
-                        Type::U64 | Type::U32 | Type::U16 | Type::U8 => self.int_to_string(field_val, true)?,
+                        Type::I64 | Type::I32 | Type::I16 | Type::I8 => {
+                            self.int_to_string(field_val, false)?
+                        }
+                        Type::U64 | Type::U32 | Type::U16 | Type::U8 => {
+                            self.int_to_string(field_val, true)?
+                        }
                         Type::F64 | Type::F32 => self.float_to_string(field_val)?,
                         Type::Bool => self.bool_to_string(field_val)?,
                         _ => self.int_to_string(field_val, false)?,
@@ -1324,7 +1412,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = self.compile_expr(ptr_expr)?;
         let i64t = self.ctx.i64_type();
-        let load = b!(self.bld.build_load(i64t, ptr.into_pointer_value(), "atomic.load"));
+        let load = b!(self
+            .bld
+            .build_load(i64t, ptr.into_pointer_value(), "atomic.load"));
         // Set atomic ordering
         load.as_instruction_value()
             .unwrap()
@@ -1400,21 +1490,34 @@ impl<'ctx> Compiler<'ctx> {
         Ok(old)
     }
 
-    fn ensure_deque_fn(&self, name: &str, param_tys: &[BasicMetadataTypeEnum<'ctx>], ret_ty: inkwell::types::BasicTypeEnum<'ctx>) -> inkwell::values::FunctionValue<'ctx> {
+    fn ensure_deque_fn(
+        &self,
+        name: &str,
+        param_tys: &[BasicMetadataTypeEnum<'ctx>],
+        ret_ty: inkwell::types::BasicTypeEnum<'ctx>,
+    ) -> inkwell::values::FunctionValue<'ctx> {
         self.module.get_function(name).unwrap_or_else(|| {
             let ft = ret_ty.fn_type(param_tys, false);
-            self.module.add_function(name, ft, Some(inkwell::module::Linkage::External))
+            self.module
+                .add_function(name, ft, Some(inkwell::module::Linkage::External))
         })
     }
 
     fn compile_deque_new(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let f = self.module.get_function("__jade_deque_new").unwrap_or_else(|| {
-            let ft = ptr_ty.fn_type(&[], false);
-            self.module.add_function("__jade_deque_new", ft, Some(inkwell::module::Linkage::External))
-        });
+        let f = self
+            .module
+            .get_function("__jade_deque_new")
+            .unwrap_or_else(|| {
+                let ft = ptr_ty.fn_type(&[], false);
+                self.module.add_function(
+                    "__jade_deque_new",
+                    ft,
+                    Some(inkwell::module::Linkage::External),
+                )
+            });
         let result = b!(self.bld.build_call(f, &[], "deque.new"));
-        Ok(result.try_as_basic_value().basic().unwrap())
+        Ok(self.call_result(result))
     }
 
     fn compile_deque_method(
@@ -1430,25 +1533,34 @@ impl<'ctx> Compiler<'ctx> {
 
         match method {
             "push_back" | "push_front" => {
-                let rt_name = if method == "push_back" { "__jade_deque_push_back" } else { "__jade_deque_push_front" };
+                let rt_name = if method == "push_back" {
+                    "__jade_deque_push_back"
+                } else {
+                    "__jade_deque_push_front"
+                };
                 let f = self.module.get_function(rt_name).unwrap_or_else(|| {
                     let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into()], false);
-                    self.module.add_function(rt_name, ft, Some(inkwell::module::Linkage::External))
+                    self.module
+                        .add_function(rt_name, ft, Some(inkwell::module::Linkage::External))
                 });
                 let val = self.compile_expr(&args[0])?;
                 b!(self.bld.build_call(f, &[handle.into(), val.into()], ""));
                 Ok(i64t.const_int(0, false).into())
             }
             "pop_front" | "pop_back" => {
-                let rt_name = if method == "pop_front" { "__jade_deque_pop_front" } else { "__jade_deque_pop_back" };
+                let rt_name = if method == "pop_front" {
+                    "__jade_deque_pop_front"
+                } else {
+                    "__jade_deque_pop_back"
+                };
                 let f = self.ensure_deque_fn(rt_name, &[ptr_ty.into()], i64t.into());
                 let result = b!(self.bld.build_call(f, &[handle.into()], "dq.pop"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                Ok(self.call_result(result))
             }
             "len" => {
                 let f = self.ensure_deque_fn("__jade_deque_len", &[ptr_ty.into()], i64t.into());
                 let result = b!(self.bld.build_call(f, &[handle.into()], "dq.len"));
-                Ok(result.try_as_basic_value().basic().unwrap())
+                Ok(self.call_result(result))
             }
             _ => Err(format!("no method '{method}' on Deque")),
         }
@@ -1472,37 +1584,58 @@ impl<'ctx> Compiler<'ctx> {
                 let lty = self.llvm_ty(elem_ty);
                 let elem_size = self.type_store_size(lty);
                 let i64t = self.ctx.i64_type();
-                let slice_fn = self.module.get_function("__jade_vec_slice").unwrap_or_else(|| {
-                    let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                    let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into(), i64t.into()], false);
-                    self.module.add_function("__jade_vec_slice", ft, Some(inkwell::module::Linkage::External))
-                });
+                let slice_fn = self
+                    .module
+                    .get_function("__jade_vec_slice")
+                    .unwrap_or_else(|| {
+                        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                        let ft = ptr_ty.fn_type(
+                            &[ptr_ty.into(), i64t.into(), i64t.into(), i64t.into()],
+                            false,
+                        );
+                        self.module.add_function(
+                            "__jade_vec_slice",
+                            ft,
+                            Some(inkwell::module::Linkage::External),
+                        )
+                    });
                 let esz = i64t.const_int(elem_size, false);
                 let result = b!(self.bld.build_call(
                     slice_fn,
                     &[obj_val.into(), start_val.into(), end_val.into(), esz.into()],
                     "slice"
                 ));
-                Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
+                Ok(result
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
             }
             Type::String => {
                 // String slice: call jade_str_slice(str, start, end) → new str
-                let slice_fn = self.module.get_function("__jade_str_slice").unwrap_or_else(|| {
-                    let st = self.string_type();
-                    let i64t = self.ctx.i64_type();
-                    let ft = st.fn_type(&[st.into(), i64t.into(), i64t.into()], false);
-                    self.module.add_function("__jade_str_slice", ft, Some(inkwell::module::Linkage::External))
-                });
+                let slice_fn = self
+                    .module
+                    .get_function("__jade_str_slice")
+                    .unwrap_or_else(|| {
+                        let st = self.string_type();
+                        let i64t = self.ctx.i64_type();
+                        let ft = st.fn_type(&[st.into(), i64t.into(), i64t.into()], false);
+                        self.module.add_function(
+                            "__jade_str_slice",
+                            ft,
+                            Some(inkwell::module::Linkage::External),
+                        )
+                    });
                 let result = b!(self.bld.build_call(
                     slice_fn,
                     &[obj_val.into(), start_val.into(), end_val.into()],
                     "str.slice"
                 ));
-                Ok(result.try_as_basic_value().basic().unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
+                Ok(result
+                    .try_as_basic_value()
+                    .basic()
+                    .unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
             }
-            _ => {
-                Err(format!("slice not supported for type: {}", &obj.ty))
-            }
+            _ => Err(format!("slice not supported for type: {}", &obj.ty)),
         }
     }
 
@@ -1515,7 +1648,10 @@ impl<'ctx> Compiler<'ctx> {
         let malloc = self.ensure_malloc();
         let size = cow_st.size_of().unwrap();
         let ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.alloc"))
-            .try_as_basic_value().basic().unwrap().into_pointer_value();
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
         // rc = 1
         let rc_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 0, "cow.rc"));
         b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
@@ -1540,21 +1676,29 @@ impl<'ctx> Compiler<'ctx> {
         let rc_gep = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 0, "cow.rcp"));
         let rc = b!(self.bld.build_load(i64t, rc_gep, "cow.rc")).into_int_value();
         let needs_clone = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::UGT, rc, i64t.const_int(1, false), "cow.shared"
+            inkwell::IntPredicate::UGT,
+            rc,
+            i64t.const_int(1, false),
+            "cow.shared"
         ));
 
-        let fn_val = self.cur_fn.unwrap();
+        let fn_val = self.current_fn();
         let clone_bb = self.ctx.append_basic_block(fn_val, "cow.clone");
         let done_bb = self.ctx.append_basic_block(fn_val, "cow.done");
-        let cur_bb = self.bld.get_insert_block().unwrap();
-        b!(self.bld.build_conditional_branch(needs_clone, clone_bb, done_bb));
+        let cur_bb = self.current_bb();
+        b!(self
+            .bld
+            .build_conditional_branch(needs_clone, clone_bb, done_bb));
 
         // Clone path: allocate new cow, copy data, set rc=1, decrement original rc
         self.bld.position_at_end(clone_bb);
         let malloc = self.ensure_malloc();
         let size = cow_st.size_of().unwrap();
         let new_ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.new"))
-            .try_as_basic_value().basic().unwrap().into_pointer_value();
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_pointer_value();
         let new_rc = b!(self.bld.build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
         b!(self.bld.build_store(new_rc, i64t.const_int(1, false)));
         let new_data = b!(self.bld.build_struct_gep(cow_st, new_ptr, 1, "cow.ndata"));
@@ -1562,7 +1706,9 @@ impl<'ctx> Compiler<'ctx> {
         let old_val = b!(self.bld.build_load(data_ty, old_data, "cow.oval"));
         b!(self.bld.build_store(new_data, old_val));
         // Decrement original rc
-        let dec = b!(self.bld.build_int_sub(rc, i64t.const_int(1, false), "cow.dec"));
+        let dec = b!(self
+            .bld
+            .build_int_sub(rc, i64t.const_int(1, false), "cow.dec"));
         b!(self.bld.build_store(rc_gep, dec));
         b!(self.bld.build_unconditional_branch(done_bb));
 
@@ -1615,11 +1761,21 @@ impl<'ctx> Compiler<'ctx> {
         let x_minus = b!(self.bld.build_float_sub(x, h, "xm"));
 
         // f(x + h)
-        let fp = b!(self.bld.build_indirect_call(inner_ft, orig_fn, &[orig_env.into(), x_plus.into()], "fp"));
-        let fp_val = fp.try_as_basic_value().basic().unwrap().into_float_value();
+        let fp = b!(self.bld.build_indirect_call(
+            inner_ft,
+            orig_fn,
+            &[orig_env.into(), x_plus.into()],
+            "fp"
+        ));
+        let fp_val = self.call_result(fp).into_float_value();
         // f(x - h)
-        let fm = b!(self.bld.build_indirect_call(inner_ft, orig_fn, &[orig_env.into(), x_minus.into()], "fm"));
-        let fm_val = fm.try_as_basic_value().basic().unwrap().into_float_value();
+        let fm = b!(self.bld.build_indirect_call(
+            inner_ft,
+            orig_fn,
+            &[orig_env.into(), x_minus.into()],
+            "fm"
+        ));
+        let fm_val = self.call_result(fm).into_float_value();
         // (f(x+h) - f(x-h)) / 2h
         let diff = b!(self.bld.build_float_sub(fp_val, fm_val, "diff"));
         let grad_val = b!(self.bld.build_float_div(diff, two_h, "grad"));

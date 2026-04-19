@@ -144,8 +144,13 @@ impl Type {
     pub fn needs_atomic_rc(&self) -> bool {
         match self {
             Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,
-            Self::Rc(inner) | Self::Weak(inner) | Self::Vec(inner) | Self::Set(inner)
-            | Self::Ptr(inner) | Self::Cow(inner) | Self::Deque(inner)
+            Self::Rc(inner)
+            | Self::Weak(inner)
+            | Self::Vec(inner)
+            | Self::Set(inner)
+            | Self::Ptr(inner)
+            | Self::Cow(inner)
+            | Self::Deque(inner)
             | Self::PriorityQueue(inner) => inner.needs_atomic_rc(),
             Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
             Self::Array(inner, _) | Self::NDArray(inner, _) | Self::SIMD(inner, _) => {

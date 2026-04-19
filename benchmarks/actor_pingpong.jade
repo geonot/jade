@@ -7,9 +7,7 @@ actor Worker
 
 *main
     w is spawn Worker
-    i is 0
-    while i < 2000000
+    for i in 0 to 2000000
         send w, @ping(1)
-        i is i + 1
-    usleep(500000)
+    extern.usleep(500000)
     log(0)

@@ -16,18 +16,33 @@ impl Typer {
                 // convert `field is value` to `self.field = value`
                 if self.current_method_type.is_some() && self.find_var(&b.name).is_none() {
                     let type_name = self.current_method_type.clone().unwrap();
-                    let is_field = self.structs.get(&type_name)
+                    let is_field = self
+                        .structs
+                        .get(&type_name)
                         .map(|fields| fields.iter().any(|(n, _)| n == &b.name))
                         .unwrap_or(false);
                     if is_field {
                         let self_expr = ast::Expr::Ident("self".to_string(), b.span);
-                        let field_expr = ast::Expr::Field(Box::new(self_expr), b.name.clone(), b.span);
+                        let field_expr =
+                            ast::Expr::Field(Box::new(self_expr), b.name.clone(), b.span);
                         let ht = self.lower_expr(&field_expr)?;
                         let hv = self.lower_expr_expected(&b.value, Some(&ht.ty))?;
-                        let r = self.infer_ctx.unify_at(&ht.ty, &hv.ty, b.span, "field assignment");
+                        let r = self
+                            .infer_ctx
+                            .unify_at(&ht.ty, &hv.ty, b.span, "field assignment");
                         self.collect_unify_error(r);
                         let hv = self.maybe_coerce_to(hv, &ht.ty);
                         return Ok(hir::Stmt::Assign(ht, hv, b.span));
+                    }
+                }
+                // If the name matches a global mutable variable and isn't shadowed by a local,
+                // emit a GlobalStore instead of a local Bind.
+                if self.find_var(&b.name).is_none() {
+                    if let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned() {
+                        let init_hir = self.lower_expr(&_gexpr)?;
+                        let global_ty = init_hir.ty.clone();
+                        let hv = self.lower_expr_expected(&b.value, Some(&global_ty))?;
+                        return Ok(hir::Stmt::GlobalStore(b.name.clone(), hv, b.span));
                     }
                 }
                 let value = if let Some(ref ann) = b.ty {
@@ -152,6 +167,65 @@ impl Typer {
             }
 
             ast::Stmt::Expr(e) => {
+                // Intercept query blocks with delete/set clauses at statement level
+                if let ast::Expr::Query(source, clauses, span) = e {
+                    let store_name = match source.as_ref() {
+                        ast::Expr::Ident(name, _) => name.clone(),
+                        _ => return Err("query block source must be a store name".into()),
+                    };
+                    let schema = self
+                        .store_schemas
+                        .get(&store_name)
+                        .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                        .clone();
+
+                    let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
+                    let mut has_delete = false;
+                    let mut sets: Vec<(String, ast::Expr)> = Vec::new();
+                    for clause in clauses {
+                        match clause {
+                            ast::QueryClause::Where(expr, cspan) => {
+                                where_exprs.push((expr.clone(), *cspan));
+                            }
+                            ast::QueryClause::Delete(_) => {
+                                has_delete = true;
+                            }
+                            ast::QueryClause::Set(field, val, _) => {
+                                sets.push((field.clone(), val.clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if !where_exprs.is_empty() && has_delete {
+                        let ast_filter = Self::merge_where_clauses(&where_exprs)?;
+                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name)?;
+                        return Ok(hir::Stmt::StoreDelete(store_name, Box::new(hfilter), *span));
+                    }
+
+                    if !where_exprs.is_empty() && !sets.is_empty() {
+                        let ast_filter = Self::merge_where_clauses(&where_exprs)?;
+                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name)?;
+                        let mut hassigns = Vec::new();
+                        for (fname, fval) in &sets {
+                            if let Some((_, fty)) = schema.iter().find(|(n, _)| n == fname) {
+                                hassigns.push((
+                                    fname.clone(),
+                                    self.lower_expr_expected(fval, Some(fty))?,
+                                ));
+                            } else {
+                                return Err(format!("store '{store_name}' has no field '{fname}'"));
+                            }
+                        }
+                        return Ok(hir::Stmt::StoreSet(
+                            store_name,
+                            hassigns,
+                            Box::new(hfilter),
+                            *span,
+                        ));
+                    }
+                }
+
                 let he = self.lower_expr(e)?;
                 Ok(hir::Stmt::Expr(he))
             }
@@ -178,17 +252,8 @@ impl Typer {
                 let resolved_iter_ty = self.infer_ctx.shallow_resolve(&iter.ty);
 
                 // Map iteration: for k, v in map → desugar to keys-based iteration
-                if let (Some(val_bind), Type::Map(key_ty, val_ty)) =
-                    (&f.bind2, &resolved_iter_ty)
-                {
-                    return self.desugar_for_map(
-                        f,
-                        val_bind,
-                        iter,
-                        key_ty,
-                        val_ty,
-                        ret_ty,
-                    );
+                if let (Some(val_bind), Type::Map(key_ty, val_ty)) = (&f.bind2, &resolved_iter_ty) {
+                    return self.desugar_for_map(f, val_bind, iter, key_ty, val_ty, ret_ty);
                 }
 
                 let iter_is_int = resolved_iter_ty.is_int()
@@ -233,12 +298,32 @@ impl Typer {
                         scheme: None,
                     },
                 );
+                // If bind2 is present, it's the index variable (i64)
+                let (bind2_id, bind2, bind2_ty) =
+                    if let Some(ref b2) = f.bind2 {
+                        let id2 = self.fresh_id();
+                        self.define_var(
+                            b2,
+                            VarInfo {
+                                def_id: id2,
+                                ty: Type::I64,
+                                ownership: Ownership::Owned,
+                                scheme: None,
+                            },
+                        );
+                        (Some(id2), Some(b2.clone()), Some(Type::I64))
+                    } else {
+                        (None, None, None)
+                    };
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();
                 Ok(hir::Stmt::For(hir::For {
                     bind_id,
                     bind: f.bind.clone(),
                     bind_ty,
+                    bind2_id,
+                    bind2,
+                    bind2_ty,
                     iter,
                     end,
                     step,
@@ -304,15 +389,31 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                if values.len() != schema.len() {
+                // Filter out built-in fields (sid, uuid, hash, created, updated, deleted)
+                // that are auto-populated; users only supply user-defined fields
+                let builtin_names = [
+                    "sid",
+                    "uuid",
+                    "hash",
+                    "created",
+                    "updated",
+                    "deleted",
+                    "__version",
+                ];
+                let user_schema: Vec<_> = schema
+                    .iter()
+                    .filter(|(n, _)| !builtin_names.contains(&n.as_str()))
+                    .cloned()
+                    .collect();
+                if values.len() != user_schema.len() {
                     return Err(format!(
                         "store '{store}' has {} fields but {} values given",
-                        schema.len(),
+                        user_schema.len(),
                         values.len()
                     ));
                 }
                 let mut hvalues = Vec::new();
-                for (v, (_fname, fty)) in values.iter().zip(schema.iter()) {
+                for (v, (_fname, fty)) in values.iter().zip(user_schema.iter()) {
                     hvalues.push(self.lower_expr_expected(v, Some(fty))?);
                 }
                 Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span))
@@ -330,6 +431,41 @@ impl Typer {
                     Box::new(hfilter),
                     *span,
                 ))
+            }
+
+            ast::Stmt::StoreDestroy(store, filter, span) => {
+                let schema = self
+                    .store_schemas
+                    .get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                Ok(hir::Stmt::StoreDestroy(
+                    store.clone(),
+                    Box::new(hfilter),
+                    *span,
+                ))
+            }
+
+            ast::Stmt::StoreRestore(store, filter, span) => {
+                let schema = self
+                    .store_schemas
+                    .get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                Ok(hir::Stmt::StoreRestore(
+                    store.clone(),
+                    Box::new(hfilter),
+                    *span,
+                ))
+            }
+
+            ast::Stmt::StoreSave(store, span) => {
+                if !self.store_schemas.contains_key(store) {
+                    return Err(format!("unknown store '{store}'"));
+                }
+                Ok(hir::Stmt::StoreSave(store.clone(), *span))
             }
 
             ast::Stmt::StoreSet(store, assignments, filter, span) => {
@@ -387,7 +523,13 @@ impl Typer {
                 let bind_ty = match &iter.ty {
                     Type::Array(et, _) => *et.clone(),
                     Type::Vec(et) => *et.clone(),
-                    _ => if end.is_some() { Type::I64 } else { self.infer_ctx.fresh_var() },
+                    _ => {
+                        if end.is_some() {
+                            Type::I64
+                        } else {
+                            self.infer_ctx.fresh_var()
+                        }
+                    }
                 };
                 let bind_id = self.fresh_id();
                 self.push_scope();
@@ -403,7 +545,19 @@ impl Typer {
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();
                 Ok(hir::Stmt::SimFor(
-                    hir::For { bind_id, bind: f.bind.clone(), bind_ty, iter, end, step, body, span: f.span },
+                    hir::For {
+                        bind_id,
+                        bind: f.bind.clone(),
+                        bind_ty,
+                        bind2_id: None,
+                        bind2: None,
+                        bind2_ty: None,
+                        iter,
+                        end,
+                        step,
+                        body,
+                        span: f.span,
+                    },
                     *span,
                 ))
             }
@@ -411,14 +565,12 @@ impl Typer {
                 let hbody = self.lower_block_no_scope(body, ret_ty)?;
                 Ok(hir::Stmt::SimBlock(hbody, *span))
             }
-            ast::Stmt::UseLocal(u) => {
-                Ok(hir::Stmt::UseLocal(
-                    u.path.clone(),
-                    u.imports.clone(),
-                    u.alias.clone(),
-                    u.span,
-                ))
-            }
+            ast::Stmt::UseLocal(u) => Ok(hir::Stmt::UseLocal(
+                u.path.clone(),
+                u.imports.clone(),
+                u.alias.clone(),
+                u.span,
+            )),
         }
     }
 
@@ -464,6 +616,106 @@ impl Typer {
         })
     }
 
+    /// Convert a general expression (from a query-block `where` clause) into an
+    /// `ast::StoreFilter`.  The expression must be a tree of comparisons joined
+    /// by `and` / `or`.
+    pub(crate) fn expr_to_store_filter(
+        expr: &ast::Expr,
+        span: ast::Span,
+    ) -> Result<ast::StoreFilter, String> {
+        let mut conds: Vec<(Option<ast::LogicalOp>, String, ast::BinOp, ast::Expr)> = Vec::new();
+        Self::flatten_filter_expr(expr, None, &mut conds)?;
+        if conds.is_empty() {
+            return Err("query where clause must be a comparison".into());
+        }
+        let (_, field, op, value) = conds.remove(0);
+        let extra = conds
+            .into_iter()
+            .map(|(lop, f, o, v)| {
+                (
+                    lop.unwrap_or(ast::LogicalOp::And),
+                    ast::StoreFilterCond {
+                        field: f,
+                        op: o,
+                        value: v,
+                    },
+                )
+            })
+            .collect();
+        Ok(ast::StoreFilter {
+            field,
+            op,
+            value,
+            span,
+            extra,
+        })
+    }
+
+    fn flatten_filter_expr(
+        expr: &ast::Expr,
+        logical_op: Option<ast::LogicalOp>,
+        out: &mut Vec<(Option<ast::LogicalOp>, String, ast::BinOp, ast::Expr)>,
+    ) -> Result<(), String> {
+        match expr {
+            ast::Expr::BinOp(left, ast::BinOp::And, right, _) => {
+                Self::flatten_filter_expr(left, logical_op, out)?;
+                Self::flatten_filter_expr(right, Some(ast::LogicalOp::And), out)?;
+                Ok(())
+            }
+            ast::Expr::BinOp(left, ast::BinOp::Or, right, _) => {
+                Self::flatten_filter_expr(left, logical_op, out)?;
+                Self::flatten_filter_expr(right, Some(ast::LogicalOp::Or), out)?;
+                Ok(())
+            }
+            ast::Expr::BinOp(left, op, right, _)
+                if matches!(
+                    op,
+                    ast::BinOp::Eq
+                        | ast::BinOp::Ne
+                        | ast::BinOp::Lt
+                        | ast::BinOp::Gt
+                        | ast::BinOp::Le
+                        | ast::BinOp::Ge
+                ) =>
+            {
+                let field_name = match left.as_ref() {
+                    ast::Expr::Ident(name, _) => name.clone(),
+                    _ => return Err("query filter left-hand side must be a field name".into()),
+                };
+                out.push((logical_op, field_name, *op, *right.clone()));
+                Ok(())
+            }
+            _ => Err("query where clause must be a comparison expression".into()),
+        }
+    }
+
+    /// Merge multiple where-clause expressions (which AND together) into a
+    /// single `ast::StoreFilter`.
+    pub(crate) fn merge_where_clauses(
+        exprs: &[(ast::Expr, ast::Span)],
+    ) -> Result<ast::StoreFilter, String> {
+        if exprs.is_empty() {
+            return Err("query block requires at least one where clause".into());
+        }
+        let mut filter = Self::expr_to_store_filter(&exprs[0].0, exprs[0].1)?;
+        for (expr, span) in &exprs[1..] {
+            let additional = Self::expr_to_store_filter(expr, *span)?;
+            // Append as AND conditions
+            filter.extra.push((
+                ast::LogicalOp::And,
+                ast::StoreFilterCond {
+                    field: additional.field,
+                    op: additional.op,
+                    value: additional.value,
+                },
+            ));
+            filter
+                .extra
+                .extend(additional.extra.into_iter().map(|(lop, c)| (lop, c)));
+        }
+        Ok(filter)
+    }
+
     pub(crate) fn lower_block_no_scope(
         &mut self,
         block: &ast::Block,
@@ -506,6 +758,32 @@ impl Typer {
             .as_ref()
             .map(|b| self.lower_block(b, ret_ty))
             .transpose()?;
+
+        // Promote variables defined in ALL branches to the outer scope so they
+        // are visible after the if/else.
+        if let Some(ref else_block) = els {
+            let mut common = Self::collect_block_new_binds(&then);
+            for (_, elif_block) in &elifs {
+                let eb = Self::collect_block_new_binds(elif_block);
+                common.retain(|name, _| eb.contains_key(name));
+            }
+            let eb = Self::collect_block_new_binds(else_block);
+            common.retain(|name, _| eb.contains_key(name));
+            for (name, (def_id, ty, ownership)) in common {
+                if self.find_var(&name).is_none() {
+                    self.define_var(
+                        &name,
+                        VarInfo {
+                            def_id,
+                            ty,
+                            ownership,
+                            scheme: None,
+                        },
+                    );
+                }
+            }
+        }
+
         Ok(hir::If {
             cond,
             then,
@@ -513,6 +791,21 @@ impl Typer {
             els,
             span: i.span,
         })
+    }
+
+    /// Collect variables first-defined (via Bind) in a block.
+    fn collect_block_new_binds(
+        block: &hir::Block,
+    ) -> std::collections::HashMap<String, (DefId, Type, Ownership)> {
+        let mut binds = std::collections::HashMap::new();
+        for stmt in block {
+            if let hir::Stmt::Bind(b) = stmt {
+                binds
+                    .entry(b.name.clone())
+                    .or_insert((b.def_id, b.ty.clone(), b.ownership));
+            }
+        }
+        binds
     }
 
     pub(crate) fn lower_match(

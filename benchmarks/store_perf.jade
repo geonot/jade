@@ -1,0 +1,123 @@
+use std/time
+
+store bench
+    key as i64
+    value as i64
+    score as f64
+
+*main
+    # ── Phase 1: Bulk Insert ────────────────────────────────
+    # Insert first 100
+    t0 is monotonic()
+    for i in 0 to 100
+        insert bench i, i * 7, 1.5
+    log('insert_100')
+    log(elapsed(t0))
+
+    # Insert to 1000 (900 more)
+    t0 is monotonic()
+    for i in 100 to 1000
+        insert bench i, i * 7, 2.5
+    log('insert_900')
+    log(elapsed(t0))
+
+    # Insert to 5000 (4000 more)
+    t0 is monotonic()
+    for i in 1000 to 5000
+        insert bench i, i * 7, 3.5
+    log('insert_4000')
+    log(elapsed(t0))
+
+    # ── Phase 2: Count ──────────────────────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        c is count bench
+    log('count_x100')
+    log(elapsed(t0))
+
+    # ── Phase 3: Point Query (where equals) ─────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        r1 is bench where key equals 2500
+    log('query_eq_x100')
+    log(elapsed(t0))
+
+    # ── Phase 4: Range Query (where >) ──────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        r2 is bench where key > 4990
+    log('query_gt_x100')
+    log(elapsed(t0))
+
+    # ── Phase 5: AND filter ─────────────────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        r3 is bench where key > 100 and value < 1000
+    log('query_and_x100')
+    log(elapsed(t0))
+
+    # ── Phase 6: Aggregations ───────────────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        s is bench.sum(value)
+    log('agg_sum_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    for j in 0 to 100
+        a is bench.avg(value)
+    log('agg_avg_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    for j in 0 to 100
+        lo is bench.min(value)
+    log('agg_min_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    for j in 0 to 100
+        hi is bench.max(value)
+    log('agg_max_x100')
+    log(elapsed(t0))
+
+    # ── Phase 7: First / Exists ─────────────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        r4 is first bench where key equals 2500
+    log('first_eq_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    for j in 0 to 100
+        e is exists bench where key equals 2500
+    log('exists_eq_x100')
+    log(elapsed(t0))
+
+    # ── Phase 8: Distinct ───────────────────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        d is bench.distinct(value)
+    log('distinct_x100')
+    log(elapsed(t0))
+
+    # ── Phase 9: Set (update) ───────────────────────────────
+    t0 is monotonic()
+    for j in 0 to 100
+        set bench where key equals 500 value 999
+    log('set_eq_x100')
+    log(elapsed(t0))
+
+    # ── Phase 10: Delete ────────────────────────────────────
+    t0 is monotonic()
+    delete bench where key > 4900
+    log('delete_gt')
+    log(elapsed(t0))
+
+    # ── Phase 11: Save ──────────────────────────────────────
+    t0 is monotonic()
+    save bench
+    log('save')
+    log(elapsed(t0))
+
+    log('done')

@@ -2,11 +2,11 @@
 //!
 //! Converts HIR functions into MIR basic blocks with explicit control flow.
 
-use std::collections::{HashMap, HashSet};
+use super::*;
 use crate::ast::{self, Span};
 use crate::hir::{self, ExprKind, Pat};
 use crate::types::Type;
-use super::*;
+use std::collections::{HashMap, HashSet};
 
 /// Lowers an HIR program into MIR.
 pub fn lower_program(prog: &hir::Program) -> Program {
@@ -26,16 +26,41 @@ pub fn lower_program(prog: &hir::Program) -> Program {
             functions.extend(lower_function(m));
         }
     }
-    let types = prog.types.iter().map(|td| TypeDef {
-        name: td.name.clone(),
-        fields: td.fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect(),
-    }).collect();
-    let externs = prog.externs.iter().map(|ef| ExternDecl {
-        name: ef.name.clone(),
-        params: ef.params.iter().map(|p| p.1.clone()).collect(),
-        ret: ef.ret.clone(),
-    }).collect();
-    Program { functions, types, externs }
+    let types = prog
+        .types
+        .iter()
+        .map(|td| TypeDef {
+            name: td.name.clone(),
+            fields: td
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.ty.clone()))
+                .collect(),
+        })
+        .collect();
+    let externs = prog
+        .externs
+        .iter()
+        .map(|ef| ExternDecl {
+            name: ef.name.clone(),
+            params: ef.params.iter().map(|p| p.1.clone()).collect(),
+            ret: ef.ret.clone(),
+        })
+        .collect();
+    let globals = prog
+        .globals
+        .iter()
+        .map(|g| GlobalDef {
+            name: g.name.clone(),
+            ty: g.ty.clone(),
+        })
+        .collect();
+    Program {
+        functions,
+        types,
+        externs,
+        globals,
+    }
 }
 
 struct Lowerer {
@@ -69,6 +94,7 @@ impl Lowerer {
             span,
             next_value: 0,
             next_block: 1,
+            attrs: crate::ast::FnAttrs::default(),
         };
         Lowerer {
             func,
@@ -99,9 +125,17 @@ impl Lowerer {
         let obj_ty = obj.ty.clone();
         let updated = self.emit(
             InstKind::FieldSet(obj_val, field.to_string(), val),
-            obj_ty,
+            obj_ty.clone(),
             span,
         );
+        // For pointer types, the FieldSet stores through the pointer and
+        // returns the same pointer — the var_map entry must NOT be
+        // updated.  Updating it creates an SSA value that is only
+        // available in the current block, which breaks references from
+        // blocks where FieldSet didn't execute (e.g. after a while loop).
+        if matches!(obj_ty, Type::Ptr(_)) {
+            return;
+        }
         match &obj.kind {
             ExprKind::Var(_, name) => {
                 self.var_map.insert(name.clone(), updated);
@@ -116,36 +150,45 @@ impl Lowerer {
 
     fn emit(&mut self, kind: InstKind, ty: Type, span: Span) -> ValueId {
         let dest = self.new_value();
-        self.func.block_mut(self.current_block).insts.push(Instruction {
-            dest: Some(dest),
-            kind,
-            ty,
-            span,
-            def_id: None,
-        });
+        self.func
+            .block_mut(self.current_block)
+            .insts
+            .push(Instruction {
+                dest: Some(dest),
+                kind,
+                ty,
+                span,
+                def_id: None,
+            });
         dest
     }
 
     fn emit_void(&mut self, kind: InstKind, span: Span) {
-        self.func.block_mut(self.current_block).insts.push(Instruction {
-            dest: None,
-            kind,
-            ty: Type::Void,
-            span,
-            def_id: None,
-        });
+        self.func
+            .block_mut(self.current_block)
+            .insts
+            .push(Instruction {
+                dest: None,
+                kind,
+                ty: Type::Void,
+                span,
+                def_id: None,
+            });
     }
 
     /// Emit an instruction with no destination but carrying a type annotation.
     /// Used for Store instructions so the variable type is preserved.
     fn emit_void_typed(&mut self, kind: InstKind, ty: Type, span: Span) {
-        self.func.block_mut(self.current_block).insts.push(Instruction {
-            dest: None,
-            kind,
-            ty,
-            span,
-            def_id: None,
-        });
+        self.func
+            .block_mut(self.current_block)
+            .insts
+            .push(Instruction {
+                dest: None,
+                kind,
+                ty,
+                span,
+                def_id: None,
+            });
     }
 
     fn set_terminator(&mut self, term: Terminator) {
@@ -185,19 +228,28 @@ impl Lowerer {
     /// Look up the type of a ValueId by scanning instructions and params.
     fn value_type(&self, val: ValueId) -> Type {
         for p in &self.func.params {
-            if p.value == val { return p.ty.clone(); }
+            if p.value == val {
+                return p.ty.clone();
+            }
         }
         for bb in &self.func.blocks {
             for phi in &bb.phis {
-                if phi.dest == val { return phi.ty.clone(); }
+                if phi.dest == val {
+                    return phi.ty.clone();
+                }
             }
             for inst in &bb.insts {
-                if inst.dest == Some(val) { return inst.ty.clone(); }
+                if inst.dest == Some(val) {
+                    return inst.ty.clone();
+                }
             }
         }
         // All value types should be resolvable. If not, it indicates a compiler bug
         // in MIR lowering.
-        panic!("MIR lower: cannot resolve type for {:?} — this is a compiler bug", val)
+        panic!(
+            "MIR lower: cannot resolve type for {:?} — this is a compiler bug",
+            val
+        )
     }
 
     fn lower_expr(&mut self, expr: &hir::Expr) -> ValueId {
@@ -266,12 +318,24 @@ impl Lowerer {
                 let r = self.lower_expr(rhs);
                 let operand_ty = lhs.ty.clone();
                 match op {
-                    ast::BinOp::Eq => self.emit(InstKind::Cmp(CmpOp::Eq, l, r, operand_ty.clone()), ty, span),
-                    ast::BinOp::Ne => self.emit(InstKind::Cmp(CmpOp::Ne, l, r, operand_ty.clone()), ty, span),
-                    ast::BinOp::Lt => self.emit(InstKind::Cmp(CmpOp::Lt, l, r, operand_ty.clone()), ty, span),
-                    ast::BinOp::Gt => self.emit(InstKind::Cmp(CmpOp::Gt, l, r, operand_ty.clone()), ty, span),
-                    ast::BinOp::Le => self.emit(InstKind::Cmp(CmpOp::Le, l, r, operand_ty.clone()), ty, span),
-                    ast::BinOp::Ge => self.emit(InstKind::Cmp(CmpOp::Ge, l, r, operand_ty), ty, span),
+                    ast::BinOp::Eq => {
+                        self.emit(InstKind::Cmp(CmpOp::Eq, l, r, operand_ty.clone()), ty, span)
+                    }
+                    ast::BinOp::Ne => {
+                        self.emit(InstKind::Cmp(CmpOp::Ne, l, r, operand_ty.clone()), ty, span)
+                    }
+                    ast::BinOp::Lt => {
+                        self.emit(InstKind::Cmp(CmpOp::Lt, l, r, operand_ty.clone()), ty, span)
+                    }
+                    ast::BinOp::Gt => {
+                        self.emit(InstKind::Cmp(CmpOp::Gt, l, r, operand_ty.clone()), ty, span)
+                    }
+                    ast::BinOp::Le => {
+                        self.emit(InstKind::Cmp(CmpOp::Le, l, r, operand_ty.clone()), ty, span)
+                    }
+                    ast::BinOp::Ge => {
+                        self.emit(InstKind::Cmp(CmpOp::Ge, l, r, operand_ty), ty, span)
+                    }
                     _ => {
                         let mir_op = lower_binop(op);
                         self.emit(InstKind::BinOp(mir_op, l, r), ty, span)
@@ -300,7 +364,11 @@ impl Lowerer {
             ExprKind::Method(obj, mangled_name, _method_name, args) => {
                 let obj_val = self.lower_expr(obj);
                 let arg_vals: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals), ty, span)
+                self.emit(
+                    InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals),
+                    ty,
+                    span,
+                )
             }
 
             ExprKind::Field(obj, field, _idx) => {
@@ -315,16 +383,24 @@ impl Lowerer {
             }
 
             ExprKind::Struct(name, inits) => {
-                let fields: Vec<(String, ValueId)> = inits.iter().map(|fi| {
-                    let v = self.lower_expr(&fi.value);
-                    (fi.name.clone().unwrap_or_default(), v)
-                }).collect();
+                let fields: Vec<(String, ValueId)> = inits
+                    .iter()
+                    .map(|fi| {
+                        let v = self.lower_expr(&fi.value);
+                        (fi.name.clone().unwrap_or_default(), v)
+                    })
+                    .collect();
                 self.emit(InstKind::StructInit(name.clone(), fields), ty, span)
             }
 
             ExprKind::VariantCtor(enum_name, variant_name, tag, inits) => {
-                let arg_vals: Vec<ValueId> = inits.iter().map(|fi| self.lower_expr(&fi.value)).collect();
-                self.emit(InstKind::VariantInit(enum_name.clone(), variant_name.clone(), *tag, arg_vals), ty, span)
+                let arg_vals: Vec<ValueId> =
+                    inits.iter().map(|fi| self.lower_expr(&fi.value)).collect();
+                self.emit(
+                    InstKind::VariantInit(enum_name.clone(), variant_name.clone(), *tag, arg_vals),
+                    ty,
+                    span,
+                )
             }
 
             ExprKind::IfExpr(if_expr) => {
@@ -338,11 +414,30 @@ impl Lowerer {
                 if let Some(els) = &if_expr.els {
                     Self::collect_assigned_vars(els, &mut assigned);
                 }
-                let pre_existing: HashSet<String> = assigned.iter()
+                let pre_existing: HashSet<String> = assigned
+                    .iter()
                     .filter(|n| self.var_map.contains_key(*n))
                     .cloned()
                     .collect();
                 self.demote_vars_to_memory(&pre_existing, span);
+
+                // Variables first defined in BOTH then and else → promote to mem_vars
+                if if_expr.els.is_some() || !if_expr.elifs.is_empty() {
+                    let mut then_binds = HashSet::new();
+                    Self::collect_new_binds(&if_expr.then, &mut then_binds);
+                    let mut other_binds = HashSet::new();
+                    for (_, elif_body) in &if_expr.elifs {
+                        Self::collect_new_binds(elif_body, &mut other_binds);
+                    }
+                    if let Some(els) = &if_expr.els {
+                        Self::collect_new_binds(els, &mut other_binds);
+                    }
+                    for name in then_binds.intersection(&other_binds) {
+                        if !self.var_map.contains_key(name) && !self.mem_vars.contains(name) {
+                            self.mem_vars.insert(name.clone());
+                        }
+                    }
+                }
 
                 let cond_val = self.lower_expr(&if_expr.cond);
                 let then_bb = self.new_block("if.then");
@@ -512,17 +607,15 @@ impl Lowerer {
                 self.emit(InstKind::Slice(a, s, e), ty, span)
             }
 
-            ExprKind::FnRef(_, name) => {
-                self.emit(InstKind::FnRef(name.clone()), ty, span)
-            }
+            ExprKind::FnRef(_, name) => self.emit(InstKind::FnRef(name.clone()), ty, span),
 
-            ExprKind::VariantRef(enum_name, variant_name, tag) => {
-                self.emit(InstKind::VariantInit(enum_name.clone(), variant_name.clone(), *tag, vec![]), ty, span)
-            }
+            ExprKind::VariantRef(enum_name, variant_name, tag) => self.emit(
+                InstKind::VariantInit(enum_name.clone(), variant_name.clone(), *tag, vec![]),
+                ty,
+                span,
+            ),
 
-            ExprKind::Block(stmts) => {
-                self.lower_block_expr(stmts)
-            }
+            ExprKind::Block(stmts) => self.lower_block_expr(stmts),
 
             ExprKind::Lambda(params, body) => {
                 // Lower the lambda body as a separate MIR function.
@@ -546,7 +639,11 @@ impl Lowerer {
                 let capture_vals: Vec<ValueId> = capture_info.iter().map(|(_, v, _)| *v).collect();
 
                 // Determine return type from the closure's type annotation.
-                let ret_ty = if let Type::Fn(_, r) = &ty { *r.clone() } else { Type::I64 };
+                let ret_ty = if let Type::Fn(_, r) = &ty {
+                    *r.clone()
+                } else {
+                    Type::I64
+                };
 
                 // Create a new Lowerer for the lambda function.
                 let mut lambda_lowerer = Lowerer::new(&lambda_name, crate::hir::DefId(0), span);
@@ -599,10 +696,13 @@ impl Lowerer {
             }
 
             // Collection methods — all follow the same pattern
-            ExprKind::StringMethod(obj, name, args) | ExprKind::DeferredMethod(obj, name, args)
+            ExprKind::StringMethod(obj, name, args)
+            | ExprKind::DeferredMethod(obj, name, args)
             | ExprKind::VecMethod(obj, name, args)
-            | ExprKind::MapMethod(obj, name, args) | ExprKind::SetMethod(obj, name, args)
-            | ExprKind::PQMethod(obj, name, args) | ExprKind::DequeMethod(obj, name, args) => {
+            | ExprKind::MapMethod(obj, name, args)
+            | ExprKind::SetMethod(obj, name, args)
+            | ExprKind::PQMethod(obj, name, args)
+            | ExprKind::DequeMethod(obj, name, args) => {
                 let obj_val = self.lower_expr(obj);
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 self.emit(InstKind::MethodCall(obj_val, name.clone(), vals), ty, span)
@@ -613,19 +713,11 @@ impl Lowerer {
                 self.emit(InstKind::VecNew(vals), ty, span)
             }
 
-            ExprKind::MapNew => {
-                self.emit(InstKind::MapInit, ty, span)
-            }
+            ExprKind::MapNew => self.emit(InstKind::MapInit, ty, span),
 
-            ExprKind::SetNew => {
-                self.emit(InstKind::SetInit, ty, span)
-            }
-            ExprKind::PQNew => {
-                self.emit(InstKind::PQInit, ty, span)
-            }
-            ExprKind::DequeNew => {
-                self.emit(InstKind::DequeInit, ty, span)
-            }
+            ExprKind::SetNew => self.emit(InstKind::SetInit, ty, span),
+            ExprKind::PQNew => self.emit(InstKind::PQInit, ty, span),
+            ExprKind::DequeNew => self.emit(InstKind::DequeInit, ty, span),
 
             ExprKind::ListComp(body_expr, _def_id, bind, iter, end, cond) => {
                 // Desugar: vec = VecNew(); for bind in iter..end { if cond { VecPush(vec, body) } }
@@ -638,7 +730,9 @@ impl Lowerer {
                 let exit_bb = self.new_block("listcomp.exit");
 
                 // Create loop index using Store/Load.
-                let init_val = if end.is_some() { iter_val } else {
+                let init_val = if end.is_some() {
+                    iter_val
+                } else {
                     self.emit(InstKind::IntConst(0), Type::I64, span)
                 };
                 let one = self.emit(InstKind::IntConst(1), Type::I64, span);
@@ -653,7 +747,11 @@ impl Lowerer {
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
                 let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, span);
-                let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, end_val, Type::I64), Type::Bool, span);
+                let cmp = self.emit(
+                    InstKind::Cmp(CmpOp::Lt, idx, end_val, Type::I64),
+                    Type::Bool,
+                    span,
+                );
                 self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                 self.switch_to(body_bb);
@@ -686,7 +784,8 @@ impl Lowerer {
                 // Increment index.
                 self.switch_to(inc_bb);
                 let cur_idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, span);
-                let next_idx = self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, span);
+                let next_idx =
+                    self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, span);
                 self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, span);
                 self.set_terminator(Terminator::Goto(cond_bb));
 
@@ -705,7 +804,11 @@ impl Lowerer {
             }
             ExprKind::ChannelCreate(elem_ty, cap) => {
                 let cap_val = self.lower_expr(cap);
-                self.emit(InstKind::ChanCreate(elem_ty.clone(), Some(cap_val)), ty, span)
+                self.emit(
+                    InstKind::ChanCreate(elem_ty.clone(), Some(cap_val)),
+                    ty,
+                    span,
+                )
             }
             ExprKind::ChannelSend(chan, val) => {
                 let ch = self.lower_expr(chan);
@@ -727,18 +830,22 @@ impl Lowerer {
                 if let Some(def_body) = default {
                     Self::collect_assigned_vars(def_body, &mut assigned);
                 }
-                let pre_existing: HashSet<String> = assigned.iter()
+                let pre_existing: HashSet<String> = assigned
+                    .iter()
                     .filter(|n| self.var_map.contains_key(*n))
                     .cloned()
                     .collect();
                 self.demote_vars_to_memory(&pre_existing, span);
 
                 // Lower select as a SelectArm with all channel values
-                let ch_vals: Vec<ValueId> = arms.iter().map(|arm| {
-                    self.lower_expr(&arm.chan)
-                }).collect();
+                let ch_vals: Vec<ValueId> =
+                    arms.iter().map(|arm| self.lower_expr(&arm.chan)).collect();
                 let has_default = default.is_some();
-                let select_val = self.emit(InstKind::SelectArm(ch_vals.clone(), has_default), ty.clone(), span);
+                let select_val = self.emit(
+                    InstKind::SelectArm(ch_vals.clone(), has_default),
+                    ty.clone(),
+                    span,
+                );
                 // Lower bodies as a switch on the selected arm index
                 if !arms.is_empty() {
                     let merge_bb = self.new_block("select.merge");
@@ -751,10 +858,14 @@ impl Lowerer {
                             // Use __select_recv instead of ChanRecv — jade_select
                             // already received the data into the case data buffer.
                             let idx_val = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
-                            let recv_val = self.emit(InstKind::Call(
-                                "__select_recv".to_string(),
-                                vec![select_val, idx_val],
-                            ), arm.elem_ty.clone(), span);
+                            let recv_val = self.emit(
+                                InstKind::Call(
+                                    "__select_recv".to_string(),
+                                    vec![select_val, idx_val],
+                                ),
+                                arm.elem_ty.clone(),
+                                span,
+                            );
                             self.var_map.insert(bind_name.clone(), recv_val);
                         }
                         self.lower_block_stmts(&arm.body);
@@ -772,11 +883,15 @@ impl Lowerer {
                     // We need to go back and set the switch terminator
                     // The select_val block ended where we emitted SelectArm
                     // Find the block that contains the select inst
-                    let select_block = self.func.blocks.iter()
+                    let select_block = self
+                        .func
+                        .blocks
+                        .iter()
                         .find(|b| b.insts.iter().any(|i| i.dest == Some(select_val)))
                         .map(|b| b.id)
                         .unwrap_or(self.current_block);
-                    self.func.block_mut(select_block).terminator = Terminator::Switch(select_val, cases, default_bb);
+                    self.func.block_mut(select_block).terminator =
+                        Terminator::Switch(select_val, cases, default_bb);
                     self.switch_to(merge_bb);
                 }
                 // Return 0 from the merge block, not the jade_select result
@@ -802,7 +917,9 @@ impl Lowerer {
             }
             ExprKind::AtomicCas(p, expected, desired) => {
                 let args = vec![
-                    self.lower_expr(p), self.lower_expr(expected), self.lower_expr(desired),
+                    self.lower_expr(p),
+                    self.lower_expr(expected),
+                    self.lower_expr(desired),
                 ];
                 self.emit(InstKind::Call("__atomic_cas".into(), args), ty, span)
             }
@@ -814,29 +931,47 @@ impl Lowerer {
                 match builtin {
                     BuiltinFn::Log => {
                         let arg_ty = args.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
-                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         // NOTE: inst.ty carries the argument type (not Void) so
                         // codegen can determine the format specifier for printing.
                         self.emit(InstKind::Log(v), arg_ty, span)
                     }
                     BuiltinFn::Assert => {
-                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::Assert(v, "assertion failed".into()), ty, span)
                     }
                     BuiltinFn::RcAlloc => {
-                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::RcNew(v, ty.clone()), ty, span)
                     }
                     BuiltinFn::RcRetain => {
-                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::RcClone(v), ty, span)
                     }
                     BuiltinFn::RcRelease => {
-                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::RcDec(v), ty, span)
                     }
                     BuiltinFn::WeakUpgrade => {
-                        let v = vals.into_iter().next().unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::WeakUpgrade(v), ty, span)
                     }
                     _ => {
@@ -855,7 +990,11 @@ impl Lowerer {
             // Coroutines — opaque calls
             ExprKind::CoroutineCreate(name, _body) => {
                 // Body is compiled separately — don't inline it here.
-                self.emit(InstKind::Call(format!("__coro_create_{name}"), vec![]), ty, span)
+                self.emit(
+                    InstKind::Call(format!("__coro_create_{name}"), vec![]),
+                    ty,
+                    span,
+                )
             }
             ExprKind::CoroutineNext(coro) => {
                 let c = self.lower_expr(coro);
@@ -870,11 +1009,19 @@ impl Lowerer {
             ExprKind::DynDispatch(obj, trait_name, method, args) => {
                 let obj_val = self.lower_expr(obj);
                 let arg_vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::DynDispatch(obj_val, trait_name.clone(), method.clone(), arg_vals), ty, span)
+                self.emit(
+                    InstKind::DynDispatch(obj_val, trait_name.clone(), method.clone(), arg_vals),
+                    ty,
+                    span,
+                )
             }
             ExprKind::DynCoerce(inner, type_name, trait_name) => {
                 let inner_val = self.lower_expr(inner);
-                self.emit(InstKind::DynCoerce(inner_val, type_name.clone(), trait_name.clone()), ty, span)
+                self.emit(
+                    InstKind::DynCoerce(inner_val, type_name.clone(), trait_name.clone()),
+                    ty,
+                    span,
+                )
             }
 
             // Store operations — opaque calls
@@ -913,19 +1060,340 @@ impl Lowerer {
                 }
                 self.emit(InstKind::Call(name, args), ty, span)
             }
-            ExprKind::StoreCount(store_name) => {
-                self.emit(InstKind::Call(format!("__store_count_{store_name}"), vec![]), ty, span)
+            ExprKind::StoreCount(store_name) => self.emit(
+                InstKind::Call(format!("__store_count_{store_name}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::StoreAll(store_name) => self.emit(
+                InstKind::Call(format!("__store_all_{store_name}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::ViewCount(store_name, filter) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let mut args = vec![filter_val];
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut name = format!("__view_count_{store_name}__{}__{op_str}", filter.field);
+                for (lop, cond) in &filter.extra {
+                    let lop_str = match lop {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let eop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                    let ev = self.lower_expr(&cond.value);
+                    args.push(ev);
+                }
+                self.emit(InstKind::Call(name, args), ty, span)
             }
-            ExprKind::StoreAll(store_name) => {
-                self.emit(InstKind::Call(format!("__store_all_{store_name}"), vec![]), ty, span)
+            ExprKind::ViewAll(store_name, filter) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let mut args = vec![filter_val];
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut name = format!("__view_all_{store_name}__{}__{op_str}", filter.field);
+                for (lop, cond) in &filter.extra {
+                    let lop_str = match lop {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let eop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                    let ev = self.lower_expr(&cond.value);
+                    args.push(ev);
+                }
+                self.emit(InstKind::Call(name, args), ty, span)
             }
+
+            ExprKind::StoreGet(store_name, key_expr) => {
+                let val = self.lower_expr(key_expr);
+                self.emit(
+                    InstKind::Call(format!("__store_get_{store_name}"), vec![val]),
+                    ty,
+                    span,
+                )
+            }
+
+            ExprKind::StoreFirst(store_name, filter) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut name = format!("__store_first_{store_name}__{}__{op_str}", filter.field);
+                let mut args = vec![filter_val];
+                for (logic_op, cond) in &filter.extra {
+                    let lop_str = match logic_op {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let eop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                    args.push(self.lower_expr(&cond.value));
+                }
+                self.emit(InstKind::Call(name, args), ty, span)
+            }
+
+            ExprKind::StoreExists(store_name, filter) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut name = format!("__store_exists_{store_name}__{}__{op_str}", filter.field);
+                let mut args = vec![filter_val];
+                for (logic_op, cond) in &filter.extra {
+                    let lop_str = match logic_op {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let eop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                    args.push(self.lower_expr(&cond.value));
+                }
+                self.emit(InstKind::Call(name, args), ty, span)
+            }
+
+            ExprKind::StoreDistinct(store_name, field) => self.emit(
+                InstKind::Call(format!("__store_distinct_{store_name}__{field}"), vec![]),
+                ty,
+                span,
+            ),
+
+            ExprKind::StoreSum(store_name, field) => self.emit(
+                InstKind::Call(format!("__store_sum_{store_name}__{field}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::StoreAvg(store_name, field) => self.emit(
+                InstKind::Call(format!("__store_avg_{store_name}__{field}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::StoreMin(store_name, field) => self.emit(
+                InstKind::Call(format!("__store_min_{store_name}__{field}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::StoreMax(store_name, field) => self.emit(
+                InstKind::Call(format!("__store_max_{store_name}__{field}"), vec![]),
+                ty,
+                span,
+            ),
+
+            ExprKind::StoreVersionCount(store_name, sid_expr) => {
+                let sid = self.lower_expr(sid_expr);
+                self.emit(
+                    InstKind::Call(format!("__store_version_count_{store_name}"), vec![sid]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::StoreHistory(store_name, sid_expr) => {
+                let sid = self.lower_expr(sid_expr);
+                self.emit(
+                    InstKind::Call(format!("__store_history_{store_name}"), vec![sid]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::StoreAtVersion(store_name, sid_expr, ver_expr) => {
+                let sid = self.lower_expr(sid_expr);
+                let ver = self.lower_expr(ver_expr);
+                self.emit(
+                    InstKind::Call(format!("__store_at_version_{store_name}"), vec![sid, ver]),
+                    ty,
+                    span,
+                )
+            }
+
+            // @kv store operations
+            ExprKind::KvGet(store_name, key_expr) => {
+                let key = self.lower_expr(key_expr);
+                self.emit(
+                    InstKind::Call(format!("__kv_get_{store_name}"), vec![key]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::KvHas(store_name, key_expr) => {
+                let key = self.lower_expr(key_expr);
+                self.emit(
+                    InstKind::Call(format!("__kv_has_{store_name}"), vec![key]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::KvCount(store_name) => self.emit(
+                InstKind::Call(format!("__kv_count_{store_name}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::KvSet(store_name, key_expr, val_expr) => {
+                let key = self.lower_expr(key_expr);
+                let val = self.lower_expr(val_expr);
+                self.emit(
+                    InstKind::Call(format!("__kv_set_{store_name}"), vec![key, val]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::KvDel(store_name, key_expr) => {
+                let key = self.lower_expr(key_expr);
+                self.emit(
+                    InstKind::Call(format!("__kv_del_{store_name}"), vec![key]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::KvIncr(store_name, key_expr, delta_expr) => {
+                let key = self.lower_expr(key_expr);
+                let delta = self.lower_expr(delta_expr);
+                self.emit(
+                    InstKind::Call(format!("__kv_incr_{store_name}"), vec![key, delta]),
+                    ty,
+                    span,
+                )
+            }
+
+            // Specialized store operations
+            ExprKind::VecInsert(store_name, vec_expr) => {
+                let v = self.lower_expr(vec_expr);
+                self.emit(
+                    InstKind::Call(format!("__vec_insert_{store_name}"), vec![v]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::VecCount(store_name) => self.emit(
+                InstKind::Call(format!("__vec_count_{store_name}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::BloomTest(store_name, field_name, value_expr) => {
+                let v = self.lower_expr(value_expr);
+                self.emit(
+                    InstKind::Call(format!("__bloom_test_{store_name}_{field_name}"), vec![v]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::FtsSearch(store_name, field_name, query_expr) => {
+                let q = self.lower_expr(query_expr);
+                self.emit(
+                    InstKind::Call(format!("__fts_search_{store_name}_{field_name}"), vec![q]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::FtsCount(store_name, field_name) => self.emit(
+                InstKind::Call(format!("__fts_count_{store_name}_{field_name}"), vec![]),
+                ty,
+                span,
+            ),
+            ExprKind::VecNearest(store_name, query_expr, k_expr) => {
+                let q = self.lower_expr(query_expr);
+                let k = self.lower_expr(k_expr);
+                self.emit(
+                    InstKind::Call(format!("__vec_nearest_{store_name}"), vec![q, k]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::GraphFrom(store_name, node_expr) => {
+                let n = self.lower_expr(node_expr);
+                self.emit(
+                    InstKind::Call(format!("__graph_from_{store_name}"), vec![n]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::GraphTo(store_name, node_expr) => {
+                let n = self.lower_expr(node_expr);
+                self.emit(
+                    InstKind::Call(format!("__graph_to_{store_name}"), vec![n]),
+                    ty,
+                    span,
+                )
+            }
+            ExprKind::TsLatest(store_name) => self.emit(
+                InstKind::Call(format!("__ts_latest_{store_name}"), vec![]),
+                ty,
+                span,
+            ),
 
             // Iterator
             ExprKind::IterNext(iter_var, type_name, method_name) => {
                 if let Some(&v) = self.var_map.get(iter_var) {
-                    self.emit(InstKind::MethodCall(v, format!("{type_name}_{method_name}"), vec![]), ty, span)
+                    self.emit(
+                        InstKind::MethodCall(v, format!("{type_name}_{method_name}"), vec![]),
+                        ty,
+                        span,
+                    )
                 } else {
-                    self.emit(InstKind::Call(format!("__iter_{type_name}_{method_name}"), vec![]), ty, span)
+                    self.emit(
+                        InstKind::Call(format!("__iter_{type_name}_{method_name}"), vec![]),
+                        ty,
+                        span,
+                    )
                 }
             }
 
@@ -943,9 +1411,10 @@ impl Lowerer {
 
             ExprKind::Builder(name, fields) => {
                 // Desugar builder into StructInit + field sets
-                let inits: Vec<(String, ValueId)> = fields.iter().map(|(n, e)| {
-                    (n.clone(), self.lower_expr(e))
-                }).collect();
+                let inits: Vec<(String, ValueId)> = fields
+                    .iter()
+                    .map(|(n, e)| (n.clone(), self.lower_expr(e)))
+                    .collect();
                 self.emit(InstKind::StructInit(name.clone(), inits), ty, span)
             }
 
@@ -960,11 +1429,46 @@ impl Lowerer {
 
             ExprKind::GeneratorCreate(_def_id, name, _body) => {
                 // Body is compiled separately — don't inline it here.
-                self.emit(InstKind::Call(format!("__gen_create_{name}"), vec![]), ty, span)
+                self.emit(
+                    InstKind::Call(format!("__gen_create_{name}"), vec![]),
+                    ty,
+                    span,
+                )
             }
             ExprKind::GeneratorNext(gen_expr) => {
                 let g = self.lower_expr(gen_expr);
                 self.emit(InstKind::Call("__gen_next".into(), vec![g]), ty, span)
+            }
+
+            ExprKind::EnumUnwrap(inner, _enum_name, success_tag) => {
+                let subj = self.lower_expr(inner);
+                // Get tag (field "__tag" is i64 after extension)
+                let tag = self.emit(InstKind::FieldGet(subj, "__tag".into()), Type::I64, span);
+                let expected = self.emit(InstKind::IntConst(*success_tag as i64), Type::I64, span);
+                let cmp = self.emit(
+                    InstKind::Cmp(CmpOp::Eq, tag, expected, Type::I64),
+                    Type::Bool,
+                    span,
+                );
+                // Assert: panics with message if tag doesn't match
+                self.emit(
+                    InstKind::Assert(cmp, "unwrap called on Nothing/Err".into()),
+                    Type::Void,
+                    span,
+                );
+                // Extract field _0
+                self.emit(InstKind::FieldGet(subj, "_0".into()), ty.clone(), span)
+            }
+
+            ExprKind::EnumIs(inner, check_tag) => {
+                let subj = self.lower_expr(inner);
+                let tag = self.emit(InstKind::FieldGet(subj, "__tag".into()), Type::I64, span);
+                let expected = self.emit(InstKind::IntConst(*check_tag as i64), Type::I64, span);
+                self.emit(
+                    InstKind::Cmp(CmpOp::Eq, tag, expected, Type::I64),
+                    Type::Bool,
+                    span,
+                )
             }
 
             ExprKind::Grad(inner) => {
@@ -974,6 +1478,10 @@ impl Lowerer {
             ExprKind::Einsum(_pattern, args) => {
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 self.emit(InstKind::Call("__einsum".into(), vals), ty, span)
+            }
+
+            ExprKind::GlobalLoad(name) => {
+                self.emit(InstKind::GlobalLoad(name.clone()), ty, span)
             }
         }
     }
@@ -992,8 +1500,12 @@ impl Lowerer {
                 let val = self.lower_expr(&b.value);
                 // Store the DefId on the instruction that produced this value,
                 // so MIR Perceus can track binding → value relationships.
-                if let Some(inst) = self.func.block_mut(self.current_block)
-                    .insts.iter_mut().rev()
+                if let Some(inst) = self
+                    .func
+                    .block_mut(self.current_block)
+                    .insts
+                    .iter_mut()
+                    .rev()
                     .find(|i| i.dest == Some(val))
                 {
                     inst.def_id = Some(b.def_id);
@@ -1001,13 +1513,16 @@ impl Lowerer {
                 if self.mem_vars.contains(&b.name) {
                     // Variable is memory-backed (reassigned in a loop/branch).
                     // Emit Store with the variable's type so codegen allocas are correct.
-                    self.func.block_mut(self.current_block).insts.push(Instruction {
-                        dest: None,
-                        kind: InstKind::Store(b.name.clone(), val),
-                        ty: b.ty.clone(),
-                        span: b.span,
-                        def_id: None,
-                    });
+                    self.func
+                        .block_mut(self.current_block)
+                        .insts
+                        .push(Instruction {
+                            dest: None,
+                            kind: InstKind::Store(b.name.clone(), val),
+                            ty: b.ty.clone(),
+                            span: b.span,
+                            def_id: None,
+                        });
                 } else {
                     self.var_map.insert(b.name.clone(), val);
                 }
@@ -1020,13 +1535,16 @@ impl Lowerer {
                     ExprKind::Var(_, name) => {
                         if self.mem_vars.contains(name) {
                             // Use the value's type from the expression.
-                            self.func.block_mut(self.current_block).insts.push(Instruction {
-                                dest: None,
-                                kind: InstKind::Store(name.clone(), val),
-                                ty: value.ty.clone(),
-                                span: target.span,
-                                def_id: None,
-                            });
+                            self.func
+                                .block_mut(self.current_block)
+                                .insts
+                                .push(Instruction {
+                                    dest: None,
+                                    kind: InstKind::Store(name.clone(), val),
+                                    ty: value.ty.clone(),
+                                    span: target.span,
+                                    def_id: None,
+                                });
                         } else {
                             self.var_map.insert(name.clone(), val);
                         }
@@ -1037,13 +1555,20 @@ impl Lowerer {
                         if let ExprKind::Var(_, name) = &obj.kind {
                             if self.mem_vars.contains(name) {
                                 let obj_ty = obj.ty.clone();
-                                self.func.block_mut(self.current_block).insts.push(Instruction {
-                                    dest: None,
-                                    kind: InstKind::FieldStore(name.clone(), field.clone(), val),
-                                    ty: obj_ty,
-                                    span: target.span,
-                                    def_id: None,
-                                });
+                                self.func
+                                    .block_mut(self.current_block)
+                                    .insts
+                                    .push(Instruction {
+                                        dest: None,
+                                        kind: InstKind::FieldStore(
+                                            name.clone(),
+                                            field.clone(),
+                                            val,
+                                        ),
+                                        ty: obj_ty,
+                                        span: target.span,
+                                        def_id: None,
+                                    });
                                 return val;
                             }
                         }
@@ -1058,20 +1583,24 @@ impl Lowerer {
                             if self.mem_vars.contains(name) {
                                 let i = self.lower_expr(idx);
                                 let arr_ty = arr.ty.clone();
-                                self.func.block_mut(self.current_block).insts.push(Instruction {
-                                    dest: None,
-                                    kind: InstKind::IndexStore(name.clone(), i, val),
-                                    ty: arr_ty,
-                                    span: target.span,
-                                    def_id: None,
-                                });
+                                self.func
+                                    .block_mut(self.current_block)
+                                    .insts
+                                    .push(Instruction {
+                                        dest: None,
+                                        kind: InstKind::IndexStore(name.clone(), i, val),
+                                        ty: arr_ty,
+                                        span: target.span,
+                                        def_id: None,
+                                    });
                                 return val;
                             }
                             // Non-mem_var array: emit IndexSet and store updated value back.
                             let a = self.lower_expr(arr);
                             let i = self.lower_expr(idx);
                             let arr_ty = arr.ty.clone();
-                            let updated = self.emit(InstKind::IndexSet(a, i, val), arr_ty, target.span);
+                            let updated =
+                                self.emit(InstKind::IndexSet(a, i, val), arr_ty, target.span);
                             self.var_map.insert(name.clone(), updated);
                             return val;
                         }
@@ -1098,15 +1627,41 @@ impl Lowerer {
                     Self::collect_assigned_vars(els, &mut assigned);
                 }
                 // Only demote vars that already exist in var_map (were defined before if).
-                let pre_existing: HashSet<String> = assigned.iter()
+                let pre_existing: HashSet<String> = assigned
+                    .iter()
                     .filter(|n| self.var_map.contains_key(*n))
                     .cloned()
                     .collect();
                 self.demote_vars_to_memory(&pre_existing, if_stmt.span);
 
+                // Variables first defined (via Bind) in BOTH then and else branches
+                // must also be promoted to mem_vars so they're accessible after merge.
+                if if_stmt.els.is_some() || !if_stmt.elifs.is_empty() {
+                    let mut then_binds = HashSet::new();
+                    Self::collect_new_binds(&if_stmt.then, &mut then_binds);
+                    let mut other_binds = HashSet::new();
+                    for (_, elif_body) in &if_stmt.elifs {
+                        Self::collect_new_binds(elif_body, &mut other_binds);
+                    }
+                    if let Some(els) = &if_stmt.els {
+                        Self::collect_new_binds(els, &mut other_binds);
+                    }
+                    // Variables defined in then AND (else or elif) → promote to mem_vars
+                    for name in then_binds.intersection(&other_binds) {
+                        if !self.var_map.contains_key(name) && !self.mem_vars.contains(name) {
+                            self.mem_vars.insert(name.clone());
+                        }
+                    }
+                }
+
                 let cond = self.lower_expr(&if_stmt.cond);
                 let then_bb = self.new_block("if.then");
                 let merge_bb = self.new_block("if.merge");
+
+                // Save var_map keys before entering branches so we can clean up
+                // variables only defined in the then-branch (not reachable at merge
+                // when there's no else).
+                let vars_before_if: HashSet<String> = self.var_map.keys().cloned().collect();
 
                 // Determine the false-branch target:
                 // elif chain first, then else, then merge.
@@ -1178,6 +1733,22 @@ impl Lowerer {
 
                 self.switch_to(merge_bb);
 
+                // Remove variables from var_map that were newly defined only
+                // inside the then-branch (or elif bodies) but not on all paths.
+                // At the merge point these values don't dominate, so they must
+                // not remain in var_map; the next definition will use Store/Load.
+                if else_val_info.is_none() {
+                    let new_vars: Vec<String> = self
+                        .var_map
+                        .keys()
+                        .filter(|k| !vars_before_if.contains(*k))
+                        .cloned()
+                        .collect();
+                    for v in new_vars {
+                        self.var_map.remove(&v);
+                    }
+                }
+
                 // If all branches produce non-void values, insert a phi at merge.
                 let then_ty = self.value_type(then_val);
                 if !matches!(then_ty, Type::Void) && else_val_info.is_some() {
@@ -1208,6 +1779,11 @@ impl Lowerer {
                 // Also check condition for assigned vars (unlikely but safe)
                 self.demote_vars_to_memory(&assigned, w.span);
 
+                // Snapshot var_map keys before the loop body so we can remove
+                // variables first defined inside the loop — their SSA values
+                // don't dominate the exit block.
+                let pre_loop_vars: HashSet<String> = self.var_map.keys().cloned().collect();
+
                 let cond_bb = self.new_block("while.cond");
                 let body_bb = self.new_block("while.body");
                 let exit_bb = self.new_block("while.exit");
@@ -1225,6 +1801,12 @@ impl Lowerer {
                 }
                 self.loop_stack.pop();
 
+                // Remove var_map entries for variables first defined inside the
+                // loop body.  Their values were produced in the body block(s)
+                // and do NOT dominate the exit block (which is reachable from
+                // the condition block when the loop is never entered).
+                self.var_map.retain(|k, _| pre_loop_vars.contains(k));
+
                 self.switch_to(exit_bb);
                 self.emit(InstKind::Void, Type::Void, w.span)
             }
@@ -1235,6 +1817,11 @@ impl Lowerer {
                 let mut assigned = HashSet::new();
                 Self::collect_assigned_vars(&f.body, &mut assigned);
                 self.demote_vars_to_memory(&assigned, f.span);
+
+                // Snapshot var_map keys before the loop body so we can remove
+                // variables first defined inside the loop — their SSA values
+                // don't dominate the exit block.
+                let pre_loop_vars: HashSet<String> = self.var_map.keys().cloned().collect();
 
                 // Range-based for: `for i in start..end`
                 // If `end` is present, this is a range for; otherwise iterate
@@ -1255,20 +1842,43 @@ impl Lowerer {
                     };
 
                     // Store counter as a variable.
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), iter_val), f.bind_ty.clone(), f.span);
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), iter_val),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
                     self.var_map.insert(f.bind.clone(), iter_val);
+                    // Initialize bind2 index to 0 for range-for.
+                    if let Some(ref b2) = f.bind2 {
+                        let zero = self.emit(InstKind::IntConst(0), Type::I64, f.span);
+                        self.emit_void_typed(
+                            InstKind::Store(b2.clone(), zero),
+                            Type::I64,
+                            f.span,
+                        );
+                    }
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     // Condition: load counter, compare < end.
                     self.switch_to(cond_bb);
-                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, f.span);
+                    let counter =
+                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let cmp = self.emit(
+                        InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
+                        Type::Bool,
+                        f.span,
+                    );
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
                     // Re-bind the loop variable to the loaded counter so body can use it.
                     self.var_map.insert(f.bind.clone(), counter);
+                    // If bind2 is present, expose a 0-based index for range-for.
+                    if let Some(ref b2) = f.bind2 {
+                        let idx = self.emit(InstKind::Load(b2.clone()), Type::I64, f.span);
+                        self.var_map.insert(b2.clone(), idx);
+                    }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -1278,8 +1888,31 @@ impl Lowerer {
                     // Increment
                     self.switch_to(inc_bb);
                     let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
-                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, step_val), f.bind_ty.clone(), f.span);
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), f.span);
+                    let next = self.emit(
+                        InstKind::BinOp(BinOp::Add, cur, step_val),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), next),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
+                    // Increment bind2 index.
+                    if let Some(ref b2) = f.bind2 {
+                        let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
+                        let cur_idx = self.emit(InstKind::Load(b2.clone()), Type::I64, f.span);
+                        let next_idx = self.emit(
+                            InstKind::BinOp(BinOp::Add, cur_idx, one),
+                            Type::I64,
+                            f.span,
+                        );
+                        self.emit_void_typed(
+                            InstKind::Store(b2.clone(), next_idx),
+                            Type::I64,
+                            f.span,
+                        );
+                    }
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else if matches!(f.iter.ty, Type::I64 | Type::I32 | Type::F64) {
                     // Range for with implicit start=0: `for i in N` means 0..N
@@ -1287,13 +1920,22 @@ impl Lowerer {
                     let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
                     let end_val = iter_val;
 
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), zero), f.bind_ty.clone(), f.span);
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), zero),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
                     self.var_map.insert(f.bind.clone(), zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, f.span);
+                    let counter =
+                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let cmp = self.emit(
+                        InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
+                        Type::Bool,
+                        f.span,
+                    );
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -1307,8 +1949,16 @@ impl Lowerer {
 
                     self.switch_to(inc_bb);
                     let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
-                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, one), f.bind_ty.clone(), f.span);
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), f.span);
+                    let next = self.emit(
+                        InstKind::BinOp(BinOp::Add, cur, one),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), next),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else if matches!(f.iter.ty, Type::Coroutine(_) | Type::Generator(_)) {
                     // Generator/coroutine for: resume loop.
@@ -1318,16 +1968,28 @@ impl Lowerer {
 
                     self.switch_to(cond_bb);
                     // Resume the generator
-                    let _resume = self.emit(InstKind::Call("__gen_resume".into(), vec![iter_val]), Type::Void, f.span);
+                    let _resume = self.emit(
+                        InstKind::Call("__gen_resume".into(), vec![iter_val]),
+                        Type::Void,
+                        f.span,
+                    );
                     // Check done flag
-                    let done = self.emit(InstKind::Call("__gen_done".into(), vec![iter_val]), Type::Bool, f.span);
+                    let done = self.emit(
+                        InstKind::Call("__gen_done".into(), vec![iter_val]),
+                        Type::Bool,
+                        f.span,
+                    );
                     // Branch: if done, exit; else body
                     self.set_terminator(Terminator::Branch(done, exit_bb, body_bb));
 
                     // Body: read yielded value and bind it
                     self.loop_stack.push((cond_bb, exit_bb));
                     self.switch_to(body_bb);
-                    let val = self.emit(InstKind::Call("__gen_next_val".into(), vec![iter_val]), f.bind_ty.clone(), f.span);
+                    let val = self.emit(
+                        InstKind::Call("__gen_next_val".into(), vec![iter_val]),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
                     self.var_map.insert(f.bind.clone(), val);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
@@ -1336,18 +1998,27 @@ impl Lowerer {
                     self.loop_stack.pop();
                 } else {
                     // Collection for: iterate with index.
-                    // Get length.
-                    let len = self.emit(InstKind::VecLen(iter_val), Type::I64, f.span);
                     let zero = self.emit(InstKind::IntConst(0), Type::I64, f.span);
                     let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
                     let idx_name = format!("__for_idx_{}", f.bind);
-                    self.emit_void_typed(InstKind::Store(idx_name.clone(), zero), Type::I64, f.span);
+                    self.emit_void_typed(
+                        InstKind::Store(idx_name.clone(), zero),
+                        Type::I64,
+                        f.span,
+                    );
                     self.set_terminator(Terminator::Goto(cond_bb));
 
-                    // Condition: idx < len.
+                    // Condition: idx < len (re-read length each iteration so
+                    // mutations to the collection between outer iterations are
+                    // visible).
                     self.switch_to(cond_bb);
+                    let len = self.emit(InstKind::VecLen(iter_val), Type::I64, f.span);
                     let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, f.span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len, Type::I64), Type::Bool, f.span);
+                    let cmp = self.emit(
+                        InstKind::Cmp(CmpOp::Lt, idx, len, Type::I64),
+                        Type::Bool,
+                        f.span,
+                    );
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     // Body: bind element.
@@ -1355,6 +2026,10 @@ impl Lowerer {
                     self.switch_to(body_bb);
                     let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), f.span);
                     self.var_map.insert(f.bind.clone(), elem);
+                    // If bind2 is present, expose the index as a user variable.
+                    if let Some(ref b2) = f.bind2 {
+                        self.var_map.insert(b2.clone(), idx);
+                    }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -1364,10 +2039,15 @@ impl Lowerer {
                     // Increment index.
                     self.switch_to(inc_bb);
                     let cur_idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, f.span);
-                    let next_idx = self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, f.span);
+                    let next_idx =
+                        self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, f.span);
                     self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, f.span);
                     self.set_terminator(Terminator::Goto(cond_bb));
                 }
+
+                // Remove var_map entries for variables first defined inside the
+                // loop body — they don't dominate the exit block.
+                self.var_map.retain(|k, _| pre_loop_vars.contains(k));
 
                 self.switch_to(exit_bb);
                 // The loop bound variable's SSA value is from the condition
@@ -1385,6 +2065,9 @@ impl Lowerer {
                 Self::collect_assigned_vars(&l.body, &mut assigned);
                 self.demote_vars_to_memory(&assigned, l.span);
 
+                // Snapshot var_map keys before the loop body.
+                let pre_loop_vars: HashSet<String> = self.var_map.keys().cloned().collect();
+
                 let body_bb = self.new_block("loop.body");
                 let exit_bb = self.new_block("loop.exit");
 
@@ -1396,6 +2079,10 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(body_bb));
                 }
                 self.loop_stack.pop();
+
+                // Remove var_map entries for variables first defined inside the
+                // loop body — they don't dominate the exit block.
+                self.var_map.retain(|k, _| pre_loop_vars.contains(k));
 
                 self.switch_to(exit_bb);
                 self.emit(InstKind::Void, Type::Void, l.span)
@@ -1441,7 +2128,8 @@ impl Lowerer {
                     Self::collect_assigned_vars(&arm.body, &mut assigned);
                 }
                 // Only demote pre-existing variables (new bindings in arms are fine).
-                let pre_existing: HashSet<String> = assigned.into_iter()
+                let pre_existing: HashSet<String> = assigned
+                    .into_iter()
                     .filter(|v| self.var_map.contains_key(v))
                     .collect();
                 self.demote_vars_to_memory(&pre_existing, m.span);
@@ -1458,7 +2146,10 @@ impl Lowerer {
                 // needs sequential comparison (if-else chain).
                 let is_enum = matches!(m.subject.ty, Type::Enum(_));
                 let has_ctor = m.arms.iter().any(|a| matches!(a.pat, Pat::Ctor(..)));
-                let all_lit = m.arms.iter().all(|a| matches!(a.pat, Pat::Lit(_) | Pat::Wild(_)));
+                let all_lit = m
+                    .arms
+                    .iter()
+                    .all(|a| matches!(a.pat, Pat::Lit(_) | Pat::Wild(_)));
                 let result_ty = m.ty.clone();
                 let has_result = !matches!(result_ty, Type::Void);
 
@@ -1469,7 +2160,9 @@ impl Lowerer {
                     m.arms.iter().any(|a| {
                         if let Pat::Ctor(_, tag, _, _) = &a.pat {
                             !seen.insert(*tag)
-                        } else { false }
+                        } else {
+                            false
+                        }
                     })
                 };
 
@@ -1567,12 +2260,13 @@ impl Lowerer {
                         if let Pat::Array(sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
                                 if let Pat::Bind(_, name, ty, _) = sp {
-                                    let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, arm.span);
-                                    let elem = self.emit(
-                                        InstKind::Index(subj, idx),
-                                        ty.clone(),
+                                    let idx = self.emit(
+                                        InstKind::IntConst(i as i64),
+                                        Type::I64,
                                         arm.span,
                                     );
+                                    let elem =
+                                        self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
                                     self.var_map.insert(name.clone(), elem);
                                 }
                             }
@@ -1628,22 +2322,24 @@ impl Lowerer {
                                     Type::I64,
                                     arm.span,
                                 );
-                                let tag_const = self.emit(
-                                    InstKind::IntConst(*tag as i64),
-                                    Type::I64,
-                                    arm.span,
-                                );
+                                let tag_const =
+                                    self.emit(InstKind::IntConst(*tag as i64), Type::I64, arm.span);
                                 let tag_cmp = self.emit(
                                     InstKind::Cmp(CmpOp::Eq, tag_val, tag_const, Type::I64),
                                     Type::Bool,
                                     arm.span,
                                 );
                                 // Check if any sub-pattern needs matching (nested Ctors).
-                                let needs_sub_check = sub_pats.iter().any(|sp| matches!(sp, Pat::Ctor(..)));
+                                let needs_sub_check =
+                                    sub_pats.iter().any(|sp| matches!(sp, Pat::Ctor(..)));
                                 if needs_sub_check {
                                     // Tag matches → check sub-patterns.
                                     let sub_check_bb = self.new_block("match.subcheck");
-                                    self.set_terminator(Terminator::Branch(tag_cmp, sub_check_bb, next_bb));
+                                    self.set_terminator(Terminator::Branch(
+                                        tag_cmp,
+                                        sub_check_bb,
+                                        next_bb,
+                                    ));
                                     self.switch_to(sub_check_bb);
                                     // Compare inner tags.
                                     let mut all_match = tag_cmp; // will be overwritten
@@ -1665,15 +2361,24 @@ impl Lowerer {
                                                 arm.span,
                                             );
                                             all_match = self.emit(
-                                                InstKind::Cmp(CmpOp::Eq, inner_tag_val, inner_const, Type::I64),
+                                                InstKind::Cmp(
+                                                    CmpOp::Eq,
+                                                    inner_tag_val,
+                                                    inner_const,
+                                                    Type::I64,
+                                                ),
                                                 Type::Bool,
                                                 arm.span,
                                             );
                                         }
                                     }
-                                    self.set_terminator(Terminator::Branch(all_match, arm_bb, next_bb));
+                                    self.set_terminator(Terminator::Branch(
+                                        all_match, arm_bb, next_bb,
+                                    ));
                                 } else {
-                                    self.set_terminator(Terminator::Branch(tag_cmp, arm_bb, next_bb));
+                                    self.set_terminator(Terminator::Branch(
+                                        tag_cmp, arm_bb, next_bb,
+                                    ));
                                 }
                             }
                             Pat::Or(alternatives, _) => {
@@ -1682,7 +2387,11 @@ impl Lowerer {
                                 let mut cur_test = self.current_block;
                                 for (ai, alt) in alternatives.iter().enumerate() {
                                     let is_last_alt = ai + 1 == alternatives.len();
-                                    let fail_bb = if is_last_alt { next_bb } else { self.new_block("or.next") };
+                                    let fail_bb = if is_last_alt {
+                                        next_bb
+                                    } else {
+                                        self.new_block("or.next")
+                                    };
                                     self.switch_to(cur_test);
                                     match alt {
                                         Pat::Lit(lit_expr) => {
@@ -1693,7 +2402,9 @@ impl Lowerer {
                                                 Type::Bool,
                                                 arm.span,
                                             );
-                                            self.set_terminator(Terminator::Branch(cmp, arm_bb, fail_bb));
+                                            self.set_terminator(Terminator::Branch(
+                                                cmp, arm_bb, fail_bb,
+                                            ));
                                         }
                                         Pat::Wild(_) => {
                                             self.set_terminator(Terminator::Goto(arm_bb));
@@ -1707,7 +2418,12 @@ impl Lowerer {
                                             let hi_val = self.lower_expr(hi);
                                             let subj_ty = self.value_type(subj);
                                             let ge = self.emit(
-                                                InstKind::Cmp(CmpOp::Ge, subj, lo_val, subj_ty.clone()),
+                                                InstKind::Cmp(
+                                                    CmpOp::Ge,
+                                                    subj,
+                                                    lo_val,
+                                                    subj_ty.clone(),
+                                                ),
                                                 Type::Bool,
                                                 arm.span,
                                             );
@@ -1721,7 +2437,9 @@ impl Lowerer {
                                                 Type::Bool,
                                                 arm.span,
                                             );
-                                            self.set_terminator(Terminator::Branch(in_range, arm_bb, fail_bb));
+                                            self.set_terminator(Terminator::Branch(
+                                                in_range, arm_bb, fail_bb,
+                                            ));
                                         }
                                         _ => {
                                             // Sub-pattern types we don't handle in or: fallback to match
@@ -1789,12 +2507,13 @@ impl Lowerer {
                         if let Pat::Array(sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
                                 if let Pat::Bind(_, name, ty, _) = sp {
-                                    let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, arm.span);
-                                    let elem = self.emit(
-                                        InstKind::Index(subj, idx),
-                                        ty.clone(),
+                                    let idx = self.emit(
+                                        InstKind::IntConst(i as i64),
+                                        Type::I64,
                                         arm.span,
                                     );
+                                    let elem =
+                                        self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
                                     self.var_map.insert(name.clone(), elem);
                                 }
                             }
@@ -1829,9 +2548,8 @@ impl Lowerer {
                 self.switch_to(merge_bb);
                 if has_result && !phi_entries.is_empty() {
                     let dest = self.new_value();
-                    let incoming: Vec<(BlockId, ValueId)> = phi_entries.iter()
-                        .map(|(val, blk)| (*blk, *val))
-                        .collect();
+                    let incoming: Vec<(BlockId, ValueId)> =
+                        phi_entries.iter().map(|(val, blk)| (*blk, *val)).collect();
                     self.func.block_mut(merge_bb).phis.push(Phi {
                         dest,
                         ty: result_ty,
@@ -1855,7 +2573,11 @@ impl Lowerer {
                 for (i, (_id, name, bind_ty)) in bindings.iter().enumerate() {
                     let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, Span::dummy());
                     let elem = self.emit(InstKind::Index(val, idx), bind_ty.clone(), Span::dummy());
-                    self.var_map.insert(name.clone(), elem);
+                    if self.mem_vars.contains(name) {
+                        self.emit(InstKind::Store(name.clone(), elem), Type::Void, Span::dummy());
+                    } else {
+                        self.var_map.insert(name.clone(), elem);
+                    }
                 }
                 val
             }
@@ -1870,7 +2592,11 @@ impl Lowerer {
 
             hir::Stmt::ChannelClose(ch, span) => {
                 let c = self.lower_expr(ch);
-                self.emit(InstKind::Call("__chan_close".into(), vec![c]), Type::Void, *span)
+                self.emit(
+                    InstKind::Call("__chan_close".into(), vec![c]),
+                    Type::Void,
+                    *span,
+                )
             }
 
             hir::Stmt::Stop(expr, span) => {
@@ -1879,22 +2605,34 @@ impl Lowerer {
             }
 
             hir::Stmt::Asm(asm) => {
-                let input_vals: Vec<_> = asm.inputs.iter().map(|(_, e)| self.lower_expr(e)).collect();
-                self.emit(InstKind::InlineAsm(asm.template.clone(), input_vals), Type::Void, asm.span)
+                let input_vals: Vec<_> =
+                    asm.inputs.iter().map(|(_, e)| self.lower_expr(e)).collect();
+                self.emit(
+                    InstKind::InlineAsm(asm.template.clone(), input_vals),
+                    Type::Void,
+                    asm.span,
+                )
             }
 
             hir::Stmt::StoreInsert(store_name, exprs, span) => {
                 let vals: Vec<_> = exprs.iter().map(|e| self.lower_expr(e)).collect();
-                self.emit(InstKind::Call(format!("__store_insert_{store_name}"), vals), Type::Void, *span)
+                self.emit(
+                    InstKind::Call(format!("__store_insert_{store_name}"), vals),
+                    Type::Void,
+                    *span,
+                )
             }
 
             hir::Stmt::StoreDelete(store_name, filter, span) => {
                 // Encode filter field+op in the call name so MIR codegen can reconstruct.
                 let filter_val = self.lower_expr(&filter.value);
                 let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
                     _ => "eq",
                 };
                 let mut extra_vals = Vec::new();
@@ -1903,27 +2641,115 @@ impl Lowerer {
                 }
                 let mut all_vals = vec![filter_val];
                 all_vals.extend(extra_vals);
-                // Encode extra filter conditions in the name: __store_delete_{name}__{field}__{op}[__and_{field2}__{op2}]*
-                let mut encoded = format!("__store_delete_{store_name}__{}__{op_str}", filter.field);
+                // Encode extra filter conditions in the name: __store_delete_{name}__{field}__{op}[__and__{field2}__{op2}]*
+                let mut encoded =
+                    format!("__store_delete_{store_name}__{}__{op_str}", filter.field);
                 for (logic_op, cond) in &filter.extra {
-                    let lop = match logic_op { ast::LogicalOp::And => "and", ast::LogicalOp::Or => "or" };
+                    let lop = match logic_op {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
                     let cop_str = match cond.op {
-                        ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
                         _ => "eq",
                     };
-                    encoded.push_str(&format!("__{lop}_{}__{cop_str}", cond.field));
+                    encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(InstKind::Call(encoded, all_vals), Type::Void, *span)
             }
 
+            hir::Stmt::StoreDestroy(store_name, filter, span) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut all_vals = vec![filter_val];
+                for (_logic_op, cond) in &filter.extra {
+                    all_vals.push(self.lower_expr(&cond.value));
+                }
+                let mut encoded =
+                    format!("__store_destroy_{store_name}__{}__{op_str}", filter.field);
+                for (logic_op, cond) in &filter.extra {
+                    let lop = match logic_op {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let cop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
+                }
+                self.emit(InstKind::Call(encoded, all_vals), Type::Void, *span)
+            }
+
+            hir::Stmt::StoreRestore(store_name, filter, span) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let op_str = match filter.op {
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
+                    _ => "eq",
+                };
+                let mut all_vals = vec![filter_val];
+                for (_logic_op, cond) in &filter.extra {
+                    all_vals.push(self.lower_expr(&cond.value));
+                }
+                let mut encoded =
+                    format!("__store_restore_{store_name}__{}__{op_str}", filter.field);
+                for (logic_op, cond) in &filter.extra {
+                    let lop = match logic_op {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let cop_str = match cond.op {
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
+                        _ => "eq",
+                    };
+                    encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
+                }
+                self.emit(InstKind::Call(encoded, all_vals), Type::Void, *span)
+            }
+
+            hir::Stmt::StoreSave(store_name, span) => self.emit(
+                InstKind::Call(format!("__store_save_{store_name}"), vec![]),
+                Type::Void,
+                *span,
+            ),
+
             hir::Stmt::StoreSet(store_name, fields, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
                 let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                    ast::BinOp::Eq => "eq",
+                    ast::BinOp::Ne => "ne",
+                    ast::BinOp::Lt => "lt",
+                    ast::BinOp::Le => "le",
+                    ast::BinOp::Gt => "gt",
+                    ast::BinOp::Ge => "ge",
                     _ => "eq",
                 };
                 let mut extra_vals = Vec::new();
@@ -1938,14 +2764,20 @@ impl Lowerer {
                 // Encode: __store_set_{name}__{field}__{op}[__and/or_{field2}__{op2}]*__fields_{f1}_{f2}_...
                 let mut encoded = format!("__store_set_{store_name}__{}__{op_str}", filter.field);
                 for (logic_op, cond) in &filter.extra {
-                    let lop = match logic_op { ast::LogicalOp::And => "and", ast::LogicalOp::Or => "or" };
+                    let lop = match logic_op {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
                     let cop_str = match cond.op {
-                        ast::BinOp::Eq => "eq", ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt", ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt", ast::BinOp::Ge => "ge",
+                        ast::BinOp::Eq => "eq",
+                        ast::BinOp::Ne => "ne",
+                        ast::BinOp::Lt => "lt",
+                        ast::BinOp::Le => "le",
+                        ast::BinOp::Gt => "gt",
+                        ast::BinOp::Ge => "ge",
                         _ => "eq",
                     };
-                    encoded.push_str(&format!("__{lop}_{}__{cop_str}", cond.field));
+                    encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 encoded.push_str("__fields");
                 for fname in &field_names {
@@ -1955,9 +2787,17 @@ impl Lowerer {
             }
 
             hir::Stmt::Transaction(body, span) => {
-                self.emit(InstKind::Call("__txn_begin".into(), vec![]), Type::Void, *span);
+                self.emit(
+                    InstKind::Call("__txn_begin".into(), vec![]),
+                    Type::Void,
+                    *span,
+                );
                 self.lower_block_stmts(body);
-                self.emit(InstKind::Call("__txn_commit".into(), vec![]), Type::Void, *span)
+                self.emit(
+                    InstKind::Call("__txn_commit".into(), vec![]),
+                    Type::Void,
+                    *span,
+                )
             }
 
             hir::Stmt::SimFor(f, span) => {
@@ -1985,13 +2825,22 @@ impl Lowerer {
                     } else {
                         self.emit(InstKind::IntConst(1), Type::I64, *span)
                     };
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), iter_val), f.bind_ty.clone(), *span);
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), iter_val),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
                     self.var_map.insert(f.bind.clone(), iter_val);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, *span);
+                    let counter =
+                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let cmp = self.emit(
+                        InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
+                        Type::Bool,
+                        *span,
+                    );
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -2005,8 +2854,16 @@ impl Lowerer {
 
                     self.switch_to(inc_bb);
                     let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
-                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, step_val), f.bind_ty.clone(), *span);
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), *span);
+                    let next = self.emit(
+                        InstKind::BinOp(BinOp::Add, cur, step_val),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), next),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else if matches!(f.iter.ty, Type::I64 | Type::I32 | Type::F64) {
                     // Implicit range: `sim for i in N` means 0..N
@@ -2014,13 +2871,22 @@ impl Lowerer {
                     let one = self.emit(InstKind::IntConst(1), Type::I64, *span);
                     let end_val = iter_val;
 
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), zero), f.bind_ty.clone(), *span);
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), zero),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
                     self.var_map.insert(f.bind.clone(), zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64), Type::Bool, *span);
+                    let counter =
+                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let cmp = self.emit(
+                        InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
+                        Type::Bool,
+                        *span,
+                    );
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
@@ -2034,11 +2900,18 @@ impl Lowerer {
 
                     self.switch_to(inc_bb);
                     let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
-                    let next = self.emit(InstKind::BinOp(BinOp::Add, cur, one), f.bind_ty.clone(), *span);
-                    self.emit_void_typed(InstKind::Store(f.bind.clone(), next), f.bind_ty.clone(), *span);
+                    let next = self.emit(
+                        InstKind::BinOp(BinOp::Add, cur, one),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
+                    self.emit_void_typed(
+                        InstKind::Store(f.bind.clone(), next),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else {
-                    let len = self.emit(InstKind::VecLen(iter_val), Type::I64, *span);
                     let zero = self.emit(InstKind::IntConst(0), Type::I64, *span);
                     let one = self.emit(InstKind::IntConst(1), Type::I64, *span);
                     let idx_name = format!("__simfor_idx_{}", f.bind);
@@ -2046,14 +2919,23 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
+                    let len = self.emit(InstKind::VecLen(iter_val), Type::I64, *span);
                     let idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, *span);
-                    let cmp = self.emit(InstKind::Cmp(CmpOp::Lt, idx, len, Type::I64), Type::Bool, *span);
+                    let cmp = self.emit(
+                        InstKind::Cmp(CmpOp::Lt, idx, len, Type::I64),
+                        Type::Bool,
+                        *span,
+                    );
                     self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
                     let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), *span);
                     self.var_map.insert(f.bind.clone(), elem);
+                    // If bind2 is present, expose the index as a user variable.
+                    if let Some(ref b2) = f.bind2 {
+                        self.var_map.insert(b2.clone(), idx);
+                    }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -2062,7 +2944,8 @@ impl Lowerer {
 
                     self.switch_to(inc_bb);
                     let cur_idx = self.emit(InstKind::Load(idx_name.clone()), Type::I64, *span);
-                    let next_idx = self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, *span);
+                    let next_idx =
+                        self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, *span);
                     self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, *span);
                     self.set_terminator(Terminator::Goto(cond_bb));
                 }
@@ -2079,6 +2962,11 @@ impl Lowerer {
             hir::Stmt::UseLocal(_, _, _, _) => {
                 // No-op in MIR — use declarations are resolved at HIR level
                 self.emit(InstKind::Void, Type::Void, Span::dummy())
+            }
+
+            hir::Stmt::GlobalStore(name, value, _span) => {
+                let val = self.lower_expr(value);
+                self.emit(InstKind::GlobalStore(name.clone(), val), Type::Void, Span::dummy())
             }
         }
     }
@@ -2124,6 +3012,11 @@ impl Lowerer {
                         Self::collect_assigned_vars(&arm.body, assigned);
                     }
                 }
+                hir::Stmt::TupleBind(bindings, _, _) => {
+                    for (_, name, _) in bindings {
+                        assigned.insert(name.clone());
+                    }
+                }
                 hir::Stmt::Expr(e) => {
                     Self::collect_assigned_vars_in_expr(e, assigned);
                 }
@@ -2159,8 +3052,12 @@ impl Lowerer {
             ExprKind::ListComp(body, _, _, iter, end, cond) => {
                 Self::collect_assigned_vars_in_expr(body, assigned);
                 Self::collect_assigned_vars_in_expr(iter, assigned);
-                if let Some(e) = end { Self::collect_assigned_vars_in_expr(e, assigned); }
-                if let Some(c) = cond { Self::collect_assigned_vars_in_expr(c, assigned); }
+                if let Some(e) = end {
+                    Self::collect_assigned_vars_in_expr(e, assigned);
+                }
+                if let Some(c) = cond {
+                    Self::collect_assigned_vars_in_expr(c, assigned);
+                }
             }
             // Recurse into sub-expressions that may contain blocks.
             ExprKind::BinOp(l, _, r) => {
@@ -2173,19 +3070,45 @@ impl Lowerer {
                 Self::collect_assigned_vars_in_expr(f, assigned);
             }
             ExprKind::Call(_, _, args) => {
-                for a in args { Self::collect_assigned_vars_in_expr(a, assigned); }
+                for a in args {
+                    Self::collect_assigned_vars_in_expr(a, assigned);
+                }
             }
             ExprKind::IndirectCall(f, args) => {
                 Self::collect_assigned_vars_in_expr(f, assigned);
-                for a in args { Self::collect_assigned_vars_in_expr(a, assigned); }
+                for a in args {
+                    Self::collect_assigned_vars_in_expr(a, assigned);
+                }
             }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
-            | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args)
-            | ExprKind::SetMethod(obj, _, args) | ExprKind::DeferredMethod(obj, _, args) => {
+            ExprKind::Method(obj, _, _, args)
+            | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::VecMethod(obj, _, args)
+            | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args)
+            | ExprKind::DeferredMethod(obj, _, args) => {
                 Self::collect_assigned_vars_in_expr(obj, assigned);
-                for a in args { Self::collect_assigned_vars_in_expr(a, assigned); }
+                for a in args {
+                    Self::collect_assigned_vars_in_expr(a, assigned);
+                }
             }
             _ => {}
+        }
+    }
+
+    /// Collect variable names first defined via Bind in a block (non-recursive into sub-blocks).
+    fn collect_new_binds(body: &[hir::Stmt], binds: &mut HashSet<String>) {
+        for stmt in body {
+            match stmt {
+                hir::Stmt::Bind(b) => {
+                    binds.insert(b.name.clone());
+                }
+                hir::Stmt::TupleBind(bindings, _, _) => {
+                    for (_, name, _) in bindings {
+                        binds.insert(name.clone());
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -2195,23 +3118,33 @@ impl Lowerer {
         for name in vars {
             if let Some(&val) = self.var_map.get(name) {
                 // Find the type of this variable from the value.
-                let ty = self.func.blocks.iter()
+                let ty = self
+                    .func
+                    .blocks
+                    .iter()
                     .flat_map(|bb| bb.insts.iter())
                     .find(|i| i.dest == Some(val))
                     .map(|i| i.ty.clone())
-                    .or_else(|| self.func.params.iter()
-                        .find(|p| p.value == val)
-                        .map(|p| p.ty.clone()))
+                    .or_else(|| {
+                        self.func
+                            .params
+                            .iter()
+                            .find(|p| p.value == val)
+                            .map(|p| p.ty.clone())
+                    })
                     .unwrap_or(Type::I64);
                 // Emit Store with the variable's type (not Void) so codegen
                 // creates the alloca with the correct LLVM type.
-                self.func.block_mut(self.current_block).insts.push(Instruction {
-                    dest: None,
-                    kind: InstKind::Store(name.clone(), val),
-                    ty,
-                    span,
-                    def_id: None,
-                });
+                self.func
+                    .block_mut(self.current_block)
+                    .insts
+                    .push(Instruction {
+                        dest: None,
+                        kind: InstKind::Store(name.clone(), val),
+                        ty,
+                        span,
+                        def_id: None,
+                    });
                 self.var_map.remove(name);
                 self.mem_vars.insert(name.clone());
             }
@@ -2219,7 +3152,10 @@ impl Lowerer {
     }
 
     /// Collect variable names referenced in a block of HIR statements.
-    fn collect_expr_var_refs_block(body: &[hir::Stmt], refs: &mut std::collections::HashSet<String>) {
+    fn collect_expr_var_refs_block(
+        body: &[hir::Stmt],
+        refs: &mut std::collections::HashSet<String>,
+    ) {
         for stmt in body {
             Self::collect_expr_var_refs_stmt(stmt, refs);
         }
@@ -2260,8 +3196,10 @@ impl Lowerer {
                     Self::collect_expr_var_refs_block(&arm.body, refs);
                 }
             }
-            hir::Stmt::Break(Some(e), _) | hir::Stmt::ErrReturn(e, _, _)
-            | hir::Stmt::ChannelClose(e, _) | hir::Stmt::Stop(e, _) => {
+            hir::Stmt::Break(Some(e), _)
+            | hir::Stmt::ErrReturn(e, _, _)
+            | hir::Stmt::ChannelClose(e, _)
+            | hir::Stmt::Stop(e, _) => {
                 Self::collect_expr_var_refs_expr(e, refs);
             }
             hir::Stmt::TupleBind(_, e, _) => Self::collect_expr_var_refs_expr(e, refs),
@@ -2273,10 +3211,14 @@ impl Lowerer {
                 Self::collect_expr_var_refs_block(body, refs);
             }
             hir::Stmt::StoreInsert(_, exprs, _) => {
-                for e in exprs { Self::collect_expr_var_refs_expr(e, refs); }
+                for e in exprs {
+                    Self::collect_expr_var_refs_expr(e, refs);
+                }
             }
             hir::Stmt::StoreSet(_, updates, _, _) => {
-                for (_, e) in updates { Self::collect_expr_var_refs_expr(e, refs); }
+                for (_, e) in updates {
+                    Self::collect_expr_var_refs_expr(e, refs);
+                }
             }
             _ => {}
         }
@@ -2284,31 +3226,50 @@ impl Lowerer {
 
     fn collect_expr_var_refs_expr(expr: &hir::Expr, refs: &mut std::collections::HashSet<String>) {
         match &expr.kind {
-            ExprKind::Var(_, name) => { refs.insert(name.clone()); }
+            ExprKind::Var(_, name) => {
+                refs.insert(name.clone());
+            }
             ExprKind::BinOp(l, _, r) => {
                 Self::collect_expr_var_refs_expr(l, refs);
                 Self::collect_expr_var_refs_expr(r, refs);
             }
-            ExprKind::UnaryOp(_, e) | ExprKind::Ref(e) | ExprKind::Deref(e)
-            | ExprKind::Cast(e, _) | ExprKind::StrictCast(e, _)
+            ExprKind::UnaryOp(_, e)
+            | ExprKind::Ref(e)
+            | ExprKind::Deref(e)
+            | ExprKind::Cast(e, _)
+            | ExprKind::StrictCast(e, _)
             | ExprKind::Coerce(e, _) => {
                 Self::collect_expr_var_refs_expr(e, refs);
             }
-            ExprKind::Call(_, _, args) | ExprKind::Array(args) | ExprKind::Tuple(args)
-            | ExprKind::VecNew(args) | ExprKind::NDArrayNew(args) | ExprKind::SIMDNew(args)
+            ExprKind::Call(_, _, args)
+            | ExprKind::Array(args)
+            | ExprKind::Tuple(args)
+            | ExprKind::VecNew(args)
+            | ExprKind::NDArrayNew(args)
+            | ExprKind::SIMDNew(args)
             | ExprKind::Syscall(args) => {
-                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+                for a in args {
+                    Self::collect_expr_var_refs_expr(a, refs);
+                }
             }
             ExprKind::IndirectCall(f, args) => {
                 Self::collect_expr_var_refs_expr(f, refs);
-                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+                for a in args {
+                    Self::collect_expr_var_refs_expr(a, refs);
+                }
             }
-            ExprKind::Method(obj, _, _, args) | ExprKind::StringMethod(obj, _, args)
-            | ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args)
-            | ExprKind::SetMethod(obj, _, args) | ExprKind::PQMethod(obj, _, args)
-            | ExprKind::DequeMethod(obj, _, args) | ExprKind::DeferredMethod(obj, _, args) => {
+            ExprKind::Method(obj, _, _, args)
+            | ExprKind::StringMethod(obj, _, args)
+            | ExprKind::VecMethod(obj, _, args)
+            | ExprKind::MapMethod(obj, _, args)
+            | ExprKind::SetMethod(obj, _, args)
+            | ExprKind::PQMethod(obj, _, args)
+            | ExprKind::DequeMethod(obj, _, args)
+            | ExprKind::DeferredMethod(obj, _, args) => {
                 Self::collect_expr_var_refs_expr(obj, refs);
-                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+                for a in args {
+                    Self::collect_expr_var_refs_expr(a, refs);
+                }
             }
             ExprKind::Field(obj, _, _) => Self::collect_expr_var_refs_expr(obj, refs),
             ExprKind::Index(a, i) => {
@@ -2318,7 +3279,9 @@ impl Lowerer {
             ExprKind::IfExpr(i) => {
                 Self::collect_expr_var_refs_expr(&i.cond, refs);
                 Self::collect_expr_var_refs_block(&i.then, refs);
-                if let Some(els) = &i.els { Self::collect_expr_var_refs_block(els, refs); }
+                if let Some(els) = &i.els {
+                    Self::collect_expr_var_refs_block(els, refs);
+                }
             }
             ExprKind::Ternary(c, t, f) => {
                 Self::collect_expr_var_refs_expr(c, refs);
@@ -2326,33 +3289,50 @@ impl Lowerer {
                 Self::collect_expr_var_refs_expr(f, refs);
             }
             ExprKind::Struct(_, fields) | ExprKind::VariantCtor(_, _, _, fields) => {
-                for fi in fields { Self::collect_expr_var_refs_expr(&fi.value, refs); }
+                for fi in fields {
+                    Self::collect_expr_var_refs_expr(&fi.value, refs);
+                }
             }
             ExprKind::Select(arms, default) => {
                 for arm in arms {
                     Self::collect_expr_var_refs_expr(&arm.chan, refs);
-                    if let Some(v) = &arm.value { Self::collect_expr_var_refs_expr(v, refs); }
+                    if let Some(v) = &arm.value {
+                        Self::collect_expr_var_refs_expr(v, refs);
+                    }
                     Self::collect_expr_var_refs_block(&arm.body, refs);
                 }
-                if let Some(def) = default { Self::collect_expr_var_refs_block(def, refs); }
+                if let Some(def) = default {
+                    Self::collect_expr_var_refs_block(def, refs);
+                }
             }
-            ExprKind::DynDispatch(obj, _, _, args) | ExprKind::Send(obj, _, _, _, args)
+            ExprKind::DynDispatch(obj, _, _, args)
+            | ExprKind::Send(obj, _, _, _, args)
             | ExprKind::Pipe(obj, _, _, args) => {
                 Self::collect_expr_var_refs_expr(obj, refs);
-                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+                for a in args {
+                    Self::collect_expr_var_refs_expr(a, refs);
+                }
             }
             ExprKind::Builtin(_, args) => {
-                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+                for a in args {
+                    Self::collect_expr_var_refs_expr(a, refs);
+                }
             }
-            ExprKind::ChannelSend(a, b) | ExprKind::AtomicStore(a, b)
-            | ExprKind::AtomicAdd(a, b) | ExprKind::AtomicSub(a, b) => {
+            ExprKind::ChannelSend(a, b)
+            | ExprKind::AtomicStore(a, b)
+            | ExprKind::AtomicAdd(a, b)
+            | ExprKind::AtomicSub(a, b) => {
                 Self::collect_expr_var_refs_expr(a, refs);
                 Self::collect_expr_var_refs_expr(b, refs);
             }
-            ExprKind::ChannelRecv(e) | ExprKind::CoroutineNext(e)
-            | ExprKind::Yield(e) | ExprKind::DynCoerce(e, _, _)
-            | ExprKind::AsFormat(e, _) | ExprKind::AtomicLoad(e)
-            | ExprKind::Slice(e, _, _) | ExprKind::Grad(e) => {
+            ExprKind::ChannelRecv(e)
+            | ExprKind::CoroutineNext(e)
+            | ExprKind::Yield(e)
+            | ExprKind::DynCoerce(e, _, _)
+            | ExprKind::AsFormat(e, _)
+            | ExprKind::AtomicLoad(e)
+            | ExprKind::Slice(e, _, _)
+            | ExprKind::Grad(e) => {
                 Self::collect_expr_var_refs_expr(e, refs);
                 if let ExprKind::Slice(_, lo, hi) = &expr.kind {
                     Self::collect_expr_var_refs_expr(lo, refs);
@@ -2363,8 +3343,12 @@ impl Lowerer {
             ExprKind::ListComp(body, _, _, iter, end, cond) => {
                 Self::collect_expr_var_refs_expr(body, refs);
                 Self::collect_expr_var_refs_expr(iter, refs);
-                if let Some(e) = end { Self::collect_expr_var_refs_expr(e, refs); }
-                if let Some(c) = cond { Self::collect_expr_var_refs_expr(c, refs); }
+                if let Some(e) = end {
+                    Self::collect_expr_var_refs_expr(e, refs);
+                }
+                if let Some(c) = cond {
+                    Self::collect_expr_var_refs_expr(c, refs);
+                }
             }
             ExprKind::CoroutineCreate(_, stmts) => Self::collect_expr_var_refs_block(stmts, refs),
             ExprKind::AtomicCas(a, b, c) => {
@@ -2373,10 +3357,14 @@ impl Lowerer {
                 Self::collect_expr_var_refs_expr(c, refs);
             }
             ExprKind::Einsum(_, args) => {
-                for a in args { Self::collect_expr_var_refs_expr(a, refs); }
+                for a in args {
+                    Self::collect_expr_var_refs_expr(a, refs);
+                }
             }
             ExprKind::Builder(_, fields) => {
-                for (_, e) in fields { Self::collect_expr_var_refs_expr(e, refs); }
+                for (_, e) in fields {
+                    Self::collect_expr_var_refs_expr(e, refs);
+                }
             }
             ExprKind::Block(stmts) => Self::collect_expr_var_refs_block(stmts, refs),
             ExprKind::Lambda(_, body) => Self::collect_expr_var_refs_block(body, refs),
@@ -2388,6 +3376,7 @@ impl Lowerer {
 fn lower_function(f: &hir::Fn) -> Vec<Function> {
     let mut lowerer = Lowerer::new(&f.name, f.def_id, f.span);
     lowerer.func.ret_ty = f.ret.clone();
+    lowerer.func.attrs = f.attrs.clone();
 
     // Create value IDs for parameters
     for p in &f.params {
@@ -2413,7 +3402,10 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
     }
 
     // Add implicit return if not already terminated
-    if matches!(lowerer.func.block(lowerer.current_block).terminator, Terminator::Unreachable) {
+    if matches!(
+        lowerer.func.block(lowerer.current_block).terminator,
+        Terminator::Unreachable
+    ) {
         if matches!(f.ret, Type::Void) {
             lowerer.set_terminator(Terminator::Return(None));
         } else {
@@ -2439,11 +3431,16 @@ fn lower_binop(op: &ast::BinOp) -> BinOp {
         ast::BinOp::BitXor => BinOp::BitXor,
         ast::BinOp::Shl => BinOp::Shl,
         ast::BinOp::Shr => BinOp::Shr,
+        ast::BinOp::Ushr => BinOp::Ushr,
         ast::BinOp::And => BinOp::And,
         ast::BinOp::Or => BinOp::Or,
         // Comparisons handled separately in lower_expr; this path is unreachable.
-        ast::BinOp::Eq | ast::BinOp::Ne | ast::BinOp::Lt
-        | ast::BinOp::Gt | ast::BinOp::Le | ast::BinOp::Ge => {
+        ast::BinOp::Eq
+        | ast::BinOp::Ne
+        | ast::BinOp::Lt
+        | ast::BinOp::Gt
+        | ast::BinOp::Le
+        | ast::BinOp::Ge => {
             unreachable!("comparison ops should be handled by lower_expr, not lower_binop")
         }
     }

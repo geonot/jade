@@ -183,72 +183,121 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
         return -1;
     }
 
-    /* Enqueue on all channel wait queues, then park */
+    /* Enqueue on a channel wait queue, park, then retry in a loop.
+     *
+     * Because the coro has a single intrusive `next` pointer, it can only
+     * sit on one wait queue at a time. We compensate by enqueuing on each
+     * channel in round-robin fashion across retries so that all channels
+     * eventually get a chance to wake us. After each wake we re-scan all
+     * channels for readiness. This is the standard polling-retry approach
+     * for single-node intrusive lists. */
     if (!w || !w->current) {
-        /* No coroutine context — return -1 */
         unlock_all(cases, lock_order, limit);
         return -1;
     }
 
     jade_coro_t *self = w->current;
-    self->state = JADE_CORO_SUSPENDED;
-    self->select_ready = -1;
+    int enqueue_start = 0; /* rotate which channel we enqueue on */
+    int max_retries = 256; /* safety bound to avoid infinite spin */
 
-    for (int i = 0; i < limit; i++) {
-        jade_select_case_t *c = &cases[i];
-        if (!c->chan) continue;
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        self->state = JADE_CORO_SUSPENDED;
+        self->select_ready = -1;
+        self->wait_chan = NULL;
 
-        /* Create a waiter node (we reuse the coro's next pointer which limits
-         * us to being on one wait queue. For multi-channel select we need
-         * separate nodes. For simplicity, we use a polling retry approach
-         * after being woken. */
-        if (c->is_send) {
-            /* Add to send wait queue of first channel */
-            if (!self->wait_chan) {
-                self->wait_chan = c->chan;
-                self->next = NULL;
-                jade_coro_t **tail = &c->chan->send_waitq;
-                while (*tail) tail = &(*tail)->next;
-                *tail = self;
-                break;
+        /* Enqueue on the next available channel (round-robin) */
+        int enqueued = 0;
+        for (int r = 0; r < limit; r++) {
+            int i = (enqueue_start + r) % limit;
+            jade_select_case_t *c = &cases[i];
+            if (!c->chan) continue;
+
+            jade_coro_t **wq = c->is_send ? &c->chan->send_waitq
+                                           : &c->chan->recv_waitq;
+            self->wait_chan = c->chan;
+            self->next = NULL;
+            jade_coro_t **tail = wq;
+            while (*tail) tail = &(*tail)->next;
+            *tail = self;
+            enqueue_start = (i + 1) % limit; /* next attempt uses next channel */
+            enqueued = 1;
+            break;
+        }
+
+        if (!enqueued) {
+            /* No valid channels at all */
+            unlock_all(cases, lock_order, limit);
+            return -1;
+        }
+
+        unlock_all(cases, lock_order, limit);
+
+        /* Park — scheduler will resume us when the channel we're on fires */
+        w->held_chan_lock = NULL;
+        w->last_action = SCHED_ACTION_PARK;
+        jade_context_swap(&self->ctx, &w->sched_ctx);
+
+        /* Woken — re-lock all channels and scan for readiness */
+        lock_all(cases, lock_order, limit);
+
+        /* Dequeue ourselves from whatever wait queue we were on */
+        if (self->wait_chan) {
+            jade_chan_t *wch = (jade_chan_t *)self->wait_chan;
+            /* Try both queues — we don't know if waker already removed us */
+            jade_coro_t **pp = &wch->send_waitq;
+            while (*pp && *pp != self) pp = &(*pp)->next;
+            if (*pp == self) *pp = self->next;
+            else {
+                pp = &wch->recv_waitq;
+                while (*pp && *pp != self) pp = &(*pp)->next;
+                if (*pp == self) *pp = self->next;
             }
-        } else {
-            if (!self->wait_chan) {
-                self->wait_chan = c->chan;
-                self->next = NULL;
-                jade_coro_t **tail = &c->chan->recv_waitq;
-                while (*tail) tail = &(*tail)->next;
-                *tail = self;
-                break;
+            self->wait_chan = NULL;
+            self->next = NULL;
+        }
+
+        /* Scan all channels in shuffled order for a ready one */
+        for (int i = 0; i < limit; i++) {
+            int idx = poll_order[i];
+            jade_select_case_t *c = &cases[idx];
+            if (!c->chan) continue;
+            if (c->is_send && chan_can_send(c->chan)) {
+                chan_send_locked(c->chan, c->data);
+                jade_coro_t *waiter = c->chan->recv_waitq;
+                if (waiter) {
+                    c->chan->recv_waitq = waiter->next;
+                    waiter->next = NULL;
+                    waiter->wait_chan = NULL;
+                    waiter->state = JADE_CORO_READY;
+                    unlock_all(cases, lock_order, limit);
+                    jade_sched_enqueue(waiter);
+                    return idx;
+                }
+                unlock_all(cases, lock_order, limit);
+                return idx;
+            }
+            if (!c->is_send && chan_can_recv(c->chan)) {
+                chan_recv_locked(c->chan, c->data);
+                jade_coro_t *waiter = c->chan->send_waitq;
+                if (waiter) {
+                    c->chan->send_waitq = waiter->next;
+                    waiter->next = NULL;
+                    waiter->wait_chan = NULL;
+                    waiter->state = JADE_CORO_READY;
+                    unlock_all(cases, lock_order, limit);
+                    jade_sched_enqueue(waiter);
+                    return idx;
+                }
+                unlock_all(cases, lock_order, limit);
+                return idx;
             }
         }
+        /* Nothing ready yet — loop back and enqueue on next channel */
     }
 
+    /* Exhausted retries — potential deadlock */
     unlock_all(cases, lock_order, limit);
-
-    /* Park */
-    w->held_chan_lock = NULL;
-    w->last_action = SCHED_ACTION_PARK;
-    jade_context_swap(&self->ctx, &w->sched_ctx);
-
-    /* Woken — retry the select from the top (scan for which channel is ready) */
-    /* Lock all again */
-    lock_all(cases, lock_order, limit);
-    for (int i = 0; i < limit; i++) {
-        int idx = poll_order[i];
-        jade_select_case_t *c = &cases[idx];
-        if (!c->chan) continue;
-        if (c->is_send && chan_can_send(c->chan)) {
-            chan_send_locked(c->chan, c->data);
-            unlock_all(cases, lock_order, limit);
-            return idx;
-        }
-        if (!c->is_send && chan_can_recv(c->chan)) {
-            chan_recv_locked(c->chan, c->data);
-            unlock_all(cases, lock_order, limit);
-            return idx;
-        }
-    }
-    unlock_all(cases, lock_order, limit);
+    fprintf(stderr, "jade: select: exhausted %d retries — possible deadlock\n",
+            max_retries);
     return -1;
 }

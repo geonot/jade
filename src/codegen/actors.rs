@@ -166,7 +166,7 @@ impl<'ctx> Compiler<'ctx> {
                 let bb = handler_bbs[i].1;
                 self.bld.position_at_end(bb);
 
-                self.vars.push(std::collections::HashMap::new());
+                self.push_var_scope();
 
                 for (fi, field) in ad.fields.iter().enumerate() {
                     let field_ptr = b!(self.bld.build_struct_gep(
@@ -207,11 +207,15 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self.bld.build_unconditional_branch(loop_bb));
                 }
 
-                self.vars.pop();
+                self.pop_var_scope();
             }
         }
 
         self.bld.position_at_end(exit_bb);
+        // Clean up: destroy the mailbox (frees channel + mailbox memory)
+        if let Some(destroy_fn) = self.module.get_function("jade_actor_destroy") {
+            b!(self.bld.build_call(destroy_fn, &[mb_ptr.into()], ""));
+        }
         b!(self.bld.build_return(None));
 
         self.cur_fn = old_fn;
@@ -280,6 +284,28 @@ impl<'ctx> Compiler<'ctx> {
 
         let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
+
+        // Initialize actor state fields with default values (if any)
+        if let Some(ad) = self.actor_defs.get(actor_name).cloned() {
+            let state_name = format!("{actor_name}_state");
+            if let Some(state_st) = self.module.get_struct_type(&state_name) {
+                let state_ptr = b!(self
+                    .bld
+                    .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
+                for (fi, field) in ad.fields.iter().enumerate() {
+                    if let Some(ref default_expr) = field.default {
+                        let val = self.compile_expr(default_expr)?;
+                        let field_ptr = b!(self.bld.build_struct_gep(
+                            state_st,
+                            state_ptr,
+                            fi as u32,
+                            &format!("state_init_{}", field.name)
+                        ));
+                        b!(self.bld.build_store(field_ptr, val));
+                    }
+                }
+            }
+        }
 
         let loop_fn = self
             .module

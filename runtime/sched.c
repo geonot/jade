@@ -33,12 +33,18 @@ static uint32_t jade_xorshift(uint64_t *state) {
 static _Atomic(int32_t) g_inject_lock = 0;
 
 static inline void inject_lock_acquire(void) {
+    int spins = 0;
     while (atomic_exchange_explicit(&g_inject_lock, 1, memory_order_acquire) != 0) {
+        if (spins < 16) {
 #if defined(__x86_64__)
-        __builtin_ia32_pause();
+            __builtin_ia32_pause();
 #elif defined(__aarch64__)
-        __asm__ volatile("yield");
+            __asm__ volatile("yield");
 #endif
+        } else {
+            sched_yield();
+        }
+        spins++;
     }
 }
 
@@ -198,7 +204,13 @@ static void *jade_worker_loop(void *arg) {
 
         if (w->last_action == SCHED_ACTION_DESTROY) {
             if (!c->daemon) {
-                atomic_fetch_sub(&g_sched.active_coros, 1);
+                int64_t remaining = atomic_fetch_sub(&g_sched.active_coros, 1) - 1;
+                if (remaining <= 0) {
+                    /* Last coroutine finished — signal jade_sched_run() */
+                    pthread_mutex_lock(&g_sched.done_lock);
+                    pthread_cond_signal(&g_sched.done_cond);
+                    pthread_mutex_unlock(&g_sched.done_lock);
+                }
             }
             jade_coro_destroy(c);
         } else if (w->last_action == SCHED_ACTION_REQUEUE) {
@@ -230,6 +242,8 @@ void jade_sched_init(int num_workers) {
     atomic_store(&g_inject_lock, 0);
     pthread_mutex_init(&g_sched.idle_lock, NULL);
     pthread_cond_init(&g_sched.idle_cond, NULL);
+    pthread_mutex_init(&g_sched.done_lock, NULL);
+    pthread_cond_init(&g_sched.done_cond, NULL);
 
     for (int i = 0; i < num_workers; i++) {
         g_sched.workers[i].id = (uint32_t)i;
@@ -281,11 +295,12 @@ void jade_sched_enqueue(jade_coro_t *c) {
 
 void jade_sched_run(void) {
     /* Block until all coroutines are done */
+    if (!atomic_load(&g_sched.started)) return;
+    pthread_mutex_lock(&g_sched.done_lock);
     while (atomic_load(&g_sched.active_coros) > 0) {
-        /* If no workers started yet, nothing to wait for */
-        if (!atomic_load(&g_sched.started)) break;
-        usleep(100);  /* 100μs poll interval */
+        pthread_cond_wait(&g_sched.done_cond, &g_sched.done_lock);
     }
+    pthread_mutex_unlock(&g_sched.done_lock);
 }
 
 void jade_sched_shutdown(void) {
@@ -301,6 +316,8 @@ void jade_sched_shutdown(void) {
 
     pthread_mutex_destroy(&g_sched.idle_lock);
     pthread_cond_destroy(&g_sched.idle_cond);
+    pthread_mutex_destroy(&g_sched.done_lock);
+    pthread_cond_destroy(&g_sched.done_cond);
     free(g_sched.workers);
     g_sched.workers = NULL;
 }

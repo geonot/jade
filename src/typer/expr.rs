@@ -170,6 +170,16 @@ impl Typer {
                 if let Some(const_expr) = self.consts.get(name).cloned() {
                     return self.lower_expr(&const_expr);
                 }
+                if let Some((_expr, _span)) = self.globals.get(name).cloned() {
+                    // Emit a load from the global variable
+                    let init_expr = self.lower_expr(&_expr)?;
+                    let ty = init_expr.ty.clone();
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::GlobalLoad(name.clone()),
+                        ty,
+                        span: *span,
+                    });
+                }
                 if let Some((id, ptys, ret)) = self.fns.get(name).cloned() {
                     let fn_ty =
                         if let Some((ref q, ref sp, ref sr)) = self.fn_schemes.get(name).cloned() {
@@ -200,7 +210,9 @@ impl Typer {
                 }
                 // Implicit self.field resolution inside method bodies
                 if let Some(ref type_name) = self.current_method_type.clone() {
-                    let is_field = self.structs.get(type_name)
+                    let is_field = self
+                        .structs
+                        .get(type_name)
                         .map(|fields| fields.iter().any(|(n, _)| n == name))
                         .unwrap_or(false);
                     if is_field {
@@ -219,11 +231,17 @@ impl Typer {
             ast::Expr::QualifiedIdent(type_name, variant_name, span) => {
                 // Handle ErrorType:Variant or EnumType:Variant
                 if let Some(variants) = self.enums.get(type_name) {
-                    if let Some((tag, (_, _))) = variants.iter().enumerate()
+                    if let Some((tag, (_, _))) = variants
+                        .iter()
+                        .enumerate()
                         .find(|(_, (vn, _))| vn == variant_name)
                     {
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::VariantRef(type_name.clone(), variant_name.clone(), tag as u32),
+                            kind: hir::ExprKind::VariantRef(
+                                type_name.clone(),
+                                variant_name.clone(),
+                                tag as u32,
+                            ),
                             ty: Type::Enum(type_name.clone()),
                             span: *span,
                         });
@@ -253,7 +271,8 @@ impl Typer {
                         let resolved_r = self.infer_ctx.shallow_resolve(&hr.ty);
                         // For Add: if either side is String, this is string concatenation
                         let is_string_concat = matches!(op, BinOp::Add)
-                            && (matches!(resolved_l, Type::String) || matches!(resolved_r, Type::String));
+                            && (matches!(resolved_l, Type::String)
+                                || matches!(resolved_r, Type::String));
                         if is_string_concat {
                             // Constrain the other side to String too
                             if matches!(resolved_l, Type::TypeVar(_)) {
@@ -298,7 +317,7 @@ impl Typer {
                             }
                         }
                     }
-                    BinOp::Shl | BinOp::Shr | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                    BinOp::Shl | BinOp::Shr | BinOp::Ushr | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
                         let _ = self.infer_ctx.constrain(
                             &hl.ty,
                             super::unify::TypeConstraint::Integer,
@@ -384,9 +403,7 @@ impl Typer {
 
             ast::Expr::Call(callee, args, span) => {
                 // Partial application: if any arg is $, wrap in a lambda
-                let has_placeholder = args
-                    .iter()
-                    .any(|a| matches!(a, ast::Expr::Placeholder(_)));
+                let has_placeholder = args.iter().any(|a| matches!(a, ast::Expr::Placeholder(_)));
                 if has_placeholder {
                     let param = ast::Param {
                         name: "__ph".into(),
@@ -406,49 +423,105 @@ impl Typer {
                         })
                         .collect();
                     let call = ast::Expr::Call(callee.clone(), new_args, *span);
-                    let lambda = ast::Expr::Lambda(
-                        vec![param],
-                        None,
-                        vec![ast::Stmt::Expr(call)],
-                        *span,
-                    );
+                    let lambda =
+                        ast::Expr::Lambda(vec![param], None, vec![ast::Stmt::Expr(call)], *span);
                     return self.lower_expr_expected(&lambda, expected);
                 }
                 let result = self.lower_call(callee, args, *span)?;
                 if let Some(exp) = expected {
-                    let _ = self
-                        .infer_ctx
-                        .unify_at(exp, &result.ty, *span, "call result");
+                    self.unify_call_result(exp, &result.ty, *span, "call result");
                 }
                 Ok(result)
             }
 
             ast::Expr::Method(obj, method, args, span) => {
-                // Module-qualified dispatch: module.fn(args) → fn(args)
+                // Module-qualified dispatch: module.fn(args) → module_fn(args)
                 // Only if the name is NOT a local variable (variables shadow modules)
                 if let ast::Expr::Ident(ref name, _) = **obj {
                     if self.modules.contains(name) && self.find_var(name).is_none() {
-                        // Rewrite module.fn(args) to a direct function call
+                        // Rewrite module.fn(args) to a prefixed function call
+                        let qualified_name = format!("{}_{}", name, method);
+                        // If the qualified name is a known extern called from within
+                        // the module, dispatch via the extern path
+                        if !self.fns.contains_key(&qualified_name)
+                            && !self.inferable_fns.contains_key(&qualified_name)
+                            && !self.generic_fns.contains_key(&qualified_name)
+                        {
+                            if let Some((id, ptys, ret)) = self.externs.get(method).cloned() {
+                                let mut hargs = Vec::new();
+                                for (i, arg) in args.iter().enumerate() {
+                                    let expected_ty = ptys.get(i);
+                                    hargs.push(self.lower_expr_expected(arg, expected_ty)?);
+                                }
+                                for (i, harg) in hargs.iter().enumerate() {
+                                    if let Some(pty) = ptys.get(i) {
+                                        let _ = self.infer_ctx.unify_at(
+                                            pty,
+                                            &harg.ty,
+                                            *span,
+                                            "extern arg",
+                                        );
+                                    }
+                                }
+                                return Ok(hir::Expr {
+                                    kind: hir::ExprKind::Call(id, method.clone(), hargs),
+                                    ty: ret,
+                                    span: *span,
+                                });
+                            }
+                        }
+                        let callee = ast::Expr::Ident(qualified_name, *span);
+                        let result = self.lower_call(&callee, args, *span)?;
+                        if let Some(exp) = expected {
+                            self.unify_call_result(exp, &result.ty, *span, "call result");
+                        }
+                        return Ok(result);
+                    }
+                    // extern.fn(args) → call extern function directly by bare name
+                    if name == "extern" {
+                        if let Some((id, ptys, ret)) = self.externs.get(method).cloned() {
+                            let mut hargs = Vec::new();
+                            for (i, arg) in args.iter().enumerate() {
+                                let expected_ty = ptys.get(i);
+                                hargs.push(self.lower_expr_expected(arg, expected_ty)?);
+                            }
+                            for (i, harg) in hargs.iter().enumerate() {
+                                if let Some(pty) = ptys.get(i) {
+                                    let _ =
+                                        self.infer_ctx.unify_at(pty, &harg.ty, *span, "extern arg");
+                                }
+                            }
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::Call(id, method.clone(), hargs),
+                                ty: ret,
+                                span: *span,
+                            });
+                        }
+                        // Fall through — maybe it's a regular function named "extern_method"
                         let callee = ast::Expr::Ident(method.clone(), *span);
                         let result = self.lower_call(&callee, args, *span)?;
                         if let Some(exp) = expected {
-                            let _ = self
-                                .infer_ctx
-                                .unify_at(exp, &result.ty, *span, "call result");
+                            self.unify_call_result(exp, &result.ty, *span, "call result");
                         }
                         return Ok(result);
                     }
                 }
                 let result = self.lower_method_call(obj, method, args, *span)?;
                 if let Some(exp) = expected {
-                    let _ = self
-                        .infer_ctx
-                        .unify_at(exp, &result.ty, *span, "method call result");
+                    self.unify_call_result(exp, &result.ty, *span, "method call result");
                 }
                 Ok(result)
             }
 
             ast::Expr::Field(obj, field, span) => {
+                // Module-qualified constant access: module.CONST → module_CONST
+                if let ast::Expr::Ident(ref name, _) = **obj {
+                    if self.modules.contains(name) && self.find_var(name).is_none() {
+                        let qualified_name = format!("{}_{}", name, field);
+                        let callee = ast::Expr::Ident(qualified_name, *span);
+                        return self.lower_expr_expected(&callee, expected);
+                    }
+                }
                 let hobj = self.lower_expr(obj)?;
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
                 let struct_name = match &resolved_ty {
@@ -611,10 +684,22 @@ impl Typer {
                 let hc = self.lower_expr(cond)?;
                 let ht = self.lower_expr_expected(then, expected)?;
                 let he = self.lower_expr_expected(els, expected)?;
-                let _ = self
-                    .infer_ctx
-                    .unify_at(&ht.ty, &he.ty, *span, "ternary branches");
-                let ty = ht.ty.clone();
+                // For partial ternaries (if-only or else-only), skip unification
+                // when one branch is Void — the result type comes from the non-Void branch.
+                let ty = match (&ht.ty, &he.ty) {
+                    (Type::Void, _) => {
+                        he.ty.clone()
+                    }
+                    (_, Type::Void) => {
+                        ht.ty.clone()
+                    }
+                    _ => {
+                        let _ = self
+                            .infer_ctx
+                            .unify_at(&ht.ty, &he.ty, *span, "ternary branches");
+                        ht.ty.clone()
+                    }
+                };
                 let he = self.maybe_coerce_to(he, &ty);
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Ternary(Box::new(hc), Box::new(ht), Box::new(he)),
@@ -719,6 +804,14 @@ impl Typer {
             }
 
             ast::Expr::Placeholder(span) => Ok(hir::Expr {
+                kind: hir::ExprKind::Void,
+                ty: expected
+                    .cloned()
+                    .unwrap_or_else(|| self.infer_ctx.fresh_var()),
+                span: *span,
+            }),
+
+            ast::Expr::IndexPlaceholder(span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Void,
                 ty: expected
                     .cloned()
@@ -837,11 +930,70 @@ impl Typer {
                     span: *span,
                 })
             }
-            ast::Expr::Query(_, _, span) => Ok(hir::Expr {
-                kind: hir::ExprKind::Void,
-                ty: Type::Void,
-                span: *span,
-            }),
+            ast::Expr::Query(source, clauses, span) => {
+                // Extract store name from source expression
+                let store_name = match source.as_ref() {
+                    ast::Expr::Ident(name, _) => name.clone(),
+                    _ => return Err("query block source must be a store name".into()),
+                };
+                let schema = self
+                    .store_schemas
+                    .get(&store_name)
+                    .ok_or_else(|| format!("unknown store '{store_name}'"))?
+                    .clone();
+
+                // Collect clauses
+                let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
+                let mut has_delete = false;
+                let mut sets: Vec<(String, ast::Expr)> = Vec::new();
+                for clause in clauses {
+                    match clause {
+                        ast::QueryClause::Where(expr, cspan) => {
+                            where_exprs.push((expr.clone(), *cspan));
+                        }
+                        ast::QueryClause::Delete(_) => {
+                            has_delete = true;
+                        }
+                        ast::QueryClause::Set(field, val, _) => {
+                            sets.push((field.clone(), val.clone()));
+                        }
+                        _ => {} // sort/limit/take/skip — future work
+                    }
+                }
+
+                if where_exprs.is_empty() {
+                    return Err("query block requires at least one where clause".into());
+                }
+
+                let ast_filter = Self::merge_where_clauses(&where_exprs)?;
+                let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name)?;
+
+                if has_delete {
+                    // Delete query block — void expression, side-effect handled
+                    // via the stmt-level interceptor
+                    Ok(hir::Expr {
+                        kind: hir::ExprKind::Void,
+                        ty: Type::Void,
+                        span: *span,
+                    })
+                } else if !sets.is_empty() {
+                    // Set query block — void expression, side-effect handled
+                    // via the stmt-level interceptor
+                    Ok(hir::Expr {
+                        kind: hir::ExprKind::Void,
+                        ty: Type::Void,
+                        span: *span,
+                    })
+                } else {
+                    // Read query → StoreQuery
+                    let struct_name = format!("__store_{store_name}");
+                    Ok(hir::Expr {
+                        kind: hir::ExprKind::StoreQuery(store_name, Box::new(hfilter)),
+                        ty: Type::Struct(struct_name, vec![]),
+                        span: *span,
+                    })
+                }
+            }
 
             ast::Expr::StoreQuery(store, filter, span) => {
                 let schema = self
@@ -881,6 +1033,59 @@ impl Typer {
                 })
             }
 
+            ast::Expr::StoreGet(store, key_expr, span) => {
+                if !self.store_schemas.contains_key(store) {
+                    return Err(format!("unknown store '{store}'"));
+                }
+                let hkey = self.lower_expr(key_expr)?;
+                let struct_name = format!("__store_{store}");
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreGet(store.clone(), Box::new(hkey)),
+                    ty: Type::Struct(struct_name, vec![]),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StoreFirst(store, filter, span) => {
+                let schema = self
+                    .store_schemas
+                    .get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let struct_name = format!("__store_{store}");
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreFirst(store.clone(), Box::new(hfilter)),
+                    ty: Type::Struct(struct_name, vec![]),
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StoreExists(store, filter, span) => {
+                let schema = self
+                    .store_schemas
+                    .get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreExists(store.clone(), Box::new(hfilter)),
+                    ty: Type::Bool,
+                    span: *span,
+                })
+            }
+
+            ast::Expr::StoreDistinct(store, field, span) => {
+                if !self.store_schemas.contains_key(store) {
+                    return Err(format!("unknown store '{store}'"));
+                }
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::StoreDistinct(store.clone(), field.clone()),
+                    ty: Type::Vec(Box::new(Type::String)),
+                    span: *span,
+                })
+            }
+
             ast::Expr::Spawn(name, span) => {
                 if !self.actors.contains_key(name) {
                     return Err(format!("spawn: unknown actor '{name}'"));
@@ -903,23 +1108,39 @@ impl Typer {
                         ));
                     }
                 };
-                let (_, _, ref handlers) = self
+                let (_, _, handlers) = self
                     .actors
                     .get(&actor_name)
                     .ok_or_else(|| format!("send: unknown actor '{actor_name}'"))?
                     .clone();
-                let (_, _, tag) =
-                    handlers
-                        .iter()
-                        .find(|(n, _, _)| n == handler)
-                        .ok_or_else(|| {
-                            format!("send: actor '{actor_name}' has no handler '@{handler}'")
-                        })?;
-                let tag = *tag;
-                let hargs: Vec<hir::Expr> = args
+                let found = handlers
                     .iter()
-                    .map(|e| self.lower_expr(e))
-                    .collect::<Result<_, _>>()?;
+                    .find(|(n, _, _)| n == handler)
+                    .ok_or_else(|| {
+                        format!("send: actor '{actor_name}' has no handler '@{handler}'")
+                    })?;
+                let handler_ptys = found.1.clone();
+                let tag = found.2;
+                // Validate argument count
+                if args.len() != handler_ptys.len() {
+                    return Err(format!(
+                        "send: handler '@{handler}' on actor '{actor_name}' expects {} argument(s), got {}",
+                        handler_ptys.len(),
+                        args.len()
+                    ));
+                }
+                // Lower and type-check each argument against handler parameter types
+                let mut hargs: Vec<hir::Expr> = Vec::with_capacity(args.len());
+                for (i, arg) in args.iter().enumerate() {
+                    let harg = self.lower_expr_expected(arg, Some(&handler_ptys[i]))?;
+                    let _ = self.infer_ctx.unify_at(
+                        &handler_ptys[i],
+                        &harg.ty,
+                        *span,
+                        "send handler argument type",
+                    );
+                    hargs.push(harg);
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Send(
                         Box::new(htarget),
@@ -933,11 +1154,11 @@ impl Typer {
                 })
             }
 
-            ast::Expr::Receive(_, span) => Ok(hir::Expr {
-                kind: hir::ExprKind::Void,
-                ty: Type::Void,
-                span: *span,
-            }),
+            ast::Expr::Receive(_, span) => Err(format!(
+                "line {}:{}: 'receive' is not supported outside actor handlers; \
+                 use channels directly with 'receive ch'",
+                span.line, span.col,
+            )),
 
             ast::Expr::Yield(inner, span) => {
                 let hi = self.lower_expr(inner)?;
@@ -1165,9 +1386,16 @@ impl Typer {
                     .iter()
                     .map(|d| self.lower_expr_expected(d, Some(&Type::I64)))
                     .collect::<Result<_, _>>()?;
-                let shape: Vec<usize> = hdims.iter().map(|d| {
-                    if let hir::ExprKind::Int(n) = &d.kind { *n as usize } else { 0 }
-                }).collect();
+                let shape: Vec<usize> = hdims
+                    .iter()
+                    .map(|d| {
+                        if let hir::ExprKind::Int(n) = &d.kind {
+                            *n as usize
+                        } else {
+                            0
+                        }
+                    })
+                    .collect();
                 Ok(hir::Expr {
                     kind: hir::ExprKind::NDArrayNew(hdims),
                     ty: Type::NDArray(Box::new(Type::F64), shape),
@@ -1277,11 +1505,11 @@ impl Typer {
                                         Type::I32 | Type::U32 | Type::F32 => 4,
                                         Type::I64 | Type::U64 | Type::F64 => 8,
                                         Type::String => 24,
-                                        Type::Struct(sname, _) => {
-                                            self.structs.get(sname)
-                                                .map(|f| f.len() as i64 * 8)
-                                                .unwrap_or(8)
-                                        }
+                                        Type::Struct(sname, _) => self
+                                            .structs
+                                            .get(sname)
+                                            .map(|f| f.len() as i64 * 8)
+                                            .unwrap_or(8),
                                         _ => 8,
                                     }
                                 }
@@ -1330,6 +1558,336 @@ impl Typer {
                     span: *span,
                 })
             }
+
+            ast::Expr::Try(inner, span) => {
+                let fn_ret = self.current_fn_ret_ty.clone().unwrap_or_else(|| {
+                    self.infer_ctx.fresh_var()
+                });
+                self.lower_try(inner, *span, &fn_ret)
+            }
+        }
+    }
+
+    /// Desugar `try expr` into an HIR match that unwraps Option/Result on
+    /// the happy path and early-returns on the error path.
+    ///
+    /// For `Option_T`:
+    ///   match expr { Some(v) => v, Nothing => return Nothing }
+    ///
+    /// For `Result_T_E`:
+    ///   match expr { Ok(v) => v, Err(e) => err Err(e) }
+    fn lower_try(
+        &mut self,
+        inner: &ast::Expr,
+        span: Span,
+        ret_ty: &Type,
+    ) -> Result<hir::Expr, String> {
+        let hexpr = self.lower_expr(inner)?;
+        let resolved = self.infer_ctx.resolve(&hexpr.ty);
+
+        let enum_name = match &resolved {
+            Type::Enum(n) => n.clone(),
+            Type::Struct(n, _) if self.enums.contains_key(n) => n.clone(),
+            _ => {
+                return Err(format!(
+                    "try requires an Option or Result value, got {:?} at {:?}",
+                    resolved, span
+                ));
+            }
+        };
+
+        let is_option = enum_name.starts_with("Option_") || enum_name == "Option";
+        let is_result = enum_name.starts_with("Result_") || enum_name == "Result";
+
+        if !is_option && !is_result {
+            return Err(format!(
+                "try requires an Option or Result value, got enum '{}' at {:?}",
+                enum_name, span
+            ));
+        }
+
+        let variants = self.enums.get(&enum_name).cloned().unwrap_or_default();
+
+        if is_option {
+            // Option: variants are [(Some, [T]), (Nothing, [])]
+            let some_tag = variants
+                .iter()
+                .position(|(n, _)| n == "Some")
+                .unwrap_or(0) as u32;
+            let nothing_tag = variants
+                .iter()
+                .position(|(n, _)| n == "Nothing")
+                .unwrap_or(1) as u32;
+            let inner_ty = variants
+                .first()
+                .and_then(|(_, ftys)| ftys.first().cloned())
+                .unwrap_or(Type::I64);
+
+            // Verify the enclosing function also returns an Option so we can propagate
+            let resolved_ret = self.infer_ctx.resolve(ret_ty);
+            match &resolved_ret {
+                Type::Enum(rn) | Type::Struct(rn, _)
+                    if rn.starts_with("Option_") || rn == "Option" => {}
+                _ => {
+                    // Try to unify ret_ty with the same Option type
+                    let _ = self.infer_ctx.unify_at(
+                        ret_ty,
+                        &Type::Enum(enum_name.clone()),
+                        span,
+                        "try propagation requires matching return type",
+                    );
+                }
+            }
+
+            // Build: match <expr> { Some(v) => v, Nothing => return Nothing }
+            let bind_id = self.fresh_id();
+            let bind_name = format!("__try_{}", bind_id.0);
+
+            let some_pat = hir::Pat::Ctor(
+                "Some".to_string(),
+                some_tag,
+                vec![hir::Pat::Bind(
+                    bind_id,
+                    bind_name.clone(),
+                    inner_ty.clone(),
+                    span,
+                )],
+                span,
+            );
+            let some_body = vec![hir::Stmt::Expr(hir::Expr {
+                kind: hir::ExprKind::Var(bind_id, bind_name),
+                ty: inner_ty.clone(),
+                span,
+            })];
+
+            // Nothing arm: build a Nothing variant ctor and early-return it
+            let nothing_val = hir::Expr {
+                kind: hir::ExprKind::VariantCtor(
+                    enum_name.clone(),
+                    "Nothing".to_string(),
+                    nothing_tag,
+                    vec![],
+                ),
+                ty: Type::Enum(enum_name.clone()),
+                span,
+            };
+            let nothing_pat = hir::Pat::Ctor("Nothing".to_string(), nothing_tag, vec![], span);
+            let nothing_body = vec![hir::Stmt::Ret(
+                Some(nothing_val),
+                Type::Enum(enum_name.clone()),
+                span,
+            )];
+
+            let match_expr = hir::Match {
+                subject: hexpr,
+                arms: vec![
+                    hir::Arm {
+                        pat: some_pat,
+                        guard: None,
+                        body: some_body,
+                        span,
+                    },
+                    hir::Arm {
+                        pat: nothing_pat,
+                        guard: None,
+                        body: nothing_body,
+                        span,
+                    },
+                ],
+                ty: inner_ty.clone(),
+                span,
+            };
+
+            Ok(hir::Expr {
+                kind: hir::ExprKind::Block(vec![hir::Stmt::Match(match_expr)]),
+                ty: inner_ty,
+                span,
+            })
+        } else {
+            // Result: variants are [(Ok, [T]), (Err, [E])]
+            let ok_tag = variants
+                .iter()
+                .position(|(n, _)| n == "Ok")
+                .unwrap_or(0) as u32;
+            let err_tag = variants
+                .iter()
+                .position(|(n, _)| n == "Err")
+                .unwrap_or(1) as u32;
+            let ok_ty = variants
+                .iter()
+                .find(|(n, _)| n == "Ok")
+                .and_then(|(_, ftys)| ftys.first().cloned())
+                .unwrap_or(Type::I64);
+            let err_ty = variants
+                .iter()
+                .find(|(n, _)| n == "Err")
+                .and_then(|(_, ftys)| ftys.first().cloned())
+                .unwrap_or(Type::String);
+
+            // Verify the enclosing function also returns a Result so we can propagate
+            let resolved_ret = self.infer_ctx.resolve(ret_ty);
+            match &resolved_ret {
+                Type::Enum(rn) | Type::Struct(rn, _)
+                    if rn.starts_with("Result_") || rn == "Result" => {}
+                _ => {
+                    let _ = self.infer_ctx.unify_at(
+                        ret_ty,
+                        &Type::Enum(enum_name.clone()),
+                        span,
+                        "try propagation requires matching return type",
+                    );
+                }
+            }
+
+            // Build: match <expr> { Ok(v) => v, Err(e) => return Err(e) }
+            let ok_bind_id = self.fresh_id();
+            let ok_bind_name = format!("__try_ok_{}", ok_bind_id.0);
+            let err_bind_id = self.fresh_id();
+            let err_bind_name = format!("__try_err_{}", err_bind_id.0);
+
+            let ok_pat = hir::Pat::Ctor(
+                "Ok".to_string(),
+                ok_tag,
+                vec![hir::Pat::Bind(
+                    ok_bind_id,
+                    ok_bind_name.clone(),
+                    ok_ty.clone(),
+                    span,
+                )],
+                span,
+            );
+            let ok_body = vec![hir::Stmt::Expr(hir::Expr {
+                kind: hir::ExprKind::Var(ok_bind_id, ok_bind_name),
+                ty: ok_ty.clone(),
+                span,
+            })];
+
+            let err_pat = hir::Pat::Ctor(
+                "Err".to_string(),
+                err_tag,
+                vec![hir::Pat::Bind(
+                    err_bind_id,
+                    err_bind_name.clone(),
+                    err_ty.clone(),
+                    span,
+                )],
+                span,
+            );
+            // Re-wrap the error value in Err(...) for current function's Result type
+            let err_var = hir::Expr {
+                kind: hir::ExprKind::Var(err_bind_id, err_bind_name),
+                ty: err_ty.clone(),
+                span,
+            };
+            let err_rewrap = hir::Expr {
+                kind: hir::ExprKind::VariantCtor(
+                    enum_name.clone(),
+                    "Err".to_string(),
+                    err_tag,
+                    vec![hir::FieldInit {
+                        name: None,
+                        value: err_var,
+                    }],
+                ),
+                ty: Type::Enum(enum_name.clone()),
+                span,
+            };
+            let err_body = vec![hir::Stmt::Ret(
+                Some(err_rewrap),
+                Type::Enum(enum_name.clone()),
+                span,
+            )];
+
+            let match_expr = hir::Match {
+                subject: hexpr,
+                arms: vec![
+                    hir::Arm {
+                        pat: ok_pat,
+                        guard: None,
+                        body: ok_body,
+                        span,
+                    },
+                    hir::Arm {
+                        pat: err_pat,
+                        guard: None,
+                        body: err_body,
+                        span,
+                    },
+                ],
+                ty: ok_ty.clone(),
+                span,
+            };
+
+            Ok(hir::Expr {
+                kind: hir::ExprKind::Block(vec![hir::Stmt::Match(match_expr)]),
+                ty: ok_ty,
+                span,
+            })
+        }
+    }
+
+    /// Collect a mapping from type parameter names to concrete types
+    /// by walking a declared (possibly-generic) type alongside a concrete type.
+    fn collect_type_mapping(
+        declared: &Type,
+        concrete: &Type,
+        map: &mut std::collections::HashMap<String, Type>,
+    ) {
+        match declared {
+            Type::Param(name) => {
+                map.entry(name.clone()).or_insert_with(|| concrete.clone());
+            }
+            Type::Vec(inner) => {
+                if let Type::Vec(ci) = concrete {
+                    Self::collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Ptr(inner) => {
+                if let Type::Ptr(ci) = concrete {
+                    Self::collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Rc(inner) => {
+                if let Type::Rc(ci) = concrete {
+                    Self::collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Fn(params, ret) => {
+                if let Type::Fn(cp, cr) = concrete {
+                    for (dp, cp) in params.iter().zip(cp.iter()) {
+                        Self::collect_type_mapping(dp, cp, map);
+                    }
+                    Self::collect_type_mapping(ret, cr, map);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Substitute type parameter names in a type with their concrete types.
+    fn substitute_type_params(
+        ty: &Type,
+        map: &std::collections::HashMap<String, Type>,
+    ) -> Type {
+        match ty {
+            Type::Param(name) => map.get(name).cloned().unwrap_or_else(|| ty.clone()),
+            Type::Vec(inner) => Type::Vec(Box::new(Self::substitute_type_params(inner, map))),
+            Type::Ptr(inner) => Type::Ptr(Box::new(Self::substitute_type_params(inner, map))),
+            Type::Rc(inner) => Type::Rc(Box::new(Self::substitute_type_params(inner, map))),
+            Type::Fn(params, ret) => Type::Fn(
+                params
+                    .iter()
+                    .map(|p| Self::substitute_type_params(p, map))
+                    .collect(),
+                Box::new(Self::substitute_type_params(ret, map)),
+            ),
+            Type::Struct(name, args) => Type::Struct(
+                name.clone(),
+                args.iter()
+                    .map(|a| Self::substitute_type_params(a, map))
+                    .collect(),
+            ),
+            _ => ty.clone(),
         }
     }
 
@@ -1342,7 +1900,9 @@ impl Typer {
         // Handle Arena(cap) as builtin
         if name == "Arena" && inits.len() == 1 {
             let harg = self.lower_expr_expected(&inits[0].value, Some(&Type::I64))?;
-            let _ = self.infer_ctx.unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
+            let _ = self
+                .infer_ctx
+                .unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::ArenaNew, vec![harg]),
                 ty: Type::Arena,
@@ -1354,8 +1914,12 @@ impl Typer {
         if name == "Pool" && inits.len() == 2 {
             let hsize = self.lower_expr_expected(&inits[0].value, Some(&Type::I64))?;
             let hcount = self.lower_expr_expected(&inits[1].value, Some(&Type::I64))?;
-            let _ = self.infer_ctx.unify_at(&hsize.ty, &Type::I64, span, "Pool obj_size");
-            let _ = self.infer_ctx.unify_at(&hcount.ty, &Type::I64, span, "Pool count");
+            let _ = self
+                .infer_ctx
+                .unify_at(&hsize.ty, &Type::I64, span, "Pool obj_size");
+            let _ = self
+                .infer_ctx
+                .unify_at(&hcount.ty, &Type::I64, span, "Pool count");
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::PoolNew, vec![hsize, hcount]),
                 ty: Type::Pool,
@@ -1389,6 +1953,138 @@ impl Typer {
         }
 
         let struct_fields = self.structs.get(name).cloned();
+
+        // ── Generic type monomorphization ──
+        // If the struct isn't known but is a generic type, monomorphize it.
+        if struct_fields.is_none() {
+            if let Some(gtd) = self.generic_types.get(name).cloned() {
+                // Lower all field init values first (without expected type — generic).
+                let mut hinits_g: Vec<hir::FieldInit> = inits
+                    .iter()
+                    .map(|fi| {
+                        Ok(hir::FieldInit {
+                            name: fi.name.clone(),
+                            value: self.lower_expr(&fi.value)?,
+                        })
+                    })
+                    .collect::<Result<_, String>>()?;
+
+                // Build type_map: map type params to concrete types from args.
+                let mut type_map = std::collections::HashMap::new();
+                for (i, fi) in hinits_g.iter().enumerate() {
+                    let field_def = if let Some(fname) = &fi.name {
+                        gtd.fields.iter().find(|f| &f.name == fname)
+                    } else {
+                        gtd.fields.get(i)
+                    };
+                    if let Some(field_def) = field_def {
+                        if let Some(ref declared_ty) = field_def.ty {
+                            Self::collect_type_mapping(declared_ty, &fi.value.ty, &mut type_map);
+                        }
+                    }
+                }
+
+                // Fill in any unmapped type params with i64 default
+                for tp in &gtd.type_params {
+                    type_map.entry(tp.clone()).or_insert(Type::I64);
+                }
+
+                // Build concrete field list
+                let concrete_fields: Vec<(String, Type)> = gtd
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        let ty = f
+                            .ty
+                            .as_ref()
+                            .map(|t| Self::substitute_type_params(t, &type_map))
+                            .unwrap_or(Type::I64);
+                        (f.name.clone(), ty)
+                    })
+                    .collect();
+
+                // Build mangled name
+                let ty_suffix = gtd
+                    .type_params
+                    .iter()
+                    .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                let mangled = format!("{name}_{ty_suffix}");
+
+                if !self.structs.contains_key(&mangled) {
+                    // Register the monomorphized struct
+                    self.structs.insert(mangled.clone(), concrete_fields.clone());
+
+                    // Build HIR TypeDef for codegen
+                    let hir_fields: Vec<hir::Field> = concrete_fields
+                        .iter()
+                        .map(|(fname, fty)| hir::Field {
+                            name: fname.clone(),
+                            ty: fty.clone(),
+                            default: None,
+                            span,
+                        })
+                        .collect();
+                    let htd = hir::TypeDef {
+                        def_id: self.fresh_id(),
+                        name: mangled.clone(),
+                        fields: hir_fields,
+                        methods: Vec::new(),
+                        layout: gtd.layout.clone(),
+                        span,
+                    };
+                    self.mono_types.push(htd);
+
+                    // Register methods for the monomorphized type
+                    for m in &gtd.methods {
+                        let mut mono_method = m.clone();
+                        // Substitute type params in method param types and return type
+                        for p in &mut mono_method.params {
+                            if let Some(ref ty) = p.ty {
+                                p.ty = Some(Self::substitute_type_params(ty, &type_map));
+                            }
+                        }
+                        if let Some(ref ret) = mono_method.ret {
+                            mono_method.ret =
+                                Some(Self::substitute_type_params(ret, &type_map));
+                        }
+                        self.methods
+                            .entry(mangled.clone())
+                            .or_default()
+                            .push(mono_method.clone());
+                        self.declare_method_sig_by_ptr(&mangled, &mono_method);
+                    }
+                }
+
+                // Unify field inits with concrete types
+                for (i, fi) in hinits_g.iter_mut().enumerate() {
+                    let declared_ty = if let Some(fname) = &fi.name {
+                        concrete_fields
+                            .iter()
+                            .find(|(n, _)| n == fname)
+                            .map(|(_, ty)| ty)
+                    } else {
+                        concrete_fields.get(i).map(|(_, ty)| ty)
+                    };
+                    if let Some(declared_ty) = declared_ty {
+                        let _ = self.infer_ctx.unify_at(
+                            declared_ty,
+                            &fi.value.ty,
+                            span,
+                            "generic struct field",
+                        );
+                    }
+                }
+
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Struct(mangled.clone(), hinits_g),
+                    ty: Type::Struct(mangled, vec![]),
+                    span,
+                });
+            }
+        }
+
         let mut hinits: Vec<hir::FieldInit> = inits
             .iter()
             .enumerate()
@@ -1430,7 +2126,9 @@ impl Typer {
             if self.inferred_field_structs.contains(name) {
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
                     let resolved = self.infer_ctx.shallow_resolve(declared_ty);
-                    let arg_ty = if let Some(fi) = hinits.iter().find(|fi| fi.name.as_deref() == Some(fname)) {
+                    let arg_ty = if let Some(fi) =
+                        hinits.iter().find(|fi| fi.name.as_deref() == Some(fname))
+                    {
                         Some(&fi.value.ty)
                     } else {
                         hinits.get(i).map(|fi| &fi.value.ty)
@@ -1450,16 +2148,35 @@ impl Typer {
                                     // Both TypeVars — check constraint compatibility
                                     let arg_root = self.infer_ctx.find(*av);
                                     let arg_constraint = self.infer_ctx.constraint(arg_root);
-                                    super::unify::InferCtx::constraints_conflict(&constraint, &arg_constraint)
+                                    super::unify::InferCtx::constraints_conflict(
+                                        &constraint,
+                                        &arg_constraint,
+                                    )
                                 }
                                 _ => {
                                     // Concrete arg type — check constraint compatibility
                                     match constraint {
-                                        super::unify::TypeConstraint::Integer if !arg_resolved.is_int() => true,
-                                        super::unify::TypeConstraint::Float if !arg_resolved.is_float() => true,
-                                        super::unify::TypeConstraint::Numeric if !arg_resolved.is_num() => true,
+                                        super::unify::TypeConstraint::Integer
+                                            if !arg_resolved.is_int() =>
+                                        {
+                                            true
+                                        }
+                                        super::unify::TypeConstraint::Float
+                                            if !arg_resolved.is_float() =>
+                                        {
+                                            true
+                                        }
+                                        super::unify::TypeConstraint::Numeric
+                                            if !arg_resolved.is_num() =>
+                                        {
+                                            true
+                                        }
                                         super::unify::TypeConstraint::Addable
-                                            if !arg_resolved.is_num() && !matches!(arg_resolved, Type::String) => true,
+                                            if !arg_resolved.is_num()
+                                                && !matches!(arg_resolved, Type::String) =>
+                                        {
+                                            true
+                                        }
                                         _ => false,
                                     }
                                 }
@@ -1603,12 +2320,18 @@ impl Typer {
         })
     }
 
-    pub(crate) fn maybe_coerce_to(&self, expr: hir::Expr, target: &Type) -> hir::Expr {
+    pub(crate) fn maybe_coerce_to(&mut self, expr: hir::Expr, target: &Type) -> hir::Expr {
         if &expr.ty == target {
             return expr;
         }
-        if let Some(coercion) = Self::needs_int_coercion(&expr.ty, target) {
-            return Self::make_coerce(expr, coercion, target.clone());
+        if let Some(ref coercion) = Self::needs_int_coercion(&expr.ty, target) {
+            if matches!(coercion, CoercionKind::IntTrunc { .. }) {
+                self.warnings.push(format!(
+                    "implicit truncation from {} to {} may lose data (line {})",
+                    expr.ty, target, expr.span.line
+                ));
+            }
+            return Self::make_coerce(expr, coercion.clone(), target.clone());
         }
         if expr.ty.is_int() && target.is_float() {
             return Self::make_coerce(
@@ -1618,6 +2341,10 @@ impl Typer {
             );
         }
         if expr.ty.is_float() && target.is_int() {
+            self.warnings.push(format!(
+                "implicit float-to-int conversion may lose precision (line {})",
+                expr.span.line
+            ));
             return Self::make_coerce(
                 expr,
                 CoercionKind::FloatToInt {

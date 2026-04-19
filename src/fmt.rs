@@ -51,13 +51,17 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                 out.push_str(&v.name);
                 if !v.fields.is_empty() {
                     out.push_str(" of ");
-                    let fields: Vec<String> = v.fields.iter().map(|f| {
-                        if let Some(ref name) = f.name {
-                            format!("{name} is {}", format_type(&f.ty))
-                        } else {
-                            format_type(&f.ty)
-                        }
-                    }).collect();
+                    let fields: Vec<String> = v
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            if let Some(ref name) = f.name {
+                                format!("{name} is {}", format_type(&f.ty))
+                            } else {
+                                format_type(&f.ty)
+                            }
+                        })
+                        .collect();
                     out.push_str(&fields.join(", "));
                 }
                 out.push('\n');
@@ -67,9 +71,11 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             indent(out, level);
             out.push_str(&format!("extern {}", e.name));
             if !e.params.is_empty() {
-                let params: Vec<String> = e.params.iter().map(|(name, ty)| {
-                    format!("{name} {}", format_type(ty))
-                }).collect();
+                let params: Vec<String> = e
+                    .params
+                    .iter()
+                    .map(|(name, ty)| format!("{name} {}", format_type(ty)))
+                    .collect();
                 out.push_str(&format!(" {}", params.join(", ")));
             }
             out.push_str(&format!(" returns {}\n", format_type(&e.ret)));
@@ -122,6 +128,10 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
         Decl::Const(name, expr, _) => {
             indent(out, level);
             out.push_str(&format!("const {} is {}\n", name, format_expr(expr)));
+        }
+        Decl::Global(name, expr, _) => {
+            indent(out, level);
+            out.push_str(&format!("global {} is {}\n", name, format_expr(expr)));
         }
         Decl::Test(t) => {
             indent(out, level);
@@ -183,6 +193,12 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
         }
         Decl::TopStmt(stmt) => {
             format_stmt(out, stmt, level);
+        }
+        Decl::Migration(_) => {
+            // Migrations are compile-time directives, not formatted
+        }
+        Decl::View(_) => {
+            // Views are compile-time directives, not formatted
         }
     }
 }
@@ -307,7 +323,11 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         }
         Stmt::TupleBind(bindings, expr, _) => {
             indent(out, level);
-            out.push_str(&format!("({}) is {}\n", bindings.join(", "), format_expr(expr)));
+            out.push_str(&format!(
+                "({}) is {}\n",
+                bindings.join(", "),
+                format_expr(expr)
+            ));
         }
         Stmt::StoreInsert(name, exprs, _) => {
             indent(out, level);
@@ -321,6 +341,18 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         Stmt::StoreDelete(name, _filter, _) => {
             indent(out, level);
             out.push_str(&format!("delete from {name}\n"));
+        }
+        Stmt::StoreDestroy(name, _filter, _) => {
+            indent(out, level);
+            out.push_str(&format!("destroy from {name}\n"));
+        }
+        Stmt::StoreRestore(name, _filter, _) => {
+            indent(out, level);
+            out.push_str(&format!("restore from {name}\n"));
+        }
+        Stmt::StoreSave(name, _) => {
+            indent(out, level);
+            out.push_str(&format!("save {name}\n"));
         }
         Stmt::StoreSet(name, assignments, _filter, _) => {
             indent(out, level);
@@ -414,6 +446,7 @@ fn format_expr(e: &Expr) -> String {
                 BinOp::BitXor => "^",
                 BinOp::Shl => "<<",
                 BinOp::Shr => ">>",
+                BinOp::Ushr => ">>>",
                 BinOp::Exp => "pow",
             };
             format!("{} {} {}", format_expr(l), ops, format_expr(r))
@@ -445,7 +478,12 @@ fn format_expr(e: &Expr) -> String {
         Expr::Field(obj, field, _) => format!("{}.{field}", format_expr(obj)),
         Expr::Index(arr, idx, _) => format!("{}[{}]", format_expr(arr), format_expr(idx)),
         Expr::Ternary(c, t, f, _) => {
-            format!("if {} then {} else {}", format_expr(c), format_expr(t), format_expr(f))
+            format!(
+                "if {} then {} else {}",
+                format_expr(c),
+                format_expr(t),
+                format_expr(f)
+            )
         }
         Expr::As(e, ty, _) => format!("{} as {}", format_expr(e), format_type(ty)),
         Expr::Array(elems, _) => {
@@ -457,21 +495,33 @@ fn format_expr(e: &Expr) -> String {
             format!("({})", es.join(", "))
         }
         Expr::Struct(name, fields, _) => {
-            let fs: Vec<String> = fields.iter().map(|fi| {
-                if let Some(ref name) = fi.name {
-                    format!("{name} is {}", format_expr(&fi.value))
-                } else {
-                    format_expr(&fi.value)
-                }
-            }).collect();
+            let fs: Vec<String> = fields
+                .iter()
+                .map(|fi| {
+                    if let Some(ref name) = fi.name {
+                        format!("{name} is {}", format_expr(&fi.value))
+                    } else {
+                        format_expr(&fi.value)
+                    }
+                })
+                .collect();
             format!("{name} {{ {} }}", fs.join(", "))
         }
         Expr::IfExpr(i) => {
-            format!("if {} then {} else {}",
+            format!(
+                "if {} then {} else {}",
                 format_expr(&i.cond),
-                if i.then.len() == 1 { format_expr_from_stmt(&i.then[0]) } else { "...".into() },
+                if i.then.len() == 1 {
+                    format_expr_from_stmt(&i.then[0])
+                } else {
+                    "...".into()
+                },
                 if let Some(ref els) = i.els {
-                    if els.len() == 1 { format_expr_from_stmt(&els[0]) } else { "...".into() }
+                    if els.len() == 1 {
+                        format_expr_from_stmt(&els[0])
+                    } else {
+                        "...".into()
+                    }
                 } else {
                     "none".into()
                 }
@@ -484,17 +534,28 @@ fn format_expr(e: &Expr) -> String {
             format!("({}) => ...", ps.join(", "))
         }
         Expr::Placeholder(_) => "$".into(),
+        Expr::IndexPlaceholder(_) => "$$".into(),
         Expr::Ref(e, _) => format!("&{}", format_expr(e)),
         Expr::Deref(e, _) => format!("*{}", format_expr(e)),
+        Expr::Try(e, _) => format!("try {}", format_expr(e)),
         Expr::Embed(path, _) => format!("embed '{path}'"),
         Expr::ListComp(body, bind, iter, _, _, _) => {
-            format!("[{} for {bind} in {}]", format_expr(body), format_expr(iter))
+            format!(
+                "[{} for {bind} in {}]",
+                format_expr(body),
+                format_expr(iter)
+            )
         }
         Expr::Unreachable(_) => "unreachable".into(),
         Expr::AsFormat(e, fmt, _) => format!("{} as {fmt}", format_expr(e)),
         Expr::StrictCast(e, ty, _) => format!("{} as strict {}", format_expr(e), format_type(ty)),
         Expr::Slice(obj, from, to, _) => {
-            format!("{} from {} to {}", format_expr(obj), format_expr(from), format_expr(to))
+            format!(
+                "{} from {} to {}",
+                format_expr(obj),
+                format_expr(from),
+                format_expr(to)
+            )
         }
         _ => "...".into(),
     }

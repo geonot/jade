@@ -1,0 +1,179 @@
+# std.fs — Filesystem operations
+#
+# Usage:
+#   fs.mkdir("build/output")
+#   files is fs.list_dir("src")
+#   fs.copy("from.txt", "to.txt")
+#   fs.remove("tmp.txt")
+
+extern *c_mkdir(path as %i8, mode as i32) returns i32
+extern *c_rmdir(path as %i8) returns i32
+extern *c_remove(path as %i8) returns i32
+extern *c_rename(old as %i8, new_name as %i8) returns i32
+extern *stat(path as %i8, buf as %i8) returns i32
+extern *opendir(path as %i8) returns %i8
+extern *readdir(dir as %i8) returns %i8
+extern *closedir(dir as %i8) returns i32
+extern *getcwd(buf as %i8, size as i64) returns %i8
+extern *c_chdir(path as %i8) returns i32
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+extern *strlen(s as %i8) returns i64
+extern *access(path as %i8, mode as i32) returns i32
+extern *realpath(path as %i8, resolved as %i8) returns %i8
+extern *c_symlink(target as %i8, linkpath as %i8) returns i32
+extern *unlink(path as %i8) returns i32
+extern *jade_dirent_name(ent as %i8) returns %i8
+extern *jade_is_dir(path as %i8) returns i32
+extern *jade_is_file(path as %i8) returns i32
+extern *jade_is_symlink(path as %i8) returns i32
+extern *jade_file_mtime(path as %i8) returns i64
+extern *jade_file_size(path as %i8) returns i64
+extern *jade_chmod(path as %i8, mode as i32) returns i32
+
+use io
+
+# ── Constants ────────────────────────────────────────────────
+
+F_OK is 0
+R_OK is 4
+W_OK is 2
+X_OK is 1
+
+# ── Directory operations ─────────────────────────────────────
+
+*mkdir(path as String)
+    extern.c_mkdir(%path, 493) equals 0
+
+*mkdir_p(path as String)
+    # Create parent directories recursively
+    parts is path.split("/")
+    current is ""
+    if path.length > 0 and path.char_at(0) equals 47
+        current is "/"
+    loop parts
+        if $.length > 0
+            if current.length > 0 and current neq "/"
+                current is current + "/" + $
+            elif current equals "/"
+                current is "/" + $
+            else
+                current is $
+            extern.c_mkdir(%current, 493)
+    true
+
+*rmdir(path as String)
+    extern.c_rmdir(%path) equals 0
+
+*list_dir(path as String) returns Vec of String
+    entries is vec()
+    dir is extern.opendir(%path)
+    if dir as i64 equals 0
+        return entries
+    loop
+        ent is extern.readdir(dir)
+        if ent as i64 equals 0
+            break
+        name_ptr is extern.jade_dirent_name(ent)
+        name is __string_from_ptr(name_ptr)
+        if name neq "." and name neq ".."
+            entries.push(name)
+    extern.closedir(dir)
+    entries
+
+# ── File operations ──────────────────────────────────────────
+
+*exists(path as String)
+    extern.access(%path, F_OK) equals 0
+
+*is_readable(path as String)
+    extern.access(%path, R_OK) equals 0
+
+*is_writable(path as String)
+    extern.access(%path, W_OK) equals 0
+
+*remove(path as String)
+    extern.unlink(%path) equals 0
+
+*rename(src as String, dst as String)
+    extern.c_rename(%src, %dst) equals 0
+
+*copy(src as String, dst as String)
+    content is io.read_file(src)
+    io.write_file(dst, content)
+
+*move(src as String, dst as String)
+    if rename(src, dst)
+        return true
+    # Cross-device: copy then remove
+    copy(src, dst)
+    remove(src)
+
+# ── Path operations ──────────────────────────────────────────
+
+*cwd
+    buf is extern.malloc(4096)
+    result is extern.getcwd(buf, 4096)
+    if result as i64 equals 0
+        extern.free(buf)
+        return ""
+    len is extern.strlen(buf)
+    __string_from_raw(buf, len, 4096)
+
+*chdir(path as String)
+    extern.c_chdir(%path) equals 0
+
+*absolute(path as String) returns String
+    buf is extern.malloc(4096)
+    result is extern.realpath(%path, buf)
+    if result as i64 equals 0
+        extern.free(buf)
+        return path
+    len is extern.strlen(buf)
+    __string_from_raw(buf, len, 4096)
+
+*symlink(target as String, link_path as String)
+    extern.c_symlink(%target, %link_path) equals 0
+
+# ── File size ────────────────────────────────────────────────
+
+*file_size(path as String)
+    extern.jade_file_size(%path)
+
+# ── Type checks ──────────────────────────────────────────────
+
+*is_dir(path as String)
+    extern.jade_is_dir(%path) neq 0
+
+*is_file(path as String)
+    extern.jade_is_file(%path) neq 0
+
+*is_symlink(path as String)
+    extern.jade_is_symlink(%path) neq 0
+
+*modified(path as String)
+    extern.jade_file_mtime(%path)
+
+*chmod(path as String, mode)
+    extern.jade_chmod(%path, mode) equals 0
+
+*touch(path as String)
+    fp is extern.fopen(%path, "a")
+    if fp as i64 neq 0
+        extern.fclose(fp)
+    true
+
+# ── Glob-like pattern matching ──────────────────────────────
+
+*walk(path as String) returns Vec of String
+    result is vec()
+    __walk_recursive(path, result)
+    result
+
+*__walk_recursive(dir as String, result as Vec of String)
+    entries is list_dir(dir)
+    loop entries
+        full is dir + "/" + $
+        result.push(full)
+        if is_dir(full)
+            __walk_recursive(full, result)

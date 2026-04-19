@@ -26,8 +26,8 @@ actor Multiplier
     send m, @mul(2)
     send m, @mul(3)
     send m, @mul(7)
-    usleep(100000)
+    extern.usleep(100000)
     send a, @show()
     send m, @show()
-    usleep(100000)
+    extern.usleep(100000)
     0

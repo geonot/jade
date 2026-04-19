@@ -4,12 +4,35 @@
 PI is 3.14159265358979323846
 E is 2.71828182845904523536
 TAU is 6.28318530717958647692
+INF is 1.0 / 0.0
+NEG_INF is -1.0 / 0.0
 
-extern *sqrt(x as f64) returns f64
+# sqrt, abs, floor, ceil, round, trunc are compiler builtins (called as x.sqrt(), x.floor() etc)
 
-# Intrinsic wrappers
+extern *sin(x as f64) returns f64
+extern *cos(x as f64) returns f64
+extern *tan(x as f64) returns f64
+extern *asin(x as f64) returns f64
+extern *acos(x as f64) returns f64
+extern *atan(x as f64) returns f64
+extern *atan2(y as f64, x as f64) returns f64
+extern *sinh(x as f64) returns f64
+extern *cosh(x as f64) returns f64
+extern *tanh(x as f64) returns f64
+extern *cbrt(x as f64) returns f64
+extern *fmod(x as f64, y as f64) returns f64
+extern *fmin(x as f64, y as f64) returns f64
+extern *fmax(x as f64, y as f64) returns f64
+extern *hypot(x as f64, y as f64) returns f64
+extern *fabs(x as f64) returns f64
+
+# ── Aliases with Jade-idiomatic names ────────────────────────
+
 *ln(x)
     __ln(x)
+
+*powf(x, y)
+    __powf(x, y)
 
 *log2(x)
     __log2(x)
@@ -23,16 +46,14 @@ extern *sqrt(x as f64) returns f64
 *exp2(x)
     __exp2(x)
 
-*powf(x, y)
-    __powf(x, y)
-
 *copysign(x, y)
     __copysign(x, y)
 
 *fma(a, b, c)
     __fma(a, b, c)
 
-# Composite functions
+# ── Composite functions ──────────────────────────────────────
+
 *log_base(x, base)
     __ln(x) / __ln(base)
 
@@ -42,14 +63,56 @@ extern *sqrt(x as f64) returns f64
 *radians(deg)
     deg * PI / 180.0
 
-*hypot(x, y)
-    sqrt(x * x + y * y)
-
 *lerp(a, b, t)
     a + (b - a) * t
 
+*clamp(x, lo, hi)
+    if x < lo
+        return lo
+    if x > hi
+        return hi
+    x
+
 *map_range(value, in_min, in_max, out_min, out_max)
     (value - in_min) / (in_max - in_min) * (out_max - out_min) + out_min
+
+*sign(x)
+    if x > 0.0
+        return 1.0
+    if x < 0.0
+        return -1.0
+    0.0
+
+*is_nan(x)
+    x neq x
+
+*is_finite(x)
+    x equals x and extern.fabs(x) neq INF
+
+*is_inf(x)
+    extern.fabs(x) equals INF
+
+# ── Integer math ─────────────────────────────────────────────
+
+*abs(n)
+    n < 0 ? 0 - n ! n
+
+*ipow(base, exp)
+    result is 1
+    b is base
+    e is exp
+    while e > 0
+        if e mod 2 equals 1
+            result is result * b
+        b is b * b
+        e is e / 2
+    result
+
+*min(a, b)
+    a < b ? a ! b
+
+*max(a, b)
+    a > b ? a ! b
 
 *factorial(n)
     if n <= 1
@@ -63,3 +126,77 @@ extern *sqrt(x as f64) returns f64
 
 *lcm(a, b)
     (a / gcd(a, b)) * b
+
+*is_even(n)
+    n mod 2 equals 0
+
+*is_odd(n)
+    n mod 2 neq 0
+
+# ── Bit manipulation ─────────────────────────────────────────
+
+*popcount(n)
+    count is 0
+    x is n
+    while x neq 0
+        count is count + (x & 1)
+        x is x >> 1
+    count
+
+*ctz(n)
+    # Count trailing zeros
+    if n equals 0
+        return 64
+    count is 0
+    x is n
+    while (x & 1) equals 0
+        count is count + 1
+        x is x >> 1
+    count
+
+*clz(n)
+    # Count leading zeros (for 64-bit)
+    if n equals 0
+        return 64
+    count is 0
+    x is n
+    # Binary search approach
+    if (x >> 32) equals 0
+        count is count + 32
+        x is x << 32
+    if (x >> 48) equals 0
+        count is count + 16
+        x is x << 16
+    if (x >> 56) equals 0
+        count is count + 8
+        x is x << 8
+    if (x >> 60) equals 0
+        count is count + 4
+        x is x << 4
+    if (x >> 62) equals 0
+        count is count + 2
+        x is x << 2
+    if (x >> 63) equals 0
+        count is count + 1
+    count
+
+*rotl(x, k)
+    (x << k) | (x >> (64 - k))
+
+*rotr(x, k)
+    (x >> k) | (x << (64 - k))
+
+*is_power_of_two(n)
+    n > 0 and (n & (n - 1)) equals 0
+
+*next_power_of_two(n)
+    if n <= 1
+        return 1
+    x is n - 1
+    x is x | (x >> 1)
+    x is x | (x >> 2)
+    x is x | (x >> 4)
+    x is x | (x >> 8)
+    x is x | (x >> 16)
+    x is x | (x >> 32)
+    x + 1

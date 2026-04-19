@@ -1,10 +1,13 @@
 # std.strings — StringBuilder for efficient string construction
 
+extern *malloc(size as i64) returns %i8
+extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
+
 type StringBuilder
     parts as Vec of String
     total as i64
 
-    *write(s as String)
+    *write(s as String) returns i64
         self.parts.push(s)
         self.total is self.total + s.length
 
@@ -16,12 +19,14 @@ type StringBuilder
     *to_string
         if self.parts.length equals 0
             return ''
-        result is self.parts.get(0)
-        i is 1
-        while i < self.parts.length
-            result is result + self.parts.get(i)
-            i is i + 1
-        result
+        if self.total equals 0
+            return ''
+        buf is extern.malloc(self.total + 1)
+        offset is 0 as i64
+        loop self.parts
+            extern.memcpy(buf + offset, %$ as %i8, $.length)
+            offset is offset + $.length
+        __string_from_raw(buf, self.total, self.total + 1)
 
     *length
         self.total

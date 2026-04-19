@@ -24,8 +24,10 @@ impl HirValidator {
                 .insert(f.def_id.0, (f.name.clone(), f.params.len(), min_params));
         }
         for ext in &prog.externs {
-            v.fn_sigs
-                .insert(ext.def_id.0, (ext.name.clone(), ext.params.len(), ext.params.len()));
+            v.fn_sigs.insert(
+                ext.def_id.0,
+                (ext.name.clone(), ext.params.len(), ext.params.len()),
+            );
         }
 
         for f in &prog.fns {
@@ -120,10 +122,12 @@ impl HirValidator {
                 // Check for reassignment to ALL_CAPS constants
                 match &target.kind {
                     hir::ExprKind::Var(_, name) if is_all_caps(name) => {
-                        self.errors.push(format!("cannot reassign constant `{name}`"));
+                        self.errors
+                            .push(format!("cannot reassign constant `{name}`"));
                     }
                     hir::ExprKind::Field(_, field, _) if is_all_caps(field) => {
-                        self.errors.push(format!("cannot reassign constant field `{field}`"));
+                        self.errors
+                            .push(format!("cannot reassign constant field `{field}`"));
                     }
                     _ => {}
                 }
@@ -187,6 +191,9 @@ impl HirValidator {
                 }
             }
             hir::Stmt::StoreDelete(_, _, _) => {}
+            hir::Stmt::StoreDestroy(_, _, _) => {}
+            hir::Stmt::StoreRestore(_, _, _) => {}
+            hir::Stmt::StoreSave(_, _) => {}
             hir::Stmt::StoreSet(_, updates, _, _) => {
                 for (_, e) in updates {
                     self.validate_expr(e);
@@ -197,12 +204,17 @@ impl HirValidator {
             hir::Stmt::Stop(e, _) => self.validate_expr(e),
             hir::Stmt::SimFor(f, _) => {
                 self.validate_expr(&f.iter);
-                if let Some(e) = &f.end { self.validate_expr(e); }
-                if let Some(e) = &f.step { self.validate_expr(e); }
+                if let Some(e) = &f.end {
+                    self.validate_expr(e);
+                }
+                if let Some(e) = &f.step {
+                    self.validate_expr(e);
+                }
                 self.validate_block(&f.body);
             }
             hir::Stmt::SimBlock(b, _) => self.validate_block(b),
             hir::Stmt::UseLocal(_, _, _, _) => {}
+            hir::Stmt::GlobalStore(_, e, _) => self.validate_expr(e),
         }
     }
 
@@ -214,8 +226,10 @@ impl HirValidator {
                 use crate::ast::BinOp::*;
                 match op {
                     Add | Sub | Mul | Div | Mod | Lt | Gt | Le | Ge => {
-                        let is_ptr_arith = matches!((&lhs.ty, &rhs.ty),
-                            (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_)));
+                        let is_ptr_arith = matches!(
+                            (&lhs.ty, &rhs.ty),
+                            (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_))
+                        );
                         if lhs.ty != rhs.ty && !is_ptr_arith {
                             self.errors.push(format!(
                                 "BinOp {:?} type mismatch at line {}: lhs {:?} vs rhs {:?}",
@@ -237,7 +251,11 @@ impl HirValidator {
                             "call to `{}` at line {}: expected {}{} args, got {}",
                             name,
                             expr.span.line,
-                            if min_params != max_params { format!("{}-", min_params) } else { String::new() },
+                            if min_params != max_params {
+                                format!("{}-", min_params)
+                            } else {
+                                String::new()
+                            },
                             max_params,
                             args.len()
                         ));
@@ -277,7 +295,10 @@ impl HirValidator {
                     self.validate_expr(e);
                 }
             }
-            hir::ExprKind::SetNew | hir::ExprKind::PQNew | hir::ExprKind::NDArrayNew(_) | hir::ExprKind::SIMDNew(_) => {}
+            hir::ExprKind::SetNew
+            | hir::ExprKind::PQNew
+            | hir::ExprKind::NDArrayNew(_)
+            | hir::ExprKind::SIMDNew(_) => {}
             hir::ExprKind::Field(obj, _, _) => self.validate_expr(obj),
             hir::ExprKind::Index(arr, idx) => {
                 self.validate_expr(arr);
@@ -358,6 +379,19 @@ impl HirValidator {
                 }
             }
             hir::ExprKind::StoreQuery(_, _) => {}
+            hir::ExprKind::ViewCount(_, _) => {}
+            hir::ExprKind::ViewAll(_, _) => {}
+            hir::ExprKind::StoreGet(_, key) => self.validate_expr(key),
+            hir::ExprKind::StoreFirst(_, _) => {}
+            hir::ExprKind::StoreExists(_, _) => {}
+            hir::ExprKind::StoreDistinct(_, _)
+            | hir::ExprKind::StoreSum(_, _)
+            | hir::ExprKind::StoreAvg(_, _)
+            | hir::ExprKind::StoreMin(_, _)
+            | hir::ExprKind::StoreMax(_, _)
+            | hir::ExprKind::StoreVersionCount(_, _)
+            | hir::ExprKind::StoreHistory(_, _)
+            | hir::ExprKind::StoreAtVersion(_, _, _) => {}
             hir::ExprKind::Int(_)
             | hir::ExprKind::Float(_)
             | hir::ExprKind::Str(_)
@@ -369,6 +403,7 @@ impl HirValidator {
             | hir::ExprKind::VariantRef(_, _, _)
             | hir::ExprKind::MapNew
             | hir::ExprKind::Spawn(_)
+            | hir::ExprKind::GlobalLoad(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_)
             | hir::ExprKind::IterNext(_, _, _)
@@ -380,7 +415,12 @@ impl HirValidator {
             }
             hir::ExprKind::ChannelRecv(ch) => self.validate_expr(ch),
             hir::ExprKind::Unreachable => {}
-            hir::ExprKind::StrictCast(inner, _) | hir::ExprKind::AsFormat(inner, _) | hir::ExprKind::AtomicLoad(inner) | hir::ExprKind::AtomicStore(inner, _) | hir::ExprKind::AtomicAdd(inner, _) | hir::ExprKind::AtomicSub(inner, _) => {
+            hir::ExprKind::StrictCast(inner, _)
+            | hir::ExprKind::AsFormat(inner, _)
+            | hir::ExprKind::AtomicLoad(inner)
+            | hir::ExprKind::AtomicStore(inner, _)
+            | hir::ExprKind::AtomicAdd(inner, _)
+            | hir::ExprKind::AtomicSub(inner, _) => {
                 self.validate_expr(inner);
             }
             hir::ExprKind::AtomicCas(ptr, expected, new) => {
@@ -407,20 +447,53 @@ impl HirValidator {
             }
             hir::ExprKind::DequeMethod(obj, _, args) => {
                 self.validate_expr(obj);
-                for a in args { self.validate_expr(a); }
+                for a in args {
+                    self.validate_expr(a);
+                }
             }
-            hir::ExprKind::Grad(e) | hir::ExprKind::CowWrap(e) | hir::ExprKind::CowClone(e) | hir::ExprKind::GeneratorNext(e) => {
+            hir::ExprKind::Grad(e)
+            | hir::ExprKind::CowWrap(e)
+            | hir::ExprKind::CowClone(e)
+            | hir::ExprKind::GeneratorNext(e)
+            | hir::ExprKind::EnumUnwrap(e, _, _)
+            | hir::ExprKind::EnumIs(e, _) => {
                 self.validate_expr(e);
             }
             hir::ExprKind::Einsum(_, args) => {
-                for a in args { self.validate_expr(a); }
+                for a in args {
+                    self.validate_expr(a);
+                }
             }
             hir::ExprKind::Builder(_, fields) => {
-                for (_, v) in fields { self.validate_expr(v); }
+                for (_, v) in fields {
+                    self.validate_expr(v);
+                }
             }
             hir::ExprKind::GeneratorCreate(_, _, stmts) => {
                 self.validate_block(stmts);
             }
+            // KV / specialized store ops
+            hir::ExprKind::KvGet(_, e)
+            | hir::ExprKind::KvHas(_, e)
+            | hir::ExprKind::KvDel(_, e) => {
+                self.validate_expr(e);
+            }
+            hir::ExprKind::KvSet(_, k, v) | hir::ExprKind::KvIncr(_, k, v) => {
+                self.validate_expr(k);
+                self.validate_expr(v);
+            }
+            hir::ExprKind::KvCount(_)
+            | hir::ExprKind::TsLatest(_)
+            | hir::ExprKind::VecCount(_)
+            | hir::ExprKind::FtsCount(_, _) => {}
+            hir::ExprKind::VecNearest(_, v, k) => {
+                self.validate_expr(v);
+                self.validate_expr(k);
+            }
+            hir::ExprKind::VecInsert(_, v) => self.validate_expr(v),
+            hir::ExprKind::BloomTest(_, _, v) => self.validate_expr(v),
+            hir::ExprKind::FtsSearch(_, _, v) => self.validate_expr(v),
+            hir::ExprKind::GraphFrom(_, e) | hir::ExprKind::GraphTo(_, e) => self.validate_expr(e),
         }
     }
 
@@ -471,6 +544,9 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::ErrReturn(_, _, s) => *s,
         hir::Stmt::StoreInsert(_, _, s) => *s,
         hir::Stmt::StoreDelete(_, _, s) => *s,
+        hir::Stmt::StoreDestroy(_, _, s) => *s,
+        hir::Stmt::StoreRestore(_, _, s) => *s,
+        hir::Stmt::StoreSave(_, s) => *s,
         hir::Stmt::StoreSet(_, _, _, s) => *s,
         hir::Stmt::Transaction(_, s) => *s,
         hir::Stmt::ChannelClose(_, s) => *s,
@@ -478,6 +554,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::SimFor(_, s) => *s,
         hir::Stmt::SimBlock(_, s) => *s,
         hir::Stmt::UseLocal(_, _, _, s) => *s,
+        hir::Stmt::GlobalStore(_, _, s) => *s,
     }
 }
 

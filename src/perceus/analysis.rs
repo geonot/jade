@@ -69,7 +69,10 @@ impl PerceusPass {
                 Type::Rc(inner) => inner.as_ref(),
                 _ => ty,
             });
-            released_by_size.entry(size).or_default().push((*id, *ty, *span));
+            released_by_size
+                .entry(size)
+                .or_default()
+                .push((*id, *ty, *span));
         }
 
         for stmt in body {
@@ -123,9 +126,13 @@ impl PerceusPass {
             | Stmt::ErrReturn(_, _, _)
             | Stmt::StoreInsert(_, _, _)
             | Stmt::StoreDelete(_, _, _)
+            | Stmt::StoreDestroy(_, _, _)
+            | Stmt::StoreRestore(_, _, _)
+            | Stmt::StoreSave(_, _)
             | Stmt::StoreSet(_, _, _, _)
             | Stmt::ChannelClose(_, _)
             | Stmt::Stop(_, _)
+            | Stmt::GlobalStore(_, _, _)
             | Stmt::UseLocal(_, _, _, _) => {}
         }
     }
@@ -181,7 +188,7 @@ impl PerceusPass {
             Type::Channel(_) => 8,
             Type::SIMD(inner, lanes) => Self::type_layout_size_pub(inner) * (*lanes as u64),
             Type::Arena => 24, // {ptr, cap, offset}
-            Type::Pool => 8, // opaque pointer
+            Type::Pool => 8,   // opaque pointer
             Type::Deque(_) => 24,
             Type::Cow(inner) => Self::type_layout_size_pub(inner),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size_pub(inner),
@@ -278,9 +285,13 @@ impl PerceusPass {
                 | Stmt::ErrReturn(_, _, _)
                 | Stmt::StoreInsert(_, _, _)
                 | Stmt::StoreDelete(_, _, _)
+                | Stmt::StoreDestroy(_, _, _)
+                | Stmt::StoreRestore(_, _, _)
+                | Stmt::StoreSave(_, _)
                 | Stmt::StoreSet(_, _, _, _)
                 | Stmt::ChannelClose(_, _)
                 | Stmt::Stop(_, _)
+                | Stmt::GlobalStore(_, _, _)
                 | Stmt::UseLocal(_, _, _, _) => {}
             }
         }
@@ -426,9 +437,13 @@ impl PerceusPass {
                 | Stmt::ErrReturn(_, _, _)
                 | Stmt::StoreInsert(_, _, _)
                 | Stmt::StoreDelete(_, _, _)
+                | Stmt::StoreDestroy(_, _, _)
+                | Stmt::StoreRestore(_, _, _)
+                | Stmt::StoreSave(_, _)
                 | Stmt::StoreSet(_, _, _, _)
                 | Stmt::ChannelClose(_, _)
                 | Stmt::Stop(_, _)
+                | Stmt::GlobalStore(_, _, _)
                 | Stmt::UseLocal(_, _, _, _) => {}
             }
         }
@@ -441,27 +456,36 @@ impl PerceusPass {
     ) {
         let rc_bindings: Vec<(DefId, &Type, Span)> = self.collect_rc_bindings(body);
 
-        for window in rc_bindings.windows(2) {
-            let (released_id, released_ty, _) = &window[0];
-            let (_, allocated_ty, alloc_span) = &window[1];
+        // Scan all pairs within a bounded window (up to 8 apart)
+        // instead of only adjacent bindings
+        let max_gap = 8.min(rc_bindings.len());
+        for i in 0..rc_bindings.len() {
+            let (released_id, released_ty, _) = &rc_bindings[i];
+            if self.hints.speculative_reuse.contains_key(released_id) {
+                continue;
+            }
+            for j in (i + 1)..rc_bindings.len().min(i + max_gap + 1) {
+                let (_, allocated_ty, alloc_span) = &rc_bindings[j];
 
-            if let Some(info) = uses.get(released_id) {
-                let already_proven = self.hints.reuse_candidates.contains_key(released_id);
-                if !already_proven
-                    && info.ownership == Ownership::Rc
-                    && Self::layouts_compatible(released_ty, allocated_ty)
-                    && info.use_count <= 3
-                    && !info.borrowed
-                {
-                    self.hints.speculative_reuse.insert(
-                        *released_id,
-                        ReuseInfo {
-                            released_ty: (*released_ty).clone(),
-                            allocated_ty: (*allocated_ty).clone(),
-                            span: *alloc_span,
-                        },
-                    );
-                    self.hints.stats.speculative_reuse_sites += 1;
+                if let Some(info) = uses.get(released_id) {
+                    let already_proven = self.hints.reuse_candidates.contains_key(released_id);
+                    if !already_proven
+                        && info.ownership == Ownership::Rc
+                        && Self::layouts_compatible(released_ty, allocated_ty)
+                        && info.use_count <= 3
+                        && !info.borrowed
+                    {
+                        self.hints.speculative_reuse.insert(
+                            *released_id,
+                            ReuseInfo {
+                                released_ty: (*released_ty).clone(),
+                                allocated_ty: (*allocated_ty).clone(),
+                                span: *alloc_span,
+                            },
+                        );
+                        self.hints.stats.speculative_reuse_sites += 1;
+                        break; // Found a match for this release, move to next
+                    }
                 }
             }
         }
@@ -500,9 +524,13 @@ impl PerceusPass {
                 | Stmt::ErrReturn(_, _, _)
                 | Stmt::StoreInsert(_, _, _)
                 | Stmt::StoreDelete(_, _, _)
+                | Stmt::StoreDestroy(_, _, _)
+                | Stmt::StoreRestore(_, _, _)
+                | Stmt::StoreSave(_, _)
                 | Stmt::StoreSet(_, _, _, _)
                 | Stmt::ChannelClose(_, _)
                 | Stmt::Stop(_, _)
+                | Stmt::GlobalStore(_, _, _)
                 | Stmt::UseLocal(_, _, _, _) => {}
             }
         }

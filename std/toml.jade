@@ -1,0 +1,312 @@
+# std.toml — TOML parser (subset: strings, ints, floats, bools, tables, arrays)
+#
+# Usage:
+#   data is toml.parse(text)
+#   val is toml.get(data, "server.port")
+
+# ── Types ────────────────────────────────────────────────────
+
+type TomlTable
+    keys as Vec of String
+    vals as Vec of String
+
+# We store all values as strings and provide typed accessors.
+# Nested tables use dotted keys: "server.port" etc.
+
+# ── Parser state ─────────────────────────────────────────────
+
+type TomlParser
+    src as String
+    pos as i64
+    prefix as String
+    keys as Vec of String
+    vals as Vec of String
+
+    *peek returns i64
+        if self.pos >= self.src.length
+            return -1
+        self.src.char_at(self.pos)
+
+    *advance returns i64
+        ch is self.src.char_at(self.pos)
+        self.pos is self.pos + 1
+        ch
+
+    *skip_ws
+        while self.pos < self.src.length
+            ch is self.src.char_at(self.pos)
+            if ch equals 32
+                self.pos is self.pos + 1
+            elif ch equals 9
+                self.pos is self.pos + 1
+            else
+                return
+
+    *skip_line
+        while self.pos < self.src.length
+            if self.src.char_at(self.pos) equals 10
+                self.pos is self.pos + 1
+                return
+            self.pos is self.pos + 1
+
+    *parse_key returns String
+        self.skip_ws()
+        start is self.pos
+        while self.pos < self.src.length
+            ch is self.src.char_at(self.pos)
+            if ch equals 61
+                break
+            if ch equals 93
+                break
+            if ch equals 46
+                break
+            if ch equals 10
+                break
+            if ch equals 32
+                break
+            self.pos is self.pos + 1
+        self.src.slice(start, self.pos).trim()
+
+    *parse_value returns String
+        self.skip_ws()
+        ch is self.peek()
+        if ch equals 34
+            return self.__parse_string()
+        if ch equals 91
+            return self.__parse_inline_array()
+        # bare value (number, bool, etc)
+        start is self.pos
+        while self.pos < self.src.length
+            c is self.src.char_at(self.pos)
+            if c equals 10
+                break
+            if c equals 13
+                break
+            if c equals 35
+                break
+            self.pos is self.pos + 1
+        self.src.slice(start, self.pos).trim()
+
+    *__parse_string returns String
+        self.advance()  # skip opening "
+        result is ""
+        while self.pos < self.src.length
+            ch is self.advance()
+            if ch equals 34
+                return result
+            if ch equals 92
+                esc is self.advance()
+                if esc equals 110
+                    result is result + '\n'
+                elif esc equals 116
+                    result is result + '\t'
+                elif esc equals 34
+                    result is result + '"'
+                elif esc equals 92
+                    result is result + '\\'
+                else
+                    result is result + self.src.slice(self.pos - 1, self.pos)
+            else
+                result is result + self.src.slice(self.pos - 1, self.pos)
+        result
+
+    *__parse_inline_array returns String
+        # Return the raw text including brackets
+        start is self.pos
+        depth is 0
+        while self.pos < self.src.length
+            ch is self.src.char_at(self.pos)
+            if ch equals 91
+                depth is depth + 1
+            elif ch equals 93
+                depth is depth - 1
+                if depth equals 0
+                    self.pos is self.pos + 1
+                    return self.src.slice(start, self.pos)
+            self.pos is self.pos + 1
+        self.src.slice(start, self.pos)
+
+    *__parse_line
+        ch is self.peek()
+        if ch equals 35
+            self.skip_line()
+            return
+        if ch equals 10
+            self.pos is self.pos + 1
+            return
+        if ch equals 13
+            self.pos is self.pos + 1
+            return
+        if ch equals 91
+            self.advance()
+            name is self.parse_key()
+            self.prefix is name + "."
+            self.skip_line()
+            return
+        # Key = value
+        key is self.parse_key()
+        self.skip_ws()
+        if self.peek() equals 61
+            self.advance()
+        val is self.parse_value()
+        full_key is self.prefix + key
+        self.keys.push(full_key)
+        self.vals.push(val)
+        if self.pos < self.src.length and self.peek() equals 10
+            self.pos is self.pos + 1
+
+# ── Public API ───────────────────────────────────────────────
+
+*parse(text as String) returns TomlTable
+    p is TomlParser(src is text, pos is 0, prefix is "", keys is vec(), vals is vec())
+    while p.pos < p.src.length
+        p.skip_ws()
+        if p.pos >= p.src.length
+            break
+        p.__parse_line()
+    TomlTable(keys is p.keys, vals is p.vals)
+
+*get(table as TomlTable, key as String) returns String
+    loop table.keys
+        if $ equals key
+            return table.vals.get($$)
+    ""
+
+*get_int(table as TomlTable, key as String) returns i64
+    val is get(table, key)
+    if val.length equals 0
+        return 0
+    __parse_toml_int(val)
+
+*get_float(table as TomlTable, key as String) returns f64
+    val is get(table, key)
+    if val.length equals 0
+        return 0.0
+    __toml_parse_float(val)
+
+*__toml_parse_float(s as String) returns f64
+    # Simple float parser: integer.fractional
+    neg is false
+    i is 0
+    if s.length > 0 and s.char_at(0) equals 45
+        neg is true
+        i is 1
+    whole is 0.0
+    while i < s.length
+        ch is s.char_at(i)
+        if ch equals 46
+            i is i + 1
+            break
+        if ch >= 48 and ch <= 57
+            whole is whole * 10.0 + (ch - 48) as f64
+        i is i + 1
+    frac is 0.0
+    scale is 0.1
+    while i < s.length
+        ch is s.char_at(i)
+        if ch >= 48 and ch <= 57
+            frac is frac + (ch - 48) as f64 * scale
+            scale is scale * 0.1
+        i is i + 1
+    result is whole + frac
+    if neg
+        return 0.0 - result
+    result
+
+*get_bool(table as TomlTable, key as String) returns bool
+    val is get(table, key)
+    val equals "true"
+
+*has(table as TomlTable, key as String) returns bool
+    loop table.keys
+        if $ equals key
+            return true
+    false
+
+*__parse_toml_int(s as String) returns i64
+    result is 0
+    neg is false
+    i is 0
+    if s.length > 0 and s.char_at(0) equals 45
+        neg is true
+        i is 1
+    while i < s.length
+        ch is s.char_at(i)
+        if ch >= 48 and ch <= 57
+            result is result * 10 + (ch - 48)
+        elif ch equals 95
+            i is i + 1
+        else
+            break
+        i is i + 1
+    neg ? 0 - result ! result
+
+*keys(table as TomlTable)
+    table.keys
+
+*size(table as TomlTable)
+    table.keys.length
+
+# ── Stringify ────────────────────────────────────────────────
+
+*stringify(table as TomlTable) returns String
+    result is ""
+    # Collect unique section names
+    section_names is vec()
+    loop table.keys
+        key is $
+        dot_pos is __find_last_dot(key)
+        if dot_pos < 0
+            # Top-level key
+            val is table.vals.get($$)
+            result is result + key + ' = ' + __format_toml_value(val) + '\n'
+        else
+            section is key.slice(0, dot_pos)
+            # Check if section already listed
+            found is false
+            loop section_names
+                if $ equals section
+                    found is true
+            if found equals false
+                section_names.push(section)
+    # Output each section
+    loop section_names
+        section is $
+        result is result + '\n[' + section + ']\n'
+        loop table.keys
+            key is table.keys.get($$)
+            val is table.vals.get($$)
+            dot_pos is __find_last_dot(key)
+            if dot_pos >= 0
+                sec is key.slice(0, dot_pos)
+                if sec equals section
+                    leaf is key.slice(dot_pos + 1, key.length)
+                    result is result + leaf + ' = ' + __format_toml_value(val) + '\n'
+    result
+
+*__find_last_dot(s as String) returns i64
+    pos is -1
+    i is 0
+    while i < s.length
+        if s.char_at(i) equals 46
+            pos is i
+        i is i + 1
+    pos
+
+*__format_toml_value(val as String) returns String
+    if val equals "true"
+        return val
+    if val equals "false"
+        return val
+    # Check if it's a number
+    if val.length > 0
+        ch is val.char_at(0)
+        if ch >= 48 and ch <= 57
+            return val
+        if ch equals 45
+            return val
+    # Check if it starts with [ (inline array)
+    if val.length > 0 and val.char_at(0) equals 91
+        return val
+    # Default: quote as string
+    '"' + val + '"'

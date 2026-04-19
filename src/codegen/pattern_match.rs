@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
@@ -15,16 +13,23 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         m: &hir::Match,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let subject_val = self.compile_expr(&m.subject)?;
         let subject_ty = self.resolve_ty(m.subject.ty.clone());
 
         // FBIP: if the subject is a variable with FBIP sites,
         // save its pointer as a reuse token for constructors in match arms.
         if let hir::ExprKind::Var(subject_id, _) = &m.subject.kind {
-            let has_fbip = self.hints.fbip_sites.iter().any(|s| s.subject_id == *subject_id);
+            let has_fbip = self
+                .hints
+                .fbip_sites
+                .iter()
+                .any(|s| s.subject_id == *subject_id);
             if has_fbip {
-                if let Some(ptr) = subject_val.is_pointer_value().then(|| subject_val.into_pointer_value()) {
+                if let Some(ptr) = subject_val
+                    .is_pointer_value()
+                    .then(|| subject_val.into_pointer_value())
+                {
                     self.reuse_tokens.insert(*subject_id, ptr);
                 }
             }
@@ -104,7 +109,7 @@ impl<'ctx> Compiler<'ctx> {
         let mut all_valued = true;
         for (i, arm) in m.arms.iter().enumerate() {
             self.bld.position_at_end(arm_bbs[i]);
-            self.vars.push(HashMap::new());
+            self.push_var_scope();
             if let hir::Pat::Ctor(vname, _, sub_pats, _) = &arm.pat {
                 let ftys: Vec<Type> = variants
                     .iter()
@@ -167,8 +172,8 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_guard(guard, fail_bb, i)?;
             }
             let arm_val = self.compile_block(&arm.body)?;
-            self.vars.pop();
-            let cur_bb = self.bld.get_insert_block().unwrap();
+            self.pop_var_scope();
+            let cur_bb = self.current_bb();
             if self.no_term() {
                 match arm_val {
                     Some(v) => phi_in.push((v, cur_bb)),
@@ -187,7 +192,7 @@ impl<'ctx> Compiler<'ctx> {
         subject_val: BasicValueEnum<'ctx>,
         subject_ty: &Type,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let merge_bb = self.ctx.append_basic_block(fv, "match.end");
 
         let has_complex = m.arms.iter().any(|a| {
@@ -303,7 +308,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 self.bld.position_at_end(arm_bbs[i]);
-                self.vars.push(HashMap::new());
+                self.push_var_scope();
                 if let hir::Pat::Bind(_, ref name, ref _bty, _) = arm.pat {
                     let a = self.entry_alloca(self.llvm_ty(subject_ty), name);
                     b!(self.bld.build_store(a, subject_val));
@@ -317,8 +322,8 @@ impl<'ctx> Compiler<'ctx> {
                     self.compile_guard(guard, next_bb, i)?;
                 }
                 let arm_val = self.compile_block(&arm.body)?;
-                self.vars.pop();
-                let cur_bb = self.bld.get_insert_block().unwrap();
+                self.pop_var_scope();
+                let cur_bb = self.current_bb();
                 if self.no_term() {
                     match arm_val {
                         Some(v) => phi_in.push((v, cur_bb)),
@@ -381,7 +386,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_guard(guard, fail_bb, i)?;
             }
             let arm_val = self.compile_block(&arm.body)?;
-            let cur_bb = self.bld.get_insert_block().unwrap();
+            let cur_bb = self.current_bb();
             if self.no_term() {
                 match arm_val {
                     Some(v) => phi_in.push((v, cur_bb)),
@@ -416,7 +421,7 @@ impl<'ctx> Compiler<'ctx> {
         fail_bb: BasicBlock<'ctx>,
         i: usize,
     ) -> Result<(), String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let guard_val = self.compile_expr(guard)?;
         let gv = guard_val.into_int_value();
         let guard_pass = self

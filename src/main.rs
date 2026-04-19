@@ -16,6 +16,7 @@ use jadec::ownership::OwnershipVerifier;
 use jadec::parser::Parser;
 use jadec::perceus::PerceusPass;
 use jadec::pkg::{Dependency, Package, SemVer};
+use jadec::resolve::prefix_module;
 use jadec::typer::Typer;
 
 #[derive(ClapParser)]
@@ -79,11 +80,25 @@ struct Cli {
     /// Number of parallel codegen threads (0 = auto-detect)
     #[arg(long, default_value = "0")]
     threads: usize,
+    /// Target triple for cross-compilation (e.g., aarch64-unknown-linux-gnu)
+    #[arg(long)]
+    target: Option<String>,
+    /// Target CPU name (e.g., cortex-a53, skylake)
+    #[arg(long)]
+    cpu: Option<String>,
+    /// Target CPU features (e.g., +avx2,+sse4.2)
+    #[arg(long)]
+    features: Option<String>,
+    /// Standalone mode: no runtime, no libc dependency
+    #[arg(long)]
+    standalone: bool,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
-    Init { name: Option<String> },
+    Init {
+        name: Option<String>,
+    },
     Fetch,
     Update,
     /// Compile the project (uses project.jade entry if available)
@@ -95,9 +110,12 @@ enum Cmd {
         #[arg(long)]
         lto: bool,
     },
-    /// Compile and run the project
+    /// Compile and run a file or the project
     Run {
+        /// Source file to run (optional — uses project entry if omitted)
+        file: Option<PathBuf>,
         /// Arguments to pass to the program
+        #[arg(last = true)]
         args: Vec<String>,
     },
     /// Run project tests
@@ -121,6 +139,16 @@ fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
+fn dirs_cache() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        PathBuf::from(xdg).join("jade")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".cache").join("jade")
+    } else {
+        PathBuf::from(".jade_cache")
+    }
+}
+
 fn decl_name(d: &Decl) -> Option<&str> {
     match d {
         Decl::Fn(f) => Some(&f.name),
@@ -137,6 +165,9 @@ fn decl_name(d: &Decl) -> Option<&str> {
         Decl::Supervisor(s) => Some(&s.name),
         Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => Some(name),
         Decl::TopStmt(_) => None,
+        Decl::Migration(m) => Some(&m.name),
+        Decl::View(v) => Some(&v.name),
+        Decl::Global(name, _, _) => Some(name),
     }
 }
 
@@ -206,7 +237,11 @@ fn resolve_modules(
         candidates.push(base_dir.join(format!("{file_path}.jade")));
         // Also check parent of base_dir in case base_dir is source/ itself
         if let Some(project_root) = base_dir.parent() {
-            candidates.push(project_root.join("source").join(format!("{file_path}.jade")));
+            candidates.push(
+                project_root
+                    .join("source")
+                    .join(format!("{file_path}.jade")),
+            );
         }
 
         // 3. Packages from project.jade / lock
@@ -241,17 +276,18 @@ fn resolve_modules(
             let src_meta = fs::metadata(&candidate).ok();
             let iface_meta = fs::metadata(&jadei_path).ok();
             let use_cache = match (src_meta, iface_meta) {
-                (Some(sm), Some(im)) => {
-                    im.modified().ok() >= sm.modified().ok()
-                }
+                (Some(sm), Some(im)) => im.modified().ok() >= sm.modified().ok(),
                 _ => false,
             };
             if use_cache {
                 if let Ok(iface) = jadec::interface::InterfaceFile::read_from(&jadei_path) {
-                    for d in iface.to_decls() {
-                        if should_import_decl(&d, &imports) {
-                            prog.decls.push(d);
-                        }
+                    let importable: Vec<Decl> = iface
+                        .to_decls()
+                        .into_iter()
+                        .filter(|d| should_import_decl(d, &imports))
+                        .collect();
+                    for pd in prefix_module(importable, name) {
+                        prog.decls.push(pd);
                     }
                     continue;
                 }
@@ -272,19 +308,21 @@ fn resolve_modules(
             loaded,
             packages,
         );
+        // Collect all importable declarations from the module
+        let mut importable: Vec<Decl> = Vec::new();
         for d in mod_prog.decls {
             if matches!(d, Decl::Use(_)) {
                 continue;
             }
-            // The parser wraps module-level constants into an implicit *main.
-            // Unwrap them back into Const decls so they don't shadow the user's main.
+            // The parser wraps module-level top-level statements into an implicit *main.
+            // Skip the implicit main from imported modules; constants are already Decl::Const.
             if let Decl::Fn(ref f) = d {
                 if f.name == "main" && f.params.is_empty() {
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
                             let cd = Decl::Const(b.name.clone(), b.value.clone(), b.span);
                             if should_import_decl(&cd, &imports) {
-                                prog.decls.push(cd);
+                                importable.push(cd);
                             }
                         }
                     }
@@ -292,8 +330,11 @@ fn resolve_modules(
                 }
             }
             if should_import_decl(&d, &imports) {
-                prog.decls.push(d);
+                importable.push(d);
             }
+        }
+        for pd in prefix_module(importable, name) {
+            prog.decls.push(pd);
         }
     }
 }
@@ -311,8 +352,8 @@ struct ProjectConfig {
 impl ProjectConfig {
     fn from_file(path: &std::path::Path) -> Result<Self, String> {
         use jadec::ast::{Expr, Stmt};
-        let src = fs::read_to_string(path)
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let src =
+            fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let tokens = Lexer::new(&src).tokenize().map_err(|e| format!("{e}"))?;
         let prog = Parser::new(tokens)
             .parse_program()
@@ -328,7 +369,7 @@ impl ProjectConfig {
                         // require 'name' 'url' 'version'
                         Stmt::Expr(Expr::Call(callee, args, _))
                             if matches!(callee.as_ref(), Expr::Ident(n, _) if n == "require")
-                            && args.len() == 3 =>
+                                && args.len() == 3 =>
                         {
                             if let (Expr::Str(name, _), Expr::Str(url, _), Expr::Str(ver, _)) =
                                 (&args[0], &args[1], &args[2])
@@ -434,8 +475,14 @@ fn cmd_fetch() {
     }
     let pkg = Package {
         name: cfg.name.unwrap_or_default(),
-        version: cfg.version.and_then(|v| SemVer::parse(&v).ok())
-            .unwrap_or(SemVer { major: 0, minor: 0, patch: 0 }),
+        version: cfg
+            .version
+            .and_then(|v| SemVer::parse(&v).ok())
+            .unwrap_or(SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            }),
         author: None,
         requires: cfg.requires,
     };
@@ -467,8 +514,14 @@ fn cmd_update() {
     }
     let pkg = Package {
         name: cfg.name.unwrap_or_default(),
-        version: cfg.version.and_then(|v| SemVer::parse(&v).ok())
-            .unwrap_or(SemVer { major: 0, minor: 0, patch: 0 }),
+        version: cfg
+            .version
+            .and_then(|v| SemVer::parse(&v).ok())
+            .unwrap_or(SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            }),
         author: None,
         requires: cfg.requires,
     };
@@ -506,13 +559,19 @@ fn find_project_entry() -> PathBuf {
     if src_main.exists() {
         return src_main;
     }
-    die("no entry file found: create project.jade with `entry is 'source/main.jade'` or add source/main.jade");
+    die(
+        "no entry file found: create project.jade with `entry is 'source/main.jade'` or add source/main.jade",
+    );
 }
 
 /// Find all .jade files in source_dir (recursively), excluding the entry file,
 /// parse them, and merge their declarations into the program.
 /// Returns the set of module keys (e.g. "math_utils", "utils.strings") for merged files.
-fn merge_source_files(prog: &mut Program, source_dir: &std::path::Path, entry_canon: &std::path::Path) -> HashSet<String> {
+fn merge_source_files(
+    prog: &mut Program,
+    source_dir: &std::path::Path,
+    entry_canon: &std::path::Path,
+) -> HashSet<String> {
     fn collect_jade_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
@@ -537,7 +596,8 @@ fn merge_source_files(prog: &mut Program, source_dir: &std::path::Path, entry_ca
         }
         // Compute module key from relative path (e.g. source/utils/strings.jade → "utils.strings")
         if let Ok(rel) = file.strip_prefix(source_dir) {
-            let key = rel.with_extension("")
+            let key = rel
+                .with_extension("")
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().to_string())
                 .collect::<Vec<_>>()
@@ -565,6 +625,12 @@ fn merge_source_files(prog: &mut Program, source_dir: &std::path::Path, entry_ca
                 continue;
             }
         };
+        // Derive module name from file stem (e.g., "helpers.jade" → "helpers")
+        let mod_name = file
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut importable: Vec<Decl> = Vec::new();
         for d in mod_prog.decls {
             if matches!(d, Decl::Use(_)) {
                 continue; // Use decls in source files will be resolved via the entry
@@ -575,13 +641,16 @@ fn merge_source_files(prog: &mut Program, source_dir: &std::path::Path, entry_ca
                     // Extract any top-level constants from the implicit *main wrapper
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
-                            prog.decls.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
+                            importable.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
                         }
                     }
                     continue;
                 }
             }
-            prog.decls.push(d);
+            importable.push(d);
+        }
+        for pd in prefix_module(importable, &mod_name) {
+            prog.decls.push(pd);
         }
     }
     merged_keys
@@ -596,7 +665,9 @@ struct EntityIndex {
 
 impl EntityIndex {
     fn new() -> Self {
-        Self { symbols: HashMap::new() }
+        Self {
+            symbols: HashMap::new(),
+        }
     }
 
     /// Scan a directory recursively for .jade files and index their exported symbols.
@@ -637,13 +708,17 @@ impl EntityIndex {
         for d in &prog.decls {
             if let Some(name) = decl_name(d) {
                 if name != "main" {
-                    self.symbols.entry(name.to_string()).or_insert_with(|| path.to_path_buf());
+                    self.symbols
+                        .entry(name.to_string())
+                        .or_insert_with(|| path.to_path_buf());
                 }
             }
             // Also index enum variant names
             if let Decl::Enum(ed) = d {
                 for v in &ed.variants {
-                    self.symbols.entry(v.name.clone()).or_insert_with(|| path.to_path_buf());
+                    self.symbols
+                        .entry(v.name.clone())
+                        .or_insert_with(|| path.to_path_buf());
                 }
             }
             // Also index method names (TypeName_method)
@@ -652,7 +727,9 @@ impl EntityIndex {
                 if f.name == "main" && f.params.is_empty() {
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
-                            self.symbols.entry(b.name.clone()).or_insert_with(|| path.to_path_buf());
+                            self.symbols
+                                .entry(b.name.clone())
+                                .or_insert_with(|| path.to_path_buf());
                         }
                     }
                 }
@@ -738,112 +815,214 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
     // Collect defined names
     for d in &prog.decls {
         match d {
-            Decl::Fn(f) => { defined.insert(f.name.clone()); }
-            Decl::Type(t) => { defined.insert(t.name.clone()); }
+            Decl::Fn(f) => {
+                defined.insert(f.name.clone());
+            }
+            Decl::Type(t) => {
+                defined.insert(t.name.clone());
+            }
             Decl::Enum(e) => {
                 defined.insert(e.name.clone());
-                for v in &e.variants { defined.insert(v.name.clone()); }
+                for v in &e.variants {
+                    defined.insert(v.name.clone());
+                }
             }
-            Decl::Extern(e) => { defined.insert(e.name.clone()); }
-            Decl::ErrDef(e) => { defined.insert(e.name.clone()); }
-            Decl::Actor(a) => { defined.insert(a.name.clone()); }
-            Decl::Store(s) => { defined.insert(s.name.clone()); }
-            Decl::Trait(t) => { defined.insert(t.name.clone()); }
-            Decl::Const(name, _, _) => { defined.insert(name.clone()); }
+            Decl::Extern(e) => {
+                defined.insert(e.name.clone());
+            }
+            Decl::ErrDef(e) => {
+                defined.insert(e.name.clone());
+            }
+            Decl::Actor(a) => {
+                defined.insert(a.name.clone());
+            }
+            Decl::Store(s) => {
+                defined.insert(s.name.clone());
+            }
+            Decl::Trait(t) => {
+                defined.insert(t.name.clone());
+            }
+            Decl::Const(name, _, _) => {
+                defined.insert(name.clone());
+            }
             Decl::Impl(_) | Decl::Use(_) | Decl::Test(_) => {}
-            Decl::Supervisor(s) => { defined.insert(s.name.clone()); }
-            Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => { defined.insert(name.clone()); }
+            Decl::Supervisor(s) => {
+                defined.insert(s.name.clone());
+            }
+            Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => {
+                defined.insert(name.clone());
+            }
             Decl::TopStmt(_) => {}
+            Decl::Migration(m) => {
+                defined.insert(m.name.clone());
+            }
+            Decl::View(v) => {
+                defined.insert(v.name.clone());
+            }
+            Decl::Global(name, _, _) => {
+                defined.insert(name.clone());
+            }
         }
     }
 
     // Walk all expressions to find referenced identifiers
-    fn walk_expr(e: &jadec::ast::Expr, refs: &mut HashSet<String>) {
+    fn walk_expr(e: &jadec::ast::Expr, refs: &mut HashSet<String>, defs: &mut HashSet<String>) {
         use jadec::ast::Expr;
         match e {
-            Expr::Ident(name, _) => { refs.insert(name.clone()); }
+            Expr::Ident(name, _) => {
+                refs.insert(name.clone());
+            }
             Expr::Call(callee, args, _) => {
-                walk_expr(callee, refs);
-                for a in args { walk_expr(a, refs); }
+                walk_expr(callee, refs, defs);
+                for a in args {
+                    walk_expr(a, refs, defs);
+                }
             }
             Expr::Method(obj, _method, args, _) => {
-                walk_expr(obj, refs);
-                for a in args { walk_expr(a, refs); }
-            }
-            Expr::BinOp(l, _, r, _) => { walk_expr(l, refs); walk_expr(r, refs); }
-            Expr::UnaryOp(_, e, _) => walk_expr(e, refs),
-            Expr::IfExpr(if_expr) => {
-                walk_expr(&if_expr.cond, refs);
-                walk_block(&if_expr.then, refs);
-                for (c, b) in &if_expr.elifs {
-                    walk_expr(c, refs);
-                    walk_block(b, refs);
+                walk_expr(obj, refs, defs);
+                for a in args {
+                    walk_expr(a, refs, defs);
                 }
-                if let Some(eb) = &if_expr.els { walk_block(eb, refs); }
             }
-            Expr::Array(elems, _) | Expr::Tuple(elems, _) | Expr::NDArray(elems, _)
+            Expr::BinOp(l, _, r, _) => {
+                walk_expr(l, refs, defs);
+                walk_expr(r, refs, defs);
+            }
+            Expr::UnaryOp(_, e, _) => walk_expr(e, refs, defs),
+            Expr::IfExpr(if_expr) => {
+                walk_expr(&if_expr.cond, refs, defs);
+                walk_block(&if_expr.then, refs, defs);
+                for (c, b) in &if_expr.elifs {
+                    walk_expr(c, refs, defs);
+                    walk_block(b, refs, defs);
+                }
+                if let Some(eb) = &if_expr.els {
+                    walk_block(eb, refs, defs);
+                }
+            }
+            Expr::Array(elems, _)
+            | Expr::Tuple(elems, _)
+            | Expr::NDArray(elems, _)
             | Expr::Deque(elems, _) => {
-                for e in elems { walk_expr(e, refs); }
+                for e in elems {
+                    walk_expr(e, refs, defs);
+                }
             }
             Expr::Struct(name, inits, _) => {
                 refs.insert(name.clone());
-                for fi in inits { walk_expr(&fi.value, refs); }
+                for fi in inits {
+                    walk_expr(&fi.value, refs, defs);
+                }
             }
-            Expr::Index(a, i, _) => { walk_expr(a, refs); walk_expr(i, refs); }
-            Expr::Field(obj, _, _) => walk_expr(obj, refs),
-            Expr::Lambda(_, _, body, _) => walk_block(body, refs),
+            Expr::Index(a, i, _) => {
+                walk_expr(a, refs, defs);
+                walk_expr(i, refs, defs);
+            }
+            Expr::Field(obj, _, _) => walk_expr(obj, refs, defs),
+            Expr::Lambda(params, _, body, _) => {
+                for p in params {
+                    defs.insert(p.name.clone());
+                }
+                walk_block(body, refs, defs);
+            }
             Expr::Pipe(l, r, extra, _) => {
-                walk_expr(l, refs);
-                walk_expr(r, refs);
-                for a in extra { walk_expr(a, refs); }
+                walk_expr(l, refs, defs);
+                walk_expr(r, refs, defs);
+                for a in extra {
+                    walk_expr(a, refs, defs);
+                }
             }
-            Expr::As(e, _, _) | Expr::StrictCast(e, _, _) | Expr::AsFormat(e, _, _) => walk_expr(e, refs),
-            Expr::Block(stmts, _) => walk_block(stmts, refs),
-            Expr::Ref(e, _) | Expr::Deref(e, _) | Expr::Yield(e, _) | Expr::Grad(e, _) => walk_expr(e, refs),
-            Expr::Spawn(name, _) => { refs.insert(name.clone()); }
-            Expr::Ternary(c, t, f, _) => { walk_expr(c, refs); walk_expr(t, refs); walk_expr(f, refs); }
-            Expr::ListComp(body, _var, iter, filter, map, _) => {
-                walk_expr(body, refs);
-                walk_expr(iter, refs);
-                if let Some(f) = filter { walk_expr(f, refs); }
-                if let Some(m) = map { walk_expr(m, refs); }
+            Expr::As(e, _, _) | Expr::StrictCast(e, _, _) | Expr::AsFormat(e, _, _) => {
+                walk_expr(e, refs, defs)
             }
-            Expr::Slice(a, lo, hi, _) => { walk_expr(a, refs); walk_expr(lo, refs); walk_expr(hi, refs); }
-            Expr::ChannelCreate(_, sz, _) => walk_expr(sz, refs),
-            Expr::ChannelSend(ch, val, _) => { walk_expr(ch, refs); walk_expr(val, refs); }
-            Expr::ChannelRecv(ch, _) => walk_expr(ch, refs),
-            Expr::Send(obj, _, args, _) => { walk_expr(obj, refs); for a in args { walk_expr(a, refs); } }
-            Expr::NamedArg(_, e, _) | Expr::Spread(e, _) => walk_expr(e, refs),
-            Expr::OfCall(a, b, _) => { walk_expr(a, refs); walk_expr(b, refs); }
+            Expr::Block(stmts, _) => walk_block(stmts, refs, defs),
+            Expr::Ref(e, _) | Expr::Deref(e, _) | Expr::Yield(e, _) | Expr::Grad(e, _) | Expr::Try(e, _) => {
+                walk_expr(e, refs, defs)
+            }
+            Expr::Spawn(name, _) => {
+                refs.insert(name.clone());
+            }
+            Expr::Ternary(c, t, f, _) => {
+                walk_expr(c, refs, defs);
+                walk_expr(t, refs, defs);
+                walk_expr(f, refs, defs);
+            }
+            Expr::ListComp(body, var, iter, filter, map, _) => {
+                defs.insert(var.clone());
+                walk_expr(body, refs, defs);
+                walk_expr(iter, refs, defs);
+                if let Some(f) = filter {
+                    walk_expr(f, refs, defs);
+                }
+                if let Some(m) = map {
+                    walk_expr(m, refs, defs);
+                }
+            }
+            Expr::Slice(a, lo, hi, _) => {
+                walk_expr(a, refs, defs);
+                walk_expr(lo, refs, defs);
+                walk_expr(hi, refs, defs);
+            }
+            Expr::ChannelCreate(_, sz, _) => walk_expr(sz, refs, defs),
+            Expr::ChannelSend(ch, val, _) => {
+                walk_expr(ch, refs, defs);
+                walk_expr(val, refs, defs);
+            }
+            Expr::ChannelRecv(ch, _) => walk_expr(ch, refs, defs),
+            Expr::Send(obj, _, args, _) => {
+                walk_expr(obj, refs, defs);
+                for a in args {
+                    walk_expr(a, refs, defs);
+                }
+            }
+            Expr::NamedArg(_, e, _) | Expr::Spread(e, _) => walk_expr(e, refs, defs),
+            Expr::OfCall(a, b, _) => {
+                walk_expr(a, refs, defs);
+                walk_expr(b, refs, defs);
+            }
             Expr::Builder(name, fields, _) => {
                 refs.insert(name.clone());
-                for f in fields { walk_expr(&f.value, refs); }
+                for f in fields {
+                    walk_expr(&f.value, refs, defs);
+                }
             }
             Expr::Einsum(_, args, _) | Expr::Syscall(args, _) => {
-                for a in args { walk_expr(a, refs); }
+                for a in args {
+                    walk_expr(a, refs, defs);
+                }
             }
-            Expr::SIMDLit(_, _, elems, _) => { for e in elems { walk_expr(e, refs); } }
+            Expr::SIMDLit(_, _, elems, _) => {
+                for e in elems {
+                    walk_expr(e, refs, defs);
+                }
+            }
             Expr::Select(arms, default, _) => {
                 for arm in arms {
-                    walk_expr(&arm.chan, refs);
-                    if let Some(v) = &arm.value { walk_expr(v, refs); }
-                    walk_block(&arm.body, refs);
+                    walk_expr(&arm.chan, refs, defs);
+                    if let Some(v) = &arm.value {
+                        walk_expr(v, refs, defs);
+                    }
+                    walk_block(&arm.body, refs, defs);
                 }
-                if let Some(d) = default { walk_block(d, refs); }
+                if let Some(d) = default {
+                    walk_block(d, refs, defs);
+                }
             }
             Expr::Receive(arms, _) => {
-                for arm in arms { walk_block(&arm.body, refs); }
+                for arm in arms {
+                    walk_block(&arm.body, refs, defs);
+                }
             }
-            Expr::DispatchBlock(_, body, _) => walk_block(body, refs),
+            Expr::DispatchBlock(_, body, _) => walk_block(body, refs, defs),
             Expr::Query(base, clauses, _) => {
-                walk_expr(base, refs);
+                walk_expr(base, refs, defs);
                 for c in clauses {
                     match c {
                         jadec::ast::QueryClause::Where(e, _)
                         | jadec::ast::QueryClause::Limit(e, _)
                         | jadec::ast::QueryClause::Take(e, _)
-                        | jadec::ast::QueryClause::Skip(e, _) => walk_expr(e, refs),
-                        jadec::ast::QueryClause::Set(_, e, _) => walk_expr(e, refs),
+                        | jadec::ast::QueryClause::Skip(e, _) => walk_expr(e, refs, defs),
+                        jadec::ast::QueryClause::Set(_, e, _) => walk_expr(e, refs, defs),
                         _ => {}
                     }
                 }
@@ -852,65 +1031,113 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
         }
     }
 
-    fn walk_pat(p: &jadec::ast::Pat, refs: &mut HashSet<String>) {
+    fn walk_pat(p: &jadec::ast::Pat, refs: &mut HashSet<String>, defs: &mut HashSet<String>) {
         use jadec::ast::Pat;
         match p {
             Pat::Ctor(name, pats, _) => {
                 refs.insert(name.clone());
-                for p in pats { walk_pat(p, refs); }
+                for p in pats {
+                    walk_pat(p, refs, defs);
+                }
             }
             Pat::Or(pats, _) | Pat::Tuple(pats, _) | Pat::Array(pats, _) => {
-                for p in pats { walk_pat(p, refs); }
+                for p in pats {
+                    walk_pat(p, refs, defs);
+                }
             }
-            Pat::Lit(e) => walk_expr(e, refs),
-            _ => {} // Wild, Ident, Range
+            Pat::Lit(e) => walk_expr(e, refs, defs),
+            Pat::Ident(name, _) => {
+                defs.insert(name.clone());
+            }
+            _ => {} // Wild, Range
         }
     }
 
-    fn walk_block(stmts: &[jadec::ast::Stmt], refs: &mut HashSet<String>) {
-        for s in stmts { walk_stmt(s, refs); }
+    fn walk_block(
+        stmts: &[jadec::ast::Stmt],
+        refs: &mut HashSet<String>,
+        defs: &mut HashSet<String>,
+    ) {
+        for s in stmts {
+            walk_stmt(s, refs, defs);
+        }
     }
 
-    fn walk_stmt(s: &jadec::ast::Stmt, refs: &mut HashSet<String>) {
+    fn walk_stmt(s: &jadec::ast::Stmt, refs: &mut HashSet<String>, defs: &mut HashSet<String>) {
         use jadec::ast::Stmt;
         match s {
-            Stmt::Expr(e) => walk_expr(e, refs),
+            Stmt::Expr(e) => walk_expr(e, refs, defs),
             Stmt::Bind(b) => {
-                walk_expr(&b.value, refs);
-                if let Some(ty) = &b.ty { walk_type(ty, refs); }
-            }
-            Stmt::Assign(l, r, _) => { walk_expr(l, refs); walk_expr(r, refs); }
-            Stmt::Ret(Some(e), _) | Stmt::ErrReturn(e, _) | Stmt::Break(Some(e), _) => walk_expr(e, refs),
-            Stmt::Ret(None, _) | Stmt::Break(None, _) | Stmt::Continue(_) => {}
-            Stmt::If(if_s) => {
-                walk_expr(&if_s.cond, refs);
-                walk_block(&if_s.then, refs);
-                for (c, b) in &if_s.elifs { walk_expr(c, refs); walk_block(b, refs); }
-                if let Some(eb) = &if_s.els { walk_block(eb, refs); }
-            }
-            Stmt::While(w) => { walk_expr(&w.cond, refs); walk_block(&w.body, refs); }
-            Stmt::For(f) => {
-                walk_expr(&f.iter, refs);
-                if let Some(end) = &f.end { walk_expr(end, refs); }
-                if let Some(step) = &f.step { walk_expr(step, refs); }
-                walk_block(&f.body, refs);
-            }
-            Stmt::Loop(l) => walk_block(&l.body, refs),
-            Stmt::Match(m) => {
-                walk_expr(&m.subject, refs);
-                for arm in &m.arms {
-                    walk_pat(&arm.pat, refs);
-                    if let Some(g) = &arm.guard { walk_expr(g, refs); }
-                    walk_block(&arm.body, refs);
+                defs.insert(b.name.clone());
+                walk_expr(&b.value, refs, defs);
+                if let Some(ty) = &b.ty {
+                    walk_type(ty, refs);
                 }
             }
-            Stmt::TupleBind(_, e, _) => walk_expr(e, refs),
-            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => walk_expr(e, refs),
-            Stmt::StoreInsert(_, exprs, _) => { for e in exprs { walk_expr(e, refs); } }
-            Stmt::Transaction(body, _) | Stmt::SimBlock(body, _) => walk_block(body, refs),
+            Stmt::Assign(l, r, _) => {
+                walk_expr(l, refs, defs);
+                walk_expr(r, refs, defs);
+            }
+            Stmt::Ret(Some(e), _) | Stmt::ErrReturn(e, _) | Stmt::Break(Some(e), _) => {
+                walk_expr(e, refs, defs)
+            }
+            Stmt::Ret(None, _) | Stmt::Break(None, _) | Stmt::Continue(_) => {}
+            Stmt::If(if_s) => {
+                walk_expr(&if_s.cond, refs, defs);
+                walk_block(&if_s.then, refs, defs);
+                for (c, b) in &if_s.elifs {
+                    walk_expr(c, refs, defs);
+                    walk_block(b, refs, defs);
+                }
+                if let Some(eb) = &if_s.els {
+                    walk_block(eb, refs, defs);
+                }
+            }
+            Stmt::While(w) => {
+                walk_expr(&w.cond, refs, defs);
+                walk_block(&w.body, refs, defs);
+            }
+            Stmt::For(f) => {
+                defs.insert(f.bind.clone());
+                if let Some(b2) = &f.bind2 {
+                    defs.insert(b2.clone());
+                }
+                walk_expr(&f.iter, refs, defs);
+                if let Some(end) = &f.end {
+                    walk_expr(end, refs, defs);
+                }
+                if let Some(step) = &f.step {
+                    walk_expr(step, refs, defs);
+                }
+                walk_block(&f.body, refs, defs);
+            }
+            Stmt::Loop(l) => walk_block(&l.body, refs, defs),
+            Stmt::Match(m) => {
+                walk_expr(&m.subject, refs, defs);
+                for arm in &m.arms {
+                    walk_pat(&arm.pat, refs, defs);
+                    if let Some(g) = &arm.guard {
+                        walk_expr(g, refs, defs);
+                    }
+                    walk_block(&arm.body, refs, defs);
+                }
+            }
+            Stmt::TupleBind(names, e, _) => {
+                for n in names {
+                    defs.insert(n.clone());
+                }
+                walk_expr(e, refs, defs);
+            }
+            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => walk_expr(e, refs, defs),
+            Stmt::StoreInsert(_, exprs, _) => {
+                for e in exprs {
+                    walk_expr(e, refs, defs);
+                }
+            }
+            Stmt::Transaction(body, _) | Stmt::SimBlock(body, _) => walk_block(body, refs, defs),
             Stmt::SimFor(f, _) => {
-                walk_expr(&f.iter, refs);
-                walk_block(&f.body, refs);
+                walk_expr(&f.iter, refs, defs);
+                walk_block(&f.body, refs, defs);
             }
             _ => {} // Asm, StoreDelete, StoreSet, UseLocal
         }
@@ -921,25 +1148,50 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
         match ty {
             Type::Struct(name, args) => {
                 refs.insert(name.clone());
-                for a in args { walk_type(a, refs); }
+                for a in args {
+                    walk_type(a, refs);
+                }
             }
-            Type::Enum(name) => { refs.insert(name.clone()); }
-            Type::Vec(inner) | Type::Ptr(inner) | Type::Rc(inner) | Type::Weak(inner)
-            | Type::Channel(inner) | Type::Set(inner) | Type::PriorityQueue(inner)
-            | Type::Coroutine(inner) | Type::Deque(inner) | Type::Cow(inner) | Type::Generator(inner) => {
+            Type::Enum(name) => {
+                refs.insert(name.clone());
+            }
+            Type::Vec(inner)
+            | Type::Ptr(inner)
+            | Type::Rc(inner)
+            | Type::Weak(inner)
+            | Type::Channel(inner)
+            | Type::Set(inner)
+            | Type::PriorityQueue(inner)
+            | Type::Coroutine(inner)
+            | Type::Deque(inner)
+            | Type::Cow(inner)
+            | Type::Generator(inner) => {
                 walk_type(inner, refs);
             }
-            Type::Map(k, v) => { walk_type(k, refs); walk_type(v, refs); }
+            Type::Map(k, v) => {
+                walk_type(k, refs);
+                walk_type(v, refs);
+            }
             Type::Array(inner, _) => walk_type(inner, refs),
-            Type::Tuple(elems) => { for e in elems { walk_type(e, refs); } }
+            Type::Tuple(elems) => {
+                for e in elems {
+                    walk_type(e, refs);
+                }
+            }
             Type::Fn(params, ret) => {
-                for p in params { walk_type(p, refs); }
+                for p in params {
+                    walk_type(p, refs);
+                }
                 walk_type(ret, refs);
             }
             Type::NDArray(inner, _) | Type::SIMD(inner, _) => walk_type(inner, refs),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => walk_type(inner, refs),
-            Type::ActorRef(name) => { refs.insert(name.clone()); }
-            Type::DynTrait(name) => { refs.insert(name.clone()); }
+            Type::ActorRef(name) => {
+                refs.insert(name.clone());
+            }
+            Type::DynTrait(name) => {
+                refs.insert(name.clone());
+            }
             _ => {} // primitives, TypeVar, etc.
         }
     }
@@ -948,30 +1200,57 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
     for d in &prog.decls {
         match d {
             Decl::Fn(f) => {
-                for s in &f.body { walk_stmt(s, &mut referenced); }
+                // Register parameter names as defined (local scope)
+                for p in &f.params {
+                    defined.insert(p.name.clone());
+                }
+                for s in &f.body {
+                    walk_stmt(s, &mut referenced, &mut defined);
+                }
                 // Check return type
-                if let Some(ret) = &f.ret { walk_type(ret, &mut referenced); }
+                if let Some(ret) = &f.ret {
+                    walk_type(ret, &mut referenced);
+                }
                 // Check param types
                 for p in &f.params {
-                    if let Some(ty) = &p.ty { walk_type(ty, &mut referenced); }
+                    if let Some(ty) = &p.ty {
+                        walk_type(ty, &mut referenced);
+                    }
                 }
             }
             Decl::Type(td) => {
                 for field in &td.fields {
-                    if let Some(ty) = &field.ty { walk_type(ty, &mut referenced); }
+                    if let Some(ty) = &field.ty {
+                        walk_type(ty, &mut referenced);
+                    }
                 }
                 for m in &td.methods {
-                    for s in &m.body { walk_stmt(s, &mut referenced); }
+                    for p in &m.params {
+                        defined.insert(p.name.clone());
+                    }
+                    for s in &m.body {
+                        walk_stmt(s, &mut referenced, &mut defined);
+                    }
                 }
             }
             Decl::Impl(ib) => {
                 for m in &ib.methods {
-                    for s in &m.body { walk_stmt(s, &mut referenced); }
+                    for p in &m.params {
+                        defined.insert(p.name.clone());
+                    }
+                    for s in &m.body {
+                        walk_stmt(s, &mut referenced, &mut defined);
+                    }
                 }
             }
             Decl::Actor(ad) => {
                 for h in &ad.handlers {
-                    for s in &h.body { walk_stmt(s, &mut referenced); }
+                    for p in &h.params {
+                        defined.insert(p.name.clone());
+                    }
+                    for s in &h.body {
+                        walk_stmt(s, &mut referenced, &mut defined);
+                    }
                 }
             }
             _ => {}
@@ -980,14 +1259,73 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
 
     // Built-in names that should never trigger auto-import
     let builtins: HashSet<&str> = [
-        "log", "print", "println", "assert", "len", "push", "pop", "append",
-        "range", "input", "exit", "panic", "type_of", "size_of",
-        "true", "false", "None", "Some", "Nothing", "Ok", "Err",
-        "Vec", "Map", "Set", "String", "Array", "Channel", "Deque",
-        "int", "float", "str", "bool", "void", "i8", "i16", "i32", "i64",
-        "u8", "u16", "u32", "u64", "f32", "f64",
-        "self", "main",
-    ].iter().copied().collect();
+        "log",
+        "print",
+        "println",
+        "assert",
+        "len",
+        "push",
+        "pop",
+        "append",
+        "range",
+        "input",
+        "exit",
+        "panic",
+        "type_of",
+        "size_of",
+        "true",
+        "false",
+        "None",
+        "Some",
+        "Nothing",
+        "Ok",
+        "Err",
+        "Vec",
+        "Map",
+        "Set",
+        "String",
+        "Array",
+        "Channel",
+        "Deque",
+        "int",
+        "float",
+        "str",
+        "bool",
+        "void",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "f32",
+        "f64",
+        "self",
+        "main",
+        "vec",
+        "map",
+        "set",
+        "to_string",
+        "to_int",
+        "to_float",
+        "to_bool",
+        "abs",
+        "min",
+        "max",
+        "sqrt",
+        "floor",
+        "ceil",
+        "round",
+        "not",
+        "and",
+        "or",
+        "mod",
+    ]
+    .iter()
+    .copied()
+    .collect();
 
     referenced
         .difference(&defined)
@@ -1009,6 +1347,9 @@ fn resolve_implicit_imports(
     if undefined.is_empty() {
         return;
     }
+    if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
+        eprintln!("[auto-import] undefined refs: {:?}", undefined);
+    }
 
     // Find which files need to be imported
     let mut files_to_import: HashMap<PathBuf, Vec<String>> = HashMap::new();
@@ -1023,10 +1364,25 @@ fn resolve_implicit_imports(
 
     for (file_path, _symbols) in &files_to_import {
         // Check if already loaded via a module key
-        let file_canon = file_path.canonicalize().unwrap_or_else(|_| file_path.clone());
+        let file_canon = file_path
+            .canonicalize()
+            .unwrap_or_else(|_| file_path.clone());
         let key = file_canon.to_string_lossy().to_string();
         if loaded.contains(&key) {
+            if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
+                eprintln!(
+                    "[auto-import] SKIP (already loaded): {}",
+                    file_path.display()
+                );
+            }
             continue;
+        }
+        if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
+            eprintln!(
+                "[auto-import] IMPORTING: {} for {:?}",
+                file_path.display(),
+                _symbols
+            );
         }
         loaded.insert(key);
 
@@ -1051,20 +1407,32 @@ fn resolve_implicit_imports(
             packages,
         );
 
+        // Derive module name from file path (e.g., "/path/to/json.jade" → "json")
+        let mod_name = file_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let mut importable: Vec<Decl> = Vec::new();
         for d in mod_prog.decls {
-            if matches!(d, Decl::Use(_)) { continue; }
+            if matches!(d, Decl::Use(_)) {
+                continue;
+            }
             if let Decl::Fn(ref f) = d {
                 if f.name == "main" && f.params.is_empty() {
                     // Unwrap implicit main constants
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
-                            prog.decls.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
+                            importable.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
                         }
                     }
                     continue;
                 }
             }
-            prog.decls.push(d);
+            importable.push(d);
+        }
+        for pd in prefix_module(importable, &mod_name) {
+            prog.decls.push(pd);
         }
     }
 }
@@ -1084,7 +1452,11 @@ fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
     }
     let pkg = Package {
         name: String::new(),
-        version: SemVer { major: 0, minor: 0, patch: 0 },
+        version: SemVer {
+            major: 0,
+            minor: 0,
+            patch: 0,
+        },
         author: None,
         requires,
     };
@@ -1099,12 +1471,22 @@ fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
         .resolve(&pkg, existing_lock.as_ref())
         .unwrap_or_else(|e| die(&format!("resolve: {e}")));
     let lock_content = resolved.write();
-    fs::write(&lock_file, &lock_content)
-        .unwrap_or_else(|e| die(&format!("write lock: {e}")));
+    fs::write(&lock_file, &lock_content).unwrap_or_else(|e| die(&format!("write lock: {e}")));
     build_package_map(&cache, &resolved)
 }
 
-fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level: u8, lto: bool, test_mode: bool, _bench: bool, fast_math: bool, deterministic_fp: bool, emit_mir: bool, incremental: bool) {
+fn compile_and_link(
+    input: &std::path::Path,
+    output: &std::path::Path,
+    opt_level: u8,
+    lto: bool,
+    test_mode: bool,
+    _bench: bool,
+    fast_math: bool,
+    deterministic_fp: bool,
+    emit_mir: bool,
+    incremental: bool,
+) {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
@@ -1120,6 +1502,8 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     let merged = merge_source_files(&mut prog, base_dir, &input_canon);
 
     let mut loaded: HashSet<String> = merged;
+    // Prevent auto-import from re-importing the entry file itself
+    loaded.insert(input_canon.to_string_lossy().to_string());
     let packages = load_packages(base_dir);
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
     let entity_index = EntityIndex::build(base_dir, &packages);
@@ -1144,9 +1528,30 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     let diags = verifier.verify(&hir_prog);
     let mut has_hard_error = false;
     for d in &diags {
-        let is_err = !matches!(d.kind, jadec::ownership::DiagKind::WeakUpgradeWithoutCheck | jadec::ownership::DiagKind::Warning);
-        if is_err { has_hard_error = true; }
-        let level = if is_err { "error" } else { "warning" };
+        let level = match d.kind {
+            jadec::ownership::DiagKind::UseAfterMove => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::DoubleMutableBorrow => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::MoveOfBorrowed => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::InvalidRcDeref => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::ReturnOfBorrowed => {
+                has_hard_error = true;
+                "error"
+            }
+            jadec::ownership::DiagKind::WeakUpgradeWithoutCheck => "warning",
+            jadec::ownership::DiagKind::Warning => "warning",
+        };
         eprintln!("ownership: {} (line {}): {}", level, d.span.line, d.message);
     }
     if has_hard_error {
@@ -1174,16 +1579,28 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
         if dirty.is_empty() {
             eprintln!("incr: all functions up to date");
         } else {
-            eprintln!("incr: {} of {} functions need recompilation", dirty.len(), hir_prog.fns.len());
+            eprintln!(
+                "incr: {} of {} functions need recompilation",
+                dirty.len(),
+                hir_prog.fns.len()
+            );
         }
     }
 
     let ctx = Context::create();
-    let name = input.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "main".into());
+    let name = input
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "main".into());
     let mut comp = Compiler::new(&ctx, &name);
+    comp.init_tbaa();
     comp.set_source(&src);
-    if fast_math { comp.set_fast_math(true); }
-    if deterministic_fp { comp.set_deterministic_fp(); }
+    if fast_math {
+        comp.set_fast_math(true);
+    }
+    if deterministic_fp {
+        comp.set_deterministic_fp();
+    }
 
     {
         use jadec::codegen::mir_codegen::MirCodegen;
@@ -1209,11 +1626,26 @@ fn compile_and_link(input: &std::path::Path, output: &std::path::Path, opt_level
     }
 
     let mut cc = Command::new("cc");
-    cc.arg(&obj).arg("-o").arg(output).arg("-lm");
+    cc.arg(&obj).arg("-o").arg(output);
     if comp.needs_runtime {
         let rt_dir = env!("JADE_RT_DIR");
         cc.arg("-L").arg(rt_dir).arg("-ljade_rt").arg("-lpthread");
     }
+    if comp.needs_ssl {
+        if env!("JADE_HAS_SSL") != "1" {
+            die("program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built");
+        }
+        let rt_dir = env!("JADE_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljade_ssl").arg("-lssl").arg("-lcrypto");
+    }
+    if comp.needs_sqlite {
+        if env!("JADE_HAS_SQLITE") != "1" {
+            die("program uses std.sqlite but SQLite3 was not available when the compiler was built");
+        }
+        let rt_dir = env!("JADE_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljade_sqlite").arg("-lsqlite3");
+    }
+    cc.arg("-lm");
     if lto {
         cc.arg("-flto");
     }
@@ -1238,14 +1670,55 @@ fn main() {
                 let entry = find_project_entry();
                 let out = output.unwrap_or_else(|| PathBuf::from("a.out"));
                 let opt_level = opt.unwrap_or(3);
-                compile_and_link(&entry, &out, opt_level, lto, false, false, cli.fast_math, cli.deterministic_fp, cli.emit_mir, cli.incremental);
+                compile_and_link(
+                    &entry,
+                    &out,
+                    opt_level,
+                    lto,
+                    false,
+                    false,
+                    cli.fast_math,
+                    cli.deterministic_fp,
+                    cli.emit_mir,
+                    cli.incremental,
+                );
             }
-            Cmd::Run { args } => {
-                let entry = find_project_entry();
-                let out = PathBuf::from("./.jade_run_tmp");
-                compile_and_link(&entry, &out, 2, false, false, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
-                let status = Command::new(&out).args(&args).status();
-                let _ = fs::remove_file(&out);
+            Cmd::Run { file, args } => {
+                let entry = match file {
+                    Some(f) => {
+                        if !f.exists() {
+                            die(&format!("file not found: {}", f.display()));
+                        }
+                        f
+                    }
+                    None => find_project_entry(),
+                };
+                // Use content hash for caching compiled binaries
+                let src_bytes = fs::read(&entry).unwrap_or_default();
+                let hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    src_bytes.hash(&mut h);
+                    h.finish()
+                };
+                let cache_dir = dirs_cache();
+                let _ = fs::create_dir_all(&cache_dir);
+                let cached_bin = cache_dir.join(format!("jade_run_{:016x}", hash));
+                if !cached_bin.exists() {
+                    compile_and_link(
+                        &entry,
+                        &cached_bin,
+                        2,
+                        false,
+                        false,
+                        false,
+                        cli.fast_math,
+                        cli.deterministic_fp,
+                        false,
+                        cli.incremental,
+                    );
+                }
+                let status = Command::new(&cached_bin).args(&args).status();
                 match status {
                     Ok(s) => std::process::exit(s.code().unwrap_or(1)),
                     Err(e) => die(&format!("run failed: {e}")),
@@ -1253,7 +1726,18 @@ fn main() {
             }
             Cmd::Test => {
                 let entry = find_project_entry();
-                compile_and_link(&entry, &PathBuf::from("./.jade_test_tmp"), 0, false, true, false, cli.fast_math, cli.deterministic_fp, false, cli.incremental);
+                compile_and_link(
+                    &entry,
+                    &PathBuf::from("./.jade_test_tmp"),
+                    0,
+                    false,
+                    true,
+                    false,
+                    cli.fast_math,
+                    cli.deterministic_fp,
+                    false,
+                    cli.incremental,
+                );
                 let status = Command::new("./.jade_test_tmp").status();
                 let _ = fs::remove_file("./.jade_test_tmp");
                 match status {
@@ -1279,7 +1763,13 @@ fn main() {
                 let packages = load_packages(base_dir);
                 resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
                 let entity_index = EntityIndex::build(base_dir, &packages);
-                resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
+                resolve_implicit_imports(
+                    &mut prog,
+                    base_dir,
+                    &mut loaded,
+                    &packages,
+                    &entity_index,
+                );
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
                 match typer.lower_program(&prog) {
@@ -1313,28 +1803,25 @@ fn main() {
                 };
                 for path in &targets {
                     match fs::read_to_string(path) {
-                        Ok(src) => {
-                            match jadec::fmt::format_source(&src) {
-                                Ok(formatted) => {
-                                    if formatted != src {
-                                        fs::write(path, &formatted)
-                                            .unwrap_or_else(|e| eprintln!("cannot write {}: {e}", path.display()));
-                                        println!("formatted {}", path.display());
-                                    }
+                        Ok(src) => match jadec::fmt::format_source(&src) {
+                            Ok(formatted) => {
+                                if formatted != src {
+                                    fs::write(path, &formatted).unwrap_or_else(|e| {
+                                        eprintln!("cannot write {}: {e}", path.display())
+                                    });
+                                    println!("formatted {}", path.display());
                                 }
-                                Err(e) => eprintln!("cannot format {}: {e}", path.display()),
                             }
-                        }
+                            Err(e) => eprintln!("cannot format {}: {e}", path.display()),
+                        },
                         Err(e) => eprintln!("cannot read {}: {e}", path.display()),
                     }
                 }
             }
-            Cmd::Bind { header } => {
-                match jadec::bind::bind_header(&header) {
-                    Ok(output) => print!("{output}"),
-                    Err(e) => die(&e),
-                }
-            }
+            Cmd::Bind { header } => match jadec::bind::bind_header(&header) {
+                Ok(output) => print!("{output}"),
+                Err(e) => die(&e),
+            },
         }
         return;
     }
@@ -1366,12 +1853,18 @@ fn main() {
 
     let base_dir = input.parent().unwrap_or_else(|| std::path::Path::new("."));
     let mut loaded = HashSet::new();
+    // Prevent auto-import from re-importing the entry file itself
+    if let Ok(canon) = input.canonicalize() {
+        loaded.insert(canon.to_string_lossy().to_string());
+    }
 
     // Load project.jade if present
     let project_jade = base_dir.join("project.jade");
     let project_config = if project_jade.exists() {
-        Some(ProjectConfig::from_file(&project_jade)
-            .unwrap_or_else(|e| die(&format!("project.jade: {e}"))))
+        Some(
+            ProjectConfig::from_file(&project_jade)
+                .unwrap_or_else(|e| die(&format!("project.jade: {e}"))),
+        )
     } else {
         None
     };
@@ -1505,8 +1998,8 @@ fn main() {
     // ── Strict-types: reject FnRef to polymorphic functions that aren't called ──
     if cli.strict_types {
         use jadec::mir::{InstKind, Terminator};
-        let _fn_names: std::collections::HashSet<String> = mir_prog.functions.iter()
-            .map(|f| f.name.clone()).collect();
+        let _fn_names: std::collections::HashSet<String> =
+            mir_prog.functions.iter().map(|f| f.name.clone()).collect();
         for func in &mir_prog.functions {
             for bb in &func.blocks {
                 for inst in &bb.insts {
@@ -1516,8 +2009,11 @@ fn main() {
                         if let Some(dest) = inst.dest {
                             // Check if this FnRef is used as a return value from main
                             if func.name == "main" {
-                                if matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest) {
-                                    die(&format!("codegen: bare function reference `{name}` has unresolved return type in main"));
+                                if matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest)
+                                {
+                                    die(&format!(
+                                        "codegen: bare function reference `{name}` has unresolved return type in main"
+                                    ));
                                 }
                             }
                         }
@@ -1539,7 +2035,11 @@ fn main() {
         if dirty.is_empty() {
             eprintln!("incr: all functions up to date");
         } else {
-            eprintln!("incr: {} of {} functions need recompilation", dirty.len(), hir_prog.fns.len());
+            eprintln!(
+                "incr: {} of {} functions need recompilation",
+                dirty.len(),
+                hir_prog.fns.len()
+            );
         }
     }
 
@@ -1549,6 +2049,7 @@ fn main() {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "main".into());
     let mut comp = Compiler::new(&ctx, &name);
+    comp.init_tbaa();
     comp.set_source(&src);
     if cli.lib {
         comp.set_lib_mode();
@@ -1562,6 +2063,18 @@ fn main() {
     }
     if cli.deterministic_fp {
         comp.set_deterministic_fp();
+    }
+    if let Some(ref target) = cli.target {
+        comp.target_triple = Some(target.clone());
+    }
+    if let Some(ref cpu) = cli.cpu {
+        comp.target_cpu = Some(cpu.clone());
+    }
+    if let Some(ref features) = cli.features {
+        comp.target_features = Some(features.clone());
+    }
+    if cli.standalone {
+        comp.standalone = true;
     }
 
     {
@@ -1600,7 +2113,10 @@ fn main() {
         return;
     }
 
-    let opt_level = project_config.as_ref().and_then(|p| p.opt).unwrap_or(cli.opt);
+    let opt_level = project_config
+        .as_ref()
+        .and_then(|p| p.opt)
+        .unwrap_or(cli.opt);
     let opt = match opt_level {
         0 => OptimizationLevel::None,
         1 => OptimizationLevel::Less,
@@ -1635,20 +2151,55 @@ fn main() {
     }
 
     let mut cc = Command::new("cc");
-    cc.arg(&obj).arg("-o").arg(&cli.output).arg("-lm");
+    cc.arg(&obj).arg("-o").arg(&cli.output);
     if comp.needs_runtime {
         let rt_dir = env!("JADE_RT_DIR");
         cc.arg("-L").arg(rt_dir).arg("-ljade_rt").arg("-lpthread");
     }
+    if comp.needs_ssl {
+        if env!("JADE_HAS_SSL") != "1" {
+            die("program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built");
+        }
+        let rt_dir = env!("JADE_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljade_ssl").arg("-lssl").arg("-lcrypto");
+    }
+    if comp.needs_sqlite {
+        if env!("JADE_HAS_SQLITE") != "1" {
+            die("program uses std.sqlite but SQLite3 was not available when the compiler was built");
+        }
+        let rt_dir = env!("JADE_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljade_sqlite").arg("-lsqlite3");
+    }
+    cc.arg("-lm");
     for extra in &cli.link {
         cc.arg(extra);
     }
-    let use_lto = project_config.as_ref().and_then(|p| p.lto).unwrap_or(cli.lto);
+    let use_lto = project_config
+        .as_ref()
+        .and_then(|p| p.lto)
+        .unwrap_or(cli.lto);
     if use_lto {
         cc.arg("-flto");
     }
     if cli.debug {
         cc.arg("-g");
+    }
+    // Cross-compilation: use appropriate linker for target
+    if let Some(ref triple) = comp.target_triple {
+        cc.arg(&format!("--target={triple}"));
+        if triple.contains("wasm") {
+            // WASM targets: emit .wasm, use clang with wasm target or wasm-ld
+            cc = Command::new("clang");
+            cc.arg(&format!("--target={triple}"));
+            cc.arg(&obj).arg("-o").arg(&cli.output);
+            if !comp.standalone {
+                cc.arg("-lc");
+            } else {
+                cc.arg("-nostdlib")
+                    .arg("-Wl,--no-entry")
+                    .arg("-Wl,--export-all");
+            }
+        }
     }
     let status = cc.status();
     let _ = fs::remove_file(&obj);

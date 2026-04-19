@@ -11,7 +11,7 @@ impl<'ctx> Compiler<'ctx> {
         r: BasicValueEnum<'ctx>,
         negate: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let memcmp = self.ensure_memcmp();
 
         let llen = self.string_len(l)?.into_int_value();
@@ -70,7 +70,7 @@ impl<'ctx> Compiler<'ctx> {
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
         let st = self.string_type();
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
 
         let llen = self.string_len(l)?.into_int_value();
         let rlen = self.string_len(r)?.into_int_value();
@@ -121,7 +121,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(memcpy2, &[dst.into(), rdata.into(), rlen.into()], ""));
         let heap_val = self.build_string(buf, total, total, "cat")?;
-        let heap_exit = self.bld.get_insert_block().unwrap();
+        let heap_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(merge_bb);
@@ -168,7 +168,7 @@ impl<'ctx> Compiler<'ctx> {
         part: BasicValueEnum<'ctx>,
         from_end: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.cur_fn.unwrap();
+        let fv = self.current_fn();
         let p = if from_end { "ew" } else { "sw" };
         let hlen = self.string_len(haystack)?.into_int_value();
         let plen = self.string_len(part)?.into_int_value();
