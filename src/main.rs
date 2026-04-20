@@ -8,6 +8,7 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use jadec::ast::{Decl, Program, Stmt};
+use jadec::intern::Symbol;
 use jadec::cache::{Cache, build_package_map};
 use jadec::codegen::Compiler;
 use jadec::lexer::Lexer;
@@ -149,34 +150,34 @@ fn dirs_cache() -> PathBuf {
     }
 }
 
-fn decl_name(d: &Decl) -> Option<&str> {
+fn decl_name(d: &Decl) -> Option<Symbol> {
     match d {
-        Decl::Fn(f) => Some(&f.name),
-        Decl::Type(t) => Some(&t.name),
-        Decl::Enum(e) => Some(&e.name),
-        Decl::Extern(e) => Some(&e.name),
-        Decl::ErrDef(e) => Some(&e.name),
-        Decl::Actor(a) => Some(&a.name),
-        Decl::Store(s) => Some(&s.name),
-        Decl::Trait(t) => Some(&t.name),
-        Decl::Const(name, _, _) => Some(name),
-        Decl::Impl(i) => Some(&i.type_name),
+        Decl::Fn(f) => Some(f.name),
+        Decl::Type(t) => Some(t.name),
+        Decl::Enum(e) => Some(e.name),
+        Decl::Extern(e) => Some(e.name),
+        Decl::ErrDef(e) => Some(e.name),
+        Decl::Actor(a) => Some(a.name),
+        Decl::Store(s) => Some(s.name),
+        Decl::Trait(t) => Some(t.name),
+        Decl::Const(name, _, _) => Some(*name),
+        Decl::Impl(i) => Some(i.type_name),
         Decl::Test(_) | Decl::Use(_) => None,
-        Decl::Supervisor(s) => Some(&s.name),
-        Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => Some(name),
+        Decl::Supervisor(s) => Some(s.name),
+        Decl::TypeAlias(name, _, _) | Decl::Newtype(name, _, _) => Some(*name),
         Decl::TopStmt(_) => None,
-        Decl::Migration(m) => Some(&m.name),
-        Decl::View(v) => Some(&v.name),
-        Decl::Global(name, _, _) => Some(name),
+        Decl::Migration(m) => Some(m.name),
+        Decl::View(v) => Some(v.name),
+        Decl::Global(name, _, _) => Some(*name),
     }
 }
 
-fn should_import_decl(d: &Decl, imports: &Option<Vec<String>>) -> bool {
+fn should_import_decl(d: &Decl, imports: &Option<Vec<Symbol>>) -> bool {
     match imports {
         None => true,
         Some(names) => {
             if let Some(name) = decl_name(d) {
-                names.iter().any(|n| n == name)
+                names.iter().any(|n| name == *n)
             } else {
                 false
             }
@@ -187,10 +188,10 @@ fn should_import_decl(d: &Decl, imports: &Option<Vec<String>>) -> bool {
 fn resolve_modules(
     prog: &mut Program,
     base_dir: &std::path::Path,
-    loaded: &mut HashSet<String>,
-    packages: &HashMap<String, PathBuf>,
+    loaded: &mut HashSet<Symbol>,
+    packages: &HashMap<Symbol, PathBuf>,
 ) {
-    let uses: Vec<(Vec<String>, Option<Vec<String>>)> = prog
+    let uses: Vec<(Vec<Symbol>, Option<Vec<Symbol>>)> = prog
         .decls
         .iter()
         .filter_map(|d| {
@@ -202,12 +203,13 @@ fn resolve_modules(
         })
         .collect();
     for (path, imports) in uses {
-        let key = path.join(".");
+        let path_strs: Vec<String> = path.iter().map(|s| s.as_str()).collect();
+        let key = Symbol::intern(&path_strs.join("."));
         if loaded.contains(&key) {
             continue;
         }
-        loaded.insert(key.clone());
-        let file_path = path.join("/");
+        loaded.insert(key);
+        let file_path = path_strs.join("/");
         let name = path.last().unwrap();
         let mut candidates = Vec::new();
 
@@ -247,7 +249,7 @@ fn resolve_modules(
         // 3. Packages from project.jade / lock
         if let Some(pkg_path) = packages.get(&path[0]) {
             if path.len() > 1 {
-                let rest = path[1..].join("/");
+                let rest = path_strs[1..].join("/");
                 candidates.push(pkg_path.join("source").join(format!("{rest}.jade")));
                 candidates.push(pkg_path.join("src").join(format!("{rest}.jade")));
             } else {
@@ -286,7 +288,7 @@ fn resolve_modules(
                         .into_iter()
                         .filter(|d| should_import_decl(d, &imports))
                         .collect();
-                    for pd in prefix_module(importable, name) {
+                    for pd in prefix_module(importable, &name.as_str()) {
                         prog.decls.push(pd);
                     }
                     continue;
@@ -333,7 +335,7 @@ fn resolve_modules(
                 importable.push(d);
             }
         }
-        for pd in prefix_module(importable, name) {
+        for pd in prefix_module(importable, &name.as_str()) {
             prog.decls.push(pd);
         }
     }
@@ -364,7 +366,7 @@ impl ProjectConfig {
                 for stmt in &f.body {
                     match stmt {
                         Stmt::Assign(Expr::Ident(name, _), val, _) => {
-                            Self::set_field(&mut cfg, name, val);
+                            Self::set_field(&mut cfg, &name.as_str(), val);
                         }
                         // require 'name' 'url' 'version'
                         Stmt::Expr(Expr::Call(callee, args, _))
@@ -391,7 +393,7 @@ impl ProjectConfig {
         // Also check top-level const bindings: `name is 'foo'`
         for decl in &prog.decls {
             if let Decl::Const(name, val, _) = decl {
-                Self::set_field(&mut cfg, name, val);
+                Self::set_field(&mut cfg, &name.as_str(), val);
             }
         }
         Ok(cfg)
@@ -571,7 +573,7 @@ fn merge_source_files(
     prog: &mut Program,
     source_dir: &std::path::Path,
     entry_canon: &std::path::Path,
-) -> HashSet<String> {
+) -> HashSet<Symbol> {
     fn collect_jade_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
@@ -602,7 +604,7 @@ fn merge_source_files(
                 .map(|c| c.as_os_str().to_string_lossy().to_string())
                 .collect::<Vec<_>>()
                 .join(".");
-            merged_keys.insert(key);
+            merged_keys.insert(Symbol::intern(&key));
         }
         let src = match fs::read_to_string(&file) {
             Ok(s) => s,
@@ -660,7 +662,7 @@ fn merge_source_files(
 /// file that defines them. Used for implicit (auto) module resolution.
 struct EntityIndex {
     /// symbol_name → file_path
-    symbols: HashMap<String, PathBuf>,
+    symbols: HashMap<Symbol, PathBuf>,
 }
 
 impl EntityIndex {
@@ -709,7 +711,7 @@ impl EntityIndex {
             if let Some(name) = decl_name(d) {
                 if name != "main" {
                     self.symbols
-                        .entry(name.to_string())
+                        .entry(name)
                         .or_insert_with(|| path.to_path_buf());
                 }
             }
@@ -717,7 +719,7 @@ impl EntityIndex {
             if let Decl::Enum(ed) = d {
                 for v in &ed.variants {
                     self.symbols
-                        .entry(v.name.clone())
+                        .entry(v.name)
                         .or_insert_with(|| path.to_path_buf());
                 }
             }
@@ -738,7 +740,7 @@ impl EntityIndex {
     }
 
     /// Build the full entity index from std lib, source dir, and package paths.
-    fn build(base_dir: &std::path::Path, packages: &HashMap<String, PathBuf>) -> Self {
+    fn build(base_dir: &std::path::Path, packages: &HashMap<Symbol, PathBuf>) -> Self {
         let mut idx = Self::new();
 
         // 1. Standard library
@@ -808,7 +810,7 @@ impl EntityIndex {
 
 /// Collect all identifiers referenced in the program (function calls, type refs,
 /// variable refs, struct constructors, etc.) that are not defined by the program itself.
-fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
+fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
     let mut defined = HashSet::new();
     let mut referenced = HashSet::new();
 
@@ -866,7 +868,7 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
     }
 
     // Walk all expressions to find referenced identifiers
-    fn walk_expr(e: &jadec::ast::Expr, refs: &mut HashSet<String>, defs: &mut HashSet<String>) {
+    fn walk_expr(e: &jadec::ast::Expr, refs: &mut HashSet<Symbol>, defs: &mut HashSet<Symbol>) {
         use jadec::ast::Expr;
         match e {
             Expr::Ident(name, _) => {
@@ -948,7 +950,7 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
                 walk_expr(f, refs, defs);
             }
             Expr::ListComp(body, var, iter, filter, map, _) => {
-                defs.insert(var.clone());
+                defs.insert(var.clone().into());
                 walk_expr(body, refs, defs);
                 walk_expr(iter, refs, defs);
                 if let Some(f) = filter {
@@ -1031,7 +1033,7 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
         }
     }
 
-    fn walk_pat(p: &jadec::ast::Pat, refs: &mut HashSet<String>, defs: &mut HashSet<String>) {
+    fn walk_pat(p: &jadec::ast::Pat, refs: &mut HashSet<Symbol>, defs: &mut HashSet<Symbol>) {
         use jadec::ast::Pat;
         match p {
             Pat::Ctor(name, pats, _) => {
@@ -1055,15 +1057,15 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
 
     fn walk_block(
         stmts: &[jadec::ast::Stmt],
-        refs: &mut HashSet<String>,
-        defs: &mut HashSet<String>,
+        refs: &mut HashSet<Symbol>,
+        defs: &mut HashSet<Symbol>,
     ) {
         for s in stmts {
             walk_stmt(s, refs, defs);
         }
     }
 
-    fn walk_stmt(s: &jadec::ast::Stmt, refs: &mut HashSet<String>, defs: &mut HashSet<String>) {
+    fn walk_stmt(s: &jadec::ast::Stmt, refs: &mut HashSet<Symbol>, defs: &mut HashSet<Symbol>) {
         use jadec::ast::Stmt;
         match s {
             Stmt::Expr(e) => walk_expr(e, refs, defs),
@@ -1143,7 +1145,7 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
         }
     }
 
-    fn walk_type(ty: &jadec::types::Type, refs: &mut HashSet<String>) {
+    fn walk_type(ty: &jadec::types::Type, refs: &mut HashSet<Symbol>) {
         use jadec::types::Type;
         match ty {
             Type::Struct(name, args) => {
@@ -1329,7 +1331,7 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
 
     referenced
         .difference(&defined)
-        .filter(|name| !builtins.contains(name.as_str()))
+        .filter(|name| !builtins.contains(&*name.as_str()))
         .cloned()
         .collect()
 }
@@ -1339,8 +1341,8 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<String> {
 fn resolve_implicit_imports(
     prog: &mut Program,
     base_dir: &std::path::Path,
-    loaded: &mut HashSet<String>,
-    packages: &HashMap<String, PathBuf>,
+    loaded: &mut HashSet<Symbol>,
+    packages: &HashMap<Symbol, PathBuf>,
     entity_index: &EntityIndex,
 ) {
     let undefined = collect_undefined_refs(prog);
@@ -1358,7 +1360,7 @@ fn resolve_implicit_imports(
             files_to_import
                 .entry(file_path.clone())
                 .or_default()
-                .push(name.clone());
+                .push(name.to_string());
         }
     }
 
@@ -1368,7 +1370,7 @@ fn resolve_implicit_imports(
             .canonicalize()
             .unwrap_or_else(|_| file_path.clone());
         let key = file_canon.to_string_lossy().to_string();
-        if loaded.contains(&key) {
+        if loaded.contains(&Symbol::intern(&key)) {
             if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
                 eprintln!(
                     "[auto-import] SKIP (already loaded): {}",
@@ -1384,7 +1386,7 @@ fn resolve_implicit_imports(
                 _symbols
             );
         }
-        loaded.insert(key);
+        loaded.insert(Symbol::intern(&key));
 
         let src = match fs::read_to_string(file_path) {
             Ok(s) => s,
@@ -1437,7 +1439,7 @@ fn resolve_implicit_imports(
     }
 }
 
-fn load_packages(base_dir: &std::path::Path) -> HashMap<String, PathBuf> {
+fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {
     let project_jade = base_dir.join("project.jade");
     let requires = if project_jade.exists() {
         match ProjectConfig::from_file(&project_jade) {
@@ -1501,9 +1503,9 @@ fn compile_and_link(
     let input_canon = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
     let merged = merge_source_files(&mut prog, base_dir, &input_canon);
 
-    let mut loaded: HashSet<String> = merged;
+    let mut loaded: HashSet<Symbol> = merged;
     // Prevent auto-import from re-importing the entry file itself
-    loaded.insert(input_canon.to_string_lossy().to_string());
+    loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let packages = load_packages(base_dir);
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
     let entity_index = EntityIndex::build(base_dir, &packages);
@@ -1759,7 +1761,7 @@ fn main() {
                 let base_dir = entry.parent().unwrap_or(std::path::Path::new("."));
                 let input_canon = entry.canonicalize().unwrap_or_else(|_| entry.clone());
                 let merged = merge_source_files(&mut prog, base_dir, &input_canon);
-                let mut loaded: HashSet<String> = merged;
+                let mut loaded: HashSet<Symbol> = merged;
                 let packages = load_packages(base_dir);
                 resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
                 let entity_index = EntityIndex::build(base_dir, &packages);
@@ -1855,7 +1857,7 @@ fn main() {
     let mut loaded = HashSet::new();
     // Prevent auto-import from re-importing the entry file itself
     if let Ok(canon) = input.canonicalize() {
-        loaded.insert(canon.to_string_lossy().to_string());
+        loaded.insert(Symbol::intern(&canon.to_string_lossy()));
     }
 
     // Load project.jade if present
@@ -1998,7 +2000,7 @@ fn main() {
     // ── Strict-types: reject FnRef to polymorphic functions that aren't called ──
     if cli.strict_types {
         use jadec::mir::{InstKind, Terminator};
-        let _fn_names: std::collections::HashSet<String> =
+        let _fn_names: std::collections::HashSet<Symbol> =
             mir_prog.functions.iter().map(|f| f.name.clone()).collect();
         for func in &mir_prog.functions {
             for bb in &func.blocks {

@@ -112,7 +112,7 @@ impl Parser {
             }
             if !body_stmts.is_empty() {
                 remaining_decls.push(Decl::Fn(Fn {
-                    name: "main".to_string(),
+                    name: Symbol::intern("main"),
                     type_params: Vec::new(),
                     type_bounds: Vec::new(),
                     params: Vec::new(),
@@ -250,7 +250,7 @@ impl Parser {
         }
     }
 
-    fn ident(&mut self) -> Result<String, ParseError> {
+    fn ident(&mut self) -> Result<Symbol, ParseError> {
         if self.pos < self.tok.len() {
             match &self.tok[self.pos].token {
                 Token::Ident(n) => {
@@ -325,8 +325,8 @@ impl Parser {
 }
 
 fn desugar_multi_clause_fns(prog: &mut Program) {
-    let mut name_indices: Vec<(String, Vec<usize>)> = Vec::new();
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut name_indices: Vec<(Symbol, Vec<usize>)> = Vec::new();
+    let mut seen: std::collections::HashMap<Symbol, usize> = std::collections::HashMap::new();
 
     for (i, decl) in prog.decls.iter().enumerate() {
         if let Decl::Fn(f) = decl {
@@ -339,7 +339,7 @@ fn desugar_multi_clause_fns(prog: &mut Program) {
         }
     }
 
-    let multi_groups: Vec<(String, Vec<usize>)> = name_indices
+    let multi_groups: Vec<(Symbol, Vec<usize>)> = name_indices
         .into_iter()
         .filter(|(_, indices)| indices.len() > 1)
         .collect();
@@ -404,7 +404,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
                     }
                 })
             })
-            .unwrap_or_else(|| format!("__arg{pi}"));
+            .unwrap_or_else(|| Symbol::intern(&format!("__arg{pi}")));
 
         let ty = clauses
             .iter()

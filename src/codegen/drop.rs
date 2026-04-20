@@ -67,7 +67,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.drop_tuple(val, tys)?;
             }
             Type::Struct(name, _) => {
-                self.drop_struct_fields(val, name)?;
+                self.drop_struct_fields(val, &name.as_str())?;
             }
             Type::Array(elem, n) => {
                 if !elem.is_trivially_droppable() {
@@ -75,7 +75,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             Type::Enum(name) => {
-                self.drop_enum_variants(val, name)?;
+                self.drop_enum_variants(val, &name.as_str())?;
             }
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.drop_value(val, inner)?;

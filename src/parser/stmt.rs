@@ -188,9 +188,9 @@ impl Parser {
                     };
                     return Ok(Stmt::For(For {
                         label: None,
-                        bind: ph_name,
+                        bind: ph_name.into(),
                         bind2: if has_idx {
-                            Some(ph_idx_name)
+                            Some(ph_idx_name.into())
                         } else {
                             None
                         },
@@ -300,7 +300,7 @@ impl Parser {
                 // Store statement keywords parsed as identifiers
                 if let Token::Ident(kw) = self.peek() {
                     let kw = kw.clone();
-                    match kw.as_str() {
+                    match &*kw.as_str() {
                         "destroy" => return self.parse_destroy_stmt(),
                         "restore" => return self.parse_restore_stmt(),
                         "save" => return self.parse_save_stmt(),
@@ -593,9 +593,9 @@ impl Parser {
                 if self.check(Token::Is) {
                     self.advance();
                     let expr = self.parse_expr()?;
-                    inputs.push((name.clone(), expr));
+                    inputs.push((name.as_str(), expr));
                 } else {
-                    outputs.push((name.clone(), format!("={{{name}}}")));
+                    outputs.push((name.as_str(), format!("={{{name}}}")));
                 }
                 if !self.check(Token::RParen) {
                     self.expect(Token::Comma)?;

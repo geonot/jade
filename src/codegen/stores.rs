@@ -4,6 +4,7 @@ use inkwell::types::BasicTypeEnum;
 use inkwell::values::{FunctionValue, PointerValue};
 
 use crate::hir;
+use crate::intern::Symbol;
 use crate::types::Type;
 
 use super::Compiler;
@@ -453,9 +454,9 @@ impl<'ctx> Compiler<'ctx> {
         let fields: Vec<(String, Type)> = sd
             .fields
             .iter()
-            .map(|f| (f.name.clone(), f.ty.clone()))
+            .map(|f| (f.name.as_str(), f.ty.clone()))
             .collect();
-        self.structs.insert(struct_name.clone(), fields);
+        self.structs.insert(Symbol::intern(&struct_name), fields);
 
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let global = self
@@ -1235,7 +1236,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
         // Normalize Struct("I64", []) → I64, etc.
         let resolved = match field_ty {
-            Type::Struct(name, params) if params.is_empty() => match name.as_str() {
+            Type::Struct(name, params) if params.is_empty() => match &*name.as_str() {
                 "I8" => Type::I8,
                 "I16" => Type::I16,
                 "I32" => Type::I32,
@@ -1323,7 +1324,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
         // Normalize Struct("I64", []) → I64, etc.
         let resolved = match field_ty {
-            Type::Struct(name, params) if params.is_empty() => match name.as_str() {
+            Type::Struct(name, params) if params.is_empty() => match &*name.as_str() {
                 "I8" => Type::I8,
                 "I16" => Type::I16,
                 "I32" => Type::I32,
@@ -1691,7 +1692,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
             Type::String => 256, // fixed-size store string buffer
-            Type::Struct(name, _) => match name.as_str() {
+            Type::Struct(name, _) => match &*name.as_str() {
                 "I8" | "U8" | "Bool" => 1,
                 "I16" | "U16" => 2,
                 "I32" | "U32" | "F32" => 4,

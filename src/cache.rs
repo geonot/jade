@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
@@ -82,9 +83,9 @@ impl Cache {
         &self,
         dep: &Dependency,
         existing_lock: Option<&Lockfile>,
-        resolving: &mut HashSet<String>,
+        resolving: &mut HashSet<Symbol>,
     ) -> Result<LockEntry, String> {
-        if !resolving.insert(dep.name.clone()) {
+        if !resolving.insert(Symbol::intern(&dep.name)) {
             return Err(format!("circular dependency: {}", dep.name));
         }
         let commit = if let Some(lock) = existing_lock {
@@ -93,7 +94,7 @@ impl Cache {
                     if !self.is_cached(dep) {
                         self.fetch(dep)?;
                     }
-                    resolving.remove(&dep.name);
+                    resolving.remove(&Symbol::intern(&dep.name));
                     return Ok(entry.clone());
                 }
             }
@@ -113,7 +114,7 @@ impl Cache {
             }
         }
 
-        resolving.remove(&dep.name);
+        resolving.remove(&Symbol::intern(&dep.name));
         Ok(LockEntry {
             name: dep.name.clone(),
             url: dep.url.clone(),
@@ -124,7 +125,7 @@ impl Cache {
     }
 }
 
-pub fn build_package_map(cache: &Cache, lockfile: &Lockfile) -> HashMap<String, PathBuf> {
+pub fn build_package_map(cache: &Cache, lockfile: &Lockfile) -> HashMap<Symbol, PathBuf> {
     let mut map = HashMap::new();
     for entry in &lockfile.entries {
         collect_paths(cache, entry, &mut map);
@@ -132,8 +133,8 @@ pub fn build_package_map(cache: &Cache, lockfile: &Lockfile) -> HashMap<String, 
     map
 }
 
-fn collect_paths(cache: &Cache, entry: &LockEntry, map: &mut HashMap<String, PathBuf>) {
-    map.insert(entry.name.clone(), cache.package_path_from_entry(entry));
+fn collect_paths(cache: &Cache, entry: &LockEntry, map: &mut HashMap<Symbol, PathBuf>) {
+    map.insert(Symbol::intern(&entry.name), cache.package_path_from_entry(entry));
     for dep in &entry.deps {
         collect_paths(cache, dep, map);
     }

@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use crate::ast::Span;
 use crate::types::Type;
 use indexmap::IndexMap;
@@ -38,7 +39,7 @@ pub(crate) struct InferCtx {
     quantified_vars: std::collections::HashSet<u32>,
     /// Maps type_name -> list of trait names it implements.
     /// Used to enforce Trait constraints during unification.
-    trait_impls: IndexMap<String, Vec<String>>,
+    trait_impls: IndexMap<Symbol, Vec<String>>,
 }
 
 impl InferCtx {
@@ -62,7 +63,7 @@ impl InferCtx {
     }
 
     /// Update the trait implementation map (called from Typer after trait registration).
-    pub(crate) fn set_trait_impls(&mut self, impls: IndexMap<String, Vec<String>>) {
+    pub(crate) fn set_trait_impls(&mut self, impls: IndexMap<Symbol, Vec<String>>) {
         self.trait_impls = impls;
     }
 
@@ -573,7 +574,7 @@ impl InferCtx {
             Type::F64 => Some("f64".into()),
             Type::Bool => Some("bool".into()),
             Type::String => Some("String".into()),
-            Type::Struct(name, _) => Some(name.clone()),
+            Type::Struct(name, _) => Some(name.as_str()),
             _ => None,
         }
     }

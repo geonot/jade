@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::HashMap;
 
 use crate::hir::*;
@@ -34,7 +35,7 @@ struct VarState {
 pub struct OwnershipVerifier {
     scopes: Vec<HashMap<DefId, VarState>>,
     pub diagnostics: Vec<OwnershipDiag>,
-    fn_ret_types: HashMap<String, Type>,
+    fn_ret_types: HashMap<Symbol, Type>,
 }
 
 impl OwnershipVerifier {
@@ -290,7 +291,7 @@ impl OwnershipVerifier {
             | ExprKind::Void => {}
 
             ExprKind::Var(def_id, name) => {
-                self.check_use(*def_id, name, expr.span);
+                self.check_use(*def_id, &name.as_str(), expr.span);
             }
 
             ExprKind::FnRef(_, _) => {}
@@ -311,7 +312,7 @@ impl OwnershipVerifier {
             ExprKind::Call(_, _, args) => {
                 for a in args {
                     if let ExprKind::Var(def_id, name) = &a.kind {
-                        self.check_use(*def_id, name, a.span);
+                        self.check_use(*def_id, &name.as_str(), a.span);
                         // Implicit borrow: Perceus RC handles copies at runtime.
                         // Only record a borrow, not a move, so the variable
                         // can be reused in subsequent expressions.
@@ -325,7 +326,7 @@ impl OwnershipVerifier {
                 self.verify_expr(callee);
                 for a in args {
                     if let ExprKind::Var(def_id, name) = &a.kind {
-                        self.check_use(*def_id, name, a.span);
+                        self.check_use(*def_id, &name.as_str(), a.span);
                     } else {
                         self.verify_expr(a);
                     }
@@ -832,7 +833,7 @@ impl OwnershipVerifier {
     /// Extract the root variable from an expression (follows field access and index chains).
     fn extract_root_var(expr: &Expr) -> Option<(DefId, String)> {
         match &expr.kind {
-            ExprKind::Var(def_id, name) => Some((*def_id, name.clone())),
+            ExprKind::Var(def_id, name) => Some((*def_id, name.as_str())),
             ExprKind::Field(obj, _, _) => Self::extract_root_var(obj),
             ExprKind::Index(obj, _) => Self::extract_root_var(obj),
             _ => None,

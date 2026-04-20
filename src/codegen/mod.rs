@@ -26,6 +26,7 @@ mod strings;
 mod types;
 mod vec;
 
+use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet};
 use indexmap::IndexMap;
 use std::path::Path;
@@ -82,18 +83,18 @@ pub struct Compiler<'ctx> {
     pub(crate) module: Module<'ctx>,
     pub(crate) bld: Builder<'ctx>,
     pub(crate) cur_fn: Option<FunctionValue<'ctx>>,
-    pub(crate) vars: IndexMap<String, (PointerValue<'ctx>, Type)>,
+    pub(crate) vars: IndexMap<Symbol, (PointerValue<'ctx>, Type)>,
     /// Shadow stack for scope-based variable shadowing.
     /// Each entry records (name, previous_value) to restore on scope pop.
     pub(crate) var_shadows: Vec<(String, Option<(PointerValue<'ctx>, Type)>)>,
     /// Scope markers: indices into var_shadows where each scope starts.
     pub(crate) var_scope_markers: Vec<usize>,
-    pub(crate) fns: IndexMap<String, (FunctionValue<'ctx>, Vec<Type>, Type)>,
-    pub(crate) structs: IndexMap<String, Vec<(String, Type)>>,
-    pub(crate) struct_defaults: IndexMap<String, IndexMap<String, hir::Expr>>,
-    pub(crate) struct_layouts: IndexMap<String, crate::ast::LayoutAttrs>,
-    pub(crate) enums: IndexMap<String, Vec<(String, Vec<Type>)>>,
-    pub(crate) variant_tags: IndexMap<String, (String, u32)>,
+    pub(crate) fns: IndexMap<Symbol, (FunctionValue<'ctx>, Vec<Type>, Type)>,
+    pub(crate) structs: IndexMap<Symbol, Vec<(String, Type)>>,
+    pub(crate) struct_defaults: IndexMap<Symbol, IndexMap<Symbol, hir::Expr>>,
+    pub(crate) struct_layouts: IndexMap<Symbol, crate::ast::LayoutAttrs>,
+    pub(crate) enums: IndexMap<Symbol, Vec<(String, Vec<Type>)>>,
+    pub(crate) variant_tags: IndexMap<Symbol, (String, u32)>,
     pub(crate) loop_stack: Vec<LoopCtx<'ctx>>,
     pub(crate) source: String,
     pub(crate) hints: PerceusHints,
@@ -103,16 +104,16 @@ pub struct Compiler<'ctx> {
     pub(crate) di_compile_unit: Option<DICompileUnit<'ctx>>,
     pub(crate) di_scope_stack: Vec<DIScope<'ctx>>,
     pub(crate) filename: String,
-    pub(crate) store_defs: IndexMap<String, hir::StoreDef>,
-    pub(crate) actor_defs: IndexMap<String, hir::ActorDef>,
+    pub(crate) store_defs: IndexMap<Symbol, hir::StoreDef>,
+    pub(crate) actor_defs: IndexMap<Symbol, hir::ActorDef>,
     pub(crate) vtables: IndexMap<(String, String), inkwell::values::GlobalValue<'ctx>>,
-    pub(crate) trait_method_order: IndexMap<String, Vec<String>>,
+    pub(crate) trait_method_order: IndexMap<Symbol, Vec<String>>,
     pub needs_runtime: bool,
     /// Program uses TLS or crypto functions requiring OpenSSL.
     pub needs_ssl: bool,
     /// Program uses SQLite functions requiring libsqlite3.
     pub needs_sqlite: bool,
-    pub(crate) globals: IndexMap<String, (inkwell::values::GlobalValue<'ctx>, Type)>,
+    pub(crate) globals: IndexMap<Symbol, (inkwell::values::GlobalValue<'ctx>, Type)>,
     pub(crate) fast_math_flags: u32,
     /// Reuse tokens: DefId → saved heap pointer for Perceus reuse.
     /// When a drop is skipped for reuse, the pointer is stashed here
@@ -121,7 +122,7 @@ pub struct Compiler<'ctx> {
     /// Cached builder used exclusively for entry-block alloca insertion.
     pub(crate) alloca_bld: Builder<'ctx>,
     /// Set of variable names declared with `atomic` keyword.
-    pub(crate) atomic_vars: HashSet<String>,
+    pub(crate) atomic_vars: HashSet<Symbol>,
     /// Override target triple for cross-compilation (None = host).
     pub target_triple: Option<String>,
     /// Override CPU name for cross-compilation.
@@ -243,7 +244,7 @@ impl<'ctx> Compiler<'ctx> {
         match ty {
             Type::Struct(name, _) => {
                 // Use LLVM's struct type to compute size if registered
-                let st = self.module.get_struct_type(name)?;
+                let st = self.module.get_struct_type(&name.as_str())?;
                 let dl_str = self.module.get_data_layout();
                 let td = inkwell::targets::TargetData::create(dl_str.as_str().to_str().ok()?);
                 Some(td.get_abi_size(&st))
@@ -367,7 +368,7 @@ impl<'ctx> Compiler<'ctx> {
                     let base_name = m
                         .name
                         .strip_prefix(&format!("{}_", ti.type_name))
-                        .unwrap_or(&m.name);
+                        .unwrap_or(m.name);
                     if !order.contains(&base_name.to_string()) {
                         order.push(base_name.to_string());
                     }
@@ -404,7 +405,7 @@ impl<'ctx> Compiler<'ctx> {
                             } else {
                                 let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self
                                     .module
-                                    .get_struct_type(&ti.type_name)
+                                    .get_struct_type(&ti.type_name.as_str())
                                     .map(|st| st.into())
                                     .unwrap_or_else(|| self.ctx.i64_type().into());
                                 b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"))
@@ -436,7 +437,7 @@ impl<'ctx> Compiler<'ctx> {
                 gv.set_constant(true);
                 gv.set_linkage(inkwell::module::Linkage::Internal);
                 self.vtables
-                    .insert((ti.type_name.clone(), trait_name.clone()), gv);
+                    .insert((ti.type_name.as_str(), trait_name.as_str()), gv);
             }
         }
         Ok(())
@@ -636,7 +637,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn set_var(&mut self, name: &str, ptr: PointerValue<'ctx>, ty: Type) {
-        let old = self.vars.insert(name.to_string(), (ptr, ty));
+        let old = self.vars.insert(name.into(), (ptr, ty));
         self.var_shadows.push((name.to_string(), old));
     }
 
@@ -652,9 +653,10 @@ impl<'ctx> Compiler<'ctx> {
         let marker = self.var_scope_markers.pop().expect("no scope to pop");
         while self.var_shadows.len() > marker {
             let (name, prev) = self.var_shadows.pop().unwrap();
+            let sym: Symbol = name.into();
             match prev {
-                Some(val) => { self.vars.insert(name, val); }
-                None => { self.vars.swap_remove(&name); }
+                Some(val) => { self.vars.insert(sym, val); }
+                None => { self.vars.swap_remove(&sym); }
             }
         }
     }
@@ -662,7 +664,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn load_var(&mut self, name: &str) -> Result<BasicValueEnum<'ctx>, String> {
         if let Some((ptr, ty)) = self.find_var(name).cloned() {
             let load = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, name));
-            if self.atomic_vars.contains(name) {
+            if self.atomic_vars.contains(&Symbol::intern(name)) {
                 ice!(load.as_instruction_value(), "atomic load produced non-instruction")
                     .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
                     .map_err(|_| "failed to set atomic ordering")?;
@@ -1055,12 +1057,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // Spawn each child actor
         for child in &sup.children {
-            let _ = self.compile_spawn(child)?;
+            let _ = self.compile_spawn(&child.as_str())?;
         }
 
         b!(self.bld.build_return(Some(&i64t.const_int(0, false))));
         self.cur_fn = old_fn;
-        self.fns.insert(fn_name, (fv, vec![], Type::I64));
+        self.fns.insert(fn_name.into(), (fv, vec![], Type::I64));
         Ok(())
     }
 }

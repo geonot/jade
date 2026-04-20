@@ -22,6 +22,7 @@ mod magic;
 mod store;
 mod store_ext;
 
+use crate::intern::Symbol;
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
@@ -51,13 +52,13 @@ pub struct MirCodegen<'a, 'ctx> {
     /// Phi nodes that need back-patching after all blocks are emitted.
     pending_phis: Vec<PendingPhi<'ctx>>,
     /// MIR ValueId → variable alloca (for Store/Load variable pairs).
-    var_allocs: HashMap<String, (PointerValue<'ctx>, Type)>,
+    var_allocs: HashMap<Symbol, (PointerValue<'ctx>, Type)>,
     /// MIR ValueId → Jade type (for FieldGet struct type resolution on parameters).
     value_types: HashMap<mir::ValueId, Type>,
     /// Coroutine/generator bodies extracted from HIR, keyed by name.
-    coro_bodies: HashMap<String, Vec<hir::Stmt>>,
+    coro_bodies: HashMap<Symbol, Vec<hir::Stmt>>,
     /// Actor definitions from HIR, keyed by name.
-    actor_defs: HashMap<String, hir::ActorDef>,
+    actor_defs: HashMap<Symbol, hir::ActorDef>,
     /// Select data buffers: select_val ValueId → Vec<PointerValue> (one per arm).
     select_data_bufs: HashMap<mir::ValueId, Vec<PointerValue<'ctx>>>,
     /// MIR ValueId → alloca for structs that were passed by pointer to methods (cached so mutations persist).
@@ -118,15 +119,15 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 .iter()
                 .map(|(_, ty)| self.comp.llvm_ty(ty))
                 .collect();
-            let st = self.comp.ctx.opaque_struct_type(&td.name);
+            let st = self.comp.ctx.opaque_struct_type(&td.name.as_str());
             st.set_body(&ltys, false);
-            let fields: Vec<(String, Type)> = td.fields.clone();
-            self.comp.structs.insert(td.name.clone(), fields);
+            let fields: Vec<(String, Type)> = td.fields.iter().map(|(n, t)| (n.as_str(), t.clone())).collect();
+            self.comp.structs.insert(td.name, fields);
         }
 
         // Populate struct_defaults from HIR type definitions.
         for td in &hir_prog.types {
-            let defaults: indexmap::IndexMap<String, hir::Expr> = td
+            let defaults: indexmap::IndexMap<Symbol, hir::Expr> = td
                 .fields
                 .iter()
                 .filter_map(|f| f.default.as_ref().map(|d| (f.name.clone(), d.clone())))
@@ -171,7 +172,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let fv = self
                 .comp
                 .module
-                .add_function(&ext.name, ft, Some(Linkage::External));
+                .add_function(&ext.name.as_str(), ft, Some(Linkage::External));
             fv.add_attribute(
                 inkwell::attributes::AttributeLoc::Function,
                 self.comp.attr("nounwind"),
@@ -179,7 +180,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let param_tys: Vec<Type> = ext.params.clone();
             self.comp
                 .fns
-                .insert(ext.name.clone(), (fv, param_tys, ext.ret.clone()));
+                .insert(ext.name, (fv, param_tys, ext.ret.clone()));
         }
 
         // ── Detect runtime needs from MIR (BEFORE declaring functions so
@@ -297,7 +298,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let gv = self.comp.module.add_global(llvm_ty, None, &format!("__jade_global_{}", gdef.name));
             gv.set_initializer(&self.comp.zero_init(&gdef.ty));
             gv.set_linkage(Linkage::Internal);
-            self.comp.globals.insert(gdef.name.clone(), (gv, gdef.ty.clone()));
+            self.comp.globals.insert(gdef.name, (gv, gdef.ty.clone()));
         }
 
         // ── Declare global initializer function (called from main wrapper) ──
@@ -323,7 +324,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         for ti in &hir_prog.trait_impls {
             for m in &ti.methods {
                 if !self.comp.fns.contains_key(&m.name) {
-                    self.comp.declare_method(&ti.type_name, m)?;
+                    self.comp.declare_method(&ti.type_name.as_str(), m)?;
                 }
             }
         }
@@ -376,7 +377,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             user_fv.set_linkage(Linkage::Internal);
             self.comp
                 .fns
-                .insert(func.name.clone(), (user_fv, ptys, ret));
+                .insert(func.name, (user_fv, ptys, ret));
 
             // Build main wrapper (same logic as decl.rs).
             let i32t = self.comp.ctx.i32_type();
@@ -440,10 +441,10 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             }
         } else {
             let ft = self.comp.mk_fn_type(&ret, &lp, false);
-            let fv = self.comp.module.add_function(&func.name, ft, None);
+            let fv = self.comp.module.add_function(&func.name.as_str(), ft, None);
             self.comp.tag_fn(fv);
             self.apply_fn_attrs(fv, &func.attrs);
-            self.comp.fns.insert(func.name.clone(), (fv, ptys, ret));
+            self.comp.fns.insert(func.name, (fv, ptys, ret));
         }
         Ok(())
     }
@@ -493,7 +494,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
         // 1. Create all LLVM basic blocks up-front.
         for bb in &func.blocks {
-            let llvm_bb = self.comp.ctx.append_basic_block(fv, &bb.label);
+            let llvm_bb = self.comp.ctx.append_basic_block(fv, &bb.label.as_str());
             self.block_map.insert(bb.id, llvm_bb);
         }
 
@@ -642,11 +643,11 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             // ── Calls ──
             mir::InstKind::Call(name, args) => {
                 // Check for magic call names first (coroutines, actors, stores)
-                if let Some(result) = self.try_handle_magic_call(name, args, &inst.ty)? {
+                if let Some(result) = self.try_handle_magic_call(&name.as_str(), args, &inst.ty)? {
                     return Ok(result);
                 }
                 // Handle overflow builtins that MIR lowered as __builtin_* calls
-                if let Some(result) = self.try_handle_overflow_builtin(name, args)? {
+                if let Some(result) = self.try_handle_overflow_builtin(&name.as_str(), args)? {
                     return Ok(result);
                 }
                 let arg_vals: Vec<BasicValueEnum<'ctx>> =
@@ -673,7 +674,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     Ok(self.comp.call_result(csv))
                 } else {
                     // Try looking up as a module-level function.
-                    if let Some(fv) = self.comp.module.get_function(name) {
+                    if let Some(fv) = self.comp.module.get_function(&name.as_str()) {
                         let ptypes = fv.get_type().get_param_types();
                         let st = self.comp.string_type();
                         let md: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = arg_vals
@@ -705,7 +706,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 // String methods
                 if matches!(&recv_ty, Some(Type::String)) {
                     let recv_val = self.val(*recv);
-                    match method.as_str() {
+                    match &*method.as_str() {
                         "length" | "len" => return self.comp.string_len(recv_val),
                         "contains" => {
                             if !args.is_empty() {
@@ -798,7 +799,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     };
                     // Fixed-size array: len returns constant, contains is inline scan
                     if let Some(Type::Array(_, arr_len)) = recv_ty {
-                        match method.as_str() {
+                        match &*method.as_str() {
                             "len" => {
                                 return Ok(self
                                     .comp
@@ -821,7 +822,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         ))
                     };
                     let lty = self.comp.llvm_ty(&elem_ty);
-                    match method.as_str() {
+                    match &*method.as_str() {
                         "len" | "count" => return self.comp.vec_len(header_ptr),
                         "push" => {
                             if !args.is_empty() {
@@ -874,7 +875,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             "map.ptr"
                         ))
                     };
-                    match method.as_str() {
+                    match &*method.as_str() {
                         "len" | "count" => return self.comp.vec_len(header_ptr),
                         "set" => {
                             if args.len() >= 2 {
@@ -1024,7 +1025,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 // Create a closure struct {fn_ptr, null_env} wrapping the named function.
                 // A wrapper is needed because closures expect (env_ptr, ...params) calling convention,
                 // but top-level functions only expect (...params).
-                if let Some(fv) = self.comp.module.get_function(name) {
+                if let Some(fv) = self.comp.module.get_function(&name.as_str()) {
                     let wrapper = self.comp.fn_ref_wrapper(fv);
                     let null_env = self
                         .comp
@@ -1039,7 +1040,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             mir::InstKind::Load(name) => {
                 if let Some((ptr, ty)) = self.var_allocs.get(name).cloned() {
                     let lt = self.comp.llvm_ty(&ty);
-                    let val = b!(self.comp.bld.build_load(lt, ptr, name));
+                    let val = b!(self.comp.bld.build_load(lt, ptr, &name.as_str()));
                     if let Some(inst) = val.as_instruction_value() {
                         let tbaa_name = Compiler::tbaa_type_name(&ty);
                         self.comp.set_tbaa(inst, tbaa_name);
@@ -1047,9 +1048,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     Ok(val)
                 } else {
                     // Fall back to Compiler's var lookup.
-                    if let Some((ptr, ty)) = self.comp.find_var(name).cloned() {
+                    if let Some((ptr, ty)) = self.comp.find_var(&name.as_str()).cloned() {
                         let lt = self.comp.llvm_ty(&ty);
-                        let val = b!(self.comp.bld.build_load(lt, ptr, name));
+                        let val = b!(self.comp.bld.build_load(lt, ptr, &name.as_str()));
                         if let Some(inst) = val.as_instruction_value() {
                             let tbaa_name = Compiler::tbaa_type_name(&ty);
                             self.comp.set_tbaa(inst, tbaa_name);
@@ -1070,12 +1071,12 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     // First store → create alloca.
                     let lt = v.get_type();
                     let ty = inst.ty.clone();
-                    let ptr = self.comp.entry_alloca(lt, name);
+                    let ptr = self.comp.entry_alloca(lt, &name.as_str());
                     let store_inst = b!(self.comp.bld.build_store(ptr, v));
                     let tbaa_name = Compiler::tbaa_type_name(&ty);
                     self.comp.set_tbaa(store_inst, tbaa_name);
-                    self.var_allocs.insert(name.clone(), (ptr, ty.clone()));
-                    self.comp.set_var(name, ptr, ty);
+                    self.var_allocs.insert(*name, (ptr, ty.clone()));
+                    self.comp.set_var(&name.as_str(), ptr, ty);
                 }
                 Ok(void_val())
             }
@@ -1084,7 +1085,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             mir::InstKind::GlobalLoad(name) => {
                 if let Some((gv, ty)) = self.comp.globals.get(name).cloned() {
                     let lt = self.comp.llvm_ty(&ty);
-                    let val = b!(self.comp.bld.build_load(lt, gv.as_pointer_value(), name));
+                    let val = b!(self.comp.bld.build_load(lt, gv.as_pointer_value(), &name.as_str()));
                     if let Some(inst) = val.as_instruction_value() {
                         self.comp.set_tbaa(inst, Compiler::tbaa_type_name(&ty));
                     }
@@ -1109,7 +1110,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let st = self
                     .comp
                     .module
-                    .get_struct_type(name)
+                    .get_struct_type(&name.as_str())
                     .ok_or_else(|| format!("mir_codegen: unknown struct `{name}`"))?;
                 let field_defs: Vec<(String, Type)> =
                     self.comp.structs.get(name).cloned().unwrap_or_default();
@@ -1124,7 +1125,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             provided.insert(i as u32);
                             i as u32
                         } else {
-                            let pos = field_defs.iter().position(|(n, _)| n == fname).ok_or_else(
+                            let pos = field_defs.iter().position(|(n, _)| fname.with_str(|s| n == s)).ok_or_else(
                                 || format!("mir_codegen: struct `{name}` has no field `{fname}`"),
                             )? as u32;
                             provided.insert(pos);
@@ -1133,7 +1134,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let label = if fname.is_empty() {
                         field_defs.get(i).map(|s| s.0.as_str()).unwrap_or("field")
                     } else {
-                        fname
+                        &fname.as_str()
                     };
                     agg = b!(self.comp.bld.build_insert_value(
                         agg.into_struct_value(),
@@ -1167,7 +1168,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 Ok(agg)
             }
             mir::InstKind::VariantInit(enum_name, variant, tag, payload) => {
-                let enum_ty = self.comp.llvm_ty(&Type::Enum(enum_name.clone()));
+                let enum_ty = self.comp.llvm_ty(&Type::Enum(*enum_name));
                 let st = enum_ty.into_struct_type();
                 let i32t = self.comp.ctx.i32_type();
                 let mut agg: BasicValueEnum<'ctx> = st.const_zero().into();
@@ -1190,7 +1191,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         .comp
                         .enums
                         .get(enum_name)
-                        .and_then(|vs| vs.iter().find(|(vn, _)| vn == variant))
+                        .and_then(|vs| vs.iter().find(|(vn, _)| variant.with_str(|s| vn == s)))
                         .map(|(_, ftys)| ftys.clone())
                         .unwrap_or_default();
                     // Store payload fields at proper byte offsets based on actual type sizes.
@@ -1199,7 +1200,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         let v = self.val(*vid);
                         let is_rec = variant_field_types
                             .get(i)
-                            .map(|fty| Compiler::is_recursive_field(fty, enum_name))
+                            .map(|fty| Compiler::is_recursive_field(fty, &enum_name.as_str()))
                             .unwrap_or(false);
                         let field_ptr = if byte_offset == 0 {
                             payload_gep
@@ -1272,7 +1273,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             }
 
             // ── Field access ──
-            mir::InstKind::FieldGet(obj, field) => self.emit_field_get(*obj, field, &inst.ty),
+            mir::InstKind::FieldGet(obj, field) => self.emit_field_get(*obj, &field.as_str(), &inst.ty),
             mir::InstKind::FieldSet(obj, field, val) => {
                 // If the object has a self_allocs entry, use the alloca pointer directly
                 // to avoid SSA domination issues with insertvalue across branches.
@@ -1291,18 +1292,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             .values()
                             .find(|(ptr, _)| *ptr == obj_val.into_pointer_value())
                             .and_then(|(_, ty)| match ty {
-                                Type::Struct(name, _) => Some(name.clone()),
+                                Type::Struct(name, _) => Some(name.as_str()),
                                 _ => None,
                             })
                     });
                     if let Some(name) = &struct_name {
                         if let Some(st) = self.comp.module.get_struct_type(name) {
-                            let field_idx = self.field_index(name, field);
+                            let field_idx = self.field_index(name, &field.as_str());
                             let gep = b!(self.comp.bld.build_struct_gep(
                                 st,
                                 obj_val.into_pointer_value(),
                                 field_idx,
-                                field
+                                &field.as_str()
                             ));
                             b!(self.comp.bld.build_store(gep, v));
                         }
@@ -1318,8 +1319,8 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         .get_name()
                         .map(|n| n.to_str().unwrap_or("").to_string());
                     if let Some(name) = &struct_ty_name {
-                        let field_idx = self.field_index(name, field);
-                        let updated = b!(self.comp.bld.build_insert_value(sv, v, field_idx, field));
+                        let field_idx = self.field_index(name, &field.as_str());
+                        let updated = b!(self.comp.bld.build_insert_value(sv, v, field_idx, &field.as_str()));
                         return Ok(updated.into_struct_value().into());
                     }
                 }
@@ -1332,9 +1333,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let struct_name = self.struct_name_from_type(&ty);
                     if let Some(name) = &struct_name {
                         if let Some(st) = self.comp.module.get_struct_type(name) {
-                            let field_idx = self.field_index(name, field);
+                            let field_idx = self.field_index(name, &field.as_str());
                             let gep =
-                                b!(self.comp.bld.build_struct_gep(st, alloca, field_idx, field));
+                                b!(self.comp.bld.build_struct_gep(st, alloca, field_idx, &field.as_str()));
                             b!(self.comp.bld.build_store(gep, v));
                         }
                     }
@@ -1787,7 +1788,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
             // ── Closures ──
             mir::InstKind::ClosureCreate(fn_name, captures) => {
-                self.emit_closure_create(fn_name, captures, &inst.ty)
+                self.emit_closure_create(&fn_name.as_str(), captures, &inst.ty)
             }
             mir::InstKind::ClosureCall(callee, args) => {
                 // Same as IndirectCall for closures.
@@ -1823,7 +1824,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         args.len()
                     ));
                 }
-                self.emit_spawn_actor(name)
+                self.emit_spawn_actor(&name.as_str())
             }
             mir::InstKind::ChanCreate(elem_ty, cap) => self.emit_chan_create(elem_ty, cap.as_ref()),
             mir::InstKind::ChanSend(ch, val) => self.emit_chan_send(*ch, *val),
@@ -1880,7 +1881,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
             // ── Dynamic dispatch ──
             mir::InstKind::DynDispatch(obj, trait_name, method, args) => {
-                self.emit_dyn_dispatch(*obj, trait_name, method, args, &inst.ty)
+                self.emit_dyn_dispatch(*obj, &trait_name.as_str(), &method.as_str(), args, &inst.ty)
             }
 
             mir::InstKind::DynCoerce(inner, type_name, trait_name) => {

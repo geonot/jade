@@ -500,7 +500,7 @@ impl Parser {
                 // array[...] syntax — same as [...] but signals fixed-size intent
                 self.advance();
                 if !self.check(Token::LBracket) {
-                    return Ok(Expr::Ident("array".to_string(), sp));
+                    return Ok(Expr::Ident("array".into(), sp));
                 }
                 self.advance();
                 self.skip_ws();
@@ -529,7 +529,7 @@ impl Parser {
                     self.expect(Token::RBracket)?;
                     return Ok(Expr::ListComp(
                         Box::new(first),
-                        bind,
+                        bind.as_str(),
                         Box::new(iter_start),
                         iter_end,
                         cond,
@@ -577,7 +577,7 @@ impl Parser {
                     self.expect(Token::RBracket)?;
                     return Ok(Expr::ListComp(
                         Box::new(first),
-                        bind,
+                        bind.as_str(),
                         Box::new(iter_start),
                         iter_end,
                         cond,
@@ -714,7 +714,7 @@ impl Parser {
                     self.expect(Token::RParen)?;
                     return Ok(Expr::SIMDLit(elem_ty, lanes, elems, sp));
                 }
-                if name.starts_with(|c: char| c.is_uppercase()) && self.check(Token::LParen) {
+                if name.with_str(|s| s.starts_with(|c: char| c.is_uppercase())) && self.check(Token::LParen) {
                     self.advance();
                     let mut fields = Vec::new();
                     while !self.check(Token::RParen) && !self.eof() {
@@ -990,7 +990,7 @@ impl Parser {
                         {
                             self.advance();
                             let body = self.parse_block()?;
-                            return Ok(Expr::DispatchBlock("__anon".to_string(), body, sp));
+                            return Ok(Expr::DispatchBlock("__anon".into(), body, sp));
                         }
                     }
                 }
@@ -1118,7 +1118,7 @@ impl Parser {
             return Ok(QueryClause::Delete(sp));
         }
         let kw = self.ident()?;
-        match kw.as_str() {
+        match &*kw.as_str() {
             "where" => {
                 let cond = self.parse_expr()?;
                 Ok(QueryClause::Where(cond, sp))
@@ -1237,7 +1237,7 @@ impl Parser {
                     }
                     return Err(self.error("expected trait name after 'dyn'"));
                 }
-                let t = self.ident_to_type(n);
+                let t = n.with_str(|s| self.ident_to_type(s));
                 self.advance();
                 if self.check(Token::Of) {
                     if let Type::Struct(name, _) = t {
@@ -1253,7 +1253,7 @@ impl Parser {
                             return Ok(Type::Set(Box::new(arg)));
                         }
                         let mangled = format!("{name}_{arg}");
-                        Ok(Type::Struct(mangled, vec![]))
+                        Ok(Type::Struct(mangled.into(), vec![]))
                     } else {
                         Ok(t)
                     }
@@ -1299,9 +1299,9 @@ impl Parser {
             "void" => Type::Void,
             "str" | "String" => Type::String,
             s if s.len() == 1 && s.chars().next().map_or(false, |c| c.is_uppercase()) => {
-                Type::Param(s.to_string())
+                Type::Param(s.into())
             }
-            _ => Type::Struct(n.to_string(), vec![]),
+            _ => Type::Struct(n.into(), vec![]),
         }
     }
 

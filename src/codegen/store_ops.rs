@@ -185,10 +185,10 @@ impl<'ctx> Compiler<'ctx> {
         for (i, field_def) in sd.fields.iter().enumerate() {
             let gep = b!(self
                 .bld
-                .build_struct_gep(st, rec_ptr, i as u32, &field_def.name));
-            if builtin_names.contains(&field_def.name.as_str()) {
+                .build_struct_gep(st, rec_ptr, i as u32, &field_def.name.as_str()));
+            if builtin_names.contains(&&*field_def.name.as_str()) {
                 // Auto-populate built-in fields
-                match field_def.name.as_str() {
+                match &*field_def.name.as_str() {
                     "sid" => {
                         b!(self.bld.build_store(gep, new_sid));
                     }

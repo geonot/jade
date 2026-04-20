@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::HashMap;
 use crate::ast::{self, Decl, Expr, Stmt};
 
@@ -11,12 +12,12 @@ use crate::ast::{self, Decl, Expr, Stmt};
 /// recursive and sibling calls resolve to the prefixed names.
 pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
     // 1. Collect all renameable names (functions + constants) defined in the module
-    let mut rename_map: HashMap<String, String> = HashMap::new();
+    let mut rename_map: HashMap<Symbol, String> = HashMap::new();
     for d in &decls {
         match d {
             Decl::Fn(f) => {
                 // Skip methods (TypeName_method) — they're already mangled
-                if f.name.contains('_') && f.name.starts_with(|c: char| c.is_uppercase()) {
+                if f.name.contains_str("_") && f.name.as_str().starts_with(char::is_uppercase) {
                     continue;
                 }
                 rename_map.insert(f.name.clone(), format!("{}_{}", module, f.name));
@@ -34,7 +35,7 @@ pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
         .map(|d| match d {
             Decl::Fn(mut f) => {
                 if let Some(new) = rename_map.get(&f.name) {
-                    f.name = new.clone();
+                    f.name = Symbol::intern(new);
                 }
                 // Exclude parameter names from renaming to avoid
                 // shadowing params with sibling function names
@@ -52,9 +53,9 @@ pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
                 Decl::Fn(f)
             }
             Decl::Const(name, mut expr, span) => {
-                let new_name = rename_map.get(&name).cloned().unwrap_or(name);
+                let new_name = rename_map.get(&name).cloned().unwrap_or(name.as_str());
                 rewrite_expr(&mut expr, &rename_map);
-                Decl::Const(new_name, expr, span)
+                Decl::Const(Symbol::intern(&new_name), expr, span)
             }
             Decl::Type(mut td) => {
                 for m in &mut td.methods {
@@ -81,13 +82,13 @@ pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
         .collect()
 }
 
-pub fn rewrite_block(block: &mut ast::Block, renames: &HashMap<String, String>) {
+pub fn rewrite_block(block: &mut ast::Block, renames: &HashMap<Symbol, String>) {
     for stmt in block.iter_mut() {
         rewrite_stmt(stmt, renames);
     }
 }
 
-pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<String, String>) {
+pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
     match stmt {
         Stmt::Bind(b) => rewrite_expr(&mut b.value, renames),
         Stmt::TupleBind(_, e, _) => rewrite_expr(e, renames),
@@ -152,7 +153,7 @@ pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<String, String>) {
     }
 }
 
-pub fn rewrite_if(i: &mut ast::If, renames: &HashMap<String, String>) {
+pub fn rewrite_if(i: &mut ast::If, renames: &HashMap<Symbol, String>) {
     rewrite_expr(&mut i.cond, renames);
     rewrite_block(&mut i.then, renames);
     for (c, b) in &mut i.elifs {
@@ -164,11 +165,11 @@ pub fn rewrite_if(i: &mut ast::If, renames: &HashMap<String, String>) {
     }
 }
 
-pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<String, String>) {
+pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
     match expr {
         Expr::Ident(name, _) => {
             if let Some(new) = renames.get(name) {
-                *name = new.clone();
+                *name = Symbol::intern(new);
             }
         }
         Expr::Call(callee, args, _) => {

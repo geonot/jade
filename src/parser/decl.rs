@@ -42,12 +42,16 @@ impl Parser {
         while self.check(Token::At) {
             self.advance();
             let attr = self.ident()?;
-            match attr.as_str() {
-                "inline" => attrs.inline = true,
-                "noinline" => attrs.noinline = true,
-                "cold" => attrs.cold = true,
-                "hot" => attrs.hot = true,
-                _ => return Err(self.error(&format!("unknown function attribute: @{attr}"))),
+            if attr == "inline" {
+                attrs.inline = true;
+            } else if attr == "noinline" {
+                attrs.noinline = true;
+            } else if attr == "cold" {
+                attrs.cold = true;
+            } else if attr == "hot" {
+                attrs.hot = true;
+            } else {
+                return Err(self.error(&format!("unknown function attribute: @{attr}")));
             }
         }
         Ok(attrs)
@@ -145,7 +149,7 @@ impl Parser {
         }
     }
 
-    fn parse_type_params(&mut self) -> (Vec<String>, Vec<(String, Vec<String>)>) {
+    fn parse_type_params(&mut self) -> (Vec<Symbol>, Vec<(Symbol, Vec<Symbol>)>) {
         let mut tp = Vec::new();
         let mut bounds = Vec::new();
         if !self.check(Token::Of) {
@@ -168,7 +172,7 @@ impl Parser {
                         Err(_) => break,
                     }
                 }
-                bounds.push((name.clone(), bs));
+                bounds.push((name, bs));
             }
             tp.push(name);
             if !self.check(Token::Comma) {
@@ -283,7 +287,7 @@ impl Parser {
                 let lit_sp = self.span();
                 let lit_expr = self.parse_literal_token()?;
                 Ok(Param {
-                    name: format!("__arg{idx}"),
+                    name: Symbol::intern(&format!("__arg{idx}")),
                     ty: None,
                     default: None,
                     literal: Some(lit_expr),
@@ -294,7 +298,7 @@ impl Parser {
                 let lit_sp = self.span();
                 let lit_expr = self.parse_unary()?;
                 Ok(Param {
-                    name: format!("__arg{idx}"),
+                    name: Symbol::intern(&format!("__arg{idx}")),
                     ty: None,
                     default: None,
                     literal: Some(lit_expr),
@@ -376,25 +380,25 @@ impl Parser {
                 continue;
             }
             let attr = self.ident()?;
-            match attr.as_str() {
-                "packed" => layout.packed = true,
-                "align" => {
-                    self.expect(Token::LParen)?;
-                    let n = match self.peek() {
-                        Token::Int(n) => {
-                            let v = *n as u32;
-                            self.advance();
-                            v
-                        }
-                        _ => return Err(self.error("expected alignment value")),
-                    };
-                    self.expect(Token::RParen)?;
-                    if !n.is_power_of_two() {
-                        return Err(self.error("alignment must be a power of 2"));
+            if attr == "packed" {
+                layout.packed = true;
+            } else if attr == "align" {
+                self.expect(Token::LParen)?;
+                let n = match self.peek() {
+                    Token::Int(n) => {
+                        let v = *n as u32;
+                        self.advance();
+                        v
                     }
-                    layout.align = Some(n);
+                    _ => return Err(self.error("expected alignment value")),
+                };
+                self.expect(Token::RParen)?;
+                if !n.is_power_of_two() {
+                    return Err(self.error("alignment must be a power of 2"));
                 }
-                _ => return Err(self.error(&format!("unknown layout attribute: @{attr}"))),
+                layout.align = Some(n);
+            } else {
+                return Err(self.error(&format!("unknown layout attribute: @{attr}")));
             }
         }
         Ok(layout)
@@ -483,7 +487,7 @@ impl Parser {
         } else {
             Ok(VField {
                 name: None,
-                ty: self.ident_to_type(&n),
+                ty: self.ident_to_type(&n.as_str()),
             })
         }
     }
@@ -570,7 +574,7 @@ impl Parser {
         self.expect(Token::Test)?;
         let name = match self.peek() {
             Token::Str(s) => {
-                let n = s.clone();
+                let n = Symbol::intern(s);
                 self.advance();
                 n
             }
@@ -644,58 +648,59 @@ impl Parser {
         while self.check(Token::At) {
             self.advance();
             let attr = self.ident()?;
-            match attr.as_str() {
-                "simple" => decorators.push(crate::ast::StoreDecorator::Simple),
-                "mem" => decorators.push(crate::ast::StoreDecorator::Mem),
-                "transient" => decorators.push(crate::ast::StoreDecorator::Transient),
-                "versioned" => decorators.push(crate::ast::StoreDecorator::Versioned),
-                "graph" => decorators.push(crate::ast::StoreDecorator::Graph),
-                "kv" => decorators.push(crate::ast::StoreDecorator::Kv),
-                "vector" => {
-                    self.expect(Token::LParen)?;
-                    let n = match self.peek() {
-                        Token::Int(v) => {
-                            let n = *v as u64;
-                            self.advance();
-                            n
-                        }
-                        _ => return Err(self.error("expected vector dimension")),
-                    };
-                    self.expect(Token::RParen)?;
-                    decorators.push(crate::ast::StoreDecorator::Vector(n));
-                }
-                "timeseries" => {
-                    self.expect(Token::LParen)?;
-                    let field = self.ident()?;
-                    self.expect(Token::RParen)?;
-                    decorators.push(crate::ast::StoreDecorator::TimeSeries(field));
-                }
-                "before_insert" => {
-                    self.expect(Token::LParen)?;
-                    let fname = self.ident()?;
-                    self.expect(Token::RParen)?;
-                    decorators.push(crate::ast::StoreDecorator::BeforeInsert(fname));
-                }
-                "after_insert" => {
-                    self.expect(Token::LParen)?;
-                    let fname = self.ident()?;
-                    self.expect(Token::RParen)?;
-                    decorators.push(crate::ast::StoreDecorator::AfterInsert(fname));
-                }
-                "before_delete" => {
-                    self.expect(Token::LParen)?;
-                    let fname = self.ident()?;
-                    self.expect(Token::RParen)?;
-                    decorators.push(crate::ast::StoreDecorator::BeforeDelete(fname));
-                }
-                "after_delete" => {
-                    self.expect(Token::LParen)?;
-                    let fname = self.ident()?;
-                    self.expect(Token::RParen)?;
-                    decorators.push(crate::ast::StoreDecorator::AfterDelete(fname));
-                }
-                "column" => decorators.push(crate::ast::StoreDecorator::Column),
-                _ => return Err(self.error(&format!("unknown store decorator: @{attr}"))),
+            if attr == "simple" {
+                decorators.push(crate::ast::StoreDecorator::Simple);
+            } else if attr == "mem" {
+                decorators.push(crate::ast::StoreDecorator::Mem);
+            } else if attr == "transient" {
+                decorators.push(crate::ast::StoreDecorator::Transient);
+            } else if attr == "versioned" {
+                decorators.push(crate::ast::StoreDecorator::Versioned);
+            } else if attr == "graph" {
+                decorators.push(crate::ast::StoreDecorator::Graph);
+            } else if attr == "kv" {
+                decorators.push(crate::ast::StoreDecorator::Kv);
+            } else if attr == "vector" {
+                self.expect(Token::LParen)?;
+                let n = match self.peek() {
+                    Token::Int(v) => {
+                        let n = *v as u64;
+                        self.advance();
+                        n
+                    }
+                    _ => return Err(self.error("expected vector dimension")),
+                };
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::Vector(n));
+            } else if attr == "timeseries" {
+                self.expect(Token::LParen)?;
+                let field = self.ident()?;
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::TimeSeries(field));
+            } else if attr == "before_insert" {
+                self.expect(Token::LParen)?;
+                let fname = self.ident()?;
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::BeforeInsert(fname));
+            } else if attr == "after_insert" {
+                self.expect(Token::LParen)?;
+                let fname = self.ident()?;
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::AfterInsert(fname));
+            } else if attr == "before_delete" {
+                self.expect(Token::LParen)?;
+                let fname = self.ident()?;
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::BeforeDelete(fname));
+            } else if attr == "after_delete" {
+                self.expect(Token::LParen)?;
+                let fname = self.ident()?;
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::AfterDelete(fname));
+            } else if attr == "column" {
+                decorators.push(crate::ast::StoreDecorator::Column);
+            } else {
+                return Err(self.error(&format!("unknown store decorator: @{attr}")));
             }
         }
 
@@ -762,51 +767,61 @@ impl Parser {
         while self.check(Token::At) {
             self.advance();
             let attr = self.ident()?;
-            match attr.as_str() {
-                "index" => field_decorators.push(crate::ast::FieldDecorator::Index),
-                "unique" => field_decorators.push(crate::ast::FieldDecorator::Unique),
-                "sorted" => field_decorators.push(crate::ast::FieldDecorator::Sorted),
-                "transient" => field_decorators.push(crate::ast::FieldDecorator::Transient),
-                "increment" => field_decorators.push(crate::ast::FieldDecorator::Increment),
-                "required" => field_decorators.push(crate::ast::FieldDecorator::Required),
-                "versioned" => field_decorators.push(crate::ast::FieldDecorator::Versioned),
-                "cascade" => field_decorators.push(crate::ast::FieldDecorator::Cascade),
-                "lazy" => field_decorators.push(crate::ast::FieldDecorator::Lazy),
-                "bloom" => field_decorators.push(crate::ast::FieldDecorator::Bloom),
-                "search" => field_decorators.push(crate::ast::FieldDecorator::Search),
-                "default" => {
-                    self.expect(Token::LParen)?;
-                    // Read the default value as a string token
-                    let val = match self.peek() {
-                        Token::Str(s) => {
-                            let v = s.clone();
-                            self.advance();
-                            v
-                        }
-                        Token::Int(n) => {
-                            let v = n.to_string();
-                            self.advance();
-                            v
-                        }
-                        Token::Float(f) => {
-                            let v = f.to_string();
-                            self.advance();
-                            v
-                        }
-                        Token::True => {
-                            self.advance();
-                            "true".to_string()
-                        }
-                        Token::False => {
-                            self.advance();
-                            "false".to_string()
-                        }
-                        _ => return Err(self.error("expected default value")),
-                    };
-                    self.expect(Token::RParen)?;
-                    field_decorators.push(crate::ast::FieldDecorator::Default(val));
-                }
-                _ => return Err(self.error(&format!("unknown field decorator: @{attr}"))),
+            if attr == "index" {
+                field_decorators.push(crate::ast::FieldDecorator::Index);
+            } else if attr == "unique" {
+                field_decorators.push(crate::ast::FieldDecorator::Unique);
+            } else if attr == "sorted" {
+                field_decorators.push(crate::ast::FieldDecorator::Sorted);
+            } else if attr == "transient" {
+                field_decorators.push(crate::ast::FieldDecorator::Transient);
+            } else if attr == "increment" {
+                field_decorators.push(crate::ast::FieldDecorator::Increment);
+            } else if attr == "required" {
+                field_decorators.push(crate::ast::FieldDecorator::Required);
+            } else if attr == "versioned" {
+                field_decorators.push(crate::ast::FieldDecorator::Versioned);
+            } else if attr == "cascade" {
+                field_decorators.push(crate::ast::FieldDecorator::Cascade);
+            } else if attr == "lazy" {
+                field_decorators.push(crate::ast::FieldDecorator::Lazy);
+            } else if attr == "bloom" {
+                field_decorators.push(crate::ast::FieldDecorator::Bloom);
+            } else if attr == "search" {
+                field_decorators.push(crate::ast::FieldDecorator::Search);
+            } else if attr == "default" {
+                self.expect(Token::LParen)?;
+                // Read the default value as a string token
+                let val = match self.peek() {
+                    Token::Str(s) => {
+                        let v = s.clone();
+                        self.advance();
+                        v
+                    }
+                    Token::Int(n) => {
+                        let v = n.to_string();
+                        self.advance();
+                        v
+                    }
+                    Token::Float(f) => {
+                        let v = f.to_string();
+                        self.advance();
+                        v
+                    }
+                    Token::True => {
+                        self.advance();
+                        "true".to_string()
+                    }
+                    Token::False => {
+                        self.advance();
+                        "false".to_string()
+                    }
+                    _ => return Err(self.error("expected default value")),
+                };
+                self.expect(Token::RParen)?;
+                field_decorators.push(crate::ast::FieldDecorator::Default(val));
+            } else {
+                return Err(self.error(&format!("unknown field decorator: @{attr}")));
             }
         }
 
@@ -830,14 +845,14 @@ impl Parser {
 
     /// Parse `migration 'name' version N` block with indented up/down containing alter ops.
     fn parse_migration_def(&mut self) -> Result<crate::ast::MigrationDef, ParseError> {
-        use crate::ast::{AlterAction, AlterOp, MigrationDef};
+        use crate::ast::MigrationDef;
         let sp = self.span();
         self.expect(Token::Migration)?;
 
         // migration 'name' version N
         let name = match self.peek() {
             Token::Str(s) => {
-                let n = s.clone();
+                let n = Symbol::intern(s);
                 self.advance();
                 n
             }
@@ -870,23 +885,22 @@ impl Parser {
             let blocks = self.parse_indented(|p| {
                 let ident = p.ident()?;
                 p.expect(Token::Newline)?;
-                match ident.as_str() {
-                    "up" | "down" => {
-                        let mut alter_ops = Vec::new();
-                        if p.check(Token::Indent) {
-                            let ops = p.parse_indented(|p2| p2.parse_alter_op())?;
-                            alter_ops = ops;
-                        }
-                        Ok((ident, alter_ops))
+                if ident == "up" || ident == "down" {
+                    let mut alter_ops = Vec::new();
+                    if p.check(Token::Indent) {
+                        let ops = p.parse_indented(|p2| p2.parse_alter_op())?;
+                        alter_ops = ops;
                     }
-                    _ => Err(p.error(&format!("expected 'up' or 'down', got '{ident}'"))),
+                    Ok((ident, alter_ops))
+                } else {
+                    Err(p.error(&format!("expected 'up' or 'down', got '{ident}'")))
                 }
             })?;
             for (dir, ops) in blocks {
-                match dir.as_str() {
-                    "up" => up = ops,
-                    "down" => down = ops,
-                    _ => {}
+                if dir == "up" {
+                    up = ops;
+                } else if dir == "down" {
+                    down = ops;
                 }
             }
         }
@@ -940,37 +954,34 @@ impl Parser {
         if self.check(Token::Indent) {
             let acts = self.parse_indented(|p| {
                 let action_name = p.ident()?;
-                match action_name.as_str() {
-                    "add" => {
-                        let field_name = p.ident()?;
-                        p.expect(Token::As)?;
-                        let ty = p.parse_type()?;
-                        // optional: default <value>
-                        let default = if p.check(Token::Default) {
-                            p.advance();
-                            Some(p.parse_expr()?)
-                        } else {
-                            None
-                        };
-                        Ok(AlterAction::Add {
-                            name: field_name,
-                            ty,
-                            default,
-                        })
-                    }
-                    "drop" => {
-                        let field_name = p.ident()?;
-                        Ok(AlterAction::Drop { name: field_name })
-                    }
-                    "rename" => {
-                        let from = p.ident()?;
-                        p.expect(Token::To)?;
-                        let to = p.ident()?;
-                        Ok(AlterAction::Rename { from, to })
-                    }
-                    _ => Err(p.error(&format!(
+                if action_name == "add" {
+                    let field_name = p.ident()?;
+                    p.expect(Token::As)?;
+                    let ty = p.parse_type()?;
+                    // optional: default <value>
+                    let default = if p.check(Token::Default) {
+                        p.advance();
+                        Some(p.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    Ok(AlterAction::Add {
+                        name: field_name.as_str(),
+                        ty,
+                        default,
+                    })
+                } else if action_name == "drop" {
+                    let field_name = p.ident()?;
+                    Ok(AlterAction::Drop { name: field_name.as_str() })
+                } else if action_name == "rename" {
+                    let from = p.ident()?;
+                    p.expect(Token::To)?;
+                    let to = p.ident()?;
+                    Ok(AlterAction::Rename { from: from.as_str(), to: to.as_str() })
+                } else {
+                    Err(p.error(&format!(
                         "expected 'add', 'drop', or 'rename', got '{action_name}'"
-                    ))),
+                    )))
                 }
             })?;
             actions = acts;
@@ -1139,28 +1150,27 @@ impl Parser {
                 break;
             }
             let key = self.ident()?;
-            match key.as_str() {
-                "strategy" => {
-                    self.expect(Token::Is)?;
-                    let val = self.ident()?;
-                    strategy = match val.as_str() {
-                        "one_for_one" => SupervisorStrategy::OneForOne,
-                        "one_for_all" => SupervisorStrategy::OneForAll,
-                        "rest_for_one" => SupervisorStrategy::RestForOne,
-                        _ => return Err(self.error(&format!(
-                            "unknown supervisor strategy '{val}', expected one_for_one, one_for_all, or rest_for_one"
-                        ))),
-                    };
-                }
-                "children" => {
-                    self.expect(Token::Newline)?;
-                    children = self.parse_indented(|p| p.ident())?;
-                }
-                _ => {
+            if key == "strategy" {
+                self.expect(Token::Is)?;
+                let val = self.ident()?;
+                if val == "one_for_one" {
+                    strategy = SupervisorStrategy::OneForOne;
+                } else if val == "one_for_all" {
+                    strategy = SupervisorStrategy::OneForAll;
+                } else if val == "rest_for_one" {
+                    strategy = SupervisorStrategy::RestForOne;
+                } else {
                     return Err(self.error(&format!(
-                        "unexpected supervisor field '{key}', expected 'strategy' or 'children'"
+                        "unknown supervisor strategy '{val}', expected one_for_one, one_for_all, or rest_for_one"
                     )));
                 }
+            } else if key == "children" {
+                self.expect(Token::Newline)?;
+                children = self.parse_indented(|p| p.ident())?;
+            } else {
+                return Err(self.error(&format!(
+                    "unexpected supervisor field '{key}', expected 'strategy' or 'children'"
+                )));
             }
             self.skip_nl();
         }

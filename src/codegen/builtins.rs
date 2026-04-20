@@ -190,7 +190,7 @@ impl<'ctx> Compiler<'ctx> {
                 "builtin {:?} should not appear in codegen",
                 builtin
             )),
-            hir::BuiltinFn::CharMethod(method) => self.compile_char_method(method, args),
+            hir::BuiltinFn::CharMethod(method) => self.compile_char_method(&method.as_str(), args),
             hir::BuiltinFn::Matmul => self.compile_matmul(args),
             hir::BuiltinFn::RegexMatch | hir::BuiltinFn::RegexFindAll => Err(format!(
                 "builtin {:?} should be lowered to string methods",
@@ -269,7 +269,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::BuiltinFn::PoolAlloc => self.compile_pool_alloc(args),
             hir::BuiltinFn::PoolFree => self.compile_pool_free(args),
             hir::BuiltinFn::PoolDestroy => self.compile_pool_destroy(args),
-            hir::BuiltinFn::FloatMethod(method) => self.compile_float_method(method, args),
+            hir::BuiltinFn::FloatMethod(method) => self.compile_float_method(&method.as_str(), args),
         }
     }
 
@@ -1889,7 +1889,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Write back to original variable if possible
         if let hir::ExprKind::Var(_, name) = &args[0].kind {
-            if let Some((var_ptr, _)) = self.find_var(name).cloned() {
+            if let Some((var_ptr, _)) = self.find_var(&name.as_str()).cloned() {
                 let updated = b!(self.bld.build_load(arena_ty, spill, "arena.updated"));
                 b!(self.bld.build_store(var_ptr, updated));
             }
@@ -1918,7 +1918,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Write back to original variable
         if let hir::ExprKind::Var(_, name) = &args[0].kind {
-            if let Some((var_ptr, _)) = self.find_var(name).cloned() {
+            if let Some((var_ptr, _)) = self.find_var(&name.as_str()).cloned() {
                 let updated = b!(self.bld.build_load(arena_ty, spill, "arena.reset"));
                 b!(self.bld.build_store(var_ptr, updated));
             }

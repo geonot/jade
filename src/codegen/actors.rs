@@ -41,13 +41,13 @@ impl<'ctx> Compiler<'ctx> {
         let state_fields: Vec<(String, Type)> = ad
             .fields
             .iter()
-            .map(|f| (f.name.clone(), f.ty.clone()))
+            .map(|f| (f.name.as_str(), f.ty.clone()))
             .collect();
         let state_ltys: Vec<BasicTypeEnum<'ctx>> =
             state_fields.iter().map(|(_, t)| self.llvm_ty(t)).collect();
         let state_st = self.ctx.opaque_struct_type(&state_name);
         state_st.set_body(&state_ltys, false);
-        self.structs.insert(state_name.clone(), state_fields);
+        self.structs.insert(state_name.into(), state_fields);
 
         let mut max_payload_bytes: u64 = 8;
         for h in &ad.handlers {
@@ -175,7 +175,7 @@ impl<'ctx> Compiler<'ctx> {
                         fi as u32,
                         &format!("state_{}", field.name)
                     ));
-                    self.set_var(&field.name, field_ptr, field.ty.clone());
+                    self.set_var(&field.name.as_str(), field_ptr, field.ty.clone());
                 }
 
                 let i64t = self.ctx.i64_type();
@@ -192,11 +192,11 @@ impl<'ctx> Compiler<'ctx> {
                             &format!("param_{}_ptr", p.name)
                         ))
                     };
-                    let param_val = b!(self.bld.build_load(pty, param_ptr, &p.name));
+                    let param_val = b!(self.bld.build_load(pty, param_ptr, &p.name.as_str()));
 
-                    let alloca = self.entry_alloca(pty, &p.name);
+                    let alloca = self.entry_alloca(pty, &p.name.as_str());
                     b!(self.bld.build_store(alloca, param_val));
-                    self.set_var(&p.name, alloca, p.ty.clone());
+                    self.set_var(&p.name.as_str(), alloca, p.ty.clone());
 
                     param_offset += psize;
                 }

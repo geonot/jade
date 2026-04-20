@@ -207,14 +207,14 @@ impl<'ctx> Compiler<'ctx> {
                 let val = self.compile_expr(&bind.value)?;
                 let ty = &bind.ty;
                 if matches!(ty, Type::Array(_, _)) {
-                    self.set_var(&bind.name, val.into_pointer_value(), ty.clone());
-                } else if let Some((ptr, _)) = self.find_var(&bind.name).cloned() {
+                    self.set_var(&bind.name.as_str(), val.into_pointer_value(), ty.clone());
+                } else if let Some((ptr, _)) = self.find_var(&bind.name.as_str()).cloned() {
                     b!(self.bld.build_store(ptr, val));
-                    self.set_var(&bind.name, ptr, ty.clone());
+                    self.set_var(&bind.name.as_str(), ptr, ty.clone());
                 } else {
-                    let a = self.entry_alloca(self.llvm_ty(ty), &bind.name);
+                    let a = self.entry_alloca(self.llvm_ty(ty), &bind.name.as_str());
                     b!(self.bld.build_store(a, val));
-                    self.set_var(&bind.name, a, ty.clone());
+                    self.set_var(&bind.name.as_str(), a, ty.clone());
                 }
             }
             hir::Stmt::Assign(target, value, _) => {
@@ -350,9 +350,9 @@ impl<'ctx> Compiler<'ctx> {
             self.compile_expr(&f.iter)?
         };
 
-        let lvar = self.entry_alloca(self.llvm_ty(&f.bind_ty), &f.bind);
+        let lvar = self.entry_alloca(self.llvm_ty(&f.bind_ty), &f.bind.as_str());
         b!(self.bld.build_store(lvar, start_val));
-        self.set_var(&f.bind, lvar, f.bind_ty.clone());
+        self.set_var(&f.bind.as_str(), lvar, f.bind_ty.clone());
 
         let cond_bb = self.ctx.append_basic_block(fv, "coro.for.cond");
         let body_bb = self.ctx.append_basic_block(fv, "coro.for.body");

@@ -82,9 +82,9 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             i64t.const_int(1, false).into()
         };
-        let a = self.entry_alloca(i64t.into(), &f.bind);
+        let a = self.entry_alloca(i64t.into(), &f.bind.as_str());
         b!(self.bld.build_store(a, start_val));
-        self.set_var(&f.bind, a, Type::I64);
+        self.set_var(&f.bind.as_str(), a, Type::I64);
         let cond_bb = self.ctx.append_basic_block(fv, "for.cond");
         let body_bb = self.ctx.append_basic_block(fv, "for.body");
         let inc_bb = self.ctx.append_basic_block(fv, "for.inc");
@@ -130,7 +130,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let arr_ptr = match &f.iter.kind {
             hir::ExprKind::Var(_, n) => self
-                .find_var(n)
+                .find_var(&n.as_str())
                 .map(|(p, _)| *p)
                 .ok_or_else(|| format!("undefined: {n}"))?,
             _ => self.compile_expr(&f.iter)?.into_pointer_value(),
@@ -179,8 +179,8 @@ impl<'ctx> Compiler<'ctx> {
 
         let idx_alloca = self.entry_alloca(i64t.into(), "__idx");
         b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
-        let elem_alloca = self.entry_alloca(lty, &f.bind);
-        self.set_var(&f.bind, elem_alloca, elem_ty.clone());
+        let elem_alloca = self.entry_alloca(lty, &f.bind.as_str());
+        self.set_var(&f.bind.as_str(), elem_alloca, elem_ty.clone());
 
         let cond_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.cond"));
         let body_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.body"));
@@ -283,9 +283,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(hv_ptr, i8t.const_int(0, false)));
 
         // Bind the loop variable
-        let a = self.entry_alloca(i64t.into(), &f.bind);
+        let a = self.entry_alloca(i64t.into(), &f.bind.as_str());
         b!(self.bld.build_store(a, value));
-        self.set_var(&f.bind, a, f.bind_ty.clone());
+        self.set_var(&f.bind.as_str(), a, f.bind_ty.clone());
 
         self.loop_stack.push(super::LoopCtx {
             continue_bb: loop_bb,
@@ -316,8 +316,8 @@ impl<'ctx> Compiler<'ctx> {
         let idx_alloca = self.entry_alloca(i64t.into(), "__sidx");
         b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
 
-        let cp_alloca = self.entry_alloca(i64t.into(), &f.bind);
-        self.set_var(&f.bind, cp_alloca, crate::types::Type::I64);
+        let cp_alloca = self.entry_alloca(i64t.into(), &f.bind.as_str());
+        self.set_var(&f.bind.as_str(), cp_alloca, crate::types::Type::I64);
 
         let cond_bb = self.ctx.append_basic_block(fv, "fs.cond");
         let body_bb = self.ctx.append_basic_block(fv, "fs.body");
@@ -664,9 +664,9 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_load(ptr, counter_ptr_ptr, "counter_ptr")).into_pointer_value();
 
         // Set up the loop variable
-        let lvar = self.entry_alloca(i64t.into(), &f.bind);
+        let lvar = self.entry_alloca(i64t.into(), &f.bind.as_str());
         b!(self.bld.build_store(lvar, iter_val));
-        self.set_var(&f.bind, lvar, Type::I64);
+        self.set_var(&f.bind.as_str(), lvar, Type::I64);
 
         // Compile the loop body
         self.compile_block(&f.body)?;

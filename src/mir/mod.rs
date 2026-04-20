@@ -12,6 +12,7 @@ use std::fmt;
 
 use crate::ast::{FnAttrs, Span};
 use crate::hir::DefId;
+use crate::intern::Symbol;
 use crate::types::Type;
 
 /// A unique identifier for an SSA value.
@@ -25,7 +26,7 @@ pub struct BlockId(pub u32);
 /// A MIR function in SSA form.
 #[derive(Debug, Clone)]
 pub struct Function {
-    pub name: String,
+    pub name: Symbol,
     pub def_id: DefId,
     pub params: Vec<Param>,
     pub ret_ty: Type,
@@ -49,7 +50,7 @@ impl Function {
         self.next_block += 1;
         self.blocks.push(BasicBlock {
             id,
-            label: format!("{}{}", label, id.0),
+            label: Symbol::intern(&format!("{}{}", label, id.0)),
             phis: Vec::new(),
             insts: Vec::new(),
             terminator: Terminator::Unreachable,
@@ -87,7 +88,7 @@ impl Function {
 #[derive(Debug, Clone)]
 pub struct Param {
     pub value: ValueId,
-    pub name: String,
+    pub name: Symbol,
     pub ty: Type,
 }
 
@@ -95,7 +96,7 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct BasicBlock {
     pub id: BlockId,
-    pub label: String,
+    pub label: Symbol,
     pub phis: Vec<Phi>,
     pub insts: Vec<Instruction>,
     pub terminator: Terminator,
@@ -133,25 +134,25 @@ pub enum InstKind {
     UnaryOp(UnaryOp, ValueId),
     Cmp(CmpOp, ValueId, ValueId, Type),
 
-    Call(String, Vec<ValueId>),
-    MethodCall(ValueId, String, Vec<ValueId>),
+    Call(Symbol, Vec<ValueId>),
+    MethodCall(ValueId, Symbol, Vec<ValueId>),
     IndirectCall(ValueId, Vec<ValueId>),
 
-    Load(String),
-    Store(String, ValueId),
+    Load(Symbol),
+    Store(Symbol, ValueId),
 
-    FieldGet(ValueId, String),
-    FieldSet(ValueId, String, ValueId),
+    FieldGet(ValueId, Symbol),
+    FieldSet(ValueId, Symbol, ValueId),
     /// Direct field store into a named variable's alloca (for mem_vars).
-    FieldStore(String, String, ValueId),
+    FieldStore(Symbol, Symbol, ValueId),
 
     Index(ValueId, ValueId),
     IndexSet(ValueId, ValueId, ValueId),
     /// Direct index store into a named variable's alloca (for mem_var arrays).
-    IndexStore(String, ValueId, ValueId),
+    IndexStore(Symbol, ValueId, ValueId),
 
-    StructInit(String, Vec<(String, ValueId)>),
-    VariantInit(String, String, u32, Vec<ValueId>),
+    StructInit(Symbol, Vec<(Symbol, ValueId)>),
+    VariantInit(Symbol, Symbol, u32, Vec<ValueId>),
     ArrayInit(Vec<ValueId>),
 
     Cast(ValueId, Type),
@@ -168,7 +169,7 @@ pub enum InstKind {
     Copy(ValueId),
 
     /// Reference to a named top-level function, used as a first-class value.
-    FnRef(String),
+    FnRef(Symbol),
 
     Slice(ValueId, ValueId, ValueId),
 
@@ -182,7 +183,7 @@ pub enum InstKind {
     DequeInit,
 
     // ── Closures (needed for escape analysis) ──
-    ClosureCreate(String, Vec<ValueId>),
+    ClosureCreate(Symbol, Vec<ValueId>),
     ClosureCall(ValueId, Vec<ValueId>),
 
     // ── RC (needed for Perceus on MIR) ──
@@ -191,7 +192,7 @@ pub enum InstKind {
     WeakUpgrade(ValueId),
 
     // ── Actors/channels (needed for actor optimization pass) ──
-    SpawnActor(String, Vec<ValueId>),
+    SpawnActor(Symbol, Vec<ValueId>),
     ChanCreate(Type, Option<ValueId>),
     ChanSend(ValueId, ValueId),
     ChanRecv(ValueId),
@@ -202,16 +203,16 @@ pub enum InstKind {
     Assert(ValueId, String),
 
     // ── Dynamic dispatch ──
-    DynDispatch(ValueId, String, String, Vec<ValueId>),
+    DynDispatch(ValueId, Symbol, Symbol, Vec<ValueId>),
     /// Box a concrete value into a fat pointer {data_ptr, vtable_ptr} for dyn trait.
-    DynCoerce(ValueId, String, String),
+    DynCoerce(ValueId, Symbol, Symbol),
 
     // ── Inline assembly ──
     InlineAsm(String, Vec<ValueId>),
 
     // ── Global variables ──
-    GlobalLoad(String),
-    GlobalStore(String, ValueId),
+    GlobalLoad(Symbol),
+    GlobalStore(Symbol, ValueId),
 }
 
 /// Binary operations.
@@ -321,21 +322,21 @@ pub struct Program {
 /// Global variable definition in MIR.
 #[derive(Debug, Clone)]
 pub struct GlobalDef {
-    pub name: String,
+    pub name: Symbol,
     pub ty: Type,
 }
 
 /// Type definition in MIR.
 #[derive(Debug, Clone)]
 pub struct TypeDef {
-    pub name: String,
-    pub fields: Vec<(String, Type)>,
+    pub name: Symbol,
+    pub fields: Vec<(Symbol, Type)>,
 }
 
 /// External function declaration.
 #[derive(Debug, Clone)]
 pub struct ExternDecl {
-    pub name: String,
+    pub name: Symbol,
     pub params: Vec<Type>,
     pub ret: Type,
 }

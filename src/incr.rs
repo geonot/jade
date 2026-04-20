@@ -4,6 +4,7 @@
 //! On recompile, skip unchanged functions by loading cached artifacts.
 //! Parallel codegen partitions functions across threads.
 
+use crate::intern::Symbol;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ use crate::types::Type;
 // ── Cache Key / HIR Hashing ──
 
 /// Compute a stable 64-bit hash of a function's HIR plus dependency signatures.
-pub fn function_cache_key(func: &hir::Fn, dep_sigs: &HashMap<String, u64>) -> u64 {
+pub fn function_cache_key(func: &hir::Fn, dep_sigs: &HashMap<Symbol, u64>) -> u64 {
     let mut hasher = StableHasher::new();
     hash_function(func, &mut hasher);
     // Include dependency signatures so callee type changes invalidate callers.
@@ -209,20 +210,20 @@ fn cache_root() -> PathBuf {
 pub fn compute_dirty_set(
     program: &hir::Program,
     cache: &ArtifactCache,
-) -> (Vec<usize>, HashMap<String, u64>) {
+) -> (Vec<usize>, HashMap<Symbol, u64>) {
     // 1. Compute signatures for all functions
-    let mut signatures: HashMap<String, u64> = HashMap::new();
+    let mut signatures: HashMap<Symbol, u64> = HashMap::new();
     for f in &program.fns {
         signatures.insert(f.name.clone(), function_signature(f));
     }
 
     // 2. Compute cache keys and check which are dirty
     let mut dirty = Vec::new();
-    let mut keys: HashMap<String, u64> = HashMap::new();
+    let mut keys: HashMap<Symbol, u64> = HashMap::new();
     for (i, f) in program.fns.iter().enumerate() {
         let key = function_cache_key(f, &signatures);
         keys.insert(f.name.clone(), key);
-        if cache.lookup(&f.name, key).is_none() {
+        if cache.lookup(&f.name.as_str(), key).is_none() {
             dirty.push(i);
         }
     }

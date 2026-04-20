@@ -3,6 +3,7 @@
 //! Each pass takes `&mut Function` and returns `true` if it changed anything.
 //! The driver runs passes in a fixed-point loop until convergence.
 
+use crate::intern::Symbol;
 use super::*;
 use crate::ast::Span;
 use crate::types::Type;
@@ -883,12 +884,12 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
             continue;
         }
 
-        let mut known: HashMap<String, ValueId> = HashMap::new();
+        let mut known: HashMap<Symbol, ValueId> = HashMap::new();
 
         for inst in &bb.insts {
             match &inst.kind {
                 InstKind::Store(name, val) => {
-                    known.insert(name.clone(), *val);
+                    known.insert(*name, *val);
                 }
                 InstKind::Load(name) => {
                     if let Some(&val) = known.get(name) {
@@ -897,7 +898,7 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                             dead_loads.insert(dest);
                         }
                     } else if let Some(dest) = inst.dest {
-                        known.insert(name.clone(), dest);
+                        known.insert(*name, dest);
                     }
                 }
                 InstKind::Call(..)
@@ -953,12 +954,12 @@ pub fn redundant_store_elimination(func: &mut Function) -> bool {
     for bb in &mut func.blocks {
         let mut to_remove: HashSet<usize> = HashSet::new();
         // Maps variable name → index of last Store instruction.
-        let mut last_store_idx: HashMap<String, usize> = HashMap::new();
+        let mut last_store_idx: HashMap<Symbol, usize> = HashMap::new();
 
         for (i, inst) in bb.insts.iter().enumerate() {
             match &inst.kind {
                 InstKind::Store(name, _) => {
-                    if let Some(prev_idx) = last_store_idx.insert(name.clone(), i) {
+                    if let Some(prev_idx) = last_store_idx.insert(*name, i) {
                         to_remove.insert(prev_idx);
                     }
                 }
@@ -1023,7 +1024,7 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
     let mut replacements: HashMap<ValueId, ValueId> = HashMap::new();
 
     for bb in &func.blocks {
-        let mut expr_map: HashMap<String, ValueId> = HashMap::new();
+        let mut expr_map: HashMap<Symbol, ValueId> = HashMap::new();
         for inst in &bb.insts {
             // Invalidate cached FieldGet/Index entries on mutation.
             match &inst.kind {
@@ -1044,10 +1045,10 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
                     continue;
                 }
                 if let Some(key) = gvn_key(&inst.kind) {
-                    if let Some(&existing) = expr_map.get(&key) {
+                    if let Some(&existing) = expr_map.get(&Symbol::intern(&key)) {
                         replacements.insert(d, existing);
                     } else {
-                        expr_map.insert(key, d);
+                        expr_map.insert(key.into(), d);
                     }
                 }
             }

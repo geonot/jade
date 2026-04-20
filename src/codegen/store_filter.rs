@@ -15,7 +15,7 @@ use super::stores::STRING_BUF_SIZE;
 /// canonical primitive types so filter/agg code can match uniformly.
 pub(crate) fn normalize_store_field_type(ty: &Type) -> Type {
     match ty {
-        Type::Struct(name, args) if args.is_empty() => match name.as_str() {
+        Type::Struct(name, args) if args.is_empty() => match &*name.as_str() {
             "I64" | "i64" | "int" => Type::I64,
             "I32" | "i32" => Type::I32,
             "I16" | "i16" => Type::I16,
@@ -178,7 +178,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 ty => {
                     let lty = self.llvm_ty(ty);
-                    let val = b!(self.bld.build_load(lty, src_gep, &field.name));
+                    let val = b!(self.bld.build_load(lty, src_gep, &field.name.as_str()));
                     b!(self.bld.build_store(dst_gep, val));
                 }
             }

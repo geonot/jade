@@ -36,7 +36,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&format!("type {} is\n", t.name));
             for field in &t.fields {
                 indent(out, level + 1);
-                out.push_str(&field.name);
+                out.push_str(&field.name.to_string());
                 if let Some(ref ty) = field.ty {
                     out.push_str(&format!(" is {}", format_type(ty)));
                 }
@@ -48,7 +48,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&format!("enum {}\n", e.name));
             for v in &e.variants {
                 indent(out, level + 1);
-                out.push_str(&v.name);
+                out.push_str(&v.name.as_str());
                 if !v.fields.is_empty() {
                     out.push_str(" of ");
                     let fields: Vec<String> = v
@@ -83,10 +83,10 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
         Decl::Use(u) => {
             indent(out, level);
             out.push_str("use ");
-            out.push_str(&u.path.join("."));
+            out.push_str(&Symbol::join_vec(&u.path, "."));
             if let Some(ref imports) = u.imports {
                 out.push_str(" import ");
-                out.push_str(&imports.join(", "));
+                out.push_str(&Symbol::join_vec(&imports, ", "));
             }
             if let Some(ref alias) = u.alias {
                 out.push_str(&format!(" as {alias}"));
@@ -159,7 +159,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&format!("store {}\n", s.name));
             for field in &s.fields {
                 indent(out, level + 1);
-                out.push_str(&field.name);
+                out.push_str(&field.name.to_string());
                 if let Some(ref ty) = field.ty {
                     out.push_str(&format!(" is {}", format_type(ty)));
                 }
@@ -171,7 +171,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&format!("error {}\n", e.name));
             for v in &e.variants {
                 indent(out, level + 1);
-                out.push_str(&v.name);
+                out.push_str(&v.name.to_string());
                 if !v.fields.is_empty() {
                     let ts: Vec<String> = v.fields.iter().map(format_type).collect();
                     out.push_str(&format!(" of {}", ts.join(", ")));
@@ -206,10 +206,10 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
 fn format_fn(out: &mut String, f: &Fn, level: usize) {
     indent(out, level);
     out.push('*');
-    out.push_str(&f.name);
+    out.push_str(&f.name.to_string());
     for p in &f.params {
         out.push(' ');
-        out.push_str(&p.name);
+        out.push_str(&p.name.to_string());
         if let Some(ref ty) = p.ty {
             out.push(' ');
             out.push_str(&format_type(ty));
@@ -232,7 +232,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
     match stmt {
         Stmt::Bind(b) => {
             indent(out, level);
-            out.push_str(&b.name);
+            out.push_str(&b.name.to_string());
             out.push_str(" is ");
             out.push_str(&format_expr(&b.value));
             out.push('\n');
@@ -272,7 +272,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
                 out.push_str(&format!("{label} is "));
             }
             out.push_str("for ");
-            out.push_str(&f.bind);
+            out.push_str(&f.bind.to_string());
             out.push_str(" in ");
             out.push_str(&format_expr(&f.iter));
             out.push('\n');
@@ -281,7 +281,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         Stmt::SimFor(f, _) => {
             indent(out, level);
             out.push_str("sim for ");
-            out.push_str(&f.bind);
+            out.push_str(&f.bind.to_string());
             out.push_str(" in ");
             out.push_str(&format_expr(&f.iter));
             out.push('\n');
@@ -325,7 +325,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str(&format!(
                 "({}) is {}\n",
-                bindings.join(", "),
+                Symbol::join_vec(bindings, ", "),
                 format_expr(expr)
             ));
         }
@@ -386,10 +386,10 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         Stmt::UseLocal(u) => {
             indent(out, level);
             out.push_str("use ");
-            out.push_str(&u.path.join("."));
+            out.push_str(&Symbol::join_vec(&u.path, "."));
             if let Some(ref imports) = u.imports {
                 out.push_str(" import ");
-                out.push_str(&imports.join(", "));
+                out.push_str(&Symbol::join_vec(&imports, ", "));
             }
             out.push('\n');
         }
@@ -425,7 +425,7 @@ fn format_expr(e: &Expr) -> String {
         Expr::Str(s, _) => format!("'{s}'"),
         Expr::Bool(true, _) => "true".into(),
         Expr::Bool(false, _) => "false".into(),
-        Expr::Ident(name, _) => name.clone(),
+        Expr::Ident(name, _) => name.to_string(),
         Expr::BinOp(l, op, r, _) => {
             let ops = match op {
                 BinOp::Add => "+",
@@ -530,7 +530,7 @@ fn format_expr(e: &Expr) -> String {
         Expr::Pipe(l, r, _, _) => format!("{} |> {}", format_expr(l), format_expr(r)),
         Expr::Block(_, _) => "do ... end".into(),
         Expr::Lambda(params, _, _, _) => {
-            let ps: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+            let ps: Vec<String> = params.iter().map(|p| p.name.to_string()).collect();
             format!("({}) => ...", ps.join(", "))
         }
         Expr::Placeholder(_) => "$".into(),
@@ -573,7 +573,7 @@ fn format_expr_from_stmt(s: &Stmt) -> String {
 fn format_pat(p: &Pat) -> String {
     match p {
         Pat::Lit(e) => format_expr(e),
-        Pat::Ident(name, _) => name.clone(),
+        Pat::Ident(name, _) => name.to_string(),
         Pat::Wild(_) => "_".into(),
         Pat::Tuple(pats, _) => {
             let ps: Vec<String> = pats.iter().map(format_pat).collect();
@@ -581,7 +581,7 @@ fn format_pat(p: &Pat) -> String {
         }
         Pat::Ctor(name, pats, _) => {
             if pats.is_empty() {
-                name.clone()
+                name.to_string()
             } else {
                 let ps: Vec<String> = pats.iter().map(format_pat).collect();
                 format!("{name} of {}", ps.join(", "))

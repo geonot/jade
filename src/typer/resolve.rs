@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use crate::ast::{self, Span};
 use crate::types::Type;
 
@@ -96,7 +97,7 @@ impl Typer {
         self.fns.insert(f.name.clone(), (id, ptys, ret));
         self.fn_param_names.insert(
             f.name.clone(),
-            f.params.iter().map(|p| p.name.clone()).collect(),
+            f.params.iter().map(|p| p.name.as_str()).collect(),
         );
         self.fn_defaults.insert(
             f.name.clone(),
@@ -114,11 +115,11 @@ impl Typer {
     }
 
     fn declare_method_sig_impl(&mut self, type_name: &str, m: &ast::Fn, by_ptr: bool) {
-        let method_name = format!("{type_name}_{}", m.name);
+        let method_name: Symbol = format!("{type_name}_{}", m.name).into();
         let self_ty = if by_ptr {
-            Type::Ptr(Box::new(Type::Struct(type_name.to_string(), vec![])))
+            Type::Ptr(Box::new(Type::Struct(type_name.into(), vec![])))
         } else {
-            Type::Struct(type_name.to_string(), vec![])
+            Type::Struct(type_name.into(), vec![])
         };
         let mut ptys = vec![self_ty];
         for p in &m.params {
@@ -133,20 +134,20 @@ impl Typer {
     }
 
     pub(crate) fn declare_type_def(&mut self, td: &ast::TypeDef) {
-        let fields: Vec<(String, Type)> = td
+        let fields: Vec<(Symbol, Type)> = td
             .fields
             .iter()
             .map(|f| {
                 let ty = f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f));
                 if f.ty.is_none() {
                     self.unannotated_struct_fields.push((
-                        td.name.clone(),
-                        f.name.clone(),
+                        td.name.as_str(),
+                        f.name.as_str(),
                         ty.clone(),
                         f.span,
                     ));
                 }
-                (f.name.clone(), ty)
+                (f.name, ty)
             })
             .collect();
         if td.fields.iter().any(|f| f.ty.is_none()) {
@@ -192,17 +193,17 @@ impl Typer {
 
     pub(crate) fn declare_actor_def(&mut self, ad: &ast::ActorDef) {
         let id = self.fresh_id();
-        let fields: Vec<(String, Type)> = ad
+        let fields: Vec<(Symbol, Type)> = ad
             .fields
             .iter()
             .map(|f| {
                 (
-                    f.name.clone(),
+                    f.name,
                     f.ty.clone().unwrap_or_else(|| self.infer_field_ty(f)),
                 )
             })
             .collect();
-        let handlers: Vec<(String, Vec<Type>, u32)> = ad
+        let handlers: Vec<(Symbol, Vec<Type>, u32)> = ad
             .handlers
             .iter()
             .enumerate()
@@ -212,7 +213,7 @@ impl Typer {
                     .iter()
                     .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
                     .collect();
-                (h.name.clone(), ptys, tag as u32)
+                (h.name, ptys, tag as u32)
             })
             .collect();
         self.actors.insert(ad.name.clone(), (id, fields, handlers));
@@ -227,7 +228,7 @@ impl Typer {
                 _params: m
                     .params
                     .iter()
-                    .map(|p| (p.name.clone(), p.ty.clone()))
+                    .map(|p| (p.name.as_str(), p.ty.clone()))
                     .collect(),
                 _ret: m.ret.clone(),
                 has_default: m.default_body.is_some(),
@@ -236,7 +237,7 @@ impl Typer {
         self.traits.insert(td.name.clone(), sigs);
         if !td.assoc_types.is_empty() {
             self.trait_assoc_types
-                .insert(td.name.clone(), td.assoc_types.clone());
+                .insert(td.name.clone(), td.assoc_types.iter().map(|s| s.as_str()).collect());
         }
     }
 
@@ -257,13 +258,13 @@ impl Typer {
             }
 
             if let Some(required_assocs) = self.trait_assoc_types.get(trait_name) {
-                let provided: Vec<&str> = ib
+                let provided: Vec<String> = ib
                     .assoc_type_bindings
                     .iter()
                     .map(|(n, _)| n.as_str())
                     .collect();
                 for required in required_assocs {
-                    if !provided.contains(&required.as_str()) {
+                    if !provided.contains(required) {
                         return Err(format!(
                             "line {}: impl {} for {} is missing required associated type '{}'",
                             ib.span.line, trait_name, ib.type_name, required
@@ -278,7 +279,7 @@ impl Typer {
                     trait_name
                 )
             });
-            let impl_method_names: Vec<&str> = ib.methods.iter().map(|m| m.name.as_str()).collect();
+            let impl_method_names: Vec<String> = ib.methods.iter().map(|m| m.name.as_str()).collect();
             for sig in &trait_sigs {
                 if !sig.has_default && !impl_method_names.contains(&sig.name.as_str()) {
                     return Err(format!(
@@ -291,7 +292,7 @@ impl Typer {
             self.trait_impls
                 .entry(ib.type_name.clone())
                 .or_default()
-                .push(trait_name.clone());
+                .push(trait_name.as_str());
 
             if !ib.trait_type_args.is_empty() {
                 self.trait_impl_type_args.insert(
@@ -302,7 +303,7 @@ impl Typer {
 
             for (assoc_name, assoc_ty) in &ib.assoc_type_bindings {
                 self.assoc_types
-                    .insert((ib.type_name.clone(), assoc_name.clone()), assoc_ty.clone());
+                    .insert((ib.type_name.clone(), *assoc_name), assoc_ty.clone());
             }
         } else {
             // no trait — standalone impl block
@@ -313,15 +314,15 @@ impl Typer {
                 .entry(ib.type_name.clone())
                 .or_default()
                 .push(m.clone());
-            self.declare_method_sig_by_ptr(&ib.type_name, m);
+            self.declare_method_sig_by_ptr(&ib.type_name.as_str(), m);
         }
 
         Ok(())
     }
 
     pub(crate) fn infer_param_types(&mut self, _prog: &ast::Program) {
-        let struct_names: Vec<String> = self.structs.keys().cloned().collect();
-        let fn_keys: Vec<String> = self.fns.keys().cloned().collect();
+        let struct_names: Vec<Symbol> = self.structs.keys().cloned().collect();
+        let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
         for fname in &fn_keys {
             for sname in &struct_names {
                 let prefix = format!("{}_", sname);
@@ -330,7 +331,7 @@ impl Typer {
                         if let Some(Type::TypeVar(_)) = ptys.first() {
                             if let Some(ast_fn) = self.inferable_fns.get(fname) {
                                 if ast_fn.params.first().map_or(false, |p| p.name == "self") {
-                                    let self_ty = Type::Struct(sname.clone(), vec![]);
+                                    let self_ty = Type::Struct(*sname, vec![]);
                                     let tv = ptys[0].clone();
                                     let _ = self.infer_ctx.unify(&tv, &self_ty);
                                 }
@@ -341,7 +342,7 @@ impl Typer {
             }
         }
 
-        let keys: Vec<String> = self.fns.keys().cloned().collect();
+        let keys: Vec<Symbol> = self.fns.keys().cloned().collect();
         for k in keys {
             let entry = self.fns.get_mut(&k).unwrap();
             for ty in &mut entry.1 {
@@ -356,7 +357,7 @@ impl Typer {
 
         if self.debug_types {
             eprintln!("[type:resolved] final signatures:");
-            let mut names: Vec<String> = self.fns.keys().cloned().collect();
+            let mut names: Vec<Symbol> = self.fns.keys().cloned().collect();
             names.sort();
             for name in &names {
                 let (_, ptys, ret) = &self.fns[name];

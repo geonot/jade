@@ -5,6 +5,7 @@
 //! via `use`, the compiler can load the `.jadei` file instead of re-parsing and
 //! re-typing the source, enabling separate compilation.
 
+use crate::intern::Symbol;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -141,23 +142,23 @@ impl From<&crate::types::Type> for IType {
             Type::Map(k, v) => IType::Map(Box::new(k.as_ref().into()), Box::new(v.as_ref().into())),
             Type::Tuple(tys) => IType::Tuple(tys.iter().map(|t| t.into()).collect()),
             Type::Struct(n, params) => {
-                IType::Struct(n.clone(), params.iter().map(|t| t.into()).collect())
+                IType::Struct(n.to_string(), params.iter().map(|t| t.into()).collect())
             }
-            Type::Enum(n) => IType::Enum(n.clone()),
+            Type::Enum(n) => IType::Enum(n.to_string()),
             Type::Fn(params, ret) => IType::Fn(
                 params.iter().map(|t| t.into()).collect(),
                 Box::new(ret.as_ref().into()),
             ),
-            Type::Param(n) => IType::Param(n.clone()),
+            Type::Param(n) => IType::Param(n.to_string()),
             Type::Ptr(inner) => IType::Ptr(Box::new(inner.as_ref().into())),
             Type::Rc(inner) => IType::Rc(Box::new(inner.as_ref().into())),
             Type::Weak(inner) => IType::Weak(Box::new(inner.as_ref().into())),
-            Type::ActorRef(n) => IType::ActorRef(n.clone()),
+            Type::ActorRef(n) => IType::ActorRef(n.to_string()),
             Type::Coroutine(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
             Type::Channel(inner) => IType::Channel(Box::new(inner.as_ref().into())),
             Type::Set(inner) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::NDArray(inner, _dims) => IType::Vec(Box::new(inner.as_ref().into())),
-            Type::DynTrait(n) => IType::DynTrait(n.clone()),
+            Type::DynTrait(n) => IType::DynTrait(n.to_string()),
             Type::Arena | Type::Pool => IType::I64, // arenas/pools not exposed in interfaces
             Type::SIMD(inner, lanes) => IType::Array(Box::new(inner.as_ref().into()), *lanes),
             Type::PriorityQueue(inner) => IType::Vec(Box::new(inner.as_ref().into())),
@@ -193,21 +194,21 @@ impl From<&IType> for crate::types::Type {
             IType::Map(k, v) => Type::Map(Box::new(k.as_ref().into()), Box::new(v.as_ref().into())),
             IType::Tuple(tys) => Type::Tuple(tys.iter().map(|t| t.into()).collect()),
             IType::Struct(n, params) => {
-                Type::Struct(n.clone(), params.iter().map(|t| t.into()).collect())
+                Type::Struct(Symbol::intern(n), params.iter().map(|t| t.into()).collect())
             }
-            IType::Enum(n) => Type::Enum(n.clone()),
+            IType::Enum(n) => Type::Enum(Symbol::intern(n)),
             IType::Fn(params, ret) => Type::Fn(
                 params.iter().map(|t| t.into()).collect(),
                 Box::new(ret.as_ref().into()),
             ),
-            IType::Param(n) => Type::Param(n.clone()),
+            IType::Param(n) => Type::Param(Symbol::intern(n)),
             IType::Ptr(inner) => Type::Ptr(Box::new(inner.as_ref().into())),
             IType::Rc(inner) => Type::Rc(Box::new(inner.as_ref().into())),
             IType::Weak(inner) => Type::Weak(Box::new(inner.as_ref().into())),
-            IType::ActorRef(n) => Type::ActorRef(n.clone()),
+            IType::ActorRef(n) => Type::ActorRef(Symbol::intern(n)),
             IType::Coroutine(inner) => Type::Coroutine(Box::new(inner.as_ref().into())),
             IType::Channel(inner) => Type::Channel(Box::new(inner.as_ref().into())),
-            IType::DynTrait(n) => Type::DynTrait(n.clone()),
+            IType::DynTrait(n) => Type::DynTrait(Symbol::intern(n)),
         }
     }
 }
@@ -238,13 +239,13 @@ impl InterfaceFile {
             match decl {
                 crate::ast::Decl::Fn(f) => {
                     iface.functions.push(FnSig {
-                        name: f.name.clone(),
-                        type_params: f.type_params.clone(),
+                        name: f.name.to_string(),
+                        type_params: f.type_params.iter().map(|s| s.to_string()).collect(),
                         params: f
                             .params
                             .iter()
                             .map(|p| ParamSig {
-                                name: p.name.clone(),
+                                name: p.name.to_string(),
                                 ty: p.ty.as_ref().map(|t| t.into()).unwrap_or(IType::I64),
                             })
                             .collect(),
@@ -253,13 +254,13 @@ impl InterfaceFile {
                 }
                 crate::ast::Decl::Type(td) => {
                     iface.types.push(TypeSig {
-                        name: td.name.clone(),
-                        type_params: td.type_params.clone(),
+                        name: td.name.to_string(),
+                        type_params: td.type_params.iter().map(|s| s.to_string()).collect(),
                         fields: td
                             .fields
                             .iter()
                             .map(|field| FieldSig {
-                                name: field.name.clone(),
+                                name: field.name.to_string(),
                                 ty: field.ty.as_ref().map(|t| t.into()).unwrap_or(IType::I64),
                             })
                             .collect(),
@@ -267,13 +268,13 @@ impl InterfaceFile {
                 }
                 crate::ast::Decl::Enum(ed) => {
                     iface.enums.push(EnumSig {
-                        name: ed.name.clone(),
-                        type_params: ed.type_params.clone(),
+                        name: ed.name.to_string(),
+                        type_params: ed.type_params.iter().map(|s| s.to_string()).collect(),
                         variants: ed
                             .variants
                             .iter()
                             .map(|v| VariantSig {
-                                name: v.name.clone(),
+                                name: v.name.to_string(),
                                 fields: v.fields.iter().map(|vf| (&vf.ty).into()).collect(),
                             })
                             .collect(),
@@ -281,19 +282,19 @@ impl InterfaceFile {
                 }
                 crate::ast::Decl::Trait(td) => {
                     iface.traits.push(TraitSig {
-                        name: td.name.clone(),
-                        type_params: td.type_params.clone(),
+                        name: td.name.to_string(),
+                        type_params: td.type_params.iter().map(|s| s.to_string()).collect(),
                         methods: td
                             .methods
                             .iter()
                             .map(|m| FnSig {
-                                name: m.name.clone(),
+                                name: m.name.to_string(),
                                 type_params: Vec::new(),
                                 params: m
                                     .params
                                     .iter()
                                     .map(|p| ParamSig {
-                                        name: p.name.clone(),
+                                        name: p.name.to_string(),
                                         ty: p.ty.as_ref().map(|t| t.into()).unwrap_or(IType::I64),
                                     })
                                     .collect(),
@@ -305,8 +306,8 @@ impl InterfaceFile {
                 crate::ast::Decl::Impl(ib) => {
                     if let Some(trait_name) = &ib.trait_name {
                         iface.impls.push(ImplSig {
-                            trait_name: trait_name.clone(),
-                            type_name: ib.type_name.clone(),
+                            trait_name: trait_name.to_string(),
+                            type_name: ib.type_name.to_string(),
                         });
                     }
                 }
@@ -354,13 +355,13 @@ impl InterfaceFile {
 
         for ts in &self.types {
             decls.push(Decl::Type(TypeDef {
-                name: ts.name.clone(),
-                type_params: ts.type_params.clone(),
+                name: Symbol::intern(&ts.name),
+                type_params: ts.type_params.iter().map(|s| Symbol::intern(s)).collect(),
                 fields: ts
                     .fields
                     .iter()
                     .map(|f| Field {
-                        name: f.name.clone(),
+                        name: Symbol::intern(&f.name),
                         ty: Some((&f.ty).into()),
                         default: None,
                         span: dummy,
@@ -374,13 +375,13 @@ impl InterfaceFile {
 
         for es in &self.enums {
             decls.push(Decl::Enum(EnumDef {
-                name: es.name.clone(),
-                type_params: es.type_params.clone(),
+                name: Symbol::intern(&es.name),
+                type_params: es.type_params.iter().map(|s| Symbol::intern(s)).collect(),
                 variants: es
                     .variants
                     .iter()
                     .map(|v| Variant {
-                        name: v.name.clone(),
+                        name: Symbol::intern(&v.name),
                         fields: v
                             .fields
                             .iter()
@@ -399,19 +400,19 @@ impl InterfaceFile {
 
         for ts in &self.traits {
             decls.push(Decl::Trait(TraitDef {
-                name: ts.name.clone(),
-                type_params: ts.type_params.clone(),
+                name: Symbol::intern(&ts.name),
+                type_params: ts.type_params.iter().map(|s| Symbol::intern(s)).collect(),
                 assoc_types: Vec::new(),
                 methods: ts
                     .methods
                     .iter()
                     .map(|m| TraitMethod {
-                        name: m.name.clone(),
+                        name: Symbol::intern(&m.name),
                         params: m
                             .params
                             .iter()
                             .map(|p| Param {
-                                name: p.name.clone(),
+                                name: Symbol::intern(&p.name),
                                 ty: Some((&p.ty).into()),
                                 default: None,
                                 literal: None,

@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
 use crate::types::Type;
@@ -5,7 +6,7 @@ use std::collections::HashMap;
 
 pub fn fold_program(prog: &mut hir::Program) {
     // Build a map of pure functions for comptime evaluation
-    let pure_fns: HashMap<String, hir::Fn> = prog
+    let pure_fns: HashMap<Symbol, hir::Fn> = prog
         .fns
         .iter()
         .filter(|f| is_pure_fn(f))
@@ -89,13 +90,13 @@ fn is_pure_expr(expr: &Expr) -> bool {
 fn try_eval_pure_call(
     name: &str,
     args: &[Expr],
-    pure_fns: &HashMap<String, hir::Fn>,
+    pure_fns: &HashMap<Symbol, hir::Fn>,
     depth: u32,
 ) -> Option<Expr> {
     if depth > 100 {
         return None; // prevent infinite recursion
     }
-    let func = pure_fns.get(name)?;
+    let func = pure_fns.get(&Symbol::intern(name))?;
     // All args must be constants
     let const_args: Vec<_> = args
         .iter()
@@ -152,7 +153,7 @@ impl ConstVal {
 fn eval_block(
     block: &Block,
     env: &mut HashMap<hir::DefId, ConstVal>,
-    pure_fns: &HashMap<String, hir::Fn>,
+    pure_fns: &HashMap<Symbol, hir::Fn>,
     depth: u32,
 ) -> Option<ConstVal> {
     for stmt in block {
@@ -199,7 +200,7 @@ fn eval_block(
 fn eval_expr(
     expr: &Expr,
     env: &mut HashMap<hir::DefId, ConstVal>,
-    pure_fns: &HashMap<String, hir::Fn>,
+    pure_fns: &HashMap<Symbol, hir::Fn>,
     depth: u32,
 ) -> Option<ConstVal> {
     match &expr.kind {
@@ -229,7 +230,7 @@ fn eval_expr(
                     eval_expr(a, env, pure_fns, depth).map(|v| v.to_expr(a.ty.clone(), a.span))
                 })
                 .collect::<Option<Vec<_>>>()?;
-            let result = try_eval_pure_call(name, &eval_args, pure_fns, depth)?;
+            let result = try_eval_pure_call(&name.as_str(), &eval_args, pure_fns, depth)?;
             match &result.kind {
                 ExprKind::Int(v) => Some(ConstVal::Int(*v)),
                 ExprKind::Float(v) => Some(ConstVal::Float(*v)),
@@ -276,13 +277,13 @@ fn eval_binop(l: ConstVal, op: BinOp, r: ConstVal) -> Option<ConstVal> {
     }
 }
 
-fn fold_block_with_fns(block: &mut Block, pure_fns: &HashMap<String, hir::Fn>) {
+fn fold_block_with_fns(block: &mut Block, pure_fns: &HashMap<Symbol, hir::Fn>) {
     for stmt in block.iter_mut() {
         fold_stmt_with_fns(stmt, pure_fns);
     }
 }
 
-fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<String, hir::Fn>) {
+fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir::Fn>) {
     match stmt {
         Stmt::Bind(bind) => fold_expr_with_fns(&mut bind.value, pure_fns),
         Stmt::TupleBind(_, e, _) => fold_expr_with_fns(e, pure_fns),
@@ -367,7 +368,7 @@ fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<String, hir::Fn>) {
     }
 }
 
-fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<String, hir::Fn>) {
+fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
     // First recurse into sub-expressions
     fold_expr(expr);
 
@@ -379,7 +380,7 @@ fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<String, hir::Fn>) {
                 ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
             )
         }) {
-            if let Some(result) = try_eval_pure_call(name, args, pure_fns, 0) {
+            if let Some(result) = try_eval_pure_call(&name.as_str(), args, pure_fns, 0) {
                 *expr = result;
             }
         }

@@ -29,7 +29,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::None | hir::ExprKind::Void => {
                 Ok(self.ctx.i64_type().const_int(0, false).into())
             }
-            hir::ExprKind::Var(_, name) => self.load_var(name),
+            hir::ExprKind::Var(_, name) => self.load_var(&name.as_str()),
             hir::ExprKind::GlobalLoad(name) => {
                 if let Some((gv, ty)) = self.globals.get(name).cloned() {
                     let lt = self.llvm_ty(&ty);
@@ -39,7 +39,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             hir::ExprKind::FnRef(_, name) => {
-                if let Some(fv) = self.module.get_function(name) {
+                if let Some(fv) = self.module.get_function(&name.as_str()) {
                     let wrapper = self.fn_ref_wrapper(fv);
                     let null_env = self
                         .ctx
@@ -51,23 +51,23 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             hir::ExprKind::VariantRef(enum_name, variant_name, tag) => {
-                self.compile_variant(enum_name, *tag, variant_name, &[])
+                self.compile_variant(&enum_name.as_str(), *tag, &variant_name.as_str(), &[])
             }
             hir::ExprKind::BinOp(l, op, r) => self.compile_binop(l, *op, r, &expr.ty),
             hir::ExprKind::UnaryOp(op, e) => self.compile_unary(*op, e),
-            hir::ExprKind::Call(_, name, args) => self.compile_direct_call(name, args),
+            hir::ExprKind::Call(_, name, args) => self.compile_direct_call(&name.as_str(), args),
             hir::ExprKind::IndirectCall(callee, args) => self.compile_indirect_call(callee, args),
             hir::ExprKind::Builtin(builtin, args) => self.compile_builtin(builtin, args),
             hir::ExprKind::Method(obj, resolved_name, _method_name, args) => {
-                self.compile_method(obj, resolved_name, args)
+                self.compile_method(obj, &resolved_name.as_str(), args)
             }
             hir::ExprKind::StringMethod(obj, method, args) => {
-                self.compile_string_method(obj, method, args)
+                self.compile_string_method(obj, &method.as_str(), args)
             }
             hir::ExprKind::DeferredMethod(_obj, method, _args) => Err(format!(
                 "unresolved deferred method call '.{method}()' — type inference could not determine the receiver type"
             )),
-            hir::ExprKind::Field(obj, field, idx) => self.compile_field(obj, field, *idx),
+            hir::ExprKind::Field(obj, field, idx) => self.compile_field(obj, &field.as_str(), *idx),
             hir::ExprKind::Index(arr, idx) => self.compile_index(arr, idx),
             hir::ExprKind::Ternary(c, t, e) => self.compile_ternary(c, t, e),
             hir::ExprKind::Coerce(inner, coercion) => {
@@ -77,16 +77,16 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::Cast(inner, target_ty) => self.compile_cast(inner, target_ty),
             hir::ExprKind::Array(elems) => self.compile_array(elems),
             hir::ExprKind::Tuple(elems) => self.compile_tuple(elems),
-            hir::ExprKind::Struct(name, inits) => self.compile_struct(name, inits),
+            hir::ExprKind::Struct(name, inits) => self.compile_struct(&name.as_str(), inits),
             hir::ExprKind::VariantCtor(enum_name, variant_name, tag, inits) => {
-                self.compile_variant(enum_name, *tag, variant_name, inits)
+                self.compile_variant(&enum_name.as_str(), *tag, &variant_name.as_str(), inits)
             }
             hir::ExprKind::IfExpr(i) => match self.compile_if(i)? {
                 Some(v) => Ok(v),
                 None => Ok(self.ctx.i64_type().const_int(0, false).into()),
             },
             hir::ExprKind::Pipe(left, _def_id, name, extra_args) => {
-                self.compile_pipe(left, name, extra_args)
+                self.compile_pipe(left, &name.as_str(), extra_args)
             }
             hir::ExprKind::Block(block) => match self.compile_block(block)? {
                 Some(v) => Ok(v),
@@ -99,9 +99,9 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_list_comp(body, bind, iter, end.as_deref(), cond.as_deref())
             }
             hir::ExprKind::Syscall(args) => self.compile_syscall(args),
-            hir::ExprKind::Spawn(actor_name) => self.compile_spawn(actor_name),
+            hir::ExprKind::Spawn(actor_name) => self.compile_spawn(&actor_name.as_str()),
             hir::ExprKind::Send(target, actor_name, handler_name, tag, args) => {
-                self.compile_send(target, actor_name, handler_name, *tag, args)
+                self.compile_send(target, &actor_name.as_str(), &handler_name.as_str(), *tag, args)
             }
             hir::ExprKind::StoreQuery(store_name, filter) => {
                 let sd = self
@@ -109,7 +109,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_query(store_name, filter, &sd)
+                self.compile_store_query(&store_name.as_str(), filter, &sd)
             }
             hir::ExprKind::StoreCount(store_name) => {
                 let sd = self
@@ -117,7 +117,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_count(store_name, &sd)
+                self.compile_store_count(&store_name.as_str(), &sd)
             }
             hir::ExprKind::StoreAll(store_name) => {
                 let sd = self
@@ -125,7 +125,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_all(store_name, &sd)
+                self.compile_store_all(&store_name.as_str(), &sd)
             }
             hir::ExprKind::ViewCount(store_name, filter) => {
                 let sd = self
@@ -133,7 +133,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_query(store_name, filter, &sd)
+                self.compile_store_query(&store_name.as_str(), filter, &sd)
             }
             hir::ExprKind::ViewAll(store_name, _filter) => {
                 let sd = self
@@ -141,7 +141,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_all(store_name, &sd)
+                self.compile_store_all(&store_name.as_str(), &sd)
             }
             hir::ExprKind::StoreGet(store_name, _key_expr) => {
                 Err(format!("store.get is not yet implemented (store '{store_name}')"))
@@ -179,32 +179,32 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::VecNew(elems) => self.compile_vec_new(elems),
             hir::ExprKind::MapNew => self.compile_map_new(),
             hir::ExprKind::VecMethod(obj, method, args) => {
-                self.compile_vec_method(obj, method, args)
+                self.compile_vec_method(obj, &method.as_str(), args)
             }
             hir::ExprKind::MapMethod(obj, method, args) => {
-                self.compile_map_method(obj, method, args)
+                self.compile_map_method(obj, &method.as_str(), args)
             }
             hir::ExprKind::SetNew => self.compile_set_new(),
             hir::ExprKind::SetMethod(obj, method, args) => {
-                self.compile_set_method(obj, method, args)
+                self.compile_set_method(obj, &method.as_str(), args)
             }
             hir::ExprKind::PQNew => self.compile_pq_new(),
-            hir::ExprKind::PQMethod(obj, method, args) => self.compile_pq_method(obj, method, args),
+            hir::ExprKind::PQMethod(obj, method, args) => self.compile_pq_method(obj, &method.as_str(), args),
             hir::ExprKind::NDArrayNew(dims) => self.compile_ndarray_new(dims),
             hir::ExprKind::SIMDNew(elems) => self.compile_simd_new(elems, &expr.ty),
-            hir::ExprKind::CoroutineCreate(name, body) => self.compile_coroutine_create(name, body),
+            hir::ExprKind::CoroutineCreate(name, body) => self.compile_coroutine_create(&name.as_str(), body),
             hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro, &expr.ty),
             hir::ExprKind::Yield(_inner) => {
                 panic!("yield expression outside of coroutine body")
             }
             hir::ExprKind::DynDispatch(obj, trait_name, method, args) => {
-                self.compile_dyn_dispatch(obj, trait_name, method, args, &expr.ty)
+                self.compile_dyn_dispatch(obj, &trait_name.as_str(), &method.as_str(), args, &expr.ty)
             }
             hir::ExprKind::DynCoerce(inner, type_name, trait_name) => {
-                self.compile_dyn_coerce(inner, type_name, trait_name)
+                self.compile_dyn_coerce(inner, &type_name.as_str(), &trait_name.as_str())
             }
             hir::ExprKind::IterNext(iter_var, type_name, method_name) => {
-                self.compile_iter_next_by_name(iter_var, type_name, method_name)
+                self.compile_iter_next_by_name(&iter_var.as_str(), &type_name.as_str(), &method_name.as_str())
             }
             hir::ExprKind::ChannelCreate(elem_ty, cap_expr) => {
                 self.compile_channel_create(elem_ty, cap_expr)
@@ -228,7 +228,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::StrictCast(inner, target_ty) => {
                 self.compile_strict_cast(inner, target_ty)
             }
-            hir::ExprKind::AsFormat(inner, fmt) => self.compile_as_format(inner, fmt),
+            hir::ExprKind::AsFormat(inner, fmt) => self.compile_as_format(inner, &fmt.as_str()),
             hir::ExprKind::AtomicLoad(ptr_expr) => self.compile_atomic_load(ptr_expr),
             hir::ExprKind::AtomicStore(ptr_expr, val_expr) => {
                 self.compile_atomic_store(ptr_expr, val_expr)
@@ -245,10 +245,10 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::Slice(obj, start, end) => self.compile_slice(obj, start, end),
             hir::ExprKind::DequeNew => self.compile_deque_new(),
             hir::ExprKind::DequeMethod(obj, method, args) => {
-                self.compile_deque_method(obj, method, args)
+                self.compile_deque_method(obj, &method.as_str(), args)
             }
             hir::ExprKind::Grad(inner) => self.compile_grad(inner),
-            hir::ExprKind::Einsum(notation, args) => self.compile_einsum(notation, args),
+            hir::ExprKind::Einsum(notation, args) => self.compile_einsum(&notation.as_str(), args),
             hir::ExprKind::Builder(name, fields) => {
                 // Desugar builder to struct init
                 let inits: Vec<hir::FieldInit> = fields
@@ -258,12 +258,12 @@ impl<'ctx> Compiler<'ctx> {
                         value: expr.clone(),
                     })
                     .collect();
-                self.compile_struct(name, &inits)
+                self.compile_struct(&name.as_str(), &inits)
             }
             hir::ExprKind::CowWrap(inner) => self.compile_cow_wrap(inner),
             hir::ExprKind::CowClone(inner) => self.compile_cow_clone(inner),
             hir::ExprKind::GeneratorCreate(_, name, body) => {
-                self.compile_coroutine_create(name, body)
+                self.compile_coroutine_create(&name.as_str(), body)
             }
             hir::ExprKind::GeneratorNext(gen_expr) => self.compile_coroutine_next(gen_expr, &expr.ty),
             // KV / specialized store ops are lowered through MIR magic calls, never reach HIR codegen
@@ -543,7 +543,7 @@ impl<'ctx> Compiler<'ctx> {
         for (i, (fname, fty)) in fields.iter().enumerate() {
             let val = inits
                 .iter()
-                .find(|fi| fi.name.as_deref() == Some(fname))
+                .find(|fi| fi.name.map_or(false, |n| n == fname.as_str()))
                 .or_else(|| {
                     // Only use positional fallback for unnamed (positional) inits
                     inits.get(i).filter(|fi| fi.name.is_none())
@@ -656,31 +656,31 @@ impl<'ctx> Compiler<'ctx> {
             return self.vec_len(v.into_pointer_value());
         }
         let (ty_name, is_ptr) = match obj_ty {
-            Type::Struct(n, _) => (n.as_str(), false),
+            Type::Struct(n, _) => (*n, false),
             Type::Ptr(inner) => match inner.as_ref() {
-                Type::Struct(n, _) => (n.as_str(), true),
+                Type::Struct(n, _) => (*n, true),
                 other => return Err(format!("field access on non-struct: {other}")),
             },
             other => return Err(format!("field access on non-struct: {other}")),
         };
         let fields = self
             .structs
-            .get(ty_name)
+            .get(&ty_name)
             .ok_or_else(|| format!("undefined type: {ty_name}"))?
             .clone();
         let idx = fields
             .iter()
-            .position(|(n, _)| n == field)
+            .position(|(n, _)| field == n.as_str())
             .ok_or_else(|| format!("no field '{field}' on {ty_name}"))?;
         let fty = fields[idx].1.clone();
         let st = self
             .module
-            .get_struct_type(ty_name)
+            .get_struct_type(&ty_name.as_str())
             .ok_or_else(|| format!("no LLVM struct: {ty_name}"))?;
 
         // Get a pointer to the struct, either from a variable or by spilling a value
         let struct_ptr = if let hir::ExprKind::Var(_, n) = &obj.kind {
-            if let Some((ptr, _)) = self.find_var(n).cloned() {
+            if let Some((ptr, _)) = self.find_var(&n.as_str()).cloned() {
                 if is_ptr {
                     b!(self.bld.build_load(
                         self.ctx.ptr_type(inkwell::AddressSpace::default()),
@@ -718,7 +718,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
         match &expr.kind {
             hir::ExprKind::Var(_, name) => self
-                .find_var(name)
+                .find_var(&name.as_str())
                 .map(|(ptr, _)| *ptr)
                 .ok_or_else(|| format!("undefined: {name}")),
             hir::ExprKind::Field(obj, field, _idx) => {
@@ -733,16 +733,16 @@ impl<'ctx> Compiler<'ctx> {
                 };
                 let fields = self
                     .structs
-                    .get(ty_name)
+                    .get(&ty_name)
                     .ok_or_else(|| format!("undefined type: {ty_name}"))?
                     .clone();
                 let fi = fields
                     .iter()
-                    .position(|(n, _)| n == field)
+                    .position(|(n, _)| *field == n.as_str())
                     .ok_or_else(|| format!("no field '{field}' on {ty_name}"))?;
                 let st = self
                     .module
-                    .get_struct_type(ty_name)
+                    .get_struct_type(&ty_name.as_str())
                     .ok_or_else(|| format!("no LLVM struct: {ty_name}"))?;
                 let obj_ptr = self.compile_lvalue_ptr(obj)?;
                 let struct_ptr = if is_ptr {
@@ -755,7 +755,7 @@ impl<'ctx> Compiler<'ctx> {
                 } else {
                     obj_ptr
                 };
-                let gep = b!(self.bld.build_struct_gep(st, struct_ptr, fi as u32, field));
+                let gep = b!(self.bld.build_struct_gep(st, struct_ptr, fi as u32, &field.as_str()));
                 Ok(gep)
             }
             _ => Err("expression is not an lvalue".into()),
@@ -775,7 +775,7 @@ impl<'ctx> Compiler<'ctx> {
                 let arr_llvm = lty.array_type(*n as u32);
                 let arr_ptr = match &arr.kind {
                     hir::ExprKind::Var(_, name) => self
-                        .find_var(name)
+                        .find_var(&name.as_str())
                         .map(|(ptr, _)| *ptr)
                         .ok_or_else(|| format!("undefined: {name}"))?,
                     _ => self.compile_expr(arr)?.into_pointer_value(),
@@ -801,7 +801,7 @@ impl<'ctx> Compiler<'ctx> {
                     .ok_or_else(|| format!("tuple index {i} out of bounds"))?;
                 let lty = self.llvm_ty(fty);
                 if let hir::ExprKind::Var(_, name) = &arr.kind {
-                    if let Some((ptr, _)) = self.find_var(name).cloned() {
+                    if let Some((ptr, _)) = self.find_var(&name.as_str()).cloned() {
                         let tup_ty = self.ctx.struct_type(
                             &tys.iter().map(|t| self.llvm_ty(t)).collect::<Vec<_>>(),
                             false,
@@ -890,12 +890,12 @@ impl<'ctx> Compiler<'ctx> {
     fn compile_ref(&mut self, inner: &hir::Expr) -> Result<BasicValueEnum<'ctx>, String> {
         match &inner.kind {
             hir::ExprKind::Var(_, name) => self
-                .find_var(name)
+                .find_var(&name.as_str())
                 .map(|(ptr, _)| *ptr)
                 .ok_or_else(|| format!("cannot take address of '{name}'"))
                 .map(|p| p.into()),
             hir::ExprKind::FnRef(_, name) => {
-                if let Some(fv) = self.module.get_function(name) {
+                if let Some(fv) = self.module.get_function(&name.as_str()) {
                     Ok(fv.as_global_value().as_pointer_value().into())
                 } else {
                     Err(format!("undefined function: {name}"))
@@ -1342,7 +1342,7 @@ impl<'ctx> Compiler<'ctx> {
                 let mut result = self.compile_str_literal("{")?;
                 let struct_ty = self
                     .module
-                    .get_struct_type(name)
+                    .get_struct_type(&name.as_str())
                     .ok_or_else(|| format!("unknown struct type: {name}"))?;
                 for (i, (fname, fty)) in fields.iter().enumerate() {
                     // Add comma separator

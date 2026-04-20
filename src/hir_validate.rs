@@ -21,41 +21,41 @@ impl HirValidator {
         for f in &prog.fns {
             let min_params = f.params.iter().filter(|p| p.default.is_none()).count();
             v.fn_sigs
-                .insert(f.def_id.0, (f.name.clone(), f.params.len(), min_params));
+                .insert(f.def_id.0, (f.name.as_str(), f.params.len(), min_params));
         }
         for ext in &prog.externs {
             v.fn_sigs.insert(
                 ext.def_id.0,
-                (ext.name.clone(), ext.params.len(), ext.params.len()),
+                (ext.name.as_str(), ext.params.len(), ext.params.len()),
             );
         }
 
         for f in &prog.fns {
-            v.check_top_level_def(f.def_id, &f.name, f.span);
+            v.check_top_level_def(f.def_id, &f.name.as_str(), f.span);
             v.validate_fn(f);
         }
         for td in &prog.types {
-            v.check_top_level_def(td.def_id, &td.name, td.span);
+            v.check_top_level_def(td.def_id, &td.name.as_str(), td.span);
             for m in &td.methods {
-                v.check_top_level_def(m.def_id, &m.name, m.span);
+                v.check_top_level_def(m.def_id, &m.name.as_str(), m.span);
                 v.validate_fn(m);
             }
         }
         for ed in &prog.enums {
-            v.check_top_level_def(ed.def_id, &ed.name, ed.span);
+            v.check_top_level_def(ed.def_id, &ed.name.as_str(), ed.span);
         }
         for ext in &prog.externs {
-            v.check_top_level_def(ext.def_id, &ext.name, ext.span);
+            v.check_top_level_def(ext.def_id, &ext.name.as_str(), ext.span);
         }
         for actor in &prog.actors {
-            v.check_top_level_def(actor.def_id, &actor.name, actor.span);
+            v.check_top_level_def(actor.def_id, &actor.name.as_str(), actor.span);
             for h in &actor.handlers {
                 v.validate_block(&h.body);
             }
         }
         for ti in &prog.trait_impls {
             for m in &ti.methods {
-                v.check_top_level_def(m.def_id, &m.name, m.span);
+                v.check_top_level_def(m.def_id, &m.name.as_str(), m.span);
                 v.validate_fn(m);
             }
         }
@@ -121,11 +121,11 @@ impl HirValidator {
             hir::Stmt::Assign(target, value, _) => {
                 // Check for reassignment to ALL_CAPS constants
                 match &target.kind {
-                    hir::ExprKind::Var(_, name) if is_all_caps(name) => {
+                    hir::ExprKind::Var(_, name) if is_all_caps(&name.as_str()) => {
                         self.errors
                             .push(format!("cannot reassign constant `{name}`"));
                     }
-                    hir::ExprKind::Field(_, field, _) if is_all_caps(field) => {
+                    hir::ExprKind::Field(_, field, _) if is_all_caps(&field.as_str()) => {
                         self.errors
                             .push(format!("cannot reassign constant field `{field}`"));
                     }

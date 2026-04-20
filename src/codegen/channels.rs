@@ -198,10 +198,10 @@ impl<'ctx> Compiler<'ctx> {
                     let elem_llvm_ty = self.llvm_ty(&arm.elem_ty);
                     let val = b!(self
                         .bld
-                        .build_load(elem_llvm_ty, data_allocas[i], bind_name));
-                    let alloca = self.entry_alloca(elem_llvm_ty, bind_name);
+                        .build_load(elem_llvm_ty, data_allocas[i], &bind_name.as_str()));
+                    let alloca = self.entry_alloca(elem_llvm_ty, &bind_name.as_str());
                     b!(self.bld.build_store(alloca, val));
-                    self.set_var(bind_name, alloca, arm.elem_ty.clone());
+                    self.set_var(&bind_name.as_str(), alloca, arm.elem_ty.clone());
                 }
             }
 

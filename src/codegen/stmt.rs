@@ -72,7 +72,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 // Detect atomic augmented assignment: `x is x + val` or `x is x - val`
                 if bind.atomic || self.atomic_vars.contains(&bind.name) {
-                    if let Some((ptr, _)) = self.find_var(&bind.name).cloned() {
+                    if let Some((ptr, _)) = self.find_var(&bind.name.as_str()).cloned() {
                         if let hir::ExprKind::BinOp(lhs, op, rhs) = &bind.value.kind {
                             if let hir::ExprKind::Var(_, ref vname) = lhs.kind {
                                 if vname == &bind.name {
@@ -111,29 +111,29 @@ impl<'ctx> Compiler<'ctx> {
                 let ty = &bind.ty;
                 if matches!(ty, Type::Array(_, _)) {
                     if val.is_pointer_value() {
-                        self.set_var(&bind.name, val.into_pointer_value(), ty.clone());
+                        self.set_var(&bind.name.as_str(), val.into_pointer_value(), ty.clone());
                     } else {
-                        let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name, ty);
+                        let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name.as_str(), ty);
                         b!(self.bld.build_store(a, val));
-                        self.set_var(&bind.name, a, ty.clone());
+                        self.set_var(&bind.name.as_str(), a, ty.clone());
                     }
-                } else if let Some((ptr, _)) = self.find_var(&bind.name).cloned() {
+                } else if let Some((ptr, _)) = self.find_var(&bind.name.as_str()).cloned() {
                     let store = b!(self.bld.build_store(ptr, val));
                     if self.atomic_vars.contains(&bind.name) {
                         store
                             .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
                             .map_err(|_| "failed to set atomic ordering".to_string())?;
                     }
-                    self.set_var(&bind.name, ptr, ty.clone());
+                    self.set_var(&bind.name.as_str(), ptr, ty.clone());
                 } else {
-                    let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name, ty);
+                    let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name.as_str(), ty);
                     let store = b!(self.bld.build_store(a, val));
                     if bind.atomic {
                         store
                             .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
                             .map_err(|_| "failed to set atomic ordering".to_string())?;
                     }
-                    self.set_var(&bind.name, a, ty.clone());
+                    self.set_var(&bind.name.as_str(), a, ty.clone());
                 }
                 Ok(None)
             }
@@ -149,10 +149,10 @@ impl<'ctx> Compiler<'ctx> {
                 for (i, (_, name, ety)) in bindings.iter().enumerate() {
                     let lty = self.llvm_ty(ety);
                     let gep = b!(self.bld.build_struct_gep(st, tmp, i as u32, "tup.d"));
-                    let elem = b!(self.bld.build_load(lty, gep, name));
-                    let a = self.entry_alloca(lty, name);
+                    let elem = b!(self.bld.build_load(lty, gep, &name.as_str()));
+                    let a = self.entry_alloca(lty, &name.as_str());
                     b!(self.bld.build_store(a, elem));
-                    self.set_var(name, a, ety.clone());
+                    self.set_var(&name.as_str(), a, ety.clone());
                 }
                 Ok(None)
             }
@@ -216,7 +216,7 @@ impl<'ctx> Compiler<'ctx> {
                 if self.hints.reuse_candidates.contains_key(def_id)
                     || self.hints.speculative_reuse.contains_key(def_id)
                 {
-                    if let Some((ptr, _)) = self.find_var(name).cloned() {
+                    if let Some((ptr, _)) = self.find_var(&name.as_str()).cloned() {
                         let llty = self.llvm_ty(ty);
                         let val = b!(self.bld.build_load(llty, ptr, "reuse.save"));
                         self.reuse_tokens.insert(*def_id, val.into_pointer_value());
@@ -227,7 +227,7 @@ impl<'ctx> Compiler<'ctx> {
                     return Ok(None);
                 }
                 if !ty.is_trivially_droppable() {
-                    if let Some((ptr, _)) = self.find_var(name).cloned() {
+                    if let Some((ptr, _)) = self.find_var(&name.as_str()).cloned() {
                         let llty = self.llvm_ty(ty);
                         let val = b!(self.bld.build_load(llty, ptr, "drop.val"));
                         self.drop_value(val, ty)?;
@@ -246,7 +246,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_insert(store_name, values, &sd)?;
+                self.compile_store_insert(&store_name.as_str(), values, &sd)?;
                 Ok(None)
             }
             hir::Stmt::StoreDelete(store_name, filter, _) => {
@@ -255,7 +255,7 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_delete(store_name, filter, &sd)?;
+                self.compile_store_delete(&store_name.as_str(), filter, &sd)?;
                 Ok(None)
             }
             hir::Stmt::StoreDestroy(store_name, _filter, _) => {
@@ -273,7 +273,8 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                self.compile_store_set(store_name, assignments, filter, &sd)?;
+                let assignments_str: Vec<(String, hir::Expr)> = assignments.iter().map(|(s, e)| (s.as_str(), e.clone())).collect();
+                self.compile_store_set(&store_name.as_str(), &assignments_str, filter, &sd)?;
                 Ok(None)
             }
             hir::Stmt::Transaction(body, _) => {
@@ -300,7 +301,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::UseLocal(_, _, _, _) => Ok(None),
             hir::Stmt::GlobalStore(name, value, _) => {
                 let val = self.compile_expr(value)?;
-                if let Some((ptr, _)) = self.find_var(name).cloned() {
+                if let Some((ptr, _)) = self.find_var(&name.as_str()).cloned() {
                     b!(self.bld.build_store(ptr, val));
                 }
                 Ok(None)
@@ -395,7 +396,7 @@ impl<'ctx> Compiler<'ctx> {
                         let arr_llvm = lty.array_type(*n as u32);
                         let arr_ptr = match &arr_expr.kind {
                             hir::ExprKind::Var(_, name) => self
-                                .find_var(name)
+                                .find_var(&name.as_str())
                                 .map(|(ptr, _)| *ptr)
                                 .ok_or_else(|| format!("undefined: {name}"))?,
                             _ => return Err("cannot assign to rvalue index".into()),
@@ -418,9 +419,9 @@ impl<'ctx> Compiler<'ctx> {
                 let obj_ty = &obj_expr.ty;
                 let val = self.compile_expr(value)?;
                 let (sname, is_ptr) = match obj_ty {
-                    Type::Struct(n, _) => (n.as_str(), false),
+                    Type::Struct(n, _) => (*n, false),
                     Type::Ptr(inner) => match inner.as_ref() {
-                        Type::Struct(n, _) => (n.as_str(), true),
+                        Type::Struct(n, _) => (*n, true),
                         _ => return Err("field assignment only on structs".into()),
                     },
                     _ => return Err("field assignment only on structs".into()),
@@ -428,16 +429,16 @@ impl<'ctx> Compiler<'ctx> {
                 {
                     let fields = self
                         .structs
-                        .get(sname)
+                        .get(&sname)
                         .ok_or_else(|| format!("unknown type: {sname}"))?
                         .clone();
                     let idx = fields
                         .iter()
-                        .position(|(n, _)| n == field)
+                        .position(|(n, _)| field.with_str(|s| n == s))
                         .ok_or_else(|| format!("no field {field} on {sname}"))?;
                     let obj_ptr = match &obj_expr.kind {
                         hir::ExprKind::Var(_, name) => self
-                            .find_var(name)
+                            .find_var(&name.as_str())
                             .map(|(ptr, _)| *ptr)
                             .ok_or_else(|| format!("undefined: {name}"))?,
                         hir::ExprKind::Field(..) => self.compile_lvalue_ptr(obj_expr)?,
@@ -568,10 +569,10 @@ impl<'ctx> Compiler<'ctx> {
                 let ety = elem_tys.get(i).cloned().unwrap_or(Type::I64);
                 let lty = self.llvm_ty(&ety);
                 let gep = b!(self.bld.build_struct_gep(st, tmp, i as u32, "tup.el"));
-                let elem = b!(self.bld.build_load(lty, gep, name));
-                let a = self.entry_alloca(lty, name);
+                let elem = b!(self.bld.build_load(lty, gep, &name.as_str()));
+                let a = self.entry_alloca(lty, &name.as_str());
                 b!(self.bld.build_store(a, elem));
-                self.set_var(name, a, ety);
+                self.set_var(&name.as_str(), a, ety);
             }
         }
         Ok(())
@@ -606,10 +607,10 @@ impl<'ctx> Compiler<'ctx> {
                         "arr.el"
                     ))
                 };
-                let elem = b!(self.bld.build_load(lty, gep, name));
-                let a = self.entry_alloca(lty, name);
+                let elem = b!(self.bld.build_load(lty, gep, &name.as_str()));
+                let a = self.entry_alloca(lty, &name.as_str());
                 b!(self.bld.build_store(a, elem));
-                self.set_var(name, a, elem_ty.clone());
+                self.set_var(&name.as_str(), a, elem_ty.clone());
             }
         }
         Ok(())

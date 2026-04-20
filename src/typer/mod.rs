@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::ast::{self, Span};
+use crate::intern::Symbol;
 use crate::hir::{self, DefId, Ownership};
 use crate::types::{Scheme, Type};
 
@@ -18,7 +19,7 @@ pub(crate) struct VarInfo {
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredMethod {
     pub(crate) receiver_ty: Type,
-    pub(crate) method: String,
+    pub(crate) method: Symbol,
     pub(crate) arg_tys: Vec<Type>,
     pub(crate) ret_ty: Type,
     pub(crate) span: Span,
@@ -27,7 +28,7 @@ pub(crate) struct DeferredMethod {
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredField {
     pub(crate) receiver_ty: Type,
-    pub(crate) field_name: String,
+    pub(crate) field_name: Symbol,
     pub(crate) field_ty: Type,
     pub(crate) span: Span,
 }
@@ -38,61 +39,61 @@ pub(crate) mod unify;
 
 pub struct Typer {
     pub(crate) next_id: u32,
-    pub(crate) scopes: Vec<HashMap<String, VarInfo>>,
-    pub(crate) fns: IndexMap<String, (DefId, Vec<Type>, Type)>,
-    pub(crate) structs: IndexMap<String, Vec<(String, Type)>>,
-    pub(crate) enums: IndexMap<String, Vec<(String, Vec<Type>)>>,
-    pub(crate) variant_tags: IndexMap<String, (String, u32)>,
-    pub(crate) generic_fns: IndexMap<String, ast::Fn>,
-    pub(crate) generic_enums: IndexMap<String, ast::EnumDef>,
-    pub(crate) generic_types: IndexMap<String, ast::TypeDef>,
-    pub(crate) methods: IndexMap<String, Vec<ast::Fn>>,
+    pub(crate) scopes: Vec<HashMap<Symbol, VarInfo>>,
+    pub(crate) fns: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
+    pub(crate) structs: IndexMap<Symbol, Vec<(Symbol, Type)>>,
+    pub(crate) enums: IndexMap<Symbol, Vec<(Symbol, Vec<Type>)>>,
+    pub(crate) variant_tags: IndexMap<Symbol, (Symbol, u32)>,
+    pub(crate) generic_fns: IndexMap<Symbol, ast::Fn>,
+    pub(crate) generic_enums: IndexMap<Symbol, ast::EnumDef>,
+    pub(crate) generic_types: IndexMap<Symbol, ast::TypeDef>,
+    pub(crate) methods: IndexMap<Symbol, Vec<ast::Fn>>,
     pub(crate) mono_fns: Vec<hir::Fn>,
     pub(crate) mono_enums: Vec<hir::EnumDef>,
     pub(crate) mono_types: Vec<hir::TypeDef>,
-    pub(crate) inferred_field_structs: std::collections::HashSet<String>,
+    pub(crate) inferred_field_structs: std::collections::HashSet<Symbol>,
     pub(crate) source_dir: Option<PathBuf>,
     pub(crate) test_mode: bool,
-    pub(crate) actors: IndexMap<String, (DefId, Vec<(String, Type)>, Vec<(String, Vec<Type>, u32)>)>,
-    pub(crate) store_schemas: IndexMap<String, Vec<(String, Type)>>,
-    pub(crate) store_decorators: IndexMap<String, Vec<crate::ast::StoreDecorator>>,
-    pub(crate) view_defs: IndexMap<String, (String, Vec<crate::ast::QueryClause>)>,
+    pub(crate) actors: IndexMap<Symbol, (DefId, Vec<(Symbol, Type)>, Vec<(Symbol, Vec<Type>, u32)>)>,
+    pub(crate) store_schemas: IndexMap<Symbol, Vec<(Symbol, Type)>>,
+    pub(crate) store_decorators: IndexMap<Symbol, Vec<crate::ast::StoreDecorator>>,
+    pub(crate) view_defs: IndexMap<Symbol, (Symbol, Vec<crate::ast::QueryClause>)>,
     pub(crate) mono_depth: u32,
-    pub(crate) traits: IndexMap<String, Vec<TraitMethodSig>>,
-    pub(crate) trait_impls: IndexMap<String, Vec<String>>,
-    pub(crate) generic_bounds: IndexMap<String, Vec<(String, Vec<String>)>>,
-    pub(crate) trait_impl_type_args: IndexMap<(String, String), Vec<Type>>,
-    pub(crate) assoc_types: IndexMap<(String, String), Type>,
-    pub(crate) trait_assoc_types: IndexMap<String, Vec<String>>,
-    pub(crate) consts: IndexMap<String, ast::Expr>,
-    pub(crate) globals: IndexMap<String, (ast::Expr, ast::Span)>,
+    pub(crate) traits: IndexMap<Symbol, Vec<TraitMethodSig>>,
+    pub(crate) trait_impls: IndexMap<Symbol, Vec<String>>,
+    pub(crate) generic_bounds: IndexMap<Symbol, Vec<(Symbol, Vec<Symbol>)>>,
+    pub(crate) trait_impl_type_args: IndexMap<(Symbol, Symbol), Vec<Type>>,
+    pub(crate) assoc_types: IndexMap<(Symbol, Symbol), Type>,
+    pub(crate) trait_assoc_types: IndexMap<Symbol, Vec<String>>,
+    pub(crate) consts: IndexMap<Symbol, ast::Expr>,
+    pub(crate) globals: IndexMap<Symbol, (ast::Expr, ast::Span)>,
     pub(crate) infer_ctx: unify::InferCtx,
     pub(crate) debug_types: bool,
     pub(crate) warnings: Vec<String>,
     pub(crate) deferred_methods: Vec<DeferredMethod>,
     pub(crate) deferred_fields: Vec<DeferredField>,
     pub(crate) deferred_quantified_vars: Vec<u32>,
-    pub(crate) field_constraints: IndexMap<u32, Vec<(String, Type)>>,
-    pub(crate) inferable_fns: IndexMap<String, ast::Fn>,
-    pub(crate) fn_schemes: IndexMap<String, (Vec<u32>, Vec<Type>, Type)>,
+    pub(crate) field_constraints: IndexMap<u32, Vec<(Symbol, Type)>>,
+    pub(crate) inferable_fns: IndexMap<Symbol, ast::Fn>,
+    pub(crate) fn_schemes: IndexMap<Symbol, (Vec<u32>, Vec<Type>, Type)>,
     pub(crate) unannotated_struct_fields: Vec<(String, String, Type, Span)>,
-    pub(crate) poly_lambda_asts: IndexMap<String, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
+    pub(crate) poly_lambda_asts: IndexMap<Symbol, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
     pub(crate) type_errors: Vec<String>,
-    pub(crate) fn_param_names: IndexMap<String, Vec<String>>,
-    pub(crate) fn_defaults: IndexMap<String, Vec<Option<ast::Expr>>>,
+    pub(crate) fn_param_names: IndexMap<Symbol, Vec<String>>,
+    pub(crate) fn_defaults: IndexMap<Symbol, Vec<Option<ast::Expr>>>,
     pub(crate) current_method_type: Option<String>,
-    pub(crate) modules: std::collections::HashSet<String>,
+    pub(crate) modules: std::collections::HashSet<Symbol>,
     /// Extern functions tracked separately from Jade functions.
     /// Key: C symbol name. Value: (DefId, param types, return type).
     /// Externs are NOT module-prefixed — they keep their C symbol names.
-    pub(crate) externs: IndexMap<String, (DefId, Vec<Type>, Type)>,
+    pub(crate) externs: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     /// Current function's return type, used by `try` desugaring.
     pub(crate) current_fn_ret_ty: Option<Type>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct TraitMethodSig {
-    pub(crate) name: String,
+    pub(crate) name: Symbol,
     pub(crate) _params: Vec<(String, Option<Type>)>,
     pub(crate) _ret: Option<Type>,
     pub(crate) has_default: bool,
@@ -204,13 +205,14 @@ impl Typer {
 
     fn define_var(&mut self, name: &str, info: VarInfo) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), info);
+            scope.insert(name.into(), info);
         }
     }
 
     fn find_var(&self, name: &str) -> Option<&VarInfo> {
+        let sym: Symbol = name.into();
         for scope in self.scopes.iter().rev() {
-            if let Some(v) = scope.get(name) {
+            if let Some(v) = scope.get(&sym) {
                 return Some(v);
             }
         }
@@ -218,14 +220,15 @@ impl Typer {
     }
 
     fn update_var(&mut self, name: &str, info: VarInfo) {
+        let sym: Symbol = name.into();
         for scope in self.scopes.iter_mut().rev() {
-            if scope.contains_key(name) {
-                scope.insert(name.to_string(), info);
+            if scope.contains_key(&sym) {
+                scope.insert(sym, info);
                 return;
             }
         }
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name.to_string(), info);
+            scope.insert(sym, info);
         }
     }
 
@@ -1725,7 +1728,7 @@ mod tests {
         let main = &hir.fns[0];
         for stmt in &main.body {
             if let hir::Stmt::Bind(b) = stmt {
-                match b.name.as_str() {
+                match &*b.name.as_str() {
                     "a" => assert_eq!(b.ty, Type::I64, "a should be I64, got {:?}", b.ty),
                     "b" => assert_eq!(b.ty, Type::String, "b should be String, got {:?}", b.ty),
                     _ => {}
@@ -1807,7 +1810,7 @@ mod tests {
         let main = &hir.fns[0];
         for stmt in &main.body {
             if let hir::Stmt::Bind(b) = stmt {
-                match b.name.as_str() {
+                match &*b.name.as_str() {
                     "a" => assert_eq!(b.ty, Type::I64, "a should be I64"),
                     "b" => assert_eq!(b.ty, Type::String, "b should be String"),
                     _ => {}

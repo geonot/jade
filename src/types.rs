@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     I8,
@@ -17,28 +18,28 @@ pub enum Type {
     Vec(Box<Type>),
     Map(Box<Type>, Box<Type>),
     Tuple(Vec<Type>),
-    Struct(String, Vec<Type>),
-    Enum(String),
+    Struct(Symbol, Vec<Type>),
+    Enum(Symbol),
     Fn(Vec<Type>, Box<Type>),
-    Param(String),
+    Param(Symbol),
     Ptr(Box<Type>),
     Rc(Box<Type>),
     Weak(Box<Type>),
-    ActorRef(String),
+    ActorRef(Symbol),
     Coroutine(Box<Type>),
     Channel(Box<Type>),
     Set(Box<Type>),
     PriorityQueue(Box<Type>),
     NDArray(Box<Type>, Vec<usize>),
     SIMD(Box<Type>, usize),
-    DynTrait(String),
+    DynTrait(Symbol),
     Arena,
     Pool,
     TypeVar(u32),
     Deque(Box<Type>),
     Cow(Box<Type>),
-    Alias(String, Box<Type>),
-    Newtype(String, Box<Type>),
+    Alias(Symbol, Box<Type>),
+    Newtype(Symbol, Box<Type>),
     Generator(Box<Type>),
 }
 
@@ -184,7 +185,7 @@ impl std::fmt::Display for Type {
             Self::String => f.write_str("String"),
             Self::TypeVar(n) => write!(f, "?{n}"),
             Self::Struct(n, params) => {
-                f.write_str(n)?;
+                write!(f, "{n}")?;
                 if !params.is_empty() {
                     f.write_str("<")?;
                     for (i, p) in params.iter().enumerate() {
@@ -197,7 +198,7 @@ impl std::fmt::Display for Type {
                 }
                 Ok(())
             }
-            Self::Enum(n) => f.write_str(n),
+            Self::Enum(n) => write!(f, "{n}"),
             Self::Array(e, l) => write!(f, "[{e}; {l}]"),
             Self::Vec(e) => write!(f, "Vec of {e}"),
             Self::Map(k, v) => write!(f, "Map of {k}, {v}"),
@@ -211,7 +212,7 @@ impl std::fmt::Display for Type {
                 }
                 f.write_str(")")
             }
-            Self::Param(n) => f.write_str(n),
+            Self::Param(n) => write!(f, "{n}"),
             Self::Ptr(inner) => write!(f, "&{inner}"),
             Self::Rc(inner) => write!(f, "rc {inner}"),
             Self::Weak(inner) => write!(f, "weak {inner}"),

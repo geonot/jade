@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
 use crate::types::{Scheme, Type};
@@ -14,7 +15,7 @@ impl Typer {
             ast::Stmt::Bind(b) => {
                 // If inside a method body and the name matches a struct field (but not a local var),
                 // convert `field is value` to `self.field = value`
-                if self.current_method_type.is_some() && self.find_var(&b.name).is_none() {
+                if self.current_method_type.is_some() && self.find_var(&b.name.as_str()).is_none() {
                     let type_name = self.current_method_type.clone().unwrap();
                     let is_field = self
                         .structs
@@ -22,7 +23,7 @@ impl Typer {
                         .map(|fields| fields.iter().any(|(n, _)| n == &b.name))
                         .unwrap_or(false);
                     if is_field {
-                        let self_expr = ast::Expr::Ident("self".to_string(), b.span);
+                        let self_expr = ast::Expr::Ident("self".into(), b.span);
                         let field_expr =
                             ast::Expr::Field(Box::new(self_expr), b.name.clone(), b.span);
                         let ht = self.lower_expr(&field_expr)?;
@@ -37,7 +38,7 @@ impl Typer {
                 }
                 // If the name matches a global mutable variable and isn't shadowed by a local,
                 // emit a GlobalStore instead of a local Bind.
-                if self.find_var(&b.name).is_none() {
+                if self.find_var(&b.name.as_str()).is_none() {
                     if let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned() {
                         let init_hir = self.lower_expr(&_gexpr)?;
                         let global_ty = init_hir.ty.clone();
@@ -48,7 +49,7 @@ impl Typer {
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?
-                } else if let Some(existing) = self.find_var(&b.name) {
+                } else if let Some(existing) = self.find_var(&b.name.as_str()) {
                     self.lower_expr_expected(&b.value, Some(&existing.ty.clone()))?
                 } else {
                     self.lower_expr(&b.value)?
@@ -64,12 +65,12 @@ impl Typer {
                 };
                 let ownership = Self::ownership_for_type(&ty);
                 let id = self.fresh_id();
-                if let Some(existing) = self.find_var(&b.name) {
+                if let Some(existing) = self.find_var(&b.name.as_str()) {
                     let id = existing.def_id;
                     let existing_ty = existing.ty.clone();
                     let value = self.maybe_coerce_to(value, &existing_ty);
                     self.update_var(
-                        &b.name,
+                        &b.name.as_str(),
                         VarInfo {
                             def_id: id,
                             ty: existing_ty.clone(),
@@ -104,7 +105,7 @@ impl Typer {
                         }
                     }
                     self.define_var(
-                        &b.name,
+                        &b.name.as_str(),
                         VarInfo {
                             def_id: id,
                             ty: ty.clone(),
@@ -133,7 +134,7 @@ impl Typer {
                         .map(|_| self.infer_ctx.fresh_var())
                         .collect(),
                 };
-                let bindings: Vec<(DefId, String, Type)> = names
+                let bindings: Vec<(DefId, Symbol, Type)> = names
                     .iter()
                     .enumerate()
                     .map(|(i, n)| {
@@ -143,7 +144,7 @@ impl Typer {
                             .unwrap_or_else(|| self.infer_ctx.fresh_var());
                         let id = self.fresh_id();
                         self.define_var(
-                            n,
+                            &n.as_str(),
                             VarInfo {
                                 def_id: id,
                                 ty: ty.clone(),
@@ -151,7 +152,7 @@ impl Typer {
                                 scheme: None,
                             },
                         );
-                        (id, n.clone(), ty)
+                        (id, *n, ty)
                     })
                     .collect();
                 Ok(hir::Stmt::TupleBind(bindings, hval, *span))
@@ -181,7 +182,7 @@ impl Typer {
 
                     let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
                     let mut has_delete = false;
-                    let mut sets: Vec<(String, ast::Expr)> = Vec::new();
+                    let mut sets: Vec<(Symbol, ast::Expr)> = Vec::new();
                     for clause in clauses {
                         match clause {
                             ast::QueryClause::Where(expr, cspan) => {
@@ -199,18 +200,18 @@ impl Typer {
 
                     if !where_exprs.is_empty() && has_delete {
                         let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name)?;
+                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
                         return Ok(hir::Stmt::StoreDelete(store_name, Box::new(hfilter), *span));
                     }
 
                     if !where_exprs.is_empty() && !sets.is_empty() {
                         let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name)?;
+                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
                         let mut hassigns = Vec::new();
                         for (fname, fval) in &sets {
                             if let Some((_, fty)) = schema.iter().find(|(n, _)| n == fname) {
                                 hassigns.push((
-                                    fname.clone(),
+                                    *fname,
                                     self.lower_expr_expected(fval, Some(fty))?,
                                 ));
                             } else {
@@ -253,7 +254,7 @@ impl Typer {
 
                 // Map iteration: for k, v in map → desugar to keys-based iteration
                 if let (Some(val_bind), Type::Map(key_ty, val_ty)) = (&f.bind2, &resolved_iter_ty) {
-                    return self.desugar_for_map(f, val_bind, iter, key_ty, val_ty, ret_ty);
+                    return self.desugar_for_map(f, &val_bind.as_str(), iter, key_ty, val_ty, ret_ty);
                 }
 
                 let iter_is_int = resolved_iter_ty.is_int()
@@ -278,9 +279,9 @@ impl Typer {
                         _ => {
                             let iter_ty = iter.ty.clone();
                             if let Type::Struct(tn, _) = iter_ty {
-                                if self.type_implements_trait(&tn, "Iter") {
-                                    let elem_ty = self.iter_element_type(&tn);
-                                    return self.desugar_for_iter(f, iter, tn, elem_ty, ret_ty);
+                                if self.type_implements_trait(&tn.as_str(), "Iter") {
+                                    let elem_ty = self.iter_element_type(&tn.as_str());
+                                    return self.desugar_for_iter(f, iter, tn.as_str(), elem_ty, ret_ty);
                                 }
                             }
                             self.infer_ctx.fresh_var()
@@ -290,7 +291,7 @@ impl Typer {
                 let bind_id = self.fresh_id();
                 self.push_scope();
                 self.define_var(
-                    &f.bind,
+                    &f.bind.as_str(),
                     VarInfo {
                         def_id: bind_id,
                         ty: bind_ty.clone(),
@@ -303,7 +304,7 @@ impl Typer {
                     if let Some(ref b2) = f.bind2 {
                         let id2 = self.fresh_id();
                         self.define_var(
-                            b2,
+                            &b2.as_str(),
                             VarInfo {
                                 def_id: id2,
                                 ty: Type::I64,
@@ -402,7 +403,7 @@ impl Typer {
                 ];
                 let user_schema: Vec<_> = schema
                     .iter()
-                    .filter(|(n, _)| !builtin_names.contains(&n.as_str()))
+                    .filter(|(n, _)| !builtin_names.iter().any(|b| *n == *b))
                     .cloned()
                     .collect();
                 if values.len() != user_schema.len() {
@@ -425,7 +426,7 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Stmt::StoreDelete(
                     store.clone(),
                     Box::new(hfilter),
@@ -439,7 +440,7 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Stmt::StoreDestroy(
                     store.clone(),
                     Box::new(hfilter),
@@ -453,7 +454,7 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Stmt::StoreRestore(
                     store.clone(),
                     Box::new(hfilter),
@@ -474,11 +475,11 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 let mut hassigns = Vec::new();
                 for (fname, fval) in assignments {
                     if let Some((_, fty)) = schema.iter().find(|(n, _)| n == fname) {
-                        hassigns.push((fname.clone(), self.lower_expr_expected(fval, Some(fty))?));
+                        hassigns.push((*fname, self.lower_expr_expected(fval, Some(fty))?));
                     } else {
                         return Err(format!("store '{store}' has no field '{fname}'"));
                     }
@@ -534,7 +535,7 @@ impl Typer {
                 let bind_id = self.fresh_id();
                 self.push_scope();
                 self.define_var(
-                    &f.bind,
+                    &f.bind.as_str(),
                     VarInfo {
                         def_id: bind_id,
                         ty: bind_ty.clone(),
@@ -577,7 +578,7 @@ impl Typer {
     pub(crate) fn lower_store_filter(
         &mut self,
         filter: &ast::StoreFilter,
-        schema: &[(String, Type)],
+        schema: &[(Symbol, Type)],
         store: &str,
     ) -> Result<hir::StoreFilter, String> {
         let field_ty = schema
@@ -623,7 +624,7 @@ impl Typer {
         expr: &ast::Expr,
         span: ast::Span,
     ) -> Result<ast::StoreFilter, String> {
-        let mut conds: Vec<(Option<ast::LogicalOp>, String, ast::BinOp, ast::Expr)> = Vec::new();
+        let mut conds: Vec<(Option<ast::LogicalOp>, Symbol, ast::BinOp, ast::Expr)> = Vec::new();
         Self::flatten_filter_expr(expr, None, &mut conds)?;
         if conds.is_empty() {
             return Err("query where clause must be a comparison".into());
@@ -654,7 +655,7 @@ impl Typer {
     fn flatten_filter_expr(
         expr: &ast::Expr,
         logical_op: Option<ast::LogicalOp>,
-        out: &mut Vec<(Option<ast::LogicalOp>, String, ast::BinOp, ast::Expr)>,
+        out: &mut Vec<(Option<ast::LogicalOp>, Symbol, ast::BinOp, ast::Expr)>,
     ) -> Result<(), String> {
         match expr {
             ast::Expr::BinOp(left, ast::BinOp::And, right, _) => {
@@ -679,7 +680,7 @@ impl Typer {
                 ) =>
             {
                 let field_name = match left.as_ref() {
-                    ast::Expr::Ident(name, _) => name.clone(),
+                    ast::Expr::Ident(name, _) => *name,
                     _ => return Err("query filter left-hand side must be a field name".into()),
                 };
                 out.push((logical_op, field_name, *op, *right.clone()));
@@ -770,9 +771,9 @@ impl Typer {
             let eb = Self::collect_block_new_binds(else_block);
             common.retain(|name, _| eb.contains_key(name));
             for (name, (def_id, ty, ownership)) in common {
-                if self.find_var(&name).is_none() {
+                if self.find_var(&name.as_str()).is_none() {
                     self.define_var(
-                        &name,
+                        &name.as_str(),
                         VarInfo {
                             def_id,
                             ty,
@@ -796,7 +797,7 @@ impl Typer {
     /// Collect variables first-defined (via Bind) in a block.
     fn collect_block_new_binds(
         block: &hir::Block,
-    ) -> std::collections::HashMap<String, (DefId, Type, Ownership)> {
+    ) -> std::collections::HashMap<Symbol, (DefId, Type, Ownership)> {
         let mut binds = std::collections::HashMap::new();
         for stmt in block {
             if let hir::Stmt::Bind(b) = stmt {
@@ -878,12 +879,12 @@ impl Typer {
                         *span,
                         "match pattern implies enum type",
                     );
-                    return Ok(hir::Pat::Ctor(name.clone(), tag, vec![], *span));
+                    return Ok(hir::Pat::Ctor(name.as_str(), tag, vec![], *span));
                 }
                 let id = self.fresh_id();
                 let ty = expected_ty.clone();
                 self.define_var(
-                    name,
+                    &name.as_str(),
                     VarInfo {
                         def_id: id,
                         ty: ty.clone(),
@@ -934,7 +935,7 @@ impl Typer {
                         .unwrap_or_else(|| self.infer_ctx.fresh_var());
                     hpats.push(self.lower_pat(sp, &ft)?);
                 }
-                Ok(hir::Pat::Ctor(name.clone(), tag, hpats, *span))
+                Ok(hir::Pat::Ctor(name.as_str(), tag, hpats, *span))
             }
             ast::Pat::Or(pats, span) => {
                 let mut hpats = Vec::new();

@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::HashMap;
 
 use crate::ast::{self, Expr, Span};
@@ -26,7 +27,7 @@ fn resolve_named_args<'a>(
     for arg in args {
         match arg {
             Expr::NamedArg(name, inner, _) => {
-                if let Some(idx) = param_names.iter().position(|p| p == name) {
+                if let Some(idx) = param_names.iter().position(|p| p == &name.as_str()) {
                     if result[idx].is_some() {
                         return Err(format!(
                             "duplicate named argument '{name}' at line {}",
@@ -189,7 +190,7 @@ impl Typer {
             args
         };
         if let ast::Expr::Ident(name, _) = callee {
-            if let Some(result) = self.try_lower_builtin_call(name, args, span) {
+            if let Some(result) = self.try_lower_builtin_call(&name.as_str(), args, span) {
                 return result;
             }
 
@@ -236,8 +237,8 @@ impl Typer {
                         .cloned()
                         .expect("fn_schemes should have corresponding inferable_fn");
                     let normalized = Self::normalize_inferable_fn(&inf_fn);
-                    let type_map = self.build_type_map(name, &normalized, &arg_tys);
-                    return self.monomorphize_call(name, &type_map, hargs, span, true);
+                    let type_map = self.build_type_map(&name.as_str(), &normalized, &arg_tys);
+                    return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, true);
                 }
             }
 
@@ -255,8 +256,8 @@ impl Typer {
                         .iter()
                         .map(|e| self.infer_ctx.resolve(&e.ty))
                         .collect();
-                    let type_map = self.build_type_map(name, &gf, &arg_tys);
-                    return self.monomorphize_call(name, &type_map, hargs, span, false);
+                    let type_map = self.build_type_map(&name.as_str(), &gf, &arg_tys);
+                    return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, false);
                 }
             }
 
@@ -285,8 +286,8 @@ impl Typer {
                             });
                         if needs_mono {
                             let normalized = Self::normalize_inferable_fn(&inf_fn);
-                            let type_map = self.build_type_map(name, &normalized, &arg_tys);
-                            return self.monomorphize_call(name, &type_map, hargs, span, false);
+                            let type_map = self.build_type_map(&name.as_str(), &normalized, &arg_tys);
+                            return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, false);
                         }
                     }
                 }
@@ -336,7 +337,7 @@ impl Typer {
                 });
             }
 
-            if let Some(v) = self.find_var(name).cloned() {
+            if let Some(v) = self.find_var(&name.as_str()).cloned() {
                 if let Some(scheme) = &v.scheme {
                     if scheme.is_poly() {
                         if let Some((lparams, lret, lbody, lspan)) =
@@ -377,9 +378,10 @@ impl Typer {
                                 resolved_params.iter().map(|t| format!("{t}")).collect();
                             let mangled = format!("__poly_{name}_{}", type_suffix.join("_"));
 
+                            let mangled_sym = Symbol::intern(&mangled);
                             if let Some((id, _, ret)) = self.fns.get(&mangled).cloned() {
                                 return Ok(hir::Expr {
-                                    kind: hir::ExprKind::Call(id, mangled, hargs),
+                                    kind: hir::ExprKind::Call(id, mangled_sym, hargs),
                                     ty: ret,
                                     span,
                                 });
@@ -387,7 +389,7 @@ impl Typer {
 
                             let fn_id = self.fresh_id();
                             self.fns.insert(
-                                mangled.clone(),
+                                mangled_sym,
                                 (fn_id, resolved_params.clone(), resolved_ret.clone()),
                             );
 
@@ -398,7 +400,7 @@ impl Typer {
                                 let ty = resolved_params.get(i).cloned().unwrap_or(Type::I64);
                                 let ownership = Self::ownership_for_type(&ty);
                                 self.define_var(
-                                    &p.name,
+                                    &p.name.as_str(),
                                     VarInfo {
                                         def_id: pid,
                                         ty: ty.clone(),
@@ -432,25 +434,25 @@ impl Typer {
                                 resolved_ret.clone()
                             };
 
-                            if let Some(entry) = self.fns.get_mut(&mangled) {
+                            if let Some(entry) = self.fns.get_mut(&mangled_sym) {
                                 entry.2 = final_ret.clone();
                             }
 
                             let mono_fn = hir::Fn {
                                 def_id: fn_id,
-                                name: mangled.clone(),
+                                name: mangled_sym,
                                 params: fn_params,
                                 ret: final_ret.clone(),
                                 body: hbody,
                                 span: lspan,
-                                generic_origin: Some(name.to_string()),
+                                generic_origin: Some(*name),
                                 is_generator: false,
                                 attrs: crate::ast::FnAttrs::default(),
                             };
                             self.mono_fns.push(mono_fn);
 
                             return Ok(hir::Expr {
-                                kind: hir::ExprKind::Call(fn_id, mangled, hargs),
+                                kind: hir::ExprKind::Call(fn_id, mangled_sym, hargs),
                                 ty: final_ret,
                                 span,
                             });
@@ -568,11 +570,11 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         // Store aggregation methods: store.avg(field), store.sum(field), etc.
         if let ast::Expr::Ident(name, _) = obj {
-            if self.store_schemas.contains_key(name.as_str()) {
+            if self.store_schemas.contains_key(&name.as_str()) {
                 // @kv store methods: .set(), .get(), .del(), .has(), .incr(), .count()
                 let is_kv = self
                     .store_decorators
-                    .get(name.as_str())
+                    .get(&name.as_str())
                     .map(|decs| decs.iter().any(|d| *d == crate::ast::StoreDecorator::Kv))
                     .unwrap_or(false);
                 if is_kv {
@@ -717,7 +719,7 @@ impl Typer {
                 // @graph store methods
                 let is_graph = self
                     .store_decorators
-                    .get(name.as_str())
+                    .get(&name.as_str())
                     .map(|decs| decs.iter().any(|d| *d == crate::ast::StoreDecorator::Graph))
                     .unwrap_or(false);
                 if is_graph {
@@ -727,7 +729,7 @@ impl Typer {
                                 return Err("graph.from() requires 1 argument (node)".into());
                             }
                             // .from(node) queries the first user field of the graph store
-                            let schema = self.store_schemas.get(name.as_str()).unwrap();
+                            let schema = self.store_schemas.get(&name.as_str()).unwrap();
                             let builtin = [
                                 "sid",
                                 "uuid",
@@ -739,7 +741,7 @@ impl Typer {
                             ];
                             let user_fields: Vec<_> = schema
                                 .iter()
-                                .filter(|(n, _)| !builtin.contains(&n.as_str()))
+                                .filter(|(n, _)| !builtin.iter().any(|b| *n == *b))
                                 .collect();
                             let first_ty = user_fields
                                 .first()
@@ -757,7 +759,7 @@ impl Typer {
                                 return Err("graph.to() requires 1 argument (node)".into());
                             }
                             // .to(node) queries the second user field of the graph store
-                            let schema = self.store_schemas.get(name.as_str()).unwrap();
+                            let schema = self.store_schemas.get(&name.as_str()).unwrap();
                             let builtin = [
                                 "sid",
                                 "uuid",
@@ -769,7 +771,7 @@ impl Typer {
                             ];
                             let user_fields: Vec<_> = schema
                                 .iter()
-                                .filter(|(n, _)| !builtin.contains(&n.as_str()))
+                                .filter(|(n, _)| !builtin.iter().any(|b| *n == *b))
                                 .collect();
                             let second_ty = user_fields
                                 .get(1)
@@ -789,7 +791,7 @@ impl Typer {
                 // @timeseries store methods
                 let is_ts = self
                     .store_decorators
-                    .get(name.as_str())
+                    .get(&name.as_str())
                     .map(|decs| {
                         decs.iter()
                             .any(|d| matches!(d, crate::ast::StoreDecorator::TimeSeries(_)))
@@ -812,7 +814,7 @@ impl Typer {
                 }
 
                 // @vector store methods
-                let vec_dims = self.store_decorators.get(name.as_str()).and_then(|decs| {
+                let vec_dims = self.store_decorators.get(&name.as_str()).and_then(|decs| {
                     decs.iter().find_map(|d| match d {
                         crate::ast::StoreDecorator::Vector(dims) => Some(*dims),
                         _ => None,
@@ -929,7 +931,7 @@ impl Typer {
                             "max" => hir::ExprKind::StoreMax(name.clone(), field.clone()),
                             _ => unreachable!(),
                         };
-                        let field_ty = self.store_schemas.get(name.as_str()).and_then(|schema| {
+                        let field_ty = self.store_schemas.get(&name.as_str()).and_then(|schema| {
                             schema
                                 .iter()
                                 .find(|(n, _)| n == &field)
@@ -1018,10 +1020,10 @@ impl Typer {
 
         // View method dispatch: view_name.count(), view_name.all()
         if let ast::Expr::Ident(name, _) = obj {
-            if let Some((source, clauses)) = self.view_defs.get(name.as_str()).cloned() {
+            if let Some((source, clauses)) = self.view_defs.get(&name.as_str()).cloned() {
                 let schema = self
                     .store_schemas
-                    .get(&source)
+                    .get(&source.as_str())
                     .ok_or_else(|| format!("view '{name}' references unknown store '{source}'"))?
                     .clone();
 
@@ -1048,7 +1050,7 @@ impl Typer {
                             });
                         }
                         "all" => {
-                            let struct_name = format!("__store_{source}");
+                            let struct_name = Symbol::intern(&format!("__store_{source}"));
                             return Ok(hir::Expr {
                                 kind: hir::ExprKind::StoreAll(source),
                                 ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
@@ -1062,8 +1064,8 @@ impl Typer {
                             }
                             let filter_expr = &args[0];
                             let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
-                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source)?;
-                            let struct_name = format!("__store_{source}");
+                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
+                            let struct_name = Symbol::intern(&format!("__store_{source}"));
                             return Ok(hir::Expr {
                                 kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
                                 ty: Type::Struct(struct_name, vec![]),
@@ -1076,7 +1078,7 @@ impl Typer {
                             }
                             let filter_expr = &args[0];
                             let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
-                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source)?;
+                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
                             return Ok(hir::Expr {
                                 kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
                                 ty: Type::Bool,
@@ -1092,7 +1094,7 @@ impl Typer {
                 }
 
                 let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                let hfilter = self.lower_store_filter(&ast_filter, &schema, &source)?;
+                let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
 
                 match method {
                     "count" => {
@@ -1103,7 +1105,7 @@ impl Typer {
                         });
                     }
                     "all" => {
-                        let struct_name = format!("__store_{source}");
+                        let struct_name = Symbol::intern(&format!("__store_{source}"));
                         return Ok(hir::Expr {
                             kind: hir::ExprKind::ViewAll(source, Box::new(hfilter)),
                             ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
@@ -1112,7 +1114,7 @@ impl Typer {
                     }
                     "select" | "first" => {
                         // For filtered views, the view's filter is already the query filter
-                        let struct_name = format!("__store_{source}");
+                        let struct_name = Symbol::intern(&format!("__store_{source}"));
                         return Ok(hir::Expr {
                             kind: hir::ExprKind::StoreQuery(source.clone(), Box::new(hfilter)),
                             ty: Type::Struct(struct_name, vec![]),
@@ -1145,7 +1147,7 @@ impl Typer {
                 .collect::<Result<_, _>>()?;
             let ret_ty = Self::string_method_ret_ty(method).unwrap_or(Type::I64);
             return Ok(hir::Expr {
-                kind: hir::ExprKind::StringMethod(Box::new(hobj), method.to_string(), hargs),
+                kind: hir::ExprKind::StringMethod(Box::new(hobj), method.into(), hargs),
                 ty: ret_ty,
                 span,
             });
@@ -1229,7 +1231,7 @@ impl Typer {
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::VecMethod(
                             Box::new(hobj),
-                            method.to_string(),
+                            method.into(),
                             vec![harg],
                         ),
                         ty: Type::Bool,
@@ -1310,7 +1312,7 @@ impl Typer {
             let ret_ty = Self::vec_method_ret_ty(method, elem_ty)
                 .ok_or_else(|| format!("no method '{method}' on Vec"))?;
             return Ok(hir::Expr {
-                kind: hir::ExprKind::VecMethod(Box::new(hobj), method.to_string(), hargs),
+                kind: hir::ExprKind::VecMethod(Box::new(hobj), method.into(), hargs),
                 ty: ret_ty,
                 span,
             });
@@ -1340,7 +1342,7 @@ impl Typer {
             let ret_ty = Self::map_method_ret_ty(method, key_ty, val_ty)
                 .ok_or_else(|| format!("no method '{method}' on Map"))?;
             return Ok(hir::Expr {
-                kind: hir::ExprKind::MapMethod(Box::new(hobj), method.to_string(), hargs),
+                kind: hir::ExprKind::MapMethod(Box::new(hobj), method.into(), hargs),
                 ty: ret_ty,
                 span,
             });
@@ -1371,7 +1373,7 @@ impl Typer {
             let ret_ty = Self::set_method_ret_ty(method, elem_ty)
                 .ok_or_else(|| format!("no method '{method}' on Set"))?;
             return Ok(hir::Expr {
-                kind: hir::ExprKind::SetMethod(Box::new(hobj), method.to_string(), hargs),
+                kind: hir::ExprKind::SetMethod(Box::new(hobj), method.into(), hargs),
                 ty: ret_ty,
                 span,
             });
@@ -1401,7 +1403,7 @@ impl Typer {
                 _ => return Err(format!("no method '{method}' on PriorityQueue")),
             };
             return Ok(hir::Expr {
-                kind: hir::ExprKind::PQMethod(Box::new(hobj), method.to_string(), hargs),
+                kind: hir::ExprKind::PQMethod(Box::new(hobj), method.into(), hargs),
                 ty: ret_ty,
                 span,
             });
@@ -1428,7 +1430,7 @@ impl Typer {
             if let Some(ret_ty) = char_ret {
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(
-                        hir::BuiltinFn::CharMethod(method.to_string()),
+                        hir::BuiltinFn::CharMethod(method.into()),
                         vec![hobj],
                     ),
                     ty: ret_ty,
@@ -1457,7 +1459,7 @@ impl Typer {
                 all_args.extend(hargs);
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(
-                        hir::BuiltinFn::FloatMethod(method.to_string()),
+                        hir::BuiltinFn::FloatMethod(method.into()),
                         all_args,
                     ),
                     ty: ret_ty,
@@ -1537,12 +1539,12 @@ impl Typer {
                 .iter()
                 .map(|e| self.lower_expr(e))
                 .collect::<Result<_, _>>()?;
-            let ret_ty = self.infer_dyn_method_ret(trait_name, method);
+            let ret_ty = self.infer_dyn_method_ret(&trait_name.as_str(), method);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::DynDispatch(
                     Box::new(hobj),
                     trait_name.clone(),
-                    method.to_string(),
+                    method.into(),
                     hargs,
                 ),
                 ty: ret_ty,
@@ -1661,8 +1663,8 @@ impl Typer {
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Method(
                         Box::new(hobj),
-                        method_name,
-                        method.to_string(),
+                        Symbol::intern(&method_name),
+                        Symbol::intern(method),
                         hargs,
                     ),
                     ty: ret,
@@ -1687,7 +1689,7 @@ impl Typer {
                     .collect::<Result<_, _>>()?;
                 let ret_ty = Self::string_method_ret_ty(method).unwrap_or(Type::I64);
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::StringMethod(Box::new(hobj), method.to_string(), hargs),
+                    kind: hir::ExprKind::StringMethod(Box::new(hobj), method.into(), hargs),
                     ty: ret_ty,
                     span,
                 });
@@ -1699,14 +1701,15 @@ impl Typer {
                 .iter()
                 .filter(|(name, _)| name.ends_with(&suffix))
                 .map(|(name, (_, ptys, ret))| {
-                    let type_name = name[..name.len() - suffix.len()].to_string();
+                    let name_s = name.as_str();
+                    let type_name = name_s[..name_s.len() - suffix.len()].to_string();
                     (type_name, ptys.clone(), ret.clone())
                 })
-                .filter(|(type_name, _, _)| self.structs.contains_key(type_name))
+                .filter(|(type_name, _, _)| self.structs.contains_key(type_name.as_str()))
                 .collect();
 
             if candidates.len() > 1 {
-                let defining_traits: Vec<&String> = self
+                let defining_traits: Vec<&Symbol> = self
                     .traits
                     .iter()
                     .filter(|(_, sigs)| sigs.iter().any(|s| s.name == method))
@@ -1716,8 +1719,8 @@ impl Typer {
                     let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
                         .iter()
                         .filter(|(type_name, _, _)| {
-                            self.trait_impls.get(type_name).map_or(false, |impls| {
-                                impls.iter().any(|i| defining_traits.contains(&i))
+                            self.trait_impls.get(type_name.as_str()).map_or(false, |impls| {
+                                impls.iter().any(|i| defining_traits.iter().any(|t| **t == i.as_str()))
                             })
                         })
                         .cloned()
@@ -1730,7 +1733,7 @@ impl Typer {
 
             if candidates.len() == 1 {
                 let (type_name, param_tys, ret) = &candidates[0];
-                let struct_ty = Type::Struct(type_name.clone(), vec![]);
+                let struct_ty = Type::Struct(Symbol::intern(type_name), vec![]);
                 let _ = self.infer_ctx.unify_at(
                     &obj_ty,
                     &struct_ty,
@@ -1749,8 +1752,8 @@ impl Typer {
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Method(
                         Box::new(hobj),
-                        method_name,
-                        method.to_string(),
+                        Symbol::intern(&method_name),
+                        Symbol::intern(method),
                         hargs,
                     ),
                     ty: ret.clone(),
@@ -1771,7 +1774,7 @@ impl Typer {
             for (trait_name, sigs) in &self.traits {
                 for sig in sigs {
                     if sig.name == method {
-                        defining_trait_names.push(trait_name.clone());
+                        defining_trait_names.push(trait_name.as_str());
                         if let Some(ref trait_ret) = sig._ret {
                             let _ = self.infer_ctx.unify_at(
                                 &ret_ty,
@@ -1794,14 +1797,14 @@ impl Typer {
 
             self.deferred_methods.push(super::DeferredMethod {
                 receiver_ty: obj_ty.clone(),
-                method: method.to_string(),
+                method: method.into(),
                 arg_tys,
                 ret_ty: ret_ty.clone(),
                 span,
             });
         }
         Ok(hir::Expr {
-            kind: hir::ExprKind::DeferredMethod(Box::new(hobj), method.to_string(), hargs),
+            kind: hir::ExprKind::DeferredMethod(Box::new(hobj), method.into(), hargs),
             ty: ret_ty,
             span,
         })
@@ -1827,7 +1830,7 @@ impl Typer {
                 for tp in &gf.type_params {
                     type_map.entry(tp.clone()).or_insert(Type::I64);
                 }
-                let mangled = self.monomorphize_fn(name, &type_map)?;
+                let mangled = self.monomorphize_fn(&name.as_str(), &type_map)?;
                 let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
                     panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
                 });
@@ -1912,12 +1915,13 @@ impl Typer {
                     for tp in &gf.type_params {
                         type_map.entry(tp.clone()).or_insert(Type::I64);
                     }
-                    let mangled = self.monomorphize_fn(name, &type_map)?;
+                    let mangled = self.monomorphize_fn(&name.as_str(), &type_map)?;
+                    let mangled_sym = mangled;
                     let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
                         panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
                     });
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::Call(id, mangled, all_args),
+                        kind: hir::ExprKind::Call(id, mangled_sym, all_args),
                         ty: ret,
                         span,
                     });
@@ -1965,10 +1969,10 @@ impl Typer {
         name: &str,
         generic_fn: &ast::Fn,
         arg_tys: &[Type],
-    ) -> HashMap<String, Type> {
+    ) -> HashMap<Symbol, Type> {
         if !self.generic_fns.contains_key(name) {
             self.generic_fns
-                .insert(name.to_string(), generic_fn.clone());
+                .insert(name.into(), generic_fn.clone());
         }
         let mut type_map = HashMap::new();
         for (i, p) in generic_fn.params.iter().enumerate() {
@@ -1987,7 +1991,7 @@ impl Typer {
     fn monomorphize_call(
         &mut self,
         name: &str,
-        type_map: &HashMap<String, Type>,
+        type_map: &HashMap<Symbol, Type>,
         mut hargs: Vec<hir::Expr>,
         span: Span,
         coerce: bool,

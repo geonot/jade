@@ -4,6 +4,7 @@ use inkwell::AddressSpace;
 use inkwell::values::{BasicValue, BasicValueEnum};
 use crate::mir;
 use crate::types::Type;
+use crate::intern::Symbol;
 use super::super::Compiler;
 use super::super::b;
 use super::MirCodegen;
@@ -443,7 +444,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         let _i64t = self.comp.ctx.i64_type();
 
         // Try to find the body in extracted HIR coroutine bodies
-        if let Some(body) = self.coro_bodies.get(name).cloned() {
+        if let Some(body) = self.coro_bodies.get(&Symbol::intern(name)).cloned() {
             // Delegate to the HIR coroutine codegen which handles everything:
             // creating the __coro_{name} function, building the gen control block, etc.
             return self.comp.compile_coroutine_create(name, &body);

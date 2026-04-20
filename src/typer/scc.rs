@@ -1,7 +1,8 @@
+use crate::intern::Symbol;
 use crate::ast;
 use std::collections::{HashMap, HashSet};
 
-fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
+fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<Symbol>) {
     match expr {
         ast::Expr::Call(callee, args, _) => {
             if let ast::Expr::Ident(name, _) = callee.as_ref() {
@@ -30,7 +31,7 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
             // For module-qualified calls like math.factorial(x),
             // add "math_factorial" as a call dependency
             if let ast::Expr::Ident(name, _) = recv.as_ref() {
-                calls.insert(format!("{}_{}", name, method));
+                calls.insert(Symbol::intern(&format!("{}_{}", name, method)));
             }
             collect_calls_expr(recv, calls);
             for a in args {
@@ -103,7 +104,7 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<String>) {
     }
 }
 
-fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<String>) {
+fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<Symbol>) {
     match stmt {
         ast::Stmt::Bind(b) => {
             collect_calls_expr(&b.value, calls);
@@ -189,56 +190,56 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<String>) {
     }
 }
 
-fn collect_calls_block(block: &[ast::Stmt], calls: &mut HashSet<String>) {
+fn collect_calls_block(block: &[ast::Stmt], calls: &mut HashSet<Symbol>) {
     for s in block {
         collect_calls_stmt(s, calls);
     }
 }
 
-pub(crate) fn build_call_graph(fns: &[&ast::Fn]) -> HashMap<String, HashSet<String>> {
-    let fn_names: HashSet<&str> = fns.iter().map(|f| f.name.as_str()).collect();
+pub(crate) fn build_call_graph(fns: &[&ast::Fn]) -> HashMap<Symbol, HashSet<Symbol>> {
+    let fn_names: HashSet<Symbol> = fns.iter().map(|f| f.name).collect();
     let mut graph = HashMap::new();
     for f in fns {
         let mut calls = HashSet::new();
         collect_calls_block(&f.body, &mut calls);
-        calls.retain(|c| fn_names.contains(c.as_str()));
-        graph.insert(f.name.clone(), calls);
+        calls.retain(|c| fn_names.contains(c));
+        graph.insert(f.name, calls);
     }
     graph
 }
 
-pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
+pub(crate) fn tarjan_scc(graph: &HashMap<Symbol, HashSet<Symbol>>) -> Vec<Vec<Symbol>> {
     struct State {
         index_counter: usize,
-        stack: Vec<String>,
-        on_stack: HashSet<String>,
-        indices: HashMap<String, usize>,
-        lowlinks: HashMap<String, usize>,
-        result: Vec<Vec<String>>,
+        stack: Vec<Symbol>,
+        on_stack: HashSet<Symbol>,
+        indices: HashMap<Symbol, usize>,
+        lowlinks: HashMap<Symbol, usize>,
+        result: Vec<Vec<Symbol>>,
     }
 
-    fn strongconnect(v: &str, graph: &HashMap<String, HashSet<String>>, state: &mut State) {
+    fn strongconnect(v: Symbol, graph: &HashMap<Symbol, HashSet<Symbol>>, state: &mut State) {
         let idx = state.index_counter;
         state.index_counter += 1;
-        state.indices.insert(v.to_string(), idx);
-        state.lowlinks.insert(v.to_string(), idx);
-        state.stack.push(v.to_string());
-        state.on_stack.insert(v.to_string());
+        state.indices.insert(v, idx);
+        state.lowlinks.insert(v, idx);
+        state.stack.push(v);
+        state.on_stack.insert(v);
 
-        if let Some(neighbors) = graph.get(v) {
-            let mut sorted_neighbors: Vec<&String> = neighbors.iter().collect();
+        if let Some(neighbors) = graph.get(&v) {
+            let mut sorted_neighbors: Vec<&Symbol> = neighbors.iter().collect();
             sorted_neighbors.sort();
             for w in sorted_neighbors {
-                if !state.indices.contains_key(w.as_str()) {
-                    strongconnect(w, graph, state);
-                    let w_low = state.lowlinks[w.as_str()];
-                    let v_low = state.lowlinks.get_mut(v).unwrap();
+                if !state.indices.contains_key(w) {
+                    strongconnect(*w, graph, state);
+                    let w_low = state.lowlinks[w];
+                    let v_low = state.lowlinks.get_mut(&v).unwrap();
                     if w_low < *v_low {
                         *v_low = w_low;
                     }
-                } else if state.on_stack.contains(w.as_str()) {
-                    let w_idx = state.indices[w.as_str()];
-                    let v_low = state.lowlinks.get_mut(v).unwrap();
+                } else if state.on_stack.contains(w) {
+                    let w_idx = state.indices[w];
+                    let v_low = state.lowlinks.get_mut(&v).unwrap();
                     if w_idx < *v_low {
                         *v_low = w_idx;
                     }
@@ -246,14 +247,14 @@ pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<St
             }
         }
 
-        let v_low = state.lowlinks[v];
-        let v_idx = state.indices[v];
+        let v_low = state.lowlinks[&v];
+        let v_idx = state.indices[&v];
         if v_low == v_idx {
             let mut component = Vec::new();
             loop {
                 let w = state.stack.pop().unwrap();
                 state.on_stack.remove(&w);
-                component.push(w.clone());
+                component.push(w);
                 if w == v {
                     break;
                 }
@@ -271,11 +272,11 @@ pub(crate) fn tarjan_scc(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<St
         result: Vec::new(),
     };
 
-    let mut sorted_keys: Vec<&String> = graph.keys().collect();
+    let mut sorted_keys: Vec<&Symbol> = graph.keys().collect();
     sorted_keys.sort();
     for v in sorted_keys {
-        if !state.indices.contains_key(v.as_str()) {
-            strongconnect(v, graph, &mut state);
+        if !state.indices.contains_key(v) {
+            strongconnect(*v, graph, &mut state);
         }
     }
 
@@ -304,8 +305,10 @@ mod tests {
         let sccs = tarjan_scc(&graph);
         let mutual: Vec<_> = sccs.iter().filter(|s| s.len() > 1).collect();
         assert_eq!(mutual.len(), 1);
-        assert!(mutual[0].contains(&"a".into()));
-        assert!(mutual[0].contains(&"b".into()));
+        let a: Symbol = "a".into();
+        let b: Symbol = "b".into();
+        assert!(mutual[0].contains(&a));
+        assert!(mutual[0].contains(&b));
     }
 
     #[test]
@@ -314,7 +317,8 @@ mod tests {
         graph.insert("f".into(), HashSet::from(["f".into()]));
         let sccs = tarjan_scc(&graph);
         assert_eq!(sccs.len(), 1);
-        assert_eq!(sccs[0], vec!["f".to_string()]);
+        let f: Symbol = "f".into();
+        assert_eq!(sccs[0], vec![f]);
     }
 
     #[test]
@@ -324,8 +328,8 @@ mod tests {
         graph.insert("helper".into(), HashSet::new());
         let sccs = tarjan_scc(&graph);
         let names: Vec<_> = sccs.iter().map(|s| s[0].as_str()).collect();
-        let helper_pos = names.iter().position(|&n| n == "helper").unwrap();
-        let main_pos = names.iter().position(|&n| n == "main").unwrap();
+        let helper_pos = names.iter().position(|n| n == "helper").unwrap();
+        let main_pos = names.iter().position(|n| n == "main").unwrap();
         assert!(helper_pos < main_pos, "helper should come before main");
     }
 }

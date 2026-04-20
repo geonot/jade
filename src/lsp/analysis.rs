@@ -84,9 +84,9 @@ pub fn analyze(src: &str) -> FileAnalysis {
         match d {
             ast::Decl::Fn(f) => {
                 let sig = fn_signature(f);
-                defs.insert(f.name.clone(), (sig.clone(), f.span));
+                defs.insert(f.name.to_string(), (sig.clone(), f.span));
                 symbols.push(Symbol {
-                    name: f.name.clone(),
+                    name: f.name.to_string(),
                     kind: SymbolKind::Function,
                     span: f.span,
                     detail: sig,
@@ -102,7 +102,7 @@ pub fn analyze(src: &str) -> FileAnalysis {
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "unknown".into());
                     children.push(Symbol {
-                        name: field.name.clone(),
+                        name: field.name.to_string(),
                         kind: SymbolKind::Field,
                         span: field.span,
                         detail: ty_str,
@@ -114,16 +114,16 @@ pub fn analyze(src: &str) -> FileAnalysis {
                     let method_name = format!("{}_{}", td.name, m.name);
                     defs.insert(method_name, (sig.clone(), m.span));
                     children.push(Symbol {
-                        name: m.name.clone(),
+                        name: m.name.to_string(),
                         kind: SymbolKind::Function,
                         span: m.span,
                         detail: sig,
                         children: Vec::new(),
                     });
                 }
-                defs.insert(td.name.clone(), (format!("type {}", td.name), td.span));
+                defs.insert(td.name.to_string(), (format!("type {}", td.name), td.span));
                 symbols.push(Symbol {
-                    name: td.name.clone(),
+                    name: td.name.to_string(),
                     kind: SymbolKind::Struct,
                     span: td.span,
                     detail: format!("type {} ({} fields)", td.name, td.fields.len()),
@@ -134,16 +134,16 @@ pub fn analyze(src: &str) -> FileAnalysis {
                 let mut children = Vec::new();
                 for v in &ed.variants {
                     children.push(Symbol {
-                        name: v.name.clone(),
+                        name: v.name.to_string(),
                         kind: SymbolKind::Field,
                         span: v.span,
                         detail: String::new(),
                         children: Vec::new(),
                     });
                 }
-                defs.insert(ed.name.clone(), (format!("enum {}", ed.name), ed.span));
+                defs.insert(ed.name.to_string(), (format!("enum {}", ed.name), ed.span));
                 symbols.push(Symbol {
-                    name: ed.name.clone(),
+                    name: ed.name.to_string(),
                     kind: SymbolKind::Enum,
                     span: ed.span,
                     detail: format!("enum {} ({} variants)", ed.name, ed.variants.len()),
@@ -151,9 +151,9 @@ pub fn analyze(src: &str) -> FileAnalysis {
                 });
             }
             ast::Decl::Const(name, _expr, span) => {
-                defs.insert(name.clone(), (format!("const {name}"), *span));
+                defs.insert(name.to_string(), (format!("const {name}"), *span));
                 symbols.push(Symbol {
-                    name: name.clone(),
+                    name: name.to_string(),
                     kind: SymbolKind::Constant,
                     span: *span,
                     detail: "constant".into(),
@@ -162,9 +162,9 @@ pub fn analyze(src: &str) -> FileAnalysis {
             }
             ast::Decl::Extern(ef) => {
                 let sig = extern_signature(ef);
-                defs.insert(ef.name.clone(), (sig.clone(), ef.span));
+                defs.insert(ef.name.to_string(), (sig.clone(), ef.span));
                 symbols.push(Symbol {
-                    name: ef.name.clone(),
+                    name: ef.name.to_string(),
                     kind: SymbolKind::Function,
                     span: ef.span,
                     detail: sig,
@@ -213,7 +213,7 @@ fn fn_signature(f: &ast::Fn) -> String {
         .iter()
         .map(|p| match &p.ty {
             Some(t) => format!("{} as {t}", p.name),
-            None => p.name.clone(),
+            None => p.name.to_string(),
         })
         .collect();
     let ret = f
@@ -391,9 +391,9 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
             }
             // Identifiers — classify based on analysis
             Token::Ident(name) => {
-                let ty = if fn_names.contains(name.as_str()) {
+                let ty = if fn_names.contains(&name.to_string()) {
                     ST_FUNCTION
-                } else if type_names.contains(name.as_str()) {
+                } else if type_names.contains(&name.to_string()) {
                     ST_TYPE
                 } else {
                     ST_VARIABLE

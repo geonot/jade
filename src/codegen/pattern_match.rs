@@ -48,7 +48,7 @@ impl<'ctx> Compiler<'ctx> {
         };
         let st = self
             .module
-            .get_struct_type(&enum_name)
+            .get_struct_type(&enum_name.as_str())
             .ok_or_else(|| format!("no LLVM type: {enum_name}"))?;
         let sub_ptr = self.entry_alloca(st.into(), "match.sub");
         b!(self.bld.build_store(sub_ptr, subject_val));
@@ -122,7 +122,7 @@ impl<'ctx> Compiler<'ctx> {
                     let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
                     for (j, pat) in sub_pats.iter().enumerate() {
                         let fty = ftys.get(j).cloned().unwrap_or(Type::I64);
-                        let is_rec = Self::is_recursive_field(&fty, &enum_name);
+                        let is_rec = Self::is_recursive_field(&fty, &enum_name.as_str());
                         let field_ptr = if offset == 0 {
                             payload_gep
                         } else {
@@ -141,27 +141,27 @@ impl<'ctx> Compiler<'ctx> {
                             let actual_ty = self.llvm_ty(&fty);
                             let fval = b!(self.bld.build_load(actual_ty, heap_ptr, "field"));
                             if let hir::Pat::Bind(_, bname, _bty, _) = pat {
-                                let a = self.entry_alloca(actual_ty, bname);
+                                let a = self.entry_alloca(actual_ty, &bname.as_str());
                                 b!(self.bld.build_store(a, fval));
-                                self.set_var(bname, a, fty);
+                                self.set_var(&bname.as_str(), a, fty);
                             }
                             offset += 8;
                         } else {
                             let lty = self.llvm_ty(&fty);
                             let fval = b!(self.bld.build_load(lty, field_ptr, "field"));
                             if let hir::Pat::Bind(_, bname, _bty, _) = pat {
-                                let a = self.entry_alloca(lty, bname);
+                                let a = self.entry_alloca(lty, &bname.as_str());
                                 b!(self.bld.build_store(a, fval));
-                                self.set_var(bname, a, fty);
+                                self.set_var(&bname.as_str(), a, fty);
                             }
                             offset += self.type_store_size(lty);
                         }
                     }
                 }
             } else if let hir::Pat::Bind(_, ref name, ref _bty, _) = arm.pat {
-                let a = self.entry_alloca(st.into(), name);
+                let a = self.entry_alloca(st.into(), &name.as_str());
                 b!(self.bld.build_store(a, subject_val));
-                self.set_var(name, a, subject_ty.clone());
+                self.set_var(&name.as_str(), a, subject_ty.clone());
             }
             if let Some(ref guard) = arm.guard {
                 let fail_bb = if i + 1 < arm_bbs.len() {
@@ -310,9 +310,9 @@ impl<'ctx> Compiler<'ctx> {
                 self.bld.position_at_end(arm_bbs[i]);
                 self.push_var_scope();
                 if let hir::Pat::Bind(_, ref name, ref _bty, _) = arm.pat {
-                    let a = self.entry_alloca(self.llvm_ty(subject_ty), name);
+                    let a = self.entry_alloca(self.llvm_ty(subject_ty), &name.as_str());
                     b!(self.bld.build_store(a, subject_val));
-                    self.set_var(name, a, subject_ty.clone());
+                    self.set_var(&name.as_str(), a, subject_ty.clone());
                 } else if let hir::Pat::Tuple(ref pats, _) = arm.pat {
                     self.bind_tuple_pat(pats, subject_val, subject_ty)?;
                 } else if let hir::Pat::Array(ref pats, _) = arm.pat {
@@ -373,9 +373,9 @@ impl<'ctx> Compiler<'ctx> {
         for (i, arm) in m.arms.iter().enumerate() {
             self.bld.position_at_end(arm_bbs[i]);
             if let hir::Pat::Bind(_, ref name, ref _bty, _) = arm.pat {
-                let a = self.entry_alloca(self.llvm_ty(subject_ty), name);
+                let a = self.entry_alloca(self.llvm_ty(subject_ty), &name.as_str());
                 b!(self.bld.build_store(a, subject_val));
-                self.set_var(name, a, subject_ty.clone());
+                self.set_var(&name.as_str(), a, subject_ty.clone());
             }
             if let Some(ref guard) = arm.guard {
                 let fail_bb = if i + 1 < arm_bbs.len() {

@@ -1,5 +1,6 @@
 //! Helper methods for MIR codegen: binary/unary/comparison ops, casts, field access, closures, channels, slicing, and coroutine body extraction.
 
+use crate::intern::Symbol;
 use std::collections::HashMap;
 use inkwell::AddressSpace;
 use inkwell::module::Linkage;
@@ -554,8 +555,8 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     })
                 });
             if let Some(name) = &struct_name {
-                if let Some(st) = self.comp.module.get_struct_type(name) {
-                    let field_idx = self.field_index(name, field);
+                if let Some(st) = self.comp.module.get_struct_type(&name.as_str()) {
+                    let field_idx = self.field_index(&name.as_str(), field);
                     let gep = b!(self.comp.bld.build_struct_gep(st, ptr, field_idx, field));
                     return Ok(b!(self.comp.bld.build_load(res_llvm, gep, field)));
                 }
@@ -899,9 +900,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
     pub(super) fn struct_name_from_type(&self, ty: &Type) -> Option<String> {
         match ty {
-            Type::Struct(name, _) => Some(name.clone()),
+            Type::Struct(name, _) => Some(name.as_str()),
             Type::Ptr(inner) => match inner.as_ref() {
-                Type::Struct(name, _) => Some(name.clone()),
+                Type::Struct(name, _) => Some(name.as_str()),
                 _ => None,
             },
             _ => None,
@@ -1075,7 +1076,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
     /// bodies, keyed by their name for later use in MIR codegen.
     pub(super) fn extract_coro_bodies_from_program(
         prog: &hir::Program,
-        out: &mut HashMap<String, Vec<hir::Stmt>>,
+        out: &mut HashMap<Symbol, Vec<hir::Stmt>>,
     ) {
         for f in &prog.fns {
             for stmt in &f.body {
@@ -1098,7 +1099,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn extract_coro_bodies_from_stmt(stmt: &hir::Stmt, out: &mut HashMap<String, Vec<hir::Stmt>>) {
+    pub(super) fn extract_coro_bodies_from_stmt(stmt: &hir::Stmt, out: &mut HashMap<Symbol, Vec<hir::Stmt>>) {
         match stmt {
             hir::Stmt::Bind(b) => Self::extract_coro_bodies_from_expr(&b.value, out),
             hir::Stmt::Expr(e) => Self::extract_coro_bodies_from_expr(e, out),
@@ -1164,7 +1165,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn extract_coro_bodies_from_expr(expr: &hir::Expr, out: &mut HashMap<String, Vec<hir::Stmt>>) {
+    pub(super) fn extract_coro_bodies_from_expr(expr: &hir::Expr, out: &mut HashMap<Symbol, Vec<hir::Stmt>>) {
         match &expr.kind {
             hir::ExprKind::CoroutineCreate(name, body) => {
                 out.insert(name.clone(), body.clone());

@@ -38,7 +38,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // @before_insert hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec {
-                if let Some(hook_fn) = self.comp.module.get_function(fname) {
+                if let Some(hook_fn) = self.comp.module.get_function(&fname.as_str()) {
                     b!(self.comp.bld.build_call(hook_fn, &[], ""));
                 }
             }
@@ -128,9 +128,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let gep = b!(self
                 .comp
                 .bld
-                .build_struct_gep(st, rec_ptr, i as u32, &field_def.name));
-            if !is_simple && builtin_names.contains(&field_def.name.as_str()) {
-                match field_def.name.as_str() {
+                .build_struct_gep(st, rec_ptr, i as u32, &field_def.name.as_str()));
+            if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
+                match &*field_def.name.as_str() {
                     "sid" => {
                         b!(self.comp.bld.build_store(gep, new_sid));
                     }
@@ -185,13 +185,13 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let mut user_idx = 0usize;
             for field_def in &sd.fields {
                 let is_unique = Compiler::field_is_unique(field_def);
-                if !is_simple && builtin_names.contains(&field_def.name.as_str()) {
+                if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
                     continue;
                 }
                 if is_unique && user_idx < args.len() {
                     has_unique = true;
                     let val = self.val(args[user_idx]);
-                    let idx_ptr = self.comp.load_store_idx(store_name, &field_def.name)?;
+                    let idx_ptr = self.comp.load_store_idx(store_name, &field_def.name.as_str())?;
                     let hash = self.comp.idx_hash_field(val, &field_def.ty)?;
                     let result = b!(self.comp.bld.build_call(
                         contains_fn,
@@ -219,7 +219,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
                     self.comp.bld.position_at_end(ok_bb);
                 }
-                if !(!is_simple && builtin_names.contains(&field_def.name.as_str())) {
+                if !(!is_simple && builtin_names.contains(&&*field_def.name.as_str())) {
                     user_idx += 1;
                 }
             }
@@ -320,13 +320,13 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let mut user_idx = 0usize;
             for field_def in &sd.fields {
                 let has_idx = Compiler::field_has_index(field_def);
-                if !is_simple && builtin_names.contains(&field_def.name.as_str()) {
+                if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
                     // builtin fields — skip index (no @index on builtins)
                     continue;
                 }
                 if has_idx && user_idx < args.len() {
                     let val = self.val(args[user_idx]);
-                    let idx_ptr = self.comp.load_store_idx(store_name, &field_def.name)?;
+                    let idx_ptr = self.comp.load_store_idx(store_name, &field_def.name.as_str())?;
                     let hash = self.comp.idx_hash_field(val, &field_def.ty)?;
                     b!(self.comp.bld.build_call(
                         insert_fn,
@@ -334,7 +334,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         ""
                     ));
                 }
-                if !(!is_simple && builtin_names.contains(&field_def.name.as_str())) {
+                if !(!is_simple && builtin_names.contains(&&*field_def.name.as_str())) {
                     user_idx += 1;
                 }
             }
@@ -350,13 +350,13 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let col_append_fn = self.comp.module.get_function("jade_col_append").unwrap();
             let mut col_user_idx = 0usize;
             for field_def in &sd.fields {
-                if !is_simple && builtin_names.contains(&field_def.name.as_str()) {
+                if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
                     continue;
                 }
                 if col_user_idx < args.len() {
                     if field_def.ty == Type::I64 || field_def.ty == Type::F64 {
                         let col_handle =
-                            self.comp.load_col_handle(store_name, &field_def.name, 8)?;
+                            self.comp.load_col_handle(store_name, &field_def.name.as_str(), 8)?;
                         let val = self.val(args[col_user_idx]);
                         let tmp = self.comp.entry_alloca(i64t.into(), "col.tmp");
                         b!(self.comp.bld.build_store(tmp, val));
@@ -375,7 +375,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         {
             let mut bloom_user_idx = 0usize;
             for field_def in &sd.fields {
-                if !is_simple && builtin_names.contains(&field_def.name.as_str()) {
+                if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
                     continue;
                 }
                 let has_bloom = field_def
@@ -385,7 +385,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 if has_bloom && bloom_user_idx < args.len() {
                     let bloom = self
                         .comp
-                        .load_bloom_handle(store_name, &field_def.name, 10000)?;
+                        .load_bloom_handle(store_name, &field_def.name.as_str(), 10000)?;
                     if field_def.ty == Type::I64 {
                         let val = self.val(args[bloom_user_idx]);
                         let add_fn = self.comp.module.get_function("jade_bloom_add_i64").unwrap();
@@ -403,7 +403,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         {
             let mut fts_user_idx = 0usize;
             for field_def in &sd.fields {
-                if !is_simple && builtin_names.contains(&field_def.name.as_str()) {
+                if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
                     continue;
                 }
                 let has_search = field_def
@@ -411,7 +411,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     .iter()
                     .any(|d| *d == crate::ast::FieldDecorator::Search);
                 if has_search && fts_user_idx < args.len() && field_def.ty == Type::String {
-                    let fts = self.comp.load_fts_handle(store_name, &field_def.name)?;
+                    let fts = self.comp.load_fts_handle(store_name, &field_def.name.as_str())?;
                     let val = self.val(args[fts_user_idx]);
                     let data = self.comp.string_data(val)?;
                     let len = self.comp.string_len(val)?;
@@ -433,7 +433,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // @after_insert hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterInsert(fname) = dec {
-                if let Some(hook_fn) = self.comp.module.get_function(fname) {
+                if let Some(hook_fn) = self.comp.module.get_function(&fname.as_str()) {
                     b!(self.comp.bld.build_call(hook_fn, &[], ""));
                 }
             }
@@ -1642,7 +1642,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // @before_delete hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec {
-                if let Some(hook_fn) = self.comp.module.get_function(fname) {
+                if let Some(hook_fn) = self.comp.module.get_function(&fname.as_str()) {
                     b!(self.comp.bld.build_call(hook_fn, &[], ""));
                 }
             }
@@ -1770,7 +1770,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // @after_delete hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec {
-                if let Some(hook_fn) = self.comp.module.get_function(fname) {
+                if let Some(hook_fn) = self.comp.module.get_function(&fname.as_str()) {
                     b!(self.comp.bld.build_call(hook_fn, &[], ""));
                 }
             }
@@ -1823,7 +1823,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // @before_delete hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec {
-                if let Some(hook_fn) = self.comp.module.get_function(fname) {
+                if let Some(hook_fn) = self.comp.module.get_function(&fname.as_str()) {
                     b!(self.comp.bld.build_call(hook_fn, &[], ""));
                 }
             }
@@ -1994,7 +1994,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         self.comp.wal_write_delete(store_name, rec_ptr, rec_size)?;
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec {
-                if let Some(hook_fn) = self.comp.module.get_function(fname) {
+                if let Some(hook_fn) = self.comp.module.get_function(&fname.as_str()) {
                     b!(self.comp.bld.build_call(hook_fn, &[], ""));
                 }
             }

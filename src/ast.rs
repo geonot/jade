@@ -1,3 +1,4 @@
+pub use crate::intern::Symbol;
 use crate::types::Type;
 
 pub type Block = Vec<Stmt>;
@@ -44,11 +45,11 @@ pub enum Decl {
     View(ViewDef),
     Trait(TraitDef),
     Impl(ImplBlock),
-    Const(String, Expr, Span),
-    Global(String, Expr, Span),
+    Const(Symbol, Expr, Span),
+    Global(Symbol, Expr, Span),
     Supervisor(SupervisorDef),
-    TypeAlias(String, Type, Span),
-    Newtype(String, Type, Span),
+    TypeAlias(Symbol, Type, Span),
+    Newtype(Symbol, Type, Span),
     TopStmt(Stmt),
 }
 
@@ -86,7 +87,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Bind(Bind),
-    TupleBind(Vec<String>, Expr, Span),
+    TupleBind(Vec<Symbol>, Expr, Span),
     Assign(Expr, Expr, Span),
     Expr(Expr),
     If(If),
@@ -99,12 +100,12 @@ pub enum Stmt {
     Match(Match),
     Asm(AsmBlock),
     ErrReturn(Expr, Span),
-    StoreInsert(String, Vec<Expr>, Span),
-    StoreDelete(String, StoreFilter, Span),
-    StoreDestroy(String, StoreFilter, Span),
-    StoreSet(String, Vec<(String, Expr)>, StoreFilter, Span),
-    StoreRestore(String, StoreFilter, Span),
-    StoreSave(String, Span),
+    StoreInsert(Symbol, Vec<Expr>, Span),
+    StoreDelete(Symbol, StoreFilter, Span),
+    StoreDestroy(Symbol, StoreFilter, Span),
+    StoreSet(Symbol, Vec<(Symbol, Expr)>, StoreFilter, Span),
+    StoreRestore(Symbol, StoreFilter, Span),
+    StoreSave(Symbol, Span),
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
@@ -149,9 +150,9 @@ impl Stmt {
 #[derive(Debug, Clone)]
 pub enum Pat {
     Wild(Span),
-    Ident(String, Span),
+    Ident(Symbol, Span),
     Lit(Expr),
-    Ctor(String, Vec<Pat>, Span),
+    Ctor(Symbol, Vec<Pat>, Span),
     Or(Vec<Pat>, Span),
     Range(Expr, Expr, Span),
     Tuple(Vec<Pat>, Span),
@@ -181,18 +182,18 @@ pub enum Expr {
     Float(f64, Span),
     Str(String, Span),
     Bool(bool, Span),
-    Ident(String, Span),
+    Ident(Symbol, Span),
     BinOp(Box<Expr>, BinOp, Box<Expr>, Span),
     UnaryOp(UnaryOp, Box<Expr>, Span),
     Call(Box<Expr>, Vec<Expr>, Span),
-    Method(Box<Expr>, String, Vec<Expr>, Span),
-    Field(Box<Expr>, String, Span),
+    Method(Box<Expr>, Symbol, Vec<Expr>, Span),
+    Field(Box<Expr>, Symbol, Span),
     Index(Box<Expr>, Box<Expr>, Span),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>, Span),
     As(Box<Expr>, Type, Span),
     Array(Vec<Expr>, Span),
     Tuple(Vec<Expr>, Span),
-    Struct(String, Vec<FieldInit>, Span),
+    Struct(Symbol, Vec<FieldInit>, Span),
     IfExpr(Box<If>),
     Pipe(Box<Expr>, Box<Expr>, Vec<Expr>, Span),
     Block(Block, Span),
@@ -212,36 +213,36 @@ pub enum Expr {
     ),
     Syscall(Vec<Expr>, Span),
     Query(Box<Expr>, Vec<QueryClause>, Span),
-    StoreQuery(String, Box<StoreFilter>, Span),
-    StoreCount(String, Span),
-    StoreAll(String, Span),
-    StoreGet(String, Box<Expr>, Span),
-    StoreFirst(String, Box<StoreFilter>, Span),
-    StoreExists(String, Box<StoreFilter>, Span),
-    StoreDistinct(String, String, Span),
-    Spawn(String, Span),
-    Send(Box<Expr>, String, Vec<Expr>, Span),
+    StoreQuery(Symbol, Box<StoreFilter>, Span),
+    StoreCount(Symbol, Span),
+    StoreAll(Symbol, Span),
+    StoreGet(Symbol, Box<Expr>, Span),
+    StoreFirst(Symbol, Box<StoreFilter>, Span),
+    StoreExists(Symbol, Box<StoreFilter>, Span),
+    StoreDistinct(Symbol, Symbol, Span),
+    Spawn(Symbol, Span),
+    Send(Box<Expr>, Symbol, Vec<Expr>, Span),
     Receive(Vec<ReceiveArm>, Span),
     Yield(Box<Expr>, Span),
-    DispatchBlock(String, Block, Span),
+    DispatchBlock(Symbol, Block, Span),
     ChannelCreate(Option<Type>, Box<Expr>, Span),
     ChannelSend(Box<Expr>, Box<Expr>, Span),
     ChannelRecv(Box<Expr>, Span),
     Select(Vec<SelectArm>, Option<Block>, Span),
     Unreachable(Span),
-    AsFormat(Box<Expr>, String, Span),
+    AsFormat(Box<Expr>, Symbol, Span),
     StrictCast(Box<Expr>, Type, Span),
     Slice(Box<Expr>, Box<Expr>, Box<Expr>, Span),
-    NamedArg(String, Box<Expr>, Span),
+    NamedArg(Symbol, Box<Expr>, Span),
     Spread(Box<Expr>, Span),
     NDArray(Vec<Expr>, Span),
     SIMDLit(Type, usize, Vec<Expr>, Span),
     Grad(Box<Expr>, Span),
     Einsum(String, Vec<Expr>, Span),
-    Builder(String, Vec<BuilderField>, Span),
+    Builder(Symbol, Vec<BuilderField>, Span),
     Deque(Vec<Expr>, Span),
     OfCall(Box<Expr>, Box<Expr>, Span),
-    QualifiedIdent(String, String, Span),
+    QualifiedIdent(Symbol, Symbol, Span),
     Try(Box<Expr>, Span),
 }
 
@@ -320,9 +321,9 @@ pub struct Program {
 
 #[derive(Debug, Clone)]
 pub struct Fn {
-    pub name: String,
-    pub type_params: Vec<String>,
-    pub type_bounds: Vec<(String, Vec<String>)>,
+    pub name: Symbol,
+    pub type_params: Vec<Symbol>,
+    pub type_bounds: Vec<(Symbol, Vec<Symbol>)>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub body: Block,
@@ -342,7 +343,7 @@ pub struct FnAttrs {
 
 #[derive(Debug, Clone)]
 pub struct Param {
-    pub name: String,
+    pub name: Symbol,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
     pub literal: Option<Expr>,
@@ -358,8 +359,8 @@ pub struct LayoutAttrs {
 
 #[derive(Debug, Clone)]
 pub struct TypeDef {
-    pub name: String,
-    pub type_params: Vec<String>,
+    pub name: Symbol,
+    pub type_params: Vec<Symbol>,
     pub fields: Vec<Field>,
     pub methods: Vec<Fn>,
     pub layout: LayoutAttrs,
@@ -368,7 +369,7 @@ pub struct TypeDef {
 
 #[derive(Debug, Clone)]
 pub struct Field {
-    pub name: String,
+    pub name: Symbol,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
     pub span: Span,
@@ -376,15 +377,15 @@ pub struct Field {
 
 #[derive(Debug, Clone)]
 pub struct EnumDef {
-    pub name: String,
-    pub type_params: Vec<String>,
+    pub name: Symbol,
+    pub type_params: Vec<Symbol>,
     pub variants: Vec<Variant>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct Variant {
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<VField>,
     pub discriminant: Option<i64>,
     pub span: Span,
@@ -392,13 +393,13 @@ pub struct Variant {
 
 #[derive(Debug, Clone)]
 pub struct VField {
-    pub name: Option<String>,
+    pub name: Option<Symbol>,
     pub ty: Type,
 }
 
 #[derive(Debug, Clone)]
 pub struct Bind {
-    pub name: String,
+    pub name: Symbol,
     pub value: Expr,
     pub ty: Option<Type>,
     pub atomic: bool,
@@ -423,9 +424,9 @@ pub struct While {
 
 #[derive(Debug, Clone)]
 pub struct For {
-    pub label: Option<String>,
-    pub bind: String,
-    pub bind2: Option<String>,
+    pub label: Option<Symbol>,
+    pub bind: Symbol,
+    pub bind2: Option<Symbol>,
     pub iter: Expr,
     pub end: Option<Expr>,
     pub step: Option<Expr>,
@@ -456,8 +457,8 @@ pub struct Arm {
 
 #[derive(Debug, Clone)]
 pub struct ExternFn {
-    pub name: String,
-    pub params: Vec<(String, Type)>,
+    pub name: Symbol,
+    pub params: Vec<(Symbol, Type)>,
     pub ret: Type,
     pub variadic: bool,
     pub span: Span,
@@ -465,7 +466,7 @@ pub struct ExternFn {
 
 #[derive(Debug, Clone)]
 pub struct FieldInit {
-    pub name: Option<String>,
+    pub name: Option<Symbol>,
     pub value: Expr,
 }
 
@@ -482,45 +483,45 @@ pub struct AsmBlock {
 pub enum QueryClause {
     Where(Expr, Span),
     Limit(Expr, Span),
-    Sort(String, bool, Span),
+    Sort(Symbol, bool, Span),
     Take(Expr, Span),
     Skip(Expr, Span),
-    Set(String, Expr, Span),
+    Set(Symbol, Expr, Span),
     Delete(Span),
 }
 
 #[derive(Debug, Clone)]
 pub struct UseDecl {
-    pub path: Vec<String>,
-    pub imports: Option<Vec<String>>,
-    pub alias: Option<String>,
+    pub path: Vec<Symbol>,
+    pub imports: Option<Vec<Symbol>>,
+    pub alias: Option<Symbol>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct ErrDef {
-    pub name: String,
+    pub name: Symbol,
     pub variants: Vec<ErrVariant>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct ErrVariant {
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<Type>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct TestBlock {
-    pub name: String,
+    pub name: Symbol,
     pub body: Block,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct ActorDef {
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<Field>,
     pub handlers: Vec<Handler>,
     pub span: Span,
@@ -528,7 +529,7 @@ pub struct ActorDef {
 
 #[derive(Debug, Clone)]
 pub struct Handler {
-    pub name: String,
+    pub name: Symbol,
     pub params: Vec<Param>,
     pub body: Block,
     pub span: Span,
@@ -536,8 +537,8 @@ pub struct Handler {
 
 #[derive(Debug, Clone)]
 pub struct ReceiveArm {
-    pub handler: String,
-    pub bindings: Vec<String>,
+    pub handler: Symbol,
+    pub bindings: Vec<Symbol>,
     pub body: Block,
     pub span: Span,
 }
@@ -547,7 +548,7 @@ pub struct SelectArm {
     pub is_send: bool,
     pub chan: Expr,
     pub value: Option<Expr>,
-    pub binding: Option<String>,
+    pub binding: Option<Symbol>,
     pub body: Block,
     pub span: Span,
 }
@@ -560,12 +561,12 @@ pub enum StoreDecorator {
     Versioned,
     Vector(u64),
     Graph,
-    TimeSeries(String),
+    TimeSeries(Symbol),
     Kv,
-    BeforeInsert(String),
-    AfterInsert(String),
-    BeforeDelete(String),
-    AfterDelete(String),
+    BeforeInsert(Symbol),
+    AfterInsert(Symbol),
+    BeforeDelete(Symbol),
+    AfterDelete(Symbol),
     Column,
 }
 
@@ -587,7 +588,7 @@ pub enum FieldDecorator {
 
 #[derive(Debug, Clone)]
 pub struct StoreField {
-    pub name: String,
+    pub name: Symbol,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
     pub decorators: Vec<FieldDecorator>,
@@ -598,7 +599,7 @@ pub struct StoreField {
 
 #[derive(Debug, Clone)]
 pub struct StoreDef {
-    pub name: String,
+    pub name: Symbol,
     pub decorators: Vec<StoreDecorator>,
     pub fields: Vec<StoreField>,
     pub methods: Vec<Fn>,
@@ -607,7 +608,7 @@ pub struct StoreDef {
 
 #[derive(Debug, Clone)]
 pub struct MigrationDef {
-    pub name: String,
+    pub name: Symbol,
     pub version: i64,
     pub up: Vec<AlterOp>,
     pub down: Vec<AlterOp>,
@@ -616,7 +617,7 @@ pub struct MigrationDef {
 
 #[derive(Debug, Clone)]
 pub struct AlterOp {
-    pub store_name: String,
+    pub store_name: Symbol,
     pub actions: Vec<AlterAction>,
 }
 
@@ -638,24 +639,24 @@ pub enum AlterAction {
 
 #[derive(Debug, Clone)]
 pub struct ViewDef {
-    pub name: String,
-    pub source: String,
+    pub name: Symbol,
+    pub source: Symbol,
     pub clauses: Vec<QueryClause>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct TraitDef {
-    pub name: String,
-    pub type_params: Vec<String>,
-    pub assoc_types: Vec<String>,
+    pub name: Symbol,
+    pub type_params: Vec<Symbol>,
+    pub assoc_types: Vec<Symbol>,
     pub methods: Vec<TraitMethod>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct TraitMethod {
-    pub name: String,
+    pub name: Symbol,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
     pub default_body: Option<Block>,
@@ -664,10 +665,10 @@ pub struct TraitMethod {
 
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
-    pub trait_name: Option<String>,
+    pub trait_name: Option<Symbol>,
     pub trait_type_args: Vec<Type>,
-    pub type_name: String,
-    pub assoc_type_bindings: Vec<(String, Type)>,
+    pub type_name: Symbol,
+    pub assoc_type_bindings: Vec<(Symbol, Type)>,
     pub methods: Vec<Fn>,
     pub span: Span,
 }
@@ -687,22 +688,22 @@ pub enum SupervisorStrategy {
 
 #[derive(Debug, Clone)]
 pub struct SupervisorDef {
-    pub name: String,
+    pub name: Symbol,
     pub strategy: SupervisorStrategy,
-    pub children: Vec<String>,
+    pub children: Vec<Symbol>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct BuilderField {
-    pub name: String,
+    pub name: Symbol,
     pub value: Expr,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct StoreFilter {
-    pub field: String,
+    pub field: Symbol,
     pub op: BinOp,
     pub value: Expr,
     pub span: Span,
@@ -711,7 +712,7 @@ pub struct StoreFilter {
 
 #[derive(Debug, Clone)]
 pub struct StoreFilterCond {
-    pub field: String,
+    pub field: Symbol,
     pub op: BinOp,
     pub value: Expr,
 }

@@ -1,4 +1,5 @@
 use crate::ast::Span;
+use crate::intern::Symbol;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -10,7 +11,7 @@ pub enum Token {
     True,
     False,
     None,
-    Ident(String),
+    Ident(Symbol),
     Is,
     Neq,
     Equals,
@@ -146,7 +147,7 @@ impl std::fmt::Display for Token {
             Self::True => f.write_str("true"),
             Self::False => f.write_str("false"),
             Self::None => f.write_str("none"),
-            Self::Ident(s) => f.write_str(s),
+            Self::Ident(s) => write!(f, "{s}"),
             Self::Is => f.write_str("is"),
             Self::Neq => f.write_str("neq"),
             Self::Equals => f.write_str("equals"),
@@ -1016,7 +1017,7 @@ impl<'s> Lexer<'s> {
             self.advance();
         }
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        let tok = keyword(text).unwrap_or_else(|| Token::Ident(text.to_string()));
+        let tok = keyword(text).unwrap_or_else(|| Token::Ident(Symbol::intern(text)));
         Ok(Spanned {
             token: tok,
             span: Span::new(start, self.pos, self.line, sc),
@@ -1075,7 +1076,7 @@ mod tests {
             &t[..13],
             &[
                 Token::Star,
-                Token::Ident("main".into()),
+                Token::Ident(Symbol::intern("main")),
                 Token::LParen,
                 Token::RParen,
                 Token::Newline,
@@ -1139,7 +1140,7 @@ mod tests {
         let t = lex("x is 42");
         assert_eq!(
             &t[..3],
-            &[Token::Ident("x".into()), Token::Is, Token::Int(42)]
+            &[Token::Ident(Symbol::intern("x")), Token::Is, Token::Int(42)]
         );
     }
 
@@ -1241,9 +1242,9 @@ mod tests {
     #[test]
     fn comments() {
         let t = lex("x is 1 # this is a comment\ny is 2");
-        assert_eq!(t[0], Token::Ident("x".into()));
+        assert_eq!(t[0], Token::Ident(Symbol::intern("x")));
         assert_eq!(t[2], Token::Int(1));
-        assert_eq!(t[4], Token::Ident("y".into()));
+        assert_eq!(t[4], Token::Ident(Symbol::intern("y")));
     }
 
     #[test]

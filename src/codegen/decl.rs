@@ -32,7 +32,7 @@ impl<'ctx> Compiler<'ctx> {
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
             ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
         let ft = self.mk_fn_type(&ret, &lp, false);
-        let fv = self.module.add_function(&method_name, ft, None);
+        let fv = self.module.add_function(&method_name.as_str(), ft, None);
         self.tag_fn(fv);
         fv.set_linkage(Linkage::Internal);
         for (i, p) in m.params.iter().enumerate() {
@@ -50,19 +50,19 @@ impl<'ctx> Compiler<'ctx> {
             .iter()
             .map(|v| {
                 let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
-                (v.name.clone(), ftys, v.tag)
+                (v.name.as_str(), ftys, v.tag)
             })
             .collect();
-        self.declare_tagged_union(&ed.name, &variants)
+        self.declare_tagged_union(&ed.name.as_str(), &variants)
     }
 
     pub(crate) fn declare_err_def(&mut self, ed: &hir::ErrDef) -> Result<(), String> {
         let variants: Vec<(String, Vec<Type>, u32)> = ed
             .variants
             .iter()
-            .map(|v| (v.name.clone(), v.fields.clone(), v.tag))
+            .map(|v| (v.name.as_str(), v.fields.clone(), v.tag))
             .collect();
-        self.declare_tagged_union(&ed.name, &variants)
+        self.declare_tagged_union(&ed.name.as_str(), &variants)
     }
 
     fn declare_tagged_union(
@@ -85,14 +85,14 @@ impl<'ctx> Compiler<'ctx> {
             }
             max_payload = max_payload.max(payload_bytes);
             self.variant_tags
-                .insert(vname.clone(), (name.to_string(), *tag));
+                .insert(vname.clone().into(), (name.into(), *tag));
             resolved.push((vname.clone(), ftys.clone()));
         }
 
         if max_payload == 0 {
             let st = self.ctx.opaque_struct_type(name);
             st.set_body(&[i32t.into()], false);
-            self.enums.insert(name.to_string(), resolved);
+            self.enums.insert(name.into(), resolved);
             return Ok(());
         }
 
@@ -110,7 +110,7 @@ impl<'ctx> Compiler<'ctx> {
                     let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
                     let st = self.ctx.opaque_struct_type(name);
                     st.set_body(&[ptr.into()], false);
-                    self.enums.insert(name.to_string(), resolved);
+                    self.enums.insert(name.into(), resolved);
                     return Ok(());
                 }
             }
@@ -119,7 +119,7 @@ impl<'ctx> Compiler<'ctx> {
         let payload_ty = self.ctx.i8_type().array_type(max_payload as u32);
         let st = self.ctx.opaque_struct_type(name);
         st.set_body(&[i32t.into(), payload_ty.into()], false);
-        self.enums.insert(name.to_string(), resolved);
+        self.enums.insert(name.into(), resolved);
         Ok(())
     }
 }

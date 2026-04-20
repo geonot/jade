@@ -181,7 +181,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             .fields
             .iter()
             .enumerate()
-            .filter(|(_, f)| !builtin_names.contains(&f.name.as_str()))
+            .filter(|(_, f)| !builtin_names.contains(&&*f.name.as_str()))
             .collect();
         // .from() → first user field, .to() → second user field
         let target_idx = if direction == "from" { 0usize } else { 1 };

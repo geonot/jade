@@ -27,7 +27,7 @@ impl<'ctx> Compiler<'ctx> {
             }
             Type::Struct(name, _) | Type::Enum(name) => self
                 .module
-                .get_struct_type(name)
+                .get_struct_type(&name.as_str())
                 .map(|s| s.into())
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),

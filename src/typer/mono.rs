@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::HashMap;
 
 use crate::ast;
@@ -7,7 +8,7 @@ use crate::types::Type;
 use super::{Typer, VarInfo};
 
 impl Typer {
-    pub(crate) fn substitute_type(ty: &Type, type_map: &HashMap<String, Type>) -> Type {
+    pub(crate) fn substitute_type(ty: &Type, type_map: &HashMap<Symbol, Type>) -> Type {
         match ty {
             Type::Param(n) => type_map.get(n).cloned().unwrap_or_else(|| ty.clone()),
             Type::Array(inner, sz) => {
@@ -42,8 +43,8 @@ impl Typer {
 
     pub(crate) fn mangle_generic(
         base: &str,
-        type_map: &HashMap<String, Type>,
-        type_params: &[String],
+        type_map: &HashMap<Symbol, Type>,
+        type_params: &[Symbol],
     ) -> String {
         let mut name = base.to_string();
         name.push_str("__G_");
@@ -60,7 +61,7 @@ impl Typer {
         name
     }
 
-    pub(crate) fn effective_type_params(f: &ast::Fn) -> Vec<String> {
+    pub(crate) fn effective_type_params(f: &ast::Fn) -> Vec<Symbol> {
         if !f.type_params.is_empty() {
             return f.type_params.clone();
         }
@@ -76,11 +77,11 @@ impl Typer {
         tps
     }
 
-    pub(crate) fn collect_type_params_from(ty: &Type, out: &mut Vec<String>) {
+    pub(crate) fn collect_type_params_from(ty: &Type, out: &mut Vec<Symbol>) {
         match ty {
             Type::Param(n) => {
                 if !out.contains(n) {
-                    out.push(n.clone());
+                    out.push(*n);
                 }
             }
             Type::Array(inner, _)
@@ -120,10 +121,10 @@ impl Typer {
     pub(crate) fn monomorphize_struct(
         &mut self,
         base_name: &str,
-        _orig_fields: &[(String, Type)],
+        _orig_fields: &[(Symbol, Type)],
         arg_tys: &[Type],
         span: crate::ast::Span,
-    ) -> Result<String, String> {
+    ) -> Result<Symbol, String> {
         use crate::hir;
 
         // Build mangled name from the concrete argument types
@@ -132,7 +133,7 @@ impl Typer {
             .map(|t| format!("{t}"))
             .collect::<Vec<_>>()
             .join("_");
-        let mangled = format!("{base_name}_{ty_suffix}");
+        let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
 
         // If already monomorphized, reuse
         if self.structs.contains_key(&mangled) {
@@ -141,23 +142,23 @@ impl Typer {
 
         // Get the original AST definition for field names and layout
         let orig_fields_from_structs = self.structs.get(base_name).cloned().unwrap_or_default();
-        let new_fields: Vec<(String, Type)> = orig_fields_from_structs
+        let new_fields: Vec<(Symbol, Type)> = orig_fields_from_structs
             .iter()
             .enumerate()
             .map(|(i, (fname, _))| {
                 let ty = arg_tys.get(i).cloned().unwrap_or(Type::I64);
-                (fname.clone(), ty)
+                (*fname, ty)
             })
             .collect();
 
         // Register the monomorphized struct in self.structs
-        self.structs.insert(mangled.clone(), new_fields.clone());
+        self.structs.insert(mangled, new_fields.clone());
 
         // Build an hir::TypeDef for codegen
         let hir_fields: Vec<hir::Field> = new_fields
             .iter()
             .map(|(fname, fty)| hir::Field {
-                name: fname.clone(),
+                name: *fname,
                 ty: fty.clone(),
                 default: None,
                 span,
@@ -176,7 +177,7 @@ impl Typer {
 
         let htd = hir::TypeDef {
             def_id: self.fresh_id(),
-            name: mangled.clone(),
+            name: mangled,
             fields: hir_fields,
             methods: Vec::new(),
             layout,
@@ -195,12 +196,12 @@ impl Typer {
 
     pub(crate) fn normalize_inferable_fn(f: &ast::Fn) -> ast::Fn {
         let mut gf = f.clone();
-        let mut tps = Vec::new();
+        let mut tps: Vec<Symbol> = Vec::new();
         for (i, p) in gf.params.iter_mut().enumerate() {
             if p.ty.is_none() {
-                let name = format!("__{i}");
+                let name: Symbol = format!("__{i}").into();
                 if !tps.contains(&name) {
-                    tps.push(name.clone());
+                    tps.push(name);
                 }
                 p.ty = Some(Type::Param(name));
             }
@@ -212,8 +213,8 @@ impl Typer {
     pub(crate) fn monomorphize_fn(
         &mut self,
         name: &str,
-        type_map: &HashMap<String, Type>,
-    ) -> Result<String, String> {
+        type_map: &HashMap<Symbol, Type>,
+    ) -> Result<Symbol, String> {
         if self.mono_depth >= 64 {
             return Err(format!(
                 "monomorphization depth limit exceeded for '{name}' (possible infinite recursion in generics)"
@@ -228,8 +229,8 @@ impl Typer {
     fn monomorphize_fn_inner(
         &mut self,
         name: &str,
-        type_map: &HashMap<String, Type>,
-    ) -> Result<String, String> {
+        type_map: &HashMap<Symbol, Type>,
+    ) -> Result<Symbol, String> {
         let gf = self
             .generic_fns
             .get(name)
@@ -244,7 +245,7 @@ impl Typer {
                     self.infer_ctx.set_strict(was_strict);
                     let type_name = Self::type_name_for_bound_check(&resolved);
                     for trait_name in required_traits {
-                        if !self.type_satisfies_trait(&type_name, trait_name) {
+                        if !self.type_satisfies_trait(&type_name, &trait_name.as_str()) {
                             return Err(format!(
                                 "type `{type_name}` does not satisfy trait bound `{trait_name}` \
                                  required by type parameter `{param}` in `{name}`"
@@ -255,7 +256,7 @@ impl Typer {
             }
         }
 
-        let mangled = Self::mangle_generic(name, type_map, &gf.type_params);
+        let mangled: Symbol = Self::mangle_generic(name, type_map, &gf.type_params).into();
         if self.fns.contains_key(&mangled) {
             return Ok(mangled);
         }
@@ -272,7 +273,7 @@ impl Typer {
             if i < ptys.len() {
                 let id = self.fresh_id();
                 self.define_var(
-                    &p.name,
+                    &p.name.as_str(),
                     VarInfo {
                         def_id: id,
                         ty: ptys[i].clone(),
@@ -290,9 +291,9 @@ impl Typer {
         self.pop_scope();
         let id = self.fresh_id();
         self.fns
-            .insert(mangled.clone(), (id, ptys.clone(), ret.clone()));
+            .insert(mangled, (id, ptys.clone(), ret.clone()));
 
-        let mono_fn = self.lower_generic_fn_body(&gf, &mangled, id, &ptys, &ret, name)?;
+        let mono_fn = self.lower_generic_fn_body(&gf, &mangled.as_str(), id, &ptys, &ret, name)?;
         self.mono_fns.push(mono_fn);
         Ok(mangled)
     }
@@ -315,7 +316,7 @@ impl Typer {
             let ty = ptys[i].clone();
             let ownership = Self::ownership_for_type(&ty);
             self.define_var(
-                &p.name,
+                &p.name.as_str(),
                 VarInfo {
                     def_id: pid,
                     ty: ty.clone(),
@@ -346,7 +347,7 @@ impl Typer {
         self.infer_ctx.set_strict(false);
         let resolved_ret = self.infer_ctx.resolve(ret);
         self.infer_ctx.set_strict(was_strict);
-        if let Some(entry) = self.fns.get_mut(mangled) {
+        if let Some(entry) = self.fns.get_mut(&Symbol::intern(mangled)) {
             entry.2 = resolved_ret.clone();
         }
 
@@ -355,12 +356,12 @@ impl Typer {
 
         Ok(hir::Fn {
             def_id,
-            name: mangled.to_string(),
+            name: mangled.into(),
             params,
             ret: resolved_ret,
             body,
             span: gf.span,
-            generic_origin: Some(origin.to_string()),
+            generic_origin: Some(origin.into()),
             is_generator: false,
             attrs: gf.attrs.clone(),
         })
@@ -369,14 +370,14 @@ impl Typer {
     pub(crate) fn monomorphize_enum(
         &mut self,
         name: &str,
-        type_map: &HashMap<String, Type>,
-    ) -> Result<String, String> {
+        type_map: &HashMap<Symbol, Type>,
+    ) -> Result<Symbol, String> {
         let ge = self
             .generic_enums
             .get(name)
             .ok_or_else(|| format!("no generic enum: {name}"))?
             .clone();
-        let mangled = Self::mangle_generic(name, type_map, &ge.type_params);
+        let mangled: Symbol = Self::mangle_generic(name, type_map, &ge.type_params).into();
         if self.enums.contains_key(&mangled) {
             return Ok(mangled);
         }
@@ -389,7 +390,7 @@ impl Typer {
                 .map(|f| Self::substitute_type(&f.ty, type_map))
                 .collect();
             self.variant_tags
-                .insert(v.name.clone(), (mangled.clone(), tag as u32));
+                .insert(v.name, (mangled, tag as u32));
             let hv = hir::Variant {
                 name: v.name.clone(),
                 fields: ftys
@@ -407,10 +408,10 @@ impl Typer {
             hir_variants.push(hv);
             variants.push((v.name.clone(), ftys));
         }
-        self.enums.insert(mangled.clone(), variants);
+        self.enums.insert(mangled, variants);
         let hed = hir::EnumDef {
             def_id: self.fresh_id(),
-            name: mangled.clone(),
+            name: mangled,
             variants: hir_variants,
             span: ge.span,
         };
@@ -422,12 +423,12 @@ impl Typer {
         &mut self,
         variant_name: &str,
         arg_tys: Option<&[Type]>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<Symbol>, String> {
         let found = self.generic_enums.iter().find_map(|(ename, edef)| {
             edef.variants
                 .iter()
                 .find(|v| v.name == variant_name)
-                .map(|v| (ename.clone(), edef.clone(), v.clone()))
+                .map(|v| (*ename, edef.clone(), v.clone()))
         });
         let (enum_name, edef, variant) = match found {
             Some(f) => f,
@@ -438,15 +439,15 @@ impl Typer {
             for (i, field) in variant.fields.iter().enumerate() {
                 if let Type::Param(ref p) = field.ty {
                     if let Some(ty) = tys.get(i) {
-                        type_map.insert(p.clone(), ty.clone());
+                        type_map.insert(*p, ty.clone());
                     }
                 }
             }
         }
         for tp in &edef.type_params {
-            type_map.entry(tp.clone()).or_insert(Type::I64);
+            type_map.entry(*tp).or_insert(Type::I64);
         }
-        let mangled = self.monomorphize_enum(&enum_name, &type_map)?;
+        let mangled = self.monomorphize_enum(&enum_name.as_str(), &type_map)?;
         Ok(Some(mangled))
     }
 
@@ -456,8 +457,8 @@ impl Typer {
             Type::F64 | Type::F32 => "f64".into(),
             Type::Bool => "bool".into(),
             Type::String => "String".into(),
-            Type::Struct(n, _) => n.clone(),
-            Type::Enum(n) => n.clone(),
+            Type::Struct(n, _) => n.as_str(),
+            Type::Enum(n) => n.as_str(),
             Type::Vec(inner) => format!("Vec_{}", Self::type_name_for_bound_check(inner)),
             Type::Fn(params, ret) => {
                 let ps: Vec<_> = params
@@ -470,7 +471,7 @@ impl Typer {
                     Self::type_name_for_bound_check(ret)
                 )
             }
-            Type::Param(name) => name.clone(),
+            Type::Param(name) => name.as_str(),
             _ => format!("{ty:?}"),
         }
     }

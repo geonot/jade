@@ -1,5 +1,6 @@
 use crate::ast::{self, Span};
 use crate::hir;
+use crate::intern::Symbol;
 use crate::types::Type;
 
 use super::Typer;
@@ -365,14 +366,14 @@ impl Typer {
                 // fields_of('StructName') → Vec of field name strings at compile time
                 let type_name = match &args[0] {
                     ast::Expr::Str(s, _) => s.clone(),
-                    ast::Expr::Ident(s, _) => s.clone(),
+                    ast::Expr::Ident(s, _) => s.as_str(),
                     _ => return Some(Err("fields_of expects a type name".into())),
                 };
                 let fields = self.structs.get(&type_name).cloned().unwrap_or_default();
                 let field_exprs: Vec<hir::Expr> = fields
                     .iter()
                     .map(|(fname, _)| hir::Expr {
-                        kind: hir::ExprKind::Str(fname.clone()),
+                        kind: hir::ExprKind::Str(fname.as_str()),
                         ty: Type::String,
                         span,
                     })
@@ -400,11 +401,25 @@ impl Typer {
             "size_of" if args.len() == 1 && !self.fns.contains_key(name) => {
                 // size_of('StructName') or size_of(expr) → byte size as i64
                 let size = match &args[0] {
-                    ast::Expr::Str(s, _) | ast::Expr::Ident(s, _) => {
-                        if let Some(fields) = self.structs.get(s) {
-                            fields.len() as i64 * 8 // rough estimate: 8 bytes per field
+                    ast::Expr::Str(s, _) => {
+                        if let Some(fields) = self.structs.get(&Symbol::intern(s)) {
+                            fields.len() as i64 * 8
                         } else {
                             match s.as_str() {
+                                "i8" | "u8" | "bool" => 1,
+                                "i16" | "u16" => 2,
+                                "i32" | "u32" | "f32" => 4,
+                                "i64" | "u64" | "f64" => 8,
+                                "String" | "string" => 24,
+                                _ => 0,
+                            }
+                        }
+                    }
+                    ast::Expr::Ident(s, _) => {
+                        if let Some(fields) = self.structs.get(s) {
+                            fields.len() as i64 * 8
+                        } else {
+                            match &*s.as_str() {
                                 "i8" | "u8" | "bool" => 1,
                                 "i16" | "u16" => 2,
                                 "i32" | "u32" | "f32" => 4,
@@ -606,7 +621,7 @@ impl Typer {
                 };
                 format!("{ls} {ops} {rs}")
             }
-            ast::Expr::Ident(name, _) => name.clone(),
+            ast::Expr::Ident(name, _) => name.as_str(),
             ast::Expr::Int(n, _) => n.to_string(),
             ast::Expr::Float(f, _) => f.to_string(),
             ast::Expr::Str(s, _) => format!("'{s}'"),

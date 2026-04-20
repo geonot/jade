@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::HashMap;
 
 use crate::ast::{self, Span};
@@ -7,11 +8,11 @@ use crate::types::Type;
 use super::{Typer, VarInfo};
 
 /// Check if a type recursively references a given name (for cycle detection).
-fn type_references_name(ty: &Type, name: &str) -> bool {
+fn type_references_name(ty: &Type, name: Symbol) -> bool {
     match ty {
-        Type::Struct(n, args) => n == name || args.iter().any(|a| type_references_name(a, name)),
+        Type::Struct(n, args) => *n == name || args.iter().any(|a| type_references_name(a, name)),
         Type::Alias(n, inner) | Type::Newtype(n, inner) => {
-            n == name || type_references_name(inner, name)
+            *n == name || type_references_name(inner, name)
         }
         Type::Vec(inner)
         | Type::Rc(inner)
@@ -29,7 +30,7 @@ fn type_references_name(ty: &Type, name: &str) -> bool {
         Type::Fn(params, ret) => {
             params.iter().any(|p| type_references_name(p, name)) || type_references_name(ret, name)
         }
-        Type::Enum(n) => n == name,
+        Type::Enum(n) => *n == name,
         Type::NDArray(inner, _) | Type::SIMD(inner, _) | Type::PriorityQueue(inner) => {
             type_references_name(inner, name)
         }
@@ -44,7 +45,7 @@ impl Typer {
         }
         self.register_prelude_types();
 
-        let mut alias_map: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+        let mut alias_map: std::collections::HashMap<Symbol, Type> = std::collections::HashMap::new();
         for d in &prog.decls {
             match d {
                 ast::Decl::Fn(f) if Self::is_generic_fn(f) => {
@@ -80,7 +81,7 @@ impl Typer {
                     }
                     self.declare_type_def(td);
                     for m in &td.methods {
-                        self.declare_method_sig_by_ptr(&td.name, m);
+                        self.declare_method_sig_by_ptr(&td.name.as_str(), m);
                     }
                 }
                 ast::Decl::Enum(ed) if !ed.type_params.is_empty() => {
@@ -114,7 +115,7 @@ impl Typer {
                         .decorators
                         .iter()
                         .any(|d| *d == ast::StoreDecorator::Simple);
-                    let mut fields: Vec<(String, Type)> = Vec::new();
+                    let mut fields: Vec<(Symbol, Type)> = Vec::new();
                     // Inject built-in fields unless @simple
                     if !is_simple {
                         fields.push(("sid".into(), Type::I64));
@@ -130,7 +131,7 @@ impl Typer {
                         }
                     }
                     self.structs
-                        .insert(format!("__store_{}", sd.name), fields.clone());
+                        .insert(Symbol::intern(&format!("__store_{}", sd.name)), fields.clone());
                     self.store_schemas.insert(sd.name.clone(), fields);
                     self.store_decorators
                         .insert(sd.name.clone(), sd.decorators.clone());
@@ -158,7 +159,7 @@ impl Typer {
                 }
                 ast::Decl::TypeAlias(name, ty, _span) => {
                     // Direct cycle detection
-                    if type_references_name(ty, name) {
+                    if type_references_name(ty, *name) {
                         self.type_errors.push(format!(
                             "type alias '{}' is cyclic (references itself)",
                             name
@@ -186,14 +187,14 @@ impl Typer {
                     self.type_errors.push(format!(
                         "type alias '{}' participates in a cycle: {}",
                         name,
-                        cycle.join(" -> ")
+                        Symbol::join_vec(&cycle, " -> ")
                     ));
                     break;
                 }
                 // Find the next alias name referenced by this type
                 let mut next = None;
                 for other in alias_map.keys() {
-                    if other != &cur && type_references_name(ty, other) {
+                    if other != &cur && type_references_name(ty, *other) {
                         next = Some(other.clone());
                         break;
                     }
@@ -247,9 +248,9 @@ impl Typer {
         let call_graph = super::scc::build_call_graph(&non_generic_fns);
         let sccs = super::scc::tarjan_scc(&call_graph);
 
-        let fn_lookup: std::collections::HashMap<&str, &ast::Fn> = non_generic_fns
+        let fn_lookup: std::collections::HashMap<Symbol, &ast::Fn> = non_generic_fns
             .iter()
-            .map(|f| (f.name.as_str(), *f))
+            .map(|f| (f.name, *f))
             .collect();
 
         let mut lowered_fn_names = std::collections::HashSet::new();
@@ -258,13 +259,13 @@ impl Typer {
                 let mut scc_fns = Vec::new();
                 let mut scc_fn_names = Vec::new();
                 for name in scc {
-                    if let Some(f) = fn_lookup.get(name.as_str()) {
+                    if let Some(f) = fn_lookup.get(name) {
                         let hfn = self.lower_fn_deferred(f).map_err(|e| {
                             if scc.len() > 1 {
                                 let peers = scc
                                     .iter()
-                                    .filter(|n| n.as_str() != f.name)
-                                    .cloned()
+                                    .filter(|n| f.name != **n)
+                                    .map(|n| n.as_str())
                                     .collect::<Vec<_>>()
                                     .join(", ");
                                 format!("{e}\n  note: in mutually recursive group with: {peers}")
@@ -279,17 +280,17 @@ impl Typer {
                             f.name.clone(),
                         ));
                         scc_fn_names.push(f.name.clone());
-                        lowered_fn_names.insert(name.clone());
+                        lowered_fn_names.insert(*name);
                     }
                 }
                 for (needs_resolve, _span, hfn, fname) in &mut scc_fns {
-                    if *needs_resolve && !self.inferable_fns.contains_key(fname.as_str()) {
+                    if *needs_resolve && !self.inferable_fns.contains_key(&*fname) {
                         hfn.ret = self.infer_ctx.resolve(&hfn.ret);
                     }
                 }
                 for (_, _, hfn, fname) in &scc_fns {
                     if self.inferable_fns.contains_key(fname) {
-                        self.build_fn_scheme(fname, hfn);
+                        self.build_fn_scheme(*fname, hfn);
                     }
                 }
                 for (_, _, hfn, fname) in scc_fns {
@@ -304,21 +305,21 @@ impl Typer {
                 }
             } else {
                 for name in scc {
-                    if let Some(f) = fn_lookup.get(name.as_str()) {
+                    if let Some(f) = fn_lookup.get(name) {
                         let hfn = self.lower_fn(f)?;
                         if self.inferable_fns.contains_key(&f.name) {
-                            self.build_fn_scheme(&f.name, &hfn);
+                            self.build_fn_scheme(f.name, &hfn);
                         }
                         if self
                             .fn_schemes
                             .get(&f.name)
                             .map_or(false, |s| !s.0.is_empty())
                         {
-                            lowered_fn_names.insert(name.clone());
+                            lowered_fn_names.insert(*name);
                             continue;
                         }
                         hir_fns.push(hfn);
-                        lowered_fn_names.insert(name.clone());
+                        lowered_fn_names.insert(*name);
                     }
                 }
             }
@@ -328,7 +329,7 @@ impl Typer {
             if !lowered_fn_names.contains(&f.name) {
                 let hfn = self.lower_fn(f)?;
                 if self.inferable_fns.contains_key(&f.name) {
-                    self.build_fn_scheme(&f.name, &hfn);
+                    self.build_fn_scheme(f.name, &hfn);
                 }
                 if self
                     .fn_schemes
@@ -371,9 +372,9 @@ impl Typer {
                     let test_fn = self.lower_test_block(tb, &fn_name)?;
                     let test_id = test_fn.def_id;
                     self.fns
-                        .insert(fn_name.clone(), (test_id, vec![], Type::Void));
+                        .insert(Symbol::intern(&fn_name), (test_id, vec![], Type::Void));
                     hir_fns.push(test_fn);
-                    test_fns.push((tb.name.clone(), fn_name));
+                    test_fns.push((tb.name.as_str(), fn_name));
                 }
                 _ => {}
             }
@@ -567,7 +568,7 @@ impl Typer {
                                     .unify_at(&elem, val_ty, dm.span, "vec.set value");
                         }
                     }
-                    let actual_ret = match Self::vec_method_ret_ty(&dm.method, &elem) {
+                    let actual_ret = match Self::vec_method_ret_ty(&dm.method.as_str(), &elem) {
                         Some(ty) => ty,
                         None => continue,
                     };
@@ -581,7 +582,7 @@ impl Typer {
                 Type::Map(key_ty, val_ty) => {
                     let key = key_ty.as_ref().clone();
                     let val = val_ty.as_ref().clone();
-                    match dm.method.as_str() {
+                    match &*dm.method.as_str() {
                         "set" => {
                             if let Some(k) = dm.arg_tys.first() {
                                 let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.set key");
@@ -602,7 +603,7 @@ impl Typer {
                         }
                         _ => {}
                     }
-                    let actual_ret = match Self::map_method_ret_ty(&dm.method, &key, &val) {
+                    let actual_ret = match Self::map_method_ret_ty(&dm.method.as_str(), &key, &val) {
                         Some(ty) => ty,
                         None => continue,
                     };
@@ -614,7 +615,7 @@ impl Typer {
                     );
                 }
                 Type::String => {
-                    let actual_ret = match Self::string_method_ret_ty(&dm.method) {
+                    let actual_ret = match Self::string_method_ret_ty(&dm.method.as_str()) {
                         Some(ty) => ty,
                         None => continue,
                     };
@@ -659,14 +660,14 @@ impl Typer {
                 _ => {
                     if matches!(recv_ty, Type::TypeVar(_)) {
                         // If the method is exclusive to String, resolve immediately
-                        if Self::is_string_exclusive_method(&dm.method) {
+                        if Self::is_string_exclusive_method(&dm.method.as_str()) {
                             let _ = self.infer_ctx.unify_at(
                                 &recv_ty,
                                 &Type::String,
                                 dm.span,
                                 "deferred string-exclusive method implies String",
                             );
-                            if let Some(actual_ret) = Self::string_method_ret_ty(&dm.method) {
+                            if let Some(actual_ret) = Self::string_method_ret_ty(&dm.method.as_str()) {
                                 let _ = self.infer_ctx.unify_at(
                                     &dm.ret_ty,
                                     &actual_ret,
@@ -678,12 +679,12 @@ impl Typer {
                         }
 
                         let suffix = format!("_{}", dm.method);
-                        let mut candidates: Vec<(String, Vec<Type>, Type)> = self
+                        let mut candidates: Vec<(Symbol, Vec<Type>, Type)> = self
                             .fns
                             .iter()
                             .filter(|(name, _)| name.ends_with(&suffix))
                             .map(|(name, (_, ptys, ret))| {
-                                let type_name = name[..name.len() - suffix.len()].to_string();
+                                let type_name = { let __n = name.as_str(); Symbol::intern(&__n[..__n.len() - suffix.len()]) };
                                 (type_name, ptys.clone(), ret.clone())
                             })
                             .filter(|(type_name, _, _)| self.structs.contains_key(type_name))
@@ -694,7 +695,7 @@ impl Typer {
                             if let super::unify::TypeConstraint::Trait(ref required_traits) =
                                 constraint
                             {
-                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
+                                let narrowed: Vec<(Symbol, Vec<Type>, Type)> = candidates
                                     .iter()
                                     .filter(|(type_name, _, _)| {
                                         self.trait_impls.get(type_name).map_or(false, |impls| {
@@ -710,18 +711,18 @@ impl Typer {
                         }
 
                         if candidates.len() > 1 {
-                            let defining_traits: Vec<&String> = self
+                            let defining_traits: Vec<&Symbol> = self
                                 .traits
                                 .iter()
                                 .filter(|(_, sigs)| sigs.iter().any(|s| s.name == dm.method))
                                 .map(|(tname, _)| tname)
                                 .collect();
                             if !defining_traits.is_empty() {
-                                let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
+                                let narrowed: Vec<(Symbol, Vec<Type>, Type)> = candidates
                                     .iter()
                                     .filter(|(type_name, _, _)| {
                                         self.trait_impls.get(type_name).map_or(false, |impls| {
-                                            impls.iter().any(|i| defining_traits.contains(&i))
+                                            impls.iter().any(|i| defining_traits.iter().any(|dt| **dt == i.as_str()))
                                         })
                                     })
                                     .cloned()
@@ -735,14 +736,14 @@ impl Typer {
                         candidates.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
 
                         if candidates.len() > 1 {
-                            let names: Vec<&str> = candidates.iter().map(|(n, _, _)| n.as_str()).collect();
+                            let names: Vec<String> = candidates.iter().map(|(n, _, _)| n.as_str()).collect();
                             self.type_errors.push(format!(
                                 "line {}:{}: ambiguous method `{}`: multiple types have this method: {}",
                                 dm.span.line, dm.span.col, dm.method, names.join(", ")
                             ));
                         } else if candidates.len() == 1 {
                             let (type_name, param_tys, ret) = &candidates[0];
-                            let struct_ty = Type::Struct(type_name.clone(), vec![]);
+                            let struct_ty = Type::Struct(*type_name, vec![]);
                             let _ = self.infer_ctx.unify_at(
                                 &recv_ty,
                                 &struct_ty,
@@ -813,18 +814,18 @@ impl Typer {
         }
 
         for (_root, fields) in by_receiver {
-            let required_fields: Vec<(&str, &Type)> = fields
+            let required_fields: Vec<(String, &Type)> = fields
                 .iter()
                 .map(|df| (df.field_name.as_str(), &df.field_ty))
                 .collect();
 
-            let extra_constraints: Vec<(String, Type)> = self
+            let extra_constraints: Vec<(Symbol, Type)> = self
                 .field_constraints
                 .get(&_root)
                 .cloned()
                 .unwrap_or_default();
 
-            let mut candidates: Vec<String> = self
+            let mut candidates: Vec<Symbol> = self
                 .structs
                 .iter()
                 .filter(|(_, struct_fields)| {
@@ -840,15 +841,15 @@ impl Typer {
             candidates.sort();
 
             if candidates.len() > 1 {
-                let field_names: Vec<&str> = fields.iter().map(|f| f.field_name.as_str()).collect();
+                let field_names: Vec<String> = fields.iter().map(|f| f.field_name.as_str()).collect();
                 self.type_errors.push(format!(
                     "line {}:{}: ambiguous field access ({}): multiple types have these fields: {}",
                     fields[0].span.line, fields[0].span.col,
-                    field_names.join(", "), candidates.join(", ")
+                    field_names.join(", "), Symbol::join_vec(&candidates, ", ")
                 ));
             } else if candidates.len() == 1 {
                 let sname = &candidates[0];
-                let struct_ty = Type::Struct(sname.clone(), vec![]);
+                let struct_ty = Type::Struct(*sname, vec![]);
                 let span = fields[0].span;
                 let _ = self.infer_ctx.unify_at(
                     &fields[0].receiver_ty,
@@ -893,7 +894,7 @@ impl Typer {
                 let mut candidates: Vec<String> = Vec::new();
                 for (type_name, impl_traits) in &self.trait_impls {
                     if required_traits.iter().all(|rt| impl_traits.contains(rt)) {
-                        candidates.push(type_name.clone());
+                        candidates.push(type_name.as_str());
                     }
                 }
                 candidates.sort();
@@ -904,7 +905,7 @@ impl Typer {
                         required_traits.join(" + "), candidates.join(", ")
                     ));
                 } else if candidates.len() == 1 {
-                    let ty = match candidates[0].as_str() {
+                    let ty = match &*candidates[0].as_str() {
                         "i8" => Type::I8,
                         "i16" => Type::I16,
                         "i32" => Type::I32,
@@ -917,7 +918,7 @@ impl Typer {
                         "f64" => Type::F64,
                         "bool" => Type::Bool,
                         "String" => Type::String,
-                        name => Type::Struct(name.to_string(), vec![]),
+                        name => Type::Struct(name.into(), vec![]),
                     };
                     let _ = self.infer_ctx.unify(&Type::TypeVar(root), &ty);
                 }
@@ -951,7 +952,7 @@ impl Typer {
                     if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
-                        expr.kind = hir::ExprKind::Method(recv, method_name, method, args);
+                        expr.kind = hir::ExprKind::Method(recv, method_name.into(), method, args);
                     }
                 }
             }
@@ -962,7 +963,7 @@ impl Typer {
                         if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                             std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                         {
-                            expr.kind = hir::ExprKind::Method(recv, method_name, method, args);
+                            expr.kind = hir::ExprKind::Method(recv, method_name.into(), method, args);
                         }
                     }
                 }
@@ -1010,13 +1011,13 @@ impl Typer {
                     "is_finite",
                     "to_int",
                 ];
-                if float_methods.contains(&method.as_str()) {
+                if float_methods.iter().any(|m| method == *m) {
                     if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
                         let mut all_args = vec![*recv];
                         all_args.extend(args);
-                        let ret_ty = match method.as_str() {
+                        let ret_ty = match &*method.as_str() {
                             "is_nan" | "is_infinite" | "is_finite" => Type::Bool,
                             "to_int" => Type::I64,
                             _ => recv_ty.clone(),
@@ -1067,7 +1068,7 @@ impl Typer {
             | Type::U8 => {
                 // Integer char/numeric methods
                 let int_methods = ["abs", "to_float", "to_str", "min", "max", "clamp"];
-                if int_methods.contains(&method.as_str()) {
+                if int_methods.iter().any(|m| method == *m) {
                     if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
@@ -1169,7 +1170,7 @@ impl Typer {
     /// but don't have an explicit display method.
     fn auto_derive_display(&mut self, prog: &mut hir::Program) {
         // Collect struct names that need Display
-        let mut needs_display: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut needs_display: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
         for f in &prog.fns {
             Self::collect_display_usage(&f.body, &mut needs_display);
         }
@@ -1184,7 +1185,7 @@ impl Typer {
         // Generate display methods for structs
         for type_name in &needs_display {
             if let Some(fields) = self.structs.get(type_name).cloned() {
-                let method_name = format!("{type_name}_display");
+                let method_name: Symbol = format!("{type_name}_display").into();
                 let self_id = self.fresh_id();
                 let self_ty = Type::Struct(type_name.clone(), vec![]);
                 let span = crate::ast::Span::dummy();
@@ -1238,7 +1239,7 @@ impl Typer {
 
                 let hir_fn = hir::Fn {
                     def_id: self.fresh_id(),
-                    name: method_name.clone(),
+                    name: method_name,
                     params: vec![hir::Param {
                         def_id: self_id,
                         name: "__self".into(),
@@ -1261,13 +1262,13 @@ impl Typer {
         }
     }
 
-    fn collect_display_usage(block: &[hir::Stmt], needs: &mut std::collections::HashSet<String>) {
+    fn collect_display_usage(block: &[hir::Stmt], needs: &mut std::collections::HashSet<Symbol>) {
         for stmt in block {
             Self::collect_display_usage_stmt(stmt, needs);
         }
     }
 
-    fn collect_display_usage_stmt(stmt: &hir::Stmt, needs: &mut std::collections::HashSet<String>) {
+    fn collect_display_usage_stmt(stmt: &hir::Stmt, needs: &mut std::collections::HashSet<Symbol>) {
         match stmt {
             hir::Stmt::Bind(b) => Self::collect_display_usage_expr(&b.value, needs),
             hir::Stmt::TupleBind(_, e, _) => Self::collect_display_usage_expr(e, needs),
@@ -1309,7 +1310,7 @@ impl Typer {
         }
     }
 
-    fn collect_display_usage_expr(expr: &hir::Expr, needs: &mut std::collections::HashSet<String>) {
+    fn collect_display_usage_expr(expr: &hir::Expr, needs: &mut std::collections::HashSet<Symbol>) {
         match &expr.kind {
             hir::ExprKind::Builtin(hir::BuiltinFn::Log, args) => {
                 for a in args {
@@ -1548,7 +1549,7 @@ impl Typer {
                 if let hir::ExprKind::FnRef(ref mut id, ref mut name) = expr.kind {
                     let has_poly_scheme = self
                         .fn_schemes
-                        .get(name.as_str())
+                        .get(&*name)
                         .map_or(false, |s| !s.0.is_empty());
                     if has_poly_scheme {
                         if let Type::Fn(ref param_tys, _) = expr.ty {
@@ -1556,14 +1557,14 @@ impl Typer {
                             if expr.ty.has_type_var() {
                                 // Leave unresolved — codegen will emit a proper error
                             } else if let Some(inf_fn) =
-                                self.inferable_fns.get(name.as_str()).cloned()
+                                self.inferable_fns.get(&*name).cloned()
                             {
                                 let normalized = Self::normalize_inferable_fn(&inf_fn);
-                                let type_map = self.build_type_map(name, &normalized, param_tys);
-                                if let Ok(mangled) = self.monomorphize_fn(name, &type_map) {
+                                let type_map = self.build_type_map(&name.as_str(), &normalized, param_tys);
+                                if let Ok(mangled) = self.monomorphize_fn(&name.as_str(), &type_map) {
                                     if let Some((mid, _, _)) = self.fns.get(&mangled).cloned() {
                                         *id = mid;
-                                        *name = mangled;
+                                        *name = mangled.into();
                                     }
                                 }
                             }
@@ -1903,7 +1904,7 @@ impl Typer {
             for f in &fields {
                 let fid = self.fresh_id();
                 self.define_var(
-                    &f.name,
+                    &f.name.as_str(),
                     VarInfo {
                         def_id: fid,
                         ty: f.ty.clone(),
@@ -1924,7 +1925,7 @@ impl Typer {
                 });
                 let ownership = Self::ownership_for_type(&ty);
                 self.define_var(
-                    &p.name,
+                    &p.name.as_str(),
                     VarInfo {
                         def_id: pid,
                         ty: ty.clone(),
@@ -2017,7 +2018,7 @@ impl Typer {
         }
         let mut hir_methods = Vec::new();
         for m in &sd.methods {
-            let hm = self.lower_method_by_ptr(&sd.name, m)?;
+            let hm = self.lower_method_by_ptr(&sd.name.as_str(), m)?;
             hir_methods.push(hm);
         }
         Ok(hir::StoreDef {
@@ -2036,7 +2037,7 @@ impl Typer {
     ) -> Result<hir::TraitImpl, String> {
         let mut hir_methods = Vec::new();
         for m in &ib.methods {
-            let hm = self.lower_method_by_ptr(&ib.type_name, m)?;
+            let hm = self.lower_method_by_ptr(&ib.type_name.as_str(), m)?;
             hir_methods.push(hm);
         }
         Ok(hir::TraitImpl {
@@ -2074,7 +2075,7 @@ impl Typer {
         }
     }
 
-    fn build_fn_scheme(&mut self, name: &str, hfn: &hir::Fn) {
+    fn build_fn_scheme(&mut self, name: Symbol, hfn: &hir::Fn) {
         let param_tys: Vec<crate::types::Type> = hfn
             .params
             .iter()
@@ -2102,7 +2103,7 @@ impl Typer {
             }
         }
         self.fn_schemes
-            .insert(name.to_string(), (scheme.quantified, param_tys, ret_ty));
+            .insert(name, (scheme.quantified, param_tys, ret_ty));
     }
 
     pub(crate) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
@@ -2129,7 +2130,7 @@ impl Typer {
             let ty = ptys[i].clone();
             let ownership = Self::ownership_for_type(&ty);
             self.define_var(
-                &p.name,
+                &p.name.as_str(),
                 VarInfo {
                     def_id: pid,
                     ty: ty.clone(),
@@ -2187,7 +2188,7 @@ impl Typer {
         self.pop_scope();
         Ok(hir::Fn {
             def_id: id,
-            name: fn_name.to_string(),
+            name: fn_name.into(),
             params: vec![],
             ret: Type::Void,
             body,
@@ -2217,7 +2218,7 @@ impl Typer {
             }));
             let test_id = self.fns.get(fn_name).unwrap().0;
             body.push(hir::Stmt::Expr(hir::Expr {
-                kind: hir::ExprKind::Call(test_id, fn_name.clone(), vec![]),
+                kind: hir::ExprKind::Call(test_id, Symbol::intern(fn_name), vec![]),
                 ty: Type::Void,
                 span: s,
             }));
@@ -2286,7 +2287,7 @@ impl Typer {
         for m in &td.methods {
             let method_name = format!("{}_{}", td.name, m.name);
             if self.fns.contains_key(&method_name) {
-                let hm = self.lower_method_by_ptr(&td.name, m)?;
+                let hm = self.lower_method_by_ptr(&td.name.as_str(), m)?;
                 hir_methods.push(hm);
             }
         }
@@ -2345,7 +2346,7 @@ impl Typer {
         );
         params.push(hir::Param {
             def_id: self_id,
-            name: "self".to_string(),
+            name: "self".into(),
             ty: self_ty,
             ownership: Ownership::BorrowMut,
             default: None,
@@ -2362,7 +2363,7 @@ impl Typer {
             let ty = ptys[i + 1].clone();
             let ownership = Self::ownership_for_type(&ty);
             self.define_var(
-                &p.name,
+                &p.name.as_str(),
                 VarInfo {
                     def_id: pid,
                     ty: ty.clone(),
@@ -2403,7 +2404,7 @@ impl Typer {
 
         Ok(hir::Fn {
             def_id: id,
-            name: method_name,
+            name: method_name.into(),
             params,
             ret,
             body,
@@ -2500,7 +2501,7 @@ impl Typer {
         if let Some((_, _, ret)) = self.fns.get(&fn_name) {
             if let Type::Enum(ename) = ret {
                 if let Some(stripped) = ename.strip_prefix("Option_") {
-                    return match stripped {
+                    return match &*stripped.as_str() {
                         "i64" => Type::I64,
                         "f64" => Type::F64,
                         "bool" => Type::Bool,
@@ -2549,7 +2550,7 @@ impl Typer {
 
         let bind_stmt = hir::Stmt::Bind(hir::Bind {
             def_id: iter_bind_id,
-            name: iter_var_name.clone(),
+            name: Symbol::intern(&iter_var_name),
             value: iter_expr.clone(),
             ty: iter_expr.ty.clone(),
             ownership: Ownership::Owned,
@@ -2558,13 +2559,13 @@ impl Typer {
         });
 
         let method_name = format!("{type_name}_next");
-        let ret = Type::Enum(option_enum_name.clone());
+        let ret = Type::Enum(option_enum_name.into());
         if let Some(entry) = self.fns.get_mut(&method_name) {
             entry.2 = ret.clone();
         }
 
         let next_call = hir::Expr {
-            kind: hir::ExprKind::IterNext(iter_var_name.clone(), type_name.clone(), "next".into()),
+            kind: hir::ExprKind::IterNext(Symbol::intern(&iter_var_name), type_name.into(), "next".into()),
             ty: ret,
             span,
         };
@@ -2585,7 +2586,7 @@ impl Typer {
 
         self.push_scope();
         self.define_var(
-            &f.bind,
+            &f.bind.as_str(),
             VarInfo {
                 def_id: bind_id,
                 ty: elem_ty.clone(),
@@ -2658,7 +2659,7 @@ impl Typer {
         );
         let map_bind = hir::Stmt::Bind(hir::Bind {
             def_id: map_id,
-            name: map_var.clone(),
+            name: Symbol::intern(&map_var),
             value: map_expr,
             ty: map_ty.clone(),
             ownership: Ownership::Owned,
@@ -2673,7 +2674,7 @@ impl Typer {
         let keys_call = hir::Expr {
             kind: hir::ExprKind::MapMethod(
                 Box::new(hir::Expr {
-                    kind: hir::ExprKind::Var(map_id, map_var.clone()),
+                    kind: hir::ExprKind::Var(map_id, Symbol::intern(&map_var)),
                     ty: map_ty.clone(),
                     span,
                 }),
@@ -2694,7 +2695,7 @@ impl Typer {
         );
         let keys_bind = hir::Stmt::Bind(hir::Bind {
             def_id: keys_id,
-            name: keys_var.clone(),
+            name: Symbol::intern(&keys_var),
             value: keys_call,
             ty: keys_ty.clone(),
             ownership: Ownership::Owned,
@@ -2721,13 +2722,13 @@ impl Typer {
         let k_get = hir::Expr {
             kind: hir::ExprKind::VecMethod(
                 Box::new(hir::Expr {
-                    kind: hir::ExprKind::Var(keys_id, keys_var.clone()),
+                    kind: hir::ExprKind::Var(keys_id, Symbol::intern(&keys_var)),
                     ty: keys_ty.clone(),
                     span,
                 }),
                 "get".into(),
                 vec![hir::Expr {
-                    kind: hir::ExprKind::Var(i_id, i_var.clone()),
+                    kind: hir::ExprKind::Var(i_id, Symbol::intern(&i_var)),
                     ty: Type::I64,
                     span,
                 }],
@@ -2736,7 +2737,7 @@ impl Typer {
             span,
         };
         self.define_var(
-            &f.bind,
+            &f.bind.as_str(),
             VarInfo {
                 def_id: k_id,
                 ty: key_ty.clone(),
@@ -2759,7 +2760,7 @@ impl Typer {
         let v_get = hir::Expr {
             kind: hir::ExprKind::MapMethod(
                 Box::new(hir::Expr {
-                    kind: hir::ExprKind::Var(map_id, map_var.clone()),
+                    kind: hir::ExprKind::Var(map_id, Symbol::intern(&map_var)),
                     ty: map_ty,
                     span,
                 }),
@@ -2784,7 +2785,7 @@ impl Typer {
         );
         let v_bind = hir::Stmt::Bind(hir::Bind {
             def_id: v_id,
-            name: val_bind.to_string(),
+            name: val_bind.into(),
             value: v_get,
             ty: val_ty,
             ownership: Ownership::Owned,
@@ -2802,7 +2803,7 @@ impl Typer {
         let keys_len = hir::Expr {
             kind: hir::ExprKind::VecMethod(
                 Box::new(hir::Expr {
-                    kind: hir::ExprKind::Var(keys_id, keys_var),
+                    kind: hir::ExprKind::Var(keys_id, Symbol::intern(&keys_var)),
                     ty: keys_ty,
                     span,
                 }),
@@ -2815,7 +2816,7 @@ impl Typer {
 
         let for_stmt = hir::Stmt::For(hir::For {
             bind_id: i_id,
-            bind: i_var,
+            bind: Symbol::intern(&i_var),
             bind_ty: Type::I64,
             bind2_id: None,
             bind2: None,
@@ -3145,14 +3146,14 @@ impl Typer {
                     let sub_lists: Vec<&Vec<hir::Pat>> = flat
                         .iter()
                         .filter_map(|p| match p {
-                            hir::Pat::Ctor(n, _, subs, _) if n == vname => Some(subs),
+                            hir::Pat::Ctor(n, _, subs, _) if vname == n => Some(subs),
                             _ => None,
                         })
                         .collect();
 
                     if sub_lists.is_empty() {
                         if field_tys.is_empty() {
-                            missing.push(vname.clone());
+                            missing.push(vname.as_str());
                         } else {
                             let fields = vec!["_"; field_tys.len()].join(", ");
                             missing.push(format!("{}({})", vname, fields));

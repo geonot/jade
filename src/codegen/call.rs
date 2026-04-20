@@ -98,7 +98,7 @@ impl<'ctx> Compiler<'ctx> {
             let self_val = if first_param_is_ptr {
                 // By-pointer method: pass the alloca pointer directly
                 if let hir::ExprKind::Var(_, name) = &obj.kind {
-                    self.find_var(name)
+                    self.find_var(&name.as_str())
                         .ok_or_else(|| format!("undefined variable: {name}"))?
                         .0
                         .into()

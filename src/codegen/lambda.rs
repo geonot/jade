@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::collections::HashSet;
 
 use inkwell::AddressSpace;
@@ -31,18 +32,18 @@ impl<'ctx> Compiler<'ctx> {
         // Collect captured variables
         let mut body_ids = HashSet::new();
         Self::collect_var_refs_block(body, &mut body_ids);
-        let param_names: HashSet<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        let param_names: HashSet<String> = params.iter().map(|p| p.name.as_str()).collect();
         let mut captures: Vec<(String, BasicValueEnum<'ctx>, Type)> = Vec::new();
         for id in &body_ids {
-            if param_names.contains(id.as_str())
+            if param_names.contains(&id.as_str())
                 || self.fns.contains_key(id)
                 || self.variant_tags.contains_key(id)
             {
                 continue;
             }
-            if let Some((ptr, ty)) = self.find_var(id).cloned() {
-                let val = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, id));
-                captures.push((id.clone(), val, ty));
+            if let Some((ptr, ty)) = self.find_var(&id.as_str()).cloned() {
+                let val = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, &id.as_str()));
+                captures.push((id.as_str(), val, ty));
             }
         }
 
@@ -61,7 +62,7 @@ impl<'ctx> Compiler<'ctx> {
         );
         lambda_fv.set_linkage(Linkage::Internal);
         self.fns.insert(
-            lambda_name.clone(),
+            lambda_name.into(),
             (lambda_fv, ptys.clone(), ret_ty.clone()),
         );
 
@@ -116,11 +117,11 @@ impl<'ctx> Compiler<'ctx> {
         // Bind function parameters (offset by 1 for env_ptr)
         for (i, p) in params.iter().enumerate() {
             let ty = &ptys[i];
-            let a = self.entry_alloca(self.llvm_ty(ty), &p.name);
+            let a = self.entry_alloca(self.llvm_ty(ty), &p.name.as_str());
             b!(self
                 .bld
                 .build_store(a, lambda_fv.get_nth_param((i + 1) as u32).unwrap()));
-            self.set_var(&p.name, a, ty.clone());
+            self.set_var(&p.name.as_str(), a, ty.clone());
         }
         let last = self.compile_block(body)?;
         if self.no_term() {
@@ -225,7 +226,7 @@ impl<'ctx> Compiler<'ctx> {
         wrapper_fv.as_global_value().as_pointer_value()
     }
 
-    pub(crate) fn collect_var_refs_block(block: &hir::Block, out: &mut HashSet<String>) {
+    pub(crate) fn collect_var_refs_block(block: &hir::Block, out: &mut HashSet<Symbol>) {
         for stmt in block {
             match stmt {
                 hir::Stmt::Expr(e) | hir::Stmt::Bind(hir::Bind { value: e, .. }) => {
@@ -274,7 +275,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn collect_var_refs_expr(e: &hir::Expr, out: &mut HashSet<String>) {
+    fn collect_var_refs_expr(e: &hir::Expr, out: &mut HashSet<Symbol>) {
         match &e.kind {
             hir::ExprKind::Var(_, n) => {
                 out.insert(n.clone());

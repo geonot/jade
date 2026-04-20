@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use std::path::PathBuf;
 
 use crate::ast::{self, BinOp, Span, UnaryOp};
@@ -126,7 +127,7 @@ impl Typer {
                             span: *span,
                         });
                     }
-                    if let Ok(Some(_mangled)) = self.try_monomorphize_generic_variant(name, None) {
+                    if let Ok(Some(_mangled)) = self.try_monomorphize_generic_variant(&name.as_str(), None) {
                         let (en2, tag2) = self
                             .variant_tags
                             .get(name)
@@ -138,17 +139,17 @@ impl Typer {
                             span: *span,
                         });
                     }
-                } else if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, None)
+                } else if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(&name.as_str(), None)
                 {
                     if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::VariantRef(mangled.clone(), name.clone(), tag),
+                            kind: hir::ExprKind::VariantRef(mangled, *name, tag),
                             ty: Type::Enum(mangled),
                             span: *span,
                         });
                     }
                 }
-                if let Some(v) = self.find_var(name) {
+                if let Some(v) = self.find_var(&name.as_str()) {
                     let def_id = v.def_id;
                     let mono_ty = v.ty.clone();
                     let scheme_clone = v.scheme.clone();
@@ -216,7 +217,7 @@ impl Typer {
                         .map(|fields| fields.iter().any(|(n, _)| n == name))
                         .unwrap_or(false);
                     if is_field {
-                        let self_expr = ast::Expr::Ident("self".to_string(), *span);
+                        let self_expr = ast::Expr::Ident("self".into(), *span);
                         let field_expr = ast::Expr::Field(Box::new(self_expr), name.clone(), *span);
                         return self.lower_expr(&field_expr);
                     }
@@ -438,9 +439,9 @@ impl Typer {
                 // Module-qualified dispatch: module.fn(args) → module_fn(args)
                 // Only if the name is NOT a local variable (variables shadow modules)
                 if let ast::Expr::Ident(ref name, _) = **obj {
-                    if self.modules.contains(name) && self.find_var(name).is_none() {
+                    if self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
                         // Rewrite module.fn(args) to a prefixed function call
-                        let qualified_name = format!("{}_{}", name, method);
+                        let qualified_name = Symbol::intern(&format!("{}_{}", name, method));
                         // If the qualified name is a known extern called from within
                         // the module, dispatch via the extern path
                         if !self.fns.contains_key(&qualified_name)
@@ -506,7 +507,7 @@ impl Typer {
                         return Ok(result);
                     }
                 }
-                let result = self.lower_method_call(obj, method, args, *span)?;
+                let result = self.lower_method_call(obj, &method.as_str(), args, *span)?;
                 if let Some(exp) = expected {
                     self.unify_call_result(exp, &result.ty, *span, "method call result");
                 }
@@ -516,8 +517,8 @@ impl Typer {
             ast::Expr::Field(obj, field, span) => {
                 // Module-qualified constant access: module.CONST → module_CONST
                 if let ast::Expr::Ident(ref name, _) = **obj {
-                    if self.modules.contains(name) && self.find_var(name).is_none() {
-                        let qualified_name = format!("{}_{}", name, field);
+                    if self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
+                        let qualified_name = Symbol::intern(&format!("{}_{}", name, field));
                         let callee = ast::Expr::Ident(qualified_name, *span);
                         return self.lower_expr_expected(&callee, expected);
                     }
@@ -558,7 +559,7 @@ impl Typer {
                 {
                     (Type::I64, 0)
                 } else if let Type::Tuple(ref tys) = resolved_ty {
-                    if let Ok(idx) = field.parse::<usize>() {
+                    if let Ok(idx) = field.as_str().parse::<usize>() {
                         if idx < tys.len() {
                             (tys[idx].clone(), idx)
                         } else {
@@ -586,13 +587,13 @@ impl Typer {
                         .or_default()
                         .push((field.clone(), fty_placeholder.clone()));
 
-                    let all_required_fields: Vec<(String, Type)> = self
+                    let all_required_fields: Vec<(Symbol, Type)> = self
                         .field_constraints
                         .get(&var_id)
                         .cloned()
                         .unwrap_or_default();
 
-                    let candidates: Vec<(String, Vec<(String, Type, usize)>)> = self
+                    let candidates: Vec<(Symbol, Vec<(Symbol, Type, usize)>)> = self
                         .structs
                         .iter()
                         .filter_map(|(sname, fields)| {
@@ -603,18 +604,18 @@ impl Typer {
                                     .enumerate()
                                     .find(|(_, (fname, _))| fname == req_name)
                                 {
-                                    matched.push((req_name.clone(), fty.clone(), idx));
+                                    matched.push((*req_name, fty.clone(), idx));
                                 } else {
                                     return None;
                                 }
                             }
-                            Some((sname.clone(), matched))
+                            Some((*sname, matched))
                         })
                         .collect();
 
                     if candidates.len() == 1 {
                         let (sname, matched_fields) = &candidates[0];
-                        let struct_ty = Type::Struct(sname.clone(), vec![]);
+                        let struct_ty = Type::Struct(*sname, vec![]);
                         let _ = self.infer_ctx.unify_at(
                             &resolved_ty,
                             &struct_ty,
@@ -734,7 +735,7 @@ impl Typer {
             }
 
             ast::Expr::Struct(name, inits, span) => {
-                self.lower_struct_or_variant(name, inits, *span)
+                self.lower_struct_or_variant(&name.as_str(), inits, *span)
             }
 
             ast::Expr::IfExpr(i) => {
@@ -945,7 +946,7 @@ impl Typer {
                 // Collect clauses
                 let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
                 let mut has_delete = false;
-                let mut sets: Vec<(String, ast::Expr)> = Vec::new();
+                let mut sets: Vec<(Symbol, ast::Expr)> = Vec::new();
                 for clause in clauses {
                     match clause {
                         ast::QueryClause::Where(expr, cspan) => {
@@ -966,7 +967,7 @@ impl Typer {
                 }
 
                 let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name)?;
+                let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
 
                 if has_delete {
                     // Delete query block — void expression, side-effect handled
@@ -986,7 +987,7 @@ impl Typer {
                     })
                 } else {
                     // Read query → StoreQuery
-                    let struct_name = format!("__store_{store_name}");
+                    let struct_name = Symbol::intern(&format!("__store_{store_name}"));
                     Ok(hir::Expr {
                         kind: hir::ExprKind::StoreQuery(store_name, Box::new(hfilter)),
                         ty: Type::Struct(struct_name, vec![]),
@@ -1001,8 +1002,8 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
-                let struct_name = format!("__store_{store}");
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
+                let struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreQuery(store.clone(), Box::new(hfilter)),
                     ty: Type::Struct(struct_name, vec![]),
@@ -1025,7 +1026,7 @@ impl Typer {
                 if !self.store_schemas.contains_key(store) {
                     return Err(format!("unknown store '{store}'"));
                 }
-                let struct_name = format!("__store_{store}");
+                let struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreAll(store.clone()),
                     ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
@@ -1038,7 +1039,7 @@ impl Typer {
                     return Err(format!("unknown store '{store}'"));
                 }
                 let hkey = self.lower_expr(key_expr)?;
-                let struct_name = format!("__store_{store}");
+                let struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreGet(store.clone(), Box::new(hkey)),
                     ty: Type::Struct(struct_name, vec![]),
@@ -1052,8 +1053,8 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
-                let struct_name = format!("__store_{store}");
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
+                let struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreFirst(store.clone(), Box::new(hfilter)),
                     ty: Type::Struct(struct_name, vec![]),
@@ -1067,7 +1068,7 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                let hfilter = self.lower_store_filter(filter, &schema, store)?;
+                let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreExists(store.clone(), Box::new(hfilter)),
                     ty: Type::Bool,
@@ -1179,7 +1180,7 @@ impl Typer {
                     // Use Borrowed ownership so emit_scope_drops skips
                     // this variable — the Bind target owns the allocation.
                     self.define_var(
-                        name,
+                        &name.as_str(),
                         VarInfo {
                             def_id: id,
                             ty: coro_ty.clone(),
@@ -1302,7 +1303,7 @@ impl Typer {
                     let bind_id = arm.binding.as_ref().map(|_| self.fresh_id());
                     if let (Some(name), Some(id)) = (&arm.binding, bind_id) {
                         self.define_var(
-                            name,
+                            &name.as_str(),
                             VarInfo {
                                 def_id: id,
                                 ty: elem_ty.clone(),
@@ -1427,18 +1428,18 @@ impl Typer {
                     .map(|e| self.lower_expr(e))
                     .collect::<Result<_, _>>()?;
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::Einsum(notation.clone(), hops),
+                    kind: hir::ExprKind::Einsum(Symbol::intern(notation), hops),
                     ty: Type::Void,
                     span: *span,
                 })
             }
             ast::Expr::Builder(name, fields, span) => {
-                let hfields: Vec<(String, hir::Expr)> = fields
+                let hfields: Vec<(Symbol, hir::Expr)> = fields
                     .iter()
-                    .map(|f| Ok((f.name.clone(), self.lower_expr(&f.value)?)))
+                    .map(|f| Ok((f.name, self.lower_expr(&f.value)?)))
                     .collect::<Result<_, String>>()?;
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::Builder(name.clone(), hfields),
+                    kind: hir::ExprKind::Builder(*name, hfields),
                     ty: Type::Void,
                     span: *span,
                 })
@@ -1458,18 +1459,18 @@ impl Typer {
             ast::Expr::OfCall(func, arg, span) => {
                 // Comptime reflection: `fields of X`, `size of X`, `type of X`
                 if let ast::Expr::Ident(name, _) = func.as_ref() {
-                    match name.as_str() {
+                    match &*name.as_str() {
                         "fields" => {
                             let type_name = match arg.as_ref() {
-                                ast::Expr::Ident(s, _) => s.clone(),
-                                ast::Expr::Str(s, _) => s.clone(),
+                                ast::Expr::Ident(s, _) => *s,
+                                ast::Expr::Str(s, _) => Symbol::intern(s),
                                 _ => return Err("fields of expects a type name".into()),
                             };
                             let fields = self.structs.get(&type_name).cloned().unwrap_or_default();
                             let field_exprs: Vec<hir::Expr> = fields
                                 .iter()
                                 .map(|(fname, _)| hir::Expr {
-                                    kind: hir::ExprKind::Str(fname.clone()),
+                                    kind: hir::ExprKind::Str(fname.as_str()),
                                     ty: Type::String,
                                     span: *span,
                                 })
@@ -1483,8 +1484,23 @@ impl Typer {
                         }
                         "size" => {
                             let size = match arg.as_ref() {
-                                ast::Expr::Ident(s, _) | ast::Expr::Str(s, _) => {
+                                ast::Expr::Ident(s, _) => {
                                     if let Some(fields) = self.structs.get(s) {
+                                        fields.len() as i64 * 8
+                                    } else {
+                                        match &*s.as_str() {
+                                            "i8" | "u8" | "bool" => 1,
+                                            "i16" | "u16" => 2,
+                                            "i32" | "u32" | "f32" => 4,
+                                            "i64" | "u64" | "f64" => 8,
+                                            "String" | "string" | "str" => 24,
+                                            _ => 0,
+                                        }
+                                    }
+                                }
+                                ast::Expr::Str(s, _) => {
+                                    let sym = Symbol::intern(s);
+                                    if let Some(fields) = self.structs.get(&sym) {
                                         fields.len() as i64 * 8
                                     } else {
                                         match s.as_str() {
@@ -1528,7 +1544,7 @@ impl Typer {
                     if name == "type" {
                         // Try to resolve via variable info first (for bound variables)
                         if let ast::Expr::Ident(vname, _) = arg.as_ref() {
-                            if let Some(ty) = self.find_var(vname).map(|i| i.ty.clone()) {
+                            if let Some(ty) = self.find_var(&vname.as_str()).map(|i| i.ty.clone()) {
                                 let resolved = self.infer_ctx.resolve(&ty);
                                 let ty_str = format!("{}", resolved);
                                 return Ok(hir::Expr {
@@ -1641,14 +1657,14 @@ impl Typer {
 
             // Build: match <expr> { Some(v) => v, Nothing => return Nothing }
             let bind_id = self.fresh_id();
-            let bind_name = format!("__try_{}", bind_id.0);
+            let bind_name = Symbol::intern(&format!("__try_{}", bind_id.0));
 
             let some_pat = hir::Pat::Ctor(
                 "Some".to_string(),
                 some_tag,
                 vec![hir::Pat::Bind(
                     bind_id,
-                    bind_name.clone(),
+                    bind_name,
                     inner_ty.clone(),
                     span,
                 )],
@@ -1664,7 +1680,7 @@ impl Typer {
             let nothing_val = hir::Expr {
                 kind: hir::ExprKind::VariantCtor(
                     enum_name.clone(),
-                    "Nothing".to_string(),
+                    "Nothing".into(),
                     nothing_tag,
                     vec![],
                 ),
@@ -1741,16 +1757,16 @@ impl Typer {
 
             // Build: match <expr> { Ok(v) => v, Err(e) => return Err(e) }
             let ok_bind_id = self.fresh_id();
-            let ok_bind_name = format!("__try_ok_{}", ok_bind_id.0);
+            let ok_bind_name = Symbol::intern(&format!("__try_ok_{}", ok_bind_id.0));
             let err_bind_id = self.fresh_id();
-            let err_bind_name = format!("__try_err_{}", err_bind_id.0);
+            let err_bind_name = Symbol::intern(&format!("__try_err_{}", err_bind_id.0));
 
             let ok_pat = hir::Pat::Ctor(
                 "Ok".to_string(),
                 ok_tag,
                 vec![hir::Pat::Bind(
                     ok_bind_id,
-                    ok_bind_name.clone(),
+                    ok_bind_name,
                     ok_ty.clone(),
                     span,
                 )],
@@ -1767,7 +1783,7 @@ impl Typer {
                 err_tag,
                 vec![hir::Pat::Bind(
                     err_bind_id,
-                    err_bind_name.clone(),
+                    err_bind_name,
                     err_ty.clone(),
                     span,
                 )],
@@ -1782,7 +1798,7 @@ impl Typer {
             let err_rewrap = hir::Expr {
                 kind: hir::ExprKind::VariantCtor(
                     enum_name.clone(),
-                    "Err".to_string(),
+                    "Err".into(),
                     err_tag,
                     vec![hir::FieldInit {
                         name: None,
@@ -1831,7 +1847,7 @@ impl Typer {
     fn collect_type_mapping(
         declared: &Type,
         concrete: &Type,
-        map: &mut std::collections::HashMap<String, Type>,
+        map: &mut std::collections::HashMap<Symbol, Type>,
     ) {
         match declared {
             Type::Param(name) => {
@@ -1867,7 +1883,7 @@ impl Typer {
     /// Substitute type parameter names in a type with their concrete types.
     fn substitute_type_params(
         ty: &Type,
-        map: &std::collections::HashMap<String, Type>,
+        map: &std::collections::HashMap<Symbol, Type>,
     ) -> Type {
         match ty {
             Type::Param(name) => map.get(name).cloned().unwrap_or_else(|| ty.clone()),
@@ -1946,7 +1962,7 @@ impl Typer {
                 })
                 .collect::<Result<_, String>>()?;
             return Ok(hir::Expr {
-                kind: hir::ExprKind::VariantCtor(enum_name.clone(), name.to_string(), tag, hinits),
+                kind: hir::ExprKind::VariantCtor(enum_name, name.into(), tag, hinits),
                 ty: Type::Enum(enum_name),
                 span,
             });
@@ -1990,7 +2006,7 @@ impl Typer {
                 }
 
                 // Build concrete field list
-                let concrete_fields: Vec<(String, Type)> = gtd
+                let concrete_fields: Vec<(Symbol, Type)> = gtd
                     .fields
                     .iter()
                     .map(|f| {
@@ -1999,7 +2015,7 @@ impl Typer {
                             .as_ref()
                             .map(|t| Self::substitute_type_params(t, &type_map))
                             .unwrap_or(Type::I64);
-                        (f.name.clone(), ty)
+                        (f.name, ty)
                     })
                     .collect();
 
@@ -2010,17 +2026,17 @@ impl Typer {
                     .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
                     .collect::<Vec<_>>()
                     .join("_");
-                let mangled = format!("{name}_{ty_suffix}");
+                let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
 
                 if !self.structs.contains_key(&mangled) {
                     // Register the monomorphized struct
-                    self.structs.insert(mangled.clone(), concrete_fields.clone());
+                    self.structs.insert(mangled, concrete_fields.clone());
 
                     // Build HIR TypeDef for codegen
                     let hir_fields: Vec<hir::Field> = concrete_fields
                         .iter()
                         .map(|(fname, fty)| hir::Field {
-                            name: fname.clone(),
+                            name: *fname,
                             ty: fty.clone(),
                             default: None,
                             span,
@@ -2028,7 +2044,7 @@ impl Typer {
                         .collect();
                     let htd = hir::TypeDef {
                         def_id: self.fresh_id(),
-                        name: mangled.clone(),
+                        name: mangled,
                         fields: hir_fields,
                         methods: Vec::new(),
                         layout: gtd.layout.clone(),
@@ -2050,10 +2066,10 @@ impl Typer {
                                 Some(Self::substitute_type_params(ret, &type_map));
                         }
                         self.methods
-                            .entry(mangled.clone())
+                            .entry(mangled)
                             .or_default()
                             .push(mono_method.clone());
-                        self.declare_method_sig_by_ptr(&mangled, &mono_method);
+                        self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
                     }
                 }
 
@@ -2078,7 +2094,7 @@ impl Typer {
                 }
 
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::Struct(mangled.clone(), hinits_g),
+                    kind: hir::ExprKind::Struct(mangled, hinits_g),
                     ty: Type::Struct(mangled, vec![]),
                     span,
                 });
@@ -2112,9 +2128,9 @@ impl Typer {
                 .variant_tags
                 .get(name)
                 .cloned()
-                .unwrap_or((mangled.clone(), 0));
+                .unwrap_or((mangled, 0));
             return Ok(hir::Expr {
-                kind: hir::ExprKind::VariantCtor(mangled.clone(), name.to_string(), tag, hinits),
+                kind: hir::ExprKind::VariantCtor(mangled, name.into(), tag, hinits),
                 ty: Type::Enum(mangled),
                 span,
             });
@@ -2123,11 +2139,11 @@ impl Typer {
         if let Some(fields) = self.structs.get(name).cloned() {
             // For structs with inferred fields, check if the resolved field types
             // conflict with the argument types. If so, create a monomorphized variant.
-            if self.inferred_field_structs.contains(name) {
+            if self.inferred_field_structs.contains(&Symbol::intern(name)) {
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
                     let resolved = self.infer_ctx.shallow_resolve(declared_ty);
                     let arg_ty = if let Some(fi) =
-                        hinits.iter().find(|fi| fi.name.as_deref() == Some(fname))
+                        hinits.iter().find(|fi| fi.name == Some(*fname))
                     {
                         Some(&fi.value.ty)
                     } else {
@@ -2199,7 +2215,7 @@ impl Typer {
                         .collect();
                     let mangled_name = self.monomorphize_struct(name, &fields, &arg_tys, span)?;
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::Struct(mangled_name.clone(), hinits),
+                        kind: hir::ExprKind::Struct(mangled_name, hinits),
                         ty: Type::Struct(mangled_name, vec![]),
                         span,
                     });
@@ -2233,8 +2249,8 @@ impl Typer {
         }
 
         Ok(hir::Expr {
-            kind: hir::ExprKind::Struct(name.to_string(), hinits),
-            ty: Type::Struct(name.to_string(), vec![]),
+            kind: hir::ExprKind::Struct(name.into(), hinits),
+            ty: Type::Struct(name.into(), vec![]),
             span,
         })
     }
@@ -2266,7 +2282,7 @@ impl Typer {
             ptys.push(ty.clone());
             let ownership = Self::ownership_for_type(&ty);
             self.define_var(
-                &p.name,
+                &p.name.as_str(),
                 VarInfo {
                     def_id: pid,
                     ty: ty.clone(),

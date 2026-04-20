@@ -1,3 +1,4 @@
+use crate::intern::Symbol;
 use crate::ast::{self, Span};
 use crate::types::Type;
 
@@ -39,7 +40,7 @@ impl std::fmt::Display for Ownership {
 
 #[derive(Debug, Clone)]
 pub struct Global {
-    pub name: String,
+    pub name: Symbol,
     pub init: Expr,
     pub ty: Type,
     pub span: Span,
@@ -56,17 +57,17 @@ pub struct Program {
     pub stores: Vec<StoreDef>,
     pub trait_impls: Vec<TraitImpl>,
     pub supervisors: Vec<SupervisorDef>,
-    pub type_aliases: Vec<(String, Type, Span)>,
-    pub newtypes: Vec<(String, Type, Span)>,
+    pub type_aliases: Vec<(Symbol, Type, Span)>,
+    pub newtypes: Vec<(Symbol, Type, Span)>,
     pub migrations: Vec<crate::ast::MigrationDef>,
     pub globals: Vec<Global>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TraitImpl {
-    pub trait_name: Option<String>,
+    pub trait_name: Option<Symbol>,
     pub trait_type_args: Vec<Type>,
-    pub type_name: String,
+    pub type_name: Symbol,
     pub methods: Vec<Fn>,
     pub span: Span,
 }
@@ -74,12 +75,12 @@ pub struct TraitImpl {
 #[derive(Debug, Clone)]
 pub struct Fn {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Block,
     pub span: Span,
-    pub generic_origin: Option<String>,
+    pub generic_origin: Option<Symbol>,
     pub is_generator: bool,
     pub attrs: crate::ast::FnAttrs,
 }
@@ -87,7 +88,7 @@ pub struct Fn {
 #[derive(Debug, Clone)]
 pub struct Param {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub ty: Type,
     pub ownership: Ownership,
     pub default: Option<Expr>,
@@ -97,7 +98,7 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<Field>,
     pub methods: Vec<Fn>,
     pub layout: crate::ast::LayoutAttrs,
@@ -106,7 +107,7 @@ pub struct TypeDef {
 
 #[derive(Debug, Clone)]
 pub struct Field {
-    pub name: String,
+    pub name: Symbol,
     pub ty: Type,
     pub default: Option<Expr>,
     pub span: Span,
@@ -115,14 +116,14 @@ pub struct Field {
 #[derive(Debug, Clone)]
 pub struct EnumDef {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub variants: Vec<Variant>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct Variant {
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<VField>,
     pub tag: u32,
     pub discriminant: Option<i64>,
@@ -131,15 +132,15 @@ pub struct Variant {
 
 #[derive(Debug, Clone)]
 pub struct VField {
-    pub name: Option<String>,
+    pub name: Option<Symbol>,
     pub ty: Type,
 }
 
 #[derive(Debug, Clone)]
 pub struct ExternFn {
     pub def_id: DefId,
-    pub name: String,
-    pub params: Vec<(String, Type)>,
+    pub name: Symbol,
+    pub params: Vec<(Symbol, Type)>,
     pub ret: Type,
     pub variadic: bool,
     pub span: Span,
@@ -148,14 +149,14 @@ pub struct ExternFn {
 #[derive(Debug, Clone)]
 pub struct ErrDef {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub variants: Vec<ErrVariant>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct ErrVariant {
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<Type>,
     pub tag: u32,
     pub span: Span,
@@ -166,7 +167,7 @@ pub type Block = Vec<Stmt>;
 #[derive(Debug, Clone)]
 pub struct ActorDef {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub fields: Vec<Field>,
     pub handlers: Vec<HandlerDef>,
     pub span: Span,
@@ -174,7 +175,7 @@ pub struct ActorDef {
 
 #[derive(Debug, Clone)]
 pub struct HandlerDef {
-    pub name: String,
+    pub name: Symbol,
     pub params: Vec<Param>,
     pub body: Block,
     pub tag: u32,
@@ -183,7 +184,7 @@ pub struct HandlerDef {
 
 #[derive(Debug, Clone)]
 pub struct StoreField {
-    pub name: String,
+    pub name: Symbol,
     pub ty: Type,
     pub default: Option<Expr>,
     pub decorators: Vec<ast::FieldDecorator>,
@@ -195,7 +196,7 @@ pub struct StoreField {
 #[derive(Debug, Clone)]
 pub struct StoreDef {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub decorators: Vec<ast::StoreDecorator>,
     pub fields: Vec<StoreField>,
     pub methods: Vec<Fn>,
@@ -212,15 +213,15 @@ pub enum SupervisorStrategy {
 #[derive(Debug, Clone)]
 pub struct SupervisorDef {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub strategy: SupervisorStrategy,
-    pub children: Vec<String>,
+    pub children: Vec<Symbol>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct StoreFilter {
-    pub field: String,
+    pub field: Symbol,
     pub op: BinOp,
     pub value: Expr,
     pub span: Span,
@@ -229,7 +230,7 @@ pub struct StoreFilter {
 
 #[derive(Debug, Clone)]
 pub struct StoreFilterCond {
-    pub field: String,
+    pub field: Symbol,
     pub op: BinOp,
     pub value: Expr,
 }
@@ -237,7 +238,7 @@ pub struct StoreFilterCond {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Bind(Bind),
-    TupleBind(Vec<(DefId, String, Type)>, Expr, Span),
+    TupleBind(Vec<(DefId, Symbol, Type)>, Expr, Span),
     Assign(Expr, Expr, Span),
     Expr(Expr),
     If(If),
@@ -249,22 +250,22 @@ pub enum Stmt {
     Continue(Span),
     Match(Match),
     Asm(AsmBlock),
-    Drop(DefId, String, Type, Span),
+    Drop(DefId, Symbol, Type, Span),
     ErrReturn(Expr, Type, Span),
-    StoreInsert(String, Vec<Expr>, Span),
-    StoreDelete(String, Box<StoreFilter>, Span),
-    StoreDestroy(String, Box<StoreFilter>, Span),
-    StoreSet(String, Vec<(String, Expr)>, Box<StoreFilter>, Span),
-    StoreRestore(String, Box<StoreFilter>, Span),
-    StoreSave(String, Span),
+    StoreInsert(Symbol, Vec<Expr>, Span),
+    StoreDelete(Symbol, Box<StoreFilter>, Span),
+    StoreDestroy(Symbol, Box<StoreFilter>, Span),
+    StoreSet(Symbol, Vec<(Symbol, Expr)>, Box<StoreFilter>, Span),
+    StoreRestore(Symbol, Box<StoreFilter>, Span),
+    StoreSave(Symbol, Span),
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     SimFor(For, Span),
     SimBlock(Block, Span),
-    UseLocal(Vec<String>, Option<Vec<String>>, Option<String>, Span),
+    UseLocal(Vec<Symbol>, Option<Vec<Symbol>>, Option<Symbol>, Span),
     /// Store a value into a global mutable variable.
-    GlobalStore(String, Expr, Span),
+    GlobalStore(Symbol, Expr, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -272,7 +273,7 @@ pub struct SelectArm {
     pub is_send: bool,
     pub chan: Expr,
     pub value: Option<Expr>,
-    pub binding: Option<String>,
+    pub binding: Option<Symbol>,
     pub bind_id: Option<DefId>,
     pub elem_ty: Type,
     pub body: Block,
@@ -282,7 +283,7 @@ pub struct SelectArm {
 #[derive(Debug, Clone)]
 pub struct Bind {
     pub def_id: DefId,
-    pub name: String,
+    pub name: Symbol,
     pub value: Expr,
     pub ty: Type,
     pub ownership: Ownership,
@@ -307,42 +308,42 @@ pub enum ExprKind {
     Bool(bool),
     None,
     Void,
-    Var(DefId, String),
-    FnRef(DefId, String),
-    VariantRef(String, String, u32),
+    Var(DefId, Symbol),
+    FnRef(DefId, Symbol),
+    VariantRef(Symbol, Symbol, u32),
     BinOp(Box<Expr>, BinOp, Box<Expr>),
     UnaryOp(UnaryOp, Box<Expr>),
-    Call(DefId, String, Vec<Expr>),
+    Call(DefId, Symbol, Vec<Expr>),
     IndirectCall(Box<Expr>, Vec<Expr>),
     Builtin(BuiltinFn, Vec<Expr>),
-    Method(Box<Expr>, String, String, Vec<Expr>),
-    StringMethod(Box<Expr>, String, Vec<Expr>),
+    Method(Box<Expr>, Symbol, Symbol, Vec<Expr>),
+    StringMethod(Box<Expr>, Symbol, Vec<Expr>),
     /// Placeholder for method calls whose receiver type was unknown at
     /// lowering time.  `reclassify_method_call` resolves these to the
     /// correct variant once type inference has run.  If one survives to
     /// codegen it is a bug.
-    DeferredMethod(Box<Expr>, String, Vec<Expr>),
-    VecMethod(Box<Expr>, String, Vec<Expr>),
-    MapMethod(Box<Expr>, String, Vec<Expr>),
+    DeferredMethod(Box<Expr>, Symbol, Vec<Expr>),
+    VecMethod(Box<Expr>, Symbol, Vec<Expr>),
+    MapMethod(Box<Expr>, Symbol, Vec<Expr>),
     VecNew(Vec<Expr>),
     MapNew,
     SetNew,
-    SetMethod(Box<Expr>, String, Vec<Expr>),
+    SetMethod(Box<Expr>, Symbol, Vec<Expr>),
     PQNew,
-    PQMethod(Box<Expr>, String, Vec<Expr>),
+    PQMethod(Box<Expr>, Symbol, Vec<Expr>),
     NDArrayNew(Vec<Expr>),
     SIMDNew(Vec<Expr>),
-    Field(Box<Expr>, String, usize),
+    Field(Box<Expr>, Symbol, usize),
     Index(Box<Expr>, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
     Coerce(Box<Expr>, CoercionKind),
     Cast(Box<Expr>, Type),
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
-    Struct(String, Vec<FieldInit>),
-    VariantCtor(String, String, u32, Vec<FieldInit>),
+    Struct(Symbol, Vec<FieldInit>),
+    VariantCtor(Symbol, Symbol, u32, Vec<FieldInit>),
     IfExpr(Box<If>),
-    Pipe(Box<Expr>, DefId, String, Vec<Expr>),
+    Pipe(Box<Expr>, DefId, Symbol, Vec<Expr>),
     Block(Block),
     Lambda(Vec<Param>, Block),
     Ref(Box<Expr>),
@@ -356,58 +357,58 @@ pub enum ExprKind {
         Option<Box<Expr>>,
     ),
     Syscall(Vec<Expr>),
-    Spawn(String),
-    Send(Box<Expr>, String, String, u32, Vec<Expr>),
-    CoroutineCreate(String, Vec<Stmt>),
+    Spawn(Symbol),
+    Send(Box<Expr>, Symbol, Symbol, u32, Vec<Expr>),
+    CoroutineCreate(Symbol, Vec<Stmt>),
     CoroutineNext(Box<Expr>),
     Yield(Box<Expr>),
-    DynDispatch(Box<Expr>, String, String, Vec<Expr>),
-    DynCoerce(Box<Expr>, String, String),
-    StoreQuery(String, Box<StoreFilter>),
-    StoreCount(String),
-    StoreAll(String),
-    StoreGet(String, Box<Expr>),
-    StoreFirst(String, Box<StoreFilter>),
-    StoreExists(String, Box<StoreFilter>),
-    StoreDistinct(String, String),
-    StoreSum(String, String),
-    StoreAvg(String, String),
-    StoreMin(String, String),
-    StoreMax(String, String),
-    StoreVersionCount(String, Box<Expr>), // store_name, sid_expr
-    StoreHistory(String, Box<Expr>),      // store_name, sid_expr
-    StoreAtVersion(String, Box<Expr>, Box<Expr>), // store_name, sid_expr, version_expr
-    ViewCount(String, Box<StoreFilter>),  // source_store, filter
-    ViewAll(String, Box<StoreFilter>),    // source_store, filter
+    DynDispatch(Box<Expr>, Symbol, Symbol, Vec<Expr>),
+    DynCoerce(Box<Expr>, Symbol, Symbol),
+    StoreQuery(Symbol, Box<StoreFilter>),
+    StoreCount(Symbol),
+    StoreAll(Symbol),
+    StoreGet(Symbol, Box<Expr>),
+    StoreFirst(Symbol, Box<StoreFilter>),
+    StoreExists(Symbol, Box<StoreFilter>),
+    StoreDistinct(Symbol, Symbol),
+    StoreSum(Symbol, Symbol),
+    StoreAvg(Symbol, Symbol),
+    StoreMin(Symbol, Symbol),
+    StoreMax(Symbol, Symbol),
+    StoreVersionCount(Symbol, Box<Expr>), // store_name, sid_expr
+    StoreHistory(Symbol, Box<Expr>),      // store_name, sid_expr
+    StoreAtVersion(Symbol, Box<Expr>, Box<Expr>), // store_name, sid_expr, version_expr
+    ViewCount(Symbol, Box<StoreFilter>),  // source_store, filter
+    ViewAll(Symbol, Box<StoreFilter>),    // source_store, filter
     // @kv store operations
-    KvGet(String, Box<Expr>),             // store_name, key_expr → i64
-    KvHas(String, Box<Expr>),             // store_name, key_expr → bool
-    KvCount(String),                      // store_name → i64
-    KvSet(String, Box<Expr>, Box<Expr>),  // store_name, key_expr, val_expr → void
-    KvDel(String, Box<Expr>),             // store_name, key_expr → void
-    KvIncr(String, Box<Expr>, Box<Expr>), // store_name, key_expr, delta_expr → void
+    KvGet(Symbol, Box<Expr>),             // store_name, key_expr → i64
+    KvHas(Symbol, Box<Expr>),             // store_name, key_expr → bool
+    KvCount(Symbol),                      // store_name → i64
+    KvSet(Symbol, Box<Expr>, Box<Expr>),  // store_name, key_expr, val_expr → void
+    KvDel(Symbol, Box<Expr>),             // store_name, key_expr → void
+    KvIncr(Symbol, Box<Expr>, Box<Expr>), // store_name, key_expr, delta_expr → void
     // @vector store operations
-    VecNearest(String, Box<Expr>, Box<Expr>), // store_name, query_vec, k → count
-    VecInsert(String, Box<Expr>),             // store_name, vec_expr → void
-    VecCount(String),                         // store_name → i64
+    VecNearest(Symbol, Box<Expr>, Box<Expr>), // store_name, query_vec, k → count
+    VecInsert(Symbol, Box<Expr>),             // store_name, vec_expr → void
+    VecCount(Symbol),                         // store_name → i64
     // @bloom filter operations
-    BloomTest(String, String, Box<Expr>), // store_name, field_name, value → bool
+    BloomTest(Symbol, Symbol, Box<Expr>), // store_name, field_name, value → bool
     // @fts operations
-    FtsSearch(String, String, Box<Expr>), // store_name, field_name, query → count
-    FtsCount(String, String),             // store_name, field_name → count
+    FtsSearch(Symbol, Symbol, Box<Expr>), // store_name, field_name, query → count
+    FtsCount(Symbol, Symbol),             // store_name, field_name → count
     // @graph store operations
-    GraphFrom(String, Box<Expr>), // store_name, node_sid → ptr (edges from)
-    GraphTo(String, Box<Expr>),   // store_name, node_sid → ptr (edges to)
+    GraphFrom(Symbol, Box<Expr>), // store_name, node_sid → ptr (edges from)
+    GraphTo(Symbol, Box<Expr>),   // store_name, node_sid → ptr (edges to)
     // @timeseries operations
-    TsLatest(String), // store_name → record (latest entry)
-    IterNext(String, String, String),
+    TsLatest(Symbol), // store_name → record (latest entry)
+    IterNext(Symbol, Symbol, Symbol),
     ChannelCreate(Type, Box<Expr>),
     ChannelSend(Box<Expr>, Box<Expr>),
     ChannelRecv(Box<Expr>),
     Select(Vec<SelectArm>, Option<Block>),
     Unreachable,
     StrictCast(Box<Expr>, Type),
-    AsFormat(Box<Expr>, String),
+    AsFormat(Box<Expr>, Symbol),
     AtomicLoad(Box<Expr>),
     AtomicStore(Box<Expr>, Box<Expr>),
     AtomicAdd(Box<Expr>, Box<Expr>),
@@ -415,22 +416,22 @@ pub enum ExprKind {
     AtomicCas(Box<Expr>, Box<Expr>, Box<Expr>),
     Slice(Box<Expr>, Box<Expr>, Box<Expr>),
     DequeNew,
-    DequeMethod(Box<Expr>, String, Vec<Expr>),
+    DequeMethod(Box<Expr>, Symbol, Vec<Expr>),
     Grad(Box<Expr>),
-    Einsum(String, Vec<Expr>),
-    Builder(String, Vec<(String, Expr)>),
+    Einsum(Symbol, Vec<Expr>),
+    Builder(Symbol, Vec<(Symbol, Expr)>),
     CowWrap(Box<Expr>),
     CowClone(Box<Expr>),
-    GeneratorCreate(DefId, String, Vec<Stmt>),
+    GeneratorCreate(DefId, Symbol, Vec<Stmt>),
     GeneratorNext(Box<Expr>),
     /// Unwrap an Option/Result enum — extract inner value or abort.
     /// Fields: (expr, enum_name, success_tag)
-    EnumUnwrap(Box<Expr>, String, u32),
+    EnumUnwrap(Box<Expr>, Symbol, u32),
     /// Check an enum tag — returns bool.
     /// Fields: (expr, tag_to_check)
     EnumIs(Box<Expr>, u32),
     /// Load from a global mutable variable.
-    GlobalLoad(String),
+    GlobalLoad(Symbol),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -495,7 +496,7 @@ pub enum BuiltinFn {
     CompTimeTypeOf,
     CompTimeFieldsOf,
     CompTimeSizeOf,
-    CharMethod(String),
+    CharMethod(Symbol),
     Matmul,
     RegexMatch,
     RegexFindAll,
@@ -512,7 +513,7 @@ pub enum BuiltinFn {
     PoolAlloc,
     PoolFree,
     PoolDestroy,
-    FloatMethod(String),
+    FloatMethod(Symbol),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -556,10 +557,10 @@ pub struct While {
 #[derive(Debug, Clone)]
 pub struct For {
     pub bind_id: DefId,
-    pub bind: String,
+    pub bind: Symbol,
     pub bind_ty: Type,
     pub bind2_id: Option<DefId>,
-    pub bind2: Option<String>,
+    pub bind2: Option<Symbol>,
     pub bind2_ty: Option<Type>,
     pub iter: Expr,
     pub end: Option<Expr>,
@@ -593,7 +594,7 @@ pub struct Arm {
 #[derive(Debug, Clone)]
 pub enum Pat {
     Wild(Span),
-    Bind(DefId, String, Type, Span),
+    Bind(DefId, Symbol, Type, Span),
     Lit(Expr),
     Ctor(String, u32, Vec<Pat>, Span),
     Or(Vec<Pat>, Span),
@@ -604,7 +605,7 @@ pub enum Pat {
 
 #[derive(Debug, Clone)]
 pub struct FieldInit {
-    pub name: Option<String>,
+    pub name: Option<Symbol>,
     pub value: Expr,
 }
 
@@ -776,7 +777,7 @@ impl PrettyPrinter {
     }
 
     fn trait_impl(&mut self, ti: &TraitImpl) {
-        let trait_part = ti.trait_name.as_deref().unwrap_or("_");
+        let trait_part = ti.trait_name.map(|s| s.as_str()).unwrap_or_else(|| "_".to_string());
         self.line(&format!("impl {} for {}:", trait_part, ti.type_name));
         self.push();
         for m in &ti.methods {
@@ -800,7 +801,6 @@ impl PrettyPrinter {
             .collect();
         let gen_tag = f
             .generic_origin
-            .as_deref()
             .map(|g| format!(" <{g}>"))
             .unwrap_or_default();
         self.line(&format!(
@@ -995,10 +995,10 @@ impl PrettyPrinter {
                 self.pop();
             }
             Stmt::UseLocal(path, imports, alias, _) => {
-                let p = path.join(".");
+                let p = Symbol::join_vec(path, ".");
                 let i = imports
                     .as_ref()
-                    .map(|is| format!(" import {}", is.join(", ")))
+                    .map(|is| format!(" import {}", Symbol::join_vec(is, ", ")))
                     .unwrap_or_default();
                 let a = alias
                     .as_ref()
@@ -1164,7 +1164,7 @@ impl PrettyPrinter {
                 let fs: Vec<String> = fields
                     .iter()
                     .map(|f| {
-                        let n = f.name.as_deref().unwrap_or("_");
+                        let n = f.name.map(|s| s.as_str()).unwrap_or_else(|| "_".to_string());
                         format!("{n}: {}", self.expr_str(&f.value))
                     })
                     .collect();
@@ -1174,7 +1174,7 @@ impl PrettyPrinter {
                 let fs: Vec<String> = fields
                     .iter()
                     .map(|f| {
-                        let n = f.name.as_deref().unwrap_or("_");
+                        let n = f.name.map(|s| s.as_str()).unwrap_or_else(|| "_".to_string());
                         format!("{n}: {}", self.expr_str(&f.value))
                     })
                     .collect();
