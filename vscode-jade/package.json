@@ -11,7 +11,7 @@
   "contributes": {
     "languages": [
       {
-        "id": "jade",
+        "id": "jade-lang",
         "aliases": ["Jade", "jade"],
         "extensions": [".jade"],
         "configuration": "./language-configuration.json"
@@ -19,8 +19,8 @@
     ],
     "grammars": [
       {
-        "language": "jade",
-        "scopeName": "source.jade",
+        "language": "jade-lang",
+        "scopeName": "source.jade-lang",
         "path": "./syntaxes/jade.tmLanguage.json"
       }
     ]

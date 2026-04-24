@@ -127,6 +127,8 @@ long jade_aes_gcm_decrypt(const unsigned char *key, const unsigned char *iv,
     return pt_len;
 
 fail:
+    /* Zero any partially written plaintext before returning failure */
+    if (pt_len > 0) OPENSSL_cleanse(out, (size_t)pt_len);
     EVP_CIPHER_CTX_free(ctx);
     return -1;
 }

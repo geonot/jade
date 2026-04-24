@@ -143,11 +143,19 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&format!("actor {}\n", a.name));
             for h in &a.handlers {
                 indent(out, level + 1);
-                out.push_str(&format!("*{}", h.name));
-                for p in &h.params {
-                    out.push_str(&format!(" {}", p.name));
-                    if let Some(ref ty) = p.ty {
-                        out.push_str(&format!(" {}", format_type(ty)));
+                if h.is_loop {
+                    out.push_str("*loop");
+                    if let Some(ref sleep_ms) = h.loop_sleep_ms {
+                        out.push(' ');
+                        out.push_str(&format_expr(sleep_ms));
+                    }
+                } else {
+                    out.push_str(&format!("*{}", h.name));
+                    for p in &h.params {
+                        out.push_str(&format!(" {}", p.name));
+                        if let Some(ref ty) = p.ty {
+                            out.push_str(&format!(" {}", format_type(ty)));
+                        }
                     }
                 }
                 out.push('\n');

@@ -304,7 +304,8 @@ impl Typer {
         let env_ftvs = self.free_type_vars_in_env();
         let mut ty_ftvs = std::collections::HashSet::new();
         resolved.free_type_vars(&mut ty_ftvs);
-        let quantified: Vec<u32> = ty_ftvs.difference(&env_ftvs).copied().collect();
+        let mut quantified: Vec<u32> = ty_ftvs.difference(&env_ftvs).copied().collect();
+        quantified.sort_unstable(); // deterministic scheme variable ordering
         if quantified.is_empty() {
             Scheme::mono(resolved)
         } else {

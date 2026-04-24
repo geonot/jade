@@ -72,6 +72,8 @@ pub struct MirCodegen<'a, 'ctx> {
     migration_fns: Vec<inkwell::values::FunctionValue<'ctx>>,
     /// Generated global initializer function to call from main wrapper.
     global_init_fn: Option<inkwell::values::FunctionValue<'ctx>>,
+    /// Per-function VecNew(ValueId) -> growth floor used for VecPush on that vec.
+    vec_growth_floor_by_value: HashMap<mir::ValueId, u64>,
 }
 
 struct PendingPhi<'ctx> {
@@ -96,7 +98,40 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             block_exit_map: HashMap::new(),
             migration_fns: Vec::new(),
             global_init_fn: None,
+            vec_growth_floor_by_value: HashMap::new(),
         }
+    }
+
+    fn compute_vec_growth_floors(func: &mir::Function) -> HashMap<mir::ValueId, u64> {
+        let mut pushes_by_vec: HashMap<mir::ValueId, u32> = HashMap::new();
+        for bb in &func.blocks {
+            for inst in &bb.insts {
+                if let mir::InstKind::VecPush(vec_id, _) = inst.kind {
+                    *pushes_by_vec.entry(vec_id).or_insert(0) += 1;
+                }
+            }
+        }
+
+        let mut floors = HashMap::new();
+        for bb in &func.blocks {
+            for inst in &bb.insts {
+                if let (Some(dest), mir::InstKind::VecNew(elems)) = (&inst.dest, &inst.kind) {
+                    if !elems.is_empty() {
+                        continue;
+                    }
+                    let pushes = *pushes_by_vec.get(dest).unwrap_or(&0);
+                    let floor = if pushes >= 32 {
+                        64
+                    } else if pushes >= 16 {
+                        32
+                    } else {
+                        16
+                    };
+                    floors.insert(*dest, floor);
+                }
+            }
+        }
+        floors
     }
 
     // ── public entry point ─────────────────────────────────────────
@@ -488,6 +523,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         self.var_allocs.clear();
         self.value_types.clear();
         self.self_allocs.clear();
+        self.vec_growth_floor_by_value = Self::compute_vec_growth_floors(func);
         self.comp.vars = IndexMap::new();
         self.comp.var_shadows.clear();
         self.comp.var_scope_markers.clear();
@@ -1344,10 +1380,11 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             }
 
             // ── Indexing ──
-            mir::InstKind::Index(base, idx) => {
+            mir::InstKind::Index(base, idx) | mir::InstKind::IndexUnchecked(base, idx) => {
                 let base_val = self.val(*base);
                 let idx_val = self.val(*idx);
                 let base_ty = self.value_types.get(base);
+                let unchecked = matches!(&inst.kind, mir::InstKind::IndexUnchecked(_, _));
 
                 // String indexing: get char at index (returns byte as i64)
                 if matches!(base_ty, Some(Type::String)) {
@@ -1359,21 +1396,25 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     let arr_ty = base_val.get_type().into_array_type();
                     let arr_len = arr_ty.len() as u64;
                     let i64t = self.comp.ctx.i64_type();
-                    // Wrap negative indices: if idx < 0, idx = len + idx
-                    let idx_int = idx_val.into_int_value();
-                    let is_neg = b!(self.comp.bld.build_int_compare(
-                        inkwell::IntPredicate::SLT,
-                        idx_int,
-                        i64t.const_int(0, false),
-                        "neg"
-                    ));
-                    let wrapped = b!(self.comp.bld.build_int_nsw_add(
-                        idx_int,
-                        i64t.const_int(arr_len, false),
-                        "wrap"
-                    ));
-                    let final_idx = b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
-                        .into_int_value();
+                    let final_idx = if unchecked {
+                        idx_val.into_int_value()
+                    } else {
+                        // Wrap negative indices: if idx < 0, idx = len + idx
+                        let idx_int = idx_val.into_int_value();
+                        let is_neg = b!(self.comp.bld.build_int_compare(
+                            inkwell::IntPredicate::SLT,
+                            idx_int,
+                            i64t.const_int(0, false),
+                            "neg"
+                        ));
+                        let wrapped = b!(self.comp.bld.build_int_nsw_add(
+                            idx_int,
+                            i64t.const_int(arr_len, false),
+                            "wrap"
+                        ));
+                        b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                            .into_int_value()
+                    };
                     let alloca = self.comp.entry_alloca(arr_ty.into(), "idx.tmp");
                     b!(self.comp.bld.build_store(alloca, base_val));
                     let zero = i64t.const_int(0, false);
@@ -1398,24 +1439,30 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         .build_struct_gep(header_ty, header_ptr, 0, "vi.ptrp"));
                     let data_ptr = b!(self.comp.bld.build_load(ptr_ty, ptr_gep, "vi.data"))
                         .into_pointer_value();
-                    let len_gep = b!(self
-                        .comp
-                        .bld
-                        .build_struct_gep(header_ty, header_ptr, 1, "vi.lenp"));
-                    let len =
-                        b!(self.comp.bld.build_load(i64t, len_gep, "vi.len")).into_int_value();
-                    // Wrap negative indices: if idx < 0, idx = len + idx
-                    let idx_int = idx_val.into_int_value();
-                    let is_neg = b!(self.comp.bld.build_int_compare(
-                        inkwell::IntPredicate::SLT,
-                        idx_int,
-                        i64t.const_int(0, false),
-                        "neg"
-                    ));
-                    let wrapped = b!(self.comp.bld.build_int_nsw_add(idx_int, len, "wrap"));
-                    let final_idx = b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
-                        .into_int_value();
-                    self.comp.emit_vec_bounds_check(final_idx, len)?;
+                    let final_idx = if unchecked {
+                        idx_val.into_int_value()
+                    } else {
+                        let len_gep = b!(self
+                            .comp
+                            .bld
+                            .build_struct_gep(header_ty, header_ptr, 1, "vi.lenp"));
+                        let len =
+                            b!(self.comp.bld.build_load(i64t, len_gep, "vi.len")).into_int_value();
+                        // Wrap negative indices: if idx < 0, idx = len + idx
+                        let idx_int = idx_val.into_int_value();
+                        let is_neg = b!(self.comp.bld.build_int_compare(
+                            inkwell::IntPredicate::SLT,
+                            idx_int,
+                            i64t.const_int(0, false),
+                            "neg"
+                        ));
+                        let wrapped = b!(self.comp.bld.build_int_nsw_add(idx_int, len, "wrap"));
+                        let final_idx =
+                            b!(self.comp.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                                .into_int_value();
+                        self.comp.emit_vec_bounds_check(final_idx, len)?;
+                        final_idx
+                    };
                     let elem_gep = unsafe {
                         b!(self
                             .comp
@@ -1727,7 +1774,13 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 let elem_val = self.val(*elem);
                 let lty = elem_val.get_type();
                 let elem_size = self.comp.type_store_size(lty);
-                self.comp.vec_push_raw(vec_val, elem_val, lty, elem_size)?;
+                let growth_floor = self
+                    .vec_growth_floor_by_value
+                    .get(vec)
+                    .copied()
+                    .unwrap_or(self.comp.empty_vec_growth_floor);
+                self.comp
+                    .vec_push_raw_with_floor(vec_val, elem_val, lty, elem_size, growth_floor)?;
                 Ok(void_val())
             }
             mir::InstKind::VecLen(vec) => {

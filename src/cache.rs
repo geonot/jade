@@ -3,6 +3,27 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
 
+fn ensure_allowed_dep_url(url: &str) -> Result<(), String> {
+    if url.starts_with("https://") {
+        return Ok(());
+    }
+    let allow_non_https = std::env::var("JADE_ALLOW_NON_HTTPS_DEPS")
+        .ok()
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if allow_non_https
+        && (url.starts_with("http://")
+            || url.starts_with("ssh://")
+            || url.starts_with("git@")
+            || url.starts_with("file://"))
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "dependency URL '{url}' is not allowed; use https:// or set JADE_ALLOW_NON_HTTPS_DEPS=1"
+    ))
+}
+
 use crate::lock::{LockEntry, Lockfile};
 use crate::pkg::{Dependency, Package};
 
@@ -33,15 +54,26 @@ impl Cache {
     }
 
     pub fn fetch(&self, dep: &Dependency) -> Result<String, String> {
+        ensure_allowed_dep_url(&dep.url)?;
         let dir = self.package_path(dep);
         if dir.exists() {
             return Self::read_commit(&dir);
         }
+        let tag = format!("v{}", dep.version);
+        self.fetch_tag(dep, &tag)
+    }
+
+    fn fetch_tag(&self, dep: &Dependency, tag: &str) -> Result<String, String> {
+        let dir = self.package_path(dep);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)
+                .map_err(|e| format!("cannot clear cache dir {}: {e}", dir.display()))?;
+        }
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("cannot create cache dir {}: {e}", dir.display()))?;
-        let tag = format!("v{}", dep.version);
+
         let output = Command::new("git")
-            .args(["clone", "--depth=1", "--branch", &tag, &dep.url])
+            .args(["clone", "--depth=1", "--branch", tag, &dep.url])
             .arg(&dir)
             .output()
             .map_err(|e| format!("git clone failed: {e}"))?;
@@ -51,6 +83,51 @@ impl Cache {
             return Err(format!("git clone {} failed: {stderr}", dep.url));
         }
         Self::read_commit(&dir)
+    }
+
+    fn fetch_pinned_commit(&self, dep: &Dependency, commit: &str) -> Result<String, String> {
+        ensure_allowed_dep_url(&dep.url)?;
+        let dir = self.package_path(dep);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)
+                .map_err(|e| format!("cannot clear cache dir {}: {e}", dir.display()))?;
+        }
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("cannot create cache dir {}: {e}", dir.display()))?;
+
+        let clone = Command::new("git")
+            .args(["clone", "--no-checkout", &dep.url])
+            .arg(&dir)
+            .output()
+            .map_err(|e| format!("git clone failed: {e}"))?;
+        if !clone.status.success() {
+            let stderr = String::from_utf8_lossy(&clone.stderr);
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!("git clone {} failed: {stderr}", dep.url));
+        }
+
+        let checkout = Command::new("git")
+            .args(["checkout", "--detach", commit])
+            .current_dir(&dir)
+            .output()
+            .map_err(|e| format!("git checkout failed: {e}"))?;
+        if !checkout.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout.stderr);
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!(
+                "git checkout {} at commit {} failed: {stderr}",
+                dep.url, commit
+            ));
+        }
+
+        let actual = Self::read_commit(&dir)?;
+        if actual != commit {
+            return Err(format!(
+                "pinned commit mismatch for {}: expected {}, got {}",
+                dep.name, commit, actual
+            ));
+        }
+        Ok(actual)
     }
 
     fn read_commit(dir: &std::path::Path) -> Result<String, String> {
@@ -91,8 +168,14 @@ impl Cache {
         let commit = if let Some(lock) = existing_lock {
             if let Some(entry) = lock.find(&dep.name) {
                 if entry.version == dep.version {
+                    let dir = self.package_path(dep);
                     if !self.is_cached(dep) {
-                        self.fetch(dep)?;
+                        self.fetch_pinned_commit(dep, &entry.commit)?;
+                    } else {
+                        let actual = Self::read_commit(&dir)?;
+                        if actual != entry.commit {
+                            self.fetch_pinned_commit(dep, &entry.commit)?;
+                        }
                     }
                     resolving.remove(&Symbol::intern(&dep.name));
                     return Ok(entry.clone());
@@ -107,7 +190,7 @@ impl Cache {
         let sub_proj_file = pkg_dir.join("project.jade");
         let mut sub_deps = Vec::new();
         if sub_proj_file.exists() {
-            let sub_pkg = Package::from_file(&sub_proj_file)?;
+            let sub_pkg = Package::from_project_file(&sub_proj_file)?;
             for sub_dep in &sub_pkg.requires {
                 let sub_entry = self.resolve_dep(sub_dep, existing_lock, resolving)?;
                 sub_deps.push(sub_entry);

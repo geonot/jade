@@ -2994,7 +2994,7 @@ fn compile_and_run_in_dir(src: &str) -> String {
 fn b_actor_spawn_send_basic() {
     // Actor that logs a value when it receives a message
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Printer\n    @say n as i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    send p, @say(42)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Printer\n    @say n as i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    p.say(42)\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -3002,7 +3002,7 @@ fn b_actor_spawn_send_basic() {
 #[test]
 fn b_actor_multiple_messages() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Echo\n    @say n as i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    send e, @say(1)\n    send e, @say(2)\n    send e, @say(3)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Echo\n    @say n as i64\n        log(n)\n\n*main()\n    e is spawn Echo\n    e.say(1)\n    e.say(2)\n    e.say(3)\n    extern.usleep(100000)\n    0\n",
         "1\n2\n3",
     );
 }
@@ -3010,7 +3010,7 @@ fn b_actor_multiple_messages() {
 #[test]
 fn b_actor_state_accumulation() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    send a, @add(10)\n    send a, @add(20)\n    send a, @add(30)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Adder\n    a.add(10)\n    a.add(20)\n    a.add(30)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    0\n",
         "60",
     );
 }
@@ -3018,8 +3018,46 @@ fn b_actor_state_accumulation() {
 #[test]
 fn b_actor_multi_handler() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Math\n    val as i64\n    @assign n as i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    send m, @assign(5)\n    send m, @double()\n    extern.usleep(100000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Math\n    val as i64\n    @assign n as i64\n        val is n\n    @double\n        val is val * 2\n    @show\n        log(val)\n\n*main()\n    m is spawn Math\n    m.assign(5)\n    m.double()\n    extern.usleep(100000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "10",
+    );
+}
+
+#[test]
+fn b_actor_method_call_syntax_and_star_handlers() {
+    expect(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    total as i64\n    *add n as i64\n        total is total + n\n    *show\n        log(total)\n\n*main()\n    c is spawn Counter\n    c.add(10)\n    c.add(20)\n    extern.usleep(100000)\n    c.show()\n    extern.usleep(100000)\n    0\n",
+        "30",
+    );
+}
+
+#[test]
+fn b_actor_loop_handler_runs() {
+    let out = compile_and_run_in_dir(
+        "extern *usleep(us as i32) returns i32\n\nactor Ticker\n    ticks as i64\n    *loop 5\n        ticks is ticks + 1\n    @show\n        log(ticks)\n\n*main()\n    t is spawn Ticker\n    extern.usleep(40000)\n    t.show()\n    stop t\n    extern.usleep(10000)\n    0\n",
+    );
+    let ticks: i64 = out
+        .trim()
+        .parse()
+        .expect("expected actor loop test output to be an integer tick count");
+    assert!(
+        ticks > 0,
+        "expected *loop handler to run at least once, got {ticks}"
+    );
+}
+
+#[test]
+fn b_actor_loop_sleep_is_ms() {
+    let out = compile_and_run_in_dir(
+        "extern *usleep(us as i32) returns i32\n\nactor Ticker\n    ticks as i64\n    *loop 100\n        ticks is ticks + 1\n    @show\n        log(ticks)\n\n*main()\n    t is spawn Ticker\n    extern.usleep(350000)\n    t.show()\n    stop t\n    extern.usleep(10000)\n    0\n",
+    );
+    let ticks: i64 = out
+        .trim()
+        .parse()
+        .expect("expected actor loop sleep-ms test output to be an integer tick count");
+    assert!(
+        ticks >= 2,
+        "expected *loop sleep to be in milliseconds (>=2 ticks in 350ms), got {ticks}"
     );
 }
 
@@ -3029,7 +3067,7 @@ fn b_actor_multi_handler() {
 fn b_actor_zero_param_handler() {
     // Handler with no parameters
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Pinger\n    count as i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    send p, @ping()\n    send p, @ping()\n    send p, @ping()\n    extern.usleep(100000)\n    send p, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Pinger\n    count as i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    p.ping()\n    p.ping()\n    p.ping()\n    extern.usleep(100000)\n    p.show()\n    extern.usleep(100000)\n    0\n",
         "3",
     );
 }
@@ -3038,7 +3076,7 @@ fn b_actor_zero_param_handler() {
 fn b_actor_two_param_handler() {
     // Handler with two parameters
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(17, 25)\n    extern.usleep(100000)\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    c.add(17, 25)\n    extern.usleep(100000)\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -3047,7 +3085,7 @@ fn b_actor_two_param_handler() {
 fn b_actor_multiple_state_fields() {
     // Actor with multiple state fields
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Point\n    x as i64\n    y as i64\n    @set_x n as i64\n        x is n\n    @set_y n as i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    send p, @set_x(10)\n    send p, @set_y(20)\n    extern.usleep(100000)\n    send p, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Point\n    x as i64\n    y as i64\n    @set_x n as i64\n        x is n\n    @set_y n as i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    p.set_x(10)\n    p.set_y(20)\n    extern.usleep(100000)\n    p.show()\n    extern.usleep(100000)\n    0\n",
         "30",
     );
 }
@@ -3056,7 +3094,7 @@ fn b_actor_multiple_state_fields() {
 fn b_actor_sequential_messages() {
     // Actor processes messages in FIFO order
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say(10)\n    send l, @say(20)\n    send l, @say(30)\n    send l, @say(40)\n    send l, @say(50)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    l.say(10)\n    l.say(20)\n    l.say(30)\n    l.say(40)\n    l.say(50)\n    extern.usleep(100000)\n    0\n",
         "10\n20\n30\n40\n50",
     );
 }
@@ -4086,7 +4124,7 @@ fn b_select_default_arm() {
 fn b_actor_stop_basic() {
     // Spawn actor, send messages, stop it, program exits cleanly
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    send a, @add(5)\n    send a, @add(10)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    stop a\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    a.add(5)\n    a.add(10)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    stop a\n    0\n",
         "15",
     );
 }
@@ -4095,7 +4133,7 @@ fn b_actor_stop_basic() {
 fn b_actor_sequential_message_order() {
     // Send many messages sequentially, verify accumulated state
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        send s, @add(i)\n        i is i + 1\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        s.add(i)\n        i is i + 1\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "45",
     );
 }
@@ -4104,7 +4142,7 @@ fn b_actor_sequential_message_order() {
 fn b_actor_multiple_state_tracking() {
     // Actor with multiple state fields
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Stats\n    count as i64\n    sum as i64\n    @record n as i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    send s, @record(10)\n    send s, @record(20)\n    send s, @record(30)\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Stats\n    count as i64\n    sum as i64\n    @record n as i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    s.record(10)\n    s.record(20)\n    s.record(30)\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "3\n60",
     );
 }
@@ -4113,7 +4151,7 @@ fn b_actor_multiple_state_tracking() {
 fn b_actor_two_param_handler_math() {
     // Handler with two parameters
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add_mul a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add_mul(3, 4)\n    send c, @add_mul(5, 6)\n    extern.usleep(200000)\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add_mul a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    c.add_mul(3, 4)\n    c.add_mul(5, 6)\n    extern.usleep(200000)\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -4126,7 +4164,7 @@ fn b_actor_two_param_handler_math() {
 fn b_actor_send_too_few_args() {
     // C4: handler expects 2 args, only 1 given → compile error
     let err = expect_compile_fail(
-        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    send c, @add(10)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    c.add(10)\n    extern.usleep(100000)\n    0\n",
     );
     assert!(
         err.contains("expects 2 argument(s), got 1"),
@@ -4138,7 +4176,7 @@ fn b_actor_send_too_few_args() {
 fn b_actor_send_too_many_args() {
     // C4: handler expects 1 arg, 3 given → compile error
     let err = expect_compile_fail(
-        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n\n*main()\n    a is spawn Adder\n    send a, @add(1, 2, 3)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n\n*main()\n    a is spawn Adder\n    a.add(1, 2, 3)\n    extern.usleep(100000)\n    0\n",
     );
     assert!(
         err.contains("expects 1 argument(s), got 3"),
@@ -4150,7 +4188,7 @@ fn b_actor_send_too_many_args() {
 fn b_actor_send_zero_args_to_parameterized_handler() {
     // C4: handler expects 1 arg, 0 given → compile error
     let err = expect_compile_fail(
-        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    send l, @say()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    l.say()\n    extern.usleep(100000)\n    0\n",
     );
     assert!(
         err.contains("expects 1 argument(s), got 0"),
@@ -4160,12 +4198,23 @@ fn b_actor_send_zero_args_to_parameterized_handler() {
 
 #[test]
 fn b_actor_send_unknown_handler() {
-    // Send to a handler that doesn't exist → compile error
+    // Call a handler that doesn't exist → compile error
     let err = expect_compile_fail(
-        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    count as i64\n    @increment\n        count is count + 1\n\n*main()\n    c is spawn Counter\n    send c, @decrement()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    count as i64\n    @increment\n        count is count + 1\n\n*main()\n    c is spawn Counter\n    c.decrement()\n    extern.usleep(100000)\n    0\n",
     );
     assert!(
-        err.contains("has no handler '@decrement'"),
+        err.contains("has no handler '.decrement()'"),
+        "err was: {err}"
+    );
+}
+
+#[test]
+fn b_actor_send_syntax_removed() {
+    let err = expect_compile_fail(
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    count as i64\n    @increment\n        count is count + 1\n\n*main()\n    c is spawn Counter\n    send c, @increment()\n    extern.usleep(100000)\n    0\n",
+    );
+    assert!(
+        err.contains("actor send syntax") && err.contains("method-call syntax"),
         "err was: {err}"
     );
 }
@@ -4190,7 +4239,7 @@ fn b_actor_receive_outside_handler() {
 fn b_actor_f64_state_and_handler() {
     // Actor with f64 state and f64 handler parameter
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Accum\n    total as f64\n    @add n as f64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Accum\n    send a, @add(1.5)\n    send a, @add(2.5)\n    send a, @add(3.0)\n    extern.usleep(200000)\n    send a, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Accum\n    total as f64\n    @add n as f64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Accum\n    a.add(1.5)\n    a.add(2.5)\n    a.add(3.0)\n    extern.usleep(200000)\n    a.show()\n    extern.usleep(100000)\n    0\n",
         "7.000000",
     );
 }
@@ -4199,7 +4248,7 @@ fn b_actor_f64_state_and_handler() {
 fn b_actor_mixed_param_types() {
     // Handler with two i64 parameters using arithmetic
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Mixer\n    result as i64\n    @compute a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    m is spawn Mixer\n    send m, @compute(3, 4)\n    send m, @compute(5, 6)\n    extern.usleep(200000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Mixer\n    result as i64\n    @compute a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    m is spawn Mixer\n    m.compute(3, 4)\n    m.compute(5, 6)\n    extern.usleep(200000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
@@ -4208,7 +4257,7 @@ fn b_actor_mixed_param_types() {
 fn b_actor_stop_clean_exit() {
     // Spawn, send, stop, and program exits cleanly without hang
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Worker\n    @ping\n        log(1)\n\n*main()\n    w is spawn Worker\n    send w, @ping()\n    extern.usleep(100000)\n    stop w\n    extern.usleep(50000)\n    log(0)\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Worker\n    @ping\n        log(1)\n\n*main()\n    w is spawn Worker\n    w.ping()\n    extern.usleep(100000)\n    stop w\n    extern.usleep(50000)\n    log(0)\n",
         "1\n0",
     );
 }
@@ -4217,7 +4266,7 @@ fn b_actor_stop_clean_exit() {
 fn b_actor_multiple_actors_independent() {
     // Two independent actors accumulate separately
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor A\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\nactor B\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    a is spawn A\n    b is spawn B\n    send a, @set(10)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    send b, @set(20)\n    extern.usleep(100000)\n    send b, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor A\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\nactor B\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    a is spawn A\n    b is spawn B\n    a.set(10)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    b.set(20)\n    extern.usleep(100000)\n    b.show()\n    extern.usleep(100000)\n    0\n",
         "10\n20",
     );
 }
@@ -4227,7 +4276,7 @@ fn b_actor_spawn_in_loop() {
     // Spawn multiple actors in a loop, each sends a message
     // Use a single accumulator to avoid nondeterministic output order
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    i is 1\n    while i <= 5\n        send a, @add(i)\n        i is i + 1\n    extern.usleep(200000)\n    send a, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    i is 1\n    while i <= 5\n        a.add(i)\n        i is i + 1\n    extern.usleep(200000)\n    a.show()\n    extern.usleep(100000)\n    0\n",
         "15",
     );
 }
@@ -4236,7 +4285,7 @@ fn b_actor_spawn_in_loop() {
 fn b_actor_handler_with_conditional() {
     // Handler body contains conditional logic
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Filter\n    @check n as i64\n        if n > 10\n            log(n)\n\n*main()\n    f is spawn Filter\n    send f, @check(5)\n    send f, @check(15)\n    send f, @check(3)\n    send f, @check(20)\n    extern.usleep(200000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Filter\n    @check n as i64\n        if n > 10\n            log(n)\n\n*main()\n    f is spawn Filter\n    f.check(5)\n    f.check(15)\n    f.check(3)\n    f.check(20)\n    extern.usleep(200000)\n    0\n",
         "15\n20",
     );
 }
@@ -4245,7 +4294,7 @@ fn b_actor_handler_with_conditional() {
 fn b_actor_handler_with_while_loop() {
     // Handler body contains a while loop
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    @count_to n as i64\n        i is 1\n        while i <= n\n            log(i)\n            i is i + 1\n\n*main()\n    c is spawn Counter\n    send c, @count_to(3)\n    extern.usleep(200000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    @count_to n as i64\n        i is 1\n        while i <= n\n            log(i)\n            i is i + 1\n\n*main()\n    c is spawn Counter\n    c.count_to(3)\n    extern.usleep(200000)\n    0\n",
         "1\n2\n3",
     );
 }
@@ -4254,7 +4303,7 @@ fn b_actor_handler_with_while_loop() {
 fn b_actor_stress_many_messages() {
     // Send 500 messages to an accumulator, verify sum
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor BigSum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn BigSum\n    i is 1\n    while i <= 500\n        send s, @add(i)\n        i is i + 1\n    extern.usleep(500000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor BigSum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn BigSum\n    i is 1\n    while i <= 500\n        s.add(i)\n        i is i + 1\n    extern.usleep(500000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "125250",
     );
 }
@@ -4263,7 +4312,7 @@ fn b_actor_stress_many_messages() {
 fn b_actor_three_actors_three_handlers() {
     // Three actors with different handler signatures, sequenced output
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor X\n    v as i64\n    @set n as i64\n        v is n\n    @show\n        log(v)\n\nactor Y\n    v as i64\n    @add a as i64, b as i64\n        v is a + b\n    @show\n        log(v)\n\nactor Z\n    @echo n as i64\n        log(n)\n\n*main()\n    x is spawn X\n    y is spawn Y\n    z is spawn Z\n    send x, @set(1)\n    extern.usleep(100000)\n    send x, @show()\n    extern.usleep(100000)\n    send y, @add(2, 3)\n    extern.usleep(100000)\n    send y, @show()\n    extern.usleep(100000)\n    send z, @echo(5)\n    extern.usleep(200000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor X\n    v as i64\n    @set n as i64\n        v is n\n    @show\n        log(v)\n\nactor Y\n    v as i64\n    @add a as i64, b as i64\n        v is a + b\n    @show\n        log(v)\n\nactor Z\n    @echo n as i64\n        log(n)\n\n*main()\n    x is spawn X\n    y is spawn Y\n    z is spawn Z\n    x.set(1)\n    extern.usleep(100000)\n    x.show()\n    extern.usleep(100000)\n    y.add(2, 3)\n    extern.usleep(100000)\n    y.show()\n    extern.usleep(100000)\n    z.echo(5)\n    extern.usleep(200000)\n    0\n",
         "1\n5\n5",
     );
 }
@@ -4272,7 +4321,7 @@ fn b_actor_three_actors_three_handlers() {
 fn b_actor_handler_mutates_multiple_fields() {
     // Single handler updates multiple state fields
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Pair\n    x as i64\n    y as i64\n    @set_both a as i64, b as i64\n        x is a\n        y is b\n    @show\n        log(x)\n        log(y)\n\n*main()\n    p is spawn Pair\n    send p, @set_both(42, 99)\n    extern.usleep(200000)\n    send p, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Pair\n    x as i64\n    y as i64\n    @set_both a as i64, b as i64\n        x is a\n        y is b\n    @show\n        log(x)\n        log(y)\n\n*main()\n    p is spawn Pair\n    p.set_both(42, 99)\n    extern.usleep(200000)\n    p.show()\n    extern.usleep(100000)\n    0\n",
         "42\n99",
     );
 }
@@ -4281,7 +4330,7 @@ fn b_actor_handler_mutates_multiple_fields() {
 fn b_actor_repeated_stop() {
     // Stop an actor that was already stopped — should not crash
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Simple\n    @ping\n        log(1)\n\n*main()\n    s is spawn Simple\n    send s, @ping()\n    extern.usleep(100000)\n    stop s\n    extern.usleep(50000)\n    log(0)\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Simple\n    @ping\n        log(1)\n\n*main()\n    s is spawn Simple\n    s.ping()\n    extern.usleep(100000)\n    stop s\n    extern.usleep(50000)\n    log(0)\n",
         "1\n0",
     );
 }
@@ -4559,7 +4608,7 @@ fn b_dispatch_yield_zero() {
 fn b_actor_state_init_zero() {
     // State fields default to zero
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "0",
     );
 }
@@ -4567,7 +4616,7 @@ fn b_actor_state_init_zero() {
 #[test]
 fn b_actor_increment_decrement() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @dec\n        val is val - 1\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    send c, @inc()\n    send c, @inc()\n    send c, @inc()\n    send c, @dec()\n    extern.usleep(100000)\n    send c, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @dec\n        val is val - 1\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    c.inc()\n    c.inc()\n    c.inc()\n    c.dec()\n    extern.usleep(100000)\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "2",
     );
 }
@@ -4576,7 +4625,7 @@ fn b_actor_increment_decrement() {
 fn b_actor_overwrite_state() {
     // Repeatedly overwrite state
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Box\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    b is spawn Box\n    send b, @set(1)\n    send b, @set(2)\n    send b, @set(3)\n    send b, @set(99)\n    extern.usleep(100000)\n    send b, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Box\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    b is spawn Box\n    b.set(1)\n    b.set(2)\n    b.set(3)\n    b.set(99)\n    extern.usleep(100000)\n    b.show()\n    extern.usleep(100000)\n    0\n",
         "99",
     );
 }
@@ -4585,7 +4634,7 @@ fn b_actor_overwrite_state() {
 fn b_actor_state_tracks_max() {
     // Actor that tracks the maximum value seen
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor MaxTracker\n    best as i64\n    @update n as i64\n        if n > best\n            best is n\n    @show\n        log(best)\n\n*main()\n    m is spawn MaxTracker\n    send m, @update(5)\n    send m, @update(3)\n    send m, @update(9)\n    send m, @update(1)\n    send m, @update(7)\n    extern.usleep(100000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor MaxTracker\n    best as i64\n    @update n as i64\n        if n > best\n            best is n\n    @show\n        log(best)\n\n*main()\n    m is spawn MaxTracker\n    m.update(5)\n    m.update(3)\n    m.update(9)\n    m.update(1)\n    m.update(7)\n    extern.usleep(100000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "9",
     );
 }
@@ -4594,7 +4643,7 @@ fn b_actor_state_tracks_max() {
 fn b_actor_conditional_handler() {
     // Handler with conditional logic
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor EvenCounter\n    evens as i64\n    @check n as i64\n        if n % 2 equals 0\n            evens is evens + 1\n    @show\n        log(evens)\n\n*main()\n    e is spawn EvenCounter\n    send e, @check(1)\n    send e, @check(2)\n    send e, @check(3)\n    send e, @check(4)\n    send e, @check(5)\n    send e, @check(6)\n    extern.usleep(100000)\n    send e, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor EvenCounter\n    evens as i64\n    @check n as i64\n        if n % 2 equals 0\n            evens is evens + 1\n    @show\n        log(evens)\n\n*main()\n    e is spawn EvenCounter\n    e.check(1)\n    e.check(2)\n    e.check(3)\n    e.check(4)\n    e.check(5)\n    e.check(6)\n    extern.usleep(100000)\n    e.show()\n    extern.usleep(100000)\n    0\n",
         "3",
     );
 }
@@ -4603,7 +4652,7 @@ fn b_actor_conditional_handler() {
 fn b_actor_handler_with_math() {
     // Handler performing arithmetic on state
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Multiply\n    product as i64\n    @init\n        product is 1\n    @mul n as i64\n        product is product * n\n    @show\n        log(product)\n\n*main()\n    m is spawn Multiply\n    send m, @init()\n    send m, @mul(2)\n    send m, @mul(3)\n    send m, @mul(4)\n    extern.usleep(100000)\n    send m, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Multiply\n    product as i64\n    @init\n        product is 1\n    @mul n as i64\n        product is product * n\n    @show\n        log(product)\n\n*main()\n    m is spawn Multiply\n    m.init()\n    m.mul(2)\n    m.mul(3)\n    m.mul(4)\n    extern.usleep(100000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "24",
     );
 }
@@ -4612,7 +4661,7 @@ fn b_actor_handler_with_math() {
 fn b_actor_many_messages_stress() {
     // 50 messages to an actor
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 50\n        send s, @add(1)\n        i is i + 1\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 50\n        s.add(1)\n        i is i + 1\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "50",
     );
 }
@@ -4621,7 +4670,7 @@ fn b_actor_many_messages_stress() {
 fn b_actor_two_actors_same_type() {
     // Two actors of the same type, independent state — show sum to avoid ordering
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @get\n        log(val)\n\n*main()\n    a is spawn Counter\n    b is spawn Counter\n    send a, @inc()\n    send a, @inc()\n    send a, @inc()\n    send b, @inc()\n    extern.usleep(200000)\n    send a, @get()\n    extern.usleep(200000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @get\n        log(val)\n\n*main()\n    a is spawn Counter\n    b is spawn Counter\n    a.inc()\n    a.inc()\n    a.inc()\n    b.inc()\n    extern.usleep(200000)\n    a.get()\n    extern.usleep(200000)\n    0\n",
         "3",
     );
 }
@@ -4629,7 +4678,7 @@ fn b_actor_two_actors_same_type() {
 #[test]
 fn b_actor_three_state_fields() {
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Vec3\n    x as i64\n    y as i64\n    z as i64\n    @set_all a as i64, b as i64, c as i64\n        x is a\n        y is b\n        z is c\n    @show\n        log(x + y + z)\n\n*main()\n    v is spawn Vec3\n    send v, @set_all(10, 20, 30)\n    extern.usleep(100000)\n    send v, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Vec3\n    x as i64\n    y as i64\n    z as i64\n    @set_all a as i64, b as i64, c as i64\n        x is a\n        y is b\n        z is c\n    @show\n        log(x + y + z)\n\n*main()\n    v is spawn Vec3\n    v.set_all(10, 20, 30)\n    extern.usleep(100000)\n    v.show()\n    extern.usleep(100000)\n    0\n",
         "60",
     );
 }
@@ -4638,7 +4687,7 @@ fn b_actor_three_state_fields() {
 fn b_actor_handler_logs_directly() {
     // Handler that logs immediately (no state read)
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Greeter\n    @greet n as i64\n        log(n * 100)\n\n*main()\n    g is spawn Greeter\n    send g, @greet(5)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Greeter\n    @greet n as i64\n        log(n * 100)\n\n*main()\n    g is spawn Greeter\n    g.greet(5)\n    extern.usleep(100000)\n    0\n",
         "500",
     );
 }
@@ -4647,7 +4696,7 @@ fn b_actor_handler_logs_directly() {
 fn b_actor_accumulate_then_stop() {
     // Accumulate, show, stop
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    sum as i64\n    @add n as i64\n        sum is sum + n\n    @show\n        log(sum)\n\n*main()\n    a is spawn Acc\n    send a, @add(1)\n    send a, @add(2)\n    send a, @add(3)\n    extern.usleep(100000)\n    send a, @show()\n    extern.usleep(100000)\n    stop a\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Acc\n    sum as i64\n    @add n as i64\n        sum is sum + n\n    @show\n        log(sum)\n\n*main()\n    a is spawn Acc\n    a.add(1)\n    a.add(2)\n    a.add(3)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    stop a\n    extern.usleep(100000)\n    0\n",
         "6",
     );
 }
@@ -4656,7 +4705,7 @@ fn b_actor_accumulate_then_stop() {
 fn b_actor_spawn_five_independent() {
     // Spawn 5 independent actors — order may vary, so use a single actor that accumulates
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Summer\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Summer\n    send s, @add(1)\n    send s, @add(2)\n    send s, @add(3)\n    send s, @add(4)\n    send s, @add(5)\n    extern.usleep(200000)\n    send s, @show()\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Summer\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Summer\n    s.add(1)\n    s.add(2)\n    s.add(3)\n    s.add(4)\n    s.add(5)\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "15",
     );
 }
@@ -4665,7 +4714,7 @@ fn b_actor_spawn_five_independent() {
 fn b_actor_handler_while_loop() {
     // Handler uses while loop to log multiple values
     expect(
-        "extern *usleep(us as i32) returns i32\n\nactor Repeater\n    @repeat n as i64\n        i is 0\n        while i < n\n            log(i)\n            i is i + 1\n\n*main()\n    r is spawn Repeater\n    send r, @repeat(3)\n    extern.usleep(100000)\n    0\n",
+        "extern *usleep(us as i32) returns i32\n\nactor Repeater\n    @repeat n as i64\n        i is 0\n        while i < n\n            log(i)\n            i is i + 1\n\n*main()\n    r is spawn Repeater\n    r.repeat(3)\n    extern.usleep(100000)\n    0\n",
         "0\n1\n2",
     );
 }

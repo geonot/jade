@@ -118,6 +118,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::FieldStore(var, field, val) => format!("field_store ${var}.{field} = {val}"),
 
         InstKind::Index(arr, idx) => format!("index {arr}[{idx}]"),
+        InstKind::IndexUnchecked(arr, idx) => format!("index_unchecked {arr}[{idx}]"),
         InstKind::IndexSet(arr, idx, val) => format!("index_set {arr}[{idx}] = {val}"),
         InstKind::IndexStore(var, idx, val) => format!("index_store ${var}[{idx}] = {val}"),
 

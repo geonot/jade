@@ -8,6 +8,6 @@ actor Counter
 *main
     w is spawn Counter
     for i in 0 to 5000000
-        send w, @inc(1)
+        w.inc(1)
     extern.usleep(800000)
     log(0)

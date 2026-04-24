@@ -24,6 +24,9 @@ pub fn fold_program(prog: &mut hir::Program) {
     for actor in &mut prog.actors {
         for m in &mut actor.handlers {
             fold_block_with_fns(&mut m.body, &pure_fns);
+            if let Some(sleep_ms) = &mut m.loop_sleep_ms {
+                fold_expr_with_fns(sleep_ms, &pure_fns);
+            }
         }
     }
     for imp in &mut prog.trait_impls {

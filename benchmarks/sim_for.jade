@@ -1,12 +1,8 @@
 # Sim for benchmark
 # Spawns N independent coroutines via sim for
 
-*fib(n as i64) returns i64
-    if n < 2
-        return n
-    return fib(n - 1) + fib(n - 2)
-
 *main
-    sim for i in 1000
-        fib(28 + i mod 5)
+    sim for i in 200000
+        x is (i * 7) + 3
+        y is x / 3
     log(0)

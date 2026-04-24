@@ -531,6 +531,8 @@ pub struct ActorDef {
 pub struct Handler {
     pub name: Symbol,
     pub params: Vec<Param>,
+    pub is_loop: bool,
+    pub loop_sleep_ms: Option<Expr>,
     pub body: Block,
     pub span: Span,
 }

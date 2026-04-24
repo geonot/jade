@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Jade",
-  "scopeName": "source.jade",
+  "scopeName": "source.jade-lang",
   "fileTypes": ["jade"],
   "patterns": [
     { "include": "#comment" },

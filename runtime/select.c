@@ -112,6 +112,51 @@ static void chan_recv_locked(jade_chan_t *ch, void *data_out) {
     atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 }
 
+static inline void waitq_push(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *node) {
+    node->next = NULL;
+    if (*tail) {
+        (*tail)->next = node;
+    } else {
+        *head = node;
+    }
+    *tail = node;
+}
+
+static inline jade_coro_t *waitq_pop(jade_coro_t **head, jade_coro_t **tail) {
+    jade_coro_t *node = *head;
+    if (!node) {
+        return NULL;
+    }
+    *head = node->next;
+    if (!*head) {
+        *tail = NULL;
+    }
+    node->next = NULL;
+    return node;
+}
+
+static int waitq_remove(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *node) {
+    jade_coro_t *prev = NULL;
+    jade_coro_t *cur = *head;
+    while (cur && cur != node) {
+        prev = cur;
+        cur = cur->next;
+    }
+    if (!cur) {
+        return 0;
+    }
+    if (prev) {
+        prev->next = cur->next;
+    } else {
+        *head = cur->next;
+    }
+    if (*tail == cur) {
+        *tail = prev;
+    }
+    cur->next = NULL;
+    return 1;
+}
+
 int jade_select(jade_select_case_t *cases, int n, int has_default) {
     if (n == 0) return -1;
 
@@ -144,10 +189,8 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             if (chan_can_send(c->chan)) {
                 chan_send_locked(c->chan, c->data);
                 /* Wake receiver if waiting */
-                jade_coro_t *waiter = c->chan->recv_waitq;
+                jade_coro_t *waiter = waitq_pop(&c->chan->recv_waitq, &c->chan->recv_waitq_tail);
                 if (waiter) {
-                    c->chan->recv_waitq = waiter->next;
-                    waiter->next = NULL;
                     waiter->wait_chan = NULL;
                     waiter->state = JADE_CORO_READY;
                     unlock_all(cases, lock_order, limit);
@@ -161,10 +204,8 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             if (chan_can_recv(c->chan)) {
                 chan_recv_locked(c->chan, c->data);
                 /* Wake sender if waiting */
-                jade_coro_t *waiter = c->chan->send_waitq;
+                jade_coro_t *waiter = waitq_pop(&c->chan->send_waitq, &c->chan->send_waitq_tail);
                 if (waiter) {
-                    c->chan->send_waitq = waiter->next;
-                    waiter->next = NULL;
                     waiter->wait_chan = NULL;
                     waiter->state = JADE_CORO_READY;
                     unlock_all(cases, lock_order, limit);
@@ -212,13 +253,12 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             jade_select_case_t *c = &cases[i];
             if (!c->chan) continue;
 
-            jade_coro_t **wq = c->is_send ? &c->chan->send_waitq
-                                           : &c->chan->recv_waitq;
             self->wait_chan = c->chan;
-            self->next = NULL;
-            jade_coro_t **tail = wq;
-            while (*tail) tail = &(*tail)->next;
-            *tail = self;
+            if (c->is_send) {
+                waitq_push(&c->chan->send_waitq, &c->chan->send_waitq_tail, self);
+            } else {
+                waitq_push(&c->chan->recv_waitq, &c->chan->recv_waitq_tail, self);
+            }
             enqueue_start = (i + 1) % limit; /* next attempt uses next channel */
             enqueued = 1;
             break;
@@ -244,13 +284,8 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
         if (self->wait_chan) {
             jade_chan_t *wch = (jade_chan_t *)self->wait_chan;
             /* Try both queues — we don't know if waker already removed us */
-            jade_coro_t **pp = &wch->send_waitq;
-            while (*pp && *pp != self) pp = &(*pp)->next;
-            if (*pp == self) *pp = self->next;
-            else {
-                pp = &wch->recv_waitq;
-                while (*pp && *pp != self) pp = &(*pp)->next;
-                if (*pp == self) *pp = self->next;
+            if (!waitq_remove(&wch->send_waitq, &wch->send_waitq_tail, self)) {
+                waitq_remove(&wch->recv_waitq, &wch->recv_waitq_tail, self);
             }
             self->wait_chan = NULL;
             self->next = NULL;
@@ -263,10 +298,8 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             if (!c->chan) continue;
             if (c->is_send && chan_can_send(c->chan)) {
                 chan_send_locked(c->chan, c->data);
-                jade_coro_t *waiter = c->chan->recv_waitq;
+                jade_coro_t *waiter = waitq_pop(&c->chan->recv_waitq, &c->chan->recv_waitq_tail);
                 if (waiter) {
-                    c->chan->recv_waitq = waiter->next;
-                    waiter->next = NULL;
                     waiter->wait_chan = NULL;
                     waiter->state = JADE_CORO_READY;
                     unlock_all(cases, lock_order, limit);
@@ -278,10 +311,8 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             }
             if (!c->is_send && chan_can_recv(c->chan)) {
                 chan_recv_locked(c->chan, c->data);
-                jade_coro_t *waiter = c->chan->send_waitq;
+                jade_coro_t *waiter = waitq_pop(&c->chan->send_waitq, &c->chan->send_waitq_tail);
                 if (waiter) {
-                    c->chan->send_waitq = waiter->next;
-                    waiter->next = NULL;
                     waiter->wait_chan = NULL;
                     waiter->state = JADE_CORO_READY;
                     unlock_all(cases, lock_order, limit);

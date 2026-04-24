@@ -1,0 +1,21 @@
+use models/metric
+
+*sample(n as i64) returns i64
+    if n % 3 eq 0
+        n * 2 + 5
+    else
+        if n % 5 eq 0
+            n * 4
+        else
+            n + 11
+
+*transform(n as i64) returns i64
+    if n % 2 eq 0
+        n * 2
+    else
+        n * 3 + 1
+
+*build_metric(id as i64, raw as i64) returns Metric
+    value is transform(raw)
+    bucket is metric.bucket_for(value)
+    metric.new(id, raw, value, bucket)

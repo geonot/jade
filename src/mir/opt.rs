@@ -115,7 +115,7 @@ fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
         InstKind::FieldStore(_, _, v) => {
             sub!(v);
         }
-        InstKind::Index(a, i) => {
+        InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
             sub!(a);
             sub!(i);
         }
@@ -305,7 +305,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::FieldStore(_, _, v) => {
             s.insert(*v);
         }
-        InstKind::Index(a, i) => {
+        InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
             s.insert(*a);
             s.insert(*i);
         }
@@ -1095,7 +1095,9 @@ fn gvn_key(kind: &InstKind) -> Option<String> {
         }
         InstKind::UnaryOp(op, v) => Some(format!("un:{op:?}:{}", v.0)),
         InstKind::FieldGet(o, f) => Some(format!("fg:{}:{f}", o.0)),
-        InstKind::Index(a, i) => Some(format!("ix:{}:{}", a.0, i.0)),
+        InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
+            Some(format!("ix:{}:{}", a.0, i.0))
+        }
         InstKind::Cast(v, ty) => Some(format!("cast:{}:{ty:?}", v.0)),
         InstKind::StrictCast(v, ty) => Some(format!("scast:{}:{ty:?}", v.0)),
         _ => None,

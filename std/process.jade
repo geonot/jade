@@ -1,16 +1,22 @@
 # std.process — Subprocess spawning and command execution
 #
 # Usage:
-#   result is process.run("ls -la")
+#   result is process.run("ls -la")          # shell mode (requires JADE_ALLOW_SHELL=1)
 #   log(result.output)
 #   log(result.exit_code)
 #
-#   code is process.exec("make build")
-#   lines is process.lines("find . -name '*.jade'")
+#   code is process.exec("make build")       # shell mode (requires JADE_ALLOW_SHELL=1)
+#   lines is process.lines("find . -name '*.jade'")  # shell mode
+#
+#   # Safe argv-based execution (no shell, no JADE_ALLOW_SHELL needed):
+#   result is process.spawn("ls", vec("-la", "/tmp"))
+#   code is process.spawn_exec("git", vec("status"))
 
 extern *jade_popen_read(cmd as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
 extern *jade_system(cmd as %i8) returns i32
 extern *jade_exec_capture(prog as %i8, argv as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jade_spawn_capture(vec_ptr as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jade_spawn_exec(vec_ptr as %i8, exit_code as %i32) returns i32
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -98,3 +104,47 @@ type ProcessResult
 # Run a command with environment variable set.
 *with_env(name as String, value as String, command as String) returns ProcessResult
     run(name + "=" + value + " " + command)
+
+# ── Safe argv-based execution (no shell, no JADE_ALLOW_SHELL needed) ─────────
+
+# Spawn a program with explicit argument list and capture its stdout.
+# Does NOT invoke a shell — arguments are passed verbatim, preventing injection.
+# Returns a ProcessResult with output and exit code.
+*spawn(prog as String, args as Vec of String) returns ProcessResult
+    buf_size is 65536
+    buf is extern.malloc(buf_size)
+    exit_code is 0
+    # Build a single Vec with prog prepended to args for the C ABI
+    argv is vec(prog) + args
+    n is extern.jade_spawn_capture(%argv, buf, buf_size, %exit_code as %i32)
+    if n < 0
+        extern.free(buf)
+        return ProcessResult(output is "", exit_code is -1)
+    if n >= buf_size - 1
+        extern.free(buf)
+        return ProcessResult(output is "[output truncated at 64KB]", exit_code is exit_code)
+    out is __string_from_raw(buf, n, buf_size)
+    ProcessResult(output is out, exit_code is exit_code)
+
+# Spawn a program with explicit argument list; stdout/stderr go to terminal.
+# Returns the exit code. Does NOT invoke a shell.
+*spawn_exec(prog as String, args as Vec of String) returns i32
+    exit_code is 0
+    argv is vec(prog) + args
+    extern.jade_spawn_exec(%argv, %exit_code as %i32)
+    exit_code
+
+# Spawn a program and return its stdout lines as a vector.
+*spawn_lines(prog as String, args as Vec of String) returns Vec of String
+    result is spawn(prog, args)
+    if result.exit_code neq 0
+        return vec()
+    out is result.output
+    if out.length > 0 and out.char_at(out.length - 1) equals 10
+        out is out.slice(0, out.length - 1)
+    out.split("\n")
+
+# Spawn a program and return true if it exits with code 0.
+*spawn_succeeds(prog as String, args as Vec of String) returns bool
+    result is spawn(prog, args)
+    result.exit_code equals 0

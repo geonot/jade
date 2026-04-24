@@ -1100,59 +1100,19 @@ impl Typer {
 
             ast::Expr::Send(target, handler, args, span) => {
                 let htarget = self.lower_expr(target)?;
-                let actor_name = match &htarget.ty {
-                    Type::ActorRef(name) => name.clone(),
-                    _ => {
-                        return Err(format!(
-                            "send: target must be an ActorRef, got {}",
-                            htarget.ty
-                        ));
-                    }
-                };
-                let (_, _, handlers) = self
-                    .actors
-                    .get(&actor_name)
-                    .ok_or_else(|| format!("send: unknown actor '{actor_name}'"))?
-                    .clone();
-                let found = handlers
-                    .iter()
-                    .find(|(n, _, _)| n == handler)
-                    .ok_or_else(|| {
-                        format!("send: actor '{actor_name}' has no handler '@{handler}'")
-                    })?;
-                let handler_ptys = found.1.clone();
-                let tag = found.2;
-                // Validate argument count
-                if args.len() != handler_ptys.len() {
+                if !matches!(&htarget.ty, Type::ActorRef(_)) {
                     return Err(format!(
-                        "send: handler '@{handler}' on actor '{actor_name}' expects {} argument(s), got {}",
-                        handler_ptys.len(),
-                        args.len()
+                        "send: target must be an ActorRef, got {}",
+                        htarget.ty
                     ));
                 }
-                // Lower and type-check each argument against handler parameter types
-                let mut hargs: Vec<hir::Expr> = Vec::with_capacity(args.len());
-                for (i, arg) in args.iter().enumerate() {
-                    let harg = self.lower_expr_expected(arg, Some(&handler_ptys[i]))?;
-                    let _ = self.infer_ctx.unify_at(
-                        &handler_ptys[i],
-                        &harg.ty,
-                        *span,
-                        "send handler argument type",
-                    );
-                    hargs.push(harg);
-                }
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::Send(
-                        Box::new(htarget),
-                        actor_name,
-                        handler.clone(),
-                        tag,
-                        hargs,
-                    ),
-                    ty: Type::Void,
-                    span: *span,
-                })
+                let arg_placeholders = std::iter::repeat_n("_", args.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(format!(
+                    "line {}:{}: actor send syntax 'send target, @{}(...)' is not supported; use method-call syntax instead: target.{}({})",
+                    span.line, span.col, handler, handler, arg_placeholders
+                ))
             }
 
             ast::Expr::Receive(_, span) => Err(format!(

@@ -147,6 +147,9 @@ pub enum InstKind {
     FieldStore(Symbol, Symbol, ValueId),
 
     Index(ValueId, ValueId),
+    /// Bounds-proven indexing (e.g., compiler-generated foreach loops).
+    /// Codegen may skip dynamic bounds checks for this instruction.
+    IndexUnchecked(ValueId, ValueId),
     IndexSet(ValueId, ValueId, ValueId),
     /// Direct index store into a named variable's alloca (for mem_var arrays).
     IndexStore(Symbol, ValueId, ValueId),

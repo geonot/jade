@@ -177,6 +177,8 @@ pub struct ActorDef {
 pub struct HandlerDef {
     pub name: Symbol,
     pub params: Vec<Param>,
+    pub is_loop: bool,
+    pub loop_sleep_ms: Option<Expr>,
     pub body: Block,
     pub tag: u32,
     pub span: Span,
@@ -754,12 +756,21 @@ impl PrettyPrinter {
                 .iter()
                 .map(|p| format!("{}: {}", p.name, p.ty))
                 .collect();
-            self.line(&format!(
-                "on {}({}) [tag={}]:",
-                h.name,
-                params.join(", "),
-                h.tag
-            ));
+            if h.is_loop {
+                let sleep = h
+                    .loop_sleep_ms
+                    .as_ref()
+                    .map(|e| self.expr_str(e))
+                    .unwrap_or_else(|| "0".to_string());
+                self.line(&format!("loop {}({}) [sleep_ms={}]:", h.name, params.join(", "), sleep));
+            } else {
+                self.line(&format!(
+                    "on {}({}) [tag={}]:",
+                    h.name,
+                    params.join(", "),
+                    h.tag
+                ));
+            }
             self.push();
             self.block(&h.body);
             self.pop();

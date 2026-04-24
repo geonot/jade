@@ -36,13 +36,27 @@ impl PerceusPass {
                 || info.borrowed
                 || info.ownership != Ownership::Rc
             {
-                // Not a release candidate; check if it can be an allocation target
+                // Not a release candidate; check if it can be an allocation target.
+                // Only pop a release candidate if its last use is strictly before
+                // this binding's definition site — otherwise the release candidate
+                // is still live when this allocation would occur.
                 let size = Self::type_layout_size(match ty {
                     Type::Rc(inner) => inner.as_ref(),
                     _ => ty,
                 });
                 if let Some(candidates) = released_by_size.get_mut(&size) {
-                    if let Some((released_id, released_ty, _)) = candidates.pop() {
+                    // Find a candidate whose last use precedes this binding's span.
+                    let eligible = candidates.iter().rposition(|(rel_id, _, _)| {
+                        let last_use = uses
+                            .get(rel_id)
+                            .and_then(|i| i.last_use_span)
+                            .map(|s| s.start);
+                        // If we have span info, require last use before this alloc.
+                        // Fall back to allowing the pair when span info is absent.
+                        last_use.map_or(true, |lu| lu < span.start)
+                    });
+                    if let Some(pos) = eligible {
+                        let (released_id, released_ty, _) = candidates.remove(pos);
                         self.hints.reuse_candidates.insert(
                             released_id,
                             ReuseInfo {

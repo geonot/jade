@@ -19,15 +19,15 @@ actor Multiplier
 *main
     a is spawn Adder
     m is spawn Multiplier
-    send m, @init()
-    send a, @add(10)
-    send a, @add(20)
-    send a, @add(30)
-    send m, @mul(2)
-    send m, @mul(3)
-    send m, @mul(7)
+    m.init()
+    a.add(10)
+    a.add(20)
+    a.add(30)
+    m.mul(2)
+    m.mul(3)
+    m.mul(7)
     extern.usleep(100000)
-    send a, @show()
-    send m, @show()
+    a.show()
+    m.show()
     extern.usleep(100000)
     0

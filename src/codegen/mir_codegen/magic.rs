@@ -557,6 +557,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let mut found = None;
             for (aname, ad) in &self.actor_defs {
                 for h in &ad.handlers {
+                    if h.is_loop {
+                        continue;
+                    }
                     if h.name == handler_name {
                         let param_tys: Vec<Type> = h.params.iter().map(|p| p.ty.clone()).collect();
                         found = Some((aname.clone(), h.tag, param_tys));

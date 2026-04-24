@@ -51,6 +51,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let mut max_payload_bytes: u64 = 8;
         for h in &ad.handlers {
+            if h.is_loop {
+                continue;
+            }
             let mut handler_size: u64 = 0;
             for p in &h.params {
                 handler_size += self.type_store_size(self.llvm_ty(&p.ty));
@@ -84,6 +87,10 @@ impl<'ctx> Compiler<'ctx> {
         let mb_st = self.module.get_struct_type(&mb_name).unwrap();
         let msg_st = self.module.get_struct_type(&msg_name).unwrap();
 
+        let loop_handler = ad.handlers.iter().find(|h| h.is_loop);
+        let message_handlers: Vec<&hir::HandlerDef> =
+            ad.handlers.iter().filter(|h| !h.is_loop).collect();
+
         let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
         let fv = self
             .module
@@ -109,9 +116,96 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(loop_bb);
-        let chan_recv = self.module.get_function("jade_chan_recv").unwrap();
-        let recv_ok =
+        if let Some(loop_h) = loop_handler {
+            self.push_var_scope();
+
+            let state_name = format!("{name}_state");
+            let state_st = self.module.get_struct_type(&state_name).unwrap();
+            for (fi, field) in ad.fields.iter().enumerate() {
+                let field_ptr = b!(self.bld.build_struct_gep(
+                    state_st,
+                    state_ptr,
+                    fi as u32,
+                    &format!("state_{}", field.name)
+                ));
+                self.set_var(&field.name.as_str(), field_ptr, field.ty.clone());
+            }
+
+            self.compile_block(&loop_h.body)?;
+            self.pop_var_scope();
+
+            if !self.no_term() {
+                return Err(format!(
+                    "actor '{name}': *loop handler cannot terminate control flow"
+                ));
+            }
+
+            let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
+            if let Some(sleep_expr) = &loop_h.loop_sleep_ms {
+                let i64t = self.ctx.i64_type();
+                let sleep_ms = self.compile_expr(sleep_expr)?.into_int_value();
+                let should_sleep = b!(self.bld.build_int_compare(
+                    IntPredicate::SGT,
+                    sleep_ms,
+                    i64t.const_int(0, false),
+                    "loop_should_sleep"
+                ));
+
+                let sleep_bb = self.ctx.append_basic_block(fv, "loop_sleep");
+                let yield_bb = self.ctx.append_basic_block(fv, "loop_yield");
+                let pause_done_bb = self.ctx.append_basic_block(fv, "loop_pause_done");
+                b!(self
+                    .bld
+                    .build_conditional_branch(should_sleep, sleep_bb, yield_bb));
+
+                self.bld.position_at_end(sleep_bb);
+                let _ = self.compile_sleep_ms(std::slice::from_ref(sleep_expr))?;
+                b!(self.bld.build_unconditional_branch(pause_done_bb));
+
+                self.bld.position_at_end(yield_bb);
+                b!(self.bld.build_call(sched_yield, &[], ""));
+                b!(self.bld.build_unconditional_branch(pause_done_bb));
+
+                self.bld.position_at_end(pause_done_bb);
+            } else {
+                b!(self.bld.build_call(sched_yield, &[], ""));
+            }
+
+            let chan_try_recv = self.module.get_function("jade_chan_try_recv").unwrap();
+            let recv_state = b!(self.bld.build_call(
+                chan_try_recv,
+                &[ch_ptr.into(), msg_alloca.into()],
+                "recv_state"
+            ))
+            .try_as_basic_value()
+            .basic()
+            .unwrap()
+            .into_int_value();
+
+            let got_msg = b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                recv_state,
+                i32t.const_int(1, false),
+                "got_msg"
+            ));
+            let check_closed_bb = self.ctx.append_basic_block(fv, "check_closed");
             b!(self
+                .bld
+                .build_conditional_branch(got_msg, dispatch_bb, check_closed_bb));
+
+            self.bld.position_at_end(check_closed_bb);
+            let is_closed = b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                recv_state,
+                i32t.const_int(u32::MAX as u64, false),
+                "is_closed"
+            ));
+            b!(self
+                .bld
+                .build_conditional_branch(is_closed, exit_bb, loop_bb));
+        } else {
+            let chan_recv = self.module.get_function("jade_chan_recv").unwrap();
+            let recv_ok = b!(self
                 .bld
                 .build_call(chan_recv, &[ch_ptr.into(), msg_alloca.into()], "recv_ok"))
             .try_as_basic_value()
@@ -119,13 +213,14 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap()
             .into_int_value();
 
-        let ok = b!(self.bld.build_int_compare(
-            IntPredicate::NE,
-            recv_ok,
-            i32t.const_int(0, false),
-            "ok"
-        ));
-        b!(self.bld.build_conditional_branch(ok, dispatch_bb, exit_bb));
+            let ok = b!(self.bld.build_int_compare(
+                IntPredicate::NE,
+                recv_ok,
+                i32t.const_int(0, false),
+                "ok"
+            ));
+            b!(self.bld.build_conditional_branch(ok, dispatch_bb, exit_bb));
+        }
 
         self.bld.position_at_end(dispatch_bb);
         let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
@@ -134,11 +229,11 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_struct_gep(msg_st, msg_alloca, 1, "payload_ptr"));
 
-        if ad.handlers.is_empty() {
+        if message_handlers.is_empty() {
             b!(self.bld.build_unconditional_branch(loop_bb));
         } else {
             let mut handler_bbs = Vec::new();
-            for h in &ad.handlers {
+            for h in &message_handlers {
                 let bb = self
                     .ctx
                     .append_basic_block(fv, &format!("handler_{}", h.name));
@@ -162,7 +257,7 @@ impl<'ctx> Compiler<'ctx> {
             let state_name = format!("{name}_state");
             let state_st = self.module.get_struct_type(&state_name).unwrap();
 
-            for (i, h) in ad.handlers.iter().enumerate() {
+            for (i, h) in message_handlers.iter().enumerate() {
                 let bb = handler_bbs[i].1;
                 self.bld.position_at_end(bb);
 

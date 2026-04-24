@@ -33,6 +33,7 @@
                 <li><a href="#code">Code</a></li>
                 <li><a href="#features">Features</a></li>
                 <li><a href="#start">Get Started</a></li>
+                <li><a href="guide.html">Guide</a></li>
                 <li><a href="https://github.com/example/jade" class="nav__cta" aria-label="View Jade on GitHub">GitHub</a></li>
             </ul>
         </div>
@@ -189,8 +190,8 @@ result <span class="c-keyword">is</span> <span class="c-number">5</span> <span c
 
 <span class="c-keyword">*</span><span class="c-fn">main</span>
     w <span class="c-keyword">is</span> <span class="c-keyword">spawn</span> <span class="c-type">Counter</span>
-    <span class="c-keyword">send</span> w, <span class="c-decorator">@ping</span>(<span class="c-number">1</span>)
-    <span class="c-keyword">send</span> w, <span class="c-decorator">@ping</span>(<span class="c-number">5</span>)
+    w.<span class="c-fn">ping</span>(<span class="c-number">1</span>)
+    w.<span class="c-fn">ping</span>(<span class="c-number">5</span>)
 
     <span class="c-comment"># Typed buffered channels</span>
     ch <span class="c-keyword">is</span> <span class="c-keyword">channel</span> <span class="c-keyword">of</span> <span class="c-type">i64</span>(<span class="c-number">1024</span>)

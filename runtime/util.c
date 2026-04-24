@@ -33,3 +33,29 @@ double jade_bits_to_f64(int64_t bits) {
     memcpy(&val, &bits, sizeof(val));
     return val;
 }
+
+static int cmp_i64_asc(const void *a, const void *b) {
+    int64_t lhs = *(const int64_t *)a;
+    int64_t rhs = *(const int64_t *)b;
+    if (lhs < rhs) return -1;
+    if (lhs > rhs) return 1;
+    return 0;
+}
+
+static int cmp_f64_asc(const void *a, const void *b) {
+    double lhs = *(const double *)a;
+    double rhs = *(const double *)b;
+    if (lhs < rhs) return -1;
+    if (lhs > rhs) return 1;
+    return 0;
+}
+
+void jade_sort_i64(int64_t *data, int64_t len) {
+    if (!data || len <= 1) return;
+    qsort(data, (size_t)len, sizeof(int64_t), cmp_i64_asc);
+}
+
+void jade_sort_f64(double *data, int64_t len) {
+    if (!data || len <= 1) return;
+    qsort(data, (size_t)len, sizeof(double), cmp_f64_asc);
+}

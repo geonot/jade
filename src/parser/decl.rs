@@ -597,7 +597,7 @@ impl Parser {
         let (mut fields, mut handlers) = (Vec::new(), Vec::new());
         if self.check(Token::Indent) {
             let items = self.parse_indented(|p| {
-                if p.check(Token::At) {
+                if p.check(Token::At) || p.check(Token::Star) {
                     Ok(Either::Method(p.parse_handler()?))
                 } else {
                     Ok(Either::Field(p.parse_field()?))
@@ -610,6 +610,10 @@ impl Parser {
                 }
             }
         }
+        let loop_count = handlers.iter().filter(|h| h.is_loop).count();
+        if loop_count > 1 {
+            return Err(self.error("actor may define at most one *loop handler"));
+        }
         Ok(ActorDef {
             name,
             fields,
@@ -620,19 +624,42 @@ impl Parser {
 
     fn parse_handler(&mut self) -> Result<Handler, ParseError> {
         let sp = self.span();
-        self.expect(Token::At)?;
-        let name = self.ident()?;
-        let mut params = Vec::new();
-        while !self.check(Token::Newline) && !self.check(Token::Is) && !self.eof() {
-            params.push(self.parse_param(true)?);
-            if self.check(Token::Comma) {
+        let mut is_loop = false;
+        let mut loop_sleep_ms = None;
+
+        let name = if self.check(Token::At) {
+            self.advance();
+            self.ident()?
+        } else {
+            self.expect(Token::Star)?;
+            if self.check(Token::Loop) {
                 self.advance();
+                is_loop = true;
+                Symbol::intern("loop")
+            } else {
+                self.ident()?
+            }
+        };
+
+        let mut params = Vec::new();
+        if is_loop {
+            if !self.check(Token::Newline) && !self.check(Token::Is) && !self.eof() {
+                loop_sleep_ms = Some(self.parse_expr()?);
+            }
+        } else {
+            while !self.check(Token::Newline) && !self.check(Token::Is) && !self.eof() {
+                params.push(self.parse_param(true)?);
+                if self.check(Token::Comma) {
+                    self.advance();
+                }
             }
         }
         let body = self.parse_body()?;
         Ok(Handler {
             name,
             params,
+            is_loop,
+            loop_sleep_ms,
             body,
             span: sp,
         })

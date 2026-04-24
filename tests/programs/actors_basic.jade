@@ -9,9 +9,9 @@ actor Counter
 
 *main
     c is spawn Counter
-    send c, @increment()
-    send c, @add(10)
-    send c, @increment()
-    send c, @add(5)
+    c.increment()
+    c.add(10)
+    c.increment()
+    c.add(5)
     extern.usleep(50000)
     log(0)

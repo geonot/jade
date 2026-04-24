@@ -10,8 +10,8 @@ actor Accumulator
 *main
     a is spawn Accumulator
     for i in 1 to 1001
-        send a, @add(i)
+        a.add(i)
     extern.usleep(200000)
-    send a, @result()
+    a.result()
     extern.usleep(100000)
     0

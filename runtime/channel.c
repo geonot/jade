@@ -47,6 +47,29 @@ static uint64_t next_pow2(uint64_t v) {
     return v + 1;
 }
 
+static inline void waitq_push(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *node) {
+    node->next = NULL;
+    if (*tail) {
+        (*tail)->next = node;
+    } else {
+        *head = node;
+    }
+    *tail = node;
+}
+
+static inline jade_coro_t *waitq_pop(jade_coro_t **head, jade_coro_t **tail) {
+    jade_coro_t *node = *head;
+    if (!node) {
+        return NULL;
+    }
+    *head = node->next;
+    if (!*head) {
+        *tail = NULL;
+    }
+    node->next = NULL;
+    return node;
+}
+
 jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity) {
     jade_chan_t *ch = (jade_chan_t *)calloc(1, sizeof(jade_chan_t));
     if (!ch) return NULL;
@@ -61,7 +84,9 @@ jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity) {
     atomic_store(&ch->tail, 0);
     atomic_store(&ch->closed, 0);
     ch->send_waitq = NULL;
+    ch->send_waitq_tail = NULL;
     ch->recv_waitq = NULL;
+    ch->recv_waitq_tail = NULL;
     atomic_store(&ch->lock, 0);
 
     return ch;
@@ -81,9 +106,11 @@ void jade_chan_close(jade_chan_t *ch) {
     chan_lock(ch);
     jade_coro_t *c = ch->recv_waitq;
     ch->recv_waitq = NULL;
+    ch->recv_waitq_tail = NULL;
     /* Also wake senders */
     jade_coro_t *s = ch->send_waitq;
     ch->send_waitq = NULL;
+    ch->send_waitq_tail = NULL;
     chan_unlock(ch);
 
     while (c) {
@@ -125,10 +152,8 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
             atomic_store_explicit(&ch->tail, tail + 1, memory_order_release);
 
             /* Wake one blocked receiver if any */
-            jade_coro_t *waiter = ch->recv_waitq;
+            jade_coro_t *waiter = waitq_pop(&ch->recv_waitq, &ch->recv_waitq_tail);
             if (waiter) {
-                ch->recv_waitq = waiter->next;
-                waiter->next = NULL;
                 waiter->wait_chan = NULL;
                 waiter->state = JADE_CORO_READY;
                 chan_unlock(ch);
@@ -161,14 +186,8 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
         self->wait_chan = ch;
         self->next = NULL;
 
-        /* Append to send wait queue */
-        if (!ch->send_waitq) {
-            ch->send_waitq = self;
-        } else {
-            jade_coro_t *t = ch->send_waitq;
-            while (t->next) t = t->next;
-            t->next = self;
-        }
+        /* Append to send wait queue in O(1) */
+        waitq_push(&ch->send_waitq, &ch->send_waitq_tail, self);
 
         /* Don't unlock — scheduler will release after context is saved */
 
@@ -194,10 +213,8 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
             atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 
             /* Wake one blocked sender if any */
-            jade_coro_t *waiter = ch->send_waitq;
+            jade_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
             if (waiter) {
-                ch->send_waitq = waiter->next;
-                waiter->next = NULL;
                 waiter->wait_chan = NULL;
                 waiter->state = JADE_CORO_READY;
                 chan_unlock(ch);
@@ -236,14 +253,8 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
         self->wait_chan = ch;
         self->next = NULL;
 
-        /* Append to recv wait queue */
-        if (!ch->recv_waitq) {
-            ch->recv_waitq = self;
-        } else {
-            jade_coro_t *t = ch->recv_waitq;
-            while (t->next) t = t->next;
-            t->next = self;
-        }
+        /* Append to recv wait queue in O(1) */
+        waitq_push(&ch->recv_waitq, &ch->recv_waitq_tail, self);
 
         /* Don't unlock — scheduler will release after context is saved */
 
@@ -253,4 +264,37 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
         jade_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed — retry recv */
     }
+}
+
+int jade_chan_try_recv(jade_chan_t *ch, void *data_out) {
+    chan_lock(ch);
+
+    uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
+    uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_acquire);
+
+    if (head < tail) {
+        size_t idx = head & (ch->capacity - 1);
+        memcpy(data_out, (char *)ch->buffer + idx * ch->elem_size, ch->elem_size);
+        atomic_store_explicit(&ch->head, head + 1, memory_order_release);
+
+        jade_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
+        if (waiter) {
+            waiter->wait_chan = NULL;
+            waiter->state = JADE_CORO_READY;
+            chan_unlock(ch);
+            jade_sched_enqueue(waiter);
+        } else {
+            chan_unlock(ch);
+        }
+        return 1;
+    }
+
+    if (atomic_load(&ch->closed)) {
+        memset(data_out, 0, ch->elem_size);
+        chan_unlock(ch);
+        return -1;
+    }
+
+    chan_unlock(ch);
+    return 0;
 }

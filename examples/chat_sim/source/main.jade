@@ -42,26 +42,26 @@ actor User
     u3 is spawn User
 
     # Initialize users
-    send u0, @init(0)
-    send u1, @init(1)
-    send u2, @init(2)
-    send u3, @init(3)
+    u0.init(0)
+    u1.init(1)
+    u2.init(2)
+    u3.init(3)
 
     # Simulate 40 messages being broadcast to all users
     # Each message goes to all 4 users = 160 total message handlers
     msg is 0
     while msg < 40
-        send u0, @receive_msg(msg)
-        send u1, @receive_msg(msg)
-        send u2, @receive_msg(msg)
-        send u3, @receive_msg(msg)
+        u0.receive_msg(msg)
+        u1.receive_msg(msg)
+        u2.receive_msg(msg)
+        u3.receive_msg(msg)
         msg is msg + 1
 
     # Request status from each user
-    send u0, @status()
-    send u1, @status()
-    send u2, @status()
-    send u3, @status()
+    u0.status()
+    u1.status()
+    u2.status()
+    u3.status()
 
     t1 is jade_time_now_ns()
     elapsed_ms is (t1 - t0) / 1000000

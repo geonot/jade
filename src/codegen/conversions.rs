@@ -122,6 +122,7 @@ impl<'ctx> Compiler<'ctx> {
         unsigned: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
         let fmt_str = if unsigned { "%lu" } else { "%ld" };
         let iv = val.into_int_value();
         let wide: BasicValueEnum<'ctx> = if iv.get_type().get_bit_width() < 64 {
@@ -133,7 +134,32 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             iv.into()
         };
-        self.snprintf_to_string(fmt_str, &[wide.into()], "ts")
+
+        // Fast path for integer formatting: one snprintf into a fixed stack buffer,
+        // then convert to SSO/heap string as needed. Avoids the length-probe snprintf.
+        let snprintf = self.ensure_snprintf();
+        let fmt = b!(self.bld.build_global_string_ptr(fmt_str, "ts.ifmt"));
+        let cap = i64t.const_int(32, false); // enough for signed/unsigned 64-bit + NUL
+        let buf_arr_ty = i8t.array_type(32);
+        let buf_arr = self.entry_alloca(buf_arr_ty.into(), "ts.ibuf");
+        let zero = i64t.const_int(0, false);
+        let buf = unsafe {
+            b!(self
+                .bld
+                .build_gep(buf_arr_ty, buf_arr, &[zero, zero], "ts.ibuf.ptr"))
+        };
+        let len_i32 = b!(self.bld.build_call(
+            snprintf,
+            &[buf.into(), cap.into(), fmt.as_pointer_value().into(), wide.into()],
+            "ts.ilen"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .unwrap()
+        .into_int_value();
+
+        let len = b!(self.bld.build_int_s_extend(len_i32, i64t, "ts.ilen64"));
+        self.finalize_string_sso(buf, len, false, "ts.i")
     }
 
     pub(crate) fn float_to_string(

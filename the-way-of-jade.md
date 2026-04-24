@@ -243,7 +243,7 @@ actor Counter
         count
 
 c is spawn Counter
-send c, @increment(5)
+c.increment(5)
 ```
 
 ### Channels carry values.

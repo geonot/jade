@@ -29,12 +29,13 @@ actor Worker
     for i in 0 to n
         r is i % 8
         match r
-            0 ? send a, @work(35)
-            1 ? send b, @work(35)
-            2 ? send c, @work(35)
-            3 ? send d, @work(35)
-            4 ? send e, @work(35)
-            5 ? send f, @work(35)
-            6 ? send g, @work(35)
-            7 ? send h, @work(35)
+            0 ? a.work(35)
+            1 ? b.work(35)
+            2 ? c.work(35)
+            3 ? d.work(35)
+            4 ? e.work(35)
+            5 ? f.work(35)
+            6 ? g.work(35)
+            7 ? h.work(35)
+            _ ? a.work(35)
     log(0)

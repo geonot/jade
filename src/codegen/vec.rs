@@ -205,9 +205,21 @@ impl<'ctx> Compiler<'ctx> {
         lty: inkwell::types::BasicTypeEnum<'ctx>,
         elem_size: u64,
     ) -> Result<(), String> {
+        self.vec_push_raw_with_floor(header_ptr, val, lty, elem_size, self.empty_vec_growth_floor)
+    }
+
+    pub(crate) fn vec_push_raw_with_floor(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        val: BasicValueEnum<'ctx>,
+        lty: inkwell::types::BasicTypeEnum<'ctx>,
+        elem_size: u64,
+        growth_floor: u64,
+    ) -> Result<(), String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
         let fv = self.current_fn();
+        let growth_floor = growth_floor.clamp(16, 128).next_power_of_two();
 
         let len_gep = b!(self
             .bld
@@ -232,15 +244,20 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_nsw_mul(cap, i64t.const_int(2, false), "vpr.dbl"));
         let new_cap_cmp = b!(self.bld.build_int_compare(
-            IntPredicate::SGT,
+            IntPredicate::SGE,
             doubled,
-            i64t.const_int(4, false),
+            i64t.const_int(growth_floor, false),
             "vpr.cmp"
         ));
         let new_cap =
             b!(self
                 .bld
-                .build_select(new_cap_cmp, doubled, i64t.const_int(4, false), "vpr.nc"))
+                .build_select(
+                    new_cap_cmp,
+                    doubled,
+                    i64t.const_int(growth_floor, false),
+                    "vpr.nc",
+                ))
             .into_int_value();
         let new_size =
             b!(self
@@ -1500,6 +1517,59 @@ impl<'ctx> Compiler<'ctx> {
             "sort.data"
         ))
         .into_pointer_value();
+
+        // Fast path for primitive numeric vectors: delegate to C qsort-backed runtime.
+        match elem_ty {
+            Type::I64 => {
+                let sort_fn = self.module.get_function("jade_sort_i64").unwrap_or_else(|| {
+                    let sig = self.ctx.void_type().fn_type(
+                        &[
+                            self.ctx
+                                .i64_type()
+                                .ptr_type(AddressSpace::default())
+                                .into(),
+                            i64t.into(),
+                        ],
+                        false,
+                    );
+                    self.module.add_function("jade_sort_i64", sig, Some(Linkage::External))
+                });
+                let cast = b!(self.bld.build_pointer_cast(
+                    out_data,
+                    self.ctx.i64_type().ptr_type(AddressSpace::default()),
+                    "sort.i64.cast"
+                ));
+                let _ = b!(self
+                    .bld
+                    .build_call(sort_fn, &[cast.into(), len.into()], "sort.i64.fast"));
+                return Ok(out_hdr.into());
+            }
+            Type::F64 => {
+                let sort_fn = self.module.get_function("jade_sort_f64").unwrap_or_else(|| {
+                    let sig = self.ctx.void_type().fn_type(
+                        &[
+                            self.ctx
+                                .f64_type()
+                                .ptr_type(AddressSpace::default())
+                                .into(),
+                            i64t.into(),
+                        ],
+                        false,
+                    );
+                    self.module.add_function("jade_sort_f64", sig, Some(Linkage::External))
+                });
+                let cast = b!(self.bld.build_pointer_cast(
+                    out_data,
+                    self.ctx.f64_type().ptr_type(AddressSpace::default()),
+                    "sort.f64.cast"
+                ));
+                let _ = b!(self
+                    .bld
+                    .build_call(sort_fn, &[cast.into(), len.into()], "sort.f64.fast"));
+                return Ok(out_hdr.into());
+            }
+            _ => {}
+        }
 
         let i_ptr = self.entry_alloca(i64t.into(), "sort.i");
         b!(self.bld.build_store(i_ptr, i64t.const_int(1, false)));

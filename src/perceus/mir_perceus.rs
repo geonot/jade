@@ -247,7 +247,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::FieldGet(obj, _) => vec![*obj],
         InstKind::FieldSet(obj, _, val) => vec![*obj, *val],
         InstKind::FieldStore(_, _, val) => vec![*val],
-        InstKind::Index(base, idx) => vec![*base, *idx],
+        InstKind::Index(base, idx) | InstKind::IndexUnchecked(base, idx) => vec![*base, *idx],
         InstKind::IndexSet(base, idx, val) => vec![*base, *idx, *val],
         InstKind::IndexStore(_, idx, val) => vec![*idx, *val],
 

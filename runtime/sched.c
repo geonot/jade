@@ -4,11 +4,15 @@
  * N worker threads, each with a Chase-Lev deque.
  * Idle workers steal from others or park on a condvar.
  */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "jade_rt.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sched.h>
+#include <time.h>
 
 /* Global scheduler */
 jade_sched_t g_sched;
@@ -118,7 +122,7 @@ static void jade_worker_park(jade_worker_t *w) {
     pthread_mutex_lock(&g_sched.idle_lock);
     if (!atomic_load(&g_sched.shutdown)) {
         struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
+        timespec_get(&ts, TIME_UTC);
         ts.tv_nsec += 100000; /* 100μs timeout */
         if (ts.tv_nsec >= 1000000000) {
             ts.tv_sec += 1;
@@ -329,7 +333,8 @@ void jade_sched_yield(void) {
         jade_coro_yield();
     } else {
         /* Called from main thread (not a coroutine) — brief sleep to avoid busy-spin */
-        usleep(10);
+        struct timespec ns = {0, 10000}; /* 10μs */
+        nanosleep(&ns, NULL);
     }
 }
 
@@ -337,7 +342,8 @@ void jade_sched_park(void) {
     jade_worker_t *w = tl_worker;
     if (!w || !w->current) {
         /* Called from main thread — can't truly park, just brief sleep */
-        usleep(10);
+        struct timespec ns = {0, 10000}; /* 10μs */
+        nanosleep(&ns, NULL);
         return;
     }
     jade_coro_t *c = w->current;

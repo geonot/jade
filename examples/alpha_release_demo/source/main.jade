@@ -1,0 +1,119 @@
+use std/time
+use analytics
+use models/metric
+use workers/ingest
+use reports/reporter
+
+extern *usleep(us as i32) returns i32
+
+store metrics
+    id as i64
+    source as i64
+    value as i64
+    bucket as i64
+
+store metric_windows
+    window_id as i64
+    sample_count as i64
+    value_sum as i64
+    hot_count as i64
+
+actor Aggregator
+    window_id as i64
+    pending_count as i64
+    pending_sum as i64
+    pending_hot as i64
+    *loop 0
+        if pending_count >= 24
+            reporter.persist_window(window_id, pending_count, pending_sum, pending_hot)
+            window_id is window_id + 1
+            pending_count is 0
+            pending_sum is 0
+            pending_hot is 0
+    *record m as Metric
+        reporter.persist_metric(m)
+        pending_count is pending_count + 1
+        pending_sum is pending_sum + m.value
+        if metric.is_hot(m)
+            pending_hot is pending_hot + 1
+    *flush
+        if pending_count > 0
+            reporter.persist_window(window_id, pending_count, pending_sum, pending_hot)
+            window_id is window_id + 1
+            pending_count is 0
+            pending_sum is 0
+            pending_hot is 0
+
+test 'analytics_sum_range'
+    assert analytics.sum_range(1, 10) equals 55
+
+test 'ingest_transform'
+    assert ingest.transform(4) equals 8
+    assert ingest.transform(5) equals 16
+
+test 'ingest_build_metric'
+    m is ingest.build_metric(9, 7)
+    assert m.id equals 9
+    assert m.source equals 7
+    assert m.value equals 22
+    assert m.bucket equals metric.bucket_for(22)
+
+*main
+    t0 is time.monotonic()
+
+    # Reset persisted data so each run demonstrates deterministic behavior.
+    delete metrics where id >= 0
+    delete metric_windows where window_id >= 0
+
+    agg is spawn Aggregator
+
+    i is 0
+    while i < 180
+        raw is ingest.sample(i)
+        m is ingest.build_metric(i, raw)
+        agg.record(m)
+        i is i + 1
+
+    extern.usleep(160000)
+    agg.flush()
+    extern.usleep(50000)
+    stop agg
+    extern.usleep(40000)
+
+    metrics_rows is count metrics
+    window_rows is count metric_windows
+    sample_count is metric_windows.sum(sample_count)
+    value_sum is metrics.sum(value)
+    max_value is metrics.max(value)
+    min_value is metrics.min(value)
+    hot_exists is exists metrics where value > 250
+    first_hot is first metrics where value > 250
+
+    set metrics where id equals 5 value 999
+    patched is first metrics where id equals 5
+    delete metrics where value < 0
+
+    log('metrics_rows')
+    log(metrics_rows)
+    log('window_rows')
+    log(window_rows)
+    log('has_hot')
+    if hot_exists
+        log(1)
+    else
+        log(0)
+    log('first_hot_value')
+    log(first_hot.value)
+    log('patched_value')
+    log(patched.value)
+    log('max_value')
+    log(max_value)
+    log('min_value')
+    log(min_value)
+
+    log('sample_count')
+    log(sample_count)
+    log('value_sum')
+    log(value_sum)
+    log('elapsed_ms')
+    log(time.elapsed(t0))

@@ -6,8 +6,8 @@ actor Printer
 
 *main
     p is spawn Printer
-    send p, @say(42)
-    send p, @say(100)
-    send p, @say(7)
+    p.say(42)
+    p.say(100)
+    p.say(7)
     extern.usleep(100000)
     0

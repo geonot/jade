@@ -3342,3 +3342,368 @@ global x is 42
 "#;
     expect(src, "42");
 }
+
+// ── try chaining ─────────────────────────────────────────────────
+
+#[test]
+fn try_chain_two_levels() {
+    // Two consecutive `try` expressions in a single function.
+    expect(
+        r#"
+enum Option
+    Some(i64)
+    Nothing
+
+*step1() returns Option
+    Some(10)
+
+*step2() returns Option
+    Some(20)
+
+*run() returns Option
+    a is try step1()
+    b is try step2()
+    Some(a + b)
+
+*main()
+    match run()
+        Some(v) ? log(v)
+        Nothing ? log(-1)
+"#,
+        "30",
+    );
+}
+
+#[test]
+fn try_chain_short_circuits() {
+    // First `try` returns Nothing — the rest of the function must not execute.
+    expect(
+        r#"
+enum Option
+    Some(i64)
+    Nothing
+
+*fail() returns Option
+    Nothing
+
+*should_not_run() returns Option
+    Some(99)
+
+*run() returns Option
+    a is try fail()
+    b is try should_not_run()
+    Some(a + b)
+
+*main()
+    match run()
+        Some(v) ? log(v)
+        Nothing ? log(0)
+"#,
+        "0",
+    );
+}
+
+// ── multi-function error propagation chain ───────────────────────
+
+#[test]
+fn try_propagation_chain() {
+    // A → B → C with try; error in C propagates to main.
+    expect(
+        r#"
+enum Result
+    Ok(i64)
+    Err(i64)
+
+*level_c(x as i64) returns Result
+    if x < 0
+        Err(-1)
+    else
+        Ok(x * 2)
+
+*level_b(x as i64) returns Result
+    v is try level_c(x)
+    Ok(v + 100)
+
+*level_a(x as i64) returns Result
+    v is try level_b(x)
+    Ok(v + 1)
+
+*main()
+    match level_a(5)
+        Ok(v) ? log(v)
+        Err(e) ? log(e)
+    match level_a(-1)
+        Ok(v) ? log(v)
+        Err(e) ? log(e)
+"#,
+        "111\n-1",
+    );
+}
+
+// ── bang return (!) edge cases ────────────────────────────────────
+
+#[test]
+fn bang_return_in_loop() {
+    // Early return from inside a for loop.
+    expect(
+        r#"
+*find_first(n as i64) returns i64
+    for i in n
+        if i equals 3
+            ! i
+    -1
+
+*main()
+    log(find_first(10))
+    log(find_first(2))
+"#,
+        "3\n-1",
+    );
+}
+
+#[test]
+fn bang_return_nested_calls() {
+    // ! used inside a helper called from a loop.
+    expect(
+        r#"
+*check(x as i64) returns i64
+    if x > 10
+        ! x
+    0
+
+*main()
+    log(check(5))
+    log(check(15))
+"#,
+        "0\n15",
+    );
+}
+
+// ── Perceus / ownership patterns ─────────────────────────────────
+
+#[test]
+fn rc_linear_use() {
+    // A string (heap-allocated) created and used exactly once — should compile
+    // and produce correct output even with aggressive drop elision.
+    expect(
+        r#"
+*make(x as i64) returns String
+    if x > 0
+        "positive"
+    else
+        "non-positive"
+
+*main()
+    s is make(5)
+    log(s)
+    t is make(-1)
+    log(t)
+"#,
+        "positive\nnon-positive",
+    );
+}
+
+#[test]
+fn string_concat_ownership() {
+    // String concatenation forces copies/moves; test that ownership is handled
+    // correctly across multiple bindings.
+    expect(
+        r#"
+*main()
+    a is "hello"
+    b is " world"
+    c is a + b
+    log(c)
+    d is c + "!"
+    log(d)
+"#,
+        "hello world\nhello world!",
+    );
+}
+
+#[test]
+fn vec_single_owner() {
+    // Vec with a single binding path — tests that the vec is dropped exactly once.
+    expect(
+        r#"
+*main()
+    v is vec(1, 2, 3)
+    log(v.len())
+"#,
+        "3",
+    );
+}
+
+#[test]
+fn closure_captures_value() {
+    // Closure capturing an i64 by value; tests Perceus closure-capture tracking.
+    expect(
+        r#"
+*apply(f as (i64) returns i64, x as i64) returns i64
+    f(x)
+
+*main()
+    base is 10
+    add_base is |x as i64| returns i64 x + base
+    log(apply(add_base, 5))
+    log(apply(add_base, 20))
+"#,
+        "15\n30",
+    );
+}
+
+// ── compilation pipeline: struct field inference ─────────────────
+
+#[test]
+fn struct_field_inferred_from_use() {
+    // Struct with typed fields.
+    expect(
+        r#"
+type Point
+    x as i64
+    y as i64
+
+*main()
+    p is Point(x is 3, y is 4)
+    log(p.x + p.y)
+"#,
+        "7",
+    );
+}
+
+#[test]
+fn nested_struct_access() {
+    expect(
+        r#"
+type Inner
+    val as i64
+
+type Outer
+    inner as Inner
+    count as i64
+
+*main()
+    o is Outer(inner is Inner(val is 42), count is 1)
+    log(o.inner.val)
+    log(o.count)
+"#,
+        "42\n1",
+    );
+}
+
+// ── exhaustiveness checking ───────────────────────────────────────
+
+#[test]
+fn match_wildcard_arm() {
+    // Integer match must have a wildcard (catch-all) arm.
+    expect(
+        r#"
+*classify(n as i64) returns i64
+    match n
+        0 ? 0
+        1 ? 1
+        _ ? 2
+
+*main()
+    log(classify(0))
+    log(classify(1))
+    log(classify(5))
+"#,
+        "0\n1\n2",
+    );
+}
+
+#[test]
+fn match_enum_exhaustive() {
+    expect(
+        r#"
+enum Color
+    Red
+    Green
+    Blue
+
+*name(c as Color) returns i64
+    match c
+        Red ? 1
+        Green ? 2
+        Blue ? 3
+
+*main()
+    log(name(Red))
+    log(name(Green))
+    log(name(Blue))
+"#,
+        "1\n2\n3",
+    );
+}
+
+// ── compile-time constant folding ────────────────────────────────
+
+#[test]
+fn comptime_arithmetic() {
+    expect(
+        r#"
+const LIMIT is 100
+const HALF is LIMIT / 2
+
+*main()
+    log(LIMIT)
+    log(HALF)
+"#,
+        "100\n50",
+    );
+}
+
+#[test]
+fn comptime_used_in_array_bound() {
+    expect(
+        r#"
+const N is 4
+
+*main()
+    arr is [1, 2, 3, 4]
+    log(arr[N - 1])
+"#,
+        "4",
+    );
+}
+
+// ── higher-order functions / first-class fn ───────────────────────
+
+#[test]
+fn hof_map_manual() {
+    // Manual map over a vec using a loop and a function value.
+    expect(
+        r#"
+*double(x as i64) returns i64
+    x * 2
+
+*main()
+    src is vec(1, 2, 3, 4, 5)
+    dst is vec()
+    for i in src.len()
+        dst.push(double(src[i]))
+    for i in dst.len()
+        log(dst[i])
+"#,
+        "2\n4\n6\n8\n10",
+    );
+}
+
+#[test]
+fn hof_passed_as_argument() {
+    expect(
+        r#"
+*apply_twice(f as (i64) returns i64, x as i64) returns i64
+    f(f(x))
+
+*inc(x as i64) returns i64
+    x + 1
+
+*main()
+    log(apply_twice(inc, 0))
+    log(apply_twice(inc, 10))
+"#,
+        "2\n12",
+    );
+}

@@ -1147,6 +1147,9 @@ impl Typer {
                 for p in &mut h.params {
                     p.ty = self.infer_ctx.resolve(&p.ty);
                 }
+                if let Some(sleep_ms) = &mut h.loop_sleep_ms {
+                    self.resolve_expr(sleep_ms);
+                }
                 self.resolve_block(&mut h.body);
             }
         }
@@ -1915,6 +1918,12 @@ impl Typer {
             }
             let mut params = Vec::new();
             let declared_ptys = &handler_info[i].1;
+            if h.is_loop && !h.params.is_empty() {
+                return Err(format!(
+                    "line {}:{}: *loop handler cannot declare parameters",
+                    h.span.line, h.span.col
+                ));
+            }
             for (pi, p) in h.params.iter().enumerate() {
                 let pid = self.fresh_id();
                 let ty = p.ty.clone().unwrap_or_else(|| {
@@ -1942,11 +1951,21 @@ impl Typer {
                     span: p.span,
                 });
             }
+            let loop_sleep_ms = if h.is_loop {
+                h.loop_sleep_ms
+                    .as_ref()
+                    .map(|e| self.lower_expr_expected(e, Some(&Type::I64)))
+                    .transpose()?
+            } else {
+                None
+            };
             let body = self.lower_block(&h.body, &Type::Void)?;
             self.pop_scope();
             hir_handlers.push(hir::HandlerDef {
                 name: h.name.clone(),
                 params,
+                is_loop: h.is_loop,
+                loop_sleep_ms,
                 body,
                 tag: handler_info[i].2,
                 span: h.span,

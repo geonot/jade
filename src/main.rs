@@ -110,6 +110,39 @@ enum Cmd {
         opt: Option<u8>,
         #[arg(long)]
         lto: bool,
+        /// Target triple for cross-compilation (e.g., aarch64-unknown-linux-gnu)
+        #[arg(long)]
+        target: Option<String>,
+        /// Target CPU name (e.g., cortex-a53, skylake)
+        #[arg(long)]
+        cpu: Option<String>,
+        /// Target CPU features (e.g., +avx2,+sse4.2)
+        #[arg(long)]
+        features: Option<String>,
+        /// Standalone mode: no runtime, no libc dependency
+        #[arg(long)]
+        standalone: bool,
+    },
+    /// Generate jade.pkg and (by default) a source archive in dist/
+    Package {
+        /// Output manifest path (default: ./jade.pkg)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Generate only jade.pkg (skip dist/*.tar.gz creation)
+        #[arg(long)]
+        no_archive: bool,
+    },
+    /// Tag the current git repo as v<version> for dependency publishing
+    Publish {
+        /// Also push the created tag to remote (default remote: origin)
+        #[arg(long)]
+        push: bool,
+        /// Git remote to push to (default: origin)
+        #[arg(long)]
+        remote: Option<String>,
+        /// Force retag if tag already exists and skip clean-tree check
+        #[arg(long)]
+        force: bool,
     },
     /// Compile and run a file or the project
     Run {
@@ -147,6 +180,18 @@ fn dirs_cache() -> PathBuf {
         PathBuf::from(home).join(".cache").join("jade")
     } else {
         PathBuf::from(".jade_cache")
+    }
+}
+
+fn find_project_root(start_dir: &std::path::Path) -> Option<PathBuf> {
+    let mut dir = start_dir.to_path_buf();
+    loop {
+        if dir.join("project.jade").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
     }
 }
 
@@ -538,6 +583,161 @@ fn cmd_update() {
     println!("updated {} dependencies", pkg.requires.len());
 }
 
+fn project_config_to_package(cfg: ProjectConfig) -> Package {
+    let name = cfg.name.unwrap_or_else(|| "unnamed".to_string());
+    let version = cfg
+        .version
+        .as_deref()
+        .and_then(|v| SemVer::parse(v).ok())
+        .unwrap_or(SemVer {
+            major: 0,
+            minor: 1,
+            patch: 0,
+        });
+    Package {
+        name,
+        version,
+        author: None,
+        requires: cfg.requires,
+    }
+}
+
+fn run_git(args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| format!("git {:?}: {e}", args))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn cmd_package(output: Option<PathBuf>, no_archive: bool) {
+    let project_path = PathBuf::from("project.jade");
+    if !project_path.exists() {
+        die("no project.jade found in current directory (run `jadec init` to create one)");
+    }
+
+    let cfg = ProjectConfig::from_file(&project_path)
+        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+    let pkg = project_config_to_package(cfg);
+
+    let pkg_out = output.unwrap_or_else(|| PathBuf::from("jade.pkg"));
+    fs::write(&pkg_out, pkg.to_string_repr())
+        .unwrap_or_else(|e| die(&format!("cannot write {}: {e}", pkg_out.display())));
+    println!("wrote {}", pkg_out.display());
+
+    if no_archive {
+        return;
+    }
+
+    let dist_dir = PathBuf::from("dist");
+    if !dist_dir.exists() {
+        fs::create_dir_all(&dist_dir)
+            .unwrap_or_else(|e| die(&format!("cannot create {}: {e}", dist_dir.display())));
+    }
+    let archive_name = format!("{}-{}.tar.gz", pkg.name, pkg.version);
+    let archive_path = dist_dir.join(archive_name);
+
+    let mut tar_args = vec![
+        "-czf".to_string(),
+        archive_path.to_string_lossy().to_string(),
+        "project.jade".to_string(),
+        pkg_out.to_string_lossy().to_string(),
+    ];
+    if PathBuf::from("source").is_dir() {
+        tar_args.push("source".to_string());
+    }
+    if PathBuf::from("README.md").exists() {
+        tar_args.push("README.md".to_string());
+    }
+    if PathBuf::from("LICENSE").exists() {
+        tar_args.push("LICENSE".to_string());
+    }
+
+    let status = Command::new("tar")
+        .args(tar_args.iter().map(|s| s.as_str()))
+        .status()
+        .unwrap_or_else(|e| die(&format!("tar invocation failed: {e}")));
+    if !status.success() {
+        die(&format!(
+            "tar failed with exit code {}",
+            status.code().unwrap_or(-1)
+        ));
+    }
+    println!("created {}", archive_path.display());
+}
+
+fn cmd_publish(push: bool, remote: Option<String>, force: bool) {
+    let project_path = PathBuf::from("project.jade");
+    if !project_path.exists() {
+        die("no project.jade found in current directory (run `jadec init` to create one)");
+    }
+
+    let cfg = ProjectConfig::from_file(&project_path)
+        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+    let pkg = project_config_to_package(cfg);
+    let tag = format!("v{}", pkg.version);
+
+    run_git(&["rev-parse", "--is-inside-work-tree"]).unwrap_or_else(|e| die(&e));
+
+    if !force {
+        let status_out = run_git(&["status", "--porcelain"])
+            .unwrap_or_else(|e| die(&format!("cannot read git status: {e}")));
+        if !status_out.trim().is_empty() {
+            die("publish requires a clean git working tree (use --force to override)");
+        }
+    }
+
+    let tag_exists = Command::new("git")
+        .args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if tag_exists {
+        if force {
+            run_git(&["tag", "-d", &tag]).unwrap_or_else(|e| die(&e));
+        } else {
+            die(&format!("tag {tag} already exists (use --force to retag)"));
+        }
+    }
+
+    run_git(&[
+        "tag",
+        "-a",
+        &tag,
+        "-m",
+        &format!("jade publish {} {}", pkg.name, pkg.version),
+    ])
+    .unwrap_or_else(|e| die(&e));
+
+    let remote_name = remote.unwrap_or_else(|| "origin".to_string());
+    if push {
+        run_git(&["push", &remote_name, &tag]).unwrap_or_else(|e| die(&e));
+        println!("pushed tag {tag} to {remote_name}");
+    }
+
+    let remote_url = run_git(&["remote", "get-url", &remote_name]).ok();
+    println!("published {} {} as git tag {}", pkg.name, pkg.version, tag);
+    if let Some(url) = remote_url {
+        println!(
+            "consumer require line:\nrequire '{}' '{}' '{}'",
+            pkg.name, url, pkg.version
+        );
+    } else {
+        println!(
+            "consumer require line:\nrequire '{}' '<git-url>' '{}'",
+            pkg.name, pkg.version
+        );
+    }
+}
+
 fn find_project_entry() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let project_jade = cwd.join("project.jade");
@@ -780,6 +980,13 @@ impl EntityIndex {
         let source_dir = base_dir.join("source");
         if source_dir.is_dir() {
             idx.scan_dir(&source_dir);
+        } else if base_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| s == "source")
+            .unwrap_or(false)
+        {
+            idx.scan_dir(base_dir);
         }
 
         // 3. Package directories
@@ -1250,6 +1457,9 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                     for p in &h.params {
                         defined.insert(p.name.clone());
                     }
+                    if let Some(sleep_ms) = &h.loop_sleep_ms {
+                        walk_expr(sleep_ms, &mut referenced, &mut defined);
+                    }
                     for s in &h.body {
                         walk_stmt(s, &mut referenced, &mut defined);
                     }
@@ -1440,7 +1650,8 @@ fn resolve_implicit_imports(
 }
 
 fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {
-    let project_jade = base_dir.join("project.jade");
+    let project_root = find_project_root(base_dir).unwrap_or_else(|| base_dir.to_path_buf());
+    let project_jade = project_root.join("project.jade");
     let requires = if project_jade.exists() {
         match ProjectConfig::from_file(&project_jade) {
             Ok(cfg) => cfg.requires,
@@ -1462,7 +1673,7 @@ fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {
         author: None,
         requires,
     };
-    let lock_file = base_dir.join("jade.lock");
+    let lock_file = project_root.join("jade.lock");
     let existing_lock = if lock_file.exists() {
         Some(Lockfile::from_file(&lock_file).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
     } else {
@@ -1488,6 +1699,10 @@ fn compile_and_link(
     deterministic_fp: bool,
     emit_mir: bool,
     incremental: bool,
+    target: Option<&str>,
+    cpu: Option<&str>,
+    features: Option<&str>,
+    standalone: bool,
 ) {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
@@ -1603,10 +1818,23 @@ fn compile_and_link(
     if deterministic_fp {
         comp.set_deterministic_fp();
     }
+    if let Some(t) = target {
+        comp.target_triple = Some(t.to_string());
+    }
+    if let Some(c) = cpu {
+        comp.target_cpu = Some(c.to_string());
+    }
+    if let Some(f) = features {
+        comp.target_features = Some(f.to_string());
+    }
+    if standalone {
+        comp.standalone = true;
+    }
 
     {
         use jadec::codegen::mir_codegen::MirCodegen;
         use jadec::perceus::mir_perceus;
+        comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
         let mut mir_cg = MirCodegen::new(&mut comp);
         if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
@@ -1651,6 +1879,21 @@ fn compile_and_link(
     if lto {
         cc.arg("-flto");
     }
+    if let Some(triple) = target {
+        cc.arg(format!("--target={triple}"));
+        if triple.contains("wasm") {
+            cc = Command::new("clang");
+            cc.arg(format!("--target={triple}"));
+            cc.arg(&obj).arg("-o").arg(output);
+            if !standalone {
+                cc.arg("-lc");
+            } else {
+                cc.arg("-nostdlib")
+                    .arg("-Wl,--no-entry")
+                    .arg("-Wl,--export-all");
+            }
+        }
+    }
     let status = cc.status();
     let _ = fs::remove_file(&obj);
     match status {
@@ -1668,10 +1911,21 @@ fn main() {
             Cmd::Init { name } => cmd_init(name),
             Cmd::Fetch => cmd_fetch(),
             Cmd::Update => cmd_update(),
-            Cmd::Build { output, opt, lto } => {
+            Cmd::Build {
+                output,
+                opt,
+                lto,
+                target,
+                cpu,
+                features,
+                standalone,
+            } => {
                 let entry = find_project_entry();
                 let out = output.unwrap_or_else(|| PathBuf::from("a.out"));
                 let opt_level = opt.unwrap_or(3);
+                let chosen_target = target.as_deref().or(cli.target.as_deref());
+                let chosen_cpu = cpu.as_deref().or(cli.cpu.as_deref());
+                let chosen_features = features.as_deref().or(cli.features.as_deref());
                 compile_and_link(
                     &entry,
                     &out,
@@ -1683,8 +1937,18 @@ fn main() {
                     cli.deterministic_fp,
                     cli.emit_mir,
                     cli.incremental,
+                    chosen_target,
+                    chosen_cpu,
+                    chosen_features,
+                    standalone || cli.standalone,
                 );
             }
+            Cmd::Package { output, no_archive } => cmd_package(output, no_archive),
+            Cmd::Publish {
+                push,
+                remote,
+                force,
+            } => cmd_publish(push, remote, force),
             Cmd::Run { file, args } => {
                 let entry = match file {
                     Some(f) => {
@@ -1718,6 +1982,10 @@ fn main() {
                         cli.deterministic_fp,
                         false,
                         cli.incremental,
+                        cli.target.as_deref(),
+                        cli.cpu.as_deref(),
+                        cli.features.as_deref(),
+                        cli.standalone,
                     );
                 }
                 let status = Command::new(&cached_bin).args(&args).status();
@@ -1739,6 +2007,10 @@ fn main() {
                     cli.deterministic_fp,
                     false,
                     cli.incremental,
+                    cli.target.as_deref(),
+                    cli.cpu.as_deref(),
+                    cli.features.as_deref(),
+                    cli.standalone,
                 );
                 let status = Command::new("./.jade_test_tmp").status();
                 let _ = fs::remove_file("./.jade_test_tmp");
@@ -2082,6 +2354,7 @@ fn main() {
     {
         use jadec::codegen::mir_codegen::MirCodegen;
         use jadec::perceus::mir_perceus;
+        comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
         if mir_hints.stats.drops_elided > 0
             || mir_hints.stats.reuse_sites > 0

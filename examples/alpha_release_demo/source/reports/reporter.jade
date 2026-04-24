@@ -1,0 +1,7 @@
+use models/metric
+
+*persist_metric(m as Metric)
+    insert metrics m.id, m.source, m.value, m.bucket
+
+*persist_window(window_id as i64, sample_count as i64, value_sum as i64, hot_count as i64)
+    insert metric_windows window_id, sample_count, value_sum, hot_count

@@ -1140,6 +1140,61 @@ impl Typer {
         let hobj = self.lower_expr(obj)?;
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
+        if let Type::ActorRef(actor_name) = &obj_ty {
+            let (_, _, handlers) = self
+                .actors
+                .get(actor_name)
+                .ok_or_else(|| format!("unknown actor '{actor_name}'"))?
+                .clone();
+            let (handler_name, handler_ptys, tag) = handlers
+                .iter()
+                .find(|(n, _, _)| n.as_str() == method)
+                .ok_or_else(|| {
+                    format!(
+                        "actor '{actor_name}' has no handler '.{method}()'"
+                    )
+                })?
+                .clone();
+
+            if tag == u32::MAX {
+                return Err(format!(
+                    "actor '{actor_name}' handler '.{method}()' is reserved for *loop and cannot be sent"
+                ));
+            }
+
+            if args.len() != handler_ptys.len() {
+                return Err(format!(
+                    "actor handler '.{method}()' on '{actor_name}' expects {} argument(s), got {}",
+                    handler_ptys.len(),
+                    args.len()
+                ));
+            }
+
+            let mut hargs: Vec<hir::Expr> = Vec::with_capacity(args.len());
+            for (i, arg) in args.iter().enumerate() {
+                let harg = self.lower_expr_expected(arg, Some(&handler_ptys[i]))?;
+                let _ = self.infer_ctx.unify_at(
+                    &handler_ptys[i],
+                    &harg.ty,
+                    span,
+                    "actor method argument",
+                );
+                hargs.push(harg);
+            }
+
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Send(
+                    Box::new(hobj),
+                    actor_name.clone(),
+                    handler_name,
+                    tag,
+                    hargs,
+                ),
+                ty: Type::Void,
+                span,
+            });
+        }
+
         if matches!(obj_ty, Type::String) {
             let hargs: Vec<hir::Expr> = args
                 .iter()
@@ -1831,9 +1886,15 @@ impl Typer {
                     type_map.entry(tp.clone()).or_insert(Type::I64);
                 }
                 let mangled = self.monomorphize_fn(&name.as_str(), &type_map)?;
-                let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
-                    panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
-                });
+                let (id, _, ret) = self
+                    .fns
+                    .get(&mangled)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "internal compiler error: monomorphized fn '{mangled}' not found after instantiation"
+                        )
+                    })?;
                 let mut all_args = vec![hleft];
                 for a in extra_args {
                     all_args.push(self.lower_expr(a)?);
@@ -1917,9 +1978,15 @@ impl Typer {
                     }
                     let mangled = self.monomorphize_fn(&name.as_str(), &type_map)?;
                     let mangled_sym = mangled;
-                    let (id, _, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
-                        panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
-                    });
+                    let (id, _, ret) = self
+                        .fns
+                        .get(&mangled)
+                        .cloned()
+                        .ok_or_else(|| {
+                            format!(
+                                "internal compiler error: monomorphized fn '{mangled}' not found after instantiation"
+                            )
+                        })?;
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Call(id, mangled_sym, all_args),
                         ty: ret,
@@ -1997,9 +2064,15 @@ impl Typer {
         coerce: bool,
     ) -> Result<hir::Expr, String> {
         let mangled = self.monomorphize_fn(name, type_map)?;
-        let (id, mono_param_tys, ret) = self.fns.get(&mangled).cloned().unwrap_or_else(|| {
-            panic!("ICE: monomorphized fn '{mangled}' not found after instantiation")
-        });
+        let (id, mono_param_tys, ret) = self
+            .fns
+            .get(&mangled)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "internal compiler error: monomorphized fn '{mangled}' not found after instantiation"
+                )
+            })?;
         if coerce {
             for (i, ha) in hargs.iter_mut().enumerate() {
                 if let Some(pt) = mono_param_tys.get(i) {

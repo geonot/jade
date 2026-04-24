@@ -940,11 +940,11 @@ actor Counter
 
 *main
     c is spawn Counter
-    send c, @increment(5)
-    send c, @increment(3)
+    c.increment(5)
+    c.increment(3)
 ```
 
-Actor handlers use `@name` syntax. Fields are defined in the actor body. Messages are sent with `send target, @handler(args)`. Actors run on a cooperative work-stealing scheduler. Message sends are non-blocking.
+Actor handlers use `@name` syntax. Fields are defined in the actor body. Messages are sent with `target.handler(args)`. Actors run on a cooperative work-stealing scheduler. Message sends are non-blocking.
 
 ### Supervisor Trees
 
@@ -1062,6 +1062,8 @@ jade check                 # type-check without codegen
 jade fmt [files]           # format Jade source files
 jade fetch                 # download dependencies
 jade update                # update dependency lock file
+jade package               # emit jade.pkg (+ dist tarball)
+jade publish               # create git tag v<version> for package release
 jade bind header.h         # generate extern declarations from C header
 ```
 
@@ -1076,6 +1078,14 @@ jade bind header.h         # generate extern declarations from C header
 - `--fast-math` — enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
 - `--deterministic-fp` — guarantee deterministic floating-point results
 - `--threads N` — parallel codegen threads (0 = auto-detect)
+
+Cross compilation and embedded/OS-style builds:
+
+```bash
+jadec --target aarch64-unknown-linux-gnu source/main.jade -o app-aarch64
+jade build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
+jade build --target wasm32-wasi --standalone -o app.wasm
+```
 
 ### Codegen Optimizations
 

@@ -1,4 +1,6 @@
+use crate::ast::{Decl, Expr, Stmt};
 use crate::lexer::{Lexer, Token};
+use crate::parser::Parser;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +125,100 @@ impl Package {
         let input = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         Self::parse(&input)
+    }
+
+    pub fn from_project_file(path: &Path) -> Result<Self, String> {
+        let input = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let tokens = Lexer::new(&input)
+            .tokenize()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let prog = Parser::new(tokens)
+            .parse_program()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+
+        let mut name: Option<String> = None;
+        let mut version: Option<SemVer> = None;
+        let mut author: Option<String> = None;
+        let mut requires = Vec::new();
+
+        for decl in &prog.decls {
+            if let Decl::Fn(f) = decl {
+                for stmt in &f.body {
+                    match stmt {
+                        Stmt::Assign(Expr::Ident(field, _), value, _) => {
+                            let field_name = field.as_str();
+                            match (field_name.as_str(), value) {
+                                ("name", Expr::Str(v, _)) => name = Some(v.clone()),
+                                ("version", Expr::Str(v, _)) => {
+                                    version = Some(SemVer::parse(v).map_err(|e| {
+                                        format!("{}: invalid version: {e}", path.display())
+                                    })?)
+                                }
+                                ("author", Expr::Str(v, _)) => author = Some(v.clone()),
+                                _ => {}
+                            }
+                        }
+                        Stmt::Expr(Expr::Call(callee, args, _))
+                            if matches!(callee.as_ref(), Expr::Ident(n, _) if n == "require")
+                                && args.len() == 3 =>
+                        {
+                            if let (Expr::Str(dep_name, _), Expr::Str(url, _), Expr::Str(ver, _)) =
+                                (&args[0], &args[1], &args[2])
+                            {
+                                let parsed = SemVer::parse(ver).map_err(|e| {
+                                    format!(
+                                        "{}: invalid require version for '{}': {e}",
+                                        path.display(),
+                                        dep_name
+                                    )
+                                })?;
+                                requires.push(Dependency {
+                                    name: dep_name.clone(),
+                                    url: url.clone(),
+                                    version: parsed,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        for decl in &prog.decls {
+            if let Decl::Const(const_name, value, _) = decl {
+                let const_field = const_name.as_str();
+                match (const_field.as_str(), value) {
+                    ("name", Expr::Str(v, _)) => name = Some(v.clone()),
+                    ("version", Expr::Str(v, _)) => {
+                        version = Some(
+                            SemVer::parse(v)
+                                .map_err(|e| format!("{}: invalid version: {e}", path.display()))?,
+                        )
+                    }
+                    ("author", Expr::Str(v, _)) => author = Some(v.clone()),
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(Package {
+            name: name.ok_or_else(|| {
+                format!(
+                    "{}: missing package name (expected `name is '...'`)",
+                    path.display()
+                )
+            })?,
+            version: version.ok_or_else(|| {
+                format!(
+                    "{}: missing package version (expected `version is 'x.y.z'`)",
+                    path.display()
+                )
+            })?,
+            author,
+            requires,
+        })
     }
 
     pub fn to_string_repr(&self) -> String {

@@ -51,6 +51,7 @@ use inkwell::debug_info::{
 };
 
 use crate::hir;
+use crate::mir;
 use crate::perceus::PerceusHints;
 use crate::types::Type;
 
@@ -135,6 +136,9 @@ pub struct Compiler<'ctx> {
     tbaa_kind_id: u32,
     /// TBAA root node for type-based alias analysis.
     tbaa_root: Option<inkwell::values::MetadataValue<'ctx>>,
+    /// Per-compilation floor for first growth of empty vectors.
+    /// Tuned from MIR VecNew/VecPush patterns in the current program.
+    pub(crate) empty_vec_growth_floor: u64,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
@@ -185,7 +189,71 @@ impl<'ctx> Compiler<'ctx> {
             standalone: false,
             tbaa_kind_id: ctx.get_kind_id("tbaa"),
             tbaa_root: None,
+            empty_vec_growth_floor: 16,
         }
+    }
+
+    pub fn set_empty_vec_growth_floor(&mut self, cap: u64) {
+        // Keep this small and power-of-two for allocator friendliness.
+        let clamped = cap.clamp(16, 128);
+        self.empty_vec_growth_floor = clamped.next_power_of_two();
+    }
+
+    /// Infer a per-program empty-vec initial growth floor from MIR.
+    ///
+    /// We analyze empty `VecNew([])` sites and count static `VecPush` uses on
+    /// those vectors. Then we choose a conservative floor:
+    /// - max/p90 >= 32 -> 64
+    /// - max/p90 >= 16 -> 32
+    /// - otherwise     -> 16
+    ///
+    /// This remains robust for outlier-heavy programs (e.g. alloc churn loops)
+    /// while avoiding over-allocation in tiny push-only scripts.
+    pub fn tune_empty_vec_growth_floor_from_mir(&mut self, prog: &mir::Program) {
+        use std::collections::HashMap;
+
+        let mut empty_vec_push_counts: Vec<u32> = Vec::new();
+
+        for func in &prog.functions {
+            let mut pushes_by_vec: HashMap<mir::ValueId, u32> = HashMap::new();
+
+            for bb in &func.blocks {
+                for inst in &bb.insts {
+                    if let mir::InstKind::VecPush(vec_id, _) = inst.kind {
+                        *pushes_by_vec.entry(vec_id).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            for bb in &func.blocks {
+                for inst in &bb.insts {
+                    if let (Some(dest), mir::InstKind::VecNew(elems)) = (&inst.dest, &inst.kind) {
+                        if elems.is_empty() {
+                            empty_vec_push_counts.push(*pushes_by_vec.get(dest).unwrap_or(&0));
+                        }
+                    }
+                }
+            }
+        }
+
+        if empty_vec_push_counts.is_empty() {
+            return;
+        }
+
+        empty_vec_push_counts.sort_unstable();
+        let max_push = *empty_vec_push_counts.last().unwrap_or(&0);
+        let p90_idx = ((empty_vec_push_counts.len() as f64) * 0.90).floor() as usize;
+        let p90_idx = p90_idx.min(empty_vec_push_counts.len().saturating_sub(1));
+        let p90 = empty_vec_push_counts[p90_idx];
+
+        let floor = if max_push >= 32 || p90 >= 32 {
+            64
+        } else if max_push >= 16 || p90 >= 16 {
+            32
+        } else {
+            16
+        };
+        self.set_empty_vec_growth_floor(floor);
     }
 
     /// Initialize the TBAA metadata tree.  Must be called after `new()`.
@@ -1014,6 +1082,10 @@ impl<'ctx> Compiler<'ctx> {
         );
         decl!(
             "jade_chan_recv",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false)
+        );
+        decl!(
+            "jade_chan_try_recv",
             i32t.fn_type(&[ptr.into(), ptr.into()], false)
         );
         decl!("jade_chan_close", void.fn_type(&[ptr.into()], false));

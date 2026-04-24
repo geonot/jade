@@ -15,13 +15,13 @@ actor Worker
     g is spawn Worker
     h is spawn Worker
     for i in 0 to 1000000
-        send a, @add(1)
-        send b, @add(1)
-        send c, @add(1)
-        send d, @add(1)
-        send e, @add(1)
-        send f, @add(1)
-        send g, @add(1)
-        send h, @add(1)
+        a.add(1)
+        b.add(1)
+        c.add(1)
+        d.add(1)
+        e.add(1)
+        f.add(1)
+        g.add(1)
+        h.add(1)
     extern.usleep(800000)
     log(0)

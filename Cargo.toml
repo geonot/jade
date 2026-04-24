@@ -11,6 +11,10 @@ name = "jadec"
 path = "src/main.rs"
 
 [[bin]]
+name = "jade"
+path = "src/bin/jade.rs"
+
+[[bin]]
 name = "jadec-lsp"
 path = "src/lsp/main.rs"
 

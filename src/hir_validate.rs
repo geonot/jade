@@ -50,6 +50,9 @@ impl HirValidator {
         for actor in &prog.actors {
             v.check_top_level_def(actor.def_id, &actor.name.as_str(), actor.span);
             for h in &actor.handlers {
+                if let Some(sleep_ms) = &h.loop_sleep_ms {
+                    v.validate_expr(sleep_ms);
+                }
                 v.validate_block(&h.body);
             }
         }
@@ -224,6 +227,17 @@ impl HirValidator {
                 self.validate_expr(lhs);
                 self.validate_expr(rhs);
                 use crate::ast::BinOp::*;
+                match op {
+                    Div | Mod => {
+                        if matches!(&rhs.kind, hir::ExprKind::Int(0)) {
+                            self.errors.push(format!(
+                                "line {}: division by zero: integer literal 0 used as {:?} divisor",
+                                expr.span.line, op
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
                 match op {
                     Add | Sub | Mul | Div | Mod | Lt | Gt | Le | Ge => {
                         let is_ptr_arith = matches!(

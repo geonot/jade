@@ -1,0 +1,23 @@
+type Metric
+    id as i64
+    source as i64
+    value as i64
+    bucket as i64
+
+*new(id as i64, source as i64, value as i64, bucket as i64) returns Metric
+    Metric(id is id, source is source, value is value, bucket is bucket)
+
+*bucket_for(value as i64) returns i64
+    if value < 50
+        0
+    else
+        if value < 150
+            1
+        else
+            if value < 300
+                2
+            else
+                3
+
+*is_hot(m as Metric) returns bool
+    m.value > 250

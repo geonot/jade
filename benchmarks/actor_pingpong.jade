@@ -8,6 +8,6 @@ actor Worker
 *main
     w is spawn Worker
     for i in 0 to 2000000
-        send w, @ping(1)
+        w.ping(1)
     extern.usleep(500000)
     log(0)

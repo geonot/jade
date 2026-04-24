@@ -175,13 +175,16 @@ struct jade_chan {
     void              *buffer;
     _Atomic(int32_t)   closed;
     jade_coro_t       *send_waitq;
+    jade_coro_t       *send_waitq_tail;
     jade_coro_t       *recv_waitq;
+    jade_coro_t       *recv_waitq_tail;
     _Atomic(int32_t)   lock;         /* spinlock (no thread-ownership tracking) */
 };
 
 jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity);
 void        jade_chan_send(jade_chan_t *ch, const void *data);
 int         jade_chan_recv(jade_chan_t *ch, void *data_out);
+int         jade_chan_try_recv(jade_chan_t *ch, void *data_out);
 void        jade_chan_close(jade_chan_t *ch);
 void        jade_chan_destroy(jade_chan_t *ch);
 
@@ -234,6 +237,21 @@ extern _Thread_local jade_worker_t *tl_worker;
 
 void *jade_xmalloc(size_t size);
 void jade_store_truncation_warn(int64_t original_len, int64_t max_len);
+
+/* ── Process helpers ─────────────────────────────────────────────── */
+
+long jade_popen_read(const char *cmd, char *buf, long buf_size, int *exit_code);
+int  jade_system(const char *cmd);
+long jade_exec_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
+int  jade_exec_argv(const char *prog, char *const argv[], int *exit_code);
+int  jade_exec_argv_timeout(const char *prog, char *const argv[], int *exit_code, long timeout_ms);
+long jade_exec_argv_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
+long jade_exec_argv_capture_timeout(const char *prog, char *const argv[],
+                                    char *buf, long buf_size, int *exit_code, long timeout_ms);
+
+/* Vec<String>-aware spawn (called from std/process.jade) */
+long jade_spawn_capture(const void *vec_ptr, char *buf, long buf_size, int *exit_code);
+int  jade_spawn_exec(const void *vec_ptr, int *exit_code);
 
 #ifdef __cplusplus
 }

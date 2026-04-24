@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Jade Language Guide: syntax, modules, packages, actors, store, testing, cross compilation, and release workflows.">
+    <title>Jade Language Guide</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .guide {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 96px 20px 64px;
+        }
+        .guide h1, .guide h2, .guide h3 {
+            font-family: var(--font-display);
+            line-height: 1.2;
+            margin-bottom: 0.6rem;
+        }
+        .guide h1 {
+            font-size: 2.4rem;
+            margin-bottom: 1rem;
+        }
+        .guide h2 {
+            font-size: 1.5rem;
+            margin-top: 2.2rem;
+        }
+        .guide p, .guide li {
+            color: var(--text-dim);
+        }
+        .guide ul, .guide ol {
+            padding-left: 1.2rem;
+            margin: 0.7rem 0;
+        }
+        .guide code {
+            font-family: var(--font-mono);
+            font-size: 0.9em;
+        }
+        .guide pre {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 14px;
+            overflow-x: auto;
+            margin: 0.9rem 0 1.2rem;
+        }
+        .guide .toc {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 1rem 1rem 0.5rem;
+            background: rgba(255, 255, 255, 0.03);
+            margin: 1.2rem 0 2rem;
+        }
+        .guide .toc a {
+            color: var(--jade-200);
+        }
+        .guide .pill {
+            display: inline-block;
+            border: 1px solid rgba(0, 168, 107, 0.4);
+            border-radius: 999px;
+            padding: 0.25rem 0.65rem;
+            margin-right: 0.45rem;
+            margin-bottom: 0.45rem;
+            font-size: 0.8rem;
+            color: var(--jade-200);
+        }
+        .guide .back {
+            margin-top: 2.5rem;
+        }
+    </style>
+</head>
+<body>
+<nav class="nav" role="navigation" aria-label="Guide navigation">
+    <div class="nav__inner">
+        <a href="index.html" class="nav__logo" aria-label="Jade home">
+            <span class="nav__logo-text">Jade</span>
+        </a>
+        <ul class="nav__links" role="list">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="guide.html">Guide</a></li>
+            <li><a href="#cli">CLI</a></li>
+            <li><a href="#packages">Packages</a></li>
+            <li><a href="#cross">Cross Compile</a></li>
+        </ul>
+    </div>
+</nav>
+
+<main class="guide">
+    <h1>Jade Language Guide</h1>
+    <p>Jade is a compiled systems language focused on readability, static typing with inference, actor concurrency, and built-in persistence.</p>
+
+    <div>
+        <span class="pill">Type Inference</span>
+        <span class="pill">Actor Runtime</span>
+        <span class="pill">Persistent Store</span>
+        <span class="pill">Multi-module Projects</span>
+        <span class="pill">Package Tooling</span>
+        <span class="pill">Cross Compilation</span>
+    </div>
+
+    <section class="toc">
+        <h2>Contents</h2>
+        <ol>
+            <li><a href="#quickstart">Quick Start</a></li>
+            <li><a href="#layout">Project Layout and Modules</a></li>
+            <li><a href="#cli">Compiler and CLI Workflows</a></li>
+            <li><a href="#packages">Package Includes and Publish Workflow</a></li>
+            <li><a href="#actors">Actors and Loop Handlers</a></li>
+            <li><a href="#store">Persistent Store</a></li>
+            <li><a href="#testing">Testing</a></li>
+            <li><a href="#cross">Cross Compilation and Standalone Builds</a></li>
+            <li><a href="#perf">Performance Notes</a></li>
+            <li><a href="#release">Alpha Release Checklist</a></li>
+        </ol>
+    </section>
+
+    <h2 id="quickstart">1. Quick Start</h2>
+    <pre><code>jade init demo
+cd demo
+jade run
+jade test
+jade build -o demo_bin</code></pre>
+
+    <p>If your environment uses the legacy binary name, replace <code>jade</code> with <code>jadec</code>.</p>
+
+    <h2 id="layout">2. Project Layout and Modules</h2>
+    <pre><code>demo/
+  project.jade
+  source/
+    main.jade
+    analytics.jade
+    workers/
+      ingest.jade</code></pre>
+
+    <p>Imports use slash paths:</p>
+    <pre><code>use analytics
+use workers/ingest
+use std/time</code></pre>
+
+    <p>Call module functions with method-style qualification:</p>
+    <pre><code>sum is analytics.sum_range(1, 100)
+value is ingest.transform(42)
+now is time.monotonic()</code></pre>
+
+    <h2 id="cli">3. Compiler and CLI Workflows</h2>
+    <ul>
+        <li><code>jade build</code>: compile project entry.</li>
+        <li><code>jade run</code>: compile and execute.</li>
+        <li><code>jade test</code>: run inline tests.</li>
+        <li><code>jade check</code>: type-check only.</li>
+        <li><code>jade fmt</code>: format source files.</li>
+        <li><code>jade bind header.h</code>: generate extern declarations from C headers.</li>
+        <li><code>jade fetch</code>: resolve and cache package dependencies.</li>
+        <li><code>jade update</code>: refresh lockfile dependency commits.</li>
+        <li><code>jade package</code>: emit <code>jade.pkg</code> and source archive.</li>
+        <li><code>jade publish</code>: publish by creating git tag <code>vX.Y.Z</code>.</li>
+    </ul>
+
+    <h2 id="packages">4. Package Includes and Publish Workflow</h2>
+    <p>Dependencies are declared in <code>project.jade</code> and resolved through git URLs + semantic version tags.</p>
+
+    <pre><code>name is 'consumer'
+version is '0.1.0'
+entry is 'source/main.jade'
+require 'mathlib' 'https://example.com/mathlib.git' '0.2.1'</code></pre>
+
+    <p>Typical flow:</p>
+    <pre><code># package author
+jade package
+jade publish --push
+
+# package consumer
+jade fetch
+jade build
+jade run</code></pre>
+
+    <p>For local development-only dependency tests, you can opt in to non-HTTPS URLs by setting <code>JADE_ALLOW_NON_HTTPS_DEPS=1</code> and using <code>file://</code> URLs.</p>
+
+    <h2 id="actors">5. Actors and Loop Handlers</h2>
+    <p>Actor handlers are declared inside actor blocks; messages are sent with regular method-call syntax.</p>
+
+    <pre><code>actor Counter
+    total as i64
+    *add n as i64
+        total is total + n
+    *show
+        log(total)
+
+*main
+    c is spawn Counter
+    c.add(10)
+    c.add(20)
+    c.show()</code></pre>
+
+    <p>Loop handlers are supported with optional sleep in milliseconds:</p>
+    <pre><code>actor Ticker
+    ticks as i64
+    *loop 100
+        ticks is ticks + 1</code></pre>
+
+    <h2 id="store">6. Persistent Store</h2>
+    <pre><code>store users
+    name as String
+    age as i64
+
+*main
+    insert users 'Ada', 36
+    insert users 'Bob', 24
+    set users where name equals 'Bob' age 25
+    row is users where name equals 'Bob'
+    log(row.age)
+    log(count users)</code></pre>
+
+    <p>Store records persist to disk and are suitable for fast embedded persistence without an external database server.</p>
+
+    <h2 id="testing">7. Testing</h2>
+    <pre><code>*add(a, b)
+    a + b
+
+test 'addition'
+    assert add(2, 3) equals 5
+
+*main
+    log('normal runtime entry')</code></pre>
+
+    <p>Run all inline tests with <code>jade test</code>.</p>
+
+    <h2 id="cross">8. Cross Compilation and Standalone Builds</h2>
+    <pre><code>jade build --target aarch64-unknown-linux-gnu -o app-aarch64
+jade build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
+jade build --target wasm32-wasi --standalone -o app.wasm</code></pre>
+
+    <p><code>--standalone</code> enables no-runtime/no-libc-style builds useful for embedded, boot, and low-level environments where minimal linkage is required.</p>
+
+    <h2 id="perf">9. Performance Notes</h2>
+    <ul>
+        <li>Use <code>--opt 3</code> for release builds.</li>
+        <li>Use <code>--lto</code> for cross-module optimization.</li>
+        <li>Use benchmark subsets to track actor/store throughput and latency over time.</li>
+        <li>Use <code>--deterministic-fp</code> for reproducible floating-point behavior.</li>
+    </ul>
+
+    <h2 id="release">10. Alpha Release Checklist</h2>
+    <ul>
+        <li>Multi-file project build and module import pass.</li>
+        <li>Standard library imports validated in real projects.</li>
+        <li>Package include + lock + fetch flow pass.</li>
+        <li>Package publish flow (git tag + optional push) pass.</li>
+        <li>Actor messaging and loop behavior pass.</li>
+        <li>Persistent store insert/query/update/count pass.</li>
+        <li>Cross-target object/link workflows validated for target matrix.</li>
+        <li>Smoke benchmark baseline captured for actor/store paths.</li>
+    </ul>
+
+    <p class="back"><a href="index.html">Back to home</a></p>
+</main>
+</body>
+</html>

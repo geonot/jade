@@ -63,9 +63,11 @@ type Complex
     extern.fabs(a.re - b.re) < 1e-12 and extern.fabs(a.im - b.im) < 1e-12
 
 *to_string(z as Complex) returns String
+    re_s is __fmt_float(z.re, 6)
+    im_s is __fmt_float(z.im, 6)
     if z.im >= 0.0
-        return to_string(z.re) + "+" + to_string(z.im) + "i"
-    to_string(z.re) + to_string(z.im) + "i"
+        return re_s + "+" + im_s + "i"
+    re_s + im_s + "i"
 
 *zero
     Complex(re is 0.0, im is 0.0)

@@ -203,17 +203,24 @@ impl Typer {
                 )
             })
             .collect();
+        let mut next_tag: u32 = 0;
         let handlers: Vec<(Symbol, Vec<Type>, u32)> = ad
             .handlers
             .iter()
-            .enumerate()
-            .map(|(tag, h)| {
+            .map(|h| {
                 let ptys: Vec<Type> = h
                     .params
                     .iter()
                     .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
                     .collect();
-                (h.name, ptys, tag as u32)
+                let tag = if h.is_loop {
+                    u32::MAX
+                } else {
+                    let t = next_tag;
+                    next_tag = next_tag.saturating_add(1);
+                    t
+                };
+                (h.name, ptys, tag)
             })
             .collect();
         self.actors.insert(ad.name.clone(), (id, fields, handlers));

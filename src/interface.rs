@@ -323,10 +323,24 @@ impl InterfaceFile {
 
     /// Serialize to JSON and write to the given path.
     pub fn write_to(&self, path: &Path) -> Result<(), String> {
+        use std::fs::File;
+        use std::io::Write;
+
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("failed to serialize interface: {e}"))?;
-        std::fs::write(path, json)
-            .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+
+        let mut tmp = path.to_path_buf();
+        tmp.set_extension("jadei.tmp");
+
+        let mut file = File::create(&tmp)
+            .map_err(|e| format!("failed to create temp file {}: {e}", tmp.display()))?;
+        file.write_all(json.as_bytes())
+            .map_err(|e| format!("failed to write temp file {}: {e}", tmp.display()))?;
+        file.sync_all()
+            .map_err(|e| format!("failed to sync temp file {}: {e}", tmp.display()))?;
+
+        std::fs::rename(&tmp, path)
+            .map_err(|e| format!("failed to atomically replace {}: {e}", path.display()))?;
         Ok(())
     }
 

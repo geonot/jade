@@ -2025,7 +2025,11 @@ impl Lowerer {
                     // Body: bind element.
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
-                    let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), f.span);
+                    let elem = self.emit(
+                        InstKind::IndexUnchecked(iter_val, idx),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
                     self.var_map.insert(f.bind.clone(), elem);
                     // If bind2 is present, expose the index as a user variable.
                     if let Some(ref b2) = f.bind2 {
@@ -2931,7 +2935,11 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
-                    let elem = self.emit(InstKind::Index(iter_val, idx), f.bind_ty.clone(), *span);
+                    let elem = self.emit(
+                        InstKind::IndexUnchecked(iter_val, idx),
+                        f.bind_ty.clone(),
+                        *span,
+                    );
                     self.var_map.insert(f.bind.clone(), elem);
                     // If bind2 is present, expose the index as a user variable.
                     if let Some(ref b2) = f.bind2 {
