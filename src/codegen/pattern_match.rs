@@ -1,3 +1,5 @@
+//! Codegen for `match` expressions and pattern destructuring.
+
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};

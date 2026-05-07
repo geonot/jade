@@ -1,3 +1,5 @@
+//! Source code formatter (`jade fmt`).
+
 use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -340,9 +342,12 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         Stmt::StoreInsert(name, exprs, _) => {
             indent(out, level);
             out.push_str(&format!("insert into {name}"));
-            for e in exprs {
+            for fi in exprs {
                 out.push(' ');
-                out.push_str(&format_expr(e));
+                if let Some(fname) = &fi.name {
+                    out.push_str(&format!("{fname} is "));
+                }
+                out.push_str(&format_expr(&fi.value));
             }
             out.push('\n');
         }
@@ -377,6 +382,11 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         Stmt::ErrReturn(e, _) => {
             indent(out, level);
             out.push_str(&format!("throw {}\n", format_expr(e)));
+        }
+        Stmt::Defer(body, _) => {
+            indent(out, level);
+            out.push_str("defer\n");
+            format_block(out, body, level + 1);
         }
         Stmt::Transaction(body, _) => {
             indent(out, level);
@@ -545,7 +555,6 @@ fn format_expr(e: &Expr) -> String {
         Expr::IndexPlaceholder(_) => "$$".into(),
         Expr::Ref(e, _) => format!("&{}", format_expr(e)),
         Expr::Deref(e, _) => format!("*{}", format_expr(e)),
-        Expr::Try(e, _) => format!("try {}", format_expr(e)),
         Expr::Embed(path, _) => format!("embed '{path}'"),
         Expr::ListComp(body, bind, iter, _, _, _) => {
             format!(

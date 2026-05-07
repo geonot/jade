@@ -1,0 +1,77 @@
+err RegistrationError
+        FirstNameRequired
+        LastNameRequired
+        EmailRequired
+        PasswordRequired
+        PasswordTooShort
+        EmailRegistered                                                                                     
+
+enum ServerMessage
+    LoginRequest
+        email
+        password
+    RegisterRequest
+        first_name
+        last_name
+        email
+        password
+
+store User
+
+    first_name
+    last_name
+    email_address
+    password
+
+    ^password(pw)
+        argon2.hash(pw)
+
+type Authenticator
+
+    **authenticate(user, pw)
+        argon2.verify(user.password, pw)
+
+
+type Server
+
+    *register_user(first, last, email, pass)
+        first ? ! UserError:FirstNameRequired
+        last  ? ! UserError:LastNameRequired
+        email ? ! UserError:EmailRequired
+        pass  ? ! UserError:PasswordRequired
+        pass.length < 8 ? UserError:PasswordTooShort
+        User where email_address is email ? UserError:EmailRegistered
+        User(first_name, last_name, email_address, password).save()
+
+    *login(email_address, password)
+        user is User where user.email_address == email_address
+        if Authenticator.authenticate(user, password)
+            log('Login successful')
+        else
+            log('Login failed')
+
+    *start
+        socket.bind('3033')
+        socket.listen()            3
+        log('Server started')
+
+    *accept
+        client is socket.accept()
+    
+    *read
+        data is client.read() as ServerMessage
+        match data
+            ServerMessage:LoginRequest ? self.login(data.email, data.password)
+            ServerMessage:RegisterRequest ? self.register_user(data.first_name, 
+                                                               data.last_name, 
+                                                               data.email, 
+                                                               data.password)
+
+
+
+*main
+    server is Server
+
+    user is server.register_user('John', 'Doe', 'john.doe@example.com', 'password123') ?
+        server.login('john.doe@example.com', 'password123') ? ! log('User login failed. Error: {err}')
+    ! log('User registration failed. Error: {err}')

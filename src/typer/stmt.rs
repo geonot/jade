@@ -1,3 +1,5 @@
+//! Per-statement typing rules.
+
 use crate::intern::Symbol;
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
@@ -194,7 +196,18 @@ impl Typer {
                             ast::QueryClause::Set(field, val, _) => {
                                 sets.push((field.clone(), val.clone()));
                             }
-                            _ => {}
+                            ast::QueryClause::Sort(_, _, _) => {
+                                return Err("query 'sort' clause is not yet implemented".into());
+                            }
+                            ast::QueryClause::Limit(_, _) => {
+                                return Err("query 'limit' clause is not yet implemented".into());
+                            }
+                            ast::QueryClause::Take(_, _) => {
+                                return Err("query 'take' clause is not yet implemented".into());
+                            }
+                            ast::QueryClause::Skip(_, _) => {
+                                return Err("query 'skip' clause is not yet implemented".into());
+                            }
                         }
                     }
 
@@ -380,8 +393,85 @@ impl Typer {
             }
 
             ast::Stmt::ErrReturn(e, span) => {
-                let he = self.lower_expr(e)?;
+                // `! value` is a universal early-return form: the value must be
+                // assignable to the function's declared return type T.
+                // Use the same expected-type lowering as `Ret` so literals get
+                // the right context.
+                let he = self.lower_expr_expected(e, Some(ret_ty))?;
+
+                // Classify: if the expression's type resolves to an err-defined
+                // enum, record it so the function's error union can be inferred
+                // (and validated against any explicit `! E` declarations).
+                let resolved = self.infer_ctx.resolve(&he.ty);
+                let enum_name: Option<Symbol> = match &resolved {
+                    Type::Enum(n) if self.err_enum_names.contains(n) => Some(n.clone()),
+                    Type::Struct(n, _) if self.err_enum_names.contains(n) => Some(n.clone()),
+                    _ => None,
+                };
+                if let Some(en) = &enum_name {
+                    if !self.current_fn_declared_errors.is_empty()
+                        && !self.current_fn_declared_errors.contains(en)
+                    {
+                        return Err(format!(
+                            "`! {0}` returns a variant of err `{0}` at {1:?}, but the function's declared error union (`! ...`) does not list `{0}`. Add `! {0}` to the function signature, or use a different value.",
+                            en, span
+                        ));
+                    }
+                    self.current_fn_error_types.insert(en.clone());
+                }
+
+                // Unify the err-return value with the function's return type T.
+                // In jade's unitary errors-as-values convention, `! value` returns
+                // a value of type T just like `return value` does. The `! E`
+                // signature suffix is a declarative annotation that constrains
+                // *which* variants can be early-returned this way; the value
+                // itself must still be type-compatible with T.
+                //
+                // Normalize the function's return type: a bare identifier in
+                // type position (e.g. `returns Outcome`) is parsed as
+                // `Type::Struct(N, [])` even when `N` is actually an enum.
+                // Treat such forms as the enum so unification succeeds.
+                let resolved_ret = self.infer_ctx.resolve(ret_ty);
+                let normalized_ret = match &resolved_ret {
+                    Type::Struct(n, args) if args.is_empty() && self.enums.contains_key(n) => {
+                        Type::Enum(n.clone())
+                    }
+                    _ => resolved_ret.clone(),
+                };
+                let resolved_val = self.infer_ctx.resolve(&he.ty);
+                let normalized_val = match &resolved_val {
+                    Type::Struct(n, args) if args.is_empty() && self.enums.contains_key(n) => {
+                        Type::Enum(n.clone())
+                    }
+                    _ => resolved_val.clone(),
+                };
+                let unify_res = self.infer_ctx.unify_at(
+                    &normalized_val,
+                    &normalized_ret,
+                    *span,
+                    "early-return value (`!`)",
+                );
+                if let Err(_) = &unify_res {
+                    if let Some(en) = &enum_name {
+                        // Tailor the message to point users at the canonical
+                        // jade convention: declare the function as returning the
+                        // err enum directly (`returns E`), or encode errors as
+                        // values of T (e.g., sentinel codes for primitives).
+                        return Err(format!(
+                            "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jade, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
+                            en, span, resolved_ret
+                        ));
+                    }
+                }
+                self.collect_unify_error(unify_res);
+
+                let he = self.maybe_coerce_to(he, ret_ty);
                 Ok(hir::Stmt::ErrReturn(he, ret_ty.clone(), *span))
+            }
+
+            ast::Stmt::Defer(body, span) => {
+                let hbody = self.lower_block(body, ret_ty)?;
+                Ok(hir::Stmt::Defer(hbody, *span))
             }
 
             ast::Stmt::StoreInsert(store, values, span) => {
@@ -406,6 +496,54 @@ impl Typer {
                     .filter(|(n, _)| !builtin_names.iter().any(|b| *n == *b))
                     .cloned()
                     .collect();
+
+                let any_named = values.iter().any(|fi| fi.name.is_some());
+                let all_named = values.iter().all(|fi| fi.name.is_some());
+
+                if any_named && !all_named {
+                    return Err(format!(
+                        "store '{store}': cannot mix named and positional \
+                         fields in a single insert"
+                    ));
+                }
+
+                if all_named && !values.is_empty() {
+                    // Reorder by schema; require all user fields present.
+                    let mut hvalues = Vec::with_capacity(user_schema.len());
+                    for (fname, fty) in &user_schema {
+                        let fi = values
+                            .iter()
+                            .find(|fi| fi.name.as_ref() == Some(fname))
+                            .ok_or_else(|| {
+                                format!(
+                                    "store '{store}' insert: missing field '{fname}'"
+                                )
+                            })?;
+                        hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
+                    }
+                    // Detect unknown / duplicate field names.
+                    let mut seen = std::collections::HashSet::new();
+                    for fi in values {
+                        let n = fi.name.as_ref().unwrap();
+                        if !user_schema.iter().any(|(sn, _)| sn == n) {
+                            return Err(format!(
+                                "store '{store}' has no field '{n}'"
+                            ));
+                        }
+                        if !seen.insert(n.clone()) {
+                            return Err(format!(
+                                "store '{store}' insert: field '{n}' \
+                                 specified twice"
+                            ));
+                        }
+                    }
+                    return Ok(hir::Stmt::StoreInsert(
+                        store.clone(),
+                        hvalues,
+                        *span,
+                    ));
+                }
+
                 if values.len() != user_schema.len() {
                     return Err(format!(
                         "store '{store}' has {} fields but {} values given",
@@ -414,8 +552,8 @@ impl Typer {
                     ));
                 }
                 let mut hvalues = Vec::new();
-                for (v, (_fname, fty)) in values.iter().zip(user_schema.iter()) {
-                    hvalues.push(self.lower_expr_expected(v, Some(fty))?);
+                for (fi, (_fname, fty)) in values.iter().zip(user_schema.iter()) {
+                    hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
                 }
                 Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span))
             }

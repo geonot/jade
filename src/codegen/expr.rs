@@ -1,3 +1,5 @@
+//! HIR-era expression codegen helpers consumed by `mir_codegen`. Slated for inlining (CLEANUP §C.1).
+
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum};
 use inkwell::{FloatPredicate, IntPredicate};
@@ -624,7 +626,7 @@ impl<'ctx> Compiler<'ctx> {
                     ))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap()
+                    .expect("ICE: call returned void")
                     .into_pointer_value();
                     b!(self.bld.build_store(heap, val));
                     b!(self.bld.build_store(field_ptr, heap));
@@ -1010,7 +1012,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc_fn, &[alloc_size.into()], "comp_arr"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
         let fv = self.current_fn();
         let loop_bb = self.ctx.append_basic_block(fv, "comp_loop");
@@ -1416,8 +1418,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_load(i64t, ptr.into_pointer_value(), "atomic.load"));
         // Set atomic ordering
-        load.as_instruction_value()
-            .unwrap()
+        load.as_instruction_value().expect("ICE: not an instruction")
             .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
             .map_err(|_| "failed to set atomic ordering".to_string())?;
         Ok(load)
@@ -1646,11 +1647,11 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
         let malloc = self.ensure_malloc();
-        let size = cow_st.size_of().unwrap();
+        let size = cow_st.size_of().expect("ICE: type has no size");
         let ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.alloc"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
         // rc = 1
         let rc_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 0, "cow.rc"));
@@ -1693,11 +1694,11 @@ impl<'ctx> Compiler<'ctx> {
         // Clone path: allocate new cow, copy data, set rc=1, decrement original rc
         self.bld.position_at_end(clone_bb);
         let malloc = self.ensure_malloc();
-        let size = cow_st.size_of().unwrap();
+        let size = cow_st.size_of().expect("ICE: type has no size");
         let new_ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.new"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
         let new_rc = b!(self.bld.build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
         b!(self.bld.build_store(new_rc, i64t.const_int(1, false)));
@@ -1739,8 +1740,8 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(entry);
         self.cur_fn = Some(grad_fn);
 
-        let env_arg = grad_fn.get_nth_param(0).unwrap().into_pointer_value();
-        let x = grad_fn.get_nth_param(1).unwrap().into_float_value();
+        let env_arg = grad_fn.get_nth_param(0).expect("ICE: missing param").into_pointer_value();
+        let x = grad_fn.get_nth_param(1).expect("ICE: missing param").into_float_value();
 
         // Load the original closure from the env: {fn_ptr, env_ptr}
         let cl_ty = self.closure_type();

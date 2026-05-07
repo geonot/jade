@@ -1,3 +1,5 @@
+//! Parser arms for expressions including precedence climbing.
+
 use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
@@ -142,7 +144,7 @@ impl Parser {
                     ))
                 }
             }
-        } else if self.check(Token::Bang) {
+        } else if self.check(Token::Bang) && !self.suppress_bang_else {
             // `cond ! false_expr` — else-only shorthand
             let sp = self.span();
             self.advance();
@@ -314,10 +316,6 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Deref(Box::new(self.parse_unary()?), sp))
             }
-            Token::Try => {
-                self.advance();
-                Ok(Expr::Try(Box::new(self.parse_unary()?), sp))
-            }
             _ => self.parse_postfix(),
         }
     }
@@ -417,6 +415,16 @@ impl Parser {
     pub(super) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let sp = self.span();
         match self.peek() {
+            // `err` used in expression position — implicit identifier
+            // bound by handler-chain failure arms (e.g.
+            // `compute() ? log(a) ! log(err)`). The `err` keyword
+            // otherwise introduces an err-enum declaration; here it is
+            // safe to treat as an identifier reference because the
+            // declaration form is only valid at the top-level decl tier.
+            Token::Err => {
+                self.advance();
+                Ok(Expr::Ident("err".into(), sp))
+            }
             // `extern.fn(...)` — extern dispatch syntax
             Token::Extern
                 if self.pos + 1 < self.tok.len()
@@ -748,7 +756,12 @@ impl Parser {
                 if name == "count" {
                     if let Token::Ident(_) = self.peek() {
                         let store = self.ident()?;
-                        return Ok(Expr::StoreCount(store, sp));
+                        let filter = if matches!(self.peek(), Token::Ident(s) if s == "where") {
+                            Some(Box::new(self.parse_store_filter()?))
+                        } else {
+                            None
+                        };
+                        return Ok(Expr::StoreCount(store, filter, sp));
                     }
                 }
                 if name == "all" {
@@ -1010,7 +1023,17 @@ impl Parser {
                         }
                         self.expect(Token::RParen)?;
                     }
-                    Ok(Expr::Send(Box::new(target), handler, args, sp))
+                    if is_dispatch {
+                        // Desugar `dispatch target, @handler(args)` to a method call
+                        // `target.handler(args)` so the typer routes it through the
+                        // actor-dispatch path rather than the deprecated Send AST node.
+                        Ok(Expr::Method(Box::new(target), handler, args, sp))
+                    } else {
+                        // The `send` keyword is reserved for channel sends in 0.5+.
+                        // For actor handler dispatch use method-call syntax
+                        // `target.handler(args)` (or `dispatch target, @handler(args)`).
+                        Ok(Expr::Send(Box::new(target), handler, args, sp))
+                    }
                 } else {
                     let val = self.parse_expr()?;
                     Ok(Expr::ChannelSend(Box::new(target), Box::new(val), sp))
@@ -1102,7 +1125,7 @@ impl Parser {
         }
     }
 
-    fn parse_query_block(&mut self, source: Expr) -> Result<Expr, ParseError> {
+    pub(super) fn parse_query_block(&mut self, source: Expr) -> Result<Expr, ParseError> {
         let sp = source.span();
         self.expect(Token::Query)?;
         self.expect(Token::Newline)?;

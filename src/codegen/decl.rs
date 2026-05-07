@@ -1,3 +1,5 @@
+//! Codegen for top-level declarations: functions, globals, type metadata.
+
 use inkwell::attributes::AttributeLoc;
 use inkwell::module::Linkage;
 use inkwell::types::BasicMetadataTypeEnum;

@@ -1,3 +1,5 @@
+//! Codegen for string transformation builtins (case, slice, split, etc.).
+
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -51,7 +53,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(memcmp, &[ptr.into(), ndata.into(), nlen.into()], "sf.cmp"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_int_value();
         let eq = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
@@ -227,7 +229,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = b!(self.bld.build_call(malloc, &[len.into()], "sc.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
 
         let loop_bb = self.ctx.append_basic_block(fv, "sc.loop");
@@ -322,7 +324,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[init_cap_min.into()], "rep.buf"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let cond_bb = self.ctx.append_basic_block(fv, "rep.cond");
@@ -372,7 +374,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
         let is_match = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
@@ -450,7 +452,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = b!(self.bld.build_call(malloc, &[total_len.into()], "rpt.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
 
         let memcpy = self.ensure_memcpy();
@@ -543,7 +545,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(memcmp, &[sp.into(), ddata.into(), dlen.into()], "spl.cmp"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_int_value();
         let is_match = b!(self.bld.build_int_compare(
             IntPredicate::EQ,

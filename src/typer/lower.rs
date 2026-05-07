@@ -1,3 +1,5 @@
+//! AST → HIR lowering after type inference completes.
+
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -155,6 +157,20 @@ impl Typer {
                                 sup.name, child
                             ));
                         }
+                    }
+                    // Register the supervisor's codegen-emitted entry points
+                    // (`<Sup>_start()` and `<Sup>_restart_count()`) so the
+                    // typer can resolve calls to them from user code.
+                    let sup_name = sup.name.as_str();
+                    let start_name = Symbol::intern(&format!("{}_start", sup_name));
+                    if !self.fns.contains_key(&start_name) {
+                        let id = self.fresh_id();
+                        self.fns.insert(start_name, (id, vec![], Type::I64));
+                    }
+                    let rc_name = Symbol::intern(&format!("{}_restart_count", sup_name));
+                    if !self.fns.contains_key(&rc_name) {
+                        let id = self.fresh_id();
+                        self.fns.insert(rc_name, (id, vec![], Type::I64));
                     }
                 }
                 ast::Decl::TypeAlias(name, ty, _span) => {
@@ -1252,6 +1268,7 @@ impl Typer {
                         span,
                     }],
                     ret: Type::String,
+                    error_types: Vec::new(),
                     body,
                     span,
                     generic_origin: None,
@@ -1481,6 +1498,7 @@ impl Typer {
                 *ty = self.infer_ctx.resolve(ty);
                 self.resolve_expr(e);
             }
+            hir::Stmt::Defer(body, _) => self.resolve_block(body),
             hir::Stmt::StoreInsert(_, exprs, _) => {
                 for e in exprs {
                     self.resolve_expr(e);
@@ -2172,8 +2190,50 @@ impl Typer {
             });
         }
         let prev_fn_ret = self.current_fn_ret_ty.replace(ret.clone());
+        // Snapshot & reset per-function error-tracking state.
+        let prev_inferred = std::mem::take(&mut self.current_fn_error_types);
+        let prev_declared = std::mem::take(&mut self.current_fn_declared_errors);
+        // Seed declared error-union from the AST signature.
+        let mut declared_err_names: Vec<Symbol> = Vec::new();
+        for et in &f.error_types {
+            // The parser may emit Param/Enum/Struct/UserDefined for an
+            // identifier in type position; resolve to the err-enum name.
+            let name = match et {
+                Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => Some(n.clone()),
+                _ => None,
+            };
+            match name {
+                Some(n) if self.err_enum_names.contains(&n) => {
+                    declared_err_names.push(n);
+                }
+                Some(n) => {
+                    return Err(format!(
+                        "function '{}' declares error type '{}' which is not an `err` definition",
+                        f.name, n
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "function '{}' declares non-enum error type '{:?}'",
+                        f.name, et
+                    ));
+                }
+            }
+        }
+        self.current_fn_declared_errors = declared_err_names.clone();
         let body = self.lower_block(&f.body, &ret)?;
+        // Final error union: union of declared + inferred.
+        let mut error_types: Vec<Type> = Vec::new();
+        let mut seen: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
+        for n in declared_err_names.into_iter().chain(self.current_fn_error_types.iter().cloned()) {
+            if seen.insert(n.clone()) {
+                error_types.push(Type::Enum(n));
+            }
+        }
+        // Restore.
         self.current_fn_ret_ty = prev_fn_ret;
+        self.current_fn_error_types = prev_inferred;
+        self.current_fn_declared_errors = prev_declared;
         self.pop_scope();
 
         if f.ret.is_none() && f.name != "main" {
@@ -2192,6 +2252,7 @@ impl Typer {
             name: f.name.clone(),
             params,
             ret,
+            error_types,
             body,
             span: f.span,
             generic_origin: None,
@@ -2210,6 +2271,7 @@ impl Typer {
             name: fn_name.into(),
             params: vec![],
             ret: Type::Void,
+            error_types: Vec::new(),
             body,
             span: tb.span,
             generic_origin: None,
@@ -2259,6 +2321,7 @@ impl Typer {
             name: "main".into(),
             params: vec![],
             ret: Type::I32,
+            error_types: Vec::new(),
             body,
             span: s,
             generic_origin: None,
@@ -2426,6 +2489,7 @@ impl Typer {
             name: method_name.into(),
             params,
             ret,
+            error_types: Vec::new(),
             body,
             span: m.span,
             generic_origin: None,

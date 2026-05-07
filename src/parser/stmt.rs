@@ -1,3 +1,5 @@
+//! Parser arms for statements and blocks.
+
 use crate::ast::*;
 use crate::lexer::Token;
 
@@ -9,7 +11,30 @@ use super::{ParseError, Parser};
 
 impl Parser {
     pub(super) fn parse_block(&mut self) -> Result<Block, ParseError> {
-        self.parse_indented(Self::parse_stmt)
+        // Custom inlined version of parse_indented that drains the pending
+        // statement queues populated by Layer-2 sugar desugaring.
+        self.expect(Token::Indent)?;
+        let mut items: Block = Vec::new();
+        while !self.check(Token::Dedent) && !self.eof() {
+            self.skip_nl();
+            if self.check(Token::Dedent) || self.eof() {
+                break;
+            }
+            let stmt = self.parse_stmt()?;
+            // Drain any pre-statements queued during this parse_stmt call.
+            for pre in self.pending_pre_stmts.drain(..).collect::<Vec<_>>() {
+                items.push(pre);
+            }
+            items.push(stmt);
+            for post in self.pending_post_stmts.drain(..).collect::<Vec<_>>() {
+                items.push(post);
+            }
+            self.skip_nl();
+        }
+        if self.check(Token::Dedent) {
+            self.advance();
+        }
+        Ok(items)
     }
 
     pub(super) fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -267,6 +292,19 @@ impl Parser {
                 let val = self.parse_expr()?;
                 Ok(Stmt::ErrReturn(val, sp))
             }
+            Token::Defer => {
+                let sp = self.span();
+                self.advance();
+                // `defer` followed by either an indented block or a single
+                // inline statement (`defer close(fd)`).
+                let body = if self.check(Token::Newline) {
+                    self.expect(Token::Newline)?;
+                    self.parse_block()?
+                } else {
+                    vec![self.parse_stmt()?]
+                };
+                Ok(Stmt::Defer(body, sp))
+            }
             Token::Use => {
                 let u = self.parse_use_decl()?;
                 Ok(Stmt::UseLocal(u))
@@ -312,12 +350,26 @@ impl Parser {
                 } else if self.is_bind() {
                     self.parse_bind()
                 } else {
-                    let expr = self.parse_expr()?;
+                    // Bare-statement handler chain: `call() ? on_ok ! on_err`.
+                    // We parse via parse_pipeline so the trailing `?` and
+                    // `!` remain visible at this level. If neither sugar
+                    // shape applies we splice the rest of the expression
+                    // back together and behave exactly as `parse_expr`.
+                    let head = self.parse_pipeline()?;
+                    if self.check(Token::Question)
+                        && matches!(head, Expr::Call(..))
+                    {
+                        return self.finish_bare_handler_chain(head);
+                    }
+                    if self.check(Token::BangBang) {
+                        return self.finish_bare_bangbang(head);
+                    }
+                    let head_sp = head.span();
+                    let expr = self.complete_expr_after_pipeline(head)?;
                     if self.check(Token::Is) {
-                        let sp = expr.span();
                         self.advance();
                         let val = self.parse_expr()?;
-                        Ok(Stmt::Assign(expr, val, sp))
+                        Ok(Stmt::Assign(expr, val, head_sp))
                     } else {
                         Ok(Stmt::Expr(expr))
                     }
@@ -450,11 +502,521 @@ impl Parser {
                 span: sp,
             }));
         }
+        // Layer 2 sugar: `a is RHS ! Variant` (guard) and
+        // `a is RHS ? on_ok ! on_err` (handler chain). Both desugar at
+        // parse-time into a small block of statements, wrapped in an
+        // `if true { ... }` so we can return a single Stmt from this
+        // function (jade has no Stmt::Block variant).
+        //
+        // We parse RHS with parse_pipeline so the trailing `?` and `!`
+        // are visible to us (parse_expr/parse_ternary would consume them
+        // as ternary operators).
+        let value = self.parse_pipeline()?;
+        // Re-attach `query` post-fix block so `r is users query ...`
+        // continues to work (parse_expr does this for normal callers).
+        let value = if self.check(Token::Query) {
+            self.parse_query_block(value)?
+        } else {
+            value
+        };
+
+        // ── Form 1: `a is RHS ? on_ok [! on_err] [!! Variant]` ──────────
+        // Only treat `?` as a handler-chain when RHS is a call expression
+        // (otherwise `r is x > 3 ? "big" ! "small"` would lose its
+        // standard ternary meaning).
+        if self.check(Token::Question) && matches!(value, Expr::Call(..)) {
+            self.advance();
+            let on_ok = self.parse_pipeline()?;
+            let (on_falsy_or_err, throw_variant): (Option<Expr>, Option<(Symbol, Span)>) =
+                if self.check(Token::BangBang) {
+                    self.advance();
+                    let var_sp = self.span();
+                    let v: Symbol = self.ident()?.into();
+                    (None, Some((v, var_sp)))
+                } else if self.check(Token::Bang) {
+                    self.advance();
+                    let arm_expr = self.parse_pipeline()?;
+                    let throw = if self.check(Token::BangBang) {
+                        self.advance();
+                        let var_sp = self.span();
+                        let v: Symbol = self.ident()?.into();
+                        Some((v, var_sp))
+                    } else {
+                        None
+                    };
+                    (Some(arm_expr), throw)
+                } else {
+                    (None, None)
+                };
+            let tmp_name: Symbol = self.gensym("__hc").into();
+            self.pending_pre_stmts.push(Stmt::Bind(Bind {
+                name: tmp_name.clone(),
+                value,
+                ty: None,
+                atomic: false,
+                span: sp,
+            }));
+            // Build arms: same three-way logic as finish_bare_handler_chain but the
+            // Ok arm always binds `name` (the user-visible bind target).
+            let ok_arm;
+            let err_arm;
+            if let Some((variant_name, var_sp)) = throw_variant {
+                // `!!` present: `!` is the falsy-Ok ternary-else, NOT an error handler.
+                if let Some(falsy_expr) = on_falsy_or_err {
+                    let v_name: Symbol = self.gensym("__v").into();
+                    let ternary = Expr::Ternary(
+                        Box::new(Expr::Ident(v_name.clone(), sp)),
+                        Box::new(on_ok),
+                        Box::new(falsy_expr),
+                        sp,
+                    );
+                    ok_arm = Arm {
+                        pat: Pat::Ctor(
+                            "Ok".into(),
+                            vec![Pat::Ident(v_name, sp)],
+                            sp,
+                        ),
+                        guard: None,
+                        body: vec![Stmt::Expr(ternary)],
+                        span: sp,
+                    };
+                } else {
+                    ok_arm = Arm {
+                        pat: Pat::Ctor(
+                            "Ok".into(),
+                            vec![Pat::Ident(name.clone(), sp)],
+                            sp,
+                        ),
+                        guard: None,
+                        body: vec![Stmt::Expr(on_ok)],
+                        span: sp,
+                    };
+                }
+                err_arm = Arm {
+                    pat: Pat::Wild(sp),
+                    guard: None,
+                    body: vec![Stmt::ErrReturn(Expr::Ident(variant_name, var_sp), var_sp)],
+                    span: sp,
+                };
+            } else {
+                // No `!!`: `! on_err` is the error/else handler with implicit `err` binding.
+                ok_arm = Arm {
+                    pat: Pat::Ctor(
+                        "Ok".into(),
+                        vec![Pat::Ident(name.clone(), sp)],
+                        sp,
+                    ),
+                    guard: None,
+                    body: vec![Stmt::Expr(on_ok)],
+                    span: sp,
+                };
+                let err_pat = if on_falsy_or_err.is_some() {
+                    Pat::Ident("err".into(), sp)
+                } else {
+                    Pat::Wild(sp)
+                };
+                err_arm = Arm {
+                    pat: err_pat,
+                    guard: None,
+                    body: match on_falsy_or_err {
+                        Some(err_expr) => vec![Stmt::Expr(err_expr)],
+                        None => vec![],
+                    },
+                    span: sp,
+                };
+            }
+            return Ok(Stmt::Match(Match {
+                subject: Expr::Ident(tmp_name, sp),
+                arms: vec![ok_arm, err_arm],
+                span: sp,
+            }));
+        }
+
+        // ── Form 1b: `a is RHS !! Variant` ──────────────────────────────
+        // Bind a to the Ok payload; on any error throw Variant.
+        // Desugars (via pre-stmts):
+        //   __guard is RHS
+        //   match __guard
+        //       Ok(_) ?   (fall through)
+        //       _     ?   ! Variant
+        //   a is __guard
+        if self.check(Token::BangBang) {
+            self.advance();
+            let var_sp = self.span();
+            let variant_name = self.ident()?;
+            let tmp_name: Symbol = self.gensym("__guard").into();
+            self.pending_pre_stmts.push(Stmt::Bind(Bind {
+                name: tmp_name.clone(),
+                value,
+                ty: None,
+                atomic: false,
+                span: sp,
+            }));
+            let ok_arm = Arm {
+                pat: Pat::Ctor("Ok".into(), vec![Pat::Wild(sp)], sp),
+                guard: None,
+                body: vec![],
+                span: sp,
+            };
+            let err_arm = Arm {
+                pat: Pat::Wild(sp),
+                guard: None,
+                body: vec![Stmt::ErrReturn(Expr::Ident(variant_name, var_sp), var_sp)],
+                span: sp,
+            };
+            self.pending_pre_stmts.push(Stmt::Match(Match {
+                subject: Expr::Ident(tmp_name.clone(), sp),
+                arms: vec![ok_arm, err_arm],
+                span: sp,
+            }));
+            return Ok(Stmt::Bind(Bind {
+                name,
+                value: Expr::Ident(tmp_name, sp),
+                ty: None,
+                atomic: false,
+                span: sp,
+            }));
+        }
+
+        // ── Form 2: `a is RHS ! Variant` (guard form) ───────────────────
+        // Desugar to (spliced into the enclosing block via pending queues):
+        //   __guard is RHS
+        //   match __guard
+        //       Variant ?
+        //           ! __guard
+        //       _ ?
+        //           (fall through)
+        //   a is __guard      ← returned as the main Stmt
+        //
+        // The `!` must be followed immediately by a bare identifier (the
+        // err-variant tag). We do NOT require an uppercase prefix — the
+        // disambiguation against ternary-else is done by token shape:
+        //   `a is x() ! Bad`        → guard (next is bare ident)
+        //   `a is x ! "fallback"`   → ternary-else (next is a literal)
+        //   `a is x ! foo()`        → ternary-else (ident followed by `(`)
+        // If the named tag turns out not to be an err-variant, the typer
+        // will produce an error when lowering the synthesized match arm.
+        let next_is_bare_ident = self.check(Token::Bang)
+            && self.pos + 1 < self.tok.len()
+            && matches!(&self.tok[self.pos + 1].token, Token::Ident(_))
+            && {
+                let p2 = self.pos + 2;
+                if p2 < self.tok.len() {
+                    !matches!(
+                        &self.tok[p2].token,
+                        Token::LParen
+                            | Token::LBracket
+                            | Token::Dot
+                            | Token::DotDotDot
+                            | Token::Tilde
+                    )
+                } else {
+                    true
+                }
+            };
+        if next_is_bare_ident {
+            if let Token::Ident(_) = &self.tok[self.pos + 1].token {
+                {
+                    {
+                        self.advance(); // consume `!`
+                        let var_sp = self.span();
+                        let variant_name = self.ident()?;
+
+                        let tmp_name: Symbol = self.gensym("__guard").into();
+                        let bind_tmp = Stmt::Bind(Bind {
+                            name: tmp_name.clone(),
+                            value,
+                            ty: None,
+                            atomic: false,
+                            span: sp,
+                        });
+                        let propagate_arm = Arm {
+                            pat: Pat::Ctor(variant_name.clone(), vec![], var_sp),
+                            guard: None,
+                            body: vec![Stmt::ErrReturn(
+                                Expr::Ident(tmp_name.clone(), sp),
+                                sp,
+                            )],
+                            span: sp,
+                        };
+                        let fall_arm = Arm {
+                            pat: Pat::Wild(sp),
+                            guard: None,
+                            body: vec![],
+                            span: sp,
+                        };
+                        let match_stmt = Stmt::Match(Match {
+                            subject: Expr::Ident(tmp_name.clone(), sp),
+                            arms: vec![propagate_arm, fall_arm],
+                            span: sp,
+                        });
+                        // Splice the temp-bind and match BEFORE the user-
+                        // visible `a is __tmp` bind that we return.
+                        self.pending_pre_stmts.push(bind_tmp);
+                        self.pending_pre_stmts.push(match_stmt);
+                        return Ok(Stmt::Bind(Bind {
+                            name: name.clone(),
+                            value: Expr::Ident(tmp_name, sp),
+                            ty: None,
+                            atomic: false,
+                            span: sp,
+                        }));
+                    }
+                }
+            }
+        }
+
+        // ── Plain bind ──────────────────────────────────────────────────
+        // If the RHS is followed by ternary operators that we did not
+        // consume as sugar, re-parse them at this level to preserve the
+        // standard ternary semantics for `is` bindings.
+        let value = if self.check(Token::Question) {
+            let qsp = self.span();
+            self.advance();
+            // `cond ? ! else_expr`
+            if self.check(Token::Bang) {
+                self.advance();
+                let f = self.parse_pipeline()?;
+                Expr::Ternary(
+                    Box::new(value),
+                    Box::new(Expr::Void(qsp)),
+                    Box::new(f),
+                    qsp,
+                )
+            } else {
+                let t = self.parse_pipeline()?;
+                if self.check(Token::Bang) {
+                    self.advance();
+                    let f = self.parse_expr()?;
+                    Expr::Ternary(Box::new(value), Box::new(t), Box::new(f), qsp)
+                } else {
+                    Expr::Ternary(
+                        Box::new(value),
+                        Box::new(t),
+                        Box::new(Expr::Void(qsp)),
+                        qsp,
+                    )
+                }
+            }
+        } else if self.check(Token::Bang) && !self.suppress_bang_else {
+            let bsp = self.span();
+            self.advance();
+            let f = self.parse_pipeline()?;
+            Expr::Ternary(
+                Box::new(value),
+                Box::new(Expr::Void(bsp)),
+                Box::new(f),
+                bsp,
+            )
+        } else {
+            value
+        };
         Ok(Stmt::Bind(Bind {
             name,
-            value: self.parse_expr()?,
+            value,
             ty: None,
             atomic: false,
+            span: sp,
+        }))
+    }
+
+    /// Continue an expression after `parse_pipeline` has returned, applying
+    /// the same ternary / query-block continuations that `parse_expr` would
+    /// have. Used by callers that intercept tokens between the pipeline and
+    /// the rest of the expression (e.g. the bare-statement handler chain).
+    fn complete_expr_after_pipeline(&mut self, head: Expr) -> Result<Expr, ParseError> {
+        // Ternary continuations. We mirror parse_ternary's logic.
+        let value = if self.check(Token::Question) {
+            let qsp = self.span();
+            self.advance();
+            if self.check(Token::Bang) {
+                self.advance();
+                let f = self.parse_pipeline()?;
+                Expr::Ternary(
+                    Box::new(head),
+                    Box::new(Expr::Void(qsp)),
+                    Box::new(f),
+                    qsp,
+                )
+            } else {
+                let t = self.parse_pipeline()?;
+                if self.check(Token::Bang) {
+                    self.advance();
+                    let f = self.parse_expr()?;
+                    Expr::Ternary(Box::new(head), Box::new(t), Box::new(f), qsp)
+                } else {
+                    Expr::Ternary(
+                        Box::new(head),
+                        Box::new(t),
+                        Box::new(Expr::Void(qsp)),
+                        qsp,
+                    )
+                }
+            }
+        } else if self.check(Token::Bang) && !self.suppress_bang_else {
+            let bsp = self.span();
+            self.advance();
+            let f = self.parse_pipeline()?;
+            Expr::Ternary(
+                Box::new(head),
+                Box::new(Expr::Void(bsp)),
+                Box::new(f),
+                bsp,
+            )
+        } else {
+            head
+        };
+        // Query block (`expr query ...`) — parse_expr_inner does this after
+        // the ternary layer.
+        if self.check(Token::Query) {
+            self.parse_query_block(value)
+        } else {
+            Ok(value)
+        }
+    }
+
+    /// Bare `!! Variant` form: `expr !! Variant`.
+    /// On any error from `head`, propagate as a freshly-constructed `Variant`.
+    /// On Ok, silently fall through.
+    fn finish_bare_bangbang(&mut self, head: Expr) -> Result<Stmt, ParseError> {
+        let sp = head.span();
+        debug_assert!(self.check(Token::BangBang));
+        self.advance(); // consume `!!`
+        let var_sp = self.span();
+        let variant_name = self.ident()?;
+        let tmp_name: Symbol = self.gensym("__hc").into();
+        self.pending_pre_stmts.push(Stmt::Bind(Bind {
+            name: tmp_name.clone(),
+            value: head,
+            ty: None,
+            atomic: false,
+            span: sp,
+        }));
+        let ok_arm = Arm {
+            pat: Pat::Ctor("Ok".into(), vec![Pat::Wild(sp)], sp),
+            guard: None,
+            body: vec![],
+            span: sp,
+        };
+        let err_arm = Arm {
+            pat: Pat::Wild(sp),
+            guard: None,
+            body: vec![Stmt::ErrReturn(Expr::Ident(variant_name, var_sp), var_sp)],
+            span: sp,
+        };
+        Ok(Stmt::Match(Match {
+            subject: Expr::Ident(tmp_name, sp),
+            arms: vec![ok_arm, err_arm],
+            span: sp,
+        }))
+    }
+
+    /// Bare-statement handler chain: `call() ? on_ok [! on_falsy] [!! Variant]`.
+    /// Desugars to a `match` on the call's return value.
+    ///
+    /// - `call() ? on_ok`                   — ok: on_ok, err: no-op
+    /// - `call() ? on_ok ! on_err`          — ok: on_ok, err: on_err (implicit `err` binding)
+    /// - `call() ? on_ok !! Variant`        — ok: on_ok, err: throw Variant
+    /// - `call() ? on_ok ! on_falsy !! V`   — truthy-ok: on_ok, falsy-ok: on_falsy, err: throw V
+    ///
+    /// When `!!` is present, `!` is the ternary-else (falsy non-error) branch, NOT an error
+    /// handler. `!` is only the error handler (with implicit `err` binding) when `!!` is absent.
+    fn finish_bare_handler_chain(&mut self, call: Expr) -> Result<Stmt, ParseError> {
+        let sp = call.span();
+        debug_assert!(self.check(Token::Question));
+        self.advance(); // consume `?`
+        let on_ok = self.parse_pipeline()?;
+        // Parse the remaining arms.
+        let (on_falsy_or_err, throw_variant): (Option<Expr>, Option<(Symbol, Span)>) =
+            if self.check(Token::BangBang) {
+                self.advance();
+                let var_sp = self.span();
+                let v: Symbol = self.ident()?.into();
+                (None, Some((v, var_sp)))
+            } else if self.check(Token::Bang) {
+                self.advance();
+                let arm_expr = self.parse_pipeline()?;
+                let throw = if self.check(Token::BangBang) {
+                    self.advance();
+                    let var_sp = self.span();
+                    let v: Symbol = self.ident()?.into();
+                    Some((v, var_sp))
+                } else {
+                    None
+                };
+                (Some(arm_expr), throw)
+            } else {
+                (None, None)
+            };
+        // Bind the call to a temp so codegen has a stable subject.
+        let tmp_name: Symbol = self.gensym("__hc").into();
+        self.pending_pre_stmts.push(Stmt::Bind(Bind {
+            name: tmp_name.clone(),
+            value: call,
+            ty: None,
+            atomic: false,
+            span: sp,
+        }));
+        // Build arms.
+        let ok_arm;
+        let err_arm;
+        if let Some((variant_name, var_sp)) = throw_variant {
+            // `!!` present: `!` (if present) is the falsy-Ok ternary-else, NOT an error handler.
+            // Three-way desugar: truthy-ok → on_ok, falsy-ok → on_falsy, error → throw Variant.
+            if let Some(falsy_expr) = on_falsy_or_err {
+                let v_name: Symbol = self.gensym("__v").into();
+                let ternary = Expr::Ternary(
+                    Box::new(Expr::Ident(v_name.clone(), sp)),
+                    Box::new(on_ok),
+                    Box::new(falsy_expr),
+                    sp,
+                );
+                ok_arm = Arm {
+                    pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(v_name, sp)], sp),
+                    guard: None,
+                    body: vec![Stmt::Expr(ternary)],
+                    span: sp,
+                };
+            } else {
+                ok_arm = Arm {
+                    pat: Pat::Ctor("Ok".into(), vec![Pat::Wild(sp)], sp),
+                    guard: None,
+                    body: vec![Stmt::Expr(on_ok)],
+                    span: sp,
+                };
+            }
+            err_arm = Arm {
+                pat: Pat::Wild(sp),
+                guard: None,
+                body: vec![Stmt::ErrReturn(Expr::Ident(variant_name, var_sp), var_sp)],
+                span: sp,
+            };
+        } else {
+            // No `!!`: `! on_err` is the error/else handler with implicit `err` binding.
+            ok_arm = Arm {
+                pat: Pat::Ctor("Ok".into(), vec![Pat::Wild(sp)], sp),
+                guard: None,
+                body: vec![Stmt::Expr(on_ok)],
+                span: sp,
+            };
+            let err_pat = if on_falsy_or_err.is_some() {
+                Pat::Ident("err".into(), sp)
+            } else {
+                Pat::Wild(sp)
+            };
+            err_arm = Arm {
+                pat: err_pat,
+                guard: None,
+                body: match on_falsy_or_err {
+                    Some(err_expr) => vec![Stmt::Expr(err_expr)],
+                    None => vec![],
+                },
+                span: sp,
+            };
+        }
+        Ok(Stmt::Match(Match {
+            subject: Expr::Ident(tmp_name, sp),
+            arms: vec![ok_arm, err_arm],
             span: sp,
         }))
     }
@@ -652,12 +1214,42 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Insert)?;
         let store = self.ident()?;
-        let mut values = vec![self.parse_expr()?];
+        // Optional parenthesized form: `insert users (name is "alice", age is 30)`
+        let parens = self.check(Token::LParen);
+        if parens {
+            self.advance();
+        }
+        let mut values = vec![self.parse_insert_value()?];
         while self.check(Token::Comma) {
             self.advance();
-            values.push(self.parse_expr()?);
+            values.push(self.parse_insert_value()?);
+        }
+        if parens {
+            self.expect(Token::RParen)?;
         }
         Ok(Stmt::StoreInsert(store, values, sp))
+    }
+
+    /// Parse one insert value: either `name is expr` (named) or a bare expr.
+    fn parse_insert_value(&mut self) -> Result<crate::ast::FieldInit, ParseError> {
+        // Look-ahead for `Ident is …` — but only when the rhs is a value
+        // expression, not a relational comparison (so `users where age is 30`
+        // is unaffected — `where` parses separately).
+        if let (Token::Ident(name), Token::Is) = (self.peek().clone(), self.peek_at(1)) {
+            // Reserve `where`/`from`/`to`/etc. as positional shorthands —
+            // unlikely as field names but err on the side of acceptance.
+            self.advance(); // ident
+            self.advance(); // is
+            let value = self.parse_expr()?;
+            return Ok(crate::ast::FieldInit {
+                name: Some(name),
+                value,
+            });
+        }
+        Ok(crate::ast::FieldInit {
+            name: None,
+            value: self.parse_expr()?,
+        })
     }
 
     fn parse_delete_stmt(&mut self) -> Result<Stmt, ParseError> {

@@ -1,3 +1,5 @@
+//! Codegen for string formatting builtins (`fmt_float`, `fmt_hex`, etc.).
+
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
@@ -48,7 +50,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[i64t.const_int(65, false).into()], "fb.buf"))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
         let buf_ptr = buf.into_pointer_value();
 
         let fv = self.current_fn();
@@ -74,7 +76,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
         let raw_bits = b!(self
             .bld
@@ -247,7 +249,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
         let is_ok = b!(self.bld.build_int_compare(
             IntPredicate::EQ,

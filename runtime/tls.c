@@ -7,14 +7,15 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include "jade_rt.h"
 
 static int tls_initialized = 0;
 
-typedef struct {
+struct jade_tls_conn {
     SSL_CTX *ctx;
     SSL *ssl;
     int fd;
-} jade_tls_conn;
+};
 
 void jade_tls_init(void) {
     if (!tls_initialized) {

@@ -11,11 +11,10 @@ use crate::mir;
 use crate::types::Type;
 use super::super::b;
 use super::super::Compiler;
-use super::MirCodegen;
 
-impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
+impl<'ctx> Compiler<'ctx> {
     pub(super) fn emit_string_const(&mut self, s: &str) -> Result<BasicValueEnum<'ctx>, String> {
-        self.comp.compile_str_literal(s)
+        self.compile_str_literal(s)
     }
 
     pub(super) fn emit_binop(
@@ -36,7 +35,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             };
             if let Some(method_name) = method {
                 let fn_name = format!("{name}_{method_name}");
-                if let Some((fv, _, _)) = self.comp.fns.get(&fn_name).cloned() {
+                if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
                     let first_param_is_ptr = fv
@@ -47,18 +46,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         .unwrap_or(false);
                     let self_arg: BasicValueEnum<'ctx> =
                         if first_param_is_ptr && !l.is_pointer_value() {
-                            let tmp = self.comp.entry_alloca(l.get_type(), "op.self");
-                            b!(self.comp.bld.build_store(tmp, l));
+                            let tmp = self.entry_alloca(l.get_type(), "op.self");
+                            b!(self.bld.build_store(tmp, l));
                             tmp.into()
                         } else {
                             l
                         };
-                    let csv = b!(self.comp.bld.build_call(
+                    let csv = b!(self.bld.build_call(
                         fv,
                         &[self_arg.into(), r.into()],
                         &format!("{method_name}.call")
                     ));
-                    return Ok(self.comp.call_result(csv));
+                    return Ok(self.call_result(csv));
                 }
             }
         }
@@ -67,7 +66,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         if matches!(op, mir::BinOp::Add) && matches!(result_ty, Type::String) {
             let l = self.val(lhs);
             let r = self.val(rhs);
-            return self.comp.string_concat(l, r);
+            return self.string_concat(l, r);
         }
 
         let l = self.val(lhs);
@@ -77,24 +76,22 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let lf = l.into_float_value();
             let rf = r.into_float_value();
             let res = match op {
-                mir::BinOp::Add => b!(self.comp.bld.build_float_add(lf, rf, "fadd")),
-                mir::BinOp::Sub => b!(self.comp.bld.build_float_sub(lf, rf, "fsub")),
-                mir::BinOp::Mul => b!(self.comp.bld.build_float_mul(lf, rf, "fmul")),
-                mir::BinOp::Div => b!(self.comp.bld.build_float_div(lf, rf, "fdiv")),
-                mir::BinOp::Mod => b!(self.comp.bld.build_float_rem(lf, rf, "fmod")),
+                mir::BinOp::Add => b!(self.bld.build_float_add(lf, rf, "fadd")),
+                mir::BinOp::Sub => b!(self.bld.build_float_sub(lf, rf, "fsub")),
+                mir::BinOp::Mul => b!(self.bld.build_float_mul(lf, rf, "fmul")),
+                mir::BinOp::Div => b!(self.bld.build_float_div(lf, rf, "fdiv")),
+                mir::BinOp::Mod => b!(self.bld.build_float_rem(lf, rf, "fmod")),
                 mir::BinOp::Exp => {
-                    let f64t = self.comp.ctx.f64_type();
-                    let pow = self.comp.module.get_function("pow").unwrap_or_else(|| {
+                    let f64t = self.ctx.f64_type();
+                    let pow = self.module.get_function("pow").unwrap_or_else(|| {
                         let ft = f64t.fn_type(&[f64t.into(), f64t.into()], false);
-                        self.comp
-                            .module
+                        self.module
                             .add_function("pow", ft, Some(Linkage::External))
                     });
                     let result = b!(self
-                        .comp
                         .bld
                         .build_call(pow, &[lf.into(), rf.into()], "pow"));
-                    return Ok(self.comp.call_result(result));
+                    return Ok(self.call_result(result));
                 }
                 _ => return Err(format!("mir_codegen: unsupported float binop {op:?}")),
             };
@@ -106,73 +103,68 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             // Pointer arithmetic: ptr + int or ptr - int
             let ptr = l.into_pointer_value();
             let idx = r.into_int_value();
-            let i8_ty = self.comp.ctx.i8_type();
+            let i8_ty = self.ctx.i8_type();
             let offset = if matches!(op, mir::BinOp::Sub) {
-                b!(self.comp.bld.build_int_neg(idx, "neg"))
+                b!(self.bld.build_int_neg(idx, "neg"))
             } else {
                 idx
             };
-            let res = unsafe { b!(self.comp.bld.build_gep(i8_ty, ptr, &[offset], "ptradd")) };
+            let res = unsafe { b!(self.bld.build_gep(i8_ty, ptr, &[offset], "ptradd")) };
             Ok(res.into())
         } else {
             let li = l.into_int_value();
             let ri = r.into_int_value();
             let res = match op {
-                mir::BinOp::Add => b!(self.comp.bld.build_int_add(li, ri, "add")),
-                mir::BinOp::Sub => b!(self.comp.bld.build_int_sub(li, ri, "sub")),
-                mir::BinOp::Mul => b!(self.comp.bld.build_int_mul(li, ri, "mul")),
+                mir::BinOp::Add => b!(self.bld.build_int_add(li, ri, "add")),
+                mir::BinOp::Sub => b!(self.bld.build_int_sub(li, ri, "sub")),
+                mir::BinOp::Mul => b!(self.bld.build_int_mul(li, ri, "mul")),
                 mir::BinOp::Div => {
                     if result_ty.is_signed() {
-                        b!(self.comp.bld.build_int_signed_div(li, ri, "sdiv"))
+                        b!(self.bld.build_int_signed_div(li, ri, "sdiv"))
                     } else {
-                        b!(self.comp.bld.build_int_unsigned_div(li, ri, "udiv"))
+                        b!(self.bld.build_int_unsigned_div(li, ri, "udiv"))
                     }
                 }
                 mir::BinOp::Mod => {
                     if result_ty.is_signed() {
-                        b!(self.comp.bld.build_int_signed_rem(li, ri, "srem"))
+                        b!(self.bld.build_int_signed_rem(li, ri, "srem"))
                     } else {
-                        b!(self.comp.bld.build_int_unsigned_rem(li, ri, "urem"))
+                        b!(self.bld.build_int_unsigned_rem(li, ri, "urem"))
                     }
                 }
-                mir::BinOp::BitAnd => b!(self.comp.bld.build_and(li, ri, "and")),
-                mir::BinOp::BitOr => b!(self.comp.bld.build_or(li, ri, "or")),
-                mir::BinOp::BitXor => b!(self.comp.bld.build_xor(li, ri, "xor")),
-                mir::BinOp::Shl => b!(self.comp.bld.build_left_shift(li, ri, "shl")),
+                mir::BinOp::BitAnd => b!(self.bld.build_and(li, ri, "and")),
+                mir::BinOp::BitOr => b!(self.bld.build_or(li, ri, "or")),
+                mir::BinOp::BitXor => b!(self.bld.build_xor(li, ri, "xor")),
+                mir::BinOp::Shl => b!(self.bld.build_left_shift(li, ri, "shl")),
                 mir::BinOp::Shr => {
                     b!(self
-                        .comp
                         .bld
                         .build_right_shift(li, ri, result_ty.is_signed(), "shr"))
                 }
                 mir::BinOp::Ushr => {
                     b!(self
-                        .comp
                         .bld
                         .build_right_shift(li, ri, false, "ushr"))
                 }
-                mir::BinOp::And => b!(self.comp.bld.build_and(li, ri, "land")),
-                mir::BinOp::Or => b!(self.comp.bld.build_or(li, ri, "lor")),
+                mir::BinOp::And => b!(self.bld.build_and(li, ri, "land")),
+                mir::BinOp::Or => b!(self.bld.build_or(li, ri, "lor")),
                 mir::BinOp::Exp => {
                     // Exponentiation: use llvm.powi intrinsic or loop.
                     // For now, cast to float, call pow, cast back.
-                    let f64t = self.comp.ctx.f64_type();
-                    let lf = b!(self.comp.bld.build_signed_int_to_float(li, f64t, "exp.l"));
-                    let rf = b!(self.comp.bld.build_signed_int_to_float(ri, f64t, "exp.r"));
-                    let pow = self.comp.module.get_function("pow").unwrap_or_else(|| {
+                    let f64t = self.ctx.f64_type();
+                    let lf = b!(self.bld.build_signed_int_to_float(li, f64t, "exp.l"));
+                    let rf = b!(self.bld.build_signed_int_to_float(ri, f64t, "exp.r"));
+                    let pow = self.module.get_function("pow").unwrap_or_else(|| {
                         let ft = f64t.fn_type(&[f64t.into(), f64t.into()], false);
-                        self.comp
-                            .module
+                        self.module
                             .add_function("pow", ft, Some(Linkage::External))
                     });
                     let result = b!(self
-                        .comp
                         .bld
                         .build_call(pow, &[lf.into(), rf.into()], "pow"));
-                    let fv = self.comp.call_result(result).into_float_value();
+                    let fv = self.call_result(result).into_float_value();
                     let iv =
                         b!(self
-                            .comp
                             .bld
                             .build_float_to_signed_int(fv, li.get_type(), "exp.i"));
                     return Ok(iv.into());
@@ -192,15 +184,15 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         match op {
             mir::UnaryOp::Neg => {
                 if result_ty.is_float() {
-                    Ok(b!(self.comp.bld.build_float_neg(v.into_float_value(), "fneg")).into())
+                    Ok(b!(self.bld.build_float_neg(v.into_float_value(), "fneg")).into())
                 } else {
                     let zero = v.into_int_value().get_type().const_int(0, false);
-                    Ok(b!(self.comp.bld.build_int_sub(zero, v.into_int_value(), "neg")).into())
+                    Ok(b!(self.bld.build_int_sub(zero, v.into_int_value(), "neg")).into())
                 }
             }
-            mir::UnaryOp::Not => Ok(b!(self.comp.bld.build_not(v.into_int_value(), "not")).into()),
+            mir::UnaryOp::Not => Ok(b!(self.bld.build_not(v.into_int_value(), "not")).into()),
             mir::UnaryOp::BitNot => {
-                Ok(b!(self.comp.bld.build_not(v.into_int_value(), "bitnot")).into())
+                Ok(b!(self.bld.build_not(v.into_int_value(), "bitnot")).into())
             }
         }
     }
@@ -224,7 +216,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             };
             if let Some(method_name) = method {
                 let fn_name = format!("{name}_{method_name}");
-                if let Some((fv, _, _)) = self.comp.fns.get(&fn_name).cloned() {
+                if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
                     let first_param_is_ptr = fv
@@ -235,20 +227,19 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         .unwrap_or(false);
                     let self_arg: BasicValueEnum<'ctx> =
                         if first_param_is_ptr && !l.is_pointer_value() {
-                            let tmp = self.comp.entry_alloca(l.get_type(), "cmp.self");
-                            b!(self.comp.bld.build_store(tmp, l));
+                            let tmp = self.entry_alloca(l.get_type(), "cmp.self");
+                            b!(self.bld.build_store(tmp, l));
                             tmp.into()
                         } else {
                             l
                         };
                     let csv =
                         b!(self
-                            .comp
                             .bld
                             .build_call(fv, &[self_arg.into(), r.into()], "cmp.call"));
-                    let result = self.comp.call_result(csv);
+                    let result = self.call_result(csv);
                     return if matches!(op, mir::CmpOp::Ne) {
-                        Ok(b!(self.comp.bld.build_not(result.into_int_value(), "neq")).into())
+                        Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
                     } else {
                         Ok(result)
                     };
@@ -264,7 +255,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             || matches!(operand_ty, Type::Struct(n, _) if n == "String");
         if l.is_struct_value() && is_string_type {
             let negate = matches!(op, mir::CmpOp::Ne);
-            return self.comp.string_eq(l, r, negate);
+            return self.string_eq(l, r, negate);
         }
 
         // Determine comparison mode from the actual LLVM value type, not
@@ -278,7 +269,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 mir::CmpOp::Le => inkwell::FloatPredicate::OLE,
                 mir::CmpOp::Ge => inkwell::FloatPredicate::OGE,
             };
-            Ok(b!(self.comp.bld.build_float_compare(
+            Ok(b!(self.bld.build_float_compare(
                 pred,
                 l.into_float_value(),
                 r.into_float_value(),
@@ -300,7 +291,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 (mir::CmpOp::Ge, false) => inkwell::IntPredicate::SGE,
                 (mir::CmpOp::Ge, true) => inkwell::IntPredicate::UGE,
             };
-            Ok(b!(self.comp.bld.build_int_compare(
+            Ok(b!(self.bld.build_int_compare(
                 pred,
                 l.into_int_value(),
                 r.into_int_value(),
@@ -323,14 +314,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // Int → Float.
         if val.is_int_value() && target_ty.is_float() {
             return if !_src_ty.is_signed() {
-                Ok(b!(self.comp.bld.build_unsigned_int_to_float(
+                Ok(b!(self.bld.build_unsigned_int_to_float(
                     val.into_int_value(),
                     target_llvm.into_float_type(),
                     "u2f"
                 ))
                 .into())
             } else {
-                Ok(b!(self.comp.bld.build_signed_int_to_float(
+                Ok(b!(self.bld.build_signed_int_to_float(
                     val.into_int_value(),
                     target_llvm.into_float_type(),
                     "i2f"
@@ -341,14 +332,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // Float → Int.
         if val.is_float_value() && target_ty.is_int() {
             return if !target_ty.is_signed() {
-                Ok(b!(self.comp.bld.build_float_to_unsigned_int(
+                Ok(b!(self.bld.build_float_to_unsigned_int(
                     val.into_float_value(),
                     target_llvm.into_int_type(),
                     "f2u"
                 ))
                 .into())
             } else {
-                Ok(b!(self.comp.bld.build_float_to_signed_int(
+                Ok(b!(self.bld.build_float_to_signed_int(
                     val.into_float_value(),
                     target_llvm.into_int_type(),
                     "f2i"
@@ -362,14 +353,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             let dst_bits = target_llvm.into_int_type().get_bit_width();
             return if dst_bits > src_bits {
                 if !_src_ty.is_signed() {
-                    Ok(b!(self.comp.bld.build_int_z_extend(
+                    Ok(b!(self.bld.build_int_z_extend(
                         val.into_int_value(),
                         target_llvm.into_int_type(),
                         "zext"
                     ))
                     .into())
                 } else {
-                    Ok(b!(self.comp.bld.build_int_s_extend(
+                    Ok(b!(self.bld.build_int_s_extend(
                         val.into_int_value(),
                         target_llvm.into_int_type(),
                         "sext"
@@ -377,7 +368,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     .into())
                 }
             } else if dst_bits < src_bits {
-                Ok(b!(self.comp.bld.build_int_truncate(
+                Ok(b!(self.bld.build_int_truncate(
                     val.into_int_value(),
                     target_llvm.into_int_type(),
                     "trunc"
@@ -389,7 +380,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         }
         // Float → Float.
         if val.is_float_value() && target_llvm.is_float_type() {
-            return Ok(b!(self.comp.bld.build_float_cast(
+            return Ok(b!(self.bld.build_float_cast(
                 val.into_float_value(),
                 target_llvm.into_float_type(),
                 "fcast"
@@ -401,9 +392,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             return Ok(val);
         }
         // Fallback: bitcast via alloca.
-        let alloca = self.comp.entry_alloca(val.get_type(), "cast.tmp");
-        b!(self.comp.bld.build_store(alloca, val));
-        Ok(b!(self.comp.bld.build_load(target_llvm, alloca, "cast")))
+        let alloca = self.entry_alloca(val.get_type(), "cast.tmp");
+        b!(self.bld.build_store(alloca, val));
+        Ok(b!(self.bld.build_load(target_llvm, alloca, "cast")))
     }
 
     pub(super) fn emit_field_get(
@@ -424,8 +415,8 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         let obj_ty = self.value_types.get(&obj).cloned();
         if matches!(&obj_ty, Some(Type::String)) {
             match field {
-                "length" | "len" => return self.comp.string_len(obj_val),
-                "data" => return self.comp.string_data(obj_val),
+                "length" | "len" => return self.string_len(obj_val),
+                "data" => return self.string_data(obj_val),
                 _ => {}
             }
         }
@@ -440,13 +431,13 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 .map(|n| n.to_str().unwrap_or("").to_string());
             if let Some(name) = &struct_ty_name {
                 // Check if this is an enum type — enum payloads need special extraction.
-                if self.comp.enums.contains_key(name) {
+                if self.enums.contains_key(name) {
                     if field == "__tag" {
                         // Tag is at struct index 0 (i32). Extend to i64
                         // since the MIR lowering declares __tag as Type::I64.
-                        let tag_i32 = b!(self.comp.bld.build_extract_value(sv, 0, "tag"));
-                        let i64t = self.comp.ctx.i64_type();
-                        let val = b!(self.comp.bld.build_int_z_extend(
+                        let tag_i32 = b!(self.bld.build_extract_value(sv, 0, "tag"));
+                        let i64t = self.ctx.i64_type();
+                        let val = b!(self.bld.build_int_z_extend(
                             tag_i32.into_int_value(),
                             i64t,
                             "tag.ext"
@@ -459,20 +450,20 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     if let Some(idx_str) = field.strip_prefix('_') {
                         if let Ok(idx) = idx_str.parse::<usize>() {
                             let st = sv.get_type();
-                            let alloca = self.comp.entry_alloca(st.into(), "enum.tmp");
-                            b!(self.comp.bld.build_store(alloca, sv));
+                            let alloca = self.entry_alloca(st.into(), "enum.tmp");
+                            b!(self.bld.build_store(alloca, sv));
                             let payload_gep =
-                                b!(self.comp.bld.build_struct_gep(st, alloca, 1, "payload"));
-                            let res_llvm = self.comp.llvm_ty(result_ty);
+                                b!(self.bld.build_struct_gep(st, alloca, 1, "payload"));
+                            let res_llvm = self.llvm_ty(result_ty);
                             let byte_offset = self.compute_enum_payload_offset(name, idx);
                             let field_ptr = if byte_offset == 0 {
                                 payload_gep
                             } else {
                                 let offset_val =
-                                    self.comp.ctx.i64_type().const_int(byte_offset, false);
+                                    self.ctx.i64_type().const_int(byte_offset, false);
                                 unsafe {
-                                    b!(self.comp.bld.build_gep(
-                                        self.comp.ctx.i8_type(),
+                                    b!(self.bld.build_gep(
+                                        self.ctx.i8_type(),
                                         payload_gep,
                                         &[offset_val],
                                         "payload.field"
@@ -483,20 +474,20 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                             let is_rec = Compiler::is_recursive_field(result_ty, name);
                             if is_rec {
                                 let ptr_ty =
-                                    self.comp.ctx.ptr_type(inkwell::AddressSpace::default());
+                                    self.ctx.ptr_type(inkwell::AddressSpace::default());
                                 let heap_ptr =
-                                    b!(self.comp.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
+                                    b!(self.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
                                         .into_pointer_value();
-                                let val = b!(self.comp.bld.build_load(res_llvm, heap_ptr, field));
+                                let val = b!(self.bld.build_load(res_llvm, heap_ptr, field));
                                 return Ok(val);
                             }
-                            let val = b!(self.comp.bld.build_load(res_llvm, field_ptr, field));
+                            let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
                             return Ok(val);
                         }
                     }
                 }
                 let idx = self.field_index(name, field);
-                let val = b!(self.comp.bld.build_extract_value(sv, idx, field));
+                let val = b!(self.bld.build_extract_value(sv, idx, field));
                 return Ok(val);
             }
             // Unknown struct type — cannot determine correct field index.
@@ -508,19 +499,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             if matches!(field, "length" | "len") {
                 if matches!(&obj_ty, Some(Type::Vec(_))) {
                     let header_ptr = obj_val.into_pointer_value();
-                    let header_ty = self.comp.vec_header_type();
-                    let i64t = self.comp.ctx.i64_type();
+                    let header_ty = self.vec_header_type();
+                    let i64t = self.ctx.i64_type();
                     let len_gep = b!(self
-                        .comp
                         .bld
                         .build_struct_gep(header_ty, header_ptr, 1, "vl.lenp"));
-                    let len = b!(self.comp.bld.build_load(i64t, len_gep, "vl.len"));
+                    let len = b!(self.bld.build_load(i64t, len_gep, "vl.len"));
                     return Ok(len);
                 }
             }
             // Pointer to struct: GEP + load.
             let ptr = obj_val.into_pointer_value();
-            let res_llvm = self.comp.llvm_ty(result_ty);
+            let res_llvm = self.llvm_ty(result_ty);
             // Try to find the struct type from var_allocs or compiler vars.
             let struct_name = self
                 .var_allocs
@@ -532,7 +522,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 })
                 .or_else(|| {
                     // Search compiler's vars for a matching pointer.
-                    self.comp.vars.values().find_map(|(p, ty)| {
+                    self.vars.values().find_map(|(p, ty)| {
                         if *p == ptr {
                             match ty {
                                 Type::Struct(name, _) => Some(name.clone()),
@@ -555,10 +545,10 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                     })
                 });
             if let Some(name) = &struct_name {
-                if let Some(st) = self.comp.module.get_struct_type(&name.as_str()) {
+                if let Some(st) = self.module.get_struct_type(&name.as_str()) {
                     let field_idx = self.field_index(&name.as_str(), field);
-                    let gep = b!(self.comp.bld.build_struct_gep(st, ptr, field_idx, field));
-                    return Ok(b!(self.comp.bld.build_load(res_llvm, gep, field)));
+                    let gep = b!(self.bld.build_struct_gep(st, ptr, field_idx, field));
+                    return Ok(b!(self.bld.build_load(res_llvm, gep, field)));
                 }
             }
             // No fallback — loading from an unknown struct pointer at offset 0
@@ -571,7 +561,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             // Fields are named _0, _1, ...
             if let Some(idx_str) = field.strip_prefix('_') {
                 if let Ok(idx) = idx_str.parse::<u32>() {
-                    let val = b!(self.comp.bld.build_extract_value(
+                    let val = b!(self.bld.build_extract_value(
                         obj_val.into_array_value(),
                         idx,
                         field
@@ -595,19 +585,18 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             _ => &Type::I64,
         };
         // Inline vec construction matching HIR codegen: allocate {ptr, i64, i64} header.
-        let i64t = self.comp.ctx.i64_type();
-        let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
-        let header_ty = self.comp.vec_header_type();
-        let malloc = self.comp.ensure_malloc();
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let header_ty = self.vec_header_type();
+        let malloc = self.ensure_malloc();
 
         let header_size = i64t.const_int(24, false);
         let header_ptr = b!(self
-            .comp
             .bld
             .build_call(malloc, &[header_size.into()], "vec.hdr"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let n = elems.len();
@@ -618,59 +607,52 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         };
 
         if n > 0 {
-            let lty = self.comp.llvm_ty(elem_ty);
-            let elem_size = self.comp.type_store_size(lty);
+            let lty = self.llvm_ty(elem_ty);
+            let elem_size = self.type_store_size(lty);
             let buf_size = i64t.const_int(cap * elem_size, false);
             let buf = b!(self
-                .comp
                 .bld
                 .build_call(malloc, &[buf_size.into()], "vec.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
 
             for (i, vid) in elems.iter().enumerate() {
                 let val = self.val(*vid);
                 let gep = unsafe {
-                    b!(self.comp.bld.build_gep(
+                    b!(self.bld.build_gep(
                         lty,
                         buf,
                         &[i64t.const_int(i as u64, false)],
                         "vec.elem"
                     ))
                 };
-                b!(self.comp.bld.build_store(gep, val));
+                b!(self.bld.build_store(gep, val));
             }
 
             let ptr_gep = b!(self
-                .comp
                 .bld
                 .build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
-            b!(self.comp.bld.build_store(ptr_gep, buf));
+            b!(self.bld.build_store(ptr_gep, buf));
         } else {
             let ptr_gep = b!(self
-                .comp
                 .bld
                 .build_struct_gep(header_ty, header_ptr, 0, "vec.ptr"));
-            b!(self.comp.bld.build_store(ptr_gep, ptr_ty.const_null()));
+            b!(self.bld.build_store(ptr_gep, ptr_ty.const_null()));
         }
 
         let len_gep = b!(self
-            .comp
             .bld
             .build_struct_gep(header_ty, header_ptr, 1, "vec.len"));
         b!(self
-            .comp
             .bld
             .build_store(len_gep, i64t.const_int(n as u64, false)));
 
         let cap_gep = b!(self
-            .comp
             .bld
             .build_struct_gep(header_ty, header_ptr, 2, "vec.cap"));
         b!(self
-            .comp
             .bld
             .build_store(cap_gep, i64t.const_int(cap, false)));
 
@@ -683,14 +665,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         captures: &[mir::ValueId],
         _result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
-        let closure_ty = self.comp.closure_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let closure_ty = self.closure_type();
 
         // Look up the inner lambda function (has captures prepended as params).
-        let inner_fv = if let Some((fv, _, _)) = self.comp.fns.get(fn_name).cloned() {
+        let inner_fv = if let Some((fv, _, _)) = self.fns.get(fn_name).cloned() {
             Some(fv)
         } else {
-            self.comp.module.get_function(fn_name)
+            self.module.get_function(fn_name)
         };
 
         // Build env struct from capture values.
@@ -698,24 +680,22 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         let cap_tys: Vec<BasicTypeEnum<'ctx>> = cap_vals.iter().map(|v| v.get_type()).collect();
 
         let env_ptr = if !captures.is_empty() {
-            let env_struct_ty = self.comp.ctx.struct_type(&cap_tys, false);
-            let env_size = env_struct_ty.size_of().unwrap();
-            let malloc = self.comp.ensure_malloc();
+            let env_struct_ty = self.ctx.struct_type(&cap_tys, false);
+            let env_size = env_struct_ty.size_of().expect("ICE: type has no size");
+            let malloc = self.ensure_malloc();
             let ep = b!(self
-                .comp
                 .bld
                 .build_call(malloc, &[env_size.into()], "env.alloc"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
             for (i, v) in cap_vals.iter().enumerate() {
                 let gep =
                     b!(self
-                        .comp
                         .bld
                         .build_struct_gep(env_struct_ty, ep, i as u32, "env.field"));
-                b!(self.comp.bld.build_store(gep, *v));
+                b!(self.bld.build_store(gep, *v));
             }
             ep
         } else {
@@ -726,7 +706,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         // and calls the inner function with (captures..., declared_params...).
         let wrapper_ptr = if let Some(ifv) = inner_fv {
             let wrapper_name = format!("{fn_name}.env_wrap");
-            if let Some(w) = self.comp.module.get_function(&wrapper_name) {
+            if let Some(w) = self.module.get_function(&wrapper_name) {
                 w.as_global_value().as_pointer_value()
             } else {
                 let inner_type = ifv.get_type();
@@ -742,33 +722,33 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 );
                 let wrapper_ft = match inner_type.get_return_type() {
                     Some(ret) => ret.fn_type(&wrapper_params, false),
-                    None => self.comp.ctx.void_type().fn_type(&wrapper_params, false),
+                    None => self.ctx.void_type().fn_type(&wrapper_params, false),
                 };
-                let wrapper_fv = self.comp.module.add_function(
+                let wrapper_fv = self.module.add_function(
                     &wrapper_name,
                     wrapper_ft,
                     Some(inkwell::module::Linkage::Internal),
                 );
-                self.comp.tag_fn(wrapper_fv);
+                self.tag_fn(wrapper_fv);
 
-                let saved_bb = self.comp.bld.get_insert_block();
-                let entry = self.comp.ctx.append_basic_block(wrapper_fv, "entry");
-                self.comp.bld.position_at_end(entry);
+                let saved_bb = self.bld.get_insert_block();
+                let entry = self.ctx.append_basic_block(wrapper_fv, "entry");
+                self.bld.position_at_end(entry);
 
                 // Build call args: unpack captures from env, then forward declared params.
                 let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = Vec::new();
                 if n_captures > 0 {
-                    let env_struct_ty = self.comp.ctx.struct_type(&cap_tys, false);
-                    let env_param = wrapper_fv.get_nth_param(0).unwrap().into_pointer_value();
+                    let env_struct_ty = self.ctx.struct_type(&cap_tys, false);
+                    let env_param = wrapper_fv.get_nth_param(0).expect("ICE: missing param").into_pointer_value();
                     for i in 0..n_captures {
-                        let gep = b!(self.comp.bld.build_struct_gep(
+                        let gep = b!(self.bld.build_struct_gep(
                             env_struct_ty,
                             env_param,
                             i as u32,
                             "cap.gep"
                         ));
                         let load_ty: BasicTypeEnum<'ctx> = inner_params[i].try_into().unwrap();
-                        let cap = b!(self.comp.bld.build_load(load_ty, gep, "cap.load"));
+                        let cap = b!(self.bld.build_load(load_ty, gep, "cap.load"));
                         call_args.push(cap.into());
                     }
                 }
@@ -779,22 +759,21 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                 }
 
                 let result = self
-                    .comp
                     .bld
                     .build_call(ifv, &call_args, "lam.call")
                     .unwrap();
                 match inner_type.get_return_type() {
                     Some(_) => {
-                        let rv = self.comp.call_result(result);
-                        self.comp.bld.build_return(Some(&rv)).unwrap();
+                        let rv = self.call_result(result);
+                        self.bld.build_return(Some(&rv)).unwrap();
                     }
                     None => {
-                        self.comp.bld.build_return(None).unwrap();
+                        self.bld.build_return(None).unwrap();
                     }
                 }
 
                 if let Some(bb) = saved_bb {
-                    self.comp.bld.position_at_end(bb);
+                    self.bld.position_at_end(bb);
                 }
                 wrapper_fv.as_global_value().as_pointer_value()
             }
@@ -805,7 +784,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
         // Build {wrapper_ptr, env_ptr} closure struct.
         let mut agg: BasicValueEnum<'ctx> = closure_ty.const_zero().into();
-        agg = b!(self.comp.bld.build_insert_value(
+        agg = b!(self.bld.build_insert_value(
             agg.into_struct_value(),
             wrapper_ptr,
             0,
@@ -813,7 +792,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         ))
         .into_struct_value()
         .into();
-        agg = b!(self.comp.bld.build_insert_value(
+        agg = b!(self.bld.build_insert_value(
             agg.into_struct_value(),
             env_ptr,
             1,
@@ -829,11 +808,10 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         elem_ty: &Type,
         cap: Option<&mir::ValueId>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let i64t = self.comp.ctx.i64_type();
-        let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
-        if let Some(fv) = self.comp.module.get_function("jade_chan_create") {
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        if let Some(fv) = self.module.get_function("jade_chan_create") {
             let elem_size = self
-                .comp
                 .llvm_ty(elem_ty)
                 .size_of()
                 .unwrap_or(i64t.const_int(8, false));
@@ -844,10 +822,9 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             };
             let csv =
                 b!(self
-                    .comp
                     .bld
                     .build_call(fv, &[elem_size.into(), capacity.into()], "chan"));
-            Ok(self.comp.call_result(csv))
+            Ok(self.call_result(csv))
         } else {
             Ok(ptr_ty.const_null().into())
         }
@@ -860,15 +837,14 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ch_val = self.val(ch);
         let v = self.val(val);
-        if let Some(fv) = self.comp.module.get_function("jade_chan_send") {
-            let alloca = self.comp.entry_alloca(v.get_type(), "send.tmp");
-            b!(self.comp.bld.build_store(alloca, v));
+        if let Some(fv) = self.module.get_function("jade_chan_send") {
+            let alloca = self.entry_alloca(v.get_type(), "send.tmp");
+            b!(self.bld.build_store(alloca, v));
             b!(self
-                .comp
                 .bld
                 .build_call(fv, &[ch_val.into(), alloca.into()], ""));
         }
-        Ok(self.comp.ctx.i8_type().const_int(0, false).into())
+        Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
     pub(super) fn emit_chan_recv(
@@ -877,22 +853,20 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ch_val = self.val(ch);
-        if let Some(fv) = self.comp.module.get_function("jade_chan_recv") {
-            let elem_llvm = self.comp.llvm_ty(result_ty);
-            let alloca = self.comp.entry_alloca(elem_llvm, "recv.tmp");
+        if let Some(fv) = self.module.get_function("jade_chan_recv") {
+            let elem_llvm = self.llvm_ty(result_ty);
+            let alloca = self.entry_alloca(elem_llvm, "recv.tmp");
             b!(self
-                .comp
                 .bld
                 .build_call(fv, &[ch_val.into(), alloca.into()], ""));
-            Ok(b!(self.comp.bld.build_load(elem_llvm, alloca, "recv.val")))
+            Ok(b!(self.bld.build_load(elem_llvm, alloca, "recv.val")))
         } else {
-            Ok(self.comp.default_val(result_ty))
+            Ok(self.default_val(result_ty))
         }
     }
 
     pub(super) fn field_index(&self, struct_name: &str, field: &str) -> u32 {
-        self.comp
-            .structs
+        self.structs
             .get(struct_name)
             .and_then(|fields| fields.iter().position(|(n, _)| n == field))
             .unwrap_or(0) as u32
@@ -913,7 +887,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
     /// matching the VariantInit layout (8-byte aligned actual type sizes).
     /// When we don't have type info, defaults to `target_idx * 8`.
     pub(super) fn compute_enum_payload_offset(&self, enum_name: &str, target_idx: usize) -> u64 {
-        if let Some(variants) = self.comp.enums.get(enum_name) {
+        if let Some(variants) = self.enums.get(enum_name) {
             for (_, field_types) in variants {
                 if field_types.len() > target_idx {
                     let mut offset: u64 = 0;
@@ -924,8 +898,7 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
                         let type_size = if Compiler::is_recursive_field(fty, enum_name) {
                             8 // pointer
                         } else {
-                            self.comp
-                                .llvm_ty(fty)
+                            self.llvm_ty(fty)
                                 .size_of()
                                 .map(|s| s.get_zero_extended_constant().unwrap_or(8))
                                 .unwrap_or(8)
@@ -948,44 +921,40 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
         result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let fat = self.val(obj);
-        let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let fat_ty = self
-            .comp
             .ctx
             .struct_type(&[ptr_ty.into(), ptr_ty.into()], false);
 
-        let tmp = self.comp.entry_alloca(fat_ty.into(), "dyn.tmp");
-        b!(self.comp.bld.build_store(tmp, fat));
+        let tmp = self.entry_alloca(fat_ty.into(), "dyn.tmp");
+        b!(self.bld.build_store(tmp, fat));
         let data_gep = b!(self
-            .comp
             .bld
             .build_struct_gep(fat_ty, tmp, 0, "dyn.data.gep"));
         let data_ptr =
-            b!(self.comp.bld.build_load(ptr_ty, data_gep, "dyn.data")).into_pointer_value();
+            b!(self.bld.build_load(ptr_ty, data_gep, "dyn.data")).into_pointer_value();
         let vtable_gep = b!(self
-            .comp
             .bld
             .build_struct_gep(fat_ty, tmp, 1, "dyn.vtable.gep"));
         let vtable_ptr =
-            b!(self.comp.bld.build_load(ptr_ty, vtable_gep, "dyn.vtable")).into_pointer_value();
+            b!(self.bld.build_load(ptr_ty, vtable_gep, "dyn.vtable")).into_pointer_value();
 
         let method_idx = self
-            .comp
             .trait_method_order
             .get(trait_name)
             .and_then(|methods| methods.iter().position(|m| m == method))
             .unwrap_or(0) as u64;
 
         let fn_ptr_gep = unsafe {
-            b!(self.comp.bld.build_gep(
+            b!(self.bld.build_gep(
                 ptr_ty,
                 vtable_ptr,
-                &[self.comp.ctx.i64_type().const_int(method_idx, false)],
+                &[self.ctx.i64_type().const_int(method_idx, false)],
                 "dyn.fn.gep"
             ))
         };
         let fn_ptr =
-            b!(self.comp.bld.build_load(ptr_ty, fn_ptr_gep, "dyn.fn")).into_pointer_value();
+            b!(self.bld.build_load(ptr_ty, fn_ptr_gep, "dyn.fn")).into_pointer_value();
 
         let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
             vec![data_ptr.into()];
@@ -993,20 +962,19 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
             call_args.push(self.val(*a).into());
         }
 
-        let ret_ty = self.comp.llvm_ty(result_ty);
+        let ret_ty = self.llvm_ty(result_ty);
         let mut param_tys: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
         for a in args {
             param_tys.push(self.val(*a).get_type().into());
         }
         let fn_ty = ret_ty.fn_type(&param_tys, false);
         let result = b!(self
-            .comp
             .bld
             .build_indirect_call(fn_ty, fn_ptr, &call_args, "dyn.call"));
         Ok(result
             .try_as_basic_value()
             .basic()
-            .unwrap_or_else(|| self.comp.ctx.i64_type().const_int(0, false).into()))
+            .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
     }
 
     /// Emit slice operation for Vec or String types.
@@ -1023,50 +991,48 @@ impl<'a, 'ctx> MirCodegen<'a, 'ctx> {
 
         match result_ty {
             Type::Vec(_) => {
-                let ptr_ty = self.comp.ctx.ptr_type(AddressSpace::default());
-                let i64t = self.comp.ctx.i64_type();
+                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+                let i64t = self.ctx.i64_type();
                 let slice_fn = self
-                    .comp
                     .module
                     .get_function("__jade_vec_slice")
                     .unwrap_or_else(|| {
                         let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
-                        self.comp.module.add_function(
+                        self.module.add_function(
                             "__jade_vec_slice",
                             ft,
                             Some(Linkage::External),
                         )
                     });
-                let result = b!(self.comp.bld.build_call(
+                let result = b!(self.bld.build_call(
                     slice_fn,
                     &[base_val.into(), lo_val.into(), hi_val.into()],
                     "slice"
                 ));
-                Ok(self.comp.call_result(result))
+                Ok(self.call_result(result))
             }
             Type::String => {
-                let st = self.comp.llvm_ty(&Type::String);
-                let i64t = self.comp.ctx.i64_type();
+                let st = self.llvm_ty(&Type::String);
+                let i64t = self.ctx.i64_type();
                 let slice_fn = self
-                    .comp
                     .module
                     .get_function("__jade_str_slice")
                     .unwrap_or_else(|| {
                         let ft = st.fn_type(&[st.into(), i64t.into(), i64t.into()], false);
-                        self.comp.module.add_function(
+                        self.module.add_function(
                             "__jade_str_slice",
                             ft,
                             Some(Linkage::External),
                         )
                     });
-                let result = b!(self.comp.bld.build_call(
+                let result = b!(self.bld.build_call(
                     slice_fn,
                     &[base_val.into(), lo_val.into(), hi_val.into()],
                     "str.slice"
                 ));
-                Ok(self.comp.call_result(result))
+                Ok(self.call_result(result))
             }
-            _ => Ok(self.comp.ctx.i8_type().const_int(0, false).into()),
+            _ => Ok(self.ctx.i8_type().const_int(0, false).into()),
         }
     }
 

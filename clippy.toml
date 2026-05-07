@@ -1,0 +1,15 @@
+## clippy.toml — Jade compiler lint configuration
+##
+## Stable clippy options only. Lint-allow/deny live in src/lib.rs and src/main.rs.
+
+# Allow somewhat large enums (HIR, MIR nodes are intentionally chunky).
+enum-variant-size-threshold = 256
+
+# Single-line literal complexity limit (don't fight long format strings).
+literal-representation-threshold = 16384
+
+# Cognitive complexity is informational here; the codegen has long match arms.
+cognitive-complexity-threshold = 80
+
+# `arc_with_non_send_sync` is silenced project-wide (single-threaded codegen).
+disallowed-types = []

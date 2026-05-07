@@ -1,3 +1,5 @@
+//! Per-expression typing rules.
+
 use crate::intern::Symbol;
 use std::path::PathBuf;
 
@@ -347,6 +349,58 @@ impl Typer {
                 }
 
                 let (hl, hr) = self.coerce_binop_operands(hl, hr);
+
+                // ── R8: arithmetic operand validation (concrete types) ──
+                // Reject Bool/Char/Void/etc. on arithmetic ops where both sides
+                // are already concrete; previously these slipped through to the
+                // codegen and produced surprising bit-twiddling results.
+                if matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Exp
+                ) {
+                    let rl = self.infer_ctx.shallow_resolve(&hl.ty);
+                    let rr = self.infer_ctx.shallow_resolve(&hr.ty);
+                    let valid = |t: &Type, allow_string: bool| -> bool {
+                        match t {
+                            Type::TypeVar(_) | Type::Ptr(_) => true,
+                            t if t.is_num() => true,
+                            Type::String if allow_string => true,
+                            // Struct overloads are dispatched in codegen via
+                            // `<Struct>_{add,sub,mul,div}`; allow them here and
+                            // surface a clearer "no such method" diagnostic
+                            // later if missing.
+                            Type::Struct(_, _) => true,
+                            _ => false,
+                        }
+                    };
+                    let allow_string = matches!(op, BinOp::Add);
+                    if !valid(&rl, allow_string) || !valid(&rr, allow_string) {
+                        let opname = match op {
+                            BinOp::Add => "+",
+                            BinOp::Sub => "-",
+                            BinOp::Mul => "*",
+                            BinOp::Div => "/",
+                            BinOp::Mod => "%",
+                            BinOp::Exp => "^",
+                            _ => unreachable!(),
+                        };
+                        return Err(format!(
+                            "operator `{opname}` not defined for `{rl}` and `{rr}` (line {}); requires numeric{} types or a struct with an `{}` method",
+                            span.line,
+                            if allow_string { ", String," } else { "" },
+                            match op {
+                                BinOp::Add => "add",
+                                BinOp::Sub => "sub",
+                                BinOp::Mul => "mul",
+                                BinOp::Div => "div",
+                                BinOp::Mod => "mod",
+                                BinOp::Exp => "pow",
+                                _ => unreachable!(),
+                            }
+                        ));
+                    }
+                }
+
                 let result_ty = match op {
                     BinOp::Eq
                     | BinOp::Ne
@@ -403,6 +457,66 @@ impl Typer {
             }
 
             ast::Expr::Call(callee, args, span) => {
+                // Generic struct/variant constructor: `T of TypeArg(args)` —
+                // The parser shapes this as `Call(OfCall(Ident, type_expr), args)`.
+                // Reroute to lower_struct_or_variant with explicit type bindings
+                // so monomorphization does not have to infer from arg types.
+                if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref() {
+                    if let ast::Expr::Ident(ctor_name, _) = inner.as_ref() {
+                        let is_struct_ctor = self.generic_types.contains_key(ctor_name)
+                            || self.structs.contains_key(ctor_name);
+                        let is_variant_ctor = self.variant_tags.contains_key(ctor_name);
+                        if is_struct_ctor || is_variant_ctor {
+                            if let Some(tys) = self.expr_to_type_args(type_arg_expr) {
+                                let inits: Vec<ast::FieldInit> = args
+                                    .iter()
+                                    .map(|a| ast::FieldInit {
+                                        name: None,
+                                        value: a.clone(),
+                                    })
+                                    .collect();
+                                let result = self.lower_struct_or_variant_with_typeargs(
+                                    &ctor_name.as_str(),
+                                    &inits,
+                                    *span,
+                                    &tys,
+                                )?;
+                                if let Some(exp) = expected {
+                                    self.unify_call_result(exp, &result.ty, *span, "call result");
+                                }
+                                return Ok(result);
+                            }
+                        }
+                    }
+                }
+                // Positional struct constructor: `Box(7)` for a known
+                // (possibly generic) struct, no `is`-named fields. The parser
+                // routes Uppercase-Ident + `(` directly to Expr::Struct, but
+                // when the caller wrote it after a postfix path (e.g. parens
+                // following another postfix) it can also reach here.
+                if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
+                    let is_struct = self.generic_types.contains_key(ctor_name)
+                        || self.structs.contains_key(ctor_name);
+                    let is_variant = self.variant_tags.contains_key(ctor_name);
+                    let is_value = self.find_var(&ctor_name.as_str()).is_some()
+                        || self.fns.contains_key(ctor_name)
+                        || self.generic_fns.contains_key(ctor_name)
+                        || self.inferable_fns.contains_key(ctor_name);
+                    if (is_struct || is_variant) && !is_value {
+                        let inits: Vec<ast::FieldInit> = args
+                            .iter()
+                            .map(|a| ast::FieldInit {
+                                name: None,
+                                value: a.clone(),
+                            })
+                            .collect();
+                        let result = self.lower_struct_or_variant(&ctor_name.as_str(), &inits, *span)?;
+                        if let Some(exp) = expected {
+                            self.unify_call_result(exp, &result.ty, *span, "call result");
+                        }
+                        return Ok(result);
+                    }
+                }
                 // Partial application: if any arg is $, wrap in a lambda
                 let has_placeholder = args.iter().any(|a| matches!(a, ast::Expr::Placeholder(_)));
                 if has_placeholder {
@@ -540,9 +654,31 @@ impl Typer {
                         {
                             (self.infer_ctx.shallow_resolve(fty), i)
                         } else {
+                            // Improve diagnostic for store-query result types:
+                            // surface the user-visible store name and suggest
+                            // `count <store> where …` for `.length`/`.len`.
+                            let raw = name.as_str();
+                            let display: String = if let Some(stripped) =
+                                raw.strip_prefix("__store_")
+                            {
+                                format!("{} (query result)", stripped)
+                            } else {
+                                raw.to_string()
+                            };
+                            if raw.starts_with("__store_")
+                                && (field == "length" || field == "len")
+                            {
+                                let store = raw.trim_start_matches("__store_");
+                                return Err(format!(
+                                    "line {}:{}: type '{}' has no field '{}' — \
+                                     for the number of matching records use \
+                                     `count {} where …`",
+                                    span.line, span.col, display, field, store
+                                ));
+                            }
                             return Err(format!(
                                 "line {}:{}: type '{}' has no field '{}'",
-                                span.line, span.col, name, field
+                                span.line, span.col, display, field
                             ));
                         }
                     } else {
@@ -735,6 +871,27 @@ impl Typer {
             }
 
             ast::Expr::Struct(name, inits, span) => {
+                // The parser routes `Uppercase(args)` directly to Expr::Struct
+                // (per N-2 generic-ctor support). If no struct/generic/variant
+                // exists with this name but a function does, fall back to a
+                // regular function call. This permits identifiers like
+                // `MySupervisor_start()` or any uppercase-prefixed function.
+                let known_struct = self.structs.contains_key(name)
+                    || self.generic_types.contains_key(name)
+                    || self.variant_tags.contains_key(name)
+                    || name.as_str() == "Arena"
+                    || name.as_str() == "Pool";
+                if !known_struct
+                    && inits.iter().all(|fi| fi.name.is_none())
+                    && (self.fns.contains_key(name)
+                        || self.inferable_fns.contains_key(name)
+                        || self.generic_fns.contains_key(name)
+                        || self.externs.contains_key(name))
+                {
+                    let args: Vec<ast::Expr> = inits.iter().map(|fi| fi.value.clone()).collect();
+                    let callee = ast::Expr::Ident(name.clone(), *span);
+                    return self.lower_call(&callee, &args, *span);
+                }
                 self.lower_struct_or_variant(&name.as_str(), inits, *span)
             }
 
@@ -958,7 +1115,18 @@ impl Typer {
                         ast::QueryClause::Set(field, val, _) => {
                             sets.push((field.clone(), val.clone()));
                         }
-                        _ => {} // sort/limit/take/skip — future work
+                        ast::QueryClause::Sort(_, _, _) => {
+                            return Err("query 'sort' clause is not yet implemented".into());
+                        }
+                        ast::QueryClause::Limit(_, _) => {
+                            return Err("query 'limit' clause is not yet implemented".into());
+                        }
+                        ast::QueryClause::Take(_, _) => {
+                            return Err("query 'take' clause is not yet implemented".into());
+                        }
+                        ast::QueryClause::Skip(_, _) => {
+                            return Err("query 'skip' clause is not yet implemented".into());
+                        }
                     }
                 }
 
@@ -1011,15 +1179,27 @@ impl Typer {
                 })
             }
 
-            ast::Expr::StoreCount(store, span) => {
-                if !self.store_schemas.contains_key(store) {
-                    return Err(format!("unknown store '{store}'"));
+            ast::Expr::StoreCount(store, filter, span) => {
+                let schema = self
+                    .store_schemas
+                    .get(store)
+                    .ok_or_else(|| format!("unknown store '{store}'"))?
+                    .clone();
+                if let Some(filter) = filter {
+                    let hfilter =
+                        self.lower_store_filter(filter, &schema, &store.as_str())?;
+                    Ok(hir::Expr {
+                        kind: hir::ExprKind::ViewCount(store.clone(), Box::new(hfilter)),
+                        ty: Type::I64,
+                        span: *span,
+                    })
+                } else {
+                    Ok(hir::Expr {
+                        kind: hir::ExprKind::StoreCount(store.clone()),
+                        ty: Type::I64,
+                        span: *span,
+                    })
                 }
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreCount(store.clone()),
-                    ty: Type::I64,
-                    span: *span,
-                })
             }
 
             ast::Expr::StoreAll(store, span) => {
@@ -1534,271 +1714,6 @@ impl Typer {
                     span: *span,
                 })
             }
-
-            ast::Expr::Try(inner, span) => {
-                let fn_ret = self.current_fn_ret_ty.clone().unwrap_or_else(|| {
-                    self.infer_ctx.fresh_var()
-                });
-                self.lower_try(inner, *span, &fn_ret)
-            }
-        }
-    }
-
-    /// Desugar `try expr` into an HIR match that unwraps Option/Result on
-    /// the happy path and early-returns on the error path.
-    ///
-    /// For `Option_T`:
-    ///   match expr { Some(v) => v, Nothing => return Nothing }
-    ///
-    /// For `Result_T_E`:
-    ///   match expr { Ok(v) => v, Err(e) => err Err(e) }
-    fn lower_try(
-        &mut self,
-        inner: &ast::Expr,
-        span: Span,
-        ret_ty: &Type,
-    ) -> Result<hir::Expr, String> {
-        let hexpr = self.lower_expr(inner)?;
-        let resolved = self.infer_ctx.resolve(&hexpr.ty);
-
-        let enum_name = match &resolved {
-            Type::Enum(n) => n.clone(),
-            Type::Struct(n, _) if self.enums.contains_key(n) => n.clone(),
-            _ => {
-                return Err(format!(
-                    "try requires an Option or Result value, got {:?} at {:?}",
-                    resolved, span
-                ));
-            }
-        };
-
-        let is_option = enum_name.starts_with("Option_") || enum_name == "Option";
-        let is_result = enum_name.starts_with("Result_") || enum_name == "Result";
-
-        if !is_option && !is_result {
-            return Err(format!(
-                "try requires an Option or Result value, got enum '{}' at {:?}",
-                enum_name, span
-            ));
-        }
-
-        let variants = self.enums.get(&enum_name).cloned().unwrap_or_default();
-
-        if is_option {
-            // Option: variants are [(Some, [T]), (Nothing, [])]
-            let some_tag = variants
-                .iter()
-                .position(|(n, _)| n == "Some")
-                .unwrap_or(0) as u32;
-            let nothing_tag = variants
-                .iter()
-                .position(|(n, _)| n == "Nothing")
-                .unwrap_or(1) as u32;
-            let inner_ty = variants
-                .first()
-                .and_then(|(_, ftys)| ftys.first().cloned())
-                .unwrap_or(Type::I64);
-
-            // Verify the enclosing function also returns an Option so we can propagate
-            let resolved_ret = self.infer_ctx.resolve(ret_ty);
-            match &resolved_ret {
-                Type::Enum(rn) | Type::Struct(rn, _)
-                    if rn.starts_with("Option_") || rn == "Option" => {}
-                _ => {
-                    // Try to unify ret_ty with the same Option type
-                    let _ = self.infer_ctx.unify_at(
-                        ret_ty,
-                        &Type::Enum(enum_name.clone()),
-                        span,
-                        "try propagation requires matching return type",
-                    );
-                }
-            }
-
-            // Build: match <expr> { Some(v) => v, Nothing => return Nothing }
-            let bind_id = self.fresh_id();
-            let bind_name = Symbol::intern(&format!("__try_{}", bind_id.0));
-
-            let some_pat = hir::Pat::Ctor(
-                "Some".to_string(),
-                some_tag,
-                vec![hir::Pat::Bind(
-                    bind_id,
-                    bind_name,
-                    inner_ty.clone(),
-                    span,
-                )],
-                span,
-            );
-            let some_body = vec![hir::Stmt::Expr(hir::Expr {
-                kind: hir::ExprKind::Var(bind_id, bind_name),
-                ty: inner_ty.clone(),
-                span,
-            })];
-
-            // Nothing arm: build a Nothing variant ctor and early-return it
-            let nothing_val = hir::Expr {
-                kind: hir::ExprKind::VariantCtor(
-                    enum_name.clone(),
-                    "Nothing".into(),
-                    nothing_tag,
-                    vec![],
-                ),
-                ty: Type::Enum(enum_name.clone()),
-                span,
-            };
-            let nothing_pat = hir::Pat::Ctor("Nothing".to_string(), nothing_tag, vec![], span);
-            let nothing_body = vec![hir::Stmt::Ret(
-                Some(nothing_val),
-                Type::Enum(enum_name.clone()),
-                span,
-            )];
-
-            let match_expr = hir::Match {
-                subject: hexpr,
-                arms: vec![
-                    hir::Arm {
-                        pat: some_pat,
-                        guard: None,
-                        body: some_body,
-                        span,
-                    },
-                    hir::Arm {
-                        pat: nothing_pat,
-                        guard: None,
-                        body: nothing_body,
-                        span,
-                    },
-                ],
-                ty: inner_ty.clone(),
-                span,
-            };
-
-            Ok(hir::Expr {
-                kind: hir::ExprKind::Block(vec![hir::Stmt::Match(match_expr)]),
-                ty: inner_ty,
-                span,
-            })
-        } else {
-            // Result: variants are [(Ok, [T]), (Err, [E])]
-            let ok_tag = variants
-                .iter()
-                .position(|(n, _)| n == "Ok")
-                .unwrap_or(0) as u32;
-            let err_tag = variants
-                .iter()
-                .position(|(n, _)| n == "Err")
-                .unwrap_or(1) as u32;
-            let ok_ty = variants
-                .iter()
-                .find(|(n, _)| n == "Ok")
-                .and_then(|(_, ftys)| ftys.first().cloned())
-                .unwrap_or(Type::I64);
-            let err_ty = variants
-                .iter()
-                .find(|(n, _)| n == "Err")
-                .and_then(|(_, ftys)| ftys.first().cloned())
-                .unwrap_or(Type::String);
-
-            // Verify the enclosing function also returns a Result so we can propagate
-            let resolved_ret = self.infer_ctx.resolve(ret_ty);
-            match &resolved_ret {
-                Type::Enum(rn) | Type::Struct(rn, _)
-                    if rn.starts_with("Result_") || rn == "Result" => {}
-                _ => {
-                    let _ = self.infer_ctx.unify_at(
-                        ret_ty,
-                        &Type::Enum(enum_name.clone()),
-                        span,
-                        "try propagation requires matching return type",
-                    );
-                }
-            }
-
-            // Build: match <expr> { Ok(v) => v, Err(e) => return Err(e) }
-            let ok_bind_id = self.fresh_id();
-            let ok_bind_name = Symbol::intern(&format!("__try_ok_{}", ok_bind_id.0));
-            let err_bind_id = self.fresh_id();
-            let err_bind_name = Symbol::intern(&format!("__try_err_{}", err_bind_id.0));
-
-            let ok_pat = hir::Pat::Ctor(
-                "Ok".to_string(),
-                ok_tag,
-                vec![hir::Pat::Bind(
-                    ok_bind_id,
-                    ok_bind_name,
-                    ok_ty.clone(),
-                    span,
-                )],
-                span,
-            );
-            let ok_body = vec![hir::Stmt::Expr(hir::Expr {
-                kind: hir::ExprKind::Var(ok_bind_id, ok_bind_name),
-                ty: ok_ty.clone(),
-                span,
-            })];
-
-            let err_pat = hir::Pat::Ctor(
-                "Err".to_string(),
-                err_tag,
-                vec![hir::Pat::Bind(
-                    err_bind_id,
-                    err_bind_name,
-                    err_ty.clone(),
-                    span,
-                )],
-                span,
-            );
-            // Re-wrap the error value in Err(...) for current function's Result type
-            let err_var = hir::Expr {
-                kind: hir::ExprKind::Var(err_bind_id, err_bind_name),
-                ty: err_ty.clone(),
-                span,
-            };
-            let err_rewrap = hir::Expr {
-                kind: hir::ExprKind::VariantCtor(
-                    enum_name.clone(),
-                    "Err".into(),
-                    err_tag,
-                    vec![hir::FieldInit {
-                        name: None,
-                        value: err_var,
-                    }],
-                ),
-                ty: Type::Enum(enum_name.clone()),
-                span,
-            };
-            let err_body = vec![hir::Stmt::Ret(
-                Some(err_rewrap),
-                Type::Enum(enum_name.clone()),
-                span,
-            )];
-
-            let match_expr = hir::Match {
-                subject: hexpr,
-                arms: vec![
-                    hir::Arm {
-                        pat: ok_pat,
-                        guard: None,
-                        body: ok_body,
-                        span,
-                    },
-                    hir::Arm {
-                        pat: err_pat,
-                        guard: None,
-                        body: err_body,
-                        span,
-                    },
-                ],
-                ty: ok_ty.clone(),
-                span,
-            };
-
-            Ok(hir::Expr {
-                kind: hir::ExprKind::Block(vec![hir::Stmt::Match(match_expr)]),
-                ty: ok_ty,
-                span,
-            })
         }
     }
 
@@ -1865,6 +1780,207 @@ impl Typer {
             ),
             _ => ty.clone(),
         }
+    }
+
+    /// Convert a type-argument expression as it appears after `of` in a
+    /// generic constructor call (e.g. `Box of i64(7)` or
+    /// `Pair of (i64, String)(1, "a")`) into the corresponding ordered
+    /// list of `Type`s. Returns `None` if any sub-expression cannot be
+    /// resolved to a type.
+    pub(crate) fn expr_to_type_args(&self, e: &ast::Expr) -> Option<Vec<Type>> {
+        match e {
+            ast::Expr::Tuple(elems, _) => {
+                let mut tys = Vec::with_capacity(elems.len());
+                for el in elems {
+                    tys.push(self.expr_to_single_type(el)?);
+                }
+                Some(tys)
+            }
+            _ => Some(vec![self.expr_to_single_type(e)?]),
+        }
+    }
+
+    fn expr_to_single_type(&self, e: &ast::Expr) -> Option<Type> {
+        match e {
+            ast::Expr::Ident(name, _) => Some(Self::ident_to_type(&name.as_str())),
+            ast::Expr::OfCall(outer, inner, _) => {
+                // E.g. `Vec of i64`, `Box of i64`.
+                let outer_name = match outer.as_ref() {
+                    ast::Expr::Ident(n, _) => n.as_str(),
+                    _ => return None,
+                };
+                let inner_ty = self.expr_to_single_type(inner)?;
+                match &*outer_name {
+                    "Vec" => Some(Type::Vec(Box::new(inner_ty))),
+                    "Ptr" => Some(Type::Ptr(Box::new(inner_ty))),
+                    "Rc" => Some(Type::Rc(Box::new(inner_ty))),
+                    other => Some(Type::Struct(Symbol::intern(other), vec![inner_ty])),
+                }
+            }
+            ast::Expr::Tuple(elems, _) => {
+                let mut tys = Vec::with_capacity(elems.len());
+                for el in elems {
+                    tys.push(self.expr_to_single_type(el)?);
+                }
+                Some(Type::Tuple(tys))
+            }
+            _ => None,
+        }
+    }
+
+    fn ident_to_type(n: &str) -> Type {
+        match n {
+            "i8" => Type::I8,
+            "i16" => Type::I16,
+            "i32" => Type::I32,
+            "int" | "i64" => Type::I64,
+            "u8" => Type::U8,
+            "u16" => Type::U16,
+            "u32" => Type::U32,
+            "u64" => Type::U64,
+            "f32" => Type::F32,
+            "float" | "f64" => Type::F64,
+            "bool" => Type::Bool,
+            "void" => Type::Void,
+            "str" | "String" => Type::String,
+            s if s.len() == 1 && s.chars().next().is_some_and(char::is_uppercase) => {
+                Type::Param(Symbol::intern(s))
+            }
+            _ => Type::Struct(Symbol::intern(n), vec![]),
+        }
+    }
+
+    /// Lower a struct or variant constructor with explicit type-argument
+    /// bindings. Used when the user wrote `T of TypeArg(args)`.
+    pub(crate) fn lower_struct_or_variant_with_typeargs(
+        &mut self,
+        name: &str,
+        inits: &[ast::FieldInit],
+        span: Span,
+        type_args: &[Type],
+    ) -> Result<hir::Expr, String> {
+        // Generic struct path with explicit type bindings.
+        if let Some(gtd) = self.generic_types.get(name).cloned() {
+            if type_args.len() != gtd.type_params.len() {
+                return Err(format!(
+                    "type '{}' expects {} type argument(s), got {}",
+                    name,
+                    gtd.type_params.len(),
+                    type_args.len()
+                ));
+            }
+            let mut type_map = std::collections::HashMap::new();
+            for (tp, ta) in gtd.type_params.iter().zip(type_args.iter()) {
+                type_map.insert(tp.clone(), ta.clone());
+            }
+
+            // Build concrete fields and mangled name up front.
+            let concrete_fields: Vec<(Symbol, Type)> = gtd
+                .fields
+                .iter()
+                .map(|f| {
+                    let ty = f
+                        .ty
+                        .as_ref()
+                        .map(|t| Self::substitute_type_params(t, &type_map))
+                        .unwrap_or(Type::I64);
+                    (f.name, ty)
+                })
+                .collect();
+
+            let ty_suffix = gtd
+                .type_params
+                .iter()
+                .map(|tp| format!("{}", type_map.get(tp).unwrap()))
+                .collect::<Vec<_>>()
+                .join("_");
+            let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
+
+            if !self.structs.contains_key(&mangled) {
+                self.structs.insert(mangled, concrete_fields.clone());
+                let hir_fields: Vec<hir::Field> = concrete_fields
+                    .iter()
+                    .map(|(fname, fty)| hir::Field {
+                        name: *fname,
+                        ty: fty.clone(),
+                        default: None,
+                        span,
+                    })
+                    .collect();
+                let htd = hir::TypeDef {
+                    def_id: self.fresh_id(),
+                    name: mangled,
+                    fields: hir_fields,
+                    methods: Vec::new(),
+                    layout: gtd.layout.clone(),
+                    span,
+                };
+                self.mono_types.push(htd);
+
+                for m in &gtd.methods {
+                    let mut mono_method = m.clone();
+                    for p in &mut mono_method.params {
+                        if let Some(ref ty) = p.ty {
+                            p.ty = Some(Self::substitute_type_params(ty, &type_map));
+                        }
+                    }
+                    if let Some(ref ret) = mono_method.ret {
+                        mono_method.ret =
+                            Some(Self::substitute_type_params(ret, &type_map));
+                    }
+                    self.methods
+                        .entry(mangled)
+                        .or_default()
+                        .push(mono_method.clone());
+                    self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
+                }
+            }
+
+            // Lower the inits with the concrete field types as expected
+            // hints, so literal arguments (e.g. `7`) get the right type.
+            let mut hinits: Vec<hir::FieldInit> = Vec::with_capacity(inits.len());
+            for (i, fi) in inits.iter().enumerate() {
+                let declared_ty = if let Some(fname) = &fi.name {
+                    concrete_fields
+                        .iter()
+                        .find(|(n, _)| n == fname)
+                        .map(|(_, ty)| ty.clone())
+                } else {
+                    concrete_fields.get(i).map(|(_, ty)| ty.clone())
+                };
+                let val =
+                    self.lower_expr_expected(&fi.value, declared_ty.as_ref())?;
+                if let Some(declared_ty) = declared_ty.as_ref() {
+                    let r = self.infer_ctx.unify_at(
+                        declared_ty,
+                        &val.ty,
+                        span,
+                        "generic struct field",
+                    );
+                    self.collect_unify_error(r);
+                }
+                hinits.push(hir::FieldInit {
+                    name: fi.name,
+                    value: val,
+                });
+            }
+
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Struct(mangled, hinits),
+                ty: Type::Struct(mangled, vec![]),
+                span,
+            });
+        }
+
+        // Non-generic struct: explicit `of` arguments are ignored but
+        // accepted gracefully so the constructor still works.
+        if self.structs.contains_key(name) {
+            return self.lower_struct_or_variant(name, inits, span);
+        }
+
+        // Variant constructor — just delegate; type args inform inference
+        // through the field expected types.
+        self.lower_struct_or_variant(name, inits, span)
     }
 
     fn lower_struct_or_variant(

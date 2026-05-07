@@ -1,3 +1,5 @@
+//! Codegen dispatch for `hir::BuiltinFn` variants. Maps each builtin to LLVM IR or runtime call.
+
 use inkwell::module::Linkage;
 use inkwell::values::{BasicValue, BasicValueEnum};
 use inkwell::{AddressSpace, IntPredicate};
@@ -208,7 +210,7 @@ impl<'ctx> Compiler<'ctx> {
                 let ptr = b!(self.bld.build_call(malloc, &[size.into()], "alloc_col"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap()
+                    .expect("ICE: call returned void")
                     .into_pointer_value();
                 let memset = self
                     .module
@@ -364,7 +366,7 @@ impl<'ctx> Compiler<'ctx> {
             ))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
             return Ok(result);
         }
 
@@ -380,7 +382,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[byte_size.into()], "mm.result"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         // Zero-initialize result
@@ -692,7 +694,7 @@ impl<'ctx> Compiler<'ctx> {
         let result_ptr = b!(self.bld.build_call(malloc, &[byte_size.into()], "tp.ptr"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
 
         let fn_val = self.current_fn();
@@ -800,7 +802,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[int_val.into()], intrinsic))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "clz" | "ctz" => {
                 let false_val = self.ctx.bool_type().const_int(0, false);
@@ -814,7 +816,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(f, &[int_val.into(), false_val.into()], intrinsic))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             "rotate_left" | "rotate_right" => {
                 if args.len() < 2 {
@@ -833,7 +835,7 @@ impl<'ctx> Compiler<'ctx> {
                 ))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             _ => Err(format!("unknown intrinsic: {intrinsic}")),
         }
@@ -847,8 +849,7 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(inner);
         let ptr = ptr_val.into_pointer_value();
         let load = b!(self.bld.build_load(lty, ptr, "vol.load"));
-        load.as_instruction_value()
-            .unwrap()
+        load.as_instruction_value().expect("ICE: not an instruction")
             .set_volatile(true)
             .unwrap();
         Ok(load)
@@ -862,7 +863,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = ptr_val.into_pointer_value();
         let store = b!(self.bld.build_store(ptr, val));
-        store.set_volatile(true).unwrap();
+        store.set_volatile(true).expect("ICE: set_volatile failed");
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
@@ -912,7 +913,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "sat"))
             .try_as_basic_value()
             .basic()
-            .unwrap())
+            .expect("ICE: call returned void"))
     }
 
     fn compile_saturating_mul(
@@ -940,7 +941,7 @@ impl<'ctx> Compiler<'ctx> {
         let result = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "smul"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         let val = b!(self
             .bld
             .build_extract_value(result.into_struct_value(), 0, "mul.val"))
@@ -996,7 +997,7 @@ impl<'ctx> Compiler<'ctx> {
         let result = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "chk"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         Ok(result)
     }
 
@@ -1048,7 +1049,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_call(raise_fn, &[sig32.into()], "raise"))
             .try_as_basic_value()
             .basic()
-            .unwrap())
+            .expect("ICE: call returned void"))
     }
 
     fn compile_signal_ignore(
@@ -1087,7 +1088,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cond, pass_bb, fail_bb));
 
         self.bld.position_at_end(fail_bb);
-        let printf = self.module.get_function("printf").unwrap();
+        let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let line = cond_expr.span.line;
         // Use the descriptive message if provided
         let desc = if args.len() > 1 {
@@ -1146,7 +1147,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_call(f, &compiled, ""))
             .try_as_basic_value()
             .basic()
-            .unwrap())
+            .expect("ICE: call returned void"))
     }
 
     fn compile_float_method(
@@ -1175,7 +1176,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "sqrt"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "abs" => {
                 let f = self
@@ -1191,7 +1192,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "abs"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "floor" => {
                 let f = self
@@ -1207,7 +1208,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "floor"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "ceil" => {
                 let f = self
@@ -1223,7 +1224,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "ceil"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "round" => {
                 let f = self
@@ -1239,7 +1240,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "round"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "trunc" => {
                 let f = self
@@ -1255,7 +1256,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "trunc"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             // Trig via libm
             "sin" => {
@@ -1269,7 +1270,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "sin"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "cos" => {
                 let f = self.module.get_function("llvm.cos.f64").unwrap_or_else(|| {
@@ -1282,7 +1283,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "cos"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "cbrt" => {
                 let f = self.module.get_function(method).unwrap_or_else(|| {
@@ -1295,7 +1296,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], method))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "exp" => {
                 let f = self.module.get_function("llvm.exp.f64").unwrap_or_else(|| {
@@ -1308,7 +1309,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "exp2" => {
                 let f = self
@@ -1324,7 +1325,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "exp2"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "ln" => {
                 let f = self.module.get_function("llvm.log.f64").unwrap_or_else(|| {
@@ -1337,7 +1338,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "ln"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "log2" => {
                 let f = self
@@ -1353,7 +1354,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "log2"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "log10" => {
                 let f = self
@@ -1369,7 +1370,7 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_call(f, &[receiver.into()], "log10"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap())
+                    .expect("ICE: call returned void"))
             }
             "recip" => {
                 let one = f64t.const_float(1.0);
@@ -1425,7 +1426,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(f, &[receiver.into(), exp.into()], "pow"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             "atan2" => {
                 if args.len() < 2 {
@@ -1444,7 +1445,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(f, &[receiver.into(), other.into()], "atan2"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             "copysign" => {
                 if args.len() < 2 {
@@ -1466,7 +1467,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(f, &[receiver.into(), sign.into()], "copysign"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             "min" => {
                 if args.len() < 2 {
@@ -1488,7 +1489,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(f, &[receiver.into(), other.into()], "fmin"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             "max" => {
                 if args.len() < 2 {
@@ -1510,7 +1511,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(f, &[receiver.into(), other.into()], "fmax"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             // Boolean predicates
             "is_nan" => {
@@ -1536,7 +1537,7 @@ impl<'ctx> Compiler<'ctx> {
                 let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap()
+                    .expect("ICE: call returned void")
                     .into_float_value();
                 let inf = f64t.const_float(f64::INFINITY);
                 let result = b!(self.bld.build_float_compare(
@@ -1561,7 +1562,7 @@ impl<'ctx> Compiler<'ctx> {
                 let abs_val = b!(self.bld.build_call(abs_f, &[receiver.into()], "abs"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap()
+                    .expect("ICE: call returned void")
                     .into_float_value();
                 let inf = f64t.const_float(f64::INFINITY);
                 let not_inf = b!(self.bld.build_float_compare(
@@ -1610,14 +1611,14 @@ impl<'ctx> Compiler<'ctx> {
                         .build_call(min_f, &[receiver.into(), hi.into()], "clamp.min"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap()
+                    .expect("ICE: call returned void")
                     .into_float_value();
                 Ok(b!(self
                     .bld
                     .build_call(max_f, &[min_val.into(), lo.into()], "clamp.max"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap())
+                .expect("ICE: call returned void"))
             }
             "to_int" => Ok(b!(self.bld.build_float_to_signed_int(receiver, i64t, "ftoi")).into()),
             _ => Err(format!("unknown float method '{method}'")),
@@ -1655,7 +1656,7 @@ impl<'ctx> Compiler<'ctx> {
         let len = b!(self.bld.build_call(strlen, &[ptr.into()], "sfp.len"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_int_value();
         let size = b!(self
             .bld
@@ -1664,7 +1665,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = b!(self.bld.build_call(malloc, &[size.into()], "sfp.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         let memcpy = self.ensure_memcpy();
         b!(self
             .bld
@@ -1728,7 +1729,7 @@ impl<'ctx> Compiler<'ctx> {
         let slen = b!(self.bld.build_call(strlen, &[arg_p.into()], "arg.len"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_int_value();
         let size = b!(self
             .bld
@@ -1737,7 +1738,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = b!(self.bld.build_call(malloc, &[size.into()], "arg.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         let memcpy = self.ensure_memcpy();
         b!(self
             .bld
@@ -1791,7 +1792,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(realloc, &[old_ptr.into(), new_size.into()], "ga.nptr"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         b!(self.bld.build_store(data_gep, new_ptr));
         b!(self.bld.build_store(cap_gep, new_cap));
         b!(self.bld.build_unconditional_branch(store_bb));
@@ -1831,7 +1832,7 @@ impl<'ctx> Compiler<'ctx> {
         let base = b!(self.bld.build_call(malloc, &[cap.into()], "arena.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
 
         let arena_ty = self.arena_type();

@@ -9,6 +9,7 @@
 #include <openssl/err.h>
 #include <string.h>
 #include <stdlib.h>
+#include "jade_rt.h"
 
 /* ── Hashing ─────────────────────────────────────────────── */
 

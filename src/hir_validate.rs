@@ -1,3 +1,5 @@
+//! HIR well-formedness checks invoked after the typer.
+
 use std::collections::HashMap;
 
 use crate::ast::Span;
@@ -188,6 +190,7 @@ impl HirValidator {
             hir::Stmt::Drop(_, _, _, _) => {}
             hir::Stmt::Asm(_) => {}
             hir::Stmt::ErrReturn(e, _, _) => self.validate_expr(e),
+            hir::Stmt::Defer(body, _) => self.validate_block(body),
             hir::Stmt::StoreInsert(_, exprs, _) => {
                 for e in exprs {
                     self.validate_expr(e);
@@ -556,6 +559,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::Asm(a) => a.span,
         hir::Stmt::Drop(_, _, _, s) => *s,
         hir::Stmt::ErrReturn(_, _, s) => *s,
+        hir::Stmt::Defer(_, s) => *s,
         hir::Stmt::StoreInsert(_, _, s) => *s,
         hir::Stmt::StoreDelete(_, _, s) => *s,
         hir::Stmt::StoreDestroy(_, _, s) => *s,

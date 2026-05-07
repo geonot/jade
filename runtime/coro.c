@@ -100,6 +100,8 @@ jade_coro_t *jade_coro_create(void (*entry)(void*), void *arg) {
     c->wait_chan   = NULL;
     c->select_ready = -1;
     c->daemon      = 0;
+    c->on_exit_cb  = NULL;
+    c->on_exit_arg = NULL;
 
     /*
      * Set up the initial stack so that jade_context_swap's `ret`
@@ -191,6 +193,13 @@ static void jade_coro_exit(void) {
     jade_worker_t *w = tl_worker;
     if (!w || !w->current) return;
     jade_coro_t *self = w->current;
+    /* Fire on-exit callback (e.g. supervisor notification) */
+    if (self->on_exit_cb) {
+        void (*cb)(void *) = self->on_exit_cb;
+        void *arg = self->on_exit_arg;
+        self->on_exit_cb = NULL;
+        cb(arg);
+    }
     self->state = JADE_CORO_DONE;
     w->held_chan_lock = NULL;
     w->last_action = SCHED_ACTION_DESTROY;
@@ -226,6 +235,12 @@ jade_worker_t *jade_current_worker(void) {
 
 void jade_coro_set_daemon(jade_coro_t *c) {
     if (c) c->daemon = 1;
+}
+
+void jade_coro_set_on_exit(jade_coro_t *c, void (*cb)(void *), void *arg) {
+    if (!c) return;
+    c->on_exit_cb = cb;
+    c->on_exit_arg = arg;
 }
 
 /* ── Generator direct context-swap API ─────────────────────────── */

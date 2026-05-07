@@ -1,3 +1,5 @@
+//! Codegen for coroutine spawn/yield/resume operations.
+
 use indexmap::IndexMap;
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
@@ -88,7 +90,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(entry);
 
         // arg is the generator control block pointer
-        let gen_ptr_param = coro_fn.get_first_param().unwrap().into_pointer_value();
+        let gen_ptr_param = coro_fn.get_first_param().expect("ICE: function has no first param").into_pointer_value();
         let gen_ptr_alloca = self.entry_alloca(ptr.into(), "__coro_ctx");
         b!(self.bld.build_store(gen_ptr_alloca, gen_ptr_param));
 
@@ -102,7 +104,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_load(ptr, gen_ptr_alloca, "gen.ptr")).into_pointer_value();
             let done_ptr = self.gen_field_ptr(gen_ptr_val, Self::GEN_DONE_OFF, "gen.done")?;
             b!(self.bld.build_store(done_ptr, i8t.const_int(1, false)));
-            let gen_suspend = self.module.get_function("jade_gen_suspend").unwrap();
+            let gen_suspend = crate::codegen::fn_or_die(&self.module, "jade_gen_suspend");
             b!(self.bld.build_call(gen_suspend, &[gen_ptr_val.into()], ""));
             b!(self.bld.build_unreachable());
         }
@@ -127,7 +129,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let memset_fn = self.module.get_function("memset").unwrap_or_else(|| {
@@ -146,7 +148,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         // Create coroutine via jade_coro_create and store ptr in gen block
-        let coro_create = self.module.get_function("jade_coro_create").unwrap();
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
         let coro = b!(self.bld.build_call(
             coro_create,
             &[
@@ -157,7 +159,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
 
         let coro_ptr_field = self.gen_field_ptr(gen_mem, Self::GEN_CORO_PTR_OFF, "gen.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
@@ -237,7 +239,7 @@ impl<'ctx> Compiler<'ctx> {
         let val = self.compile_expr(val_expr)?;
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i8t = self.ctx.i8_type();
-        let i64t = self.ctx.i64_type();
+        let _i64t = self.ctx.i64_type();
 
         let (gen_alloca, _) = self
             .find_var("__coro_ctx")
@@ -263,7 +265,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(has_val_ptr, i8t.const_int(1, false)));
 
         // Suspend back to caller via direct context swap
-        let gen_suspend = self.module.get_function("jade_gen_suspend").unwrap();
+        let gen_suspend = crate::codegen::fn_or_die(&self.module, "jade_gen_suspend");
         b!(self.bld.build_call(gen_suspend, &[gen_ptr.into()], ""));
 
         Ok(())
@@ -305,7 +307,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
 
         // Resume the producer coroutine (direct context swap)
-        let gen_resume = self.module.get_function("jade_gen_resume").unwrap();
+        let gen_resume = crate::codegen::fn_or_die(&self.module, "jade_gen_resume");
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // After resume returns, the producer has either yielded a value or finished.

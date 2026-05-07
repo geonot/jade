@@ -10,14 +10,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "jade_rt.h"
 
 #define VEC_MAGIC "JADEVEC\0"
 
-typedef struct {
+struct JadeVec {
     FILE   *fp;
     int64_t count;
     int64_t dims;
-} JadeVec;
+};
 
 JadeVec *jade_vec_open(const char *path, int64_t dims) {
     JadeVec *v = calloc(1, sizeof(JadeVec));

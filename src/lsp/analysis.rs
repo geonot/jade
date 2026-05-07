@@ -1,3 +1,5 @@
+//! Semantic analysis adapters: hover, signature help, diagnostics.
+
 use std::collections::HashMap;
 
 use crate::ast::{self, Span};
@@ -374,7 +376,7 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
             | Token::View | Token::Actor | Token::Spawn | Token::Send | Token::Receive
             | Token::Dispatch | Token::Yield | Token::Channel | Token::Close
             | Token::Select | Token::Stop | Token::Default | Token::Sim
-            | Token::Supervisor | Token::Atomic | Token::Strict | Token::Try
+            | Token::Supervisor | Token::Atomic | Token::Strict | Token::Defer
             | Token::Global | Token::Pub => {
                 (ST_KEYWORD, (span.end - span.start) as u32)
             }

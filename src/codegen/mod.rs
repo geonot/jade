@@ -1,3 +1,5 @@
+//! Codegen root: the `Compiler` struct and shared LLVM utilities used by both HIR-era helpers and `mir_codegen`.
+
 mod actors;
 mod arith;
 mod builtins;
@@ -27,7 +29,7 @@ mod types;
 mod vec;
 
 use crate::intern::Symbol;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use indexmap::IndexMap;
 use std::path::Path;
 
@@ -78,6 +80,20 @@ macro_rules! ice {
     };
 }
 pub(crate) use ice;
+
+/// Look up a runtime/builtin function by name; panic with an ICE diagnostic
+/// if it has not been declared yet. Use only for symbols that codegen
+/// guarantees to be present (declared in `runtime/jade_rt.h` or via
+/// `declare_runtime_*`).
+#[inline]
+pub(crate) fn fn_or_die<'ctx>(
+    module: &inkwell::module::Module<'ctx>,
+    name: &str,
+) -> inkwell::values::FunctionValue<'ctx> {
+    module.get_function(name).unwrap_or_else(|| {
+        panic!("internal compiler error: runtime function `{name}` not declared")
+    })
+}
 
 pub struct Compiler<'ctx> {
     pub(crate) ctx: &'ctx Context,
@@ -139,6 +155,41 @@ pub struct Compiler<'ctx> {
     /// Per-compilation floor for first growth of empty vectors.
     /// Tuned from MIR VecNew/VecPush patterns in the current program.
     pub(crate) empty_vec_growth_floor: u64,
+
+    // ── MIR-codegen working state (formerly on the separate MirCodegen struct) ──
+    /// MIR ValueId → LLVM value.
+    pub(crate) value_map: std::collections::HashMap<mir::ValueId, BasicValueEnum<'ctx>>,
+    /// MIR BlockId → LLVM basic block (per-function, rebuilt each time).
+    pub(crate) block_map: std::collections::HashMap<mir::BlockId, BasicBlock<'ctx>>,
+    /// Phi nodes that need back-patching after all blocks are emitted.
+    pub(crate) pending_phis: Vec<PendingPhi<'ctx>>,
+    /// MIR ValueId → variable alloca (for Store/Load variable pairs).
+    pub(crate) var_allocs: std::collections::HashMap<Symbol, (PointerValue<'ctx>, Type)>,
+    /// MIR ValueId → Jade type (for FieldGet struct type resolution on parameters).
+    pub(crate) value_types: std::collections::HashMap<mir::ValueId, Type>,
+    /// Coroutine/generator bodies extracted from HIR, keyed by name.
+    pub(crate) coro_bodies: std::collections::HashMap<Symbol, Vec<hir::Stmt>>,
+    /// Select data buffers: select_val ValueId → Vec<PointerValue> (one per arm).
+    pub(crate) select_data_bufs: std::collections::HashMap<mir::ValueId, Vec<PointerValue<'ctx>>>,
+    /// MIR ValueId → alloca for structs that were passed by pointer to methods
+    /// (cached so mutations persist).
+    pub(crate) self_allocs: std::collections::HashMap<mir::ValueId, PointerValue<'ctx>>,
+    /// MIR ValueId → original LLVM BasicTypeEnum for `self_allocs` entries (for lazy reload).
+    pub(crate) self_alloc_types: std::collections::HashMap<mir::ValueId, BasicTypeEnum<'ctx>>,
+    /// MIR BlockId → actual LLVM exit block (may differ from `block_map` when
+    /// helpers like `string_concat` create intermediate LLVM blocks).
+    pub(crate) block_exit_map: std::collections::HashMap<mir::BlockId, BasicBlock<'ctx>>,
+    /// Generated migration function values to call from main wrapper.
+    pub(crate) migration_fns: Vec<FunctionValue<'ctx>>,
+    /// Generated global initializer function to call from main wrapper.
+    pub(crate) global_init_fn: Option<FunctionValue<'ctx>>,
+    /// Per-function `VecNew(ValueId)` → growth floor used for `VecPush` on that vec.
+    pub(crate) vec_growth_floor_by_value: std::collections::HashMap<mir::ValueId, u64>,
+}
+
+pub(crate) struct PendingPhi<'ctx> {
+    pub phi: inkwell::values::PhiValue<'ctx>,
+    pub incoming: Vec<(mir::BlockId, mir::ValueId)>,
 }
 
 pub(crate) struct LoopCtx<'ctx> {
@@ -190,6 +241,19 @@ impl<'ctx> Compiler<'ctx> {
             tbaa_kind_id: ctx.get_kind_id("tbaa"),
             tbaa_root: None,
             empty_vec_growth_floor: 16,
+            value_map: std::collections::HashMap::new(),
+            block_map: std::collections::HashMap::new(),
+            pending_phis: Vec::new(),
+            var_allocs: std::collections::HashMap::new(),
+            value_types: std::collections::HashMap::new(),
+            coro_bodies: std::collections::HashMap::new(),
+            select_data_bufs: std::collections::HashMap::new(),
+            self_allocs: std::collections::HashMap::new(),
+            self_alloc_types: std::collections::HashMap::new(),
+            block_exit_map: std::collections::HashMap::new(),
+            migration_fns: Vec::new(),
+            global_init_fn: None,
+            vec_growth_floor_by_value: std::collections::HashMap::new(),
         }
     }
 
@@ -561,6 +625,44 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.set_current_debug_location(loc);
         }
     }
+
+    /// R15: emit `llvm.dbg.declare` for an alloca'd local so debuggers
+    /// (lldb, gdb) can resolve `frame variable <name>`. Uses an opaque
+    /// 64-bit basic type as a stand-in DIType — accurate enough for
+    /// integers/pointers and gives the variable a name binding.
+    /// No-op when debug info is disabled.
+    pub(crate) fn attach_dbg_declare(
+        &self,
+        ptr: PointerValue<'ctx>,
+        name: &str,
+        line: u32,
+    ) {
+        if !self.debug {
+            return;
+        }
+        let Some(ref di) = self.di_builder else { return };
+        let Some(scope) = self.di_scope_stack.last().copied() else { return };
+        let Some(ref cu) = self.di_compile_unit else { return };
+        let file = cu.get_file();
+        // Use a generic 64-bit unsigned DI type. This is a stand-in:
+        // proper per-Type DI metadata is a follow-up. lldb still prints
+        // the address and bytes, which is the main thing the user gets.
+        let di_ty = di.create_basic_type("__jade_local", 64, 0x07 /* DW_ATE_unsigned */, DIFlags::PUBLIC);
+        let Ok(di_ty) = di_ty else { return };
+        let var_info = di.create_auto_variable(
+            scope,
+            name,
+            file,
+            line,
+            di_ty.as_type(),
+            true,
+            DIFlags::PUBLIC,
+            0,
+        );
+        let loc = di.create_debug_location(self.ctx, line, 1, scope, None);
+        let Some(bb) = self.bld.get_insert_block() else { return };
+        di.insert_declare_at_end(ptr, Some(var_info), None, loc, bb);
+    }
 }
 
 impl<'ctx> Compiler<'ctx> {
@@ -901,7 +1003,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 None
             });
-        matching_id.and_then(|id| self.reuse_tokens.remove(&id))
+        matching_id.and_then(|id| self.reuse_tokens.shift_remove(&id))
     }
 
     pub(crate) fn ensure_free(&mut self) -> FunctionValue<'ctx> {
@@ -1111,30 +1213,154 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Compile a supervisor definition.
     ///
-    /// **Current limitations (H3)**:
-    /// - Only spawns child actors; does NOT monitor them for crashes.
-    /// - No automatic restart on child failure (OneForOne / OneForAll / RestForOne
-    ///   strategies are parsed but not enforced at runtime).
-    /// - No max-restart-count or time-window throttling.
-    /// - Full OTP-style supervision is a planned future enhancement.
+    /// Emits two LLVM functions per supervisor:
+    ///   `<name>_start()`         — first call creates the runtime supervisor,
+    ///                              registers each child (factory + loop), and
+    ///                              starts it. Subsequent calls are no-ops.
+    ///   `<name>_restart_count()` — returns the runtime restart counter.
+    ///
+    /// A module-private global `<name>_g` (jade_sup_t*) holds the supervisor
+    /// handle. The strategy enum (one_for_one / one_for_all / rest_for_one)
+    /// is passed through to `jade_sup_create`. Each child's loop function
+    /// (`<actor>_loop`) is paired with a generated factory
+    /// (`<actor>_create_mb`) so the runtime can re-allocate its mailbox on
+    /// restart without compile-time knowledge of the layout.
     pub(crate) fn compile_supervisor(&mut self, sup: &hir::SupervisorDef) -> Result<(), String> {
-        let fn_name = format!("{}_start", sup.name);
-        let i64t = self.ctx.i64_type();
-        let ft = i64t.fn_type(&[], false);
-        let fv = self.module.add_function(&fn_name, ft, None);
-        let entry = self.ctx.append_basic_block(fv, "entry");
-        self.bld.position_at_end(entry);
-        let old_fn = self.cur_fn;
-        self.cur_fn = Some(fv);
+        use inkwell::AddressSpace;
+        use inkwell::module::Linkage;
 
-        // Spawn each child actor
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let void = self.ctx.void_type();
+
+        // Declare runtime functions (idempotent).
+        let sup_create = self.module.get_function("jade_sup_create").unwrap_or_else(|| {
+            let ft = ptr.fn_type(&[i32t.into()], false);
+            self.module.add_function("jade_sup_create", ft, Some(Linkage::External))
+        });
+        let sup_register = self.module.get_function("jade_sup_register").unwrap_or_else(|| {
+            let ft = i64t.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false);
+            self.module.add_function("jade_sup_register", ft, Some(Linkage::External))
+        });
+        let sup_start_fn = self.module.get_function("jade_sup_start").unwrap_or_else(|| {
+            let ft = void.fn_type(&[ptr.into()], false);
+            self.module.add_function("jade_sup_start", ft, Some(Linkage::External))
+        });
+        let sup_rcount = self.module.get_function("jade_sup_restart_count").unwrap_or_else(|| {
+            let ft = i32t.fn_type(&[ptr.into()], false);
+            self.module.add_function("jade_sup_restart_count", ft, Some(Linkage::External))
+        });
+
+        // Module-private global holding the supervisor handle.
+        let g_name = format!("{}_g", sup.name);
+        let g = self.module.add_global(ptr, None, &g_name);
+        g.set_initializer(&ptr.const_null());
+        g.set_linkage(Linkage::Internal);
+        let g_ptr = g.as_pointer_value();
+
+        // Strategy code.
+        let strat_code: u64 = match sup.strategy {
+            hir::SupervisorStrategy::OneForOne => 0,
+            hir::SupervisorStrategy::OneForAll => 1,
+            hir::SupervisorStrategy::RestForOne => 2,
+        };
+
+        // Ensure factory + loop exist for each child up-front so we can take
+        // their function pointers.
+        let mut child_info: Vec<(inkwell::values::FunctionValue<'ctx>, inkwell::values::FunctionValue<'ctx>, String)> = Vec::new();
         for child in &sup.children {
-            let _ = self.compile_spawn(&child.as_str())?;
+            let factory_fv = self.ensure_actor_factory(&child.as_str())?;
+            let loop_name = format!("{}_loop", child.as_str());
+            let loop_fv = self
+                .module
+                .get_function(&loop_name)
+                .ok_or_else(|| format!("supervisor '{}': child loop '{loop_name}' not found", sup.name))?;
+            child_info.push((factory_fv, loop_fv, child.as_str().to_string()));
         }
 
+        // ── <sup>_start() -> i64 ──
+        let start_name = format!("{}_start", sup.name);
+        let start_ft = i64t.fn_type(&[], false);
+        let start_fv = self.module.add_function(&start_name, start_ft, None);
+        let entry = self.ctx.append_basic_block(start_fv, "entry");
+        let init_bb = self.ctx.append_basic_block(start_fv, "init");
+        let ret_bb = self.ctx.append_basic_block(start_fv, "ret");
+
+        let old_fn = self.cur_fn;
+        let old_bb = self.bld.get_insert_block();
+        self.cur_fn = Some(start_fv);
+
+        self.bld.position_at_end(entry);
+        let cur = b!(self.bld.build_load(ptr, g_ptr, "sup_cur")).into_pointer_value();
+        let is_null = b!(self.bld.build_is_null(cur, "is_null"));
+        b!(self.bld.build_conditional_branch(is_null, init_bb, ret_bb));
+
+        self.bld.position_at_end(init_bb);
+        let new_sup = b!(self.bld.build_call(
+            sup_create,
+            &[i32t.const_int(strat_code, false).into()],
+            "sup_new",
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: call returned void")
+        .into_pointer_value();
+        b!(self.bld.build_store(g_ptr, new_sup));
+
+        for (factory_fv, loop_fv, name) in &child_info {
+            let name_global = self.bld
+                .build_global_string_ptr(name, &format!("__sup_child_name_{name}"))
+                .map_err(|e| e.to_string())?
+                .as_pointer_value();
+            b!(self.bld.build_call(
+                sup_register,
+                &[
+                    new_sup.into(),
+                    factory_fv.as_global_value().as_pointer_value().into(),
+                    loop_fv.as_global_value().as_pointer_value().into(),
+                    name_global.into(),
+                ],
+                "",
+            ));
+        }
+
+        b!(self.bld.build_call(sup_start_fn, &[new_sup.into()], ""));
+        b!(self.bld.build_unconditional_branch(ret_bb));
+
+        self.bld.position_at_end(ret_bb);
         b!(self.bld.build_return(Some(&i64t.const_int(0, false))));
+
+        // ── <sup>_restart_count() -> i64 ──
+        let rc_name = format!("{}_restart_count", sup.name);
+        let rc_ft = i64t.fn_type(&[], false);
+        let rc_fv = self.module.add_function(&rc_name, rc_ft, None);
+        let rc_entry = self.ctx.append_basic_block(rc_fv, "entry");
+        self.cur_fn = Some(rc_fv);
+        self.bld.position_at_end(rc_entry);
+        let cur2 = b!(self.bld.build_load(ptr, g_ptr, "sup_cur")).into_pointer_value();
+        let cur2_null = b!(self.bld.build_is_null(cur2, "is_null"));
+        let zero_bb = self.ctx.append_basic_block(rc_fv, "zero");
+        let load_bb = self.ctx.append_basic_block(rc_fv, "load");
+        b!(self.bld.build_conditional_branch(cur2_null, zero_bb, load_bb));
+        self.bld.position_at_end(zero_bb);
+        b!(self.bld.build_return(Some(&i64t.const_int(0, false))));
+        self.bld.position_at_end(load_bb);
+        let r = b!(self.bld.build_call(sup_rcount, &[cur2.into()], "rc"))
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: call returned void")
+            .into_int_value();
+        let r64 = b!(self.bld.build_int_s_extend(r, i64t, "rc64"));
+        b!(self.bld.build_return(Some(&r64)));
+
         self.cur_fn = old_fn;
-        self.fns.insert(fn_name.into(), (fv, vec![], Type::I64));
+        if let Some(bb) = old_bb {
+            self.bld.position_at_end(bb);
+        }
+
+        self.fns.insert(start_name.clone().into(), (start_fv, vec![], Type::I64));
+        self.fns.insert(rc_name.clone().into(), (rc_fv, vec![], Type::I64));
         Ok(())
     }
 }

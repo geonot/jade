@@ -1,3 +1,5 @@
+//! Path resolution for the typer (vs. `src/resolve.rs` which handles modules).
+
 use crate::intern::Symbol;
 use crate::ast::{self, Span};
 use crate::types::Type;
@@ -189,6 +191,7 @@ impl Typer {
             variants.push((v.name.clone(), ftys));
         }
         self.enums.insert(ed.name.clone(), variants);
+        self.err_enum_names.insert(ed.name.clone());
     }
 
     pub(crate) fn declare_actor_def(&mut self, ad: &ast::ActorDef) {

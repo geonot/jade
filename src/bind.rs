@@ -1,3 +1,5 @@
+//! Name binding utilities used by the typer (resolve identifiers to symbols).
+
 /// C header import tool — parses C function declarations and generates Jade `extern` declarations.
 ///
 /// Usage: `jade bind header.h` → prints Jade extern declarations to stdout.

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 #define KV_MAGIC      "JADEKV\0\0"
 #define KV_MAGIC_SIZE 8
@@ -28,12 +29,12 @@ typedef struct {
     int64_t  status;
 } KvSlot;
 
-typedef struct {
+struct JadeKV {
     FILE    *fp;
     KvSlot  *slots;
     int64_t  capacity;
     int64_t  count;
-} JadeKV;
+};
 
 /* ── FNV-1a hash ──────────────────────────────────────────────── */
 

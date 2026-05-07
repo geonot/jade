@@ -16,22 +16,22 @@ pub fn print_program(prog: &Program) -> String {
     let mut out = String::new();
 
     for td in &prog.types {
-        writeln!(out, "type {} {{", td.name).unwrap();
+        let _ = writeln!(out, "type {} {{", td.name);
         for (fname, fty) in &td.fields {
-            writeln!(out, "  {}: {:?}", fname, fty).unwrap();
+            let _ = writeln!(out, "  {}: {:?}", fname, fty);
         }
-        writeln!(out, "}}\n").unwrap();
+        let _ = writeln!(out, "}}\n");
     }
 
     for ext in &prog.externs {
-        write!(out, "extern fn {}(", ext.name).unwrap();
+        let _ = write!(out, "extern fn {}(", ext.name);
         for (i, p) in ext.params.iter().enumerate() {
             if i > 0 {
-                write!(out, ", ").unwrap();
+                let _ = write!(out, ", ");
             }
-            write!(out, "{:?}", p).unwrap();
+            let _ = write!(out, "{:?}", p);
         }
-        writeln!(out, ") -> {:?}\n", ext.ret).unwrap();
+        let _ = writeln!(out, ") -> {:?}\n", ext.ret);
     }
 
     for func in &prog.functions {
@@ -46,46 +46,46 @@ pub fn print_program(prog: &Program) -> String {
 pub fn print_function(func: &Function) -> String {
     let mut out = String::new();
 
-    write!(out, "fn {}(", func.name).unwrap();
+    let _ = write!(out, "fn {}(", func.name);
     for (i, p) in func.params.iter().enumerate() {
         if i > 0 {
-            write!(out, ", ").unwrap();
+            let _ = write!(out, ", ");
         }
-        write!(out, "{}: {:?} = {}", p.name, p.ty, p.value).unwrap();
+        let _ = write!(out, "{}: {:?} = {}", p.name, p.ty, p.value);
     }
-    writeln!(out, ") -> {:?} {{", func.ret_ty).unwrap();
+    let _ = writeln!(out, ") -> {:?} {{", func.ret_ty);
 
     for block in &func.blocks {
-        writeln!(out, "  {}:  // {}", block.id, block.label).unwrap();
+        let _ = writeln!(out, "  {}:  // {}", block.id, block.label);
 
         for phi in &block.phis {
-            write!(out, "    {} = phi {:?} ", phi.dest, phi.ty).unwrap();
+            let _ = write!(out, "    {} = phi {:?} ", phi.dest, phi.ty);
             for (i, (bb, val)) in phi.incoming.iter().enumerate() {
                 if i > 0 {
-                    write!(out, ", ").unwrap();
+                    let _ = write!(out, ", ");
                 }
-                write!(out, "[{}: {}]", bb, val).unwrap();
+                let _ = write!(out, "[{}: {}]", bb, val);
             }
-            writeln!(out).unwrap();
+            let _ = writeln!(out);
         }
 
         for inst in &block.insts {
             if let Some(dest) = inst.dest {
-                write!(out, "    {} = ", dest).unwrap();
+                let _ = write!(out, "    {} = ", dest);
             } else {
-                write!(out, "    ").unwrap();
+                let _ = write!(out, "    ");
             }
-            write!(out, "{}", format_inst_kind(&inst.kind)).unwrap();
+            let _ = write!(out, "{}", format_inst_kind(&inst.kind));
             if !matches!(inst.ty, crate::types::Type::Void) {
-                write!(out, "  // {:?}", inst.ty).unwrap();
+                let _ = write!(out, "  // {:?}", inst.ty);
             }
-            writeln!(out).unwrap();
+            let _ = writeln!(out);
         }
 
-        writeln!(out, "    {}", format_terminator(&block.terminator)).unwrap();
+        let _ = writeln!(out, "    {}", format_terminator(&block.terminator));
     }
 
-    writeln!(out, "}}").unwrap();
+    let _ = writeln!(out, "}}");
     out
 }
 

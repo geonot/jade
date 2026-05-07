@@ -1,3 +1,5 @@
+//! Codegen for map literal/operation builtins.
+
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -18,7 +20,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[header_size.into()], "map.hdr"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let init_cap = 16u64;
@@ -34,7 +36,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let ptr_gep = b!(self
@@ -450,7 +452,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = b!(self.bld.build_call(malloc, &[buf_bytes.into()], "mk.buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
         let r_ptr_gep = b!(self
             .bld

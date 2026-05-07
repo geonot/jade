@@ -1,3 +1,5 @@
+//! Diagnostic emission: spans, severities, and pretty-printing.
+
 use crate::ast::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

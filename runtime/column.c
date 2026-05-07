@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 #define COL_MAGIC "JADECOL\0"
 #define COL_HEADER_SIZE 24
@@ -34,12 +35,12 @@ static inline void *col_alloc(int64_t count, int64_t elem_bytes) {
     return malloc(bytes);
 }
 
-typedef struct {
+struct JadeCol {
     FILE   *fp;
     int64_t count;
     int64_t elem_size;  /* bytes per element */
     char    path[256];
-} JadeCol;
+};
 
 /* ── Open / Close ─────────────────────────────────────────── */
 

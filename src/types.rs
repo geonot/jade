@@ -1,3 +1,5 @@
+//! Core type system data structures shared across the typer pipeline.
+
 use crate::intern::Symbol;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {

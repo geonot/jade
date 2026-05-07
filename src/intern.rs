@@ -1,3 +1,5 @@
+//! String interning for identifiers, paths, and symbol names.
+
 use lasso::{Rodeo, Spur};
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};

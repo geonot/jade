@@ -1,3 +1,5 @@
+//! Package management: dependency resolution and module discovery.
+
 use crate::ast::{Decl, Expr, Stmt};
 use crate::lexer::{Lexer, Token};
 use crate::parser::Parser;

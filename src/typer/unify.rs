@@ -1,3 +1,5 @@
+//! Type unification with occurs check and row/effect handling.
+
 use crate::intern::Symbol;
 use crate::ast::Span;
 use crate::types::Type;
@@ -848,7 +850,7 @@ impl InferCtx {
         if scheme.quantified.is_empty() {
             return scheme.ty.clone();
         }
-        let subst: std::collections::HashMap<u32, Type> = scheme
+        let subst: HashMap<u32, Type> = scheme
             .quantified
             .iter()
             .map(|&v| {
@@ -882,7 +884,7 @@ impl InferCtx {
         self.substitute(&scheme.ty, &subst)
     }
 
-    fn substitute(&self, ty: &Type, subst: &std::collections::HashMap<u32, Type>) -> Type {
+    fn substitute(&self, ty: &Type, subst: &HashMap<u32, Type>) -> Type {
         match ty {
             Type::TypeVar(v) => {
                 if let Some(replacement) = subst.get(v) {

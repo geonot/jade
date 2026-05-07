@@ -1,3 +1,5 @@
+//! Codegen for lambda expressions and closure environments.
+
 use crate::intern::Symbol;
 use std::collections::HashSet;
 
@@ -72,12 +74,12 @@ impl<'ctx> Compiler<'ctx> {
 
         // Allocate environment on the heap (in the caller's context)
         let env_ptr = if !captures.is_empty() {
-            let env_size = env_struct_ty.size_of().unwrap();
+            let env_size = env_struct_ty.size_of().expect("ICE: type has no size");
             let raw = self.ensure_malloc();
             let ep = b!(self.bld.build_call(raw, &[env_size.into()], "env.alloc"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap()
+                .expect("ICE: call returned void")
                 .into_pointer_value();
             // Store captured values into environment
             for (i, (_, val, _)) in captures.iter().enumerate() {
@@ -101,7 +103,7 @@ impl<'ctx> Compiler<'ctx> {
         self.push_var_scope();
 
         // Load captures from env struct (param 0 is env_ptr)
-        let env_param = lambda_fv.get_nth_param(0).unwrap().into_pointer_value();
+        let env_param = lambda_fv.get_nth_param(0).expect("ICE: missing param").into_pointer_value();
         for (i, (name, _, ty)) in captures.iter().enumerate() {
             let lt = self.llvm_ty(ty);
             let field_ptr =

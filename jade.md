@@ -581,33 +581,102 @@ enum HttpStatus
 
 ## Error Handling
 
-Errors are values, not exceptions.
+Errors are values, not exceptions. Jade has one error convention: declare an
+err enum, return it from your function, and pattern-match at the call site.
+There is no `try`, no `catch`, no exception machinery, no two-color
+`async`/`throws` split.
+
+### Primitives
+
+| Form               | Meaning                                                                |
+| ------------------ | ---------------------------------------------------------------------- |
+| `err E`            | Declares a tagged error enum (compiles like `enum`, semantically marked). |
+| `*fn() returns T`  | Canonical signature; `T` may be any type, including an err enum.       |
+| `! value`          | Universal early-return; `value` must be type-compatible with `T`.      |
+| `! E1 ! E2` suffix | Declarative annotation listing which err enums may be used with `!`.   |
+| `defer block`      | Function-scoped cleanup; runs LIFO at every exit.                      |
+| `match` / `is`     | Universal handler for the returned value.                              |
+
+### The canonical form — return the err enum directly
 
 ```jade
-err FileError
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    r is compute(41)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
+```
+
+### The sentinel form — encode errors as values of `T`
+
+```jade
+*lookup(k as string) returns i64
+    if missing
+        ! -1
+    found_value
+```
+
+### `! E` annotation — declarative validation
+
+```jade
+err Network
+    Timeout
+err Disk
     NotFound
-    PermissionDenied(String)
 
-*read_file(path as String)
-    if path equals ''
-        ! FileError:NotFound
-    'file contents here'
-
-*main
-    match read_file('test.txt')
-        FileError:NotFound ? log 'not found'
-        FileError:PermissionDenied(msg) ? log msg
-        _ ? log 'ok'
+*fetch(url as string) returns i64 ! Network ! Disk
+    if down
+        ! Timeout       // ok: variant of Network
+    if no_space
+        ! NotFound      // ok: variant of Disk
+    payload_size
 ```
 
-`!` is the error return operator — returns the error value from the current function. Error variants are qualified with their error type using a single colon: `FileError:NotFound`. The non-error path returns normally (here, the string on the last line).
+The `! E` suffix constrains *which* err variants the body may early-return.
+The function's runtime return type is still `T`. The early-returned value
+must be type-compatible with `T` — so this form is only useful when `T`
+itself is one of the listed err enums, or when errors are sentinel-encoded
+into `T`. Returning a variant of an err enum that is not in the list is a
+compile error. Returning a variant whose enum type is incompatible with `T`
+is also a compile error and the message points at one of the two canonical
+forms above.
 
-When `!` might be ambiguous with the ternary `!` (else branch), use `!! ErrorType:Variant` to make intent explicit:
+### `defer` — universal cleanup
 
 ```jade
-result eq condition ? value ! fallback     # ternary: condition ? then ! else
-!! FileError:NotFound                      # error return (unambiguous)
+*compute(x as i64) returns Outcome
+    defer
+        log("cleanup")    // runs whether the function returns normally,
+                          // exits early via `!`, or falls through
+    if x is 0
+        ! Bad
+    Ok(x)
 ```
+
+`defer` is function-scoped; placing one inside an `if` or `while` block still
+fires it at function exit, in reverse order of registration.
+
+### Disambiguating `!` from the ternary
+
+When `!` might be ambiguous with the ternary `!` (else branch), use `!!` to
+make intent explicit:
+
+```jade
+result is condition ? value ! fallback     # ternary: condition ? then ! else
+!! NotFound                                # early return (unambiguous)
+```
+
 
 ---
 

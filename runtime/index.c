@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 #define IDX_MAGIC     "JADEIDX\0"
 #define IDX_MAGIC_LEN 8
@@ -26,37 +27,26 @@
 #define STATUS_OCCUPIED  1
 #define STATUS_TOMBSTONE 2
 
-/* ── FNV-1a hash for arbitrary bytes ────────────────────────────── */
-static uint64_t fnv1a(const void *data, int64_t len) {
-    const uint8_t *p = (const uint8_t *)data;
-    uint64_t h = 14695981039346656037ULL;
-    for (int64_t i = 0; i < len; i++) {
-        h ^= p[i];
-        h *= 1099511628211ULL;
-    }
-    return h;
-}
-
 /* ── Hash a store field value (i64 or fixed string) ─────────────── */
 uint64_t jade_idx_hash_i64(int64_t val) {
-    return fnv1a(&val, sizeof(val));
+    return jade_fnv1a(&val, sizeof(val));
 }
 
 uint64_t jade_idx_hash_str(const char *buf, int64_t len) {
-    return fnv1a(buf, len);
+    return jade_fnv1a(buf, len);
 }
 
 uint64_t jade_idx_hash_f64(double val) {
-    return fnv1a(&val, sizeof(val));
+    return jade_fnv1a(&val, sizeof(val));
 }
 
 /* ── Index file management ──────────────────────────────────────── */
 
-typedef struct {
+struct JadeIndex {
     FILE   *fp;
     int64_t capacity;
     int64_t count;
-} JadeIndex;
+};
 
 /* Read header from an open index file */
 static int read_header(JadeIndex *idx) {

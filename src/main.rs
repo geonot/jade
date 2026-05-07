@@ -1,3 +1,6 @@
+// Compiler driver / CLI entry point. See `docs/architecture.md` for the pipeline overview.
+// (Regular comment, not a `//!` doc comment, because this file is `include!`d by `src/bin/jade.rs`.)
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -51,6 +54,8 @@ struct Cli {
     debug: bool,
     #[arg(long)]
     debug_types: bool,
+    #[arg(long)]
+    debug_perceus: bool,
     #[arg(long, default_value_t = true)]
     warn_inferred_defaults: bool,
     #[arg(long)]
@@ -1145,7 +1150,7 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                 walk_expr(e, refs, defs)
             }
             Expr::Block(stmts, _) => walk_block(stmts, refs, defs),
-            Expr::Ref(e, _) | Expr::Deref(e, _) | Expr::Yield(e, _) | Expr::Grad(e, _) | Expr::Try(e, _) => {
+            Expr::Ref(e, _) | Expr::Deref(e, _) | Expr::Yield(e, _) | Expr::Grad(e, _) => {
                 walk_expr(e, refs, defs)
             }
             Expr::Spawn(name, _) => {
@@ -1339,8 +1344,8 @@ fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             }
             Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => walk_expr(e, refs, defs),
             Stmt::StoreInsert(_, exprs, _) => {
-                for e in exprs {
-                    walk_expr(e, refs, defs);
+                for fi in exprs {
+                    walk_expr(&fi.value, refs, defs);
                 }
             }
             Stmt::Transaction(body, _) | Stmt::SimBlock(body, _) => walk_block(body, refs, defs),
@@ -1832,12 +1837,10 @@ fn compile_and_link(
     }
 
     {
-        use jadec::codegen::mir_codegen::MirCodegen;
         use jadec::perceus::mir_perceus;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
-        let mut mir_cg = MirCodegen::new(&mut comp);
-        if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
+        if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&format!("mir-codegen: {e}"));
         }
     }
@@ -2201,27 +2204,33 @@ fn main() {
 
     jadec::comptime::fold_program(&mut hir_prog);
 
-    let mut perceus = PerceusPass::new();
-    let hints = perceus.optimize(&hir_prog);
-    if hints.stats.drops_elided > 0
-        || hints.stats.reuse_sites > 0
-        || hints.stats.borrows_promoted > 0
-        || hints.stats.fbip_sites > 0
-        || hints.stats.tail_reuse_sites > 0
-        || hints.stats.speculative_reuse_sites > 0
-        || hints.stats.pool_hints_found > 0
-    {
-        eprintln!(
-            "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative, {} pool-hints ({} bindings)",
-            hints.stats.drops_elided,
-            hints.stats.reuse_sites,
-            hints.stats.borrows_promoted,
-            hints.stats.fbip_sites,
-            hints.stats.tail_reuse_sites,
-            hints.stats.speculative_reuse_sites,
-            hints.stats.pool_hints_found,
-            hints.stats.total_bindings_analyzed,
-        );
+    // ── R11: HIR-level Perceus is diagnostic-only. The MIR-level pass below
+    // is the sole consumer of refcount hints used by codegen. Skip the HIR
+    // analysis on normal compiles to avoid the redundant work; surface it
+    // only under --debug-perceus.
+    if cli.debug_perceus {
+        let mut perceus = PerceusPass::new();
+        let hints = perceus.optimize(&hir_prog);
+        if hints.stats.drops_elided > 0
+            || hints.stats.reuse_sites > 0
+            || hints.stats.borrows_promoted > 0
+            || hints.stats.fbip_sites > 0
+            || hints.stats.tail_reuse_sites > 0
+            || hints.stats.speculative_reuse_sites > 0
+            || hints.stats.pool_hints_found > 0
+        {
+            eprintln!(
+                "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative, {} pool-hints ({} bindings)",
+                hints.stats.drops_elided,
+                hints.stats.reuse_sites,
+                hints.stats.borrows_promoted,
+                hints.stats.fbip_sites,
+                hints.stats.tail_reuse_sites,
+                hints.stats.speculative_reuse_sites,
+                hints.stats.pool_hints_found,
+                hints.stats.total_bindings_analyzed,
+            );
+        }
     }
 
     let mut verifier = OwnershipVerifier::new();
@@ -2352,7 +2361,6 @@ fn main() {
     }
 
     {
-        use jadec::codegen::mir_codegen::MirCodegen;
         use jadec::perceus::mir_perceus;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
@@ -2377,8 +2385,7 @@ fn main() {
                 mir_hints.stats.total_bindings_analyzed,
             );
         }
-        let mut mir_cg = MirCodegen::new(&mut comp);
-        if let Err(e) = mir_cg.compile_program(&mir_prog, &hir_prog, mir_hints) {
+        if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&format!("mir-codegen: {e}"));
         }
     }

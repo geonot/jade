@@ -1,3 +1,5 @@
+//! Codegen for actor spawn/send/become/supervisor operations.
+
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::BasicValueEnum;
@@ -84,8 +86,8 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
 
-        let mb_st = self.module.get_struct_type(&mb_name).unwrap();
-        let msg_st = self.module.get_struct_type(&msg_name).unwrap();
+        let mb_st = self.module.get_struct_type(&mb_name).expect("ICE: struct type not declared");
+        let msg_st = self.module.get_struct_type(&msg_name).expect("ICE: struct type not declared");
 
         let loop_handler = ad.handlers.iter().find(|h| h.is_loop);
         let message_handlers: Vec<&hir::HandlerDef> =
@@ -104,7 +106,7 @@ impl<'ctx> Compiler<'ctx> {
         let old_fn = self.cur_fn;
         self.cur_fn = Some(fv);
 
-        let mb_ptr = fv.get_nth_param(0).unwrap().into_pointer_value();
+        let mb_ptr = fv.get_nth_param(0).expect("ICE: missing param").into_pointer_value();
 
         self.bld.position_at_end(entry);
         let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
@@ -120,7 +122,7 @@ impl<'ctx> Compiler<'ctx> {
             self.push_var_scope();
 
             let state_name = format!("{name}_state");
-            let state_st = self.module.get_struct_type(&state_name).unwrap();
+            let state_st = self.module.get_struct_type(&state_name).expect("ICE: struct type not declared");
             for (fi, field) in ad.fields.iter().enumerate() {
                 let field_ptr = b!(self.bld.build_struct_gep(
                     state_st,
@@ -140,7 +142,7 @@ impl<'ctx> Compiler<'ctx> {
                 ));
             }
 
-            let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
+            let sched_yield = crate::codegen::fn_or_die(&self.module, "jade_sched_yield");
             if let Some(sleep_expr) = &loop_h.loop_sleep_ms {
                 let i64t = self.ctx.i64_type();
                 let sleep_ms = self.compile_expr(sleep_expr)?.into_int_value();
@@ -171,7 +173,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(sched_yield, &[], ""));
             }
 
-            let chan_try_recv = self.module.get_function("jade_chan_try_recv").unwrap();
+            let chan_try_recv = crate::codegen::fn_or_die(&self.module, "jade_chan_try_recv");
             let recv_state = b!(self.bld.build_call(
                 chan_try_recv,
                 &[ch_ptr.into(), msg_alloca.into()],
@@ -179,7 +181,7 @@ impl<'ctx> Compiler<'ctx> {
             ))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_int_value();
 
             let got_msg = b!(self.bld.build_int_compare(
@@ -204,13 +206,13 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_conditional_branch(is_closed, exit_bb, loop_bb));
         } else {
-            let chan_recv = self.module.get_function("jade_chan_recv").unwrap();
+            let chan_recv = crate::codegen::fn_or_die(&self.module, "jade_chan_recv");
             let recv_ok = b!(self
                 .bld
                 .build_call(chan_recv, &[ch_ptr.into(), msg_alloca.into()], "recv_ok"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_int_value();
 
             let ok = b!(self.bld.build_int_compare(
@@ -255,7 +257,7 @@ impl<'ctx> Compiler<'ctx> {
             ));
 
             let state_name = format!("{name}_state");
-            let state_st = self.module.get_struct_type(&state_name).unwrap();
+            let state_st = self.module.get_struct_type(&state_name).expect("ICE: struct type not declared");
 
             for (i, h) in message_handlers.iter().enumerate() {
                 let bb = handler_bbs[i].1;
@@ -333,13 +335,13 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_struct_type(&mb_name)
             .ok_or_else(|| format!("actor '{actor_name}' not declared"))?;
-        let msg_st = self.module.get_struct_type(&msg_name).unwrap();
+        let msg_st = self.module.get_struct_type(&msg_name).expect("ICE: struct type not declared");
 
         let mb_size = self.type_store_size(mb_st.into());
         let msg_size = self.type_store_size(msg_st.into());
 
-        let malloc_fn = self.module.get_function("malloc").unwrap();
-        let memset_fn = self.module.get_function("memset").unwrap();
+        let malloc_fn = crate::codegen::fn_or_die(&self.module, "malloc");
+        let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
 
         let mb_ptr = b!(self.bld.build_call(
             malloc_fn,
@@ -348,7 +350,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
         b!(self.bld.build_call(
             memset_fn,
             &[
@@ -361,7 +363,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let mb_ptr_v = mb_ptr.into_pointer_value();
 
-        let chan_create = self.module.get_function("jade_chan_create").unwrap();
+        let chan_create = crate::codegen::fn_or_die(&self.module, "jade_chan_create");
         let ch = b!(self.bld.build_call(
             chan_create,
             &[
@@ -372,7 +374,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
 
         let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 0, "ch_ptr_ptr"));
         b!(self.bld.build_store(ch_ptr_ptr, ch));
@@ -406,7 +408,7 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_function(&loop_name)
             .ok_or_else(|| format!("actor loop fn '{loop_name}' not found"))?;
-        let coro_create = self.module.get_function("jade_coro_create").unwrap();
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
         let coro = b!(self.bld.build_call(
             coro_create,
             &[
@@ -417,15 +419,125 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
 
-        let set_daemon = self.module.get_function("jade_coro_set_daemon").unwrap();
+        let set_daemon = crate::codegen::fn_or_die(&self.module, "jade_coro_set_daemon");
         b!(self.bld.build_call(set_daemon, &[coro.into()], ""));
 
-        let sched_spawn = self.module.get_function("jade_sched_spawn").unwrap();
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jade_sched_spawn");
         b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
 
         Ok(mb_ptr_v.into())
+    }
+
+    /// Emit (lazily) a per-actor factory function:
+    ///   void *<actor>_create_mb(void)
+    /// Allocates and initialises a fresh mailbox (channel + alive flag +
+    /// state defaults). Used by the supervisor runtime to (re)spawn this
+    /// actor without compile-time knowledge of its layout.
+    pub(crate) fn ensure_actor_factory(
+        &mut self,
+        actor_name: &str,
+    ) -> Result<inkwell::values::FunctionValue<'ctx>, String> {
+        let fn_name = format!("{actor_name}_create_mb");
+        if let Some(fv) = self.module.get_function(&fn_name) {
+            return Ok(fv);
+        }
+
+        let mb_name = format!("{actor_name}_mailbox");
+        let msg_name = format!("{actor_name}_msg");
+
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+
+        let mb_st = self
+            .module
+            .get_struct_type(&mb_name)
+            .ok_or_else(|| format!("actor '{actor_name}' not declared"))?;
+        let msg_st = self.module.get_struct_type(&msg_name).expect("ICE: struct type not declared");
+
+        let mb_size = self.type_store_size(mb_st.into());
+        let msg_size = self.type_store_size(msg_st.into());
+
+        let ft = ptr.fn_type(&[], false);
+        let fv = self.module.add_function(&fn_name, ft, Some(Linkage::Internal));
+        let entry = self.ctx.append_basic_block(fv, "entry");
+
+        let old_fn = self.cur_fn;
+        let old_bb = self.bld.get_insert_block();
+        self.cur_fn = Some(fv);
+        self.bld.position_at_end(entry);
+
+        let malloc_fn = crate::codegen::fn_or_die(&self.module, "malloc");
+        let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
+        let chan_create = crate::codegen::fn_or_die(&self.module, "jade_chan_create");
+
+        let mb_ptr = b!(self.bld.build_call(
+            malloc_fn,
+            &[i64t.const_int(mb_size, false).into()],
+            "mb_raw"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: call returned void");
+        b!(self.bld.build_call(
+            memset_fn,
+            &[
+                mb_ptr.into(),
+                i32t.const_int(0, false).into(),
+                i64t.const_int(mb_size, false).into(),
+            ],
+            ""
+        ));
+        let mb_ptr_v = mb_ptr.into_pointer_value();
+
+        let ch = b!(self.bld.build_call(
+            chan_create,
+            &[
+                i64t.const_int(msg_size, false).into(),
+                i64t.const_int(MAILBOX_CAP, false).into(),
+            ],
+            "actor_ch"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: call returned void");
+
+        let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 0, "ch_ptr_ptr"));
+        b!(self.bld.build_store(ch_ptr_ptr, ch));
+
+        let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
+        b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
+
+        if let Some(ad) = self.actor_defs.get(actor_name).cloned() {
+            let state_name = format!("{actor_name}_state");
+            if let Some(state_st) = self.module.get_struct_type(&state_name) {
+                let state_ptr = b!(self
+                    .bld
+                    .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
+                for (fi, field) in ad.fields.iter().enumerate() {
+                    if let Some(ref default_expr) = field.default {
+                        let val = self.compile_expr(default_expr)?;
+                        let field_ptr = b!(self.bld.build_struct_gep(
+                            state_st,
+                            state_ptr,
+                            fi as u32,
+                            &format!("state_init_{}", field.name)
+                        ));
+                        b!(self.bld.build_store(field_ptr, val));
+                    }
+                }
+            }
+        }
+
+        b!(self.bld.build_return(Some(&mb_ptr_v)));
+
+        self.cur_fn = old_fn;
+        if let Some(bb) = old_bb {
+            self.bld.position_at_end(bb);
+        }
+        Ok(fv)
     }
 
     pub(crate) fn compile_send(
@@ -485,7 +597,7 @@ impl<'ctx> Compiler<'ctx> {
             arg_offset += psize;
         }
 
-        let chan_send = self.module.get_function("jade_chan_send").unwrap();
+        let chan_send = crate::codegen::fn_or_die(&self.module, "jade_chan_send");
         b!(self
             .bld
             .build_call(chan_send, &[ch_ptr.into(), msg_alloca.into()], ""));

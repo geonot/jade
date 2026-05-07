@@ -311,18 +311,111 @@ Each module is a `.jade` file. No hidden magic. No special compiler support. The
 
 ## XV. Errors Are Values
 
-```jade
-err FileError
-    NotFound
-    PermissionDenied(String)
+Jade has one error convention. There is no `try`, no `catch`, no exceptions, no
+stack unwinding, no panic-and-pray. Errors are values returned by functions and
+handled by pattern-matching at the call site.
 
-*read path
-    if path equals ''
-        ! FileError:NotFound
-    'contents'
+### The four primitives
+
+1. **`err E`** declares an error enum (semantically tagged; compiles like `enum`).
+2. **`*fn() returns T`** is the canonical signature. `T` may be any type — a
+   primitive, a struct, or an err enum.
+3. **`! value`** is the universal early-return form. The value must be
+   type-compatible with `T`.
+4. **`defer block`** runs LIFO at any function exit (normal return, `! value`,
+   or fall-through).
+
+### The canonical form — return the err enum directly
+
+```jade
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    r is compute(41)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
 ```
 
-No exceptions. No stack unwinding. No hidden control flow. An error is a value. You return it with `!`. You match on it. You handle it or you propagate it. The compiler sees every path.
+The function declares an err enum as its return type. Plain returns produce a
+success-tagged variant. `! Variant` returns an error-tagged variant. The caller
+pattern-matches every outcome. The compiler sees every path.
+
+### The sentinel form — encode errors as values of `T`
+
+When `T` is a primitive and the failure space is small, use a sentinel:
+
+```jade
+*lookup(k as string) returns i64
+    if missing
+        ! -1
+    found_value
+```
+
+### The `! E` annotation
+
+A signature may declare which err enums a function may early-return:
+
+```jade
+*fetch(url as string) returns i64 ! Network ! Disk
+    if down
+        ! Timeout      // must be a variant of Network or Disk
+    if no_space
+        ! NotFound     // must be a variant of Network or Disk
+    payload_size
+```
+
+The `! E` suffix is a **declarative constraint**. The function's runtime
+return type is still `T`. The annotation:
+
+- documents the failure modes,
+- forbids `! Variant` for any variant whose enum is not in the list,
+- enables future tooling (lints, exhaustiveness checks, IDE hints).
+
+The early-returned value must still be type-compatible with `T`. If you write
+`! Bad` (where `Bad` is a variant of err `Outcome`) inside a function that
+returns `i64`, the compiler refuses with a clear, actionable message that
+points you at one of the two canonical forms above.
+
+### `defer` runs on every exit
+
+```jade
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    defer
+        log("cleanup")        // fires whether the function ends normally,
+                              // returns early via `!`, or falls through
+    if x is 0
+        ! Bad
+    Ok(x)
+```
+
+`defer` is function-scoped: a `defer` placed inside an `if` or `while` block
+still runs at function exit, in reverse order of registration.
+
+### What jade does not have
+
+- No `try` keyword. No `try/catch`. No two-color functions (`async`/`sync`,
+  `throws`/`nothrows`).
+- No magic propagation operator that hides the match. Errors are matched
+  explicitly, where the reader can see them.
+- No `Result<T, E>` standard wrapper. The user's err enum *is* the result
+  type — variants for success and failure live side-by-side, named by the
+  domain. `Ok` is just one variant the user chose to write.
+
+One convention. One direction of control flow. One compiler that proves it.
 
 ---
 

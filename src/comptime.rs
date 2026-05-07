@@ -1,3 +1,5 @@
+//! Compile-time evaluation of `comptime` expressions.
+
 use crate::intern::Symbol;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
@@ -333,6 +335,7 @@ fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir::Fn>) {
             }
         }
         Stmt::ErrReturn(e, _, _) => fold_expr_with_fns(e, pure_fns),
+        Stmt::Defer(b, _) => fold_block_with_fns(b, pure_fns),
         Stmt::StoreInsert(_, exprs, _) => {
             for e in exprs {
                 fold_expr_with_fns(e, pure_fns);
@@ -443,6 +446,7 @@ fn fold_stmt(stmt: &mut Stmt) {
             }
         }
         Stmt::ErrReturn(e, _, _) => fold_expr(e),
+        Stmt::Defer(b, _) => fold_block(b),
         Stmt::Drop(_, _, _, _)
         | Stmt::Continue(_)
         | Stmt::Ret(None, _, _)

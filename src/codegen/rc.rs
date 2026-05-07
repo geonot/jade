@@ -1,3 +1,5 @@
+//! Codegen for Perceus reference-counting ops (`rc.alloc`, `rc.retain`, `rc.release`).
+
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -23,7 +25,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let layout = self.rc_layout_ty(inner);
         let i64t = self.ctx.i64_type();
-        let size = layout.size_of().unwrap();
+        let size = layout.size_of().expect("ICE: type has no size");
         let needed_bytes = size.get_zero_extended_constant().unwrap_or(8);
         // Perceus reuse: try to reuse a saved heap pointer instead of malloc
         let heap_ptr = if let Some(reused) = self.try_consume_reuse_token(needed_bytes) {
@@ -33,7 +35,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(malloc, &[size.into()], "rc.alloc"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap()
+                .expect("ICE: call returned void")
                 .into_pointer_value()
         };
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));

@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+#include "jade_rt.h"
 
 static const char VER_MAGIC[8] = {'J','A','D','E','V','E','R','\0'};
 #define VER_HEADER 8   /* just the magic */

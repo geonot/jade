@@ -1,3 +1,5 @@
+//! LSP protocol type definitions (request/response/notification payloads).
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

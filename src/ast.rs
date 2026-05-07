@@ -1,3 +1,5 @@
+//! Abstract syntax tree produced by the parser. Pure data; no semantics.
+
 pub use crate::intern::Symbol;
 use crate::types::Type;
 
@@ -100,7 +102,9 @@ pub enum Stmt {
     Match(Match),
     Asm(AsmBlock),
     ErrReturn(Expr, Span),
-    StoreInsert(Symbol, Vec<Expr>, Span),
+    /// `defer <block>` — runs the block at function exit (any return path).
+    Defer(Block, Span),
+    StoreInsert(Symbol, Vec<FieldInit>, Span),
     StoreDelete(Symbol, StoreFilter, Span),
     StoreDestroy(Symbol, StoreFilter, Span),
     StoreSet(Symbol, Vec<(Symbol, Expr)>, StoreFilter, Span),
@@ -131,6 +135,7 @@ impl Stmt {
             Stmt::Match(m) => m.span,
             Stmt::Asm(a) => a.span,
             Stmt::ErrReturn(_, s) => *s,
+            Stmt::Defer(_, s) => *s,
             Stmt::StoreInsert(_, _, s) => *s,
             Stmt::StoreDelete(_, _, s) => *s,
             Stmt::StoreDestroy(_, _, s) => *s,
@@ -214,7 +219,7 @@ pub enum Expr {
     Syscall(Vec<Expr>, Span),
     Query(Box<Expr>, Vec<QueryClause>, Span),
     StoreQuery(Symbol, Box<StoreFilter>, Span),
-    StoreCount(Symbol, Span),
+    StoreCount(Symbol, Option<Box<StoreFilter>>, Span),
     StoreAll(Symbol, Span),
     StoreGet(Symbol, Box<Expr>, Span),
     StoreFirst(Symbol, Box<StoreFilter>, Span),
@@ -243,7 +248,6 @@ pub enum Expr {
     Deque(Vec<Expr>, Span),
     OfCall(Box<Expr>, Box<Expr>, Span),
     QualifiedIdent(Symbol, Symbol, Span),
-    Try(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -279,7 +283,7 @@ impl Expr {
             | Self::Syscall(_, s)
             | Self::Query(_, _, s)
             | Self::StoreQuery(_, _, s)
-            | Self::StoreCount(_, s)
+            | Self::StoreCount(_, _, s)
             | Self::StoreAll(_, s)
             | Self::StoreGet(_, _, s)
             | Self::StoreFirst(_, _, s)
@@ -308,8 +312,7 @@ impl Expr {
             | Self::Builder(_, _, s)
             | Self::Deque(_, s)
             | Self::OfCall(_, _, s)
-            | Self::QualifiedIdent(_, _, s)
-            | Self::Try(_, s) => *s,
+            | Self::QualifiedIdent(_, _, s) => *s,
         }
     }
 }
@@ -326,6 +329,9 @@ pub struct Fn {
     pub type_bounds: Vec<(Symbol, Vec<Symbol>)>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
+    /// Error types declared in the signature: `returns T ! E1 ! E2`.
+    /// Empty when the user omits them; the typer infers from the body.
+    pub error_types: Vec<Type>,
     pub body: Block,
     pub is_generator: bool,
     pub attrs: FnAttrs,

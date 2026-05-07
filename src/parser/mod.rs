@@ -1,3 +1,5 @@
+//! Recursive-descent parser. Tokens → AST.
+
 use crate::ast::*;
 use crate::lexer::{Spanned, Token};
 
@@ -12,6 +14,19 @@ pub struct Parser {
     pos: usize,
     errors: Vec<ParseError>,
     suppress_by: bool,
+    /// When set, `parse_ternary` will not consume a trailing `! else_expr`
+    /// as the ternary-else form. Used by statement-level parsers (e.g. the
+    /// `is` binding) so they can recognize `a is x() ! Variant` as the
+    /// guard-form sugar instead of as a ternary.
+    suppress_bang_else: bool,
+    /// Queue of statements that desugaring inside `parse_stmt` wants to
+    /// splice into the enclosing block *before* the statement actually
+    /// returned from `parse_stmt`. Used by Layer-2 sugar (`a is x() ! V`)
+    /// where one source statement expands into several. `parse_block`
+    /// drains this queue between statements.
+    pending_pre_stmts: Vec<Stmt>,
+    /// Same, but spliced *after* the returned statement.
+    pending_post_stmts: Vec<Stmt>,
     gensym_counter: u32,
     depth: u32,
 }
@@ -40,6 +55,9 @@ impl Parser {
             pos: 0,
             errors: Vec::new(),
             suppress_by: false,
+            suppress_bang_else: false,
+            pending_pre_stmts: Vec::new(),
+            pending_post_stmts: Vec::new(),
             gensym_counter: 0,
             depth: 0,
         }
@@ -117,6 +135,7 @@ impl Parser {
                     type_bounds: Vec::new(),
                     params: Vec::new(),
                     ret: None,
+                    error_types: Vec::new(),
                     body: body_stmts,
                     is_generator: false,
                     span: main_span,
@@ -492,6 +511,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         type_bounds: first.type_bounds.clone(),
         params: unified_params,
         ret: first.ret.clone(),
+        error_types: first.error_types.clone(),
         body,
         is_generator: false,
         span: sp,

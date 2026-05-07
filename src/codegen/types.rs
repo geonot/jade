@@ -1,3 +1,5 @@
+//! Codegen for type metadata and runtime type information.
+
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue};
 use inkwell::{AddressSpace, IntPredicate};

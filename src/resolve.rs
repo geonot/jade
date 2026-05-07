@@ -1,3 +1,5 @@
+//! Module/path resolution: maps qualified names to defining items.
+
 use crate::intern::Symbol;
 use std::collections::HashMap;
 use crate::ast::{self, Decl, Expr, Stmt};
@@ -127,9 +129,10 @@ pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
             }
         }
         Stmt::ErrReturn(e, _) => rewrite_expr(e, renames),
+        Stmt::Defer(b, _) => rewrite_block(b, renames),
         Stmt::StoreInsert(_, exprs, _) => {
-            for e in exprs {
-                rewrite_expr(e, renames);
+            for fi in exprs {
+                rewrite_expr(&mut fi.value, renames);
             }
         }
         Stmt::StoreSet(_, pairs, _, _) => {
@@ -204,7 +207,6 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
         | Expr::Deref(e, _)
         | Expr::Yield(e, _)
         | Expr::Grad(e, _)
-        | Expr::Try(e, _)
         | Expr::StrictCast(e, _, _)
         | Expr::Spread(e, _) => {
             rewrite_expr(e, renames);
@@ -312,7 +314,7 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
         | Expr::Unreachable(_)
         | Expr::Spawn(_, _)
         | Expr::StoreQuery(_, _, _)
-        | Expr::StoreCount(_, _)
+        | Expr::StoreCount(_, _, _)
         | Expr::StoreAll(_, _)
         | Expr::StoreFirst(_, _, _)
         | Expr::StoreExists(_, _, _)

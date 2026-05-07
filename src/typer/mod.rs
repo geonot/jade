@@ -1,3 +1,5 @@
+//! Typer root: orchestrates inference, name resolution, ownership, and HIR lowering.
+
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -43,6 +45,9 @@ pub struct Typer {
     pub(crate) fns: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     pub(crate) structs: IndexMap<Symbol, Vec<(Symbol, Type)>>,
     pub(crate) enums: IndexMap<Symbol, Vec<(Symbol, Vec<Type>)>>,
+    /// Names of enums declared with the `err` keyword. Used to classify
+    /// `! Variant` returns and infer per-function error unions.
+    pub(crate) err_enum_names: std::collections::HashSet<Symbol>,
     pub(crate) variant_tags: IndexMap<Symbol, (Symbol, u32)>,
     pub(crate) generic_fns: IndexMap<Symbol, ast::Fn>,
     pub(crate) generic_enums: IndexMap<Symbol, ast::EnumDef>,
@@ -89,6 +94,14 @@ pub struct Typer {
     pub(crate) externs: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     /// Current function's return type, used by `try` desugaring.
     pub(crate) current_fn_ret_ty: Option<Type>,
+    /// Set of err-enum names that the current function actually early-returns
+    /// via `! Variant`. Populated during `lower_fn`; consumed to populate
+    /// `hir::Fn.error_types`.
+    pub(crate) current_fn_error_types: std::collections::BTreeSet<Symbol>,
+    /// Declared `! E1 ! E2` after `returns T` for the current function, if
+    /// any. When non-empty, `! Variant` is validated to belong to one of
+    /// these enums; when empty, the union is inferred.
+    pub(crate) current_fn_declared_errors: Vec<Symbol>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +120,7 @@ impl Typer {
             fns: IndexMap::new(),
             structs: IndexMap::new(),
             enums: IndexMap::new(),
+            err_enum_names: std::collections::HashSet::new(),
             variant_tags: IndexMap::new(),
             generic_fns: IndexMap::new(),
             generic_enums: IndexMap::new(),
@@ -149,6 +163,8 @@ impl Typer {
             modules: std::collections::HashSet::new(),
             externs: IndexMap::new(),
             current_fn_ret_ty: None,
+            current_fn_error_types: std::collections::BTreeSet::new(),
+            current_fn_declared_errors: Vec::new(),
         }
     }
 

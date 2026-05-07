@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 
+#include "jade_rt.h"
 int c_mkdir(const char *path, int mode) { return mkdir(path, (mode_t)mode); }
 int c_rmdir(const char *path) { return rmdir(path); }
 int c_remove(const char *path) { return remove(path); }

@@ -1,3 +1,5 @@
+//! Codegen for destructor / drop-glue insertion.
+
 use inkwell::AddressSpace;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
@@ -127,7 +129,7 @@ impl<'ctx> Compiler<'ctx> {
             let len = b!(self.bld.build_load(i64t, len_gep, "dvd.len")).into_int_value();
 
             let elem_llvm = self.llvm_ty(elem);
-            let elem_size = elem_llvm.size_of().unwrap();
+            let elem_size = elem_llvm.size_of().expect("ICE: type has no size");
 
             // Loop: for i in 0..len { drop_value(data[i]) }
             let loop_bb = self.ctx.append_basic_block(fv, "dvd.loop");
@@ -496,7 +498,7 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         self.declare_gen_runtime();
-        let gen_destroy = self.module.get_function("jade_gen_destroy").unwrap();
+        let gen_destroy = crate::codegen::fn_or_die(&self.module, "jade_gen_destroy");
 
         let null = ptr_ty.const_null();
         let is_null =
@@ -594,7 +596,7 @@ impl<'ctx> Compiler<'ctx> {
         let entry = self.ctx.append_basic_block(dfn, "entry");
         self.bld.position_at_end(entry);
 
-        let param_ptr = dfn.get_first_param().unwrap().into_pointer_value();
+        let param_ptr = dfn.get_first_param().expect("ICE: function has no first param").into_pointer_value();
         for (i, (_, ty)) in fields.iter().enumerate() {
             if ty.is_trivially_droppable() {
                 continue;

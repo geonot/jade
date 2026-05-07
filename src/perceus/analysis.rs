@@ -1,3 +1,5 @@
+//! Liveness and ownership analysis used by Perceus to decide retain/release placement.
+
 use std::collections::HashMap;
 
 use crate::ast::Span;
@@ -128,6 +130,7 @@ impl PerceusPass {
             Stmt::While(w) => self.analyze_reuse(&w.body, uses),
             Stmt::Loop(l) => self.analyze_reuse(&l.body, uses),
             Stmt::Transaction(body, _) => self.analyze_reuse(body, uses),
+            Stmt::Defer(body, _) => self.analyze_reuse(body, uses),
             Stmt::Bind(_)
             | Stmt::TupleBind(_, _, _)
             | Stmt::Assign(_, _, _)
@@ -287,6 +290,7 @@ impl PerceusPass {
                 Stmt::While(w) => self.analyze_fbip(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_fbip(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_fbip(body, uses),
+                Stmt::Defer(body, _) => self.analyze_fbip(body, uses),
                 Stmt::Bind(_)
                 | Stmt::TupleBind(_, _, _)
                 | Stmt::Assign(_, _, _)
@@ -439,6 +443,7 @@ impl PerceusPass {
                 Stmt::While(w) => self.analyze_drop_fusion(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_drop_fusion(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_drop_fusion(body, uses),
+                Stmt::Defer(body, _) => self.analyze_drop_fusion(body, uses),
                 Stmt::Bind(_)
                 | Stmt::TupleBind(_, _, _)
                 | Stmt::Assign(_, _, _)
@@ -526,6 +531,7 @@ impl PerceusPass {
                 Stmt::While(w) => self.analyze_speculative_reuse(&w.body, uses),
                 Stmt::Loop(l) => self.analyze_speculative_reuse(&l.body, uses),
                 Stmt::Transaction(body, _) => self.analyze_speculative_reuse(body, uses),
+                Stmt::Defer(body, _) => self.analyze_speculative_reuse(body, uses),
                 Stmt::Bind(_)
                 | Stmt::TupleBind(_, _, _)
                 | Stmt::Assign(_, _, _)

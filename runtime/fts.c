@@ -14,14 +14,15 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+#include "jade_rt.h"
 
 #define FTS_MAGIC "JADEFTS\0"
 
-typedef struct {
+struct JadeFts {
     FILE   *fp;
     char    path[256];
     int64_t posting_count;
-} JadeFts;
+};
 
 /* ── Open / Close ─────────────────────────────────────────── */
 

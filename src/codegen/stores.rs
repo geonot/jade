@@ -1,3 +1,5 @@
+//! HIR-era store schema codegen. Slated for porting into `mir_codegen/store.rs` (CLEANUP §C.1).
+
 use inkwell::AddressSpace;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
@@ -558,7 +560,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let kv_path = format!("{store_name}.kv\0");
         let kv_str = b!(self.bld.build_global_string_ptr(&kv_path, "kv.path"));
-        let open_fn = self.module.get_function("jade_kv_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -605,7 +607,7 @@ impl<'ctx> Compiler<'ctx> {
         let vec_path = format!("{store_name}.vec\0");
         let vec_str = b!(self.bld.build_global_string_ptr(&vec_path, "vec.path"));
         let dims_val = i64t.const_int(dims, false);
-        let open_fn = self.module.get_function("jade_vec_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_vec_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -667,7 +669,7 @@ impl<'ctx> Compiler<'ctx> {
         let col_path = format!("{store_name}_{field_name}.col\0");
         let col_str = b!(self.bld.build_global_string_ptr(&col_path, "col.path"));
         let size_val = i64t.const_int(elem_size, false);
-        let open_fn = self.module.get_function("jade_col_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_col_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -688,7 +690,7 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn store_record_size(&self, sd: &hir::StoreDef) -> u64 {
         let rec_name = format!("__store_{}_rec", sd.name);
-        let st = self.module.get_struct_type(&rec_name).unwrap();
+        let st = self.module.get_struct_type(&rec_name).expect("ICE: struct type not declared");
         self.type_store_size(st.into())
     }
 
@@ -727,7 +729,7 @@ impl<'ctx> Compiler<'ctx> {
         let bloom_path = format!("{store_name}_{field_name}.bloom\0");
         let bloom_str = b!(self.bld.build_global_string_ptr(&bloom_path, "bloom.path"));
         let items_val = i64t.const_int(expected_items, false);
-        let open_fn = self.module.get_function("jade_bloom_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_bloom_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -778,7 +780,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let fts_path = format!("{store_name}_{field_name}.fts\0");
         let fts_str = b!(self.bld.build_global_string_ptr(&fts_path, "fts.path"));
-        let open_fn = self.module.get_function("jade_fts_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_fts_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -849,7 +851,7 @@ impl<'ctx> Compiler<'ctx> {
         let filename = format!("{name}.store\0");
         let file_str = b!(self.bld.build_global_string_ptr(&filename, "store.path"));
         let mode_rw = b!(self.bld.build_global_string_ptr("r+b\0", "mode.rw"));
-        let fopen_fn = self.module.get_function("fopen").unwrap();
+        let fopen_fn = crate::codegen::fn_or_die(&self.module, "fopen");
         let fp_val = self.call_result(b!(self.bld.build_call(
             fopen_fn,
             &[
@@ -864,7 +866,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(fp_null, init_bb, done_bb));
 
         let store_existing_bb = self.ctx.append_basic_block(fv, "store_existing");
-        open_bb.get_terminator().unwrap().erase_from_basic_block();
+        open_bb.get_terminator().expect("ICE: block has no terminator").erase_from_basic_block();
         self.bld.position_at_end(open_bb);
         b!(self
             .bld
@@ -886,7 +888,7 @@ impl<'ctx> Compiler<'ctx> {
         )));
         b!(self.bld.build_store(global.as_pointer_value(), new_fp));
 
-        let fwrite_fn = self.module.get_function("fwrite").unwrap();
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
 
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "magic"));
         b!(self.bld.build_call(
@@ -929,7 +931,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fflush_fn = self.module.get_function("fflush").unwrap();
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
 
         b!(self.bld.build_unconditional_branch(done_bb));
@@ -984,7 +986,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let wal_path = format!("{store_name}.wal\0");
         let wal_str = b!(self.bld.build_global_string_ptr(&wal_path, "wal.path"));
-        let wal_open_fn = self.module.get_function("jade_wal_open").unwrap();
+        let wal_open_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_open");
         let new_wal = self
             .call_result(b!(self.bld.build_call(
                 wal_open_fn,
@@ -1012,7 +1014,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = self.module.get_function("jade_wal_write").unwrap();
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_write");
         let op = self.ctx.i8_type().const_int(1, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -1031,7 +1033,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = self.module.get_function("jade_wal_write").unwrap();
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_write");
         let op = self.ctx.i8_type().const_int(3, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -1050,7 +1052,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = self.module.get_function("jade_wal_write").unwrap();
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_write");
         let op = self.ctx.i8_type().const_int(2, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -1064,7 +1066,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Checkpoint WAL (truncate to just header).
     pub(crate) fn wal_checkpoint(&mut self, store_name: &str) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_cp_fn = self.module.get_function("jade_wal_checkpoint").unwrap();
+        let wal_cp_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_checkpoint");
         b!(self.bld.build_call(wal_cp_fn, &[wal.into()], ""));
         Ok(())
     }
@@ -1081,8 +1083,8 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn store_flock(&mut self, fp: PointerValue<'ctx>, op: u64) -> Result<(), String> {
-        let fileno_fn = self.module.get_function("fileno").unwrap();
-        let flock_fn = self.module.get_function("flock").unwrap();
+        let fileno_fn = crate::codegen::fn_or_die(&self.module, "fileno");
+        let flock_fn = crate::codegen::fn_or_die(&self.module, "flock");
         let fd = self.call_result(b!(self.bld.build_call(fileno_fn, &[fp.into()], "fd")));
         let lock_op = self.ctx.i32_type().const_int(op, false);
         b!(self
@@ -1111,7 +1113,7 @@ impl<'ctx> Compiler<'ctx> {
         let _snprintf_fn_val = self.ensure_snprintf();
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let _ptr = self.ctx.ptr_type(AddressSpace::default());
 
         // Allocate 40 bytes for the UUID string
         let buf = self.entry_alloca(i8t.array_type(40).into(), "uuid.buf");
@@ -1119,7 +1121,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_global_string_ptr("%08lx-0000-4000-8000-%012lx\0", "uuid.fmt"));
 
-        let snprintf_fn = self.module.get_function("snprintf").unwrap();
+        let snprintf_fn = crate::codegen::fn_or_die(&self.module, "snprintf");
         b!(self.bld.build_call(
             snprintf_fn,
             &[
@@ -1133,7 +1135,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         // Build a Jade String from the buffer
-        let strlen_fn = self.module.get_function("strlen").unwrap();
+        let strlen_fn = crate::codegen::fn_or_die(&self.module, "strlen");
         let len = self
             .call_result(b!(self.bld.build_call(
                 strlen_fn,
@@ -1208,7 +1210,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let idx_path = format!("{store_name}.{field_name}.idx\0");
         let idx_str = b!(self.bld.build_global_string_ptr(&idx_path, "idx.path"));
-        let open_fn = self.module.get_function("jade_idx_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -1274,12 +1276,12 @@ impl<'ctx> Compiler<'ctx> {
                 } else {
                     i64t.const_int(0, false)
                 };
-                let hash_fn = self.module.get_function("jade_idx_hash_i64").unwrap();
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_i64");
                 self.call_result(b!(self.bld.build_call(hash_fn, &[val.into()], "idx.hash")))
                     .into_int_value()
             }
             Type::F64 | Type::F32 => {
-                let hash_fn = self.module.get_function("jade_idx_hash_f64").unwrap();
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_f64");
                 let fval = if field_val.is_float_value() {
                     let fv = field_val.into_float_value();
                     if fv.get_type() == self.ctx.f32_type() {
@@ -1299,7 +1301,7 @@ impl<'ctx> Compiler<'ctx> {
                 // Use SSO-aware helpers to get data pointer and length
                 let str_data = self.string_data(field_val)?;
                 let str_len = self.string_len(field_val)?;
-                let hash_fn = self.module.get_function("jade_idx_hash_str").unwrap();
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_str");
                 self.call_result(b!(self.bld.build_call(
                     hash_fn,
                     &[str_data.into(), str_len.into()],
@@ -1353,14 +1355,14 @@ impl<'ctx> Compiler<'ctx> {
             | Type::U8
             | Type::Bool => {
                 let val = b!(self.bld.build_load(i64t, field_gep, "dist.ival")).into_int_value();
-                let hash_fn = self.module.get_function("jade_idx_hash_i64").unwrap();
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_i64");
                 self.call_result(b!(self.bld.build_call(hash_fn, &[val.into()], "dist.hash")))
                     .into_int_value()
             }
             Type::F64 | Type::F32 => {
                 let f64t = self.ctx.f64_type();
                 let val = b!(self.bld.build_load(f64t, field_gep, "dist.fval")).into_float_value();
-                let hash_fn = self.module.get_function("jade_idx_hash_f64").unwrap();
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_f64");
                 self.call_result(b!(self.bld.build_call(hash_fn, &[val.into()], "dist.hash")))
                     .into_int_value()
             }
@@ -1376,7 +1378,7 @@ impl<'ctx> Compiler<'ctx> {
                         "dist.sdata"
                     ))
                 };
-                let hash_fn = self.module.get_function("jade_idx_hash_str").unwrap();
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_str");
                 self.call_result(b!(self.bld.build_call(
                     hash_fn,
                     &[data_ptr.into(), len.into()],
@@ -1421,7 +1423,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let ver_path = format!("{store_name}.versions\0");
         let ver_str = b!(self.bld.build_global_string_ptr(&ver_path, "ver.path"));
-        let open_fn = self.module.get_function("jade_ver_open").unwrap();
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_ver_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -1476,7 +1478,7 @@ impl<'ctx> Compiler<'ctx> {
         let log_str = b!(self.bld.build_global_string_ptr(&log_path, "mig.path"));
 
         // Open migration log
-        let log_open = self.module.get_function("jade_mig_log_open").unwrap();
+        let log_open = crate::codegen::fn_or_die(&self.module, "jade_mig_log_open");
         let log_fp = self
             .call_result(b!(self.bld.build_call(
                 log_open,
@@ -1486,7 +1488,7 @@ impl<'ctx> Compiler<'ctx> {
             .into_pointer_value();
 
         // Check if already applied
-        let log_applied = self.module.get_function("jade_mig_log_applied").unwrap();
+        let log_applied = crate::codegen::fn_or_die(&self.module, "jade_mig_log_applied");
         let applied = self
             .call_result(b!(self.bld.build_call(
                 log_applied,
@@ -1525,7 +1527,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_global_string_ptr(&store_path_lit, "mig.spath"));
 
             // Check if store file exists: fopen(path, "rb")
-            let fopen_fn = self.module.get_function("fopen").unwrap();
+            let fopen_fn = crate::codegen::fn_or_die(&self.module, "fopen");
             let rb_str = b!(self.bld.build_global_string_ptr("rb\0", "mig.rb"));
             let test_fp = self
                 .call_result(b!(self.bld.build_call(
@@ -1547,7 +1549,7 @@ impl<'ctx> Compiler<'ctx> {
 
             // Store exists — close the test handle, open via ensure, then apply
             self.bld.position_at_end(exists_bb);
-            let fclose_fn = self.module.get_function("fclose").unwrap();
+            let fclose_fn = crate::codegen::fn_or_die(&self.module, "fclose");
             b!(self.bld.build_call(fclose_fn, &[test_fp.into()], ""));
 
             // Ensure the store is open (sets the global FILE*)
@@ -1573,7 +1575,7 @@ impl<'ctx> Compiler<'ctx> {
                                     .build_load(ptr_ty, fp_g.as_pointer_value(), "mig.fp"))
                                 .into_pointer_value();
                             // Read current rec_size from header offset 16
-                            let fseek = self.module.get_function("fseek").unwrap();
+                            let fseek = crate::codegen::fn_or_die(&self.module, "fseek");
                             b!(self.bld.build_call(
                                 fseek,
                                 &[
@@ -1584,7 +1586,7 @@ impl<'ctx> Compiler<'ctx> {
                                 ""
                             ));
                             let rec_size_buf = self.entry_alloca(i64t.into(), "mig.rsz");
-                            let fread = self.module.get_function("fread").unwrap();
+                            let fread = crate::codegen::fn_or_die(&self.module, "fread");
                             b!(self.bld.build_call(
                                 fread,
                                 &[
@@ -1599,7 +1601,7 @@ impl<'ctx> Compiler<'ctx> {
                                 b!(self.bld.build_load(i64t, rec_size_buf, "mig.off"))
                                     .into_int_value();
 
-                            let add_fn = self.module.get_function("jade_mig_add_field").unwrap();
+                            let add_fn = crate::codegen::fn_or_die(&self.module, "jade_mig_add_field");
                             b!(self.bld.build_call(
                                 add_fn,
                                 &[
@@ -1630,7 +1632,7 @@ impl<'ctx> Compiler<'ctx> {
                                 let fp_global = self.module.get_global(&fp_global_name);
                                 if let Some(fp_g) = fp_global {
                                     let drop_fn =
-                                        self.module.get_function("jade_mig_drop_field").unwrap();
+                                        crate::codegen::fn_or_die(&self.module, "jade_mig_drop_field");
                                     b!(self.bld.build_call(
                                         drop_fn,
                                         &[
@@ -1660,7 +1662,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Record the migration as applied
         self.bld.position_at_end(record_bb);
-        let log_record = self.module.get_function("jade_mig_log_record").unwrap();
+        let log_record = crate::codegen::fn_or_die(&self.module, "jade_mig_log_record");
         b!(self.bld.build_call(
             log_record,
             &[
@@ -1671,7 +1673,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let log_close = self.module.get_function("jade_mig_log_close").unwrap();
+        let log_close = crate::codegen::fn_or_die(&self.module, "jade_mig_log_close");
         b!(self.bld.build_call(log_close, &[log_fp.into()], ""));
         b!(self.bld.build_return(None));
 

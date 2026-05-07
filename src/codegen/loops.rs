@@ -1,3 +1,5 @@
+//! Codegen for loop constructs: `while`, `for`, `loop`, and parallel/sim variants.
+
 use indexmap::IndexMap;
 use inkwell::module::Linkage;
 use inkwell::types::BasicType;
@@ -259,7 +261,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(loop_bb);
 
         // Resume the generator
-        let gen_resume = self.module.get_function("jade_gen_resume").unwrap();
+        let gen_resume = crate::codegen::fn_or_die(&self.module, "jade_gen_resume");
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // Check if done
@@ -645,7 +647,7 @@ impl<'ctx> Compiler<'ctx> {
         let entry = self.ctx.append_basic_block(iter_fn, "entry");
         self.bld.position_at_end(entry);
 
-        let arg_ptr = iter_fn.get_first_param().unwrap().into_pointer_value();
+        let arg_ptr = iter_fn.get_first_param().expect("ICE: function has no first param").into_pointer_value();
 
         // Load iter_val from arg[0]
         let iter_val_ptr = arg_ptr; // offset 0
@@ -680,7 +682,7 @@ impl<'ctx> Compiler<'ctx> {
                 inkwell::AtomicOrdering::AcquireRelease,
             ));
             // Free the arg struct
-            let free_fn = self.module.get_function("free").unwrap();
+            let free_fn = crate::codegen::fn_or_die(&self.module, "free");
             b!(self.bld.build_call(free_fn, &[arg_ptr.into()], ""));
             b!(self.bld.build_return(None));
         }
@@ -702,8 +704,8 @@ impl<'ctx> Compiler<'ctx> {
             .build_store(counter_alloca, i64t.const_int(0, false)));
 
         let malloc_fn = self.ensure_malloc();
-        let coro_create = self.module.get_function("jade_coro_create").unwrap();
-        let sched_spawn = self.module.get_function("jade_sched_spawn").unwrap();
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jade_sched_spawn");
 
         // Spawn loop: for i in start..end step step
         let spawn_var = self.entry_alloca(i64t.into(), "sim.i");
@@ -741,7 +743,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(malloc_fn, &[i64t.const_int(16, false).into()], "sim.arg"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
 
         // Store iter_val at offset 0
@@ -768,7 +770,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
         b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
 
         b!(self.bld.build_unconditional_branch(spawn_inc));
@@ -798,7 +800,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(all_done, wait_done, wait_yield));
 
         self.bld.position_at_end(wait_yield);
-        let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
+        let sched_yield = crate::codegen::fn_or_die(&self.module, "jade_sched_yield");
         b!(self.bld.build_call(sched_yield, &[], ""));
         b!(self.bld.build_unconditional_branch(wait_cond));
 
@@ -848,7 +850,7 @@ impl<'ctx> Compiler<'ctx> {
             let entry = self.ctx.append_basic_block(wrapper, "entry");
             self.bld.position_at_end(entry);
 
-            let arg_ptr = wrapper.get_first_param().unwrap().into_pointer_value();
+            let arg_ptr = wrapper.get_first_param().expect("ICE: function has no first param").into_pointer_value();
 
             // arg_ptr points to a single ptr: the counter
             let counter_ptr =
@@ -865,7 +867,7 @@ impl<'ctx> Compiler<'ctx> {
                     i64t.const_int(1, false),
                     inkwell::AtomicOrdering::AcquireRelease,
                 ));
-                let free_fn = self.module.get_function("free").unwrap();
+                let free_fn = crate::codegen::fn_or_die(&self.module, "free");
                 b!(self.bld.build_call(free_fn, &[arg_ptr.into()], ""));
                 b!(self.bld.build_return(None));
             }
@@ -890,8 +892,8 @@ impl<'ctx> Compiler<'ctx> {
             .build_store(counter_alloca, i64t.const_int(n, false)));
 
         let malloc_fn = self.ensure_malloc();
-        let coro_create = self.module.get_function("jade_coro_create").unwrap();
-        let sched_spawn = self.module.get_function("jade_sched_spawn").unwrap();
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jade_sched_spawn");
 
         for wrapper in &stmt_fns {
             // Allocate arg struct (8 bytes: just a pointer to counter)
@@ -901,7 +903,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(malloc_fn, &[i64t.const_int(8, false).into()], "simb.arg"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap()
+                .expect("ICE: call returned void")
                 .into_pointer_value();
 
             // Store counter_ptr
@@ -918,7 +920,7 @@ impl<'ctx> Compiler<'ctx> {
             ))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
             b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
         }
 
@@ -941,7 +943,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(all_done, wait_done, wait_yield));
 
         self.bld.position_at_end(wait_yield);
-        let sched_yield = self.module.get_function("jade_sched_yield").unwrap();
+        let sched_yield = crate::codegen::fn_or_die(&self.module, "jade_sched_yield");
         b!(self.bld.build_call(sched_yield, &[], ""));
         b!(self.bld.build_unconditional_branch(wait_cond));
 

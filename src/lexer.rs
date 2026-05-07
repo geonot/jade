@@ -1,3 +1,5 @@
+//! Source → token stream. The KEYWORDS table is the single source of truth for reserved words; see `docs/lexer/keywords.md`.
+
 use crate::ast::Span;
 use crate::intern::Symbol;
 use std::collections::HashMap;
@@ -80,7 +82,7 @@ pub enum Token {
     Xor,
     Unreachable,
     Alias,
-    Try,
+    Defer,
     Deque,
     Grad,
     Einsum,
@@ -265,7 +267,7 @@ impl std::fmt::Display for Token {
             Self::Xor => f.write_str("xor"),
             Self::Unreachable => f.write_str("unreachable"),
             Self::Alias => f.write_str("alias"),
-            Self::Try => f.write_str("try"),
+            Self::Defer => f.write_str("defer"),
             Self::Deque => f.write_str("deque"),
             Self::Grad => f.write_str("grad"),
             Self::Einsum => f.write_str("einsum"),
@@ -380,7 +382,7 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("xor", Token::Xor),
         ("unreachable", Token::Unreachable),
         ("alias", Token::Alias),
-        ("try", Token::Try),
+        ("defer", Token::Defer),
         ("deque", Token::Deque),
         ("grad", Token::Grad),
         ("einsum", Token::Einsum),

@@ -1,3 +1,5 @@
+//! HIR-era store operation codegen helpers. Slated for inlining (CLEANUP §C.1).
+
 use inkwell::IntPredicate;
 use inkwell::values::BasicValueEnum;
 
@@ -16,7 +18,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
-        let fseek_fn = self.module.get_function("fseek").unwrap();
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -28,7 +30,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let count_buf = self.entry_alloca(i64t.into(), "sc.count");
         b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = self.module.get_function("fread").unwrap();
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         b!(self.bld.build_call(
             fread_fn,
             &[
@@ -50,7 +52,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
-        let fseek_fn = self.module.get_function("fseek").unwrap();
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -84,7 +86,7 @@ impl<'ctx> Compiler<'ctx> {
                 "sl.buf"
             )))
             .into_pointer_value();
-        let fread_fn = self.module.get_function("fread").unwrap();
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         b!(self.bld.build_call(
             fread_fn,
             &[
@@ -120,7 +122,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let rec_ptr = self.entry_alloca(st.into(), "store.rec");
         let rec_size = self.store_record_size(sd);
-        let memset_fn = self.module.get_function("memset").unwrap();
+        let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
         b!(self.bld.build_call(
             memset_fn,
             &[
@@ -132,8 +134,8 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         // Read current count for sid assignment
-        let fseek_fn = self.module.get_function("fseek").unwrap();
-        let fread_fn = self.module.get_function("fread").unwrap();
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         let count_buf = self.entry_alloca(i64t.into(), "ins.count");
         b!(self.bld.build_call(
             fseek_fn,
@@ -161,7 +163,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Get current time via time(NULL)
         self.ensure_time_fn();
-        let time_fn = self.module.get_function("time").unwrap();
+        let time_fn = crate::codegen::fn_or_die(&self.module, "time");
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let now = self
             .call_result(b!(self.bld.build_call(
@@ -228,17 +230,56 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        // R13: amortize file growth in 64KiB chunks via posix ftruncate.
+        // ftruncate may extend the file beyond the logical end (count*rec_size
+        // + header), so we must seek to the *logical* end based on old_count
+        // rather than SEEK_END which would land in the zero-padded reserved
+        // region after a prior reserve.
+        let reserve_fn = self
+            .module
+            .get_function("jade_store_reserve")
+            .unwrap_or_else(|| {
+                let void_ty = self.ctx.void_type();
+                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
+                self.module.add_function(
+                    "jade_store_reserve",
+                    ft,
+                    Some(inkwell::module::Linkage::External),
+                )
+            });
         b!(self.bld.build_call(
-            fseek_fn,
+            reserve_fn,
             &[
                 fp.into(),
-                i64t.const_int(0, false).into(),
-                i32t.const_int(2, false).into(),
+                old_count.into(),
+                i64t.const_int(rec_size, false).into(),
             ],
             ""
         ));
 
-        let fwrite_fn = self.module.get_function("fwrite").unwrap();
+        // Seek to logical end = 8 + old_count * rec_size.
+        let logical_end_off = b!(self.bld.build_int_nsw_mul(
+            old_count,
+            i64t.const_int(rec_size, false),
+            "ins.logoff"
+        ));
+        let logical_end = b!(self.bld.build_int_nsw_add(
+            logical_end_off,
+            i64t.const_int(8, false),
+            "ins.logend"
+        ));
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                logical_end.into(),
+                i32t.const_int(0, false).into(),
+            ],
+            ""
+        ));
+
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
         b!(self.bld.build_call(
             fwrite_fn,
             &[
@@ -262,7 +303,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let count_buf = self.entry_alloca(i64t.into(), "count.buf");
         b!(self.bld.build_store(count_buf, new_sid)); // new_sid = old_count + 1 = new count
-        let fwrite_fn = self.module.get_function("fwrite").unwrap();
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
 
         b!(self.bld.build_call(
             fseek_fn,
@@ -284,7 +325,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fflush_fn = self.module.get_function("fflush").unwrap();
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
         self.store_unlock(fp)?;
@@ -317,7 +358,7 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
 
         let rec_name = format!("__store_{store_name}_rec");
-        let st = self.module.get_struct_type(&rec_name).unwrap();
+        let st = self.module.get_struct_type(&rec_name).expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(sd);
 
         let (fi, ft, fv, extras) = self.precompile_filter_values(filter, sd)?;
@@ -325,7 +366,7 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
 
         // Seek past header to first record
-        let fseek_fn = self.module.get_function("fseek").unwrap();
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -347,7 +388,7 @@ impl<'ctx> Compiler<'ctx> {
             .into_pointer_value();
 
         let result_ptr = self.entry_alloca(st.into(), "q.result");
-        let memset_fn = self.module.get_function("memset").unwrap();
+        let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
         b!(self.bld.build_call(
             memset_fn,
             &[
@@ -379,7 +420,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(body_bb);
         // Read one record from file (fread advances file position)
-        let fread_fn = self.module.get_function("fread").unwrap();
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         b!(self.bld.build_call(
             fread_fn,
             &[
@@ -433,11 +474,11 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
 
         let rec_name = format!("__store_{store_name}_rec");
-        let rec_st = self.module.get_struct_type(&rec_name).unwrap();
+        let rec_st = self.module.get_struct_type(&rec_name).expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(sd);
 
         let jade_name = format!("__store_{store_name}");
-        let jade_st = self.module.get_struct_type(&jade_name).unwrap();
+        let jade_st = self.module.get_struct_type(&jade_name).expect("ICE: struct type not declared");
         let jade_size = self.type_store_size(jade_st.into());
 
         let count = self.store_read_count(fp)?;
@@ -552,14 +593,14 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
 
         let rec_name = format!("__store_{store_name}_rec");
-        let st = self.module.get_struct_type(&rec_name).unwrap();
+        let st = self.module.get_struct_type(&rec_name).expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(sd);
 
         let (fi, ft, fval, extras) = self.precompile_filter_values(filter, sd)?;
 
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
-        let fseek_fn = self.module.get_function("fseek").unwrap();
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
 
         // Rewind and truncate the file in-place (keeps the lock held)
         b!(self.bld.build_call(
@@ -571,7 +612,7 @@ impl<'ctx> Compiler<'ctx> {
             ],
             ""
         ));
-        let fileno_fn = self.module.get_function("fileno").unwrap();
+        let fileno_fn = crate::codegen::fn_or_die(&self.module, "fileno");
         let fd = self
             .call_result(b!(self.bld.build_call(fileno_fn, &[fp.into()], "del.fd")))
             .into_int_value();
@@ -587,7 +628,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let new_fp = fp;
 
-        let fwrite_fn = self.module.get_function("fwrite").unwrap();
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "del.magic"));
         b!(self.bld.build_call(
             fwrite_fn,
@@ -711,7 +752,7 @@ impl<'ctx> Compiler<'ctx> {
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
 
-        let fflush_fn = self.module.get_function("fflush").unwrap();
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
 
         self.store_unlock(fp)?;
@@ -734,7 +775,7 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
 
         let rec_name = format!("__store_{store_name}_rec");
-        let st = self.module.get_struct_type(&rec_name).unwrap();
+        let st = self.module.get_struct_type(&rec_name).expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(sd);
 
         let mut assign_vals = Vec::new();
@@ -744,7 +785,7 @@ impl<'ctx> Compiler<'ctx> {
             assign_vals.push((idx, fname.clone(), val));
         }
 
-        let fseek_fn = self.module.get_function("fseek").unwrap();
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
 
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
@@ -817,7 +858,7 @@ impl<'ctx> Compiler<'ctx> {
             ],
             ""
         ));
-        let fwrite_fn = self.module.get_function("fwrite").unwrap();
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
         b!(self.bld.build_call(
             fwrite_fn,
             &[
@@ -832,7 +873,7 @@ impl<'ctx> Compiler<'ctx> {
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
 
-        let fflush_fn = self.module.get_function("fflush").unwrap();
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
         self.store_unlock(fp)?;

@@ -1,3 +1,5 @@
+//! Library facade for the Jade compiler. Re-exports the pipeline modules so the CLI driver and LSP can share types.
+
 pub mod ast;
 pub mod bind;
 pub mod cache;
@@ -21,5 +23,6 @@ pub mod pkg;
 pub mod resolve;
 pub mod typer;
 pub mod types;
+pub mod runtime_ffi;
 
 pub use codegen::Compiler;

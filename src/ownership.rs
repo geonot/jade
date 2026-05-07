@@ -1,3 +1,5 @@
+//! Ownership and borrow checking pass operating on HIR.
+
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -224,6 +226,9 @@ impl OwnershipVerifier {
             }
             Stmt::ErrReturn(e, _, _) => {
                 self.verify_expr(e);
+            }
+            Stmt::Defer(body, _) => {
+                self.verify_block(body);
             }
             Stmt::StoreInsert(_, exprs, _) => {
                 for e in exprs {

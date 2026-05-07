@@ -1,3 +1,5 @@
+//! Codegen for primitive type conversions (int/float/bool/string).
+
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 
 use crate::hir;
@@ -25,7 +27,7 @@ impl<'ctx> Compiler<'ctx> {
         val: BasicValueEnum<'ctx>,
         ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let printf = self.module.get_function("printf").unwrap();
+        let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let fmt = self.fmt_for_ty(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt"));
         if matches!(ty, Type::String) {
@@ -106,7 +108,7 @@ impl<'ctx> Compiler<'ctx> {
                     let result = b!(self.bld.build_call(fv, &[self_arg.into()], "display.call"))
                         .try_as_basic_value()
                         .basic()
-                        .unwrap();
+                        .expect("ICE: call returned void");
                     Ok(result)
                 } else {
                     self.int_to_string(val, false)
@@ -155,7 +157,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
 
         let len = b!(self.bld.build_int_s_extend(len_i32, i64t, "ts.ilen64"));

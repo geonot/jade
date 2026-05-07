@@ -1,3 +1,5 @@
+//! HIR-era store WHERE-clause codegen.
+
 use inkwell::IntPredicate;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 
@@ -44,7 +46,7 @@ impl<'ctx> Compiler<'ctx> {
         let i8t = self.ctx.i8_type();
         let i32t = self.ctx.i32_type();
 
-        let memset_fn = self.module.get_function("memset").unwrap();
+        let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
         b!(self.bld.build_call(
             memset_fn,
             &[
@@ -344,8 +346,8 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(phi.as_basic_value().into_int_value())
                     }
                     _ => {
-                        result_bb.remove_from_function().unwrap();
-                        len_eq_bb.remove_from_function().unwrap();
+                        result_bb.remove_from_function().expect("ICE: remove_from_function failed");
+                        len_eq_bb.remove_from_function().expect("ICE: remove_from_function failed");
 
                         let min_len = b!(self.bld.build_select(
                             b!(self.bld.build_int_compare(

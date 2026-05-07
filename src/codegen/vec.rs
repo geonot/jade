@@ -1,3 +1,5 @@
+//! HIR-era vector codegen. Slated for inlining (CLEANUP §C.1).
+
 use inkwell::module::Linkage;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
@@ -42,7 +44,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[header_size.into()], "vec.hdr"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let n = elems.len();
@@ -60,7 +62,7 @@ impl<'ctx> Compiler<'ctx> {
             let buf = b!(self.bld.build_call(malloc, &[buf_size.into()], "vec.buf"))
                 .try_as_basic_value()
                 .basic()
-                .unwrap()
+                .expect("ICE: call returned void")
                 .into_pointer_value();
 
             for (i, e) in elems.iter().enumerate() {
@@ -278,7 +280,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(realloc, &[old_ptr.into(), new_size.into()], "vpr.nptr"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         b!(self.bld.build_store(ptr_gep, new_ptr));
         b!(self.bld.build_store(cap_gep, new_cap));
         b!(self.bld.build_unconditional_branch(store_bb));
@@ -608,7 +610,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(malloc, &[i64t.const_int(24, false).into()], "vn.hdr"))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
         let ptr_gep = b!(self
             .bld
@@ -1525,7 +1527,6 @@ impl<'ctx> Compiler<'ctx> {
                     let sig = self.ctx.void_type().fn_type(
                         &[
                             self.ctx
-                                .i64_type()
                                 .ptr_type(AddressSpace::default())
                                 .into(),
                             i64t.into(),
@@ -1536,7 +1537,7 @@ impl<'ctx> Compiler<'ctx> {
                 });
                 let cast = b!(self.bld.build_pointer_cast(
                     out_data,
-                    self.ctx.i64_type().ptr_type(AddressSpace::default()),
+                    self.ctx.ptr_type(AddressSpace::default()),
                     "sort.i64.cast"
                 ));
                 let _ = b!(self
@@ -1549,7 +1550,6 @@ impl<'ctx> Compiler<'ctx> {
                     let sig = self.ctx.void_type().fn_type(
                         &[
                             self.ctx
-                                .f64_type()
                                 .ptr_type(AddressSpace::default())
                                 .into(),
                             i64t.into(),
@@ -1560,7 +1560,7 @@ impl<'ctx> Compiler<'ctx> {
                 });
                 let cast = b!(self.bld.build_pointer_cast(
                     out_data,
-                    self.ctx.f64_type().ptr_type(AddressSpace::default()),
+                    self.ctx.ptr_type(AddressSpace::default()),
                     "sort.f64.cast"
                 ));
                 let _ = b!(self

@@ -5,6 +5,25 @@
  * Entry:       [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
  *
  * Ops: 1=Insert, 2=Update, 3=Delete(soft), 4=Destroy(hard)
+ *
+ * Durability model:
+ *   The WAL guarantees that every entry returned to user code as "committed"
+ *   has been forced to stable storage via fdatasync(2) (Linux) or fsync(2)
+ *   (macOS / where fdatasync is unavailable). After fdatasync returns, the
+ *   data and minimum file metadata required to retrieve it survive an OS
+ *   crash or power loss.
+ *
+ *   The sync policy is selected at runtime by the JADE_WAL_SYNC environment
+ *   variable, parsed once on first WAL open:
+ *     - "none"      : no sync; fastest but unsafe (test/bench only)
+ *     - "fdatasync" : default; sync after every entry append
+ *     - "fsync"     : full fsync after every entry append
+ *     - "group"     : do not sync per-entry; caller must invoke
+ *                     jade_wal_commit_group() at transaction boundaries
+ *
+ *   Group-commit lets a higher-level coordinator amortize fsync latency
+ *   across many records of one logical transaction. Records written between
+ *   commits are NOT durable until commit_group() returns.
  */
 
 #include <stdio.h>
@@ -13,6 +32,71 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+#include "jade_rt.h"
+
+/* Sync policy --------------------------------------------------------- */
+#define JADE_WAL_SYNC_NONE       0
+#define JADE_WAL_SYNC_FDATASYNC  1
+#define JADE_WAL_SYNC_FSYNC      2
+#define JADE_WAL_SYNC_GROUP      3
+
+static int  jade_wal_sync_policy = -1;
+
+static int jade_wal_get_policy(void) {
+    if (jade_wal_sync_policy >= 0) return jade_wal_sync_policy;
+    const char *env = getenv("JADE_WAL_SYNC");
+    if (!env || !*env) {
+        jade_wal_sync_policy = JADE_WAL_SYNC_FDATASYNC;
+    } else if (strcmp(env, "none") == 0) {
+        jade_wal_sync_policy = JADE_WAL_SYNC_NONE;
+    } else if (strcmp(env, "fsync") == 0) {
+        jade_wal_sync_policy = JADE_WAL_SYNC_FSYNC;
+    } else if (strcmp(env, "group") == 0) {
+        jade_wal_sync_policy = JADE_WAL_SYNC_GROUP;
+    } else {
+        /* Default for unknown values: fdatasync. */
+        jade_wal_sync_policy = JADE_WAL_SYNC_FDATASYNC;
+    }
+    return jade_wal_sync_policy;
+}
+
+static void jade_wal_force(FILE *wal, int policy) {
+    if (!wal) return;
+    /* Push libc buffers to the kernel first. */
+    fflush(wal);
+    int fd = fileno(wal);
+    if (fd < 0) return;
+    switch (policy) {
+        case JADE_WAL_SYNC_NONE:
+        case JADE_WAL_SYNC_GROUP:
+            return;
+        case JADE_WAL_SYNC_FSYNC:
+            (void)fsync(fd);
+            return;
+        case JADE_WAL_SYNC_FDATASYNC:
+        default:
+#if defined(__linux__)
+            if (fdatasync(fd) == 0) return;
+#endif
+            (void)fsync(fd);
+            return;
+    }
+}
+
+/* Public: explicit group-commit barrier. Always issues a full fdatasync
+ * (or fsync where fdatasync is unavailable) regardless of the configured
+ * default policy. Used by transaction coordinators to make a batch of
+ * appended records durable. */
+void jade_wal_commit_group(FILE *wal) {
+    if (!wal) return;
+    fflush(wal);
+    int fd = fileno(wal);
+    if (fd < 0) return;
+#if defined(__linux__)
+    if (fdatasync(fd) == 0) return;
+#endif
+    (void)fsync(fd);
+}
 
 static const char WAL_MAGIC[8] = {'J','A','D','E','W','A','L','\0'};
 
@@ -58,7 +142,11 @@ FILE *jade_wal_open(const char *path) {
     f = fopen(path, "w+b");
     if (!f) return NULL;
     fwrite(WAL_MAGIC, 1, 8, f);
-    fflush(f);
+    /* The magic header itself must be durable so a torn create cannot
+     * later be mistaken for a valid empty WAL with garbage entries. */
+    jade_wal_force(f, jade_wal_get_policy() == JADE_WAL_SYNC_NONE
+                          ? JADE_WAL_SYNC_NONE
+                          : JADE_WAL_SYNC_FDATASYNC);
     return f;
 }
 
@@ -108,7 +196,9 @@ void jade_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload
         uint32_t zero = 0;
         fwrite(&zero, 4, 1, wal);
     }
-    fflush(wal);
+    /* Per-record durability per JADE_WAL_SYNC. Group-commit policy defers
+     * until jade_wal_commit_group(). */
+    jade_wal_force(wal, jade_wal_get_policy());
 }
 
 /* Checkpoint: truncate WAL back to just the magic header. */
@@ -121,7 +211,13 @@ void jade_wal_checkpoint(FILE *wal) {
             fseek(wal, 8, SEEK_SET);
         }
     }
-    fflush(wal);
+    /* Checkpoint is a durability boundary: callers expect that on return,
+     * the truncated state is on stable storage. Always force regardless of
+     * the per-record sync policy (except explicit "none" for tests). */
+    int policy = jade_wal_get_policy();
+    jade_wal_force(wal, policy == JADE_WAL_SYNC_NONE
+                            ? JADE_WAL_SYNC_NONE
+                            : JADE_WAL_SYNC_FDATASYNC);
 }
 
 /* Close WAL file. */
@@ -145,9 +241,6 @@ int64_t jade_wal_size(FILE *wal) {
  * valid entry. Stops at first corrupted/truncated entry.
  * Returns number of entries successfully replayed, or -1 on error.
  */
-typedef void (*jade_wal_replay_cb)(uint8_t op, const void *payload,
-                                   uint32_t payload_len, int64_t timestamp,
-                                   void *user_data);
 
 int64_t jade_wal_replay(FILE *wal, jade_wal_replay_cb callback, void *user_data) {
     if (!wal || !callback) return -1;

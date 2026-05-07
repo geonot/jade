@@ -17,6 +17,7 @@ fn main() {
         .file("runtime/sched.c")
         .file("runtime/channel.c")
         .file("runtime/actor.c")
+        .file("runtime/sup.c")
         .file("runtime/select.c")
         .file("runtime/timer.c")
         .file("runtime/pool.c")
@@ -39,6 +40,11 @@ fn main() {
         .file(asm_file)
         .opt_level(2)
         .warnings(true)
+        .flag("-Wall")
+        .flag("-Wextra")
+        .flag("-Wshadow")
+        .flag("-Wstrict-prototypes")
+        .flag("-Wmissing-prototypes")
         .flag("-Wno-unused-parameter")
         .compile("jade_rt");
 
@@ -68,6 +74,11 @@ fn main() {
             .file("runtime/crypto.c")
             .opt_level(2)
             .warnings(true)
+            .flag("-Wall")
+            .flag("-Wextra")
+            .flag("-Wshadow")
+            .flag("-Wstrict-prototypes")
+            .flag("-Wmissing-prototypes")
             .flag("-Wno-unused-parameter");
 
         for flag in openssl_cflags.split_whitespace() {
@@ -102,6 +113,11 @@ fn main() {
             .file("runtime/sqlite.c")
             .opt_level(2)
             .warnings(true)
+            .flag("-Wall")
+            .flag("-Wextra")
+            .flag("-Wshadow")
+            .flag("-Wstrict-prototypes")
+            .flag("-Wmissing-prototypes")
             .flag("-Wno-unused-parameter");
 
         for flag in sqlite_cflags.split_whitespace() {

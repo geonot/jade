@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <time.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 extern char **environ;
 
@@ -22,7 +23,6 @@ extern char **environ;
  *   byte 23 bit 7 = 1 → heap:    ptr at offset 0 (8B), len at offset 8 (8B)
  */
 typedef struct { void *ptr; int64_t len; int64_t cap; } jade_vec_hdr_t;
-typedef struct { char bytes[24]; }                       jade_sso_t;
 
 static const char *sso_data_proc(const jade_sso_t *s, int64_t *out_len) {
     if ((unsigned char)s->bytes[23] & 0x80u) {

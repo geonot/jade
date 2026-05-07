@@ -1,3 +1,5 @@
+//! Parser arms for top-level declarations (fn, type, store, actor, import).
+
 use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
@@ -260,6 +262,15 @@ impl Parser {
             None
         };
 
+        // Optional error union: `returns T ! E1 ! E2 ...` or `! E1 ! E2 ...`
+        // Each `! Ident` after the return type names an err-type that this
+        // function may early-return via `! Variant`.
+        let mut error_types = Vec::new();
+        while self.check(Token::Bang) {
+            self.advance();
+            error_types.push(self.parse_type()?);
+        }
+
         let body = self.parse_body()?;
         let is_generator = body_contains_yield(&body);
 
@@ -269,6 +280,7 @@ impl Parser {
             type_bounds,
             params,
             ret,
+            error_types,
             body,
             is_generator,
             attrs: FnAttrs::default(),

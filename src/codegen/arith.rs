@@ -1,3 +1,5 @@
+//! Codegen for arithmetic and comparison operators.
+
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
@@ -111,7 +113,7 @@ impl<'ctx> Compiler<'ctx> {
                             .build_call(fv, &[self_arg.into(), rhs.into()], "eq.call"))
                         .try_as_basic_value()
                         .basic()
-                        .unwrap();
+                        .expect("ICE: call returned void");
                     return if matches!(op, BinOp::Ne) {
                         Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
                     } else {
@@ -155,7 +157,7 @@ impl<'ctx> Compiler<'ctx> {
                     ))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap();
+                    .expect("ICE: call returned void");
                     return Ok(result);
                 }
             }
@@ -190,7 +192,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(pf, &[l.into(), r.into()], "pow"))
                     .try_as_basic_value()
                     .basic()
-                    .unwrap()
+                    .expect("ICE: call returned void")
             }
             BinOp::Eq => b!(self
                 .bld
@@ -367,7 +369,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_global_string_ptr("runtime error: %s\n", "trap.fmt")
             .expect("fmt string");
-        let msg_param = f.get_nth_param(0).unwrap();
+        let msg_param = f.get_nth_param(0).expect("ICE: missing param");
         self.bld
             .build_call(
                 fprintf_fn,
@@ -496,7 +498,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[byte_size.into()], "bcast.result"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         // Loop over elements

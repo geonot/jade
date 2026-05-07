@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 /*
  * Vec header layout (matches codegen):
@@ -50,10 +51,6 @@ void *__jade_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size)
  * Inline: data is bytes 0..22, length = 23 - byte[23].
  * Heap:   ptr at offset 0 (8 bytes), len at offset 8 (8 bytes), cap stored with tag.
  */
-
-typedef struct {
-    char bytes[24];
-} jade_sso_t;
 
 static inline int sso_is_heap(const jade_sso_t *s) {
     return (s->bytes[23] & 0x80) != 0;

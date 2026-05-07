@@ -1,3 +1,5 @@
+//! Use-site annotation: per-binding owned/borrowed/last-use classification.
+
 use std::collections::HashMap;
 
 use crate::hir::*;
@@ -98,6 +100,7 @@ impl PerceusPass {
             Stmt::ErrReturn(e, _, _) => {
                 self.count_uses_expr_escaping(e, uses);
             }
+            Stmt::Defer(body, _) => self.count_uses_block(body, uses),
             Stmt::StoreInsert(_, exprs, _) => {
                 for e in exprs {
                     self.count_uses_expr_escaping(e, uses);
@@ -211,6 +214,7 @@ impl PerceusPass {
             }
             Stmt::Drop(id, _, _, _) => refs.push(*id),
             Stmt::ErrReturn(e, _, _) => self.collect_refs_expr(e, refs),
+            Stmt::Defer(body, _) => self.collect_refs_block(body, refs),
             Stmt::StoreInsert(_, exprs, _) => {
                 for e in exprs {
                     self.collect_refs_expr(e, refs);

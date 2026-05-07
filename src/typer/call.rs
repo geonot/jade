@@ -1,3 +1,5 @@
+//! Call-site typing: argument unification, generic instantiation, method resolution.
+
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -443,6 +445,7 @@ impl Typer {
                                 name: mangled_sym,
                                 params: fn_params,
                                 ret: final_ret.clone(),
+                                error_types: Vec::new(),
                                 body: hbody,
                                 span: lspan,
                                 generic_origin: Some(*name),

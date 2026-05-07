@@ -1,3 +1,5 @@
+//! HIR-era string codegen helpers. Slated for inlining (CLEANUP §C.1).
+
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -347,7 +349,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(malloc, &[len.into()], &format!("{prefix}.buf")))
             .try_as_basic_value()
             .basic()
-            .unwrap()
+            .expect("ICE: call returned void")
             .into_pointer_value();
             b!(self
                 .bld
@@ -390,7 +392,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(snprintf, &call_args, &format!("{prefix}.len")))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
         let len = b!(self
             .bld
@@ -405,7 +407,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[size.into()], &format!("{prefix}.buf")))
         .try_as_basic_value()
         .basic()
-        .unwrap();
+        .expect("ICE: call returned void");
 
         let mut call_args2: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
             vec![buf.into(), size.into(), fmt.as_pointer_value().into()];

@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <string.h>
+#include "jade_rt.h"
 
 int jade_socket(int domain, int type, int protocol) {
     return socket(domain, type, protocol);

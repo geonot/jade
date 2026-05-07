@@ -76,6 +76,7 @@ fn compile_and_collect_summaries(src: &str) -> (Option<PerceusSummary>, Option<P
         .arg(&jade)
         .arg("-o")
         .arg(&out)
+        .arg("--debug-perceus")
         .output()
         .expect("jadec failed to start");
 

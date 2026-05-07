@@ -1,3 +1,5 @@
+//! Perceus reference-counting insertion pass root.
+
 use std::collections::HashMap;
 
 use crate::ast::Span;

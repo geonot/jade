@@ -1,3 +1,5 @@
+//! Codegen for set literal/operation builtins.
+
 use inkwell::AddressSpace;
 use inkwell::values::BasicValueEnum;
 
@@ -20,7 +22,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[header_size.into()], "set.hdr"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         let ptr_gep = b!(self
@@ -127,7 +129,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_call(malloc, &[byte_size.into()], "ndarray.ptr"))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_pointer_value();
 
         // Zero-initialize

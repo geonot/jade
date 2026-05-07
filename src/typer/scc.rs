@@ -1,3 +1,5 @@
+//! Strongly-connected-component analysis for mutually recursive let-groups.
+
 use crate::intern::Symbol;
 use crate::ast;
 use std::collections::{HashMap, HashSet};
@@ -22,7 +24,6 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<Symbol>) {
         | ast::Expr::Ref(e, _)
         | ast::Expr::Deref(e, _)
         | ast::Expr::Yield(e, _)
-        | ast::Expr::Try(e, _)
         | ast::Expr::ChannelRecv(e, _)
         | ast::Expr::Field(e, _, _) => {
             collect_calls_expr(e, calls);
@@ -161,8 +162,8 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<Symbol>) {
             collect_calls_expr(e, calls);
         }
         ast::Stmt::StoreInsert(_, exprs, _) => {
-            for e in exprs {
-                collect_calls_expr(e, calls);
+            for fi in exprs {
+                collect_calls_expr(&fi.value, calls);
             }
         }
         ast::Stmt::StoreSet(_, updates, _, _) => {

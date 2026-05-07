@@ -22,6 +22,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 #define STORE_HEADER 24
 #define STORE_MAGIC  "JADESTR\0"

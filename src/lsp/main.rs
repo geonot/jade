@@ -1,3 +1,5 @@
+//! LSP server entry point (`jadec-lsp` binary).
+
 use std::io::{self, BufReader, Write};
 
 use serde_json::Value;
@@ -98,7 +100,7 @@ fn main() {
                         "id": id,
                         "error": { "code": -32601, "message": "method not found" }
                     });
-                    let body = serde_json::to_string(&err).unwrap();
+                    let body = serde_json::to_string(&err).expect("ICE: LSP serialization");
                     let _ = transport::write_message(&mut writer, &body);
                 }
             }
@@ -108,7 +110,7 @@ fn main() {
 
 fn send_response(writer: &mut impl Write, id: Value, result: Value) {
     let resp = Response::ok(id, result);
-    let body = serde_json::to_string(&resp).unwrap();
+    let body = serde_json::to_string(&resp).expect("ICE: LSP serialization");
     let _ = transport::write_message(writer, &body);
 }
 
@@ -124,8 +126,8 @@ fn publish_diagnostics(
     let notif = Notification {
         jsonrpc: "2.0",
         method: "textDocument/publishDiagnostics",
-        params: serde_json::to_value(params).unwrap(),
+        params: serde_json::to_value(params).expect("ICE: LSP serialization"),
     };
-    let body = serde_json::to_string(&notif).unwrap();
+    let body = serde_json::to_string(&notif).expect("ICE: LSP serialization");
     let _ = transport::write_message(writer, &body);
 }

@@ -11,31 +11,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 #define BLOOM_MAGIC "JADEBLM\0"
 #define BLOOM_HEADER_SIZE 24
 
-typedef struct {
+struct JadeBloom {
     uint8_t *bits;
     int64_t  num_bits;
     int64_t  num_hashes;
     char     path[256];
-} JadeBloom;
+};
 
-/* ── FNV-1a hashing ───────────────────────────────────────── */
-
-static uint64_t fnv1a(const void *data, int64_t len) {
-    uint64_t h = 0xcbf29ce484222325ULL;
-    const uint8_t *p = (const uint8_t *)data;
-    for (int64_t i = 0; i < len; i++) {
-        h ^= p[i];
-        h *= 0x100000001b3ULL;
-    }
-    return h;
-}
+/* ── Hashing (uses jade_fnv1a from util.c) ────────────────── */
 
 static uint64_t bloom_hash(const void *data, int64_t len, int64_t k) {
-    uint64_t h1 = fnv1a(data, len);
+    uint64_t h1 = jade_fnv1a(data, len);
     uint64_t h2 = h1 * 0x9e3779b97f4a7c15ULL + 0x517cc1b727220a95ULL;
     return h1 + k * h2;
 }

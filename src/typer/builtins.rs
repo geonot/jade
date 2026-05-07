@@ -1,3 +1,5 @@
+//! Type signatures for `hir::BuiltinFn` variants.
+
 use crate::ast::{self, Span};
 use crate::hir;
 use crate::intern::Symbol;

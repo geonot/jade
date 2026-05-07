@@ -74,6 +74,9 @@ struct Lowerer {
     loop_stack: Vec<(BlockId, BlockId)>, // (continue_target, break_target)
     /// Lambda functions generated during lowering (added to the program).
     lambda_fns: Vec<Function>,
+    /// `defer` blocks registered for the current function, in source order.
+    /// They are executed in LIFO order before any function exit.
+    function_defers: Vec<crate::hir::Block>,
 }
 
 impl Lowerer {
@@ -104,6 +107,18 @@ impl Lowerer {
             mem_vars: HashSet::new(),
             loop_stack: Vec::new(),
             lambda_fns: Vec::new(),
+            function_defers: Vec::new(),
+        }
+    }
+
+    /// Lower all registered defer blocks at the current insertion point in
+    /// LIFO order. Used before function exits to run cleanup code.
+    fn lower_deferred_in_reverse(&mut self) {
+        let defers: Vec<crate::hir::Block> = self.function_defers.clone();
+        for block in defers.into_iter().rev() {
+            for stmt in &block {
+                let _ = self.lower_stmt(stmt);
+            }
         }
     }
 
@@ -2096,12 +2111,19 @@ impl Lowerer {
             hir::Stmt::Ret(val, _ret_ty, span) => {
                 if let Some(v) = val {
                     let rv = self.lower_expr(v);
+                    self.lower_deferred_in_reverse();
                     self.set_terminator(Terminator::Return(Some(rv)));
                 } else {
+                    self.lower_deferred_in_reverse();
                     self.set_terminator(Terminator::Return(None));
                 }
                 let dead = self.new_block("after.ret");
                 self.switch_to(dead);
+                self.emit(InstKind::Void, Type::Void, *span)
+            }
+
+            hir::Stmt::Defer(body, span) => {
+                self.function_defers.push(body.clone());
                 self.emit(InstKind::Void, Type::Void, *span)
             }
 
@@ -2589,6 +2611,7 @@ impl Lowerer {
 
             hir::Stmt::ErrReturn(expr, _ty, span) => {
                 let v = self.lower_expr(expr);
+                self.lower_deferred_in_reverse();
                 self.set_terminator(Terminator::Return(Some(v)));
                 let dead = self.new_block("after.err_return");
                 self.switch_to(dead);
@@ -3415,6 +3438,7 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
         lowerer.func.block(lowerer.current_block).terminator,
         Terminator::Unreachable
     ) {
+        lowerer.lower_deferred_in_reverse();
         if matches!(f.ret, Type::Void) {
             lowerer.set_terminator(Terminator::Return(None));
         } else {

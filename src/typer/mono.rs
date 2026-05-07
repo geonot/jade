@@ -1,3 +1,5 @@
+//! Monomorphization: instantiate generic items with concrete type arguments.
+
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -359,6 +361,7 @@ impl Typer {
             name: mangled.into(),
             params,
             ret: resolved_ret,
+            error_types: Vec::new(),
             body,
             span: gf.span,
             generic_origin: Some(origin.into()),

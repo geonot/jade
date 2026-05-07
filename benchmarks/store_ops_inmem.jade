@@ -1,0 +1,27 @@
+# R7/B-STORE — in-memory store baseline that mirrors the C reference
+# implementation (Vec<i64> pair) for like-for-like comparison.
+# The on-disk variant lives in `store_ops.jade`.
+
+*main
+    keys is vec(0)
+    keys.pop()
+    vals is vec(0)
+    vals.pop()
+    # Insert 10000 records
+    for i in 0 to 10000
+        keys.push(i)
+        vals.push(i * 7)
+
+    # Query 1000 times via linear scan (same as C reference)
+    total is 0
+    for j in 0 to 1000
+        # find index of j in keys, accumulate vals[idx]
+        idx is -1
+        for k in 0 to keys.length
+            if keys[k] equals j
+                idx is k
+        if idx >= 0
+            total is total + vals[idx]
+
+    log(total)
+    log(keys.length)

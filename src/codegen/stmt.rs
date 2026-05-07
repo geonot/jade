@@ -1,3 +1,5 @@
+//! HIR-era statement codegen helpers. Slated for inlining (CLEANUP §C.1).
+
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::BasicValueEnum;
@@ -50,6 +52,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::Asm(a) => a.span,
             hir::Stmt::Drop(_, _, _, s) => *s,
             hir::Stmt::ErrReturn(_, _, s) => *s,
+            hir::Stmt::Defer(_, s) => *s,
             hir::Stmt::StoreInsert(_, _, s) => *s,
             hir::Stmt::StoreDelete(_, _, s) => *s,
             hir::Stmt::StoreDestroy(_, _, s) => *s,
@@ -115,6 +118,7 @@ impl<'ctx> Compiler<'ctx> {
                     } else {
                         let a = self.alloca_for_type(self.llvm_ty(ty), &bind.name.as_str(), ty);
                         b!(self.bld.build_store(a, val));
+                        self.attach_dbg_declare(a, &bind.name.as_str(), span.line);
                         self.set_var(&bind.name.as_str(), a, ty.clone());
                     }
                 } else if let Some((ptr, _)) = self.find_var(&bind.name.as_str()).cloned() {
@@ -133,6 +137,7 @@ impl<'ctx> Compiler<'ctx> {
                             .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
                             .map_err(|_| "failed to set atomic ordering".to_string())?;
                     }
+                    self.attach_dbg_declare(a, &bind.name.as_str(), span.line);
                     self.set_var(&bind.name.as_str(), a, ty.clone());
                 }
                 Ok(None)
@@ -239,6 +244,11 @@ impl<'ctx> Compiler<'ctx> {
                 let val = self.compile_expr(e)?;
                 b!(self.bld.build_return(Some(&val)));
                 Ok(None)
+            }
+            hir::Stmt::Defer(_, _) => {
+                // The legacy direct HIR→LLVM codegen path does not implement
+                // `defer`. Lowering goes through MIR which handles this.
+                Err("`defer` is not supported on the legacy direct codegen path".to_string())
             }
             hir::Stmt::StoreInsert(store_name, values, _) => {
                 let sd = self

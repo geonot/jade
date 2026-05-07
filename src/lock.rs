@@ -1,3 +1,5 @@
+//! File locking utilities for incremental compilation and package operations.
+
 use crate::pkg::SemVer;
 use std::path::Path;
 

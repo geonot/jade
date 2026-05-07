@@ -1,3 +1,5 @@
+//! Codegen for direct calls, indirect calls, and method dispatch.
+
 use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue};
 

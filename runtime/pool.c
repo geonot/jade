@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "jade_rt.h"
 
 typedef struct jade_pool {
     void    *backing;       /* raw backing memory */

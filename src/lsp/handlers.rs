@@ -1,3 +1,5 @@
+//! LSP request/notification handlers (textDocument/* and workspace/*).
+
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -97,7 +99,7 @@ pub fn handle_initialize(_params: Value) -> Value {
             version: "0.2.0".into(),
         },
     };
-    serde_json::to_value(result).unwrap()
+    serde_json::to_value(result).expect("ICE: LSP serialization")
 }
 
 pub fn handle_did_open(
@@ -154,7 +156,7 @@ pub fn handle_hover(state: &ServerState, params: Value) -> Value {
             },
             range: None,
         };
-        return serde_json::to_value(hover).unwrap();
+        return serde_json::to_value(hover).expect("ICE: LSP serialization");
     }
     Value::Null
 }
@@ -181,7 +183,7 @@ pub fn handle_definition(state: &ServerState, params: Value) -> Value {
             uri: p.text_document.uri,
             range: span_to_range(*span),
         };
-        return serde_json::to_value(loc).unwrap();
+        return serde_json::to_value(loc).expect("ICE: LSP serialization");
     }
     // Try cross-file workspace index
     if let Some(ws) = state.find_in_workspace(&ident) {
@@ -189,7 +191,7 @@ pub fn handle_definition(state: &ServerState, params: Value) -> Value {
             uri: ws.uri.clone(),
             range: span_to_range(ws.span),
         };
-        return serde_json::to_value(loc).unwrap();
+        return serde_json::to_value(loc).expect("ICE: LSP serialization");
     }
     Value::Null
 }
@@ -204,7 +206,7 @@ pub fn handle_document_symbols(state: &ServerState, params: Value) -> Value {
         None => return Value::Array(vec![]),
     };
     let syms: Vec<DocumentSymbol> = analysis.symbols.iter().map(|s| symbol_to_lsp(s)).collect();
-    serde_json::to_value(syms).unwrap()
+    serde_json::to_value(syms).expect("ICE: LSP serialization")
 }
 
 pub fn handle_completion(state: &ServerState, params: Value) -> Value {
@@ -242,7 +244,7 @@ pub fn handle_completion(state: &ServerState, params: Value) -> Value {
             });
         }
     }
-    serde_json::to_value(items).unwrap()
+    serde_json::to_value(items).expect("ICE: LSP serialization")
 }
 
 // ── References handler ─────────────────────────────────────────
@@ -304,7 +306,7 @@ pub fn handle_references(state: &ServerState, params: Value) -> Value {
         }
     }
 
-    serde_json::to_value(locations).unwrap()
+    serde_json::to_value(locations).expect("ICE: LSP serialization")
 }
 
 // ── Rename handler ─────────────────────────────────────────────
@@ -377,7 +379,7 @@ pub fn handle_rename(state: &ServerState, params: Value) -> Value {
     }
 
     let edit = WorkspaceEdit { changes };
-    serde_json::to_value(edit).unwrap()
+    serde_json::to_value(edit).expect("ICE: LSP serialization")
 }
 
 // ── Semantic tokens handler ────────────────────────────────────
@@ -401,7 +403,7 @@ pub fn handle_semantic_tokens(state: &ServerState, params: Value) -> Value {
         data.push(t.token_modifiers);
     }
     let result = SemanticTokensResult { data };
-    serde_json::to_value(result).unwrap()
+    serde_json::to_value(result).expect("ICE: LSP serialization")
 }
 
 // ── Signature help handler ─────────────────────────────────────
@@ -433,7 +435,7 @@ pub fn handle_signature_help(state: &ServerState, params: Value) -> Value {
         active_signature: 0,
         active_parameter: info.active_param,
     };
-    serde_json::to_value(sig_help).unwrap()
+    serde_json::to_value(sig_help).expect("ICE: LSP serialization")
 }
 
 fn build_diagnostics(state: &ServerState, uri: &str) -> Vec<Diagnostic> {

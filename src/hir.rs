@@ -1,3 +1,5 @@
+//! High-level IR data types produced by the typer and consumed by Perceus, MIR lower, and codegen.
+
 use crate::intern::Symbol;
 use crate::ast::{self, Span};
 use crate::types::Type;
@@ -78,6 +80,9 @@ pub struct Fn {
     pub name: Symbol,
     pub params: Vec<Param>,
     pub ret: Type,
+    /// Error types (declared or inferred) that this function may early-return
+    /// via `! Variant`. Each entry is the enum type of an `err`-defined union.
+    pub error_types: Vec<Type>,
     pub body: Block,
     pub span: Span,
     pub generic_origin: Option<Symbol>,
@@ -254,6 +259,8 @@ pub enum Stmt {
     Asm(AsmBlock),
     Drop(DefId, Symbol, Type, Span),
     ErrReturn(Expr, Type, Span),
+    /// `defer <block>` — runs at every function exit point. Lowered by MIR.
+    Defer(Block, Span),
     StoreInsert(Symbol, Vec<Expr>, Span),
     StoreDelete(Symbol, Box<StoreFilter>, Span),
     StoreDestroy(Symbol, Box<StoreFilter>, Span),
@@ -944,6 +951,12 @@ impl PrettyPrinter {
             }
             Stmt::ErrReturn(e, ty, _) => {
                 self.line(&format!("err_return {} : {}", self.expr_str(e), ty));
+            }
+            Stmt::Defer(body, _) => {
+                self.line("defer:");
+                self.push();
+                self.block(body);
+                self.pop();
             }
             Stmt::StoreInsert(name, vals, _) => {
                 let vs: Vec<String> = vals.iter().map(|v| self.expr_str(v)).collect();

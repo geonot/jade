@@ -1,0 +1,12 @@
+store users
+    name as String
+    age as i64
+
+*main
+    insert users 'Alice', 30
+    insert users 'Bob', 25
+    insert users 'Charlie', 35
+
+    log(count users)
+    log(count users where age > 27)
+    log(count users where age > 20 and age < 32)

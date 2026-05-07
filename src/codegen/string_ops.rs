@@ -1,3 +1,5 @@
+//! HIR-era string operation codegen. Slated for inlining (CLEANUP §C.1).
+
 use inkwell::IntPredicate;
 use inkwell::values::BasicValueEnum;
 
@@ -35,7 +37,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
         let eq = b!(self.bld.build_int_compare(
             IntPredicate::EQ,
@@ -107,7 +109,7 @@ impl<'ctx> Compiler<'ctx> {
         let buf = b!(self.bld.build_call(malloc, &[total.into()], "buf"))
             .try_as_basic_value()
             .basic()
-            .unwrap();
+            .expect("ICE: call returned void");
         let memcpy2 = self.ensure_memcpy();
         b!(self
             .bld
@@ -202,7 +204,7 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .try_as_basic_value()
         .basic()
-        .unwrap()
+        .expect("ICE: call returned void")
         .into_int_value();
         let eq = b!(self.bld.build_int_compare(
             IntPredicate::EQ,

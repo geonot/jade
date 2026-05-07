@@ -861,6 +861,35 @@ fn generic_add() {
     );
 }
 
+#[test]
+fn generic_struct_ctor_explicit_type() {
+    // N-2: `Box of i64(7)` constructs a generic struct with an
+    // explicit type binding and positional fields.
+    expect(
+        "type Box of T\n    value as T\n\n*main() returns i32\n    b is Box of i64(7)\n    log(b.value)\n    0\n",
+        "7",
+    );
+}
+
+#[test]
+fn generic_struct_ctor_positional_inferred() {
+    // N-2: `Box(7)` constructs the generic struct with the type
+    // parameter inferred from the positional argument.
+    expect(
+        "type Box of T\n    value as T\n\n*main() returns i32\n    b is Box(7)\n    log(b.value)\n    0\n",
+        "7",
+    );
+}
+
+#[test]
+fn generic_struct_ctor_two_params_positional() {
+    // N-2: tuple type-arg list `Pair of (i64, String)(...)`.
+    expect(
+        "type Pair of A, B\n    first as A\n    second as B\n\n*main() returns i32\n    p is Pair of (i64, String)(1, \"hi\")\n    log(p.first)\n    log(p.second)\n    0\n",
+        "1\nhi",
+    );
+}
+
 // ---- extern (FFI) ----
 
 #[test]
@@ -2976,6 +3005,24 @@ fn store_restore_basic() {
     );
 }
 
+// N-4: `count <store> where ...` shares the predicate evaluator with
+// `<store> where ...` and `delete users where ...`.
+#[test]
+fn store_count_where_basic() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    log(count users)\n    log(count users where age > 27)\n    log(count users where age > 20 and age < 32)\n",
+        "3\n2\n2",
+    );
+}
+
+#[test]
+fn store_count_where_no_match() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    log(count users where age > 99)\n",
+        "0",
+    );
+}
+
 #[test]
 fn store_restore_query_after() {
     expect_store(
@@ -3192,20 +3239,108 @@ store bench
     }
 }
 
-// ── try keyword (error propagation) ─────────────────────────────────
+// ── try keyword removed — replaced by `!` postfix and `defer` (Layer 1) ──
+
+#[test]
+fn defer_runs_on_normal_exit() {
+    expect(
+        "*main()\n    defer\n        log(2)\n    log(1)\n",
+        "1\n2",
+    );
+}
+
+#[test]
+fn defer_lifo_order() {
+    expect(
+        "*main()\n    defer\n        log(\"a\")\n    defer\n        log(\"b\")\n    log(\"start\")\n",
+        "start\nb\na",
+    );
+}
+
+#[test]
+fn defer_runs_on_bang_return() {
+    let src = r#"
+err NetworkError
+    Timeout
+
+*do_it() returns i64 ! NetworkError
+    defer
+        log("cleanup")
+    log("before")
+    ! -1
+    log("after")
+    0
+
+*main()
+    do_it()
+"#;
+    expect(src, "before\ncleanup");
+}
+
+#[test]
+fn signature_multi_error_union() {
+    let src = r#"
+err Net
+    Timeout
+
+err Disk
+    NotFound
+
+*op(x as i64) returns i64 ! Net ! Disk
+    if x is 1
+        ! -1
+    if x is 2
+        ! -2
+    x
+
+*main()
+    op(0)
+    log(99)
+"#;
+    expect(src, "99");
+}
+
+#[test]
+fn signature_undeclared_error_rejected() {
+    let src = r#"
+err Net
+    Timeout
+
+err Other
+    Boom
+
+*op() returns i64 ! Net
+    ! Boom
+    0
+
+*main()
+    op()
+"#;
+    expect_compile_fail(src);
+}
+
+#[test]
+fn defer_block_with_multiple_stmts() {
+    expect(
+        "*main()\n    defer\n        log(\"a\")\n        log(\"b\")\n    log(\"start\")\n",
+        "start\na\nb",
+    );
+}
 
 #[test]
 fn try_option_some() {
+    // Replaced: `try` removed; verify equivalent shape using `!` early return.
     expect(
-        "enum Option\n    Some(i64)\n    Nothing\n\n*get_val() returns Option\n    Some(42)\n\n*do_thing() returns Option\n    v is try get_val()\n    Some(v + 1)\n\n*main()\n    match do_thing()\n        Some(v) ? log(v)\n        Nothing ? log(0)\n",
-        "43",
+        "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    42\n\n*main()\n    log(do_thing())\n",
+        "42",
     );
 }
 
 #[test]
 fn try_option_nothing() {
+    // Replaced: error-path early return via `!` returns sentinel value.
     expect(
-        "enum Option\n    Some(i64)\n    Nothing\n\n*get_val() returns Option\n    Nothing\n\n*do_thing() returns Option\n    v is try get_val()\n    Some(v + 1)\n\n*main()\n    match do_thing()\n        Some(v) ? log(v)\n        Nothing ? log(-1)\n",
+        "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    ! -1\n    0\n\n*main()\n    log(do_thing())\n",
         "-1",
     );
 }
@@ -3213,7 +3348,7 @@ fn try_option_nothing() {
 #[test]
 fn try_result_ok() {
     expect(
-        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*get_val() returns Result\n    Ok(10)\n\n*do_thing() returns Result\n    v is try get_val()\n    Ok(v * 2)\n\n*main()\n    match do_thing()\n        Ok(v) ? log(v)\n        Err(e) ? log(e)\n",
+        "err E\n    Boom\n\n*do_thing() returns i64 ! E\n    20\n\n*main()\n    log(do_thing())\n",
         "20",
     );
 }
@@ -3221,12 +3356,575 @@ fn try_result_ok() {
 #[test]
 fn try_result_err() {
     expect(
-        "enum Result\n    Ok(i64)\n    Err(i64)\n\n*get_val() returns Result\n    Err(99)\n\n*do_thing() returns Result\n    v is try get_val()\n    Ok(v * 2)\n\n*main()\n    match do_thing()\n        Ok(v) ? log(v)\n        Err(e) ? log(e)\n",
+        "err E\n    Boom\n\n*do_thing() returns i64 ! E\n    ! 99\n    0\n\n*main()\n    log(do_thing())\n",
         "99",
     );
 }
 
-// ── SQLite auto-linking ─────────────────────────────────────────────
+// ── Layer 2: Unitary errors-as-values convention ────────────────────
+
+#[test]
+fn err_enum_as_return_type_ok_branch() {
+    // Canonical jade convention: a function may return an err enum directly.
+    // Plain return / final expression yields a success-tagged variant.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    r is compute(41)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
+"#;
+    expect(src, "42");
+}
+
+#[test]
+fn err_enum_as_return_type_err_branch() {
+    // Same convention; this time the err variant is taken via `! Variant`.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    r is compute(0)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
+"#;
+    expect(src, "-1");
+}
+
+#[test]
+fn err_return_to_incompatible_t_rejected() {
+    // T = i64, but `! Bad` returns an err-variant value of type `Fail`.
+    // The jade convention says: errors are values; encode them as values of T
+    // (a sentinel) or declare the function to return the err enum directly.
+    let src = r#"
+err Fail
+    Bad
+
+*do_thing() returns i64 ! Fail
+    ! Bad
+    0
+
+*main()
+    do_thing()
+"#;
+    expect_compile_fail(src);
+}
+
+#[test]
+fn defer_in_nested_block_runs_at_function_exit() {
+    // `defer` is function-scoped: a defer inside an `if` block still runs
+    // when the *function* returns, in LIFO order with other defers.
+    let src = r#"
+*go(x as i64)
+    defer
+        log("outer")
+    if x is 1
+        defer
+            log("inner")
+        log("in-if")
+    log("end")
+
+*main()
+    go(1)
+"#;
+    expect(src, "in-if\nend\ninner\nouter");
+}
+
+#[test]
+fn defer_runs_on_err_branch_of_err_enum_return() {
+    // Combining defer with an err-enum return: cleanup still fires before
+    // the early `! Variant` exits the function.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    defer
+        log("cleanup")
+    if x is 0
+        ! Bad
+    Ok(x)
+
+*main()
+    r is compute(0)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
+"#;
+    expect(src, "cleanup\n-1");
+}
+
+// ── Layer 2 sugar: guard form & handler chain ───────────────────────
+
+#[test]
+fn bind_guard_propagates_variant() {
+    // `a is x() ! Bad` — when x() returns Bad, propagate it from the
+    // caller; otherwise bind a to the value and continue.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*caller(x as i64) returns Outcome
+    a is compute(x) ! Bad
+    Ok(99)
+
+*main()
+    r is caller(0)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
+"#;
+    expect(src, "-1");
+}
+
+#[test]
+fn bind_guard_falls_through_on_ok() {
+    // Same shape; non-Bad value falls through and `a` is bound to the
+    // raw enum value (so we can still pattern-match on it downstream).
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*caller(x as i64) returns Outcome
+    a is compute(x) ! Bad
+    Ok(99)
+
+*main()
+    r is caller(5)
+    match r
+        Ok(v) ?
+            log(v)
+        Bad ?
+            log(-1)
+"#;
+    expect(src, "99");
+}
+
+#[test]
+fn bind_handler_chain_ok_path() {
+    // `a is x() ? on_ok ! on_err` — Ok-arm runs `on_ok` with `a` bound to
+    // the payload; non-Ok runs `on_err`.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    a is compute(5) ? log(a) ! log(-100)
+"#;
+    expect(src, "6");
+}
+
+#[test]
+fn bind_handler_chain_err_path() {
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    a is compute(0) ? log(a) ! log(-100)
+"#;
+    expect(src, "-100");
+}
+
+#[test]
+fn bind_handler_chain_ok_only() {
+    // Without `! on_err`, the err path silently falls through.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    a is compute(7) ? log(a)
+    log(0)
+"#;
+    expect(src, "8\n0");
+}
+
+#[test]
+fn ternary_in_bind_still_works() {
+    // The Layer-2 sugar must not break standard ternary on the RHS of
+    // `is`. `cond ? then ! else` and `cond ! else` continue to apply
+    // when no sugar shape matches.
+    let src = r#"
+*main()
+    x is 5
+    r is x > 3 ? "big" ! "small"
+    log(r)
+    s is x > 99 ! "fallback"
+    log(s)
+"#;
+    expect(src, "big\nfallback");
+}
+
+// ── Layer 2 sugar follow-ups: implicit `err`, lowercase variants,
+//    bare-statement form, type-driven rejection. ──────────────────────
+
+#[test]
+fn handler_chain_binds_implicit_err() {
+    // Inside the failure handler the err value is bound as the implicit
+    // identifier `err`. Pass it to a helper that pattern-matches it.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad(i64)
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad(42)
+    Ok(x + 1)
+
+*report(o as Outcome)
+    match o
+        Bad(c) ?
+            log(c)
+        _ ?
+            log(-1)
+
+*main()
+    a is compute(0) ? log(a) ! report(err)
+"#;
+    expect(src, "42");
+}
+
+#[test]
+fn handler_chain_bare_statement_form() {
+    // No `is` wrapper — `call() ? on_ok ! on_err` is a statement on its own.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    compute(5) ? log(100) ! log(-100)
+    compute(0) ? log(200) ! log(-200)
+"#;
+    expect(src, "100\n-200");
+}
+
+#[test]
+fn handler_chain_bare_binds_implicit_err() {
+    // Bare form also exposes `err` to the failure handler.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad(i64)
+
+*compute(x as i64) returns Outcome
+    if x is 0
+        ! Bad(7)
+    Ok(x + 1)
+
+*report(o as Outcome)
+    match o
+        Bad(c) ?
+            log(c)
+        _ ?
+            log(-1)
+
+*main()
+    compute(0) ? log(0) ! report(err)
+"#;
+    expect(src, "7");
+}
+
+#[test]
+fn bind_string_fallback_still_ternary() {
+    // `! "literal"` is unambiguously a ternary-else (token after `!` is a
+    // literal, not a bare ident) and must keep working.
+    let src = r#"
+*main()
+    x is 5
+    s is x > 99 ! "fallback"
+    log(s)
+"#;
+    expect(src, "fallback");
+}
+
+// ── Layer 2: error-union annotation enforcement ─────────────────────
+
+#[test]
+fn err_annotation_narrows_must_list_used_variants() {
+    // `! E1` is declared but `! Bad2` (an E2 variant) is used in the body.
+    // The typer must reject this: the explicit annotation is the contract.
+    let src = r#"
+err E1
+    Bad1
+
+err E2
+    Bad2
+
+*do_thing() returns i64 ! E1
+    ! Bad2
+    0
+
+*main()
+    do_thing()
+"#;
+    let stderr = expect_compile_fail(src);
+    assert!(
+        stderr.contains("does not list") || stderr.contains("E2"),
+        "expected diagnostic mentioning E2 or 'does not list', got: {stderr}"
+    );
+}
+
+#[test]
+fn err_annotation_can_list_used_variant() {
+    // The body compiles when the signature lists the err enum it uses.
+    let src = r#"
+err Outcome
+    Ok(i64)
+    Bad
+
+*do_thing(x as i64) returns Outcome ! Outcome
+    if x is 0
+        ! Bad
+    Ok(x + 1)
+
+*main()
+    r is do_thing(5)
+    match r
+        Ok(v) ?
+            log(v)
+        _ ?
+            log(-1)
+"#;
+    expect(src, "6");
+}
+
+// ── Layer 2: `!!` error-throw sugar ──────────────────────────────────────────
+
+#[test]
+fn bangbang_bare_no_ok_arm() {
+    // `expr !! Variant` — on error throw Variant, on ok fall through silently.
+    let src = r#"
+err Res
+    Ok(i64)
+    Fail
+
+*might_fail(x as i64) returns Res
+    if x is 0
+        ! Fail
+    Ok(x * 2)
+
+*caller() returns Res
+    might_fail(3) !! Fail
+    Ok(99)
+
+*main()
+    r is caller()
+    match r
+        Ok(v) ?
+            log(v)
+        _ ?
+            log(-1)
+"#;
+    expect(src, "99");
+}
+
+#[test]
+fn bangbang_propagates_on_error() {
+    // When the call returns an error, `!!` rethrows.
+    let src = r#"
+err Res
+    Ok(i64)
+    Fail
+
+*might_fail(x as i64) returns Res
+    if x is 0
+        ! Fail
+    Ok(x * 2)
+
+*caller() returns Res
+    might_fail(0) !! Fail
+    Ok(99)
+
+*main()
+    r is caller()
+    match r
+        Ok(v) ?
+            log(v)
+        Fail ?
+            log(-1)
+"#;
+    expect(src, "-1");
+}
+
+#[test]
+fn bangbang_handler_chain_ok_arm() {
+    // `call() ? on_ok !! Variant` — ok: run on_ok, err: throw Variant.
+    // Must be inside a function that declares error returns.
+    let src = r#"
+err Res
+    Ok(i64)
+    Fail
+
+*might_fail(x as i64) returns Res
+    if x is 0
+        ! Fail
+    Ok(x + 10)
+
+*caller() returns Res
+    might_fail(5) ? log(7) !! Fail
+    Ok(0)
+
+*main()
+    caller()
+"#;
+    expect(src, "7");
+}
+
+#[test]
+fn bangbang_handler_chain_with_err_handler() {
+    // `call() ? on_ok ! on_falsy !! Variant`:
+    //   - on_falsy is the ternary-else for a falsy-but-non-error Ok payload
+    //   - !! Variant fires for actual errors — mutually exclusive from on_falsy
+    // Here might_fail(0) returns an error, so on_falsy (log(-2)) must NOT run;
+    // only the !! arm fires, propagating Fail.
+    let src = r#"
+err Res
+    Ok(i64)
+    Fail
+
+*might_fail(x as i64) returns Res
+    if x is 0
+        ! Fail
+    Ok(x + 10)
+
+*outer() returns Res
+    might_fail(0) ? log(7) ! log(-2) !! Fail
+    Ok(42)
+
+*main()
+    r is outer()
+    match r
+        Ok(v) ?
+            log(v)
+        Fail ?
+            log(-9)
+"#;
+    // error arm fires (!! Fail), log(-2) is skipped, outer returns Fail, main logs -9
+    expect(src, "-9");
+}
+
+#[test]
+fn bangbang_handler_chain_falsy_branch_runs() {
+    // Same `? on_ok ! on_falsy !! Variant` form, but the call succeeds with
+    // a falsy (zero) payload — on_falsy runs, !! does not fire.
+    let src = r#"
+err Res
+    Ok(i64)
+    Fail
+
+*might_fail(x as i64) returns Res
+    if x is 0
+        ! Fail
+    Ok(x + 10)
+
+*outer() returns Res
+    might_fail(5) ? log(7) ! log(-2) !! Fail
+    Ok(42)
+
+*main()
+    r is outer()
+    match r
+        Ok(v) ?
+            log(v)
+        Fail ?
+            log(-9)
+"#;
+    // might_fail(5) → Ok(15), 15 is truthy → log(7) runs; outer returns Ok(42); main logs 42
+    expect(src, "7\n42");
+}
+
+#[test]
+fn bangbang_bind_form() {
+    // `x is call() !! Variant` — binds x to the full result (type Res), throws on any error.
+    // x is then matched to extract the ok payload.
+    let src = r#"
+err Res
+    Ok(i64)
+    Fail
+
+*get_val(x as i64) returns Res
+    if x is 0
+        ! Fail
+    Ok(x + 100)
+
+*caller() returns Res
+    v is get_val(5) !! Fail
+    v
+
+*main()
+    r is caller()
+    match r
+        Ok(n) ?
+            log(n)
+        _ ?
+            log(-1)
+"#;
+    expect(src, "105");
+}
 
 #[test]
 fn sqlite_basic() {
@@ -3343,32 +4041,29 @@ global x is 42
     expect(src, "42");
 }
 
-// ── try chaining ─────────────────────────────────────────────────
+// ── try chaining (replaced by `!` early-return chains) ───────────
 
 #[test]
 fn try_chain_two_levels() {
-    // Two consecutive `try` expressions in a single function.
+    // Two `!` early-return calls don't fire when the operations succeed.
     expect(
         r#"
-enum Option
-    Some(i64)
-    Nothing
+err Fail
+    Bad
 
-*step1() returns Option
-    Some(10)
+*step1() returns i64 ! Fail
+    10
 
-*step2() returns Option
-    Some(20)
+*step2() returns i64 ! Fail
+    20
 
-*run() returns Option
-    a is try step1()
-    b is try step2()
-    Some(a + b)
+*run() returns i64 ! Fail
+    a is step1()
+    b is step2()
+    a + b
 
 *main()
-    match run()
-        Some(v) ? log(v)
-        Nothing ? log(-1)
+    log(run())
 "#,
         "30",
     );
@@ -3376,30 +4071,31 @@ enum Option
 
 #[test]
 fn try_chain_short_circuits() {
-    // First `try` returns Nothing — the rest of the function must not execute.
+    // Sentinel-value short-circuit via `!`.
     expect(
         r#"
-enum Option
-    Some(i64)
-    Nothing
+err Fail
+    Bad
 
-*fail() returns Option
-    Nothing
+*fail() returns i64 ! Fail
+    ! -1
+    0
 
-*should_not_run() returns Option
-    Some(99)
+*should_not_run() returns i64 ! Fail
+    log(999)
+    99
 
-*run() returns Option
-    a is try fail()
-    b is try should_not_run()
-    Some(a + b)
+*run() returns i64 ! Fail
+    a is fail()
+    if a equals -1
+        ! -1
+    b is should_not_run()
+    a + b
 
 *main()
-    match run()
-        Some(v) ? log(v)
-        Nothing ? log(0)
+    log(run())
 "#,
-        "0",
+        "-1",
     );
 }
 
@@ -3407,36 +4103,30 @@ enum Option
 
 #[test]
 fn try_propagation_chain() {
-    // A → B → C with try; error in C propagates to main.
+    // A → B → C; sentinel value propagates through plain returns.
     expect(
         r#"
-enum Result
-    Ok(i64)
-    Err(i64)
+err Fail
+    Bad
 
-*level_c(x as i64) returns Result
+*level_c(x as i64) returns i64 ! Fail
     if x < 0
-        Err(-1)
-    else
-        Ok(x * 2)
+        ! -1
+    x * 2
 
-*level_b(x as i64) returns Result
-    v is try level_c(x)
-    Ok(v + 100)
+*level_b(x as i64) returns i64 ! Fail
+    v is level_c(x)
+    v + 100
 
-*level_a(x as i64) returns Result
-    v is try level_b(x)
-    Ok(v + 1)
+*level_a(x as i64) returns i64 ! Fail
+    v is level_b(x)
+    v + 1
 
 *main()
-    match level_a(5)
-        Ok(v) ? log(v)
-        Err(e) ? log(e)
-    match level_a(-1)
-        Ok(v) ? log(v)
-        Err(e) ? log(e)
+    log(level_a(5))
+    log(level_a(-1))
 "#,
-        "111\n-1",
+        "111\n100",
     );
 }
 
@@ -3706,4 +4396,193 @@ fn hof_passed_as_argument() {
 "#,
         "2\n12",
     );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// N-7: Named-field insert into stores
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn store_insert_named_basic() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Alice', age is 30)\n    r is users where name equals 'Alice'\n    log r.name\n    log r.age\n",
+        "Alice\n30",
+    );
+}
+
+#[test]
+fn store_insert_named_reordered() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (age is 25, name is 'Bob')\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "Bob\n25",
+    );
+}
+
+#[test]
+fn store_insert_positional_still_works() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Carol', 40\n    r is users where name equals 'Carol'\n    log r.name\n    log r.age\n",
+        "Carol\n40",
+    );
+}
+
+#[test]
+fn store_insert_named_missing_field_fails() {
+    let err = expect_compile_fail(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Dan')\n",
+    );
+    assert!(
+        err.contains("missing") || err.contains("age"),
+        "expected missing-field error, got: {err}"
+    );
+}
+
+#[test]
+fn store_insert_named_unknown_field_fails() {
+    let err = expect_compile_fail(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Eve', age is 22, height is 170)\n",
+    );
+    assert!(
+        err.contains("unknown") || err.contains("height"),
+        "expected unknown-field error, got: {err}"
+    );
+}
+
+#[test]
+fn store_insert_named_mixed_fails() {
+    let err = expect_compile_fail(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Fay', 33)\n",
+    );
+    assert!(
+        err.contains("mix") || err.contains("named") || err.contains("positional"),
+        "expected mixed-field error, got: {err}"
+    );
+}
+
+#[test]
+fn store_insert_named_duplicate_fails() {
+    let err = expect_compile_fail(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Gus', name is 'Gus2', age is 21)\n",
+    );
+    assert!(
+        err.contains("duplicate") || err.contains("name"),
+        "expected duplicate-field error, got: {err}"
+    );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// N-6: query blocks execute (where/delete/set), unsupported clauses
+// emit clear errors instead of being silently dropped.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn query_block_executes_full_program() {
+    expect_store(
+        &std::fs::read_to_string("tests/programs/query_parse.jade").unwrap(),
+        "Alice\n30\n26\n1",
+    );
+}
+
+#[test]
+fn query_block_sort_clause_errors() {
+    let err = expect_compile_fail(
+        "store u\n    name as String\n    age as i64\n\n*main\n    insert u 'A', 1\n    r is u query\n        where age > 0\n        sort age\n    log r.name\n",
+    );
+    assert!(
+        err.contains("sort") && err.contains("not yet"),
+        "expected sort-not-implemented error, got: {err}"
+    );
+}
+
+#[test]
+fn query_block_limit_clause_errors() {
+    let err = expect_compile_fail(
+        "store u\n    name as String\n    age as i64\n\n*main\n    insert u 'A', 1\n    r is u query\n        where age > 0\n        limit 5\n    log r.name\n",
+    );
+    assert!(
+        err.contains("limit") && err.contains("not yet"),
+        "expected limit-not-implemented error, got: {err}"
+    );
+}
+
+// ── N-3: actor supervisor smoke tests ──
+
+#[test]
+fn supervisor_starts_and_restart_count_zero() {
+    let out = compile_and_run_in_dir(
+        "actor Worker\n    count as i64\n    @bump\n        count is count + 1\n\nsupervisor App\n    strategy is one_for_one\n    children\n        Worker\n\n*main\n    App_start()\n    log(App_restart_count())\n",
+    );
+    assert_eq!(out.trim(), "0", "expected restart_count==0, got {out:?}");
+}
+
+#[test]
+fn supervisor_one_for_all_strategy_compiles() {
+    let out = compile_and_run_in_dir(
+        "actor A\n    n as i64\n    @ping\n        n is n + 1\n\nactor B\n    n as i64\n    @ping\n        n is n + 1\n\nsupervisor S\n    strategy is one_for_all\n    children\n        A\n        B\n\n*main\n    S_start()\n    log(S_restart_count())\n",
+    );
+    assert_eq!(out.trim(), "0");
+}
+
+#[test]
+fn supervisor_unknown_child_errors() {
+    let err = expect_compile_fail(
+        "supervisor App\n    strategy is one_for_one\n    children\n        Nope\n\n*main\n    App_start()\n",
+    );
+    assert!(
+        err.contains("unknown child") || err.contains("Nope"),
+        "expected unknown-child error, got: {err}"
+    );
+}
+
+// ── R8: Addable / arithmetic operand validation ──
+
+#[test]
+fn r8_arith_rejects_bool_add() {
+    let err = expect_compile_fail("*main\n    log(true + false)\n");
+    assert!(
+        err.contains("operator `+` not defined") && err.contains("bool"),
+        "expected `+ not defined` error for bool+bool, got: {err}"
+    );
+}
+
+#[test]
+fn r8_arith_rejects_bool_mul() {
+    let err = expect_compile_fail("*main\n    log(true * false)\n");
+    assert!(
+        err.contains("operator `*` not defined") && err.contains("bool"),
+        "expected `* not defined` error for bool*bool, got: {err}"
+    );
+}
+
+#[test]
+fn r8_arith_string_minus_string_rejected() {
+    let err = expect_compile_fail("*main\n    log(\"a\" - \"b\")\n");
+    assert!(
+        err.contains("operator `-` not defined") && err.contains("String"),
+        "expected `- not defined` error for String-String, got: {err}"
+    );
+}
+
+#[test]
+fn r8_arith_int_plus_int_ok() {
+    let out = compile_and_run_in_dir("*main\n    log(1 + 2)\n");
+    assert_eq!(out.trim(), "3");
+}
+
+#[test]
+fn r8_arith_string_concat_ok() {
+    let out = compile_and_run_in_dir("*main\n    log(\"a\" + \"b\")\n");
+    assert_eq!(out.trim(), "ab");
+}
+
+// ── asm path smoke (ROADMAP: A.3 "Asm path unverified") ──
+
+#[test]
+fn asm_block_nop_compiles_and_runs() {
+    // Verify inline-asm codegen path works end-to-end for a trivial nop.
+    // Operand-reference forms (e.g. `mov $42, $0`) are presently fragile due
+    // to the parser tokenizing the template; this test pins down the minimal
+    // working contract.
+    let out = compile_and_run_in_dir("*main\n    asm\n        nop\n    log(0)\n");
+    assert_eq!(out.trim(), "0");
 }
