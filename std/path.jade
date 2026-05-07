@@ -45,7 +45,9 @@ DOT   is 46   # .
     if p.length equals 0
         return "."
     last is p.length
-    while last > 1 and p.char_at(last - 1) equals SLASH
+    while last > 1
+        if p.char_at(last - 1) neq SLASH
+            break
         last is last - 1
     i is last - 1
     while i >= 0
@@ -63,7 +65,9 @@ DOT   is 46   # .
     if p.length equals 0
         return ""
     last is p.length
-    while last > 1 and p.char_at(last - 1) equals SLASH
+    while last > 1
+        if p.char_at(last - 1) neq SLASH
+            break
         last is last - 1
     i is last - 1
     while i >= 0
@@ -109,7 +113,9 @@ DOT   is 46   # .
 # ── Predicates ───────────────────────────────────────────────
 
 *is_absolute(p as String) returns bool
-    p.length > 0 and p.char_at(0) equals SLASH
+    if p.length equals 0
+        return false
+    p.char_at(0) equals SLASH
 
 *is_relative(p as String) returns bool
     not is_absolute(p)
@@ -119,7 +125,13 @@ DOT   is 46   # .
 
 *is_hidden(p as String) returns bool
     b is base(p)
-    b.length > 0 and b.char_at(0) equals DOT and (b.length equals 1 or b.char_at(1) neq DOT)
+    if b.length equals 0
+        return false
+    if b.char_at(0) neq DOT
+        return false
+    if b.length equals 1
+        return true
+    b.char_at(1) neq DOT
 
 # ── Normalization ────────────────────────────────────────────
 
@@ -143,14 +155,16 @@ DOT   is 46   # .
 
 *__normalize_part(result as Vec of String, part as String, abs as bool)
     if part equals ".."
-        if result.length > 0 and result.get(result.length - 1) neq ".."
-            result.pop()
-            return
+        if result.length > 0
+            if result.get(result.length - 1) neq ".."
+                result.pop()
+                return
         if not abs
             result.push(part)
         return
-    if part neq "." and part.length > 0
-        result.push(part)
+    if part neq "."
+        if part.length > 0
+            result.push(part)
 
 # ── Relative path ────────────────────────────────────────────
 
@@ -162,7 +176,11 @@ DOT   is 46   # .
     a is normalize(base).split("/")
     b is normalize(target).split("/")
     common is 0
-    while common < a.length and common < b.length and a.get(common) equals b.get(common)
+    while common < a.length
+        if common >= b.length
+            break
+        if a.get(common) neq b.get(common)
+            break
         common is common + 1
     out is vec()
     i is common
@@ -191,7 +209,11 @@ DOT   is 46   # .
     pb is b.split("/")
     out is vec()
     i is 0
-    while i < pa.length and i < pb.length and pa.get(i) equals pb.get(i)
+    while i < pa.length
+        if i >= pb.length
+            break
+        if pa.get(i) neq pb.get(i)
+            break
         out.push(pa.get(i))
         i is i + 1
     s is ""

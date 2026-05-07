@@ -55,12 +55,16 @@ type Duration
 
     *to_string returns String
         if self.nanos < 1000
-            return "" + self.nanos + "ns"
+            ns_v is self.nanos
+            return '{ns_v}ns'
         if self.nanos < 1000000
-            return "" + (self.nanos / 1000) + "µs"
+            us_v is self.nanos / 1000
+            return '{us_v}µs'
         if self.nanos < 1000000000
-            return "" + (self.nanos / 1000000) + "ms"
-        "" + (self.nanos / 1000000000) + "s"
+            ms_v is self.nanos / 1000000
+            return '{ms_v}ms'
+        s_v is self.nanos / 1000000000
+        '{s_v}s'
 
 # Constructors with explicit units.
 *nanos(n as i64) returns Duration
@@ -107,11 +111,11 @@ type Instant
 # Read the monotonic clock. Result is opaque — only useful for
 # differencing with another Instant.
 *instant returns Instant
-    Instant(nanos is __time_monotonic())
+    Instant(nanos is __time_monotonic() as i64)
 
 # Convenience: time elapsed since a prior instant.
 *since(earlier as Instant) returns Duration
-    Duration(nanos is __time_monotonic() - earlier.nanos)
+    Duration(nanos is (__time_monotonic() as i64) - earlier.nanos)
 
 # ── Wall clock (use only for logs/serialization) ─────────────
 
@@ -141,13 +145,13 @@ type Instant
 
 # ── Legacy helpers (deprecated, prefer Instant/Duration) ─────
 
-# Old API: returns raw monotonic nanoseconds. Kept so existing
+# Old API: returns raw monotonic seconds (f64). Kept so existing
 # benchmarks compile; new code should use `instant()` / `since()`.
-*monotonic returns i64
+*monotonic returns f64
     __time_monotonic()
 
-*elapsed(start as i64) returns i64
+*elapsed(start as f64) returns f64
     __time_monotonic() - start
 
-*elapsed_ms(start as i64) returns i64
-    ((__time_monotonic() - start) / 1000000.0) as i64
+*elapsed_ms(start as f64) returns i64
+    ((__time_monotonic() - start) * 1000.0) as i64

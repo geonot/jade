@@ -111,5 +111,6 @@ impl Parser {
 mod placeholder;
 mod pratt;
 mod primary;
+mod parse_primary;
 
 pub(super) use placeholder::*;
