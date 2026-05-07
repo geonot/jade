@@ -195,6 +195,15 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             }
             Expr::NamedArg(_, e, _) | Expr::Spread(e, _) => walk_expr(e, refs, defs),
             Expr::OfCall(a, b, _) => {
+                if let Expr::Ident(name, _) = a.as_ref() {
+                    match &*name.as_str() {
+                        "fields" | "size" | "type" => {
+                            walk_expr(b, refs, defs);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
                 walk_expr(a, refs, defs);
                 walk_expr(b, refs, defs);
             }
@@ -232,18 +241,8 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                 }
             }
             Expr::DispatchBlock(_, body, _) => walk_block(body, refs, defs),
-            Expr::Query(base, clauses, _) => {
+            Expr::Query(base, _clauses, _) => {
                 walk_expr(base, refs, defs);
-                for c in clauses {
-                    match c {
-                        crate::ast::QueryClause::Where(e, _)
-                        | crate::ast::QueryClause::Limit(e, _)
-                        | crate::ast::QueryClause::Take(e, _)
-                        | crate::ast::QueryClause::Skip(e, _) => walk_expr(e, refs, defs),
-                        crate::ast::QueryClause::Set(_, e, _) => walk_expr(e, refs, defs),
-                        _ => {}
-                    }
-                }
             }
             _ => {} // Int, Float, Str, Bool, None, Void, Embed, Placeholder, etc.
         }
@@ -494,6 +493,9 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
         "panic",
         "type_of",
         "size_of",
+        "fields",
+        "size",
+        "type",
         "true",
         "false",
         "None",

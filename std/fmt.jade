@@ -219,41 +219,42 @@
 #
 # Accepts %s, %d, %x, %% (literal %).
 
-*__printf_one(out as String, spec as i64, arg as String) returns String
-    if spec equals 37
-        return out + "%"
-    if spec equals 115
-        return out + arg
-    if spec equals 100
-        return out + arg
-    if spec equals 120
-        return out + __fmt_hex(__parse_dec(arg))
-    out
-
 *printf(format as String, args as Vec of String) returns String
     out is ""
     i is 0
     arg_idx is 0
     while i < format.length
         c is format.char_at(i)
-        is_pct is false
         if c equals 37
             if i + 1 < format.length
-                is_pct is true
-        if is_pct
-            spec is format.char_at(i + 1)
-            arg is ""
-            if spec equals 37
-                out is __printf_one(out, spec, arg)
-            else
+                spec is format.char_at(i + 1)
+                if spec equals 37
+                    out is out + "%"
+                    i is i + 2
+                    continue
+                arg is ""
+                if spec equals 100
+                    arg is "0"
                 if arg_idx < args.length
                     arg is args.get(arg_idx)
-                out is __printf_one(out, spec, arg)
                 arg_idx is arg_idx + 1
-            i is i + 2
-        else
-            out is out + format.slice(i, i + 1)
-            i is i + 1
+                if spec equals 115
+                    out is out + arg
+                    i is i + 2
+                    continue
+                if spec equals 100
+                    out is out + arg
+                    i is i + 2
+                    continue
+                if spec equals 120
+                    out is out + __fmt_hex(__parse_dec(arg))
+                    i is i + 2
+                    continue
+                out is out + format.slice(i, i + 2)
+                i is i + 2
+                continue
+        out is out + format.slice(i, i + 1)
+        i is i + 1
     out
 
 *__parse_dec(s as String) returns i64

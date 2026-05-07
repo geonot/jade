@@ -78,6 +78,11 @@ double jade_bits_to_f64(int64_t bits) {
     return val;
 }
 
+const char *jade_getenv_or_empty(const char *name) {
+    const char *value = getenv(name);
+    return value ? value : "";
+}
+
 static int cmp_i64_asc(const void *a, const void *b) {
     int64_t lhs = *(const int64_t *)a;
     int64_t rhs = *(const int64_t *)b;

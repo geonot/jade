@@ -37,6 +37,7 @@ impl Typer {
                 }))
             }
             "log" => Some(self.lower_simple_builtin(args, hir::BuiltinFn::Log, Type::Void, span)),
+            "print" => Some(self.lower_simple_builtin(args, hir::BuiltinFn::Print, Type::Void, span)),
             "to_string" => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::ToString, Type::String, span))
             }
@@ -171,15 +172,21 @@ impl Typer {
                     span,
                 }))
             }
-            "signal_handle" if args.len() == 2 && !self.fns.contains_key(name) => Some(
+            "__signal_handle" | "signal_handle" if args.len() == 2 && !self.fns.contains_key(name) => Some(
                 self.lower_simple_builtin(args, hir::BuiltinFn::SignalHandle, Type::Void, span),
             ),
-            "signal_raise" if args.len() == 1 && !self.fns.contains_key(name) => {
+            "__signal_raise" | "signal_raise" if args.len() == 1 && !self.fns.contains_key(name) => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::SignalRaise, Type::I32, span))
             }
-            "signal_ignore" if args.len() == 1 && !self.fns.contains_key(name) => Some(
+            "__signal_ignore" | "signal_ignore" if args.len() == 1 && !self.fns.contains_key(name) => Some(
                 self.lower_simple_builtin(args, hir::BuiltinFn::SignalIgnore, Type::Void, span),
             ),
+            "__signal_default" | "signal_default" if args.len() == 1 && !self.fns.contains_key(name) => Some(
+                self.lower_simple_builtin(args, hir::BuiltinFn::SignalDefault, Type::Void, span),
+            ),
+            "__signal_kill" | "signal_kill" if args.len() == 2 && !self.fns.contains_key(name) => {
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::SignalKill, Type::I32, span))
+            }
             "popcount" | "clz" | "ctz" | "rotate_left" | "rotate_right" | "bswap" => {
                 let builtin = match name {
                     "popcount" => hir::BuiltinFn::Popcount,

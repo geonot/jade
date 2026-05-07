@@ -77,6 +77,7 @@ impl PerceusPass {
                 let escapes = !matches!(
                     builtin,
                     BuiltinFn::Log
+                        | BuiltinFn::Print
                         | BuiltinFn::ToString
                         | BuiltinFn::Popcount
                         | BuiltinFn::Clz
@@ -95,6 +96,8 @@ impl PerceusPass {
                         | BuiltinFn::CheckedMul
                         | BuiltinFn::SignalRaise
                         | BuiltinFn::SignalIgnore
+                        | BuiltinFn::SignalDefault
+                        | BuiltinFn::SignalKill
                 );
                 for a in args {
                     if escapes {

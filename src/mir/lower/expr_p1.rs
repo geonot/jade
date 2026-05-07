@@ -343,6 +343,10 @@ impl Lowerer {
                         // codegen can determine the format specifier for printing.
                         self.emit(InstKind::Log(v), arg_ty, span)
                     }
+                    BuiltinFn::Print => {
+                        let name = Symbol::intern("__builtin_Print");
+                        self.emit(InstKind::Call(name, vals), ty, span)
+                    }
                     BuiltinFn::Assert => {
                         let v = vals
                             .into_iter()

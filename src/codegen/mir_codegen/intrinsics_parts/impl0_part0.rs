@@ -147,6 +147,15 @@ impl<'ctx> Compiler<'ctx> {
                 let val_ty = self.value_types.get(&args[0]).cloned().unwrap_or(Type::I64);
                 return Ok(Some(self.emit_to_string(val, &val_ty)?));
             }
+            "Print" => {
+                if args.is_empty() {
+                    return Ok(None);
+                }
+                let val = self.val(args[0]);
+                let val_ty = self.value_types.get(&args[0]).cloned().unwrap_or(Type::I64);
+                self.emit_print(val, &val_ty)?;
+                return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+            }
             "FmtHex" => {
                 if args.is_empty() {
                     return Ok(None);
@@ -284,11 +293,16 @@ impl<'ctx> Compiler<'ctx> {
                     return Ok(None);
                 }
                 let signum = self.val(args[0]).into_int_value();
-                let handler = self.val(args[1]).into_pointer_value();
                 let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let i32t = self.ctx.i32_type();
                 let ft = ptr_t.fn_type(&[i32t.into(), ptr_t.into()], false);
                 let sig32 = b!(self.bld.build_int_truncate(signum, i32t, "sig32"));
+                let handler_val = self.val(args[1]);
+                let handler = match handler_val {
+                    BasicValueEnum::PointerValue(ptr) => ptr,
+                    BasicValueEnum::IntValue(int) => b!(self.bld.build_int_to_ptr(int, ptr_t, "handler_ptr")),
+                    _ => return Err("signal_handle() handler must be a function pointer".into()),
+                };
                 let func = self.module.get_function("signal").unwrap_or_else(|| {
                     self.module.add_function(
                         "signal",
@@ -347,6 +361,55 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_call(func, &[sig32.into(), sig_ign.into()], ""));
                 return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+            }
+            "SignalDefault" => {
+                if args.is_empty() {
+                    return Ok(None);
+                }
+                let signum = self.val(args[0]).into_int_value();
+                let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                let i32t = self.ctx.i32_type();
+                let ft = ptr_t.fn_type(&[i32t.into(), ptr_t.into()], false);
+                let sig32 = b!(self.bld.build_int_truncate(signum, i32t, "sig32"));
+                let sig_dfl = b!(self.bld.build_int_to_ptr(
+                    self.ctx.i64_type().const_int(0, false),
+                    ptr_t,
+                    "sig_dfl"
+                ));
+                let func = self.module.get_function("signal").unwrap_or_else(|| {
+                    self.module.add_function(
+                        "signal",
+                        ft,
+                        Some(inkwell::module::Linkage::External),
+                    )
+                });
+                b!(self
+                    .bld
+                    .build_call(func, &[sig32.into(), sig_dfl.into()], ""));
+                return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+            }
+            "SignalKill" => {
+                if args.len() < 2 {
+                    return Ok(None);
+                }
+                let pid = self.val(args[0]).into_int_value();
+                let signum = self.val(args[1]).into_int_value();
+                let i32t = self.ctx.i32_type();
+                let ft = i32t.fn_type(&[i32t.into(), i32t.into()], false);
+                let pid32 = b!(self.bld.build_int_truncate(pid, i32t, "pid32"));
+                let sig32 = b!(self.bld.build_int_truncate(signum, i32t, "sig32"));
+                let func = self.module.get_function("kill").unwrap_or_else(|| {
+                    self.module.add_function(
+                        "kill",
+                        ft,
+                        Some(inkwell::module::Linkage::External),
+                    )
+                });
+                let r = b!(self.bld.build_call(func, &[pid32.into(), sig32.into()], "kill"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void");
+                return Ok(Some(r));
             }
             "Ln" | "Log2" | "Log10" | "Exp" | "Exp2" => {
                 if args.is_empty() {

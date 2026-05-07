@@ -23,7 +23,6 @@ use crate::typer::Typer;
 use super::cli::*;
 use super::project::*;
 use super::sources::{EntityIndex, merge_source_files, load_packages, resolve_modules, resolve_implicit_imports};
-use super::undef::collect_undefined_refs;
 
 
 pub(super) fn compile_and_link(

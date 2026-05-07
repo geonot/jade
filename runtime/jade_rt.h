@@ -414,6 +414,7 @@ int64_t jade_ovector_get(void *ovector, int64_t idx);
 /* runtime/util.c */
 int64_t jade_f64_to_bits(double val);
 double jade_bits_to_f64(int64_t bits);
+const char *jade_getenv_or_empty(const char *name);
 void jade_sort_i64(int64_t *data, int64_t len);
 void jade_sort_f64(double *data, int64_t len);
 /* runtime/terminal.c */

@@ -39,23 +39,23 @@ SIGWINCH is 28
 
 # Install a Jade closure as the handler for `sig`.
 *handle(sig as i32, handler)
-    signal_handle(sig, handler)
+    __signal_handle(sig, handler)
 
 # Set the disposition to SIG_IGN — the kernel discards the signal.
 *ignore(sig as i32)
-    signal_ignore(sig)
+    __signal_ignore(sig)
 
 # Restore the kernel's default behavior for `sig`.
 *reset(sig as i32)
-    signal_default(sig)
+    __signal_default(sig)
 
 # Send a signal to the current process.
 *raise(sig as i32) returns i32
-    signal_raise(sig)
+    __signal_raise(sig)
 
 # Send a signal to another process by PID.
 *kill(pid as i64, sig as i32) returns i32
-    signal_kill(pid as i32, sig)
+    __signal_kill(pid as i32, sig)
 
 # ── Convenience handlers ─────────────────────────────────────
 
@@ -114,4 +114,4 @@ SIGWINCH is 28
         return "SIGTSTP"
     if sig equals SIGWINCH
         return "SIGWINCH"
-    "SIG" + sig
+    "SIG{sig}"

@@ -446,6 +446,7 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuiltinFn {
     Log,
+    Print,
     ToString,
     RcAlloc,
     RcRetain,
@@ -467,6 +468,8 @@ pub enum BuiltinFn {
     SignalHandle,
     SignalRaise,
     SignalIgnore,
+    SignalDefault,
+    SignalKill,
     Popcount,
     Clz,
     Ctz,

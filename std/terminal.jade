@@ -21,6 +21,7 @@ extern *jade_terminal_size(out_cols as %i32, out_rows as %i32) returns i32
 extern *write(fd as i32, buf as %i8, len as i64) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
+extern *jade_getenv_or_empty(name as %i8) returns %i8
 
 ESC is "\x1b"
 CSI is "\x1b["
@@ -68,10 +69,10 @@ CSI is "\x1b["
 # ── 24-bit truecolor ─────────────────────────────────────────
 
 *rgb(r as i64, g as i64, b as i64, s as String) returns String
-    CSI + "38;2;" + r + ";" + g + ";" + b + "m" + s + CSI + "0m"
+    CSI + "38;2;{r};{g};{b}m" + s + CSI + "0m"
 
 *bg_rgb(r as i64, g as i64, b as i64, s as String) returns String
-    CSI + "48;2;" + r + ";" + g + ";" + b + "m" + s + CSI + "0m"
+    CSI + "48;2;{r};{g};{b}m" + s + CSI + "0m"
 
 # ── Text attributes ──────────────────────────────────────────
 
@@ -96,6 +97,9 @@ CSI is "\x1b["
 *reset returns String
     CSI + "0m"
 
+*__env(name as String) returns String
+    __string_from_ptr(extern.jade_getenv_or_empty(%name))
+
 # ── Screen control ───────────────────────────────────────────
 
 *clear
@@ -109,19 +113,19 @@ CSI is "\x1b["
 
 # Move cursor to absolute (row, col). 1-indexed (top-left = 1,1).
 *move_to(row as i64, col as i64)
-    print(CSI + row + ";" + col + "H")
+    print(CSI + "{row};{col}H")
 
 *move_up(n as i64)
-    print(CSI + n + "A")
+    print(CSI + "{n}A")
 
 *move_down(n as i64)
-    print(CSI + n + "B")
+    print(CSI + "{n}B")
 
 *move_right(n as i64)
-    print(CSI + n + "C")
+    print(CSI + "{n}C")
 
 *move_left(n as i64)
-    print(CSI + n + "D")
+    print(CSI + "{n}D")
 
 *save_cursor
     print(ESC + "7")
@@ -172,8 +176,8 @@ type Size
         extern.free(cols_buf)
         extern.free(rows_buf)
         return Size(cols is 80, rows is 24)
-    cols is __i32_load(cols_buf)
-    rows is __i32_load(rows_buf)
+    cols is @(cols_buf as %i32)
+    rows is @(rows_buf as %i32)
     extern.free(cols_buf)
     extern.free(rows_buf)
     Size(cols is cols, rows is rows)
@@ -185,14 +189,20 @@ type Size
     out is ""
     i is 0
     while i < s.length
-        if s.char_at(i) equals 27 and i + 1 < s.length and s.char_at(i + 1) equals 91
+        is_csi is false
+        if s.char_at(i) equals 27
+            if i + 1 < s.length
+                if s.char_at(i + 1) equals 91
+                    is_csi is true
+        if is_csi
             # CSI: skip until letter
             i is i + 2
             while i < s.length
                 c is s.char_at(i)
                 i is i + 1
-                if (c >= 64 and c <= 126)
-                    break
+                if c >= 64
+                    if c <= 126
+                        break
         else
             out is out + s.slice(i, i + 1)
             i is i + 1
@@ -209,7 +219,7 @@ type Size
 *color_enabled returns bool
     if not is_tty()
         return false
-    if __getenv("NO_COLOR").length > 0
+    if __env("NO_COLOR").length > 0
         return false
     true
 

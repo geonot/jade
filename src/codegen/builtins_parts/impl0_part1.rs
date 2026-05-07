@@ -398,18 +398,33 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
+    pub(in crate::codegen) fn ensure_kill(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        self.module.get_function("kill").unwrap_or_else(|| {
+            let i32t = self.ctx.i32_type();
+            let ft = i32t.fn_type(&[i32t.into(), i32t.into()], false);
+            self.module
+                .add_function("kill", ft, Some(inkwell::module::Linkage::External))
+        })
+    }
+
     pub(in crate::codegen) fn compile_signal_handle(
         &mut self,
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let signum = self.compile_expr(&args[0])?;
-        let handler = self.compile_expr(&args[1])?;
         let signal_fn = self.ensure_signal();
         let sig32 = b!(self.bld.build_int_truncate(
             signum.into_int_value(),
             self.ctx.i32_type(),
             "sig.trunc"
         ));
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let handler_val = self.compile_expr(&args[1])?;
+        let handler = match handler_val {
+            BasicValueEnum::PointerValue(ptr) => ptr,
+            BasicValueEnum::IntValue(int) => b!(self.bld.build_int_to_ptr(int, ptr_ty, "handler.ptr")),
+            _ => return Err("signal_handle() handler must be a function pointer".into()),
+        };
         b!(self
             .bld
             .build_call(signal_fn, &[sig32.into(), handler.into()], "sig"));
@@ -453,6 +468,50 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(signal_fn, &[sig32.into(), sig_ign.into()], "sig.ign"));
         Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    pub(in crate::codegen) fn compile_signal_default(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let signum = self.compile_expr(&args[0])?;
+        let signal_fn = self.ensure_signal();
+        let sig32 = b!(self.bld.build_int_truncate(
+            signum.into_int_value(),
+            self.ctx.i32_type(),
+            "sig.trunc"
+        ));
+        let sig_dfl = b!(self.bld.build_int_to_ptr(
+            self.ctx.i64_type().const_int(0, false),
+            self.ctx.ptr_type(AddressSpace::default()),
+            "sig.dfl"
+        ));
+        b!(self
+            .bld
+            .build_call(signal_fn, &[sig32.into(), sig_dfl.into()], "sig.dfl"));
+        Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
+    pub(in crate::codegen) fn compile_signal_kill(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let pid = self.compile_expr(&args[0])?;
+        let signum = self.compile_expr(&args[1])?;
+        let kill_fn = self.ensure_kill();
+        let i32t = self.ctx.i32_type();
+        let pid32 = b!(self
+            .bld
+            .build_int_truncate(pid.into_int_value(), i32t, "pid.trunc"));
+        let sig32 = b!(self
+            .bld
+            .build_int_truncate(signum.into_int_value(), i32t, "sig.trunc"));
+        Ok(b!(self
+            .bld
+            .build_call(kill_fn, &[pid32.into(), sig32.into()], "kill"))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: call returned void"))
     }
 
     pub(in crate::codegen) fn compile_assert(&mut self, args: &[hir::Expr]) -> Result<BasicValueEnum<'ctx>, String> {

@@ -12,6 +12,7 @@ impl<'ctx> Compiler<'ctx> {
                 Err("actor builtins are dispatched via ExprKind, not BuiltinFn".into())
             }
             hir::BuiltinFn::Log => self.compile_log(args),
+            hir::BuiltinFn::Print => self.compile_print(args),
             hir::BuiltinFn::ToString => {
                 if args.len() != 1 {
                     return Err("to_string() takes 1 argument".into());
@@ -138,6 +139,18 @@ impl<'ctx> Compiler<'ctx> {
                     return Err("signal_ignore() takes 1 argument".into());
                 }
                 self.compile_signal_ignore(args)
+            }
+            hir::BuiltinFn::SignalDefault => {
+                if args.len() != 1 {
+                    return Err("signal_default() takes 1 argument".into());
+                }
+                self.compile_signal_default(args)
+            }
+            hir::BuiltinFn::SignalKill => {
+                if args.len() != 2 {
+                    return Err("signal_kill() takes 2 arguments".into());
+                }
+                self.compile_signal_kill(args)
             }
             hir::BuiltinFn::Popcount
             | hir::BuiltinFn::Clz

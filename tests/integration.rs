@@ -2440,6 +2440,27 @@ fn comptime_type_of_string() {
     expect("*main\n    s is 'hello'\n    log(type of s)\n", "String");
 }
 
+#[test]
+fn auto_import_qualified_fmt_without_use() {
+    expect("*main\n    log(fmt.hex(255))\n", "ff");
+}
+
+#[test]
+fn auto_import_rejects_bare_std_function() {
+    let err = expect_compile_fail("*main\n    log(hex(255))\n");
+    assert!(err.contains("undefined function") && err.contains("hex"));
+}
+
+#[test]
+fn auto_import_qualified_signal_name_without_use() {
+    expect("*main\n    log(signal.name(signal.SIGINT))\n", "SIGINT");
+}
+
+#[test]
+fn auto_import_qualified_terminal_size_without_use() {
+    expect("*main\n    sz is terminal.size()\n    log(sz.cols > 0)\n", "1");
+}
+
 // ── Atomic Keyword Binding ──────────────────────────────────────
 
 #[test]

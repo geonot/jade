@@ -22,6 +22,19 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }
 
+    pub(crate) fn compile_print(
+        &mut self,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if args.is_empty() {
+            return Err("print() requires an argument".into());
+        }
+        let val = self.compile_expr(&args[0])?;
+        let ty = &args[0].ty;
+        self.emit_print(val, ty)?;
+        Ok(self.ctx.i64_type().const_int(0, false).into())
+    }
+
     pub(crate) fn emit_log(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -64,6 +77,50 @@ impl<'ctx> Compiler<'ctx> {
         Ok(val)
     }
 
+    pub(crate) fn emit_print(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let printf = crate::codegen::fn_or_die(&self.module, "printf");
+        let fmt = self.fmt_for_ty_no_newline(ty);
+        let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt.print"));
+        if matches!(ty, Type::String) {
+            let len = self.string_len(val)?.into_int_value();
+            let len_i32 = b!(self
+                .bld
+                .build_int_truncate(len, self.ctx.i32_type(), "slen32"));
+            let data = self.string_data(val)?;
+            b!(self.bld.build_call(
+                printf,
+                &[fs.as_pointer_value().into(), len_i32.into(), data.into()],
+                "print"
+            ));
+        } else {
+            let print_val: BasicMetadataValueEnum<'ctx> = if matches!(ty, Type::Bool) {
+                let iv = val.into_int_value();
+                let ext = if iv.get_type().get_bit_width() == 1 {
+                    b!(self.bld.build_int_z_extend(iv, self.ctx.i32_type(), "bext"))
+                } else {
+                    iv
+                };
+                ext.into()
+            } else if matches!(ty, Type::F32) {
+                let fv = val.into_float_value();
+                let f64t = self.ctx.f64_type();
+                b!(self.bld.build_float_ext(fv, f64t, "fpext")).into()
+            } else {
+                val.into()
+            };
+            b!(self.bld.build_call(
+                printf,
+                &[fs.as_pointer_value().into(), print_val],
+                "print"
+            ));
+        }
+        Ok(val)
+    }
+
     pub(crate) fn fmt_for_ty(&self, ty: &Type) -> &'static str {
         match ty {
             Type::I64 => "%ld\n",
@@ -74,6 +131,19 @@ impl<'ctx> Compiler<'ctx> {
             Type::Bool => "%d\n",
             Type::String => "%.*s\n",
             _ => "%ld\n",
+        }
+    }
+
+    pub(crate) fn fmt_for_ty_no_newline(&self, ty: &Type) -> &'static str {
+        match ty {
+            Type::I64 => "%ld",
+            Type::I32 | Type::I16 | Type::I8 => "%d",
+            Type::U64 => "%lu",
+            Type::U32 | Type::U16 | Type::U8 => "%u",
+            Type::F64 | Type::F32 => "%f",
+            Type::Bool => "%d",
+            Type::String => "%.*s",
+            _ => "%ld",
         }
     }
 
