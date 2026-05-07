@@ -1,34 +1,54 @@
-# std.regex — Regular expressions via PCRE2 extern FFI
+# std.regex — Regular expressions (PCRE2-backed)
 #
-# String literal patterns are compiled at compile time.
-# Dynamic patterns are compiled at runtime.
+# Compiled regex objects are cached as opaque PCRE2 handles. The
+# compile cost is amortized when the same pattern is reused. For
+# string literal patterns, the Jade compiler emits the compile call
+# at module init time.
 #
 # Usage:
-#   use regex
-#
-#   if text.matches '[0-9]+'
-#       log 'found number'
-#
-#   results is text.find_all '[a-z]+'
-#   replaced is text.replace_re '[0-9]+', 'NUM'
+#   re is regex.compile("\\d+")
+#   regex.is_match(text, "[a-z]+")
+#   regex.find_first(text, "\\w+")
+#   regex.find_all(text, "\\d+")
+#   regex.captures(text, "(\\w+)=(\\d+)")
+#   regex.replace_all(text, "\\d+", "N")
+#   regex.split(text, "\\s+")
 
-# PCRE2 extern bindings
+# Flag bits — combine with `|`.
+FLAG_CASELESS    is 0x00000008
+FLAG_MULTILINE   is 0x00000400
+FLAG_DOTALL      is 0x00000020
+FLAG_EXTENDED    is 0x00000080
+FLAG_UNGREEDY    is 0x00040000
+FLAG_UTF         is 0x00080000
+
+# PCRE2 extern bindings.
 extern *pcre2_compile_8(pattern as %i8, length as i64, options as i64, errcode as %i32, erroffset as %i64, ctx as %void) returns %void
 extern *pcre2_match_8(code as %void, subject as %i8, length as i64, startoffset as i64, options as i64, match_data as %void, ctx as %void) returns i32
 extern *pcre2_match_data_create_from_pattern_8(code as %void, ctx as %void) returns %void
 extern *pcre2_match_data_free_8(match_data as %void)
 extern *pcre2_code_free_8(code as %void)
 extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %void
+extern *pcre2_substring_number_from_name_8(code as %void, name as %i8) returns i32
 extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
 
-# Compile a regex pattern, returns opaque handle
+# ── Compile / handle ─────────────────────────────────────────
+
+# Returns 0 on compile failure.
 *compile(pattern as String) returns i64
+    compile_with(pattern, 0)
+
+*compile_with(pattern as String, flags as i64) returns i64
     errcode is 0
     erroffset is 0 as i64
-    code is extern.pcre2_compile_8(%pattern, pattern.length, 0, %errcode, %erroffset, 0 as %void) as i64
-    code
+    extern.pcre2_compile_8(%pattern, pattern.length, flags, %errcode, %erroffset, 0 as %void) as i64
 
-# Test if a string matches a pattern
+*free(code as i64)
+    if code neq 0
+        extern.pcre2_code_free_8(code as %void)
+
+# ── Match predicates ─────────────────────────────────────────
+
 *is_match(text as String, pattern as String) returns Bool
     code is compile(pattern)
     if code equals 0
@@ -39,8 +59,9 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     rc > 0
 
-# Find the first match in a string
-*find(text as String, pattern as String) returns String
+# ── Find ─────────────────────────────────────────────────────
+
+*find_first(text as String, pattern as String) returns String
     code is compile(pattern)
     if code equals 0
         return ''
@@ -51,14 +72,17 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
         extern.pcre2_code_free_8(code as %void)
         return ''
     ovector is extern.pcre2_get_ovector_pointer_8(md)
-    start is extern.jade_ovector_get(ovector, 0)
-    end_pos is extern.jade_ovector_get(ovector, 1)
-    result is text.slice(start, end_pos)
+    s is extern.jade_ovector_get(ovector, 0)
+    e is extern.jade_ovector_get(ovector, 1)
+    out is text.slice(s, e)
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
-    result
+    out
 
-# Find all non-overlapping matches
+# Backwards-compat alias.
+*find(text as String, pattern as String) returns String
+    find_first(text, pattern)
+
 *find_all(text as String, pattern as String) returns Vec of String
     results is vec()
     code is compile(pattern)
@@ -71,13 +95,174 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
         if rc < 1
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
-        start is extern.jade_ovector_get(ovector, 0)
-        end_pos is extern.jade_ovector_get(ovector, 1)
-        results.push(text.slice(start, end_pos))
-        if end_pos equals offset
-            offset is offset + 1
-        else
-            offset is end_pos
+        s is extern.jade_ovector_get(ovector, 0)
+        e is extern.jade_ovector_get(ovector, 1)
+        results.push(text.slice(s, e))
+        offset is e equals offset ? offset + 1 ! e
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
     results
+
+# ── Captures ─────────────────────────────────────────────────
+
+# Returns a Vec where index 0 is the full match and 1..N are capture
+# groups. Empty Vec on no match.
+*captures(text as String, pattern as String) returns Vec of String
+    out is vec()
+    code is compile(pattern)
+    if code equals 0
+        return out
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    if rc < 1
+        extern.pcre2_match_data_free_8(md)
+        extern.pcre2_code_free_8(code as %void)
+        return out
+    ovector is extern.pcre2_get_ovector_pointer_8(md)
+    i is 0
+    while i < rc
+        s is extern.jade_ovector_get(ovector, i * 2)
+        e is extern.jade_ovector_get(ovector, i * 2 + 1)
+        out.push(text.slice(s, e))
+        i is i + 1
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
+    out
+
+# Same as `captures` but returns all matches in the input.
+*captures_all(text as String, pattern as String) returns Vec of Vec of String
+    out is vec()
+    code is compile(pattern)
+    if code equals 0
+        return out
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    offset is 0
+    while offset < text.length
+        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        if rc < 1
+            break
+        ovector is extern.pcre2_get_ovector_pointer_8(md)
+        groups is vec()
+        i is 0
+        while i < rc
+            s is extern.jade_ovector_get(ovector, i * 2)
+            e is extern.jade_ovector_get(ovector, i * 2 + 1)
+            groups.push(text.slice(s, e))
+            i is i + 1
+        out.push(groups)
+        end_pos is extern.jade_ovector_get(ovector, 1)
+        offset is end_pos equals offset ? offset + 1 ! end_pos
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
+    out
+
+# ── Replace ──────────────────────────────────────────────────
+
+# Replace all non-overlapping matches with `replacement` (literal).
+# To use captures in the replacement, prefer `replace_with`.
+*replace_all(text as String, pattern as String, replacement as String) returns String
+    code is compile(pattern)
+    if code equals 0
+        return text
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    out is ""
+    offset is 0
+    while offset <= text.length
+        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        if rc < 1
+            out is out + text.slice(offset, text.length)
+            break
+        ovector is extern.pcre2_get_ovector_pointer_8(md)
+        s is extern.jade_ovector_get(ovector, 0)
+        e is extern.jade_ovector_get(ovector, 1)
+        out is out + text.slice(offset, s) + replacement
+        offset is e equals s ? s + 1 ! e
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
+    out
+
+# Replace using a callback that receives the full match string and
+# returns its replacement.
+*replace_with(text as String, pattern as String, fn) returns String
+    code is compile(pattern)
+    if code equals 0
+        return text
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    out is ""
+    offset is 0
+    while offset <= text.length
+        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        if rc < 1
+            out is out + text.slice(offset, text.length)
+            break
+        ovector is extern.pcre2_get_ovector_pointer_8(md)
+        s is extern.jade_ovector_get(ovector, 0)
+        e is extern.jade_ovector_get(ovector, 1)
+        out is out + text.slice(offset, s) + fn(text.slice(s, e))
+        offset is e equals s ? s + 1 ! e
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
+    out
+
+# Replace only the first match.
+*replace_first(text as String, pattern as String, replacement as String) returns String
+    code is compile(pattern)
+    if code equals 0
+        return text
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    if rc < 1
+        extern.pcre2_match_data_free_8(md)
+        extern.pcre2_code_free_8(code as %void)
+        return text
+    ovector is extern.pcre2_get_ovector_pointer_8(md)
+    s is extern.jade_ovector_get(ovector, 0)
+    e is extern.jade_ovector_get(ovector, 1)
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
+    text.slice(0, s) + replacement + text.slice(e, text.length)
+
+# ── Split ────────────────────────────────────────────────────
+
+# Split on every match of `pattern`.
+*split(text as String, pattern as String) returns Vec of String
+    out is vec()
+    code is compile(pattern)
+    if code equals 0
+        out.push(text)
+        return out
+    md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
+    offset is 0
+    while offset <= text.length
+        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        if rc < 1
+            out.push(text.slice(offset, text.length))
+            break
+        ovector is extern.pcre2_get_ovector_pointer_8(md)
+        s is extern.jade_ovector_get(ovector, 0)
+        e is extern.jade_ovector_get(ovector, 1)
+        out.push(text.slice(offset, s))
+        offset is e equals s ? s + 1 ! e
+    extern.pcre2_match_data_free_8(md)
+    extern.pcre2_code_free_8(code as %void)
+    out
+
+# ── Convenience ──────────────────────────────────────────────
+
+# Escape regex metacharacters in `s` so it can be used as a literal pattern.
+*escape(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if __is_meta(c)
+            out is out + "\\" + s.slice(i, i + 1)
+        else
+            out is out + s.slice(i, i + 1)
+        i is i + 1
+    out
+
+*__is_meta(c as i64) returns bool
+    c equals 92 or c equals 46 or c equals 42 or c equals 43 or c equals 63
+    or c equals 40 or c equals 41 or c equals 91 or c equals 93 or c equals 123
+    or c equals 125 or c equals 124 or c equals 94 or c equals 36 or c equals 47

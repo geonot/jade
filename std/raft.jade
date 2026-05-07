@@ -1,0 +1,292 @@
+# std.raft — Raft consensus primitives (single-node state machine)
+#
+# Implements the Raft state machine and RPC payloads from the original
+# paper (Ongaro & Ousterhout, 2014). This module is transport-agnostic:
+# it exposes pure functions and message types so applications can plug in
+# their own network and persistence layers.
+#
+# Provided:
+#   * State enum: Follower / Candidate / Leader.
+#   * Persistent state: `current_term`, `voted_for`, `log[]`.
+#   * RPC types: `RequestVote`, `RequestVoteReply`, `AppendEntries`,
+#     `AppendEntriesReply`.
+#   * Pure transitions: `tick`, `handle_request_vote`,
+#     `handle_request_vote_reply`, `handle_append_entries`,
+#     `handle_append_entries_reply`, `start_election`, `become_leader`.
+#   * Log helpers: `last_index`, `last_term`, `term_at`, `truncate_from`.
+#   * Snapshot stubs (size-bounded log compaction).
+#
+# A full distributed implementation requires (a) a network shim that
+# round-trips the message types, and (b) durable storage for log + term
+# (use `std.fs` + `std.binary` or `std.sqlite`).
+#
+# References:
+#   - "In Search of an Understandable Consensus Algorithm" (Raft, 2014)
+#   - https://raft.github.io/raft.pdf
+#   - etcd Raft library
+
+# ── Server states ────────────────────────────────────────────
+
+FOLLOWER  is 0
+CANDIDATE is 1
+LEADER    is 2
+
+*state_name(s as i64) returns String
+    if s equals FOLLOWER
+        return "follower"
+    if s equals CANDIDATE
+        return "candidate"
+    "leader"
+
+# ── Log entry ────────────────────────────────────────────────
+
+type LogEntry
+    term as i64
+    index as i64
+    command as String     # opaque, application-defined
+
+# ── Persistent state ─────────────────────────────────────────
+
+# Modified only after fsync to durable storage in production.
+type Persistent
+    current_term as i64
+    voted_for as String          # "" if none
+    log as Vec of LogEntry       # 1-indexed; entry 0 is sentinel
+
+    *last_index returns i64
+        self.log.length - 1
+
+    *last_term returns i64
+        if self.log.length equals 0
+            return 0
+        self.log.get(self.log.length - 1).term
+
+    *term_at(idx as i64) returns i64
+        if idx < 0 or idx >= self.log.length
+            return 0
+        self.log.get(idx).term
+
+    *truncate_from(idx as i64)
+        while self.log.length > idx
+            self.log.pop()
+
+    *append(entry as LogEntry)
+        self.log.push(entry)
+
+# ── Volatile state ───────────────────────────────────────────
+
+type Volatile
+    commit_index as i64
+    last_applied as i64
+
+# Per-peer leader state.
+type LeaderState
+    next_index as Map of i64        # peer_id → next log index to send
+    match_index as Map of i64       # peer_id → highest replicated index
+
+# ── Server (composes the above) ──────────────────────────────
+
+type Server
+    id as String
+    peers as Vec of String
+    state as i64                          # FOLLOWER | CANDIDATE | LEADER
+    persistent as Persistent
+    volatile as Volatile
+    leader as LeaderState
+    leader_id as String
+    votes_granted as i64
+    election_timeout_ms as i64
+    heartbeat_interval_ms as i64
+    elapsed_ms as i64
+
+# ── Constructors ─────────────────────────────────────────────
+
+*new_server(id as String, peers as Vec of String) returns Server
+    sentinel is LogEntry(term is 0, index is 0, command is "")
+    log is vec()
+    log.push(sentinel)
+    p is Persistent(current_term is 0, voted_for is "", log is log)
+    v is Volatile(commit_index is 0, last_applied is 0)
+    l is LeaderState(next_index is map(), match_index is map())
+    Server(
+        id is id,
+        peers is peers,
+        state is FOLLOWER,
+        persistent is p,
+        volatile is v,
+        leader is l,
+        leader_id is "",
+        votes_granted is 0,
+        election_timeout_ms is 300,
+        heartbeat_interval_ms is 50,
+        elapsed_ms is 0,
+    )
+
+# ── RPC: RequestVote ─────────────────────────────────────────
+
+type RequestVote
+    term as i64
+    candidate_id as String
+    last_log_index as i64
+    last_log_term as i64
+
+type RequestVoteReply
+    term as i64
+    vote_granted as bool
+
+# Handle an incoming RequestVote. Returns the reply and (mutates `s`).
+*handle_request_vote(s as Server, req as RequestVote) returns RequestVoteReply
+    if req.term > s.persistent.current_term
+        __become_follower(s, req.term)
+    if req.term < s.persistent.current_term
+        return RequestVoteReply(term is s.persistent.current_term, vote_granted is false)
+    can_vote is s.persistent.voted_for.length equals 0 or s.persistent.voted_for equals req.candidate_id
+    log_ok is __candidate_log_up_to_date(s, req.last_log_index, req.last_log_term)
+    if can_vote and log_ok
+        s.persistent.voted_for is req.candidate_id
+        s.elapsed_ms is 0
+        return RequestVoteReply(term is s.persistent.current_term, vote_granted is true)
+    RequestVoteReply(term is s.persistent.current_term, vote_granted is false)
+
+*handle_request_vote_reply(s as Server, reply as RequestVoteReply)
+    if reply.term > s.persistent.current_term
+        __become_follower(s, reply.term)
+        return
+    if s.state neq CANDIDATE
+        return
+    if reply.vote_granted
+        s.votes_granted is s.votes_granted + 1
+        if s.votes_granted * 2 > (s.peers.length + 1)
+            become_leader(s)
+
+# ── RPC: AppendEntries (also used as heartbeat when entries empty) ──
+
+type AppendEntries
+    term as i64
+    leader_id as String
+    prev_log_index as i64
+    prev_log_term as i64
+    entries as Vec of LogEntry
+    leader_commit as i64
+
+type AppendEntriesReply
+    term as i64
+    success as bool
+    match_index as i64
+
+*handle_append_entries(s as Server, req as AppendEntries) returns AppendEntriesReply
+    if req.term > s.persistent.current_term
+        __become_follower(s, req.term)
+    if req.term < s.persistent.current_term
+        return AppendEntriesReply(term is s.persistent.current_term, success is false, match_index is 0)
+    s.elapsed_ms is 0
+    s.leader_id is req.leader_id
+    s.state is FOLLOWER
+    # Log matching property
+    if req.prev_log_index > s.persistent.last_index()
+        return AppendEntriesReply(term is s.persistent.current_term, success is false, match_index is 0)
+    if s.persistent.term_at(req.prev_log_index) neq req.prev_log_term
+        return AppendEntriesReply(term is s.persistent.current_term, success is false, match_index is 0)
+    # Append entries (with conflict-truncation per §5.3)
+    i is 0
+    while i < req.entries.length
+        e is req.entries.get(i)
+        if e.index <= s.persistent.last_index()
+            if s.persistent.term_at(e.index) neq e.term
+                s.persistent.truncate_from(e.index)
+                s.persistent.append(e)
+        else
+            s.persistent.append(e)
+        i is i + 1
+    if req.leader_commit > s.volatile.commit_index
+        s.volatile.commit_index is __min(req.leader_commit, s.persistent.last_index())
+    AppendEntriesReply(term is s.persistent.current_term, success is true, match_index is s.persistent.last_index())
+
+*handle_append_entries_reply(s as Server, peer as String, reply as AppendEntriesReply)
+    if reply.term > s.persistent.current_term
+        __become_follower(s, reply.term)
+        return
+    if s.state neq LEADER
+        return
+    if reply.success
+        s.leader.match_index.set(peer, reply.match_index)
+        s.leader.next_index.set(peer, reply.match_index + 1)
+        __advance_commit_index(s)
+    else
+        cur is s.leader.next_index.get(peer)
+        if cur > 1
+            s.leader.next_index.set(peer, cur - 1)
+
+# ── Time-driven transitions ──────────────────────────────────
+
+# Advance the local clock; callers should invoke once per tick.
+# Returns true if the server changed state or wants to send messages.
+*tick(s as Server, dt_ms as i64) returns bool
+    s.elapsed_ms is s.elapsed_ms + dt_ms
+    if s.state equals LEADER
+        if s.elapsed_ms >= s.heartbeat_interval_ms
+            s.elapsed_ms is 0
+            return true
+        return false
+    if s.elapsed_ms >= s.election_timeout_ms
+        start_election(s)
+        return true
+    false
+
+*start_election(s as Server)
+    s.state is CANDIDATE
+    s.persistent.current_term is s.persistent.current_term + 1
+    s.persistent.voted_for is s.id
+    s.votes_granted is 1
+    s.elapsed_ms is 0
+
+*become_leader(s as Server)
+    s.state is LEADER
+    s.leader_id is s.id
+    s.elapsed_ms is 0
+    next is s.persistent.last_index() + 1
+    loop s.peers
+        s.leader.next_index.set($, next)
+        s.leader.match_index.set($, 0)
+
+# ── Client API: propose a command (only valid on the leader) ──
+
+# Returns the index where the entry was appended, or 0 if not leader.
+*propose(s as Server, command as String) returns i64
+    if s.state neq LEADER
+        return 0
+    idx is s.persistent.last_index() + 1
+    s.persistent.append(LogEntry(term is s.persistent.current_term, index is idx, command is command))
+    idx
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*__become_follower(s as Server, term as i64)
+    s.state is FOLLOWER
+    s.persistent.current_term is term
+    s.persistent.voted_for is ""
+    s.votes_granted is 0
+    s.elapsed_ms is 0
+
+*__candidate_log_up_to_date(s as Server, last_idx as i64, last_term as i64) returns bool
+    my_term is s.persistent.last_term()
+    if last_term neq my_term
+        return last_term > my_term
+    last_idx >= s.persistent.last_index()
+
+*__advance_commit_index(s as Server)
+    # Find highest N such that majority of match_index >= N and log[N].term == current_term.
+    n is s.persistent.last_index()
+    while n > s.volatile.commit_index
+        if s.persistent.term_at(n) equals s.persistent.current_term
+            count is 1
+            loop s.peers
+                if s.leader.match_index.get($) >= n
+                    count is count + 1
+            if count * 2 > (s.peers.length + 1)
+                s.volatile.commit_index is n
+                return
+        n is n - 1
+
+*__min(a as i64, b as i64) returns i64
+    a < b ? a ! b

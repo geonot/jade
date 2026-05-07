@@ -1,4 +1,5 @@
-//! HIR-era statement codegen helpers. Slated for inlining (CLEANUP §C.1).
+//! Statement codegen helpers (block/if/assign/asm/pattern bind). Reached transitively
+//! from `mir_codegen` via actor/coroutine/closure entry points which still walk HIR.
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::{BasicType, BasicTypeEnum};

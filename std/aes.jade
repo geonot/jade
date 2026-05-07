@@ -1,0 +1,139 @@
+# std.aes — AES symmetric encryption (GCM and CBC modes)
+#
+# AES-256-GCM is the preferred AEAD construction: provides confidentiality
+# and authenticity in one pass. AES-256-CBC is provided for legacy
+# interoperability only — it is not authenticated and must be paired with
+# an HMAC (encrypt-then-MAC) when used.
+#
+# Keys are 32 bytes (raw). GCM nonces are 12 bytes. CBC IVs are 16 bytes.
+# Inputs and outputs are raw byte strings unless `_hex` suffix indicates
+# hex encoding. Use `std.crypto.random_bytes` to generate keys/nonces and
+# `std.hex` for textual encoding.
+#
+# Usage:
+#   key is crypto.random_bytes(32)
+#   iv  is crypto.random_bytes(12)
+#   r   is aes.gcm_encrypt(key, iv, "secret message", "")
+#   pt  is aes.gcm_decrypt(key, iv, r.ciphertext, "", r.tag)
+
+extern *jade_aes_gcm_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
+extern *jade_aes_gcm_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
+extern *jade_aes_cbc_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, out as %i8) returns i64
+extern *jade_aes_cbc_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, out as %i8) returns i64
+extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+# ── Result types ─────────────────────────────────────────────
+
+# Raw GCM output. `ciphertext` is the same length as plaintext; `tag` is 16 bytes.
+type GcmResult
+    ciphertext as String
+    tag as String
+    ok as bool
+
+# Hex-encoded GCM output (for textual storage / wire formats).
+type GcmHex
+    ciphertext as String
+    tag as String
+    ok as bool
+
+# ── AES-256-GCM (preferred) ──────────────────────────────────
+
+# Raw-bytes interface. key must be 32 bytes, iv must be 12 bytes.
+*gcm_encrypt(key as String, iv as String, plaintext as String, aad as String) returns GcmResult
+    if key.length neq 32
+        return GcmResult(ciphertext is "", tag is "", ok is false)
+    if iv.length neq 12
+        return GcmResult(ciphertext is "", tag is "", ok is false)
+    ct_buf is extern.malloc(plaintext.length + 16)
+    tag_buf is extern.malloc(16)
+    ct_len is extern.jade_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    if ct_len < 0
+        extern.free(ct_buf)
+        extern.free(tag_buf)
+        return GcmResult(ciphertext is "", tag is "", ok is false)
+    ct_str is __string_from_ptr_len(ct_buf, ct_len)
+    tag_str is __string_from_ptr_len(tag_buf, 16)
+    extern.free(ct_buf)
+    extern.free(tag_buf)
+    GcmResult(ciphertext is ct_str, tag is tag_str, ok is true)
+
+# Returns plaintext or empty string on auth failure.
+*gcm_decrypt(key as String, iv as String, ciphertext as String, aad as String, tag as String) returns String
+    if key.length neq 32 or iv.length neq 12 or tag.length neq 16
+        return ""
+    pt_buf is extern.malloc(ciphertext.length + 1)
+    pt_len is extern.jade_aes_gcm_decrypt(%key, %iv, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
+    if pt_len < 0
+        extern.free(pt_buf)
+        return ""
+    result is __string_from_ptr_len(pt_buf, pt_len)
+    extern.free(pt_buf)
+    result
+
+# Hex-encoded variants for storing/transmitting as text.
+*gcm_encrypt_hex(key as String, iv as String, plaintext as String, aad as String) returns GcmHex
+    r is gcm_encrypt(key, iv, plaintext, aad)
+    if not r.ok
+        return GcmHex(ciphertext is "", tag is "", ok is false)
+    GcmHex(ciphertext is __bytes_to_hex(r.ciphertext), tag is __bytes_to_hex(r.tag), ok is true)
+
+*gcm_decrypt_hex(key as String, iv as String, ciphertext_hex as String, aad as String, tag_hex as String) returns String
+    ct is __hex_to_bytes(ciphertext_hex)
+    tag is __hex_to_bytes(tag_hex)
+    gcm_decrypt(key, iv, ct, aad, tag)
+
+# ── AES-256-CBC (legacy / interop only — NOT authenticated) ─
+
+# Encrypts plaintext with PKCS#7 padding. iv must be 16 bytes.
+*cbc_encrypt(key as String, iv as String, plaintext as String) returns String
+    if key.length neq 32 or iv.length neq 16
+        return ""
+    out_buf is extern.malloc(plaintext.length + 32)
+    n is extern.jade_aes_cbc_encrypt(%key, %iv, %plaintext, plaintext.length, out_buf)
+    if n < 0
+        extern.free(out_buf)
+        return ""
+    result is __string_from_ptr_len(out_buf, n)
+    extern.free(out_buf)
+    result
+
+*cbc_decrypt(key as String, iv as String, ciphertext as String) returns String
+    if key.length neq 32 or iv.length neq 16
+        return ""
+    out_buf is extern.malloc(ciphertext.length + 1)
+    n is extern.jade_aes_cbc_decrypt(%key, %iv, %ciphertext, ciphertext.length, out_buf)
+    if n < 0
+        extern.free(out_buf)
+        return ""
+    result is __string_from_ptr_len(out_buf, n)
+    extern.free(out_buf)
+    result
+
+# ── Internal hex helpers ─────────────────────────────────────
+
+*__bytes_to_hex(data as String) returns String
+    if data.length equals 0
+        return ""
+    hex_buf is extern.malloc(data.length * 2 + 1)
+    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(hex_buf)
+    result
+
+*__hex_to_bytes(hex as String) returns String
+    if hex.length equals 0
+        return ""
+    if hex.length mod 2 neq 0
+        return ""
+    n is hex.length / 2
+    buf is extern.malloc(n)
+    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    if rc < 0
+        extern.free(buf)
+        return ""
+    result is __string_from_ptr_len(buf, n)
+    extern.free(buf)
+    result

@@ -1,0 +1,214 @@
+# std.random — Pseudo-random number generation
+#
+# Default generator: xoshiro256** (1.8 ns / call, 2^256 period, passes
+# BigCrush). Suitable for simulation, games, sampling. NOT suitable for
+# cryptography — use `std.crypto.random_bytes` for keys, nonces, tokens.
+#
+# Usage:
+#   r is random.seed(42)
+#   x is r.next_u64()
+#   p is r.next_f64()        # uniform [0, 1)
+#   d is r.range(1, 7)       # uniform [1, 7)
+#   roll is random.gaussian(r, 0.0, 1.0)
+
+# ── xoshiro256** core ────────────────────────────────────────
+
+*__rotl(x, k)
+    (x << k) | (x >> (64 - k))
+
+type RNG
+    s0
+    s1
+    s2
+    s3
+
+    *next_u64
+        result is __rotl(self.s1 * 5, 7) * 9
+        t is self.s1 << 17
+        self.s2 is self.s2 ^ self.s0
+        self.s3 is self.s3 ^ self.s1
+        self.s1 is self.s1 ^ self.s2
+        self.s0 is self.s0 ^ self.s3
+        self.s2 is self.s2 ^ t
+        self.s3 is __rotl(self.s3, 45)
+        result
+
+    *next_i64
+        self.next_u64()
+
+    # Uniform double in [0, 1) — uses top 53 bits.
+    *next_f64
+        (self.next_u64() >> 11) as f64 * 5.421010862427522e-20
+
+    # Uniform integer in [lo, hi). Caller ensures hi > lo.
+    *range(lo, hi)
+        span is hi - lo
+        if span <= 0
+            return lo
+        r is self.next_u64()
+        if r < 0
+            r is 0 - r
+        lo + (r mod span)
+
+    # Uniform float in [lo, hi).
+    *range_f64(lo, hi)
+        lo + self.next_f64() * (hi - lo)
+
+    # Coin flip.
+    *flip
+        self.next_u64() >> 63 equals 1
+
+    # Bernoulli trial with probability p.
+    *bernoulli(p)
+        self.next_f64() < p
+
+    # Jump 2^128 steps ahead — useful for parallel streams.
+    *jump
+        JUMP_0 is 0x180ec6d33cfd0aba
+        JUMP_1 is 0xd5a61266f0c9392c
+        JUMP_2 is 0xa9582618e03fc9aa
+        JUMP_3 is 0x39abdc4529b1661c
+        s0 is 0
+        s1 is 0
+        s2 is 0
+        s3 is 0
+        b is 0
+        while b < 64
+            if (JUMP_0 >> b) & 1 equals 1
+                s0 is s0 ^ self.s0
+                s1 is s1 ^ self.s1
+                s2 is s2 ^ self.s2
+                s3 is s3 ^ self.s3
+            self.next_u64()
+            b is b + 1
+        b is 0
+        while b < 64
+            if (JUMP_1 >> b) & 1 equals 1
+                s0 is s0 ^ self.s0
+                s1 is s1 ^ self.s1
+                s2 is s2 ^ self.s2
+                s3 is s3 ^ self.s3
+            self.next_u64()
+            b is b + 1
+        b is 0
+        while b < 64
+            if (JUMP_2 >> b) & 1 equals 1
+                s0 is s0 ^ self.s0
+                s1 is s1 ^ self.s1
+                s2 is s2 ^ self.s2
+                s3 is s3 ^ self.s3
+            self.next_u64()
+            b is b + 1
+        b is 0
+        while b < 64
+            if (JUMP_3 >> b) & 1 equals 1
+                s0 is s0 ^ self.s0
+                s1 is s1 ^ self.s1
+                s2 is s2 ^ self.s2
+                s3 is s3 ^ self.s3
+            self.next_u64()
+            b is b + 1
+        self.s0 is s0
+        self.s1 is s1
+        self.s2 is s2
+        self.s3 is s3
+
+# ── Constructors ─────────────────────────────────────────────
+
+# SplitMix64 used to expand a single u64 seed into the 256-bit state.
+*seed(n) returns RNG
+    z is n
+    z is (z ^ (z >> 30)) * -4658895280553007687
+    s0 is z
+    z is (z ^ (z >> 27)) * -7723592293110705685
+    s1 is z
+    z is z ^ (z >> 31)
+    s2 is z
+    z is (z * -4658895280553007687) ^ (z >> 30)
+    s3 is z
+    RNG(s0, s1, s2, s3)
+
+# Seed from the OS time — convenient for "good enough" non-determinism.
+*from_time returns RNG
+    seed(__time_monotonic())
+
+# Seed from cryptographic randomness — best general-purpose choice.
+*from_os returns RNG
+    a is __random_u64()
+    b is __random_u64()
+    c is __random_u64()
+    d is __random_u64()
+    RNG(a, b, c, d)
+
+# ── Higher-level samplers ────────────────────────────────────
+
+*shuffle(rng as RNG, arr)
+    i is arr.length - 1
+    while i > 0
+        j is rng.range(0, i + 1)
+        tmp is arr.get(i)
+        arr.set(i, arr.get(j))
+        arr.set(j, tmp)
+        i is i - 1
+    arr
+
+*choice(rng as RNG, arr)
+    idx is rng.range(0, arr.length)
+    arr.get(idx)
+
+# Sample k distinct elements from arr without replacement (reservoir sampling).
+*sample(rng as RNG, arr, k as i64)
+    out is vec()
+    if k <= 0 or arr.length equals 0
+        return out
+    n is k < arr.length ? k ! arr.length
+    i is 0
+    while i < n
+        out.push(arr.get(i))
+        i is i + 1
+    while i < arr.length
+        j is rng.range(0, i + 1)
+        if j < n
+            out.set(j, arr.get(i))
+        i is i + 1
+    out
+
+# Standard normal via Box-Muller.
+*gaussian(rng as RNG, mean as f64, stddev as f64) returns f64
+    u1 is rng.next_f64()
+    u2 is rng.next_f64()
+    if u1 < 1.0e-300
+        u1 is 1.0e-300
+    z is __sqrt(-2.0 * __ln(u1)) * __cos(6.283185307179586 * u2)
+    mean + z * stddev
+
+# Exponential distribution with given rate λ.
+*exponential(rng as RNG, lambda as f64) returns f64
+    u is rng.next_f64()
+    if u < 1.0e-300
+        u is 1.0e-300
+    -__ln(u) / lambda
+
+# Random ASCII alphanumeric string of n chars (NOT cryptographic).
+*string(rng as RNG, n as i64) returns String
+    chars is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    out is ""
+    i is 0
+    while i < n
+        idx is rng.range(0, 62)
+        out is out + chars.slice(idx, idx + 1)
+        i is i + 1
+    out
+
+# Weighted choice: pick index i with probability weights[i] / sum(weights).
+*weighted(rng as RNG, weights as Vec of f64) returns i64
+    total is 0.0
+    loop weights
+        total is total + $
+    target is rng.next_f64() * total
+    acc is 0.0
+    loop weights
+        acc is acc + $
+        if target < acc
+            return $$
+    weights.length - 1

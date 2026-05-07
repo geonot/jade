@@ -1,56 +1,79 @@
-# std.path — Path manipulation
+# std.path — Filesystem path manipulation
+#
+# Pure-string path operations — no I/O. For existence checks, listing,
+# walking, and metadata, see `std.fs`.
 #
 # Usage:
-#   full is path.join("src", "main.jade")
-#   dir is path.dir("/home/user/file.txt")   # "/home/user"
-#   base is path.base("/home/user/file.txt")  # "file.txt"
-#   ext is path.ext("file.txt")               # ".txt"
+#   path.join("src", "main.jade")        # "src/main.jade"
+#   path.dir("/etc/hosts")               # "/etc"
+#   path.base("/etc/hosts")              # "hosts"
+#   path.ext("file.tar.gz")              # ".gz"
+#   path.normalize("/a/./b/../c")        # "/a/c"
+#   path.relative("/a/b", "/a/b/c/d")    # "c/d"
 
 SLASH is 47   # /
-DOT is 46     # .
+DOT   is 46   # .
 
-*join(a as String, b as String)
+# ── Joining ──────────────────────────────────────────────────
+
+*join(a as String, b as String) returns String
     if a.length equals 0
         return b
     if b.length equals 0
         return a
+    # Absolute b discards a.
+    if b.char_at(0) equals SLASH
+        return b
     a.char_at(a.length - 1) equals SLASH ? a + b ! a + "/" + b
 
-*join3(a as String, b as String, c as String)
+*join3(a as String, b as String, c as String) returns String
     join(join(a, b), c)
 
-*dir(path as String)
-    if path.length equals 0
+*join_all(parts as Vec of String) returns String
+    if parts.length equals 0
+        return ""
+    out is parts.get(0)
+    i is 1
+    while i < parts.length
+        out is join(out, parts.get(i))
+        i is i + 1
+    out
+
+# ── Decomposition ────────────────────────────────────────────
+
+*dir(p as String) returns String
+    if p.length equals 0
         return "."
-    # Strip trailing slashes
-    last is path.length
-    while last > 1 and path.char_at(last - 1) equals SLASH
+    last is p.length
+    while last > 1 and p.char_at(last - 1) equals SLASH
         last is last - 1
     i is last - 1
     while i >= 0
-        if path.char_at(i) equals SLASH
+        if p.char_at(i) equals SLASH
             if i equals 0
                 return "/"
-            return path.slice(0, i)
+            return p.slice(0, i)
         i is i - 1
     "."
 
-*base(path as String)
-    if path.length equals 0
+*parent(p as String) returns String
+    dir(p)
+
+*base(p as String) returns String
+    if p.length equals 0
         return ""
-    # Strip trailing slashes
-    last is path.length
-    while last > 1 and path.char_at(last - 1) equals SLASH
+    last is p.length
+    while last > 1 and p.char_at(last - 1) equals SLASH
         last is last - 1
     i is last - 1
     while i >= 0
-        if path.char_at(i) equals SLASH
-            return path.slice(i + 1, last)
+        if p.char_at(i) equals SLASH
+            return p.slice(i + 1, last)
         i is i - 1
-    path.slice(0, last)
+    p.slice(0, last)
 
-*ext(path as String)
-    b is base(path)
+*ext(p as String) returns String
+    b is base(p)
     i is b.length - 1
     while i > 0
         if b.char_at(i) equals DOT
@@ -58,8 +81,8 @@ DOT is 46     # .
         i is i - 1
     ""
 
-*stem(path as String)
-    b is base(path)
+*stem(p as String) returns String
+    b is base(p)
     i is b.length - 1
     while i > 0
         if b.char_at(i) equals DOT
@@ -67,43 +90,113 @@ DOT is 46     # .
         i is i - 1
     b
 
-*with_ext(path as String, new_ext as String)
-    s is stem(path)
-    d is dir(path)
+*with_ext(p as String, new_ext as String) returns String
+    s is stem(p)
+    d is dir(p)
     if new_ext.length equals 0
         return join(d, s)
     if new_ext.char_at(0) neq DOT
         return join(d, s + "." + new_ext)
     join(d, s + new_ext)
 
-*is_absolute(path as String)
-    path.length > 0 and path.char_at(0) equals SLASH
+*with_name(p as String, new_name as String) returns String
+    join(dir(p), new_name)
 
-*is_relative(path as String)
-    not is_absolute(path)
+# Split a path into its individual segments. Leading "/" preserved as "".
+*segments(p as String) returns Vec of String
+    p.split("/")
 
+# ── Predicates ───────────────────────────────────────────────
+
+*is_absolute(p as String) returns bool
+    p.length > 0 and p.char_at(0) equals SLASH
+
+*is_relative(p as String) returns bool
+    not is_absolute(p)
+
+*is_dot(p as String) returns bool
+    p equals "." or p equals "./"
+
+*is_hidden(p as String) returns bool
+    b is base(p)
+    b.length > 0 and b.char_at(0) equals DOT and (b.length equals 1 or b.char_at(1) neq DOT)
+
+# ── Normalization ────────────────────────────────────────────
+
+# Resolve "." and ".." segments. Does not consult the filesystem.
 *normalize(p as String) returns String
+    abs is is_absolute(p)
     parts is p.split("/")
     result is vec()
     loop parts
-        __normalize_part(result, $)
+        __normalize_part(result, $, abs)
     out is ""
     loop result
         if $$ > 0
             out is out + "/"
         out is out + $
-    if p.length > 0 and p.char_at(0) equals SLASH
+    if abs
         return "/" + out
     if out.length equals 0
         return "."
     out
 
-*__normalize_part(result as Vec of String, part as String)
+*__normalize_part(result as Vec of String, part as String, abs as bool)
     if part equals ".."
         if result.length > 0 and result.get(result.length - 1) neq ".."
             result.pop()
             return
-        result.push(part)
+        if not abs
+            result.push(part)
         return
     if part neq "." and part.length > 0
         result.push(part)
+
+# ── Relative path ────────────────────────────────────────────
+
+# Compute the relative path from `base` to `target`. Both must be
+# absolute, or both relative; otherwise returns `target` unchanged.
+*relative(base as String, target as String) returns String
+    if is_absolute(base) neq is_absolute(target)
+        return target
+    a is normalize(base).split("/")
+    b is normalize(target).split("/")
+    common is 0
+    while common < a.length and common < b.length and a.get(common) equals b.get(common)
+        common is common + 1
+    out is vec()
+    i is common
+    while i < a.length
+        if a.get(i).length > 0
+            out.push("..")
+        i is i + 1
+    i is common
+    while i < b.length
+        if b.get(i).length > 0
+            out.push(b.get(i))
+        i is i + 1
+    if out.length equals 0
+        return "."
+    s is ""
+    loop out
+        if $$ > 0
+            s is s + "/"
+        s is s + $
+    s
+
+# ── Common prefix ────────────────────────────────────────────
+
+*common_prefix(a as String, b as String) returns String
+    pa is a.split("/")
+    pb is b.split("/")
+    out is vec()
+    i is 0
+    while i < pa.length and i < pb.length and pa.get(i) equals pb.get(i)
+        out.push(pa.get(i))
+        i is i + 1
+    s is ""
+    loop out
+        if $$ > 0
+            s is s + "/"
+        s is s + $
+    s

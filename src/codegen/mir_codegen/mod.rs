@@ -82,7 +82,7 @@ impl<'ctx> Compiler<'ctx> {
 
     // ── public entry point ─────────────────────────────────────────
 
-    /// Compile a full MIR program into the LLVM module owned by `self.comp`.
+    /// Compile a full MIR program into the LLVM module owned by `self`.
     pub fn compile_program(
         &mut self,
         prog: &mir::Program,
@@ -1130,7 +1130,7 @@ impl<'ctx> Compiler<'ctx> {
                         continue;
                     }
                     let val = if let Some(def_expr) = defaults.as_ref().and_then(|d| d.get(fname)) {
-                        self.compile_expr(def_expr)?
+                        self.compile_const_expr(def_expr)?
                     } else {
                         self.default_val(fty)
                     };

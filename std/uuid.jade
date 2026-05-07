@@ -1,0 +1,173 @@
+# std.uuid — UUID generation and parsing (RFC 9562)
+#
+# Supports v4 (random, the everyday default) and v7 (time-ordered random,
+# the modern default for database keys — sortable, locality-friendly).
+# Also parses arbitrary UUIDs and validates version/variant bits.
+#
+# Usage:
+#   id is uuid.v4()                         # "f47ac10b-58cc-4372-a567-..."
+#   ordered is uuid.v7()                    # time-ordered, k-sortable
+#   parsed is uuid.parse(id)
+#   ms is uuid.timestamp_ms(parsed)         # only meaningful for v7
+
+extern *jade_random_bytes(buf as %i8, n as i64) returns i32
+extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *time(t as %i8) returns i64
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+# 128-bit value, stored as 16 raw bytes.
+type Uuid
+    bytes as String
+
+    *to_string returns String
+        format(self)
+
+    *version returns i64
+        if self.bytes.length neq 16
+            return 0
+        (self.bytes.char_at(6) >> 4) & 15
+
+    *variant returns i64
+        # RFC 9562: variant '10' = standard.
+        if self.bytes.length neq 16
+            return 0
+        (self.bytes.char_at(8) >> 6) & 3
+
+    *is_nil returns bool
+        if self.bytes.length neq 16
+            return false
+        i is 0
+        while i < 16
+            if self.bytes.char_at(i) neq 0
+                return false
+            i is i + 1
+        true
+
+    *bytes_hex returns String
+        __bytes_to_hex(self.bytes)
+
+# ── Generators ───────────────────────────────────────────────
+
+# UUIDv4 — 122 random bits, 4 reserved bits set to indicate version+variant.
+*v4 returns String
+    buf is extern.malloc(16)
+    rc is extern.jade_random_bytes(buf, 16)
+    if rc neq 0
+        extern.free(buf)
+        return ""
+    raw is __string_from_ptr_len(buf, 16)
+    extern.free(buf)
+    raw is __set_byte(raw, 6, (raw.char_at(6) & 15) | 64)        # version 4
+    raw is __set_byte(raw, 8, (raw.char_at(8) & 63) | 128)       # variant 10
+    format(Uuid(bytes is raw))
+
+# UUIDv7 — Unix timestamp (ms) in the high 48 bits + 74 random bits.
+# Sortable, monotonic-ish, ideal for database primary keys.
+*v7 returns String
+    ms is __time_monotonic() / 1000000     # ns → ms (best-effort)
+    if ms <= 0
+        ms is extern.time(0 as %i8) * 1000
+    rand_buf is extern.malloc(10)
+    rc is extern.jade_random_bytes(rand_buf, 10)
+    if rc neq 0
+        extern.free(rand_buf)
+        return ""
+    rand is __string_from_ptr_len(rand_buf, 10)
+    extern.free(rand_buf)
+    raw is __build_v7_bytes(ms, rand)
+    format(Uuid(bytes is raw))
+
+# Build the canonical 16-byte UUIDv7 layout.
+*__build_v7_bytes(ms as i64, rand as String) returns String
+    # 6 bytes timestamp | 2 bytes (ver+rand) | 8 bytes (variant+rand)
+    out is ""
+    out is out + chr((ms >> 40) & 255)
+    out is out + chr((ms >> 32) & 255)
+    out is out + chr((ms >> 24) & 255)
+    out is out + chr((ms >> 16) & 255)
+    out is out + chr((ms >> 8) & 255)
+    out is out + chr(ms & 255)
+    # version (0111) in high nibble of byte 6
+    out is out + chr(112 | (rand.char_at(0) & 15))
+    out is out + chr(rand.char_at(1) & 255)
+    # variant (10) in top 2 bits of byte 8
+    out is out + chr(128 | (rand.char_at(2) & 63))
+    i is 3
+    while i < 10
+        out is out + chr(rand.char_at(i) & 255)
+        i is i + 1
+    out
+
+# ── Format / parse ───────────────────────────────────────────
+
+# Canonical 8-4-4-4-12 lowercase hex.
+*format(u as Uuid) returns String
+    if u.bytes.length neq 16
+        return ""
+    hex is __bytes_to_hex(u.bytes)
+    hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20, 32)
+
+# Strip dashes, validate, decode to Uuid. Empty bytes on parse failure.
+*parse(s as String) returns Uuid
+    clean is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c neq 45
+            clean is clean + s.slice(i, i + 1)
+        i is i + 1
+    if clean.length neq 32
+        return Uuid(bytes is "")
+    raw is __hex_to_bytes(clean)
+    if raw.length neq 16
+        return Uuid(bytes is "")
+    Uuid(bytes is raw)
+
+*is_valid(s as String) returns bool
+    parse(s).bytes.length equals 16
+
+# Extract Unix-millisecond timestamp from a v7 UUID. Returns 0 for non-v7.
+*timestamp_ms(u as Uuid) returns i64
+    if u.bytes.length neq 16
+        return 0
+    if ((u.bytes.char_at(6) >> 4) & 15) neq 7
+        return 0
+    ms is 0
+    i is 0
+    while i < 6
+        ms is (ms << 8) | (u.bytes.char_at(i) & 255)
+        i is i + 1
+    ms
+
+# Convenience constants.
+NIL is "00000000-0000-0000-0000-000000000000"
+MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+# ── Internal hex helpers ─────────────────────────────────────
+
+*__bytes_to_hex(data as String) returns String
+    if data.length equals 0
+        return ""
+    hex_buf is extern.malloc(data.length * 2 + 1)
+    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(hex_buf)
+    result
+
+*__hex_to_bytes(hex as String) returns String
+    if hex.length equals 0 or hex.length mod 2 neq 0
+        return ""
+    n is hex.length / 2
+    buf is extern.malloc(n)
+    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    if rc < 0
+        extern.free(buf)
+        return ""
+    result is __string_from_ptr_len(buf, n)
+    extern.free(buf)
+    result
+
+*__set_byte(s as String, i as i64, b as i64) returns String
+    s.slice(0, i) + chr(b & 255) + s.slice(i + 1, s.length)

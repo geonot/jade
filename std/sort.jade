@@ -1,9 +1,20 @@
-# std.sort — Introsort: quicksort + heapsort fallback + insertion sort
+# std.sort — Generic sorting algorithms
 #
-# Usage:
-#   sort.sort(my_array)
-#   sort.reverse(my_array)
-#   if sort.is_sorted(my_array) ...
+# Provides:
+#   * `sort`        – introsort over Vec of i64 (in-place, unstable)
+#   * `sort_f64`    – introsort over Vec of f64
+#   * `sort_by`     – sort with a comparator closure
+#   * `sort_strings`– lexicographic sort of String vec
+#   * `merge_sort`  – stable sort with comparator (O(n log n))
+#   * `is_sorted`, `reverse`, `binary_search`
+#
+# Sort-by-key idioms:
+#   sort.sort_by(items, fn(a, b) { a.priority - b.priority })
+#
+# `sort` chooses introsort: quicksort with a depth limit that falls back
+# to heapsort on bad pivots, with insertion sort for small partitions.
+
+# ── Public entry points (i64) ────────────────────────────────
 
 *sort(arr as Vec of i64)
     n is arr.length
@@ -24,13 +35,139 @@
         lo is lo + 1
         hi is hi - 1
 
-*is_sorted(arr as Vec of i64)
+*is_sorted(arr as Vec of i64) returns bool
     i is 1
     while i < arr.length
         if arr.get(i) < arr.get(i - 1)
             return false
         i is i + 1
     true
+
+# Standard binary search; returns index or -1.
+*binary_search(arr as Vec of i64, target as i64) returns i64
+    lo is 0
+    hi is arr.length - 1
+    while lo <= hi
+        mid is (lo + hi) / 2
+        v is arr.get(mid)
+        if v equals target
+            return mid
+        if v < target
+            lo is mid + 1
+        else
+            hi is mid - 1
+    -1
+
+# ── f64 sort (uses runtime helper if available) ──────────────
+
+extern *jade_sort_f64(data as %f64, len as i64)
+
+*sort_f64(arr as Vec of f64)
+    if arr.length <= 1
+        return
+    extern.jade_sort_f64(%arr, arr.length)
+
+# ── String sort ──────────────────────────────────────────────
+
+*sort_strings(arr as Vec of String)
+    n is arr.length
+    if n <= 1
+        return
+    __string_introsort(arr, 0, n - 1)
+
+*__string_introsort(arr as Vec of String, lo as i64, hi as i64)
+    if hi - lo < 16
+        i is lo + 1
+        while i <= hi
+            key is arr.get(i)
+            j is i - 1
+            while j >= lo and __str_lt(key, arr.get(j))
+                arr.set(j + 1, arr.get(j))
+                j is j - 1
+            arr.set(j + 1, key)
+            i is i + 1
+        return
+    pivot is arr.get((lo + hi) / 2)
+    i is lo
+    j is hi
+    while i <= j
+        while __str_lt(arr.get(i), pivot)
+            i is i + 1
+        while __str_lt(pivot, arr.get(j))
+            j is j - 1
+        if i <= j
+            tmp is arr.get(i)
+            arr.set(i, arr.get(j))
+            arr.set(j, tmp)
+            i is i + 1
+            j is j - 1
+    if lo < j
+        __string_introsort(arr, lo, j)
+    if i < hi
+        __string_introsort(arr, i, hi)
+
+*__str_lt(a as String, b as String) returns bool
+    n is a.length < b.length ? a.length ! b.length
+    i is 0
+    while i < n
+        ca is a.char_at(i)
+        cb is b.char_at(i)
+        if ca neq cb
+            return ca < cb
+        i is i + 1
+    a.length < b.length
+
+# ── Generic sort_by (mergesort, stable) ──────────────────────
+#
+# `cmp(a, b)` should return negative if a < b, zero if equal, positive
+# if a > b. Useful for sort-by-key on records.
+
+*sort_by(arr as Vec of i64, cmp)
+    n is arr.length
+    if n <= 1
+        return
+    aux is vec()
+    i is 0
+    while i < n
+        aux.push(0)
+        i is i + 1
+    __merge_sort_i64(arr, aux, 0, n - 1, cmp)
+
+*merge_sort(arr as Vec of i64, cmp)
+    sort_by(arr, cmp)
+
+*__merge_sort_i64(arr as Vec of i64, aux as Vec of i64, lo as i64, hi as i64, cmp)
+    if lo >= hi
+        return
+    mid is (lo + hi) / 2
+    __merge_sort_i64(arr, aux, lo, mid, cmp)
+    __merge_sort_i64(arr, aux, mid + 1, hi, cmp)
+    __merge_i64(arr, aux, lo, mid, hi, cmp)
+
+*__merge_i64(arr as Vec of i64, aux as Vec of i64, lo as i64, mid as i64, hi as i64, cmp)
+    i is lo
+    while i <= hi
+        aux.set(i, arr.get(i))
+        i is i + 1
+    i is lo
+    j is mid + 1
+    k is lo
+    while k <= hi
+        if i > mid
+            arr.set(k, aux.get(j))
+            j is j + 1
+        elif j > hi
+            arr.set(k, aux.get(i))
+            i is i + 1
+        elif cmp(aux.get(j), aux.get(i)) < 0
+            arr.set(k, aux.get(j))
+            j is j + 1
+        else
+            arr.set(k, aux.get(i))
+            i is i + 1
+        k is k + 1
+
+# ── Internal: introsort for i64 ──────────────────────────────
 
 *__introsort(arr as Vec of i64, lo as i64, hi as i64, depth_limit as i64)
     if hi - lo < 16

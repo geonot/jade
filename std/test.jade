@@ -1,0 +1,162 @@
+# std.test — Assertion library and test orchestration
+#
+# Complements Jade's built-in `*test` blocks with composable assertion
+# helpers, table-driven test runners, and a tiny matcher DSL.
+#
+# Usage:
+#   test "hello"
+#       test.equal(2 + 2, 4)
+#       test.contains("hello world", "world")
+#       test.throws(fn() { divide(1, 0) })
+#
+#   test "table-driven"
+#       cases is vec()
+#       cases.push(test.case("0", 0, "zero"))
+#       cases.push(test.case("1", 1, "one"))
+#       test.table(cases, fn(input) { name_of(input) })
+
+# ── Public assertion failure model ───────────────────────────
+
+# A failed assertion throws via `__panic` so the surrounding `*test` block
+# catches and records the failure. Each helper records the asserted
+# expression in the message for clear failure diagnostics.
+
+*equal(actual, expected)
+    if not __eq(actual, expected)
+        __fail("expected " + __repr(expected) + ", got " + __repr(actual))
+
+*not_equal(actual, expected)
+    if __eq(actual, expected)
+        __fail("expected NOT " + __repr(expected) + ", but got it")
+
+*is_true(cond as bool)
+    if not cond
+        __fail("expected true, got false")
+
+*is_false(cond as bool)
+    if cond
+        __fail("expected false, got true")
+
+*is_nil(value)
+    if value neq 0
+        __fail("expected nil, got " + __repr(value))
+
+*near(actual as f64, expected as f64, tolerance as f64)
+    diff is actual - expected
+    if diff < 0.0
+        diff is 0.0 - diff
+    if diff > tolerance
+        __fail("expected " + expected + " ± " + tolerance + ", got " + actual)
+
+*greater(actual, threshold)
+    if not (actual > threshold)
+        __fail("expected > " + __repr(threshold) + ", got " + __repr(actual))
+
+*less(actual, threshold)
+    if not (actual < threshold)
+        __fail("expected < " + __repr(threshold) + ", got " + __repr(actual))
+
+*contains(haystack as String, needle as String)
+    if haystack.find(needle) < 0
+        __fail("expected " + __repr(haystack) + " to contain " + __repr(needle))
+
+*starts_with(s as String, prefix as String)
+    if not s.starts_with(prefix)
+        __fail("expected " + __repr(s) + " to start with " + __repr(prefix))
+
+*ends_with(s as String, suffix as String)
+    if not s.ends_with(suffix)
+        __fail("expected " + __repr(s) + " to end with " + __repr(suffix))
+
+*has_length(arr, n as i64)
+    if arr.length neq n
+        __fail("expected length " + n + ", got " + arr.length)
+
+*empty(arr)
+    if arr.length neq 0
+        __fail("expected empty, got length " + arr.length)
+
+*non_empty(arr)
+    if arr.length equals 0
+        __fail("expected non-empty")
+
+# ── Exception assertions ─────────────────────────────────────
+
+# Run the closure and assert that it panics. Returns true on success.
+*throws(f) returns bool
+    rescued is false
+    try
+        f()
+    rescue
+        rescued is true
+    if not rescued
+        __fail("expected closure to panic, but it returned normally")
+    true
+
+*does_not_throw(f) returns bool
+    try
+        f()
+    rescue e
+        __fail("expected no panic, got: " + e.message)
+    true
+
+# ── Snapshot testing ─────────────────────────────────────────
+#
+# Compares stringified output against a stored snapshot file. On first
+# run with `JADE_UPDATE_SNAPSHOTS=1`, writes the snapshot.
+
+*snapshot(name as String, actual as String)
+    extern *getenv(name as %i8) returns %i8
+    path is "tests/snapshots/" + name + ".snap"
+    update is __getenv("JADE_UPDATE_SNAPSHOTS")
+    if update equals "1"
+        __write_file(path, actual)
+        return
+    expected is __read_file(path)
+    if expected neq actual
+        __fail("snapshot mismatch for " + name + "; rerun with JADE_UPDATE_SNAPSHOTS=1 to update")
+
+# ── Table-driven tests ───────────────────────────────────────
+
+type Case
+    name as String
+    input
+    want
+
+# Build a test case.
+*case(name as String, input, want) returns Case
+    Case(name is name, input is input, want is want)
+
+# Run `body(input)` for each case and assert the return equals `want`.
+*table(cases as Vec of Case, body)
+    loop cases
+        result is body($.input)
+        if not __eq(result, $.want)
+            __fail("case '" + $.name + "': expected " + __repr($.want) + ", got " + __repr(result))
+
+# ── Benchmarking helper ──────────────────────────────────────
+#
+# Returns nanoseconds per iteration, averaged over `iters` runs.
+
+*bench(iters as i64, body) returns i64
+    if iters <= 0
+        return 0
+    extern *jade_time_monotonic returns i64
+    start is __time_monotonic()
+    i is 0
+    while i < iters
+        body()
+        i is i + 1
+    elapsed is __time_monotonic() - start
+    elapsed / iters
+
+# ── Internal ─────────────────────────────────────────────────
+
+*__fail(msg as String)
+    __panic("test assertion failed: " + msg)
+
+*__eq(a, b) returns bool
+    a equals b
+
+*__repr(v) returns String
+    "" + v

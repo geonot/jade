@@ -36,6 +36,7 @@ fn main() {
         .file("runtime/regex_helper.c")
         .file("runtime/process.c")
         .file("runtime/util.c")
+        .file("runtime/terminal.c")
         .file("runtime/event.c")
         .file(asm_file)
         .opt_level(2)

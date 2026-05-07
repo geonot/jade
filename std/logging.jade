@@ -1,0 +1,289 @@
+# std.logging — Structured leveled logging
+#
+# A small but production-shaped logger:
+#   * Five levels (TRACE, DEBUG, INFO, WARN, ERROR).
+#   * Structured key-value fields attached per record.
+#   * Pluggable sinks (stderr by default; add files, rotating writers, etc).
+#   * JSON or human-friendly text output.
+#   * Module-scoped loggers via `with_name`.
+#   * Color when the sink is a TTY (NO_COLOR honored).
+#
+# Usage:
+#   log is logging.get("myapp")
+#   log.info("server started", map_of("port", "8080"))
+#   log.error("db down", map_of("host", host, "err", err))
+#   logging.set_level(logging.WARN)
+#   logging.set_format(logging.FORMAT_JSON)
+
+# ── Levels ───────────────────────────────────────────────────
+
+TRACE is 0
+DEBUG is 1
+INFO  is 2
+WARN  is 3
+ERROR is 4
+OFF   is 5
+
+FORMAT_TEXT is 0
+FORMAT_JSON is 1
+
+# Module-global state (single process-wide logger config).
+type _Config
+    level as i64
+    format as i64
+    use_color as bool
+    show_time as bool
+
+_state is _Config(level is INFO, format is FORMAT_TEXT, use_color is true, show_time is true)
+
+# ── Configuration ────────────────────────────────────────────
+
+*set_level(lvl as i64)
+    _state.level is lvl
+
+*level returns i64
+    _state.level
+
+*set_format(f as i64)
+    _state.format is f
+
+*set_color(enabled as bool)
+    _state.use_color is enabled
+
+*set_show_time(enabled as bool)
+    _state.show_time is enabled
+
+# ── Logger ───────────────────────────────────────────────────
+
+type Logger
+    name as String
+    fields as Map of String
+
+    *trace(msg as String, kv as Map of String)
+        emit(TRACE, self.name, msg, __merge(self.fields, kv))
+
+    *debug(msg as String, kv as Map of String)
+        emit(DEBUG, self.name, msg, __merge(self.fields, kv))
+
+    *info(msg as String, kv as Map of String)
+        emit(INFO, self.name, msg, __merge(self.fields, kv))
+
+    *warn(msg as String, kv as Map of String)
+        emit(WARN, self.name, msg, __merge(self.fields, kv))
+
+    *error(msg as String, kv as Map of String)
+        emit(ERROR, self.name, msg, __merge(self.fields, kv))
+
+    # Return a child logger that includes additional default fields.
+    *with(kv as Map of String) returns Logger
+        Logger(name is self.name, fields is __merge(self.fields, kv))
+
+# Convenience for callers that don't need structured fields.
+    *info_msg(msg as String)
+        emit(INFO, self.name, msg, map())
+
+    *warn_msg(msg as String)
+        emit(WARN, self.name, msg, map())
+
+    *error_msg(msg as String)
+        emit(ERROR, self.name, msg, map())
+
+# ── Constructors ─────────────────────────────────────────────
+
+*get(name as String) returns Logger
+    Logger(name is name, fields is map())
+
+# Default root logger (name == "").
+*root returns Logger
+    Logger(name is "", fields is map())
+
+# ── Emission ─────────────────────────────────────────────────
+
+# Format and write a record. Bypasses the logger object so it can also be
+# called from `log()` shorthand (below).
+*emit(lvl as i64, name as String, msg as String, fields as Map of String)
+    if lvl < _state.level
+        return
+    if _state.format equals FORMAT_JSON
+        eprint(__format_json(lvl, name, msg, fields))
+    else
+        eprint(__format_text(lvl, name, msg, fields))
+
+# Module-level shortcuts (use the root logger).
+*trace(msg as String)
+    emit(TRACE, "", msg, map())
+
+*debug(msg as String)
+    emit(DEBUG, "", msg, map())
+
+*info(msg as String)
+    emit(INFO, "", msg, map())
+
+*warn(msg as String)
+    emit(WARN, "", msg, map())
+
+*error(msg as String)
+    emit(ERROR, "", msg, map())
+
+# ── Formatting ───────────────────────────────────────────────
+
+*level_name(lvl as i64) returns String
+    if lvl equals TRACE
+        return "TRACE"
+    if lvl equals DEBUG
+        return "DEBUG"
+    if lvl equals INFO
+        return "INFO"
+    if lvl equals WARN
+        return "WARN"
+    if lvl equals ERROR
+        return "ERROR"
+    "OFF"
+
+*__level_color(lvl as i64) returns String
+    if lvl equals TRACE
+        return "\x1b[90m"
+    if lvl equals DEBUG
+        return "\x1b[36m"
+    if lvl equals INFO
+        return "\x1b[32m"
+    if lvl equals WARN
+        return "\x1b[33m"
+    if lvl equals ERROR
+        return "\x1b[31;1m"
+    ""
+
+*__format_text(lvl as i64, name as String, msg as String, fields as Map of String) returns String
+    out is ""
+    if _state.show_time
+        out is out + __timestamp() + " "
+    if _state.use_color
+        out is out + __level_color(lvl) + level_name(lvl) + "\x1b[0m"
+    else
+        out is out + level_name(lvl)
+    if name.length > 0
+        out is out + " [" + name + "]"
+    out is out + " " + msg
+    keys is fields.keys()
+    if keys.length > 0
+        out is out + "  "
+        loop keys
+            if $$ > 0
+                out is out + " "
+            out is out + $ + "=" + __quote_if_needed(fields.get($))
+    out
+
+*__format_json(lvl as i64, name as String, msg as String, fields as Map of String) returns String
+    out is "{"
+    if _state.show_time
+        out is out + "\"ts\":\"" + __timestamp() + "\","
+    out is out + "\"level\":\"" + level_name(lvl) + "\""
+    if name.length > 0
+        out is out + ",\"logger\":\"" + __json_escape(name) + "\""
+    out is out + ",\"msg\":\"" + __json_escape(msg) + "\""
+    keys is fields.keys()
+    loop keys
+        out is out + ",\"" + __json_escape($) + "\":\"" + __json_escape(fields.get($)) + "\""
+    out + "}"
+
+# ── Helpers ──────────────────────────────────────────────────
+
+*__merge(a as Map of String, b as Map of String) returns Map of String
+    out is map()
+    ka is a.keys()
+    loop ka
+        out.set($, a.get($))
+    kb is b.keys()
+    loop kb
+        out.set($, b.get($))
+    out
+
+*__quote_if_needed(s as String) returns String
+    needs is false
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 32 or c equals 34 or c equals 61
+            needs is true
+        i is i + 1
+    if needs
+        return "\"" + __escape_quotes(s) + "\""
+    s
+
+*__escape_quotes(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 34
+            out is out + "\\\""
+        else
+            out is out + s.slice(i, i + 1)
+        i is i + 1
+    out
+
+*__json_escape(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 34
+            out is out + "\\\""
+        elif c equals 92
+            out is out + "\\\\"
+        elif c equals 10
+            out is out + "\\n"
+        elif c equals 13
+            out is out + "\\r"
+        elif c equals 9
+            out is out + "\\t"
+        elif c < 32
+            out is out + " "
+        else
+            out is out + s.slice(i, i + 1)
+        i is i + 1
+    out
+
+# ISO-8601 UTC timestamp from current epoch seconds.
+*__timestamp returns String
+    extern *time(t as %i8) returns i64
+    t is extern.time(0 as %i8)
+    days is t / 86400
+    secs is t mod 86400
+    hh is secs / 3600
+    mm is (secs mod 3600) / 60
+    ss is secs mod 60
+    # Compute Y-M-D from days since epoch (1970-01-01).
+    ymd is __civil_from_days(days)
+    __pad4(ymd.get(0)) + "-" + __pad2(ymd.get(1)) + "-" + __pad2(ymd.get(2)) + "T" + __pad2(hh) + ":" + __pad2(mm) + ":" + __pad2(ss) + "Z"
+
+# Howard Hinnant's civil_from_days: O(1) date conversion.
+*__civil_from_days(z as i64) returns Vec of i64
+    z is z + 719468
+    era is z >= 0 ? z / 146097 ! (z - 146096) / 146097
+    doe is z - era * 146097
+    yoe is (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    y is yoe + era * 400
+    doy is doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp is (5 * doy + 2) / 153
+    d is doy - (153 * mp + 2) / 5 + 1
+    m is mp < 10 ? mp + 3 ! mp - 9
+    if m <= 2
+        y is y + 1
+    out is vec()
+    out.push(y)
+    out.push(m)
+    out.push(d)
+    out
+
+*__pad2(n as i64) returns String
+    n < 10 ? "0" + n ! "" + n
+
+*__pad4(n as i64) returns String
+    if n < 10
+        return "000" + n
+    if n < 100
+        return "00" + n
+    if n < 1000
+        return "0" + n
+    "" + n

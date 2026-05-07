@@ -1,294 +1,19 @@
-//! Compile-time evaluation of `comptime` expressions.
+//! Bottom-up constant folder over the HIR.
 
-use crate::intern::Symbol;
+use super::eval::try_eval_pure_call;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
 use crate::types::Type;
 use std::collections::HashMap;
+use crate::intern::Symbol;
 
-pub fn fold_program(prog: &mut hir::Program) {
-    // Build a map of pure functions for comptime evaluation
-    let pure_fns: HashMap<Symbol, hir::Fn> = prog
-        .fns
-        .iter()
-        .filter(|f| is_pure_fn(f))
-        .map(|f| (f.name.clone(), f.clone()))
-        .collect();
-
-    for f in &mut prog.fns {
-        fold_block_with_fns(&mut f.body, &pure_fns);
-    }
-    for td in &mut prog.types {
-        for m in &mut td.methods {
-            fold_block_with_fns(&mut m.body, &pure_fns);
-        }
-    }
-    for actor in &mut prog.actors {
-        for m in &mut actor.handlers {
-            fold_block_with_fns(&mut m.body, &pure_fns);
-            if let Some(sleep_ms) = &mut m.loop_sleep_ms {
-                fold_expr_with_fns(sleep_ms, &pure_fns);
-            }
-        }
-    }
-    for imp in &mut prog.trait_impls {
-        for m in &mut imp.methods {
-            fold_block_with_fns(&mut m.body, &pure_fns);
-        }
-    }
-}
-
-/// Check if a function is pure (no side effects — only arithmetic, conditionals, recursion)
-fn is_pure_fn(f: &hir::Fn) -> bool {
-    f.body.iter().all(|s| is_pure_stmt(s))
-}
-
-fn is_pure_stmt(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Bind(b) => is_pure_expr(&b.value),
-        Stmt::Ret(Some(e), _, _) => is_pure_expr(e),
-        Stmt::Ret(None, _, _) => true,
-        Stmt::If(i) => {
-            is_pure_expr(&i.cond)
-                && i.then.iter().all(|s| is_pure_stmt(s))
-                && i.elifs
-                    .iter()
-                    .all(|(c, b)| is_pure_expr(c) && b.iter().all(|s| is_pure_stmt(s)))
-                && i.els
-                    .as_ref()
-                    .map_or(true, |b| b.iter().all(|s| is_pure_stmt(s)))
-        }
-        Stmt::Expr(e) => is_pure_expr(e),
-        _ => false,
-    }
-}
-
-fn is_pure_expr(expr: &Expr) -> bool {
-    match &expr.kind {
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Str(_)
-        | ExprKind::Var(_, _)
-        | ExprKind::None
-        | ExprKind::Void => true,
-        ExprKind::BinOp(l, _, r) => is_pure_expr(l) && is_pure_expr(r),
-        ExprKind::UnaryOp(_, e) => is_pure_expr(e),
-        ExprKind::Call(_, _, args) => args.iter().all(|a| is_pure_expr(a)),
-        ExprKind::Ternary(c, t, f) => is_pure_expr(c) && is_pure_expr(t) && is_pure_expr(f),
-        ExprKind::Cast(e, _) => is_pure_expr(e),
-        ExprKind::IfExpr(i) => {
-            is_pure_expr(&i.cond)
-                && i.then.iter().all(|s| is_pure_stmt(s))
-                && i.elifs
-                    .iter()
-                    .all(|(c, b)| is_pure_expr(c) && b.iter().all(|s| is_pure_stmt(s)))
-                && i.els
-                    .as_ref()
-                    .map_or(true, |b| b.iter().all(|s| is_pure_stmt(s)))
-        }
-        _ => false,
-    }
-}
-
-/// Evaluate a pure function call with constant arguments at compile time
-fn try_eval_pure_call(
-    name: &str,
-    args: &[Expr],
-    pure_fns: &HashMap<Symbol, hir::Fn>,
-    depth: u32,
-) -> Option<Expr> {
-    if depth > 100 {
-        return None; // prevent infinite recursion
-    }
-    let func = pure_fns.get(&Symbol::intern(name))?;
-    // All args must be constants
-    let const_args: Vec<_> = args
-        .iter()
-        .map(|a| match &a.kind {
-            ExprKind::Int(v) => Some(ConstVal::Int(*v)),
-            ExprKind::Float(v) => Some(ConstVal::Float(*v)),
-            ExprKind::Bool(v) => Some(ConstVal::Bool(*v)),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-
-    // Build environment: param name → value
-    let mut env: HashMap<hir::DefId, ConstVal> = HashMap::new();
-    for (param, val) in func.params.iter().zip(const_args.iter()) {
-        env.insert(param.def_id, val.clone());
-    }
-
-    eval_block(&func.body, &mut env, pure_fns, depth + 1).map(|val| {
-        val.to_expr(
-            func.ret.clone(),
-            args.first().map_or(
-                Span {
-                    start: 0,
-                    end: 0,
-                    line: 0,
-                    col: 0,
-                },
-                |a| a.span,
-            ),
-        )
-    })
-}
-
-#[derive(Clone, Debug)]
-enum ConstVal {
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Void,
-}
-
-impl ConstVal {
-    fn to_expr(&self, ty: Type, span: Span) -> Expr {
-        let kind = match self {
-            ConstVal::Int(v) => ExprKind::Int(*v),
-            ConstVal::Float(v) => ExprKind::Float(*v),
-            ConstVal::Bool(v) => ExprKind::Bool(*v),
-            ConstVal::Void => ExprKind::Void,
-        };
-        Expr { kind, ty, span }
-    }
-}
-
-fn eval_block(
-    block: &Block,
-    env: &mut HashMap<hir::DefId, ConstVal>,
-    pure_fns: &HashMap<Symbol, hir::Fn>,
-    depth: u32,
-) -> Option<ConstVal> {
-    for stmt in block {
-        match stmt {
-            Stmt::Bind(b) => {
-                let val = eval_expr(&b.value, env, pure_fns, depth)?;
-                env.insert(b.def_id, val);
-            }
-            Stmt::Ret(Some(e), _, _) => {
-                return Some(eval_expr(e, env, pure_fns, depth)?);
-            }
-            Stmt::Ret(None, _, _) => return Some(ConstVal::Void),
-            Stmt::If(i) => {
-                let cond = eval_expr(&i.cond, env, pure_fns, depth)?;
-                if let ConstVal::Bool(true) = cond {
-                    if let Some(v) = eval_block(&i.then, env, pure_fns, depth) {
-                        return Some(v);
-                    }
-                } else {
-                    for (ec, eb) in &i.elifs {
-                        let ec_val = eval_expr(ec, env, pure_fns, depth)?;
-                        if let ConstVal::Bool(true) = ec_val {
-                            if let Some(v) = eval_block(eb, env, pure_fns, depth) {
-                                return Some(v);
-                            }
-                        }
-                    }
-                    if let Some(els) = &i.els {
-                        if let Some(v) = eval_block(els, env, pure_fns, depth) {
-                            return Some(v);
-                        }
-                    }
-                }
-            }
-            Stmt::Expr(e) => {
-                eval_expr(e, env, pure_fns, depth)?;
-            }
-            _ => return None,
-        }
-    }
-    None
-}
-
-fn eval_expr(
-    expr: &Expr,
-    env: &mut HashMap<hir::DefId, ConstVal>,
-    pure_fns: &HashMap<Symbol, hir::Fn>,
-    depth: u32,
-) -> Option<ConstVal> {
-    match &expr.kind {
-        ExprKind::Int(v) => Some(ConstVal::Int(*v)),
-        ExprKind::Float(v) => Some(ConstVal::Float(*v)),
-        ExprKind::Bool(v) => Some(ConstVal::Bool(*v)),
-        ExprKind::Void => Some(ConstVal::Void),
-        ExprKind::Var(id, _) => env.get(id).cloned(),
-        ExprKind::BinOp(l, op, r) => {
-            let lv = eval_expr(l, env, pure_fns, depth)?;
-            let rv = eval_expr(r, env, pure_fns, depth)?;
-            eval_binop(lv, *op, rv)
-        }
-        ExprKind::UnaryOp(op, e) => {
-            let v = eval_expr(e, env, pure_fns, depth)?;
-            match (op, v) {
-                (UnaryOp::Neg, ConstVal::Int(n)) => Some(ConstVal::Int(-n)),
-                (UnaryOp::Neg, ConstVal::Float(n)) => Some(ConstVal::Float(-n)),
-                (UnaryOp::Not, ConstVal::Bool(b)) => Some(ConstVal::Bool(!b)),
-                _ => None,
-            }
-        }
-        ExprKind::Call(_, name, args) => {
-            let eval_args: Vec<Expr> = args
-                .iter()
-                .map(|a| {
-                    eval_expr(a, env, pure_fns, depth).map(|v| v.to_expr(a.ty.clone(), a.span))
-                })
-                .collect::<Option<Vec<_>>>()?;
-            let result = try_eval_pure_call(&name.as_str(), &eval_args, pure_fns, depth)?;
-            match &result.kind {
-                ExprKind::Int(v) => Some(ConstVal::Int(*v)),
-                ExprKind::Float(v) => Some(ConstVal::Float(*v)),
-                ExprKind::Bool(v) => Some(ConstVal::Bool(*v)),
-                _ => None,
-            }
-        }
-        ExprKind::Ternary(c, t, f) => {
-            let cv = eval_expr(c, env, pure_fns, depth)?;
-            match cv {
-                ConstVal::Bool(true) => eval_expr(t, env, pure_fns, depth),
-                ConstVal::Bool(false) => eval_expr(f, env, pure_fns, depth),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-fn eval_binop(l: ConstVal, op: BinOp, r: ConstVal) -> Option<ConstVal> {
-    match (l, r) {
-        (ConstVal::Int(a), ConstVal::Int(b)) => {
-            let v = fold_int_op(a, op, b)?;
-            match v {
-                ExprKind::Int(n) => Some(ConstVal::Int(n)),
-                ExprKind::Bool(b) => Some(ConstVal::Bool(b)),
-                _ => None,
-            }
-        }
-        (ConstVal::Float(a), ConstVal::Float(b)) => {
-            let v = fold_float_op(a, op, b)?;
-            match v {
-                ExprKind::Float(n) => Some(ConstVal::Float(n)),
-                ExprKind::Bool(b) => Some(ConstVal::Bool(b)),
-                _ => None,
-            }
-        }
-        (ConstVal::Bool(a), ConstVal::Bool(b)) => match op {
-            BinOp::And => Some(ConstVal::Bool(a && b)),
-            BinOp::Or => Some(ConstVal::Bool(a || b)),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn fold_block_with_fns(block: &mut Block, pure_fns: &HashMap<Symbol, hir::Fn>) {
+pub(super) fn fold_block_with_fns(block: &mut Block, pure_fns: &HashMap<Symbol, hir::Fn>) {
     for stmt in block.iter_mut() {
         fold_stmt_with_fns(stmt, pure_fns);
     }
 }
 
-fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir::Fn>) {
+pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir::Fn>) {
     match stmt {
         Stmt::Bind(bind) => fold_expr_with_fns(&mut bind.value, pure_fns),
         Stmt::TupleBind(_, e, _) => fold_expr_with_fns(e, pure_fns),
@@ -374,7 +99,7 @@ fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir::Fn>) {
     }
 }
 
-fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
+pub(super) fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
     // First recurse into sub-expressions
     fold_expr(expr);
 
@@ -393,13 +118,13 @@ fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
     }
 }
 
-fn fold_block(block: &mut Block) {
+pub(super) fn fold_block(block: &mut Block) {
     for stmt in block.iter_mut() {
         fold_stmt(stmt);
     }
 }
 
-fn fold_stmt(stmt: &mut Stmt) {
+pub(super) fn fold_stmt(stmt: &mut Stmt) {
     match stmt {
         Stmt::Bind(bind) => fold_expr(&mut bind.value),
         Stmt::TupleBind(_, e, _) => fold_expr(e),
@@ -485,7 +210,7 @@ fn fold_stmt(stmt: &mut Stmt) {
     }
 }
 
-fn fold_expr(expr: &mut Expr) {
+pub(super) fn fold_expr(expr: &mut Expr) {
     match &mut expr.kind {
         ExprKind::BinOp(l, _, r) => {
             fold_expr(l);
@@ -742,7 +467,7 @@ fn fold_expr(expr: &mut Expr) {
     }
 }
 
-fn try_fold(expr: &Expr) -> Option<Expr> {
+pub(super) fn try_fold(expr: &Expr) -> Option<Expr> {
     let span = expr.span;
     let ty = expr.ty.clone();
     match &expr.kind {
@@ -755,7 +480,7 @@ fn try_fold(expr: &Expr) -> Option<Expr> {
     }
 }
 
-fn fold_binop(l: &Expr, op: BinOp, r: &Expr, ty: Type, span: Span) -> Option<Expr> {
+pub(super) fn fold_binop(l: &Expr, op: BinOp, r: &Expr, ty: Type, span: Span) -> Option<Expr> {
     let kind = match (&l.kind, &r.kind) {
         (ExprKind::Int(a), ExprKind::Int(b)) => fold_int_op(*a, op, *b)?,
         (ExprKind::Float(a), ExprKind::Float(b)) => fold_float_op(*a, op, *b)?,
@@ -776,7 +501,7 @@ fn fold_binop(l: &Expr, op: BinOp, r: &Expr, ty: Type, span: Span) -> Option<Exp
     Some(make(kind, ty, span))
 }
 
-fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
+pub(super) fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
     match op {
         BinOp::Add => Some(ExprKind::Int(a.wrapping_add(b))),
         BinOp::Sub => Some(ExprKind::Int(a.wrapping_sub(b))),
@@ -799,7 +524,7 @@ fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
     }
 }
 
-fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
+pub(super) fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
     match op {
         BinOp::Add => Some(ExprKind::Float(a + b)),
         BinOp::Sub => Some(ExprKind::Float(a - b)),
@@ -814,7 +539,7 @@ fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
     }
 }
 
-fn fold_unary(op: UnaryOp, e: &Expr, ty: Type, span: Span) -> Option<Expr> {
+pub(super) fn fold_unary(op: UnaryOp, e: &Expr, ty: Type, span: Span) -> Option<Expr> {
     match (op, &e.kind) {
         (UnaryOp::Neg, ExprKind::Int(n)) => Some(make(ExprKind::Int(-n), ty, span)),
         (UnaryOp::Neg, ExprKind::Float(f)) => Some(make(ExprKind::Float(-f), ty, span)),
@@ -824,7 +549,7 @@ fn fold_unary(op: UnaryOp, e: &Expr, ty: Type, span: Span) -> Option<Expr> {
     }
 }
 
-fn fold_ternary(cond: &Expr, t: &Expr, f: &Expr) -> Option<Expr> {
+pub(super) fn fold_ternary(cond: &Expr, t: &Expr, f: &Expr) -> Option<Expr> {
     if let ExprKind::Bool(b) = &cond.kind {
         Some(if *b { t.clone() } else { f.clone() })
     } else {
@@ -832,7 +557,7 @@ fn fold_ternary(cond: &Expr, t: &Expr, f: &Expr) -> Option<Expr> {
     }
 }
 
-fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
+pub(super) fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
     match (&e.kind, to_ty) {
         (ExprKind::Int(n), Type::F64) => {
             Some(make(ExprKind::Float(*n as f64), to_ty.clone(), span))
@@ -869,7 +594,7 @@ fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
     }
 }
 
-fn fold_builtin(builtin: &hir::BuiltinFn, args: &[Expr], ty: Type, span: Span) -> Option<Expr> {
+pub(super) fn fold_builtin(builtin: &hir::BuiltinFn, args: &[Expr], ty: Type, span: Span) -> Option<Expr> {
     use hir::BuiltinFn::*;
     let kind = match builtin {
         Ln | Log2 | Log10 | Exp | Exp2 => {
@@ -908,6 +633,6 @@ fn fold_builtin(builtin: &hir::BuiltinFn, args: &[Expr], ty: Type, span: Span) -
     Some(make(kind, ty, span))
 }
 
-fn make(kind: ExprKind, ty: Type, span: Span) -> Expr {
+pub(super) fn make(kind: ExprKind, ty: Type, span: Span) -> Expr {
     Expr { kind, ty, span }
 }

@@ -1,0 +1,282 @@
+# std.args — Command-line argument parser
+#
+# A small, declarative parser for POSIX-style options. Supports long
+# (`--name`, `--name=value`), short (`-n`, `-n value`), bundled short flags
+# (`-vxf`), repeated values, sub-commands, required options, defaults, and
+# auto-generated help/usage text.
+#
+# Usage:
+#   parser is args.new("myapp", "A tool that does things")
+#   parser.flag("verbose", "v", "Enable verbose output")
+#   parser.option("output", "o", "Output file path")
+#   parser.option_default("level", "l", "Log level", "info")
+#   parser.required("output")
+#   parsed is parser.parse()
+#   if parsed.is_set("verbose") ...
+#   out_file is parsed.get("output")
+#   files is parsed.args()
+
+# ── Parsed result ────────────────────────────────────────────
+
+type ParsedArgs
+    flags as Map of i64
+    options as Map of String
+    multi as Map of Vec of String
+    positional as Vec of String
+    program as String
+    subcommand as String
+    errors as Vec of String
+
+    *has(name as String) returns bool
+        if self.flags.get(name) equals 1
+            return true
+        self.options.has(name)
+
+    *get(name as String) returns String
+        if self.options.has(name)
+            return self.options.get(name)
+        ""
+
+    *get_or(name as String, fallback as String) returns String
+        if self.options.has(name)
+            return self.options.get(name)
+        fallback
+
+    *get_int(name as String, fallback as i64) returns i64
+        if not self.options.has(name)
+            return fallback
+        v is self.options.get(name)
+        if v.length equals 0
+            return fallback
+        v as i64
+
+    *get_all(name as String) returns Vec of String
+        if self.multi.has(name)
+            return self.multi.get(name)
+        vec()
+
+    *is_set(name as String) returns bool
+        if self.flags.get(name) equals 1
+            return true
+        self.options.has(name)
+
+    *args
+        self.positional
+
+    *ok returns bool
+        self.errors.length equals 0
+
+# ── Parser definition ────────────────────────────────────────
+
+type ArgParser
+    name as String
+    description as String
+    def_names as Vec of String
+    def_shorts as Vec of String
+    def_descs as Vec of String
+    def_is_flag as Vec of i64
+    def_is_multi as Vec of i64
+    def_required as Vec of i64
+    def_defaults as Vec of String
+    subcommands as Vec of String
+    sub_descs as Vec of String
+
+    *flag(name as String, short as String, desc as String)
+        self.__add(name, short, desc, 1, 0, 0, "")
+
+    *option(name as String, short as String, desc as String)
+        self.__add(name, short, desc, 0, 0, 0, "")
+
+    *option_default(name as String, short as String, desc as String, default as String)
+        self.__add(name, short, desc, 0, 0, 0, default)
+
+    *option_multi(name as String, short as String, desc as String)
+        self.__add(name, short, desc, 0, 1, 0, "")
+
+    *required(name as String)
+        loop self.def_names
+            if $ equals name
+                self.def_required.set($$, 1)
+                return
+        # nothing to mark; silently ignore
+
+    *subcommand(name as String, desc as String)
+        self.subcommands.push(name)
+        self.sub_descs.push(desc)
+
+    *__add(name as String, short as String, desc as String, is_flag as i64, is_multi as i64, req as i64, default as String)
+        self.def_names.push(name)
+        self.def_shorts.push(short)
+        self.def_descs.push(desc)
+        self.def_is_flag.push(is_flag)
+        self.def_is_multi.push(is_multi)
+        self.def_required.push(req)
+        self.def_defaults.push(default)
+
+    *parse returns ParsedArgs
+        raw is __get_args()
+        self.parse_argv(raw)
+
+    # Parse a pre-tokenised argv vector. Element 0 is the program name.
+    *parse_argv(raw as Vec of String) returns ParsedArgs
+        flags is map()
+        options is map()
+        multi is map()
+        positional is vec()
+        errors is vec()
+        program is raw.length > 0 ? raw.get(0) ! self.name
+        subcommand is ""
+        # Apply defaults
+        loop self.def_names
+            if self.def_defaults.get($$).length > 0
+                options.set($, self.def_defaults.get($$))
+        # Detect subcommand (first non-flag arg before any flag)
+        sub_idx is 0
+        if self.subcommands.length > 0 and raw.length > 1
+            cand is raw.get(1)
+            if not cand.starts_with("-")
+                k is 0
+                while k < self.subcommands.length
+                    if self.subcommands.get(k) equals cand
+                        subcommand is cand
+                        sub_idx is 1
+                    k is k + 1
+        i is 1 + sub_idx
+        while i < raw.length
+            arg is raw.get(i)
+            if arg equals "--"
+                # Everything after `--` is positional
+                i is i + 1
+                while i < raw.length
+                    positional.push(raw.get(i))
+                    i is i + 1
+            elif arg.starts_with("--")
+                key is arg.slice(2, arg.length)
+                eq_pos is key.find("=")
+                if eq_pos > 0
+                    oname is key.slice(0, eq_pos)
+                    val is key.slice(eq_pos + 1, key.length)
+                    self.__store(options, multi, oname, val)
+                else
+                    if self.__is_flag(key)
+                        flags.set(key, 1)
+                    elif i + 1 < raw.length
+                        i is i + 1
+                        self.__store(options, multi, key, raw.get(i))
+                    else
+                        errors.push("--" + key + " expects a value")
+            elif arg.starts_with("-") and arg.length > 1
+                j is 1
+                while j < arg.length
+                    ch is arg.slice(j, j + 1)
+                    found_name is self.__find_by_short(ch)
+                    if found_name.length equals 0
+                        errors.push("unknown short option -" + ch)
+                        j is j + 1
+                    elif self.__is_flag(found_name)
+                        flags.set(found_name, 1)
+                        j is j + 1
+                    elif j + 1 < arg.length
+                        # remainder of token is the value: -oVALUE
+                        self.__store(options, multi, found_name, arg.slice(j + 1, arg.length))
+                        j is arg.length
+                    elif i + 1 < raw.length
+                        i is i + 1
+                        self.__store(options, multi, found_name, raw.get(i))
+                        j is arg.length
+                    else
+                        errors.push("-" + ch + " expects a value")
+                        j is arg.length
+            else
+                positional.push(arg)
+            i is i + 1
+        # Required check
+        loop self.def_names
+            if self.def_required.get($$) equals 1
+                if not options.has($) and self.def_is_flag.get($$) equals 0
+                    errors.push("required option missing: --" + $)
+        ParsedArgs(flags is flags, options is options, multi is multi, positional is positional, program is program, subcommand is subcommand, errors is errors)
+
+    *__store(options as Map of String, multi as Map of Vec of String, name as String, val as String)
+        if self.__is_multi(name)
+            existing is multi.has(name) ? multi.get(name) ! vec()
+            existing.push(val)
+            multi.set(name, existing)
+            options.set(name, val)
+        else
+            options.set(name, val)
+
+    *__is_flag(name as String) returns bool
+        loop self.def_names
+            if $ equals name
+                return self.def_is_flag.get($$) equals 1
+        false
+
+    *__is_multi(name as String) returns bool
+        loop self.def_names
+            if $ equals name
+                return self.def_is_multi.get($$) equals 1
+        false
+
+    *__find_by_short(short as String) returns String
+        loop self.def_shorts
+            if $ equals short
+                return self.def_names.get($$)
+        ""
+
+    # ── Help / usage ─────────────────────────────────────────
+
+    *usage returns String
+        line is "Usage: " + self.name + " [OPTIONS]"
+        if self.subcommands.length > 0
+            line is line + " <COMMAND>"
+        line + " [ARGS...]"
+
+    *help returns String
+        result is self.usage() + "\n\n"
+        if self.description.length > 0
+            result is result + self.description + "\n\n"
+        result is result + "Options:\n"
+        loop self.def_names
+            line is "  --" + $
+            s is self.def_shorts.get($$)
+            if s.length > 0
+                line is line + ", -" + s
+            if self.def_is_flag.get($$) equals 0
+                line is line + " <value>"
+            line is line + "    " + self.def_descs.get($$)
+            if self.def_required.get($$) equals 1
+                line is line + " (required)"
+            if self.def_defaults.get($$).length > 0
+                line is line + " [default: " + self.def_defaults.get($$) + "]"
+            result is result + line + "\n"
+        if self.subcommands.length > 0
+            result is result + "\nCommands:\n"
+            loop self.subcommands
+                result is result + "  " + $ + "    " + self.sub_descs.get($$) + "\n"
+        result
+
+# ── Constructors ─────────────────────────────────────────────
+
+*new(name as String, desc as String) returns ArgParser
+    ArgParser(
+        name is name,
+        description is desc,
+        def_names is vec(),
+        def_shorts is vec(),
+        def_descs is vec(),
+        def_is_flag is vec(),
+        def_is_multi is vec(),
+        def_required is vec(),
+        def_defaults is vec(),
+        subcommands is vec(),
+        sub_descs is vec(),
+    )
+
+# Backwards-compatible alias.
+*new_parser(name as String, desc as String) returns ArgParser
+    new(name, desc)
+
+# Direct access to the program's argv (read-only).
+*argv returns Vec of String
+    __get_args()

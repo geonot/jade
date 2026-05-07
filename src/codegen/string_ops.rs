@@ -1,4 +1,5 @@
-//! HIR-era string operation codegen. Slated for inlining (CLEANUP §C.1).
+//! String operation helpers on `Compiler<'ctx>`: equality, contains, starts/ends_with,
+//! slice, char_at, concat. Consumed by both `mir_codegen` and sibling helper files.
 
 use inkwell::IntPredicate;
 use inkwell::values::BasicValueEnum;

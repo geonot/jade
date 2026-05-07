@@ -1,4 +1,16 @@
-# std.io — File I/O and standard streams
+# std.io — File I/O, standard streams, byte/line iteration
+#
+# Usage:
+#   data is io.read_file("/etc/hosts")
+#   io.write_file("/tmp/out.txt", "hello\n")
+#   io.eprintln("error: " + msg)
+#
+#   f is io.open("data.bin", "rb")
+#   bytes is f.read(1024)
+#   f.shut()
+#
+#   loop io.read_lines("config.toml")
+#       handle($)
 
 extern *fopen(path as %i8, mode as %i8) returns %i8
 extern *fclose(fp as %i8) returns i32
@@ -8,6 +20,7 @@ extern *fseek(fp as %i8, offset as i64, whence as i32) returns i32
 extern *ftell(fp as %i8) returns i64
 extern *fgets(buf as %i8, size as i32, fp as %i8) returns %i8
 extern *feof(fp as %i8) returns i32
+extern *fflush(fp as %i8) returns i32
 extern *remove(path as %i8) returns i32
 extern *rename(old as %i8, new_name as %i8) returns i32
 extern *malloc(size as i64) returns %i8
@@ -17,19 +30,27 @@ extern *strlen(s as %i8) returns i64
 extern *write(fd as i32, buf as %i8, count as i64) returns i64
 extern *read(fd as i32, buf as %i8, count as i64) returns i64
 
-# ── File type ────────────────────────────────────────────────
+# Whence values for `seek`.
+SEEK_SET is 0
+SEEK_CUR is 1
+SEEK_END is 2
+
+# ── File handle ──────────────────────────────────────────────
 
 type File
     handle as %i8
     path as String
     mode as String
 
-    *read(size)
+    *read(size as i64) returns String
         buf is extern.malloc(size + 1)
         n is extern.fread(buf, 1, size, self.handle)
+        if n <= 0
+            extern.free(buf)
+            return ""
         __string_from_raw(buf, n, size + 1)
 
-    *read_line
+    *read_line returns String
         buf is extern.malloc(4096)
         result is extern.fgets(buf, 4096, self.handle)
         if result as i64 equals 0
@@ -38,6 +59,15 @@ type File
         n is extern.strlen(buf)
         __string_from_raw(buf, n, 4096)
 
+    *read_all returns String
+        sb is ""
+        loop
+            chunk is self.read(8192)
+            if chunk.length equals 0
+                break
+            sb is sb + chunk
+        sb
+
     *write(data as String)
         extern.fwrite(%data, 1, data.length, self.handle)
 
@@ -45,51 +75,69 @@ type File
         extern.fwrite(%data, 1, data.length, self.handle)
         extern.fwrite("\n", 1, 1, self.handle)
 
-    *seek(offset, whence)
+    *seek(offset as i64, whence as i32)
         extern.fseek(self.handle, offset, whence)
 
-    *tell
+    *tell returns i64
         extern.ftell(self.handle)
 
     *shut
         extern.fclose(self.handle)
 
-    *eof
+    *eof returns bool
         extern.feof(self.handle) neq 0
 
-    *size
+    *size returns i64
         cur is extern.ftell(self.handle)
-        extern.fseek(self.handle, 0, 2)
+        extern.fseek(self.handle, 0, SEEK_END)
         sz is extern.ftell(self.handle)
-        extern.fseek(self.handle, cur, 0)
+        extern.fseek(self.handle, cur, SEEK_SET)
         sz
 
     *flush
         extern.fflush(self.handle)
 
-extern *fflush(fp as %i8) returns i32
+# ── Open / one-shot helpers ──────────────────────────────────
 
-# ── Convenience functions ────────────────────────────────────
-
-*open(path, mode)
+*open(path as String, mode as String) returns File
     fp is extern.fopen(%path, %mode)
     if fp as i64 equals 0
-        return false
-    File(fp, path, mode)
+        return File(handle is 0 as %i8, path is path, mode is mode)
+    File(handle is fp, path is path, mode is mode)
 
-*read_file(path)
+# Read entire file as a String. Empty string on error or empty file.
+*read_file(path as String) returns String
     fp is extern.fopen(%path, "r")
     if fp as i64 equals 0
         return ""
-    extern.fseek(fp, 0, 2)
-    size is extern.ftell(fp)
-    extern.fseek(fp, 0, 0)
-    buf is extern.malloc(size + 1)
-    extern.fread(buf, 1, size, fp)
+    extern.fseek(fp, 0, SEEK_END)
+    sz is extern.ftell(fp)
+    extern.fseek(fp, 0, SEEK_SET)
+    if sz <= 0
+        extern.fclose(fp)
+        return ""
+    buf is extern.malloc(sz + 1)
+    extern.fread(buf, 1, sz, fp)
     extern.fclose(fp)
-    __string_from_raw(buf, size, size + 1)
+    __string_from_raw(buf, sz, sz + 1)
 
-*write_file(path, content)
+# Binary read. Same as `read_file` but explicit.
+*read_bytes(path as String) returns String
+    fp is extern.fopen(%path, "rb")
+    if fp as i64 equals 0
+        return ""
+    extern.fseek(fp, 0, SEEK_END)
+    sz is extern.ftell(fp)
+    extern.fseek(fp, 0, SEEK_SET)
+    if sz <= 0
+        extern.fclose(fp)
+        return ""
+    buf is extern.malloc(sz + 1)
+    extern.fread(buf, 1, sz, fp)
+    extern.fclose(fp)
+    __string_from_raw(buf, sz, sz + 1)
+
+*write_file(path as String, content as String) returns bool
     fp is extern.fopen(%path, "w")
     if fp as i64 equals 0
         return false
@@ -97,7 +145,15 @@ extern *fflush(fp as %i8) returns i32
     extern.fclose(fp)
     true
 
-*append_file(path, content)
+*write_bytes(path as String, content as String) returns bool
+    fp is extern.fopen(%path, "wb")
+    if fp as i64 equals 0
+        return false
+    extern.fwrite(%content, 1, content.length, fp)
+    extern.fclose(fp)
+    true
+
+*append_file(path as String, content as String) returns bool
     fp is extern.fopen(%path, "a")
     if fp as i64 equals 0
         return false
@@ -105,17 +161,62 @@ extern *fflush(fp as %i8) returns i32
     extern.fclose(fp)
     true
 
-*read_lines(path)
+# Write `lines`, joined with "\n", to `path`. Adds a trailing newline.
+*write_lines(path as String, lines as Vec of String) returns bool
+    fp is extern.fopen(%path, "w")
+    if fp as i64 equals 0
+        return false
+    loop lines
+        extern.fwrite(%$, 1, $.length, fp)
+        extern.fwrite("\n", 1, 1, fp)
+    extern.fclose(fp)
+    true
+
+# Read entire file split into lines (trailing empty line dropped).
+*read_lines(path as String) returns Vec of String
     content is read_file(path)
     if content.length equals 0
         return vec()
-    content.split("\n")
+    parts is content.split("\n")
+    if parts.length > 0 and parts.get(parts.length - 1).length equals 0
+        parts.pop()
+    parts
 
-*file_exists(path)
+# Copy `src` to `dst` byte-for-byte. Returns false on error.
+*copy_file(src as String, dst as String) returns bool
+    in_fp is extern.fopen(%src, "rb")
+    if in_fp as i64 equals 0
+        return false
+    out_fp is extern.fopen(%dst, "wb")
+    if out_fp as i64 equals 0
+        extern.fclose(in_fp)
+        return false
+    buf is extern.malloc(8192)
+    while true
+        n is extern.fread(buf, 1, 8192, in_fp)
+        if n <= 0
+            break
+        extern.fwrite(buf, 1, n, out_fp)
+    extern.free(buf)
+    extern.fclose(in_fp)
+    extern.fclose(out_fp)
+    true
+
+# Move/rename a file. Returns false on error.
+*move_file(src as String, dst as String) returns bool
+    extern.rename(%src, %dst) equals 0
+
+# Delete a file. Returns false on error.
+*remove_file(path as String) returns bool
+    extern.remove(%path) equals 0
+
+*file_exists(path as String) returns bool
     __file_exists(path)
 
 # ── Standard streams ─────────────────────────────────────────
 
+# `print`/`println` are language builtins (write to stdout).
+# These write to stderr (the canonical place for diagnostics).
 *eprint(s as String)
     extern.write(2, %s, s.length)
 
@@ -123,10 +224,44 @@ extern *fflush(fp as %i8) returns i32
     msg is s + "\n"
     extern.write(2, %msg, msg.length)
 
-*read_stdin(max_bytes)
+# Read up to `max_bytes` from stdin in one call. Returns "" on EOF/error.
+*read_stdin(max_bytes as i64) returns String
     buf is extern.malloc(max_bytes)
     n is extern.read(0, buf, max_bytes)
     if n <= 0
         extern.free(buf)
         return ""
     __string_from_raw(buf, n, max_bytes)
+
+# Read all available stdin until EOF.
+*read_stdin_all returns String
+    out is ""
+    loop
+        chunk is read_stdin(8192)
+        if chunk.length equals 0
+            break
+        out is out + chunk
+    out
+
+# Read one line from stdin (delimited by '\n'). Newline is stripped.
+*read_line returns String
+    buf is extern.malloc(4096)
+    n is 0
+    out is ""
+    while n < 4096
+        got is extern.read(0, buf + n, 1)
+        if got <= 0
+            break
+        c is __peek_byte(buf + n)
+        if c equals 10
+            break
+        n is n + 1
+    out is __string_from_raw(buf, n, 4096)
+    out
+
+# ── Internal ─────────────────────────────────────────────────
+
+*__peek_byte(p as %i8) returns i64
+    # Read a single byte through a tiny buffer copy.
+    s is __string_from_raw(p, 1, 1)
+    s.length > 0 ? s.char_at(0) ! 0

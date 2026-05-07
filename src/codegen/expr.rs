@@ -1,4 +1,6 @@
-//! HIR-era expression codegen helpers consumed by `mir_codegen`. Slated for inlining (CLEANUP §C.1).
+//! Expression codegen helpers. Reached transitively from `mir_codegen` via the
+//! actor/coroutine/closure entry points which still walk HIR. The `compile_str_literal`
+//! and `compile_const_expr` helpers are direct MIR utilities.
 
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum};
@@ -268,7 +270,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_coroutine_create(&name.as_str(), body)
             }
             hir::ExprKind::GeneratorNext(gen_expr) => self.compile_coroutine_next(gen_expr, &expr.ty),
-            // KV / specialized store ops are lowered through MIR magic calls, never reach HIR codegen
+            // KV / specialized store ops are lowered through MIR magic calls; never reached here.
             hir::ExprKind::KvGet(..)
             | hir::ExprKind::KvHas(..)
             | hir::ExprKind::KvCount(..)

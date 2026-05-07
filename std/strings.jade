@@ -1,8 +1,28 @@
-# std.strings — StringBuilder for efficient string construction
+# std.strings — String construction, transformation, and analysis
+#
+# Most basic operations live as methods on `String` itself
+# (`s.length`, `s.slice`, `s.split`, `s.find`, `s.starts_with`, …).
+# This module adds higher-level helpers and a `StringBuilder` for
+# efficient incremental construction.
+#
+# Usage:
+#   sb is strings.builder()
+#   sb.write("hello")
+#   sb.write(", world")
+#   greet is sb.to_string()
+#
+#   strings.trim("  hi  ")               # "hi"
+#   strings.split_lines("a\nb\nc")       # vec_of("a","b","c")
+#   strings.replace("foo bar", "bar", "baz")
+#   strings.indent(text, "  ")
+#   strings.snake_to_camel("my_var")     # "myVar"
 
 extern *malloc(size as i64) returns %i8
 extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
 
+# ── StringBuilder ────────────────────────────────────────────
+
+# Accumulates parts and joins once; O(n) total instead of O(n²) concat.
 type StringBuilder
     parts as Vec of String
     total as i64
@@ -16,7 +36,12 @@ type StringBuilder
         self.parts.push('\n')
         self.total is self.total + s.length + 1
 
-    *to_string
+    *write_byte(b as i64)
+        c is chr(b & 255)
+        self.parts.push(c)
+        self.total is self.total + 1
+
+    *to_string returns String
         if self.parts.length equals 0
             return ''
         if self.total equals 0
@@ -28,12 +53,319 @@ type StringBuilder
             offset is offset + $.length
         __string_from_raw(buf, self.total, self.total + 1)
 
-    *length
+    *length returns i64
         self.total
 
     *clear
         self.parts is vec()
         self.total is 0
 
-*string_builder() returns StringBuilder
+*builder returns StringBuilder
     StringBuilder(parts is vec(), total is 0)
+
+# Backwards-compat alias.
+*string_builder returns StringBuilder
+    builder()
+
+# ── Trimming ─────────────────────────────────────────────────
+
+*is_space(c as i64) returns bool
+    c equals 32 or c equals 9 or c equals 10 or c equals 13 or c equals 11 or c equals 12
+
+*trim(s as String) returns String
+    lo is 0
+    while lo < s.length and is_space(s.char_at(lo))
+        lo is lo + 1
+    hi is s.length
+    while hi > lo and is_space(s.char_at(hi - 1))
+        hi is hi - 1
+    s.slice(lo, hi)
+
+*trim_left(s as String) returns String
+    lo is 0
+    while lo < s.length and is_space(s.char_at(lo))
+        lo is lo + 1
+    s.slice(lo, s.length)
+
+*trim_right(s as String) returns String
+    hi is s.length
+    while hi > 0 and is_space(s.char_at(hi - 1))
+        hi is hi - 1
+    s.slice(0, hi)
+
+# Trim any character that appears in `chars`.
+*trim_chars(s as String, chars as String) returns String
+    lo is 0
+    while lo < s.length and __contains_byte(chars, s.char_at(lo))
+        lo is lo + 1
+    hi is s.length
+    while hi > lo and __contains_byte(chars, s.char_at(hi - 1))
+        hi is hi - 1
+    s.slice(lo, hi)
+
+# ── Replacement ──────────────────────────────────────────────
+
+# Replace every occurrence of `from` with `to`. Linear time.
+*replace(s as String, from as String, to as String) returns String
+    if from.length equals 0
+        return s
+    out is ""
+    i is 0
+    while i < s.length
+        if i + from.length <= s.length and __region_eq(s, i, from)
+            out is out + to
+            i is i + from.length
+        else
+            out is out + s.slice(i, i + 1)
+            i is i + 1
+    out
+
+# Replace only the first occurrence.
+*replace_first(s as String, from as String, to as String) returns String
+    if from.length equals 0
+        return s
+    pos is s.find(from)
+    if pos < 0
+        return s
+    s.slice(0, pos) + to + s.slice(pos + from.length, s.length)
+
+# ── Splitting ────────────────────────────────────────────────
+
+*split_lines(s as String) returns Vec of String
+    out is vec()
+    cur is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 10
+            out.push(cur)
+            cur is ""
+        elif c equals 13
+            # \r or \r\n
+            out.push(cur)
+            cur is ""
+            if i + 1 < s.length and s.char_at(i + 1) equals 10
+                i is i + 1
+        else
+            cur is cur + s.slice(i, i + 1)
+        i is i + 1
+    if cur.length > 0
+        out.push(cur)
+    out
+
+# Split on whitespace runs; ignores leading/trailing whitespace.
+*split_whitespace(s as String) returns Vec of String
+    out is vec()
+    cur is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if is_space(c)
+            if cur.length > 0
+                out.push(cur)
+                cur is ""
+        else
+            cur is cur + s.slice(i, i + 1)
+        i is i + 1
+    if cur.length > 0
+        out.push(cur)
+    out
+
+# ── Case (ASCII only) ────────────────────────────────────────
+
+*to_lower(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c >= 65 and c <= 90
+            out is out + chr(c + 32)
+        else
+            out is out + s.slice(i, i + 1)
+        i is i + 1
+    out
+
+*to_upper(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c >= 97 and c <= 122
+            out is out + chr(c - 32)
+        else
+            out is out + s.slice(i, i + 1)
+        i is i + 1
+    out
+
+*capitalize(s as String) returns String
+    if s.length equals 0
+        return s
+    c is s.char_at(0)
+    head is c >= 97 and c <= 122 ? chr(c - 32) ! s.slice(0, 1)
+    head + to_lower(s.slice(1, s.length))
+
+*title_case(s as String) returns String
+    out is ""
+    cap_next is true
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if is_space(c) or c equals 45 or c equals 95
+            out is out + s.slice(i, i + 1)
+            cap_next is true
+        elif cap_next and c >= 97 and c <= 122
+            out is out + chr(c - 32)
+            cap_next is false
+        elif (not cap_next) and c >= 65 and c <= 90
+            out is out + chr(c + 32)
+        else
+            out is out + s.slice(i, i + 1)
+            cap_next is false
+        i is i + 1
+    out
+
+# ── Indentation ──────────────────────────────────────────────
+
+*indent(s as String, prefix as String) returns String
+    lines is split_lines(s)
+    out is ""
+    loop lines
+        if $$ > 0
+            out is out + "\n"
+        out is out + prefix + $
+    out
+
+*dedent(s as String) returns String
+    lines is split_lines(s)
+    # Find min indent across non-blank lines.
+    min_i is -1
+    loop lines
+        if $.length equals 0
+            continue
+        ind is 0
+        while ind < $.length and $.char_at(ind) equals 32
+            ind is ind + 1
+        if ind equals $.length
+            continue
+        if min_i < 0 or ind < min_i
+            min_i is ind
+    if min_i <= 0
+        return s
+    out is ""
+    loop lines
+        if $$ > 0
+            out is out + "\n"
+        if $.length >= min_i
+            out is out + $.slice(min_i, $.length)
+        else
+            out is out + $
+    out
+
+# ── Case-style conversions ───────────────────────────────────
+
+*snake_to_camel(s as String) returns String
+    out is ""
+    cap_next is false
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 95
+            cap_next is true
+        elif cap_next and c >= 97 and c <= 122
+            out is out + chr(c - 32)
+            cap_next is false
+        else
+            out is out + s.slice(i, i + 1)
+            cap_next is false
+        i is i + 1
+    out
+
+*camel_to_snake(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c >= 65 and c <= 90
+            if i > 0
+                out is out + "_"
+            out is out + chr(c + 32)
+        else
+            out is out + s.slice(i, i + 1)
+        i is i + 1
+    out
+
+# ── Predicates ───────────────────────────────────────────────
+
+*contains(s as String, sub as String) returns bool
+    s.find(sub) >= 0
+
+*is_blank(s as String) returns bool
+    i is 0
+    while i < s.length
+        if not is_space(s.char_at(i))
+            return false
+        i is i + 1
+    true
+
+*is_alpha(s as String) returns bool
+    if s.length equals 0
+        return false
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if not ((c >= 65 and c <= 90) or (c >= 97 and c <= 122))
+            return false
+        i is i + 1
+    true
+
+*is_digit(s as String) returns bool
+    if s.length equals 0
+        return false
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c < 48 or c > 57
+            return false
+        i is i + 1
+    true
+
+# ── Reverse & count ──────────────────────────────────────────
+
+*reverse(s as String) returns String
+    out is ""
+    i is s.length - 1
+    while i >= 0
+        out is out + s.slice(i, i + 1)
+        i is i - 1
+    out
+
+*count(s as String, sub as String) returns i64
+    if sub.length equals 0
+        return 0
+    n is 0
+    i is 0
+    while i + sub.length <= s.length
+        if __region_eq(s, i, sub)
+            n is n + 1
+            i is i + sub.length
+        else
+            i is i + 1
+    n
+
+# ── Internal ─────────────────────────────────────────────────
+
+*__region_eq(s as String, off as i64, needle as String) returns bool
+    i is 0
+    while i < needle.length
+        if s.char_at(off + i) neq needle.char_at(i)
+            return false
+        i is i + 1
+    true
+
+*__contains_byte(chars as String, b as i64) returns bool
+    i is 0
+    while i < chars.length
+        if chars.char_at(i) equals b
+            return true
+        i is i + 1
+    false

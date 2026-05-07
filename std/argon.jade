@@ -1,0 +1,144 @@
+# std.argon — Argon2id password hashing and key derivation
+#
+# Argon2 is the winner of the Password Hashing Competition (2015) and the
+# recommended algorithm for password storage (RFC 9106). The `id` variant
+# is the default — hybrid resistance against side-channel and TMTO attacks.
+#
+# OWASP 2024 baseline parameters (used by `hash_password`):
+#   t_cost = 2 iterations
+#   m_cost = 19 MiB (19456 KiB)
+#   parallelism = 1
+#   dklen = 32 bytes
+#
+# Requires OpenSSL ≥ 3.2. Use `available()` to detect at runtime.
+#
+# Usage:
+#   stored is argon.hash_password("hunter2")
+#   ok is argon.verify_password("hunter2", stored)
+#   key is argon.derive_key("master-secret", salt, 32)
+
+extern *jade_argon2id(pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, t_cost as i64, m_cost as i64, parallel as i64, dklen as i64, out as %i8) returns i32
+extern *jade_random_bytes(buf as %i8, n as i64) returns i32
+extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+# Recommended OWASP defaults (May 2024 cheat sheet).
+DEFAULT_T_COST is 2
+DEFAULT_M_COST is 19456    # KiB == 19 MiB
+DEFAULT_PARALLEL is 1
+DEFAULT_DKLEN is 32
+DEFAULT_SALT_LEN is 16
+
+# ── Low-level: derive raw key ───────────────────────────────
+
+# Returns dklen bytes derived from password+salt. Empty string on failure.
+*derive(password as String, salt as String, t_cost as i64, m_cost as i64, parallelism as i64, dklen as i64) returns String
+    if dklen <= 0 or password.length equals 0 or salt.length < 8
+        return ""
+    out is extern.malloc(dklen)
+    rc is extern.jade_argon2id(%password, password.length, %salt, salt.length, t_cost, m_cost, parallelism, dklen, out)
+    if rc neq 0
+        extern.free(out)
+        return ""
+    result is __string_from_ptr_len(out, dklen)
+    extern.free(out)
+    result
+
+# Convenience: derive with default cost parameters.
+*derive_key(password as String, salt as String, dklen as i64) returns String
+    derive(password, salt, DEFAULT_T_COST, DEFAULT_M_COST, DEFAULT_PARALLEL, dklen)
+
+# ── PHC string format (RFC 9106 §3.1) ───────────────────────
+#
+# Format: $argon2id$v=19$m=<m>,t=<t>,p=<p>$<salt-hex>$<hash-hex>
+# We use hex (not base64) for portability with std.hex.
+
+# Hash a password with random salt. Returns PHC-formatted string.
+*hash_password(password as String) returns String
+    salt_buf is extern.malloc(DEFAULT_SALT_LEN)
+    rc is extern.jade_random_bytes(salt_buf, DEFAULT_SALT_LEN)
+    if rc neq 0
+        extern.free(salt_buf)
+        return ""
+    salt is __string_from_ptr_len(salt_buf, DEFAULT_SALT_LEN)
+    extern.free(salt_buf)
+    hash is derive(password, salt, DEFAULT_T_COST, DEFAULT_M_COST, DEFAULT_PARALLEL, DEFAULT_DKLEN)
+    if hash.length equals 0
+        return ""
+    salt_hex is __bytes_to_hex(salt)
+    hash_hex is __bytes_to_hex(hash)
+    "$argon2id$v=19$m=" + DEFAULT_M_COST + ",t=" + DEFAULT_T_COST + ",p=" + DEFAULT_PARALLEL + "$" + salt_hex + "$" + hash_hex
+
+# Verify a password against a PHC-formatted string.
+# Constant-time comparison.
+*verify_password(password as String, encoded as String) returns bool
+    parts is encoded.split("$")
+    # Expect: ["", "argon2id", "v=19", "m=...,t=...,p=...", "salt", "hash"]
+    if parts.length < 6
+        return false
+    if parts.get(1) neq "argon2id"
+        return false
+    params is parts.get(3)
+    salt_hex is parts.get(4)
+    hash_hex is parts.get(5)
+    p is __parse_params(params)
+    if p.length neq 3
+        return false
+    salt is __hex_to_bytes(salt_hex)
+    expected is __hex_to_bytes(hash_hex)
+    if expected.length equals 0
+        return false
+    actual is derive(password, salt, p.get(1), p.get(0), p.get(2), expected.length)
+    if actual.length equals 0
+        return false
+    __secure_compare(actual, expected)
+
+# Detect Argon2id support in the linked OpenSSL.
+*available returns bool
+    derive("test", "12345678", 1, 1024, 1, 16).length > 0
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*__parse_params(s as String) returns Vec of i64
+    out is vec()
+    parts is s.split(",")
+    loop parts
+        eq is $.find("=")
+        if eq < 0
+            return vec()
+        out.push($.slice(eq + 1, $.length) as i64)
+    out
+
+*__bytes_to_hex(data as String) returns String
+    if data.length equals 0
+        return ""
+    hex_buf is extern.malloc(data.length * 2 + 1)
+    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(hex_buf)
+    result
+
+*__hex_to_bytes(hex as String) returns String
+    if hex.length equals 0 or hex.length mod 2 neq 0
+        return ""
+    n is hex.length / 2
+    buf is extern.malloc(n)
+    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    if rc < 0
+        extern.free(buf)
+        return ""
+    result is __string_from_ptr_len(buf, n)
+    extern.free(buf)
+    result
+
+*__secure_compare(a as String, b as String) returns bool
+    if a.length neq b.length
+        return false
+    diff is 0
+    i is 0
+    while i < a.length
+        diff is diff | (a.char_at(i) ^ b.char_at(i))
+        i is i + 1
+    diff equals 0

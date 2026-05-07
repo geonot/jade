@@ -1,8 +1,15 @@
 # std.collections — Data structures beyond Vec and Map
 #
-# Provides: Stack, Queue, RingBuffer, Deque
+# Provides:
+#   * `Stack`        — LIFO
+#   * `Queue`        — FIFO with amortized O(1) dequeue
+#   * `RingBuffer`   — fixed-capacity circular buffer
+#   * `Deque`        — double-ended queue (built on Vec)
+#   * `PriorityQueue`— binary min-heap with priority comparator
+#   * `Heap`         — generic min-heap (i64 keys)
+#   * `LruCache`     — bounded LRU map (insertion-order eviction)
 
-# ── Stack (LIFO) ────────────────────────────────────────────
+# ── Stack (LIFO) ─────────────────────────────────────────────
 
 type Stack
     items as Vec of i64
@@ -22,10 +29,13 @@ type Stack
     *is_empty
         self.items.length equals 0
 
-*new_stack
+    *clear
+        self.items is vec()
+
+*new_stack returns Stack
     Stack(items is vec())
 
-# ── Queue (FIFO) ────────────────────────────────────────────
+# ── Queue (FIFO) ─────────────────────────────────────────────
 
 type Queue
     items as Vec of i64
@@ -39,7 +49,6 @@ type Queue
             return 0
         val is self.items.get(self.head)
         self.head is self.head + 1
-        # Compact when half the buffer is consumed
         if self.head > self.items.length / 2 and self.head > 16
             remaining is vec()
             for i in self.head to self.items.length
@@ -59,10 +68,14 @@ type Queue
     *is_empty
         self.head >= self.items.length
 
-*new_queue
+    *clear
+        self.items is vec()
+        self.head is 0
+
+*new_queue returns Queue
     Queue(items is vec(), head is 0)
 
-# ── Ring Buffer ─────────────────────────────────────────────
+# ── Ring Buffer ──────────────────────────────────────────────
 
 type RingBuffer
     data as Vec of i64
@@ -101,8 +114,219 @@ type RingBuffer
     *is_full
         self.count equals self.capacity
 
-*new_ring(cap)
+*new_ring(cap) returns RingBuffer
     data is vec()
     for i in 0 to cap
         data.push(0)
     RingBuffer(data is data, capacity is cap, head is 0, tail is 0, count is 0)
+
+# ── Deque (double-ended queue) ───────────────────────────────
+#
+# Backed by two stacks for amortized O(1) push/pop on both ends.
+
+type Deque
+    front as Vec of i64        # popped/pushed from the *back*; reversed view of front
+    back as Vec of i64
+
+    *push_back(val)
+        self.back.push(val)
+
+    *push_front(val)
+        self.front.push(val)
+
+    *pop_back
+        if self.back.length > 0
+            return self.back.pop()
+        if self.front.length equals 0
+            return 0
+        # Move all front to back, then pop.
+        while self.front.length > 0
+            self.back.push(self.front.pop())
+        self.back.pop()
+
+    *pop_front
+        if self.front.length > 0
+            return self.front.pop()
+        if self.back.length equals 0
+            return 0
+        while self.back.length > 0
+            self.front.push(self.back.pop())
+        self.front.pop()
+
+    *size
+        self.front.length + self.back.length
+
+    *is_empty
+        self.front.length equals 0 and self.back.length equals 0
+
+*new_deque returns Deque
+    Deque(front is vec(), back is vec())
+
+# ── Min-heap (binary heap) ───────────────────────────────────
+
+type Heap
+    data as Vec of i64
+
+    *push(val)
+        self.data.push(val)
+        __sift_up(self.data, self.data.length - 1)
+
+    *pop
+        if self.data.length equals 0
+            return 0
+        top is self.data.get(0)
+        last is self.data.pop()
+        if self.data.length > 0
+            self.data.set(0, last)
+            __sift_down(self.data, 0)
+        top
+
+    *peek
+        if self.data.length equals 0
+            return 0
+        self.data.get(0)
+
+    *size
+        self.data.length
+
+    *is_empty
+        self.data.length equals 0
+
+*new_heap returns Heap
+    Heap(data is vec())
+
+*__sift_up(d as Vec of i64, i as i64)
+    while i > 0
+        parent is (i - 1) / 2
+        if d.get(i) < d.get(parent)
+            tmp is d.get(i)
+            d.set(i, d.get(parent))
+            d.set(parent, tmp)
+            i is parent
+        else
+            return
+
+*__sift_down(d as Vec of i64, i as i64)
+    n is d.length
+    while true
+        left is 2 * i + 1
+        right is 2 * i + 2
+        smallest is i
+        if left < n and d.get(left) < d.get(smallest)
+            smallest is left
+        if right < n and d.get(right) < d.get(smallest)
+            smallest is right
+        if smallest equals i
+            return
+        tmp is d.get(i)
+        d.set(i, d.get(smallest))
+        d.set(smallest, tmp)
+        i is smallest
+
+# ── Priority Queue (with separate priority + payload) ────────
+
+type PqEntry
+    priority as i64
+    value as i64
+
+type PriorityQueue
+    data as Vec of PqEntry
+
+    *push(priority as i64, value as i64)
+        self.data.push(PqEntry(priority is priority, value is value))
+        __pq_sift_up(self.data, self.data.length - 1)
+
+    *pop returns PqEntry
+        if self.data.length equals 0
+            return PqEntry(priority is 0, value is 0)
+        top is self.data.get(0)
+        last is self.data.pop()
+        if self.data.length > 0
+            self.data.set(0, last)
+            __pq_sift_down(self.data, 0)
+        top
+
+    *size
+        self.data.length
+
+    *is_empty
+        self.data.length equals 0
+
+*new_priority_queue returns PriorityQueue
+    PriorityQueue(data is vec())
+
+*__pq_sift_up(d as Vec of PqEntry, i as i64)
+    while i > 0
+        parent is (i - 1) / 2
+        if d.get(i).priority < d.get(parent).priority
+            tmp is d.get(i)
+            d.set(i, d.get(parent))
+            d.set(parent, tmp)
+            i is parent
+        else
+            return
+
+*__pq_sift_down(d as Vec of PqEntry, i as i64)
+    n is d.length
+    while true
+        left is 2 * i + 1
+        right is 2 * i + 2
+        smallest is i
+        if left < n and d.get(left).priority < d.get(smallest).priority
+            smallest is left
+        if right < n and d.get(right).priority < d.get(smallest).priority
+            smallest is right
+        if smallest equals i
+            return
+        tmp is d.get(i)
+        d.set(i, d.get(smallest))
+        d.set(smallest, tmp)
+        i is smallest
+
+# ── LRU Cache (bounded; insertion-order proxy via touch) ─────
+#
+# Map-backed; tracks usage order in a parallel vec. Eviction removes
+# the least-recently-touched key when capacity is exceeded.
+
+type LruCache
+    capacity as i64
+    map as Map of String
+    order as Vec of String     # most-recent at the back
+
+    *get(key as String) returns String
+        if not self.map.has(key)
+            return ""
+        __lru_touch(self, key)
+        self.map.get(key)
+
+    *put(key as String, value as String)
+        if self.map.has(key)
+            self.map.set(key, value)
+            __lru_touch(self, key)
+            return
+        self.map.set(key, value)
+        self.order.push(key)
+        if self.order.length > self.capacity
+            evicted is self.order.get(0)
+            new_order is vec()
+            for i in 1 to self.order.length
+                new_order.push(self.order.get(i))
+            self.order is new_order
+            self.map.delete(evicted)
+
+    *has(key as String) returns bool
+        self.map.has(key)
+
+    *size returns i64
+        self.order.length
+
+*new_lru(cap as i64) returns LruCache
+    LruCache(capacity is cap, map is map(), order is vec())
+
+*__lru_touch(c as LruCache, key as String)
+    new_order is vec()
+    loop c.order
+        if $ neq key
+            new_order.push($)
+    new_order.push(key)
+    c.order is new_order

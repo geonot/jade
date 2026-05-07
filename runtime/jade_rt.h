@@ -416,6 +416,10 @@ int64_t jade_f64_to_bits(double val);
 double jade_bits_to_f64(int64_t bits);
 void jade_sort_i64(int64_t *data, int64_t len);
 void jade_sort_f64(double *data, int64_t len);
+/* runtime/terminal.c */
+int jade_terminal_enable_raw(int fd);
+int jade_terminal_disable_raw(int fd);
+int jade_terminal_size(int32_t *out_cols, int32_t *out_rows);
 /* runtime/vec.c */
 void *__jade_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size);
 jade_sso_t __jade_str_slice(jade_sso_t str, int64_t start, int64_t end);
@@ -465,6 +469,39 @@ long jade_aes_gcm_decrypt(const unsigned char *key, const unsigned char *iv,
                           const unsigned char *tag, unsigned char *out);
 int  jade_random_bytes(unsigned char *buf, long n);
 void jade_bytes_to_hex(const unsigned char *data, long len, char *out);
+long jade_hex_to_bytes(const char *hex, long hex_len, unsigned char *out);
+long jade_evp_digest(const char *alg, const unsigned char *data, long len,
+                     unsigned char *out);
+long jade_evp_hmac(const char *alg, const unsigned char *key, long key_len,
+                   const unsigned char *data, long data_len,
+                   unsigned char *out);
+int  jade_pbkdf2(const char *alg, const unsigned char *pass, long pass_len,
+                 const unsigned char *salt, long salt_len, long iters,
+                 long dklen, unsigned char *out);
+long jade_aes_cbc_encrypt(const unsigned char *key, const unsigned char *iv,
+                          const unsigned char *pt, long pt_len,
+                          unsigned char *out);
+long jade_aes_cbc_decrypt(const unsigned char *key, const unsigned char *iv,
+                          const unsigned char *ct, long ct_len,
+                          unsigned char *out);
+long jade_chacha20_poly1305_encrypt(const unsigned char *key,
+                                    const unsigned char *nonce,
+                                    const unsigned char *pt, long pt_len,
+                                    const unsigned char *aad, long aad_len,
+                                    unsigned char *out, unsigned char *tag);
+long jade_chacha20_poly1305_decrypt(const unsigned char *key,
+                                    const unsigned char *nonce,
+                                    const unsigned char *ct, long ct_len,
+                                    const unsigned char *aad, long aad_len,
+                                    const unsigned char *tag,
+                                    unsigned char *out);
+int  jade_argon2id(const unsigned char *pass, long pass_len,
+                   const unsigned char *salt, long salt_len,
+                   long t_cost, long m_cost_kib, long parallelism,
+                   long dklen, unsigned char *out);
+int  jade_scrypt(const unsigned char *pass, long pass_len,
+                 const unsigned char *salt, long salt_len,
+                 long n, long r, long p, long dklen, unsigned char *out);
 
 /* runtime/tls.c (requires OpenSSL) */
 typedef struct jade_tls_conn jade_tls_conn;
@@ -473,6 +510,15 @@ jade_tls_conn *jade_tls_connect(const char *host, int port);
 long           jade_tls_send(jade_tls_conn *conn, const char *buf, long len);
 long           jade_tls_recv(jade_tls_conn *conn, char *buf, long len);
 void           jade_tls_close(jade_tls_conn *conn);
+typedef struct jade_tls_listener jade_tls_listener;
+jade_tls_listener *jade_tls_listen(const char *host, int port,
+                                   const char *cert_path,
+                                   const char *key_path);
+jade_tls_conn *jade_tls_accept(jade_tls_listener *l);
+void           jade_tls_listener_close(jade_tls_listener *l);
+long           jade_tls_last_error(char *buf, long len);
+long           jade_tls_peer_cert_subject(jade_tls_conn *conn, char *buf, long len);
+long           jade_tls_protocol_version(jade_tls_conn *conn, char *buf, long len);
 int            jade_dns_resolve(const char *host, char *out_buf, int out_len);
 int            jade_dns_resolve_all(const char *host, char *out_buf, int out_len);
 

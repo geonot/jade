@@ -135,6 +135,26 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 - **Acceptance:** baseline compile time drops by the cost of the redundant pass;
   output diff is empty.
 
+#### N-13 — MIR-native concurrency lowering (CLEANUP §C.1 residual)
+- **Severity:** P2 (organizational; no user-visible effect)
+- **Symptom:** `src/codegen/{actors,coroutines,lambda,stmt,expr,store_ops,
+  store_filter,map,strings,string_ops,string_transform,vec,conversions}.rs`
+  (~7,200 LOC) survive solely to serve a small set of MIR entry points
+  (`compile_actor_loop`, `compile_supervisor`, `compile_coroutine_create`,
+  `compile_spawn`, `gen_migration`, `make_closure`, `eval_store_filter`)
+  that walk HIR data structures.
+- **Tasks:**
+  1. Extend MIR with native opcodes for actor message loops, coroutine state
+     machines, supervisor trees, schema migrations, and WHERE-clause
+     evaluation (today these are all HIR-shaped).
+  2. Teach `src/mir/lower.rs` to lower HIR concurrency / migration / filter
+     constructs to those opcodes.
+  3. Reimplement the codegen entry points to consume MIR instead of HIR.
+  4. Run transitive-reachability sweep and delete the now-dead helper files.
+- **Estimate:** L (multi-day MIR project)
+- **Acceptance:** `src/codegen/` shrinks by ≈ 5,000 LOC; tests still 1565/0;
+  bench parity preserved.
+
 #### Asm path unverified
 - **Severity:** P1
 - **Tasks:**

@@ -1,0 +1,89 @@
+# std.sha — SHA family hash functions (SHA-1, SHA-2, SHA-3)
+#
+# Wraps OpenSSL EVP. All functions return lowercase hex strings.
+# For BLAKE hashes, see std.blake. For HMAC, see std.crypto.
+#
+# Usage:
+#   digest is sha.sha256("hello")          # -> "2cf24dba..."
+#   digest is sha.sha3_512(message)
+#   raw    is sha.sha256_bytes("hello")    # -> 32-byte raw String
+#
+# Standards: FIPS 180-4 (SHA-1, SHA-2), FIPS 202 (SHA-3).
+
+extern *jade_evp_digest(alg as %i8, data as %i8, len as i64, out as %i8) returns i64
+extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+# ── Internal: digest by name → hex ───────────────────────────
+
+*__digest_hex(alg as String, data as String, out_size as i64) returns String
+    out_buf is extern.malloc(out_size)
+    hex_buf is extern.malloc(out_size * 2 + 1)
+    n is extern.jade_evp_digest(%alg, %data, data.length, out_buf)
+    if n < 0
+        extern.free(out_buf)
+        extern.free(hex_buf)
+        return ""
+    extern.jade_bytes_to_hex(out_buf, n, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(out_buf)
+    extern.free(hex_buf)
+    result
+
+*__digest_raw(alg as String, data as String, out_size as i64) returns String
+    out_buf is extern.malloc(out_size)
+    n is extern.jade_evp_digest(%alg, %data, data.length, out_buf)
+    if n < 0
+        extern.free(out_buf)
+        return ""
+    result is __string_from_ptr_len(out_buf, n)
+    extern.free(out_buf)
+    result
+
+# ── SHA-1 (legacy — do not use for security) ─────────────────
+
+*sha1(data as String) returns String
+    __digest_hex("SHA1", data, 20)
+
+# ── SHA-2 family ─────────────────────────────────────────────
+
+*sha224(data as String) returns String
+    __digest_hex("SHA224", data, 28)
+
+*sha256(data as String) returns String
+    __digest_hex("SHA256", data, 32)
+
+*sha384(data as String) returns String
+    __digest_hex("SHA384", data, 48)
+
+*sha512(data as String) returns String
+    __digest_hex("SHA512", data, 64)
+
+# Raw byte variants (return binary string of digest bytes)
+
+*sha256_bytes(data as String) returns String
+    __digest_raw("SHA256", data, 32)
+
+*sha512_bytes(data as String) returns String
+    __digest_raw("SHA512", data, 64)
+
+# ── SHA-3 family (Keccak) ────────────────────────────────────
+
+*sha3_224(data as String) returns String
+    __digest_hex("SHA3-224", data, 28)
+
+*sha3_256(data as String) returns String
+    __digest_hex("SHA3-256", data, 32)
+
+*sha3_384(data as String) returns String
+    __digest_hex("SHA3-384", data, 48)
+
+*sha3_512(data as String) returns String
+    __digest_hex("SHA3-512", data, 64)
+
+*sha3_256_bytes(data as String) returns String
+    __digest_raw("SHA3-256", data, 32)
+
+*sha3_512_bytes(data as String) returns String
+    __digest_raw("SHA3-512", data, 64)

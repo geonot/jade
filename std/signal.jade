@@ -1,32 +1,117 @@
 # std.signal — POSIX signal handling
 #
+# Async-signal-safe handlers are difficult; in Jade, the runtime
+# delivers signals via a coroutine-friendly callback after returning
+# from the kernel handler. Treat handlers as ordinary Jade code.
+#
 # Usage:
-#   signal.handle(signal.SIGINT, fn() { log("interrupted") })
+#   signal.handle(signal.SIGINT, fn() { log("ctrl-c") })
 #   signal.ignore(signal.SIGPIPE)
+#   signal.on_interrupt(fn() { shutdown() })
 
-# Signal constants (POSIX)
-SIGHUP is 1
-SIGINT is 2
-SIGQUIT is 3
-SIGILL is 4
-SIGABRT is 6
-SIGFPE is 8
-SIGKILL is 9
-SIGSEGV is 11
-SIGPIPE is 13
-SIGALRM is 14
-SIGTERM is 15
-SIGUSR1 is 10
-SIGUSR2 is 12
-SIGCHLD is 17
-SIGCONT is 18
-SIGSTOP is 19
+# ── Signal numbers (Linux/macOS layout) ──────────────────────
 
+SIGHUP   is 1
+SIGINT   is 2
+SIGQUIT  is 3
+SIGILL   is 4
+SIGTRAP  is 5
+SIGABRT  is 6
+SIGBUS   is 7
+SIGFPE   is 8
+SIGKILL  is 9          # uncatchable
+SIGUSR1  is 10
+SIGSEGV  is 11
+SIGUSR2  is 12
+SIGPIPE  is 13
+SIGALRM  is 14
+SIGTERM  is 15
+SIGCHLD  is 17
+SIGCONT  is 18
+SIGSTOP  is 19         # uncatchable
+SIGTSTP  is 20
+SIGTTIN  is 21
+SIGTTOU  is 22
+SIGURG   is 23
+SIGWINCH is 28
+
+# ── Core API ─────────────────────────────────────────────────
+
+# Install a Jade closure as the handler for `sig`.
 *handle(sig as i32, handler)
     signal_handle(sig, handler)
 
+# Set the disposition to SIG_IGN — the kernel discards the signal.
 *ignore(sig as i32)
     signal_ignore(sig)
 
+# Restore the kernel's default behavior for `sig`.
+*reset(sig as i32)
+    signal_default(sig)
+
+# Send a signal to the current process.
 *raise(sig as i32) returns i32
     signal_raise(sig)
+
+# Send a signal to another process by PID.
+*kill(pid as i64, sig as i32) returns i32
+    signal_kill(pid as i32, sig)
+
+# ── Convenience handlers ─────────────────────────────────────
+
+# Run `handler` on Ctrl-C.
+*on_interrupt(handler)
+    handle(SIGINT, handler)
+
+# Run `handler` on SIGTERM (graceful shutdown).
+*on_terminate(handler)
+    handle(SIGTERM, handler)
+
+# Reload-style handler (typical for HUP).
+*on_hangup(handler)
+    handle(SIGHUP, handler)
+
+# Window-resize callback for full-screen TUI apps.
+*on_resize(handler)
+    handle(SIGWINCH, handler)
+
+# ── Names ────────────────────────────────────────────────────
+
+*name(sig as i32) returns String
+    if sig equals SIGHUP
+        return "SIGHUP"
+    if sig equals SIGINT
+        return "SIGINT"
+    if sig equals SIGQUIT
+        return "SIGQUIT"
+    if sig equals SIGILL
+        return "SIGILL"
+    if sig equals SIGABRT
+        return "SIGABRT"
+    if sig equals SIGFPE
+        return "SIGFPE"
+    if sig equals SIGKILL
+        return "SIGKILL"
+    if sig equals SIGSEGV
+        return "SIGSEGV"
+    if sig equals SIGPIPE
+        return "SIGPIPE"
+    if sig equals SIGALRM
+        return "SIGALRM"
+    if sig equals SIGTERM
+        return "SIGTERM"
+    if sig equals SIGUSR1
+        return "SIGUSR1"
+    if sig equals SIGUSR2
+        return "SIGUSR2"
+    if sig equals SIGCHLD
+        return "SIGCHLD"
+    if sig equals SIGCONT
+        return "SIGCONT"
+    if sig equals SIGSTOP
+        return "SIGSTOP"
+    if sig equals SIGTSTP
+        return "SIGTSTP"
+    if sig equals SIGWINCH
+        return "SIGWINCH"
+    "SIG" + sig

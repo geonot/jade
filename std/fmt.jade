@@ -1,8 +1,16 @@
-# std.fmt — String formatting
+# std.fmt — String formatting and presentation helpers
+#
+# Numeric formatting (hex/oct/bin/float), padding, alignment, repetition,
+# tables, durations, file sizes, and printf-style format strings.
 #
 # Usage:
-#   fmt.hex(255)          # "ff"
-#   fmt.pad_left("5", 3, "0")  # "005"
+#   fmt.hex(255)                       # "ff"
+#   fmt.pad_left("5", 3, "0")          # "005"
+#   fmt.bytes(1536)                    # "1.5 KiB"
+#   fmt.duration_ns(1500000)           # "1.50ms"
+#   fmt.commas(1234567)                # "1,234,567"
+
+# ── Number bases ─────────────────────────────────────────────
 
 *float(x, decimals)
     __fmt_float(x, decimals)
@@ -15,6 +23,15 @@
 
 *bin(n)
     __fmt_bin(n)
+
+*hex_with_prefix(n) returns String
+    "0x" + __fmt_hex(n)
+
+# Fixed-width hex (zero-padded), e.g. hex_n(255, 4) -> "00ff"
+*hex_n(n as i64, width as i64) returns String
+    pad_left(__fmt_hex(n), width, "0")
+
+# ── Padding & alignment ──────────────────────────────────────
 
 *pad_left(s as String, width, fill as String)
     if s.length >= width
@@ -32,22 +49,6 @@
     result is s
     for i in 0 to padding
         result is result + fill
-    result
-
-*join(items, sep as String)
-    if items.length equals 0
-        return ""
-    result is ""
-    loop items
-        if $$ > 0
-            result is result + sep
-        result is result + $
-    result
-
-*repeat(s as String, n)
-    result is ""
-    for i in 0 to n
-        result is result + s
     result
 
 *center(s as String, width, fill as String)
@@ -68,3 +69,182 @@
     if s.length <= max_len
         return s
     s.slice(0, max_len - suffix.length) + suffix
+
+# ── Joining & repetition ─────────────────────────────────────
+
+*join(items, sep as String)
+    if items.length equals 0
+        return ""
+    result is ""
+    loop items
+        if $$ > 0
+            result is result + sep
+        result is result + $
+    result
+
+*repeat(s as String, n)
+    result is ""
+    for i in 0 to n
+        result is result + s
+    result
+
+# ── Number presentation ──────────────────────────────────────
+
+# Insert thousands separators: 1234567 -> "1,234,567"
+*commas(n as i64) returns String
+    if n equals 0
+        return "0"
+    neg is false
+    v is n
+    if v < 0
+        neg is true
+        v is 0 - v
+    s is "" + v
+    out is ""
+    j is 0
+    i is s.length - 1
+    while i >= 0
+        if j > 0 and j mod 3 equals 0
+            out is "," + out
+        out is s.slice(i, i + 1) + out
+        i is i - 1
+        j is j + 1
+    neg ? "-" + out ! out
+
+# Shorten big numbers: 1500 -> "1.5K", 2400000 -> "2.4M"
+*si_suffix(n as i64) returns String
+    abs is n < 0 ? 0 - n ! n
+    if abs < 1000
+        return "" + n
+    if abs < 1000000
+        return __fmt_float((n as f64) / 1000.0, 1) + "K"
+    if abs < 1000000000
+        return __fmt_float((n as f64) / 1000000.0, 1) + "M"
+    if abs < 1000000000000
+        return __fmt_float((n as f64) / 1000000000.0, 1) + "G"
+    __fmt_float((n as f64) / 1000000000000.0, 1) + "T"
+
+# Human-readable byte sizes (binary KiB/MiB/GiB).
+*bytes(n as i64) returns String
+    abs is n < 0 ? 0 - n ! n
+    if abs < 1024
+        return "" + n + " B"
+    if abs < 1048576
+        return __fmt_float((n as f64) / 1024.0, 1) + " KiB"
+    if abs < 1073741824
+        return __fmt_float((n as f64) / 1048576.0, 1) + " MiB"
+    if abs < 1099511627776
+        return __fmt_float((n as f64) / 1073741824.0, 2) + " GiB"
+    __fmt_float((n as f64) / 1099511627776.0, 2) + " TiB"
+
+# Human-readable duration from a nanosecond count.
+*duration_ns(ns as i64) returns String
+    if ns < 1000
+        return "" + ns + "ns"
+    if ns < 1000000
+        return __fmt_float((ns as f64) / 1000.0, 2) + "µs"
+    if ns < 1000000000
+        return __fmt_float((ns as f64) / 1000000.0, 2) + "ms"
+    if ns < 60000000000
+        return __fmt_float((ns as f64) / 1000000000.0, 2) + "s"
+    if ns < 3600000000000
+        return "" + (ns / 60000000000) + "m " + ((ns mod 60000000000) / 1000000000) + "s"
+    "" + (ns / 3600000000000) + "h " + ((ns mod 3600000000000) / 60000000000) + "m"
+
+# Percent: percent(0.875, 1) -> "87.5%"
+*percent(x as f64, decimals as i64) returns String
+    __fmt_float(x * 100.0, decimals) + "%"
+
+# ── Simple table layout ──────────────────────────────────────
+
+# Pretty-print a table given header + rows. Columns auto-sized.
+*table(header as Vec of String, rows as Vec of Vec of String) returns String
+    cols is header.length
+    widths is vec()
+    i is 0
+    while i < cols
+        widths.push(header.get(i).length)
+        i is i + 1
+    loop rows
+        row is $
+        i is 0
+        while i < cols
+            if i < row.length
+                w is row.get(i).length
+                if w > widths.get(i)
+                    widths.set(i, w)
+            i is i + 1
+    out is ""
+    out is out + __row(header, widths) + "\n"
+    out is out + __sep(widths) + "\n"
+    loop rows
+        out is out + __row($, widths) + "\n"
+    out
+
+*__row(cells as Vec of String, widths as Vec of i64) returns String
+    out is ""
+    i is 0
+    while i < widths.length
+        cell is i < cells.length ? cells.get(i) ! ""
+        if i > 0
+            out is out + " | "
+        out is out + pad_right(cell, widths.get(i), " ")
+        i is i + 1
+    out
+
+*__sep(widths as Vec of i64) returns String
+    out is ""
+    i is 0
+    while i < widths.length
+        if i > 0
+            out is out + "-+-"
+        out is out + repeat("-", widths.get(i))
+        i is i + 1
+    out
+
+# ── Tiny printf-style formatter ──────────────────────────────
+#
+# Accepts %s, %d, %x, %% (literal %).
+
+*printf(format as String, args as Vec of String) returns String
+    out is ""
+    i is 0
+    arg_idx is 0
+    while i < format.length
+        c is format.char_at(i)
+        if c equals 37 and i + 1 < format.length
+            spec is format.char_at(i + 1)
+            if spec equals 37
+                out is out + "%"
+            elif spec equals 115
+                out is out + (arg_idx < args.length ? args.get(arg_idx) ! "")
+                arg_idx is arg_idx + 1
+            elif spec equals 100
+                out is out + (arg_idx < args.length ? args.get(arg_idx) ! "0")
+                arg_idx is arg_idx + 1
+            elif spec equals 120
+                v is arg_idx < args.length ? __parse_dec(args.get(arg_idx)) ! 0
+                out is out + __fmt_hex(v)
+                arg_idx is arg_idx + 1
+            else
+                out is out + format.slice(i, i + 2)
+            i is i + 2
+        else
+            out is out + format.slice(i, i + 1)
+            i is i + 1
+    out
+
+*__parse_dec(s as String) returns i64
+    n is 0
+    sign is 1
+    i is 0
+    if s.length > 0 and s.char_at(0) equals 45
+        sign is -1
+        i is 1
+    while i < s.length
+        c is s.char_at(i)
+        if c < 48 or c > 57
+            break
+        n is n * 10 + (c - 48)
+        i is i + 1
+    n * sign

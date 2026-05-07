@@ -1,0 +1,308 @@
+# std.url — URL parsing, building, and percent-encoding (RFC 3986)
+#
+# A pragmatic URL implementation aiming for the WHATWG URL Standard /
+# RFC 3986 intersection that matters for HTTP, REST APIs, and form data.
+#
+# Usage:
+#   u is url.parse("https://api.example.com:8443/v1/users?id=42&q=hi#top")
+#   u.host        # "api.example.com"
+#   u.port        # 8443
+#   u.path        # "/v1/users"
+#   u.query.get("id")    # "42"
+#   u.to_string() # round-trips
+#
+#   built is url.build("https", "example.com", "/search", map_of("q", "café"))
+#   # -> "https://example.com/search?q=caf%C3%A9"
+
+# ── URL value type ───────────────────────────────────────────
+
+type Url
+    scheme as String
+    user as String
+    password as String
+    host as String
+    port as i64           # 0 means "default for scheme"
+    path as String
+    query as Map of String
+    raw_query as String
+    fragment as String
+
+    *to_string returns String
+        out is ""
+        if self.scheme.length > 0
+            out is out + self.scheme + "://"
+        if self.user.length > 0
+            out is out + percent_encode(self.user)
+            if self.password.length > 0
+                out is out + ":" + percent_encode(self.password)
+            out is out + "@"
+        out is out + self.host
+        if self.port > 0 and self.port neq default_port(self.scheme)
+            out is out + ":" + self.port
+        out is out + self.path
+        if self.raw_query.length > 0
+            out is out + "?" + self.raw_query
+        if self.fragment.length > 0
+            out is out + "#" + percent_encode(self.fragment)
+        out
+
+    *origin returns String
+        if self.scheme.length equals 0
+            return ""
+        port_part is ""
+        if self.port > 0 and self.port neq default_port(self.scheme)
+            port_part is ":" + self.port
+        self.scheme + "://" + self.host + port_part
+
+    *with_path(p as String) returns Url
+        Url(scheme is self.scheme, user is self.user, password is self.password, host is self.host, port is self.port, path is p, query is self.query, raw_query is self.raw_query, fragment is self.fragment)
+
+    *with_query(q as Map of String) returns Url
+        Url(scheme is self.scheme, user is self.user, password is self.password, host is self.host, port is self.port, path is self.path, query is q, raw_query is encode_query(q), fragment is self.fragment)
+
+# ── Constructors ─────────────────────────────────────────────
+
+# Returns a Url with empty fields. `host == ""` indicates parse failure.
+*parse(s as String) returns Url
+    if s.length equals 0
+        return __empty()
+    rest is s
+    scheme is ""
+    # scheme://
+    sep is rest.find("://")
+    if sep > 0
+        scheme is rest.slice(0, sep).to_lower()
+        rest is rest.slice(sep + 3, rest.length)
+    user is ""
+    password is ""
+    host is ""
+    port is 0
+    path is "/"
+    raw_query is ""
+    fragment is ""
+    # fragment
+    hash_pos is rest.find("#")
+    if hash_pos >= 0
+        fragment is percent_decode(rest.slice(hash_pos + 1, rest.length))
+        rest is rest.slice(0, hash_pos)
+    # query
+    q_pos is rest.find("?")
+    if q_pos >= 0
+        raw_query is rest.slice(q_pos + 1, rest.length)
+        rest is rest.slice(0, q_pos)
+    # split authority / path
+    slash is rest.find("/")
+    authority is ""
+    if slash >= 0
+        authority is rest.slice(0, slash)
+        path is rest.slice(slash, rest.length)
+    else
+        authority is rest
+        path is "/"
+    # userinfo @
+    at_pos is authority.find("@")
+    if at_pos >= 0
+        userinfo is authority.slice(0, at_pos)
+        authority is authority.slice(at_pos + 1, authority.length)
+        colon is userinfo.find(":")
+        if colon >= 0
+            user is percent_decode(userinfo.slice(0, colon))
+            password is percent_decode(userinfo.slice(colon + 1, userinfo.length))
+        else
+            user is percent_decode(userinfo)
+    # port
+    colon is __last_colon_outside_brackets(authority)
+    if colon >= 0
+        host is authority.slice(0, colon)
+        port_str is authority.slice(colon + 1, authority.length)
+        if port_str.length > 0
+            port is port_str as i64
+    else
+        host is authority
+    query is decode_query(raw_query)
+    Url(scheme is scheme, user is user, password is password, host is host, port is port, path is path, query is query, raw_query is raw_query, fragment is fragment)
+
+# Build a URL from components (path defaults to "/", query empty).
+*build(scheme as String, host as String, path as String, query as Map of String) returns String
+    raw is encode_query(query)
+    out is scheme + "://" + host + (path.length equals 0 ? "/" ! path)
+    if raw.length > 0
+        out is out + "?" + raw
+    out
+
+# Resolve a (possibly relative) reference against a base URL.
+# Implements a simplified RFC 3986 §5.2 (no `..` collapsing).
+*resolve(base as String, ref as String) returns String
+    if ref.length equals 0
+        return base
+    if ref.find("://") > 0
+        return ref
+    b is parse(base)
+    if ref.starts_with("//")
+        return b.scheme + ":" + ref
+    if ref.starts_with("/")
+        return b.scheme + "://" + b.host + ref
+    if ref.starts_with("?") or ref.starts_with("#")
+        return b.scheme + "://" + b.host + b.path + ref
+    # relative path: replace last segment of base.path
+    last is b.path.length - 1
+    while last >= 0 and b.path.char_at(last) neq 47
+        last is last - 1
+    new_path is b.path.slice(0, last + 1) + ref
+    b.scheme + "://" + b.host + new_path
+
+# ── Percent-encoding (RFC 3986) ──────────────────────────────
+
+# Encode unreserved characters as-is; everything else as %HH.
+# Suitable for query values; for path segments, slashes are passed through.
+*percent_encode(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if __is_unreserved(c)
+            out is out + s.slice(i, i + 1)
+        else
+            out is out + "%" + __hex_byte(c)
+        i is i + 1
+    out
+
+*percent_encode_path(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if __is_unreserved(c) or c equals 47 or c equals 45 or c equals 95
+            out is out + s.slice(i, i + 1)
+        else
+            out is out + "%" + __hex_byte(c)
+        i is i + 1
+    out
+
+*percent_decode(s as String) returns String
+    out is ""
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 37 and i + 2 < s.length
+            hi is __hex_val(s.char_at(i + 1))
+            lo is __hex_val(s.char_at(i + 2))
+            out is out + __char_from_byte((hi << 4) | lo)
+            i is i + 3
+        elif c equals 43
+            # '+' decodes to space in form-encoded contexts.
+            out is out + " "
+            i is i + 1
+        else
+            out is out + s.slice(i, i + 1)
+            i is i + 1
+    out
+
+# ── Query string helpers ─────────────────────────────────────
+
+# Encode a flat map as application/x-www-form-urlencoded.
+*encode_query(q as Map of String) returns String
+    keys is q.keys()
+    if keys.length equals 0
+        return ""
+    out is ""
+    loop keys
+        if $$ > 0
+            out is out + "&"
+        out is out + percent_encode($) + "=" + percent_encode(q.get($))
+    out
+
+# Decode "a=1&b=2" into a map. Last value wins on duplicate keys.
+*decode_query(s as String) returns Map of String
+    out is map()
+    if s.length equals 0
+        return out
+    parts is s.split("&")
+    loop parts
+        eq is $.find("=")
+        if eq < 0
+            out.set(percent_decode($), "")
+        else
+            k is percent_decode($.slice(0, eq))
+            v is percent_decode($.slice(eq + 1, $.length))
+            out.set(k, v)
+    out
+
+# ── Defaults & utilities ─────────────────────────────────────
+
+*default_port(scheme as String) returns i64
+    if scheme equals "http"
+        return 80
+    if scheme equals "https"
+        return 443
+    if scheme equals "ws"
+        return 80
+    if scheme equals "wss"
+        return 443
+    if scheme equals "ftp"
+        return 21
+    if scheme equals "ssh"
+        return 22
+    0
+
+*is_valid(s as String) returns bool
+    u is parse(s)
+    u.scheme.length > 0 and u.host.length > 0
+
+# ── Internal helpers ─────────────────────────────────────────
+
+*__empty returns Url
+    Url(scheme is "", user is "", password is "", host is "", port is 0, path is "", query is map(), raw_query is "", fragment is "")
+
+*__is_unreserved(c as i64) returns bool
+    # A-Z, a-z, 0-9, '-', '.', '_', '~'
+    if c >= 65 and c <= 90
+        return true
+    if c >= 97 and c <= 122
+        return true
+    if c >= 48 and c <= 57
+        return true
+    c equals 45 or c equals 46 or c equals 95 or c equals 126
+
+*__hex_byte(b as i64) returns String
+    digits is "0123456789ABCDEF"
+    hi is (b >> 4) & 15
+    lo is b & 15
+    digits.slice(hi, hi + 1) + digits.slice(lo, lo + 1)
+
+*__hex_val(c as i64) returns i64
+    if c >= 48 and c <= 57
+        return c - 48
+    if c >= 97 and c <= 102
+        return c - 87
+    if c >= 65 and c <= 70
+        return c - 55
+    0
+
+*__char_from_byte(b as i64) returns String
+    # Build a single-character string from a byte value.
+    # Workaround: round-trip via hex encoding.
+    h is "0123456789abcdef"
+    hi is (b >> 4) & 15
+    lo is b & 15
+    s is "%" + h.slice(hi, hi + 1) + h.slice(lo, lo + 1)
+    # The caller already handled %HH specially; for non-printable bytes we
+    # leave the literal character via slice trick:
+    __char_to_string(b)
+
+# Provided by runtime (interpret integer as a single byte string).
+*__char_to_string(b as i64) returns String
+    chr(b)
+
+*__last_colon_outside_brackets(s as String) returns i64
+    # IPv6 hosts use [::1]; the port colon is after the closing bracket.
+    if s.length > 0 and s.char_at(0) equals 91
+        close is s.find("]")
+        if close < 0
+            return -1
+        rest is s.slice(close + 1, s.length)
+        c is rest.find(":")
+        if c < 0
+            return -1
+        return close + 1 + c
+    s.find(":")

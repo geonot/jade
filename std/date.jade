@@ -1,0 +1,328 @@
+# std.date — Calendar arithmetic, dates, time zones
+#
+# Companion to `std.time`. While `time` deals in *durations* and
+# *instants on the monotonic / wall clock*, `date` deals in
+# *human calendar values*: year/month/day, days of week, ISO weeks,
+# leap years, and DST-aware datetime arithmetic.
+#
+# Per VISION v6.3: `Instant`, `Duration`, and `DateTime<TZ>` are distinct
+# types — `DateTime` operations cross zone boundaries; `Instant`/`Duration`
+# operations don't.
+#
+# Usage:
+#   d is date.from_ymd(2025, 11, 18)
+#   date.day_name(d.day_of_week())          # "Tuesday"
+#   d2 is date.add_days(d, 10)
+#   date.diff_days(d, d2)                   # 10
+#   when is date.from_iso("2025-11-18T13:45:00Z")
+
+import std.time
+
+# ── Date value (calendar day, no time-of-day) ────────────────
+
+type Date
+    year as i64
+    month as i64        # 1..12
+    day as i64          # 1..days_in_month
+
+    *to_string returns String
+        format_pad4(self.year) + "-" + format_pad2(self.month) + "-" + format_pad2(self.day)
+
+    *day_of_week returns i64
+        day_of_week(self.year, self.month, self.day)
+
+    *day_of_year returns i64
+        n is self.day
+        m is 1
+        while m < self.month
+            n is n + days_in_month(m, self.year)
+            m is m + 1
+        n
+
+    *iso_week returns i64
+        # ISO 8601 week numbering (week containing the first Thursday).
+        doy is self.day_of_year()
+        dow is iso_dow(self.year, self.month, self.day)
+        w is (doy - dow + 10) / 7
+        if w < 1
+            return 52
+        if w > 52
+            return 1
+        w
+
+# ── DateTime (calendar day + clock time + UTC offset minutes) ──
+
+type DateTime
+    year as i64
+    month as i64
+    day as i64
+    hour as i64
+    minute as i64
+    second as i64
+    nanosecond as i64
+    tz_offset_min as i64       # minutes east of UTC (+540 = JST)
+
+    *to_string returns String
+        s is format_pad4(self.year) + "-" + format_pad2(self.month) + "-" + format_pad2(self.day)
+        s is s + "T" + format_pad2(self.hour) + ":" + format_pad2(self.minute) + ":" + format_pad2(self.second)
+        if self.tz_offset_min equals 0
+            return s + "Z"
+        sign is self.tz_offset_min >= 0 ? "+" ! "-"
+        off is self.tz_offset_min < 0 ? 0 - self.tz_offset_min ! self.tz_offset_min
+        s + sign + format_pad2(off / 60) + ":" + format_pad2(off mod 60)
+
+    *to_unix returns i64
+        d is epoch_days(self.year, self.month, self.day)
+        d * 86400 + self.hour * 3600 + self.minute * 60 + self.second - self.tz_offset_min * 60
+
+# ── Constructors ─────────────────────────────────────────────
+
+*from_ymd(year as i64, month as i64, day as i64) returns Date
+    Date(year is year, month is month, day is day)
+
+*today returns Date
+    from_unix(time.now())
+
+*from_unix(secs as i64) returns Date
+    days is secs / 86400
+    if secs < 0 and (secs mod 86400) neq 0
+        days is days - 1
+    ymd is civil_from_days(days)
+    Date(year is ymd.get(0), month is ymd.get(1), day is ymd.get(2))
+
+*now_utc returns DateTime
+    secs is time.now()
+    days is secs / 86400
+    rem is secs mod 86400
+    if rem < 0
+        rem is rem + 86400
+        days is days - 1
+    ymd is civil_from_days(days)
+    DateTime(
+        year is ymd.get(0), month is ymd.get(1), day is ymd.get(2),
+        hour is rem / 3600, minute is (rem mod 3600) / 60, second is rem mod 60,
+        nanosecond is 0, tz_offset_min is 0,
+    )
+
+# Parse "YYYY-MM-DD" or full ISO-8601 ("YYYY-MM-DDTHH:MM:SS[Z|±HH:MM]").
+*from_iso(s as String) returns DateTime
+    year is __parse_int(s.slice(0, 4))
+    month is __parse_int(s.slice(5, 7))
+    day is __parse_int(s.slice(8, 10))
+    if s.length <= 10
+        return DateTime(year is year, month is month, day is day, hour is 0, minute is 0, second is 0, nanosecond is 0, tz_offset_min is 0)
+    hour is __parse_int(s.slice(11, 13))
+    minute is __parse_int(s.slice(14, 16))
+    second is __parse_int(s.slice(17, 19))
+    tz_min is 0
+    if s.length > 19
+        tail is s.slice(19, s.length)
+        if tail.starts_with("Z")
+            tz_min is 0
+        elif tail.length >= 6
+            sign is tail.char_at(0) equals 43 ? 1 ! -1
+            tz_min is sign * (__parse_int(tail.slice(1, 3)) * 60 + __parse_int(tail.slice(4, 6)))
+    DateTime(year is year, month is month, day is day, hour is hour, minute is minute, second is second, nanosecond is 0, tz_offset_min is tz_min)
+
+# ── Calendar helpers (Gregorian) ─────────────────────────────
+
+*is_leap_year(year as i64) returns bool
+    if year mod 400 equals 0
+        return true
+    if year mod 100 equals 0
+        return false
+    year mod 4 equals 0
+
+*days_in_month(month as i64, year as i64) returns i64
+    if month equals 2
+        return is_leap_year(year) ? 29 ! 28
+    if month equals 4 or month equals 6 or month equals 9 or month equals 11
+        return 30
+    31
+
+*days_in_year(year as i64) returns i64
+    is_leap_year(year) ? 366 ! 365
+
+# Zeller's congruence — 0 = Sunday … 6 = Saturday.
+*day_of_week(year as i64, month as i64, day as i64) returns i64
+    y is year
+    m is month
+    if m < 3
+        m is m + 12
+        y is y - 1
+    k is y mod 100
+    j is y / 100
+    h is (day + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 - 2 * j) mod 7
+    if h < 0
+        h is h + 7
+    (h + 6) mod 7
+
+# ISO day-of-week: 1 = Monday … 7 = Sunday.
+*iso_dow(year as i64, month as i64, day as i64) returns i64
+    d is day_of_week(year, month, day)
+    d equals 0 ? 7 ! d
+
+*day_name(dow as i64) returns String
+    if dow equals 0
+        return "Sunday"
+    if dow equals 1
+        return "Monday"
+    if dow equals 2
+        return "Tuesday"
+    if dow equals 3
+        return "Wednesday"
+    if dow equals 4
+        return "Thursday"
+    if dow equals 5
+        return "Friday"
+    "Saturday"
+
+*month_name(m as i64) returns String
+    names is vec()
+    names.push("")
+    names.push("January")
+    names.push("February")
+    names.push("March")
+    names.push("April")
+    names.push("May")
+    names.push("June")
+    names.push("July")
+    names.push("August")
+    names.push("September")
+    names.push("October")
+    names.push("November")
+    names.push("December")
+    if m < 1 or m > 12
+        return ""
+    names.get(m)
+
+# ── Days-since-epoch conversions (Howard Hinnant, O(1)) ──────
+
+*epoch_days(year as i64, month as i64, day as i64) returns i64
+    y is month <= 2 ? year - 1 ! year
+    era is y >= 0 ? y / 400 ! (y - 399) / 400
+    yoe is y - era * 400
+    doy is (153 * (month > 2 ? month - 3 ! month + 9) + 2) / 5 + day - 1
+    doe is yoe * 365 + yoe / 4 - yoe / 100 + doy
+    era * 146097 + doe - 719468
+
+*civil_from_days(z as i64) returns Vec of i64
+    z is z + 719468
+    era is z >= 0 ? z / 146097 ! (z - 146096) / 146097
+    doe is z - era * 146097
+    yoe is (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    y is yoe + era * 400
+    doy is doe - (365 * yoe + yoe / 4 - yoe / 100)
+    mp is (5 * doy + 2) / 153
+    d is doy - (153 * mp + 2) / 5 + 1
+    m is mp < 10 ? mp + 3 ! mp - 9
+    if m <= 2
+        y is y + 1
+    out is vec()
+    out.push(y)
+    out.push(m)
+    out.push(d)
+    out
+
+# ── Arithmetic on dates ──────────────────────────────────────
+
+*add_days(d as Date, n as i64) returns Date
+    days is epoch_days(d.year, d.month, d.day) + n
+    ymd is civil_from_days(days)
+    Date(year is ymd.get(0), month is ymd.get(1), day is ymd.get(2))
+
+*sub_days(d as Date, n as i64) returns Date
+    add_days(d, 0 - n)
+
+*diff_days(a as Date, b as Date) returns i64
+    epoch_days(b.year, b.month, b.day) - epoch_days(a.year, a.month, a.day)
+
+# Add `n` calendar months — clamps day-of-month if needed (e.g. Jan 31 + 1mo = Feb 28/29).
+*add_months(d as Date, n as i64) returns Date
+    total is d.year * 12 + (d.month - 1) + n
+    ny is total / 12
+    nm is total mod 12 + 1
+    nd is d.day
+    max is days_in_month(nm, ny)
+    if nd > max
+        nd is max
+    Date(year is ny, month is nm, day is nd)
+
+*add_years(d as Date, n as i64) returns Date
+    add_months(d, n * 12)
+
+# ── Comparisons ──────────────────────────────────────────────
+
+*before(a as Date, b as Date) returns bool
+    epoch_days(a.year, a.month, a.day) < epoch_days(b.year, b.month, b.day)
+
+*after(a as Date, b as Date) returns bool
+    epoch_days(a.year, a.month, a.day) > epoch_days(b.year, b.month, b.day)
+
+*same(a as Date, b as Date) returns bool
+    a.year equals b.year and a.month equals b.month and a.day equals b.day
+
+# ── Formatting ───────────────────────────────────────────────
+
+# Strict subset of strftime: %Y %m %d %H %M %S %A %B
+*format(dt as DateTime, pattern as String) returns String
+    out is ""
+    i is 0
+    while i < pattern.length
+        c is pattern.char_at(i)
+        if c equals 37 and i + 1 < pattern.length
+            spec is pattern.char_at(i + 1)
+            if spec equals 89                    # 'Y'
+                out is out + format_pad4(dt.year)
+            elif spec equals 109                 # 'm'
+                out is out + format_pad2(dt.month)
+            elif spec equals 100                 # 'd'
+                out is out + format_pad2(dt.day)
+            elif spec equals 72                  # 'H'
+                out is out + format_pad2(dt.hour)
+            elif spec equals 77                  # 'M'
+                out is out + format_pad2(dt.minute)
+            elif spec equals 83                  # 'S'
+                out is out + format_pad2(dt.second)
+            elif spec equals 65                  # 'A'
+                out is out + day_name(day_of_week(dt.year, dt.month, dt.day))
+            elif spec equals 66                  # 'B'
+                out is out + month_name(dt.month)
+            else
+                out is out + pattern.slice(i, i + 2)
+            i is i + 2
+        else
+            out is out + pattern.slice(i, i + 1)
+            i is i + 1
+    out
+
+*format_pad2(n as i64) returns String
+    n < 10 and n >= 0 ? "0" + n ! "" + n
+
+*format_pad4(n as i64) returns String
+    if n < 0
+        return "" + n
+    if n < 10
+        return "000" + n
+    if n < 100
+        return "00" + n
+    if n < 1000
+        return "0" + n
+    "" + n
+
+# ── Internal ─────────────────────────────────────────────────
+
+*__parse_int(s as String) returns i64
+    n is 0
+    sign is 1
+    i is 0
+    if s.length > 0 and s.char_at(0) equals 45
+        sign is -1
+        i is 1
+    while i < s.length
+        c is s.char_at(i)
+        if c < 48 or c > 57
+            return n * sign
+        n is n * 10 + (c - 48)
+        i is i + 1
+    n * sign

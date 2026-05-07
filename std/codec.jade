@@ -1,27 +1,54 @@
-# std.codec — Byte encoding utilities (hex, base64)
+# std.codec — Byte encoding and decoding
+#
+# Hex (RFC 4648 §8), Base64 (§4), Base64URL (§5), and Base32 (§6).
+# All encoders/decoders operate on Jade `String` (treated as raw bytes).
 #
 # Usage:
-#   hex_str is codec.to_hex("hello")
-#   bytes is codec.from_hex("48656c6c6f")
-#   b64 is codec.to_base64("hello")
-#   decoded is codec.from_base64(b64)
+#   codec.to_hex("hi")              # "6869"
+#   codec.from_hex("6869")          # "hi"
+#   codec.to_base64("hello")        # "aGVsbG8="
+#   codec.from_base64("aGVsbG8=")   # "hello"
+#   codec.to_base64_url(data)       # url-safe, no padding
+#   codec.to_base32(data)           # "NBSWY3DP"
 
-# ── Hex encoding ─────────────────────────────────────────────
+# ── Hex ──────────────────────────────────────────────────────
 
 HEX_CHARS is "0123456789abcdef"
+HEX_CHARS_UPPER is "0123456789ABCDEF"
 
 *to_hex(data as String) returns String
-    result is ""
+    out is ""
     i is 0
     while i < data.length
         b is data.char_at(i)
-        hi is b / 16
-        lo is b mod 16
-        result is result + HEX_CHARS.slice(hi, hi + 1) + HEX_CHARS.slice(lo, lo + 1)
+        hi is (b >> 4) & 15
+        lo is b & 15
+        out is out + HEX_CHARS.slice(hi, hi + 1) + HEX_CHARS.slice(lo, lo + 1)
         i is i + 1
-    result
+    out
 
-*__hex_digit(ch) returns i64
+*to_hex_upper(data as String) returns String
+    out is ""
+    i is 0
+    while i < data.length
+        b is data.char_at(i)
+        hi is (b >> 4) & 15
+        lo is b & 15
+        out is out + HEX_CHARS_UPPER.slice(hi, hi + 1) + HEX_CHARS_UPPER.slice(lo, lo + 1)
+        i is i + 1
+    out
+
+*from_hex(hex as String) returns String
+    out is ""
+    i is 0
+    while i + 1 < hex.length
+        hi is __hex_digit(hex.char_at(i))
+        lo is __hex_digit(hex.char_at(i + 1))
+        out is out + chr(hi * 16 + lo)
+        i is i + 2
+    out
+
+*__hex_digit(ch as i64) returns i64
     if ch >= 48 and ch <= 57
         return ch - 48
     if ch >= 97 and ch <= 102
@@ -30,37 +57,38 @@ HEX_CHARS is "0123456789abcdef"
         return ch - 55
     0
 
-*from_hex(hex as String) returns String
-    result is ""
-    i is 0
-    while i < hex.length - 1
-        hi is __hex_digit(hex.char_at(i))
-        lo is __hex_digit(hex.char_at(i + 1))
-        val is hi * 16 + lo
-        result is result + __char_from_code(val)
-        i is i + 2
-    result
+# ── Base64 (RFC 4648 §4) ─────────────────────────────────────
 
-*__char_from_code(code) returns String
-    # Build single-byte string from character code
-    if code equals 0
-        return ""
-    # Use the string builder approach with comparison
-    chars is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\t\n\r"
-    lookup is vec()
-    for j in 0 to chars.length
-        lookup.push(chars.char_at(j))
-    loop lookup
-        if $ equals code
-            return chars.slice($$, $$ + 1)
-    "?"
-
-# ── Base64 encoding ──────────────────────────────────────────
-
-B64_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+B64_TABLE     is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
 *to_base64(data as String) returns String
-    result is ""
+    __b64_encode(data, B64_TABLE, true)
+
+# Base64URL (RFC 4648 §5) — url-safe alphabet, no padding by default.
+*to_base64_url(data as String) returns String
+    __b64_encode(data, B64_URL_TABLE, false)
+
+*from_base64(encoded as String) returns String
+    __b64_decode(encoded)
+
+*from_base64_url(encoded as String) returns String
+    # Translate '-' -> '+' and '_' -> '/' then decode.
+    converted is ""
+    i is 0
+    while i < encoded.length
+        c is encoded.char_at(i)
+        if c equals 45
+            converted is converted + "+"
+        elif c equals 95
+            converted is converted + "/"
+        else
+            converted is converted + encoded.slice(i, i + 1)
+        i is i + 1
+    __b64_decode(converted)
+
+*__b64_encode(data as String, table as String, pad as bool) returns String
+    out is ""
     i is 0
     len is data.length
     while i < len
@@ -71,24 +99,45 @@ B64_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
             b1 is data.char_at(i + 1)
         if i + 2 < len
             b2 is data.char_at(i + 2)
-        idx0 is b0 >> 2
-        idx1 is ((b0 & 3) << 4) | (b1 >> 4)
-        idx2 is ((b1 & 15) << 2) | (b2 >> 6)
+        idx0 is (b0 >> 2) & 63
+        idx1 is ((b0 & 3) << 4) | ((b1 >> 4) & 15)
+        idx2 is ((b1 & 15) << 2) | ((b2 >> 6) & 3)
         idx3 is b2 & 63
-        result is result + B64_TABLE.slice(idx0, idx0 + 1)
-        result is result + B64_TABLE.slice(idx1, idx1 + 1)
+        out is out + table.slice(idx0, idx0 + 1)
+        out is out + table.slice(idx1, idx1 + 1)
         if i + 1 < len
-            result is result + B64_TABLE.slice(idx2, idx2 + 1)
-        else
-            result is result + "="
+            out is out + table.slice(idx2, idx2 + 1)
+        elif pad
+            out is out + "="
         if i + 2 < len
-            result is result + B64_TABLE.slice(idx3, idx3 + 1)
-        else
-            result is result + "="
+            out is out + table.slice(idx3, idx3 + 1)
+        elif pad
+            out is out + "="
         i is i + 3
-    result
+    out
 
-*__b64_val(ch) returns i64
+*__b64_decode(encoded as String) returns String
+    out is ""
+    i is 0
+    while i < encoded.length
+        if i + 3 >= encoded.length
+            break
+        c0 is __b64_val(encoded.char_at(i))
+        c1 is __b64_val(encoded.char_at(i + 1))
+        c2 is __b64_val(encoded.char_at(i + 2))
+        c3 is __b64_val(encoded.char_at(i + 3))
+        b0 is ((c0 << 2) | (c1 >> 4)) & 255
+        out is out + chr(b0)
+        if encoded.char_at(i + 2) neq 61
+            b1 is (((c1 & 15) << 4) | (c2 >> 2)) & 255
+            out is out + chr(b1)
+        if encoded.char_at(i + 3) neq 61
+            b2 is (((c2 & 3) << 6) | c3) & 255
+            out is out + chr(b2)
+        i is i + 4
+    out
+
+*__b64_val(ch as i64) returns i64
     if ch >= 65 and ch <= 90
         return ch - 65
     if ch >= 97 and ch <= 122
@@ -99,27 +148,88 @@ B64_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
         return 62
     if ch equals 47
         return 63
+    if ch equals 45
+        return 62
+    if ch equals 95
+        return 63
     0
 
-*from_base64(encoded as String) returns String
-    result is ""
+# ── Base32 (RFC 4648 §6) ─────────────────────────────────────
+
+B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+*to_base32(data as String) returns String
+    out is ""
+    i is 0
+    n is data.length
+    while i < n
+        # Take 5 bytes -> 8 base32 chars
+        b is vec()
+        j is 0
+        while j < 5
+            b.push(i + j < n ? data.char_at(i + j) ! 0)
+            j is j + 1
+        # Pack into 40 bits then split into 5-bit groups.
+        idx is vec()
+        idx.push((b.get(0) >> 3) & 31)
+        idx.push(((b.get(0) & 7) << 2) | ((b.get(1) >> 6) & 3))
+        idx.push((b.get(1) >> 1) & 31)
+        idx.push(((b.get(1) & 1) << 4) | ((b.get(2) >> 4) & 15))
+        idx.push(((b.get(2) & 15) << 1) | ((b.get(3) >> 7) & 1))
+        idx.push((b.get(3) >> 2) & 31)
+        idx.push(((b.get(3) & 3) << 3) | ((b.get(4) >> 5) & 7))
+        idx.push(b.get(4) & 31)
+        # How many output chars valid (depends on remaining bytes)?
+        remaining is n - i
+        keep is 8
+        if remaining equals 1
+            keep is 2
+        elif remaining equals 2
+            keep is 4
+        elif remaining equals 3
+            keep is 5
+        elif remaining equals 4
+            keep is 7
+        k is 0
+        while k < 8
+            if k < keep
+                v is idx.get(k)
+                out is out + B32_TABLE.slice(v, v + 1)
+            else
+                out is out + "="
+            k is k + 1
+        i is i + 5
+    out
+
+*from_base32(encoded as String) returns String
+    out is ""
     i is 0
     while i < encoded.length
-        c0 is __b64_val(encoded.char_at(i))
-        c1 is __b64_val(encoded.char_at(i + 1))
-        c2 is __b64_val(encoded.char_at(i + 2))
-        c3 is __b64_val(encoded.char_at(i + 3))
-        b0 is (c0 << 2) | (c1 >> 4)
-        result is result + __char_from_code(b0)
-        if i + 2 < encoded.length
-            ch2 is encoded.char_at(i + 2)
-            if ch2 neq 61
-                b1 is ((c1 & 15) << 4) | (c2 >> 2)
-                result is result + __char_from_code(b1)
-        if i + 3 < encoded.length
-            ch3 is encoded.char_at(i + 3)
-            if ch3 neq 61
-                b2 is ((c2 & 3) << 6) | c3
-                result is result + __char_from_code(b2)
-        i is i + 4
-    result
+        if i + 7 >= encoded.length
+            break
+        v is vec()
+        j is 0
+        while j < 8
+            v.push(__b32_val(encoded.char_at(i + j)))
+            j is j + 1
+        # Reconstruct 5 bytes from 8 5-bit groups.
+        out is out + chr(((v.get(0) << 3) | (v.get(1) >> 2)) & 255)
+        if encoded.char_at(i + 2) neq 61
+            out is out + chr((((v.get(1) & 3) << 6) | (v.get(2) << 1) | (v.get(3) >> 4)) & 255)
+        if encoded.char_at(i + 4) neq 61
+            out is out + chr((((v.get(3) & 15) << 4) | (v.get(4) >> 1)) & 255)
+        if encoded.char_at(i + 5) neq 61
+            out is out + chr((((v.get(4) & 1) << 7) | (v.get(5) << 2) | (v.get(6) >> 3)) & 255)
+        if encoded.char_at(i + 7) neq 61
+            out is out + chr((((v.get(6) & 7) << 5) | v.get(7)) & 255)
+        i is i + 8
+    out
+
+*__b32_val(ch as i64) returns i64
+    if ch >= 65 and ch <= 90
+        return ch - 65
+    if ch >= 97 and ch <= 122
+        return ch - 97
+    if ch >= 50 and ch <= 55
+        return ch - 24
+    0

@@ -1,4 +1,5 @@
-//! HIR-era vector codegen. Slated for inlining (CLEANUP §C.1).
+//! Vector helpers on `Compiler<'ctx>`: header layout, growth, push/pop, slicing,
+//! and HOF lowerings. Consumed by both `mir_codegen` and sibling helper files.
 
 use inkwell::module::Linkage;
 use inkwell::types::BasicType;

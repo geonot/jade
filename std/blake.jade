@@ -1,0 +1,73 @@
+# std.blake — BLAKE2 and BLAKE3 hash functions
+#
+# BLAKE2 is provided via OpenSSL (BLAKE2b-512, BLAKE2s-256). BLAKE3 (when
+# available) is invoked via the same EVP interface and degrades gracefully
+# when not present in the linked OpenSSL.
+#
+# Usage:
+#   d is blake.blake2b("hello")           # 128-char hex (512 bits)
+#   d is blake.blake2s("hello")           # 64-char hex (256 bits)
+#   d is blake.blake3("hello")            # 64-char hex (256 bits, if linked)
+#
+# Standards: RFC 7693 (BLAKE2), BLAKE3 spec (2020).
+
+extern *jade_evp_digest(alg as %i8, data as %i8, len as i64, out as %i8) returns i64
+extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *malloc(size as i64) returns %i8
+extern *free(ptr as %i8)
+
+*__digest_hex(alg as String, data as String, out_size as i64) returns String
+    out_buf is extern.malloc(out_size)
+    hex_buf is extern.malloc(out_size * 2 + 1)
+    n is extern.jade_evp_digest(%alg, %data, data.length, out_buf)
+    if n < 0
+        extern.free(out_buf)
+        extern.free(hex_buf)
+        return ""
+    extern.jade_bytes_to_hex(out_buf, n, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(out_buf)
+    extern.free(hex_buf)
+    result
+
+*__digest_raw(alg as String, data as String, out_size as i64) returns String
+    out_buf is extern.malloc(out_size)
+    n is extern.jade_evp_digest(%alg, %data, data.length, out_buf)
+    if n < 0
+        extern.free(out_buf)
+        return ""
+    result is __string_from_ptr_len(out_buf, n)
+    extern.free(out_buf)
+    result
+
+# ── BLAKE2b (512-bit) ────────────────────────────────────────
+
+# 64-byte digest (128 hex chars).
+*blake2b(data as String) returns String
+    __digest_hex("BLAKE2B512", data, 64)
+
+*blake2b_bytes(data as String) returns String
+    __digest_raw("BLAKE2B512", data, 64)
+
+# ── BLAKE2s (256-bit) ────────────────────────────────────────
+
+# 32-byte digest (64 hex chars).
+*blake2s(data as String) returns String
+    __digest_hex("BLAKE2S256", data, 32)
+
+*blake2s_bytes(data as String) returns String
+    __digest_raw("BLAKE2S256", data, 32)
+
+# ── BLAKE3 (256-bit default) ─────────────────────────────────
+#
+# BLAKE3 was added to OpenSSL 3.4. On older builds these functions return
+# the empty string — call `blake3_available()` to detect.
+
+*blake3(data as String) returns String
+    __digest_hex("BLAKE3", data, 32)
+
+*blake3_bytes(data as String) returns String
+    __digest_raw("BLAKE3", data, 32)
+
+*blake3_available returns bool
+    blake3("").length > 0

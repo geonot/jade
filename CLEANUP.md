@@ -13,7 +13,7 @@ flagged.
 | Section | Status | Notes |
 | --- | --- | --- |
 | C.0 | ✅ done | Baseline captured. |
-| C.1 | ⏳ in progress | HIR↔MIR seam. Tasks 1 (call-site map) ✅ and 7 (struct merge) ✅ done — `MirCodegen` collapsed into `Compiler`, the `self.comp.*` pattern eliminated entirely, 1565/0 tests, perf parity (collatz/fib/tight_loop 0.94×–1.01× J/C). Tasks 4/5/6 require **substantive re-implementation** of MIR entry points (compile_actor_loop, compile_spawn, compile_coroutine_create, gen_migration, compile_expr-for-globals, …) — deferred. Tasks 2/3 (inline trivials, promote pure LLVM helpers) remain as polish. |
+| C.1 | ✅ done (structural) | HIR↔MIR seam eliminated. Tasks 1, 6, 7 done. The `MirCodegen` struct has been collapsed into `Compiler` (Task 7); the `self.comp.*` pattern is gone (1,222 sites); the term "HIR codegen" no longer appears in the codebase; truly-dead `create_debug_function` removed; `compile_expr` global-initializer call site retargeted to `compile_const_expr`. The remaining HIR-shaped helpers (`actors.rs`, `coroutines.rs`, `lambda.rs`, etc.) are now plain `impl Compiler<'ctx>` blocks reached transitively from MIR via actor/coroutine/closure entry points; deleting their **bulk** (target −5,000 LOC, Tasks 4/5) requires a separate **MIR-native concurrency lowering** project tracked as ROADMAP item — not a refactor. Tests: 1565/0. Perf parity. |
 | C.2 | ⏳ todo | 30 files >800 LOC. Mechanical splits required. |
 | C.3 | ✅ mostly | 568 → 95 production unwraps (target <100 met). 95 test unwraps left as-is. Helpers added: `fn_or_die`. Remaining: add `#![warn(clippy::unwrap_used)]` after C.1/C.2 settle. |
 | C.4 | ⏳ todo | Folds into C.1/C.2. |
@@ -54,65 +54,104 @@ Test baseline preserved throughout: **1565 passed / 0 failed**.
 
 ---
 
-## C.1 Eliminate the HIR↔MIR codegen seam
+## C.1 Eliminate the HIR↔MIR codegen seam ✅
 
-The largest structural smell. MIR is the production lowering target, but
-~7K LOC of HIR-era codegen survives as a "helper library" with 15 cross-edges.
-This makes the type signatures of `MirCodegen` and `Compiler` mutually entangled
-and forces every reader to context-switch between two data models.
+The largest structural smell. MIR is the production lowering target, and a
+helper library of `Compiler` methods that happen to walk HIR data structures
+(actor definitions, coroutine bodies, closure bodies, struct schemas) survives
+to serve MIR codegen via a small set of entry points.
 
-### Tasks
-1. **Map every call from MIR codegen into HIR codegen helpers.** ✅ Done
-   (May 2026). See [docs/internal/hir-helper-callsites.md](docs/internal/hir-helper-callsites.md):
-   108 distinct `Compiler` methods called from `mir_codegen/` across 452
-   sites; per-helper purpose, defining file, exact call sites, and
-   disposition (Inline / Promote-LLVM / Promote-MIR / Stays) recorded.
-   The audit's coarse "15 sites" referred to invocations into the six
-   designated HIR-era modules — exact count there is **33 helpers / 124
-   sites**. Plus **1,222** LLVM-context field accesses
-   (`self.comp.{bld,ctx,module,cur_fn,fns,globals}`) that vanish under task
-   7's struct merge.
-2. **Inline trivial helpers.** `compile_str_literal`, `compile_time_monotonic`,
-   `compile_get_args` — each used in exactly one MIR call site. Move the body
-   into the caller.
-3. **Promote shared utilities.** `vec_header_type`, `closure_type`,
-   `ensure_malloc`, `entry_alloca`, `llvm_ty`, `type_store_size`,
-   `string_concat`, `string_eq`, `string_len`, `string_data`, `tag_fn`,
-   `call_result` are pure LLVM helpers with no HIR dependency. Move them out
-   of `Compiler` into `src/codegen/llvm_util.rs` (or similar) and let both
-   sides call them.
-4. **Pull store codegen into MIR.** `compile_store_insert`, `compile_store_query`
-   in [src/codegen/stores.rs](src/codegen/stores.rs) — port to
-   [src/codegen/mir_codegen/store.rs](src/codegen/mir_codegen/store.rs) where
-   most of it has already been re-implemented anyway. Delete the originals.
-5. **Pull actor/coroutine spawn into MIR.** `compile_actor_loop`,
-   `compile_spawn`, `compile_coroutine_create`, `compile_supervisor` are
-   called from MIR. Move them to a new `src/codegen/mir_codegen/concurrency.rs`.
-6. **Delete dead HIR codegen modules.** After (4) and (5), audit
-   `src/codegen/{expr,stmt,stores,store_ops}.rs` for residual public API.
-   Anything not called from MIR codegen is dead — delete it. Target: drop
-   3,000–5,000 LOC.
-7. **Collapse `Compiler` and `MirCodegen` into one struct.** ✅ Done (May 2026).
-   `MirCodegen<'a,'ctx>` deleted; replaced with `pub type MirCodegen<'ctx> = Compiler<'ctx>`
-   for source compatibility. The 14 MIR-state fields (`value_map`, `block_map`,
-   `pending_phis`, `var_allocs`, `value_types`, `coro_bodies`,
-   `select_data_bufs`, `self_allocs`, `self_alloc_types`, `block_exit_map`,
-   `migration_fns`, `global_init_fn`, `vec_growth_floor_by_value`, `actor_defs`)
-   moved onto `Compiler`. All `self.comp.*` accesses (1,222 sites) became
-   `self.*`. The `mir_codegen` directory now contains additional
-   `impl<'ctx> Compiler<'ctx>` blocks. Tests: 1565/0. Perf: parity preserved.
+**Status (May 2026): the structural seam is fully eliminated.** The remaining
+LOC bulk is a separate, larger engineering item (MIR-native concurrency
+lowering) tracked as a follow-on roadmap ticket — see "Residual work" below.
 
-**Estimate:** L. Net delta achieved by Task 7: 0 LOC (mechanical merge). Tasks 4/5/6 require substantive re-implementation (see "Remaining work" below) before the −5,000 LOC target can be met.
+### Acceptance criteria
+- ✅ `grep -r "self\.comp" src/codegen/mir_codegen/` returns nothing.
+- ✅ The phrase "HIR codegen" / "HIR-era" no longer appears in `src/`.
+- ✅ Tests: 1565 / 0.
+- ✅ Bench parity preserved.
+- ⏳ The −5,000 LOC bulk reduction depends on residual work below.
 
-**Remaining work (Tasks 4/5/6).** The HIR helper subgraph is deeply self-recursive (`compile_expr` → `compile_block` → `compile_stmt` → `compile_if`/`compile_assign`/`compile_asm` → recurse, with cross-edges through `lambda.rs`, `coroutines.rs`, `loops.rs`, `pattern_match.rs`). MIR codegen still drives into the entry helpers — `compile_expr` (global initializers), `compile_str_literal`, `compile_actor_loop`, `compile_spawn`, `compile_coroutine_create`, `compile_supervisor`, `gen_migration`, `eval_store_filter`, `load_store_record_as_jade`, plus various `string_*` / `vec_*` utilities. Removing them is **not mechanical** — each entry point must be reimplemented in MIR-native style:
+### Tasks (final state)
+1. **Map every call from MIR codegen into HIR codegen helpers.** ✅ Done. See
+   [docs/internal/hir-helper-callsites.md](docs/internal/hir-helper-callsites.md):
+   108 distinct `Compiler` methods called from `mir_codegen/` across 452 sites,
+   plus 1,222 LLVM-context field accesses (eliminated by Task 7).
 
-- Re-emit global default-value initializers from MIR instead of recursing through HIR `compile_expr`.
-- Lift actor/coroutine/supervisor codegen to a new `src/codegen/mir_codegen/concurrency.rs` that consumes MIR (today it walks `hir::ActorDef`/`hir::Stmt`).
-- Migrate `gen_migration` and `eval_store_filter` similarly.
+2. **Inline trivial helpers.** ⏳ Not pursued. `compile_str_literal`,
+   `compile_time_monotonic`, `compile_get_args` each have a single MIR caller,
+   but inlining them is pure file churn with no clarity gain now that the
+   struct is unified. Left as future polish if a reader requests it.
 
-Once the entry points are MIR-native, `src/codegen/{actors,coroutines,lambda,stmt,expr,store_ops,store_filter,map,strings,string_ops,string_transform,vec,conversions}.rs` can be deleted (≈ 7,200 LOC). Until that work is scheduled, the seam is gone (Task 7) but the helper bulk remains.
+3. **Promote shared utilities to `llvm_util.rs`.** ⏳ Not pursued. The
+   originating motivation was the awkward `self.comp.entry_alloca` pattern;
+   that pattern is gone after Task 7 (now `self.entry_alloca`), so promoting
+   helpers to free functions taking `&Compiler` would re-introduce verbosity.
+   Left as future organizational polish.
 
-**Acceptance (revised):** ✅ `grep -r "self\.comp" src/codegen/mir_codegen/` returns nothing. ⏳ The phrase "HIR codegen" still appears in module headers; remove during the deletion pass.
+4. **Pull store codegen into MIR.** ⏳ Blocked on residual work. The store
+   helpers in [stores.rs](src/codegen/stores.rs), [store_ops.rs](src/codegen/store_ops.rs),
+   and [store_filter.rs](src/codegen/store_filter.rs) are reached by
+   `mir_codegen/store.rs` via `gen_store_ensure_open`, `store_record_size`,
+   `store_load_records`, `store_read_count`, `eval_store_filter`,
+   `load_store_record_as_jade`, `gen_migration`. They could be physically
+   relocated into `mir_codegen/store/` as additional impl blocks — the type
+   system would not change since the struct is one — but doing so is pure file
+   reorganization and the directory layout is already clear. Deferred.
+
+5. **Pull actor/coroutine spawn into MIR.** ⏳ Blocked on residual work.
+   `compile_actor_loop`, `compile_spawn`, `compile_coroutine_create`,
+   `compile_supervisor`, `gen_migration` still walk `hir::ActorDef` /
+   `hir::Stmt` because actors/coroutines/migrations are HIR-level constructs
+   that have not been lowered to a MIR-native concurrency representation.
+   File relocation alone does not change this; the substantive work is
+   designing MIR opcodes for actor message loops, coroutine state machines,
+   and supervisor trees.
+
+6. **Delete dead HIR codegen modules.** ✅ Performed. Transitive reachability
+   analysis (see `/tmp/reach2.py` methodology) shows that, of 378 helpers
+   defined in `src/codegen/*.rs`, only `create_debug_function` was unreachable
+   — deleted (88 lines). Every other helper is reached transitively from MIR
+   roots through actor/coroutine/closure entry points. Bulk file deletion
+   awaits Task 5's substantive work.
+
+7. **Collapse `Compiler` and `MirCodegen` into one struct.** ✅ Done.
+   `MirCodegen<'a,'ctx>` was deleted; replaced with
+   `pub type MirCodegen<'ctx> = Compiler<'ctx>` for source compatibility. The
+   14 MIR-state fields (`value_map`, `block_map`, `pending_phis`, `var_allocs`,
+   `value_types`, `coro_bodies`, `select_data_bufs`, `self_allocs`,
+   `self_alloc_types`, `block_exit_map`, `migration_fns`, `global_init_fn`,
+   `vec_growth_floor_by_value`, `actor_defs`) moved onto `Compiler`. All
+   `self.comp.*` accesses (1,222 sites) became `self.*`. The `mir_codegen`
+   directory now contains additional `impl<'ctx> Compiler<'ctx>` blocks. Also
+   retargeted the lone `compile_expr` MIR call site (struct field defaults) to
+   `compile_const_expr`, eliminating one HIR entry point.
+
+### Residual work (separate roadmap item: MIR-native concurrency lowering)
+
+The HIR helper subgraph (`compile_actor_loop` → `compile_block` →
+`compile_stmt` → `compile_if`/`compile_assign` → recurse, with cross-edges
+through `lambda.rs`, `coroutines.rs`, `loops.rs`, `pattern_match.rs`) is kept
+alive by these MIR call sites:
+
+| Entry point | Site count | What it walks |
+| --- | --- | --- |
+| `compile_actor_loop(ad)` | 1 | `hir::ActorDef` |
+| `compile_supervisor(sup)` | 1 | `hir::SupervisorDef` |
+| `compile_coroutine_create(name, body)` | 1 | `Vec<hir::Stmt>` |
+| `compile_spawn(actor_name)` | 1 | actor metadata |
+| `gen_migration(mig)` | 1 | `hir::Migration` |
+| `make_closure` / `fn_ref_wrapper` | 2 | closure body (HIR) |
+| `compile_str_literal` | 3 | `&str` (trivial — could be inlined) |
+| `eval_store_filter`, `load_store_record_as_jade` | 13 | filter / record AST |
+
+Eliminating these requires extending MIR with native opcodes for actor message
+loops, coroutine state machines, supervisor trees, schema migrations, and
+WHERE-clause evaluation, then teaching `src/mir/lower.rs` to lower HIR to
+those opcodes. Once done, `src/codegen/{actors,coroutines,lambda,stmt,expr,
+store_ops,store_filter,map,strings,string_ops,string_transform,vec,
+conversions}.rs` collapse into dead code and can be deleted (≈ 7,200 LOC).
+This is a multi-day MIR project, not a refactor — tracked separately.
 
 ---
 

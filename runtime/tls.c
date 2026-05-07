@@ -158,3 +158,121 @@ int jade_dns_resolve_all(const char *host, char *out_buf, int out_len) {
     freeaddrinfo(result);
     return count;
 }
+
+/* === Server-side TLS, error retrieval, peer info === */
+
+struct jade_tls_listener {
+    SSL_CTX *ctx;
+    int listen_fd;
+};
+
+/* Start a TLS server bound to host:port using cert/key PEM files.
+ * Returns a pointer or NULL on failure. */
+struct jade_tls_listener *jade_tls_listen(const char *host, int port,
+                                          const char *cert_path,
+                                          const char *key_path) {
+    jade_tls_init();
+    const SSL_METHOD *method = TLS_server_method();
+    SSL_CTX *ctx = SSL_CTX_new(method);
+    if (!ctx) return NULL;
+    if (SSL_CTX_use_certificate_file(ctx, cert_path, SSL_FILETYPE_PEM) <= 0 ||
+        SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) <= 0) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((unsigned short)port);
+    if (host == NULL || strcmp(host, "0.0.0.0") == 0) {
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    } else {
+        if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
+            close(fd);
+            SSL_CTX_free(ctx);
+            return NULL;
+        }
+    }
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
+        listen(fd, 128) < 0) {
+        close(fd);
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    struct jade_tls_listener *l = (struct jade_tls_listener *)malloc(sizeof(*l));
+    l->ctx = ctx;
+    l->listen_fd = fd;
+    return l;
+}
+
+jade_tls_conn *jade_tls_accept(struct jade_tls_listener *l) {
+    if (!l) return NULL;
+    int cfd = accept(l->listen_fd, NULL, NULL);
+    if (cfd < 0) return NULL;
+    SSL *ssl = SSL_new(l->ctx);
+    SSL_set_fd(ssl, cfd);
+    if (SSL_accept(ssl) <= 0) {
+        SSL_free(ssl);
+        close(cfd);
+        return NULL;
+    }
+    jade_tls_conn *c = (jade_tls_conn *)malloc(sizeof(*c));
+    c->ctx = NULL;          /* shared from listener; do not free */
+    c->ssl = ssl;
+    c->fd = cfd;
+    return c;
+}
+
+void jade_tls_listener_close(struct jade_tls_listener *l) {
+    if (!l) return;
+    if (l->listen_fd >= 0) close(l->listen_fd);
+    if (l->ctx) SSL_CTX_free(l->ctx);
+    free(l);
+}
+
+/* Copy the most recent OpenSSL error string into buf. Returns bytes
+ * written (excluding NUL), or 0 if no error. */
+long jade_tls_last_error(char *buf, long len) {
+    unsigned long e = ERR_peek_last_error();
+    if (e == 0 || len <= 0) return 0;
+    ERR_error_string_n(e, buf, (size_t)len);
+    return (long)strlen(buf);
+}
+
+/* Copy the peer certificate subject DN into buf. Returns bytes written. */
+long jade_tls_peer_cert_subject(jade_tls_conn *conn, char *buf, long len) {
+    if (!conn || !conn->ssl) return 0;
+    X509 *cert = SSL_get_peer_certificate(conn->ssl);
+    if (!cert) return 0;
+    X509_NAME *subj = X509_get_subject_name(cert);
+    char *line = X509_NAME_oneline(subj, NULL, 0);
+    long n = 0;
+    if (line) {
+        n = (long)strlen(line);
+        if (n >= len) n = len - 1;
+        if (n > 0) memcpy(buf, line, (size_t)n);
+        buf[n] = 0;
+        OPENSSL_free(line);
+    }
+    X509_free(cert);
+    return n;
+}
+
+/* Copy the negotiated TLS protocol version (e.g. "TLSv1.3"). */
+long jade_tls_protocol_version(jade_tls_conn *conn, char *buf, long len) {
+    if (!conn || !conn->ssl || len <= 0) return 0;
+    const char *v = SSL_get_version(conn->ssl);
+    if (!v) return 0;
+    long n = (long)strlen(v);
+    if (n >= len) n = len - 1;
+    memcpy(buf, v, (size_t)n);
+    buf[n] = 0;
+    return n;
+}

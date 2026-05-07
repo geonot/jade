@@ -1,4 +1,5 @@
-//! HIR-era store WHERE-clause codegen.
+//! Store WHERE-clause evaluator, record loader, and field-comparison helpers used
+//! by `mir_codegen/store.rs`.
 
 use inkwell::IntPredicate;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};

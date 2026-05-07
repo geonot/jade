@@ -584,7 +584,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Vec(e) => e.as_ref(),
             _ => &Type::I64,
         };
-        // Inline vec construction matching HIR codegen: allocate {ptr, i64, i64} header.
+        // Inline vec construction matching the sibling `vec.rs` layout: allocate {ptr, i64, i64} header.
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();

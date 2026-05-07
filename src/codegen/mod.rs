@@ -1,4 +1,7 @@
-//! Codegen root: the `Compiler` struct and shared LLVM utilities used by both HIR-era helpers and `mir_codegen`.
+//! Codegen root: the `Compiler` struct and shared LLVM utilities. The `mir_codegen/`
+//! submodule provides additional `impl` blocks that consume MIR; sibling files in this
+//! directory provide helpers that operate on HIR-shaped data (actor/coroutine/closure
+//! definitions, struct/enum schemas, etc.) — both groups extend the same `Compiler<'ctx>`.
 
 mod actors;
 mod arith;
@@ -48,7 +51,7 @@ use inkwell::{AddressSpace, OptimizationLevel};
 use inkwell::attributes::{Attribute, AttributeLoc};
 
 use inkwell::debug_info::{
-    AsDIScope, DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind,
+    DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind,
     DWARFSourceLanguage, DebugInfoBuilder,
 };
 
@@ -582,31 +585,6 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(ref di) = self.di_builder {
             di.finalize();
         }
-    }
-
-    pub(crate) fn create_debug_function(&mut self, fv: FunctionValue<'ctx>, name: &str, line: u32) {
-        if !self.debug {
-            return;
-        }
-        let di = ice!(self.di_builder.as_ref(), "debug info builder not initialized");
-        let cu = ice!(self.di_compile_unit.as_ref(), "debug compile unit not initialized");
-        let file = cu.get_file();
-        let di_type = di.create_subroutine_type(file, None, &[], DIFlags::PUBLIC);
-        let subprogram = di.create_function(
-            file.as_debug_info_scope(),
-            name,
-            None,
-            file,
-            line,
-            di_type,
-            true,
-            true,
-            line,
-            DIFlags::PUBLIC,
-            false,
-        );
-        fv.set_subprogram(subprogram);
-        self.di_scope_stack.push(subprogram.as_debug_info_scope());
     }
 
     pub(crate) fn pop_debug_scope(&mut self) {

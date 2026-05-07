@@ -1,68 +1,94 @@
-# std.crypto — Cryptographic primitives
+# std.crypto — Cryptographic primitives index
 #
-# Wraps OpenSSL libcrypto for hashing, HMAC, AES-GCM, and secure random.
+# This module provides the cross-cutting primitives that don't belong to a
+# single algorithm family:
 #
-# Usage:
-#   hash is crypto.sha256("hello")
-#   mac  is crypto.hmac_sha256(key, message)
-#   ct   is crypto.aes_encrypt(key, iv, plaintext)
-#   pt   is crypto.aes_decrypt(key, iv, ct.ciphertext, ct.tag)
-#   rand is crypto.random_bytes(32)
+#   * `random_bytes` / `random_hex`    — CSPRNG (OpenSSL `RAND_bytes`)
+#   * `hmac` / `hmac_sha256` / etc.    — HMAC (RFC 2104) over any digest
+#   * `chacha20_poly1305_*`            — RFC 8439 AEAD
+#   * `pbkdf2`                         — RFC 8018 PBKDF2-HMAC
+#   * `scrypt`                         — RFC 7914
+#   * `secure_compare`                 — constant-time byte comparison
+#
+# Single-algorithm families live in dedicated modules:
+#
+#   * `std.sha`     — SHA-1, SHA-2, SHA-3 hashing
+#   * `std.blake`   — BLAKE2 / BLAKE3 hashing
+#   * `std.aes`     — AES-256 (GCM, CBC)
+#   * `std.argon`   — Argon2id password hashing / KDF
+#
+# All inputs/outputs are raw byte strings unless suffixed with `_hex`.
+# Standards: RFC 2104, RFC 7914, RFC 8018, RFC 8439, RFC 9106.
 
-# ── Extern bindings to runtime/crypto.c ─────────────────────
-
-extern *jade_sha256(data as %i8, len as i64, out as %i8) returns i32
-extern *jade_sha512(data as %i8, len as i64, out as %i8) returns i32
-extern *jade_hmac_sha256(key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i32
-extern *jade_aes_gcm_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
-extern *jade_aes_gcm_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
 extern *jade_random_bytes(buf as %i8, n as i64) returns i32
+extern *jade_evp_hmac(alg as %i8, key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i64
+extern *jade_hmac_sha256(key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i32
+extern *jade_pbkdf2(alg as %i8, pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, iters as i64, dklen as i64, out as %i8) returns i32
+extern *jade_scrypt(pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, n as i64, r as i64, p as i64, dklen as i64, out as %i8) returns i32
+extern *jade_chacha20_poly1305_encrypt(key as %i8, nonce as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
+extern *jade_chacha20_poly1305_decrypt(key as %i8, nonce as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
 extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
-# ── Types ────────────────────────────────────────────────────
+# ── Random ───────────────────────────────────────────────────
 
-type CipherResult
-    ciphertext as String
-    tag as String
-    ok as bool
-
-# ── Hashing ──────────────────────────────────────────────────
-
-# SHA-256 hash of a string. Returns 64-char hex digest.
-*sha256(data as String) returns String
-    out_buf is extern.malloc(32)
-    hex_buf is extern.malloc(65)
-    rc is extern.jade_sha256(%data, data.length, out_buf)
+*random_bytes(n as i64) returns String
+    if n <= 0
+        return ""
+    buf is extern.malloc(n)
+    rc is extern.jade_random_bytes(buf, n)
     if rc neq 0
-        extern.free(out_buf)
+        extern.free(buf)
+        return ""
+    result is __string_from_ptr_len(buf, n)
+    extern.free(buf)
+    result
+
+*random_hex(n as i64) returns String
+    if n <= 0
+        return ""
+    buf is extern.malloc(n)
+    hex_buf is extern.malloc(n * 2 + 1)
+    rc is extern.jade_random_bytes(buf, n)
+    if rc neq 0
+        extern.free(buf)
         extern.free(hex_buf)
         return ""
-    extern.jade_bytes_to_hex(out_buf, 32, hex_buf)
+    extern.jade_bytes_to_hex(buf, n, hex_buf)
     result is __string_from_ptr(hex_buf)
-    extern.free(out_buf)
+    extern.free(buf)
     extern.free(hex_buf)
     result
 
-# SHA-512 hash of a string. Returns 128-char hex digest.
-*sha512(data as String) returns String
-    out_buf is extern.malloc(64)
-    hex_buf is extern.malloc(129)
-    rc is extern.jade_sha512(%data, data.length, out_buf)
-    if rc neq 0
-        extern.free(out_buf)
-        extern.free(hex_buf)
+*random_key returns String
+    random_bytes(32)
+
+*random_nonce returns String
+    random_bytes(12)
+
+*random_token returns String
+    random_hex(32)
+
+# ── HMAC (RFC 2104) ──────────────────────────────────────────
+
+*hmac(alg as String, key as String, data as String) returns String
+    out is extern.malloc(64)
+    n is extern.jade_evp_hmac(%alg, %key, key.length, %data, data.length, out)
+    if n < 0
+        extern.free(out)
         return ""
-    extern.jade_bytes_to_hex(out_buf, 64, hex_buf)
-    result is __string_from_ptr(hex_buf)
-    extern.free(out_buf)
-    extern.free(hex_buf)
+    result is __string_from_ptr_len(out, n)
+    extern.free(out)
     result
 
-# ── HMAC ─────────────────────────────────────────────────────
+*hmac_hex(alg as String, key as String, data as String) returns String
+    raw is hmac(alg, key, data)
+    if raw.length equals 0
+        return ""
+    __bytes_to_hex(raw)
 
-# HMAC-SHA256. Returns 64-char hex digest.
 *hmac_sha256(key as String, data as String) returns String
     out_buf is extern.malloc(32)
     hex_buf is extern.malloc(65)
@@ -77,163 +103,119 @@ type CipherResult
     extern.free(hex_buf)
     result
 
-# ── AES-256-GCM ─────────────────────────────────────────────
+*hmac_sha512(key as String, data as String) returns String
+    hmac_hex("SHA512", key, data)
 
-# Encrypt with AES-256-GCM.
-# key: 32-byte string, iv: 12-byte string.
-# Returns CipherResult with hex-encoded ciphertext and tag.
-*aes_encrypt(key as String, iv as String, plaintext as String) returns CipherResult
-    if key.length neq 32
-        return CipherResult(ciphertext is "", tag is "", ok is false)
-    if iv.length neq 12
-        return CipherResult(ciphertext is "", tag is "", ok is false)
+# ── ChaCha20-Poly1305 AEAD (RFC 8439) ───────────────────────
+
+type AeadResult
+    ciphertext as String
+    tag as String
+    ok as bool
+
+*chacha20_poly1305_encrypt(key as String, nonce as String, plaintext as String, aad as String) returns AeadResult
+    if key.length neq 32 or nonce.length neq 12
+        return AeadResult(ciphertext is "", tag is "", ok is false)
     ct_buf is extern.malloc(plaintext.length + 16)
     tag_buf is extern.malloc(16)
-    ct_hex is extern.malloc(plaintext.length * 2 + 33)
-    tag_hex is extern.malloc(33)
-
-    ct_len is extern.jade_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %"", 0, ct_buf, tag_buf)
-    if ct_len < 0
+    n is extern.jade_chacha20_poly1305_encrypt(%key, %nonce, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    if n < 0
         extern.free(ct_buf)
         extern.free(tag_buf)
-        extern.free(ct_hex)
-        extern.free(tag_hex)
-        return CipherResult(ciphertext is "", tag is "", ok is false)
-
-    extern.jade_bytes_to_hex(ct_buf, ct_len, ct_hex)
-    extern.jade_bytes_to_hex(tag_buf, 16, tag_hex)
-
-    ct_str is __string_from_ptr(ct_hex)
-    tag_str is __string_from_ptr(tag_hex)
-
+        return AeadResult(ciphertext is "", tag is "", ok is false)
+    ct is __string_from_ptr_len(ct_buf, n)
+    tag is __string_from_ptr_len(tag_buf, 16)
     extern.free(ct_buf)
     extern.free(tag_buf)
-    extern.free(ct_hex)
-    extern.free(tag_hex)
+    AeadResult(ciphertext is ct, tag is tag, ok is true)
 
-    CipherResult(ciphertext is ct_str, tag is tag_str, ok is true)
-
-# Encrypt with additional authenticated data (AAD).
-*aes_encrypt_aad(key as String, iv as String, plaintext as String, aad as String) returns CipherResult
-    if key.length neq 32
-        return CipherResult(ciphertext is "", tag is "", ok is false)
-    if iv.length neq 12
-        return CipherResult(ciphertext is "", tag is "", ok is false)
-    ct_buf is extern.malloc(plaintext.length + 16)
-    tag_buf is extern.malloc(16)
-    ct_hex is extern.malloc(plaintext.length * 2 + 33)
-    tag_hex is extern.malloc(33)
-
-    ct_len is extern.jade_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
-    if ct_len < 0
-        extern.free(ct_buf)
-        extern.free(tag_buf)
-        extern.free(ct_hex)
-        extern.free(tag_hex)
-        return CipherResult(ciphertext is "", tag is "", ok is false)
-
-    extern.jade_bytes_to_hex(ct_buf, ct_len, ct_hex)
-    extern.jade_bytes_to_hex(tag_buf, 16, tag_hex)
-
-    ct_str is __string_from_ptr(ct_hex)
-    tag_str is __string_from_ptr(tag_hex)
-
-    extern.free(ct_buf)
-    extern.free(tag_buf)
-    extern.free(ct_hex)
-    extern.free(tag_hex)
-
-    CipherResult(ciphertext is ct_str, tag is tag_str, ok is true)
-
-# Decrypt with AES-256-GCM.
-# key: 32-byte string, iv: 12-byte string
-# ciphertext: hex-encoded, tag: hex-encoded (32 hex chars = 16 bytes)
-# Returns decrypted plaintext or empty string on failure/auth error.
-*aes_decrypt(key as String, iv as String, ciphertext_hex as String, tag_hex as String) returns String
-    if key.length neq 32
+*chacha20_poly1305_decrypt(key as String, nonce as String, ciphertext as String, aad as String, tag as String) returns String
+    if key.length neq 32 or nonce.length neq 12 or tag.length neq 16
         return ""
-    if iv.length neq 12
-        return ""
-    ct_len is ciphertext_hex.length / 2
-    ct_buf is extern.malloc(ct_len)
-    tag_buf is extern.malloc(16)
-    pt_buf is extern.malloc(ct_len + 1)
-
-    # Decode hex to raw bytes
-    __hex_decode_into(ciphertext_hex, ct_buf)
-    __hex_decode_into(tag_hex, tag_buf)
-
-    pt_len is extern.jade_aes_gcm_decrypt(%key, %iv, ct_buf, ct_len, %"", 0, tag_buf, pt_buf)
-
-    if pt_len < 0
-        extern.free(ct_buf)
-        extern.free(tag_buf)
+    pt_buf is extern.malloc(ciphertext.length + 1)
+    n is extern.jade_chacha20_poly1305_decrypt(%key, %nonce, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
+    if n < 0
         extern.free(pt_buf)
         return ""
-
-    # Build string from decrypted bytes
-    result is __string_from_ptr_len(pt_buf, pt_len)
-
-    extern.free(ct_buf)
-    extern.free(tag_buf)
+    result is __string_from_ptr_len(pt_buf, n)
     extern.free(pt_buf)
     result
 
-# ── Random ───────────────────────────────────────────────────
+# ── PBKDF2 (RFC 8018) ───────────────────────────────────────
 
-# Generate n random bytes as a hex string.
-*random_hex(n as i64) returns String
-    buf is extern.malloc(n)
-    hex_buf is extern.malloc(n * 2 + 1)
-    rc is extern.jade_random_bytes(buf, n)
-    if rc neq 0
-        extern.free(buf)
-        extern.free(hex_buf)
+*pbkdf2(alg as String, password as String, salt as String, iters as i64, dklen as i64) returns String
+    if dklen <= 0 or iters < 1
         return ""
-    extern.jade_bytes_to_hex(buf, n, hex_buf)
-    result is __string_from_ptr(hex_buf)
-    extern.free(buf)
-    extern.free(hex_buf)
+    out is extern.malloc(dklen)
+    rc is extern.jade_pbkdf2(%alg, %password, password.length, %salt, salt.length, iters, dklen, out)
+    if rc neq 0
+        extern.free(out)
+        return ""
+    result is __string_from_ptr_len(out, dklen)
+    extern.free(out)
     result
 
-# Generate a random 32-byte (256-bit) key as hex.
-*random_key returns String
-    random_hex(32)
+*pbkdf2_sha256(password as String, salt as String, iters as i64, dklen as i64) returns String
+    pbkdf2("SHA256", password, salt, iters, dklen)
 
-# Generate a random 12-byte IV (nonce) as hex.
-*random_iv returns String
-    random_hex(12)
+*pbkdf2_sha512(password as String, salt as String, iters as i64, dklen as i64) returns String
+    pbkdf2("SHA512", password, salt, iters, dklen)
 
-# ── Utilities ────────────────────────────────────────────────
+# ── scrypt (RFC 7914) ───────────────────────────────────────
 
-# Constant-time string comparison (to prevent timing attacks).
+*scrypt(password as String, salt as String, n as i64, r as i64, p as i64, dklen as i64) returns String
+    if dklen <= 0
+        return ""
+    out is extern.malloc(dklen)
+    rc is extern.jade_scrypt(%password, password.length, %salt, salt.length, n, r, p, dklen, out)
+    if rc neq 0
+        extern.free(out)
+        return ""
+    result is __string_from_ptr_len(out, dklen)
+    extern.free(out)
+    result
+
+*scrypt_default(password as String, salt as String, dklen as i64) returns String
+    scrypt(password, salt, 16384, 8, 1, dklen)
+
+# ── Constant-time comparison ────────────────────────────────
+
 *secure_compare(a as String, b as String) returns bool
     if a.length neq b.length
         return false
-    result is 0
+    diff is 0
     i is 0
     while i < a.length
-        result is result | (a.char_at(i) ^ b.char_at(i))
+        diff is diff | (a.char_at(i) ^ b.char_at(i))
         i is i + 1
-    result equals 0
+    diff equals 0
 
-# ── Internal hex decode ──────────────────────────────────────
+# ── Hex helpers (re-exported for convenience) ───────────────
 
-*__hex_val(ch as i64) returns i64
-    # '0'-'9' = 48-57, 'a'-'f' = 97-102, 'A'-'F' = 65-70
-    if ch >= 48 and ch <= 57
-        return ch - 48
-    if ch >= 97 and ch <= 102
-        return ch - 87
-    if ch >= 65 and ch <= 70
-        return ch - 55
-    0
+*to_hex(data as String) returns String
+    __bytes_to_hex(data)
 
-*__hex_decode_into(hex as String, buf as %i8)
-    i is 0
-    while i < hex.length / 2
-        hi is __hex_val(hex.char_at(i * 2))
-        lo is __hex_val(hex.char_at(i * 2 + 1))
-        # Store byte via write to pointer offset
-        __ptr_set_byte(buf, i, (hi << 4) | lo)
-        i is i + 1
+*from_hex(hex as String) returns String
+    __hex_to_bytes(hex)
+
+*__bytes_to_hex(data as String) returns String
+    if data.length equals 0
+        return ""
+    hex_buf is extern.malloc(data.length * 2 + 1)
+    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    result is __string_from_ptr(hex_buf)
+    extern.free(hex_buf)
+    result
+
+*__hex_to_bytes(hex as String) returns String
+    if hex.length equals 0 or hex.length mod 2 neq 0
+        return ""
+    n is hex.length / 2
+    buf is extern.malloc(n)
+    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    if rc < 0
+        extern.free(buf)
+        return ""
+    result is __string_from_ptr_len(buf, n)
+    extern.free(buf)
+    result

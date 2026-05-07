@@ -1,102 +1,153 @@
-# std.time — Clock, duration, sleep
+# std.time — Monotonic clocks, instants, durations, sleep
+#
+# Per VISION v6.3, time has three distinct concerns:
+#   * `Instant`  — a point on the monotonic clock. Useful only for
+#                  measuring elapsed time. Cannot be persisted or compared
+#                  across processes; immune to wall-clock jumps.
+#   * `Duration` — a length of time. Add to an `Instant` to get a new
+#                  `Instant`; subtract two `Instant`s to get a `Duration`.
+#   * Wall-clock time — Unix seconds (`now()`), suitable for logs, file
+#                       timestamps, RPCs. For calendar arithmetic and
+#                       formatting, use `std.date`.
+#
+# This separation prevents the classic bug of computing elapsed time
+# across an NTP step or DST jump.
 #
 # Usage:
-#   start is time.monotonic()
-#   time.sleep_ms(100)
-#   log("elapsed: " + to_string(time.elapsed(start)) + " ns")
+#   start is time.instant()
+#   time.sleep(time.ms(100))
+#   d is time.since(start)            # Duration
+#   d.as_ms()                         # 100
 #
-#   epoch is time.now()    # seconds since Unix epoch
+#   wall is time.now()                # Unix seconds
 
 extern *time(t as %i8) returns i64
 
-*monotonic
-    __time_monotonic()
+# ── Duration ─────────────────────────────────────────────────
 
-*now
+# Stored internally as nanoseconds. Constructors below give clear units.
+type Duration
+    nanos as i64
+
+    *as_nanos returns i64
+        self.nanos
+
+    *as_micros returns i64
+        self.nanos / 1000
+
+    *as_ms returns i64
+        self.nanos / 1000000
+
+    *as_secs returns i64
+        self.nanos / 1000000000
+
+    *as_secs_f64 returns f64
+        (self.nanos as f64) / 1000000000.0
+
+    *add(other as Duration) returns Duration
+        Duration(nanos is self.nanos + other.nanos)
+
+    *sub(other as Duration) returns Duration
+        Duration(nanos is self.nanos - other.nanos)
+
+    *mul(n as i64) returns Duration
+        Duration(nanos is self.nanos * n)
+
+    *to_string returns String
+        if self.nanos < 1000
+            return "" + self.nanos + "ns"
+        if self.nanos < 1000000
+            return "" + (self.nanos / 1000) + "µs"
+        if self.nanos < 1000000000
+            return "" + (self.nanos / 1000000) + "ms"
+        "" + (self.nanos / 1000000000) + "s"
+
+# Constructors with explicit units.
+*nanos(n as i64) returns Duration
+    Duration(nanos is n)
+
+*micros(n as i64) returns Duration
+    Duration(nanos is n * 1000)
+
+*ms(n as i64) returns Duration
+    Duration(nanos is n * 1000000)
+
+*seconds(n as i64) returns Duration
+    Duration(nanos is n * 1000000000)
+
+*minutes(n as i64) returns Duration
+    Duration(nanos is n * 60000000000)
+
+*hours(n as i64) returns Duration
+    Duration(nanos is n * 3600000000000)
+
+# ── Instant (monotonic clock point) ──────────────────────────
+
+# Construction is restricted: you can only get an `Instant` from
+# `time.instant()`. There is no way to "make up" an Instant value;
+# this enforces the type-distinction discipline.
+type Instant
+    nanos as i64
+
+    *duration_since(earlier as Instant) returns Duration
+        Duration(nanos is self.nanos - earlier.nanos)
+
+    *plus(d as Duration) returns Instant
+        Instant(nanos is self.nanos + d.nanos)
+
+    *minus(d as Duration) returns Instant
+        Instant(nanos is self.nanos - d.nanos)
+
+    *before(other as Instant) returns bool
+        self.nanos < other.nanos
+
+    *after(other as Instant) returns bool
+        self.nanos > other.nanos
+
+# Read the monotonic clock. Result is opaque — only useful for
+# differencing with another Instant.
+*instant returns Instant
+    Instant(nanos is __time_monotonic())
+
+# Convenience: time elapsed since a prior instant.
+*since(earlier as Instant) returns Duration
+    Duration(nanos is __time_monotonic() - earlier.nanos)
+
+# ── Wall clock (use only for logs/serialization) ─────────────
+
+# Unix epoch seconds. Subject to NTP corrections; not suitable for
+# measuring elapsed time. Use `instant()` + `since()` for that.
+*now returns i64
     extern.time(0 as %i8)
 
-*sleep_ms(ms)
-    __sleep_ms(ms)
+# Unix epoch milliseconds.
+*now_ms returns i64
+    extern.time(0 as %i8) * 1000
 
-*sleep(seconds)
-    __sleep_ms(seconds * 1000)
+# ── Sleep ────────────────────────────────────────────────────
 
-*elapsed(start)
+# Sleep for the given duration. Yields to the scheduler if running
+# inside a coroutine; otherwise blocks the OS thread.
+*sleep(d as Duration)
+    __sleep_ms(d.as_ms())
+
+# Sleep for `n` milliseconds (convenience).
+*sleep_ms(n as i64)
+    __sleep_ms(n)
+
+# Sleep for `n` whole seconds.
+*sleep_secs(n as i64)
+    __sleep_ms(n * 1000)
+
+# ── Legacy helpers (deprecated, prefer Instant/Duration) ─────
+
+# Old API: returns raw monotonic nanoseconds. Kept so existing
+# benchmarks compile; new code should use `instant()` / `since()`.
+*monotonic returns i64
+    __time_monotonic()
+
+*elapsed(start as i64) returns i64
     __time_monotonic() - start
 
-*elapsed_ms(start)
+*elapsed_ms(start as i64) returns i64
     ((__time_monotonic() - start) / 1000000.0) as i64
-
-# ── Date/time calendar utilities ─────────────────────────────
-
-*is_leap_year(year)
-    if year mod 400 equals 0
-        return true
-    if year mod 100 equals 0
-        return false
-    year mod 4 equals 0
-
-*days_in_month(month, year)
-    if month equals 2
-        if is_leap_year(year)
-            return 29
-        return 28
-    if month equals 4
-        return 30
-    if month equals 6
-        return 30
-    if month equals 9
-        return 30
-    if month equals 11
-        return 30
-    31
-
-*days_in_year(year)
-    if is_leap_year(year)
-        return 366
-    365
-
-# Day of week for a date (0=Sunday ... 6=Saturday) - Zeller's congruence
-*day_of_week(year, month, day)
-    y is year
-    m is month
-    if m < 3
-        m is m + 12
-        y is y - 1
-    q is day
-    k is y mod 100
-    j is y / 100
-    h is (q + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 - 2 * j) mod 7
-    if h < 0
-        h is h + 7
-    # Convert: 0=Sat → 0=Sun
-    (h + 6) mod 7
-
-*day_name(dow)
-    if dow equals 0
-        return "Sunday"
-    if dow equals 1
-        return "Monday"
-    if dow equals 2
-        return "Tuesday"
-    if dow equals 3
-        return "Wednesday"
-    if dow equals 4
-        return "Thursday"
-    if dow equals 5
-        return "Friday"
-    "Saturday"
-
-# Days since Unix epoch (Jan 1 1970) for a given date
-*epoch_days(year, month, day)
-    # Count days from 1970-01-01
-    total is 0
-    y is 1970
-    while y < year
-        total is total + days_in_year(y)
-        y is y + 1
-    m is 1
-    while m < month
-        total is total + days_in_month(m, year)
-        m is m + 1
-    total + day - 1

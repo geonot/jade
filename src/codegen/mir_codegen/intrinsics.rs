@@ -685,7 +685,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Convert a value to a String, matching HIR codegen's compile_to_string.
+    /// Convert a value to a String, matching the sibling `compile_to_string` helper.
     pub(super) fn emit_to_string(
         &mut self,
         val: BasicValueEnum<'ctx>,
