@@ -5,10 +5,8 @@ use crate::intern::Symbol;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-
 mod token;
 pub use token::*;
-
 
 #[derive(Debug, Clone)]
 pub struct Spanned {
@@ -306,8 +304,16 @@ impl<'s> Lexer<'s> {
 
         // Four-character tokens
         if self.pos + 3 < self.src.len() {
-            if let (b'>', b'>', b'>', b'=') = (ch, self.src[self.pos + 1], self.src[self.pos + 2], self.src[self.pos + 3]) {
-                self.advance(); self.advance(); self.advance(); self.advance();
+            if let (b'>', b'>', b'>', b'=') = (
+                ch,
+                self.src[self.pos + 1],
+                self.src[self.pos + 2],
+                self.src[self.pos + 3],
+            ) {
+                self.advance();
+                self.advance();
+                self.advance();
+                self.advance();
                 return Ok(Spanned {
                     token: Token::UshrEq,
                     span: Span::new(start, self.pos, self.line, sc),

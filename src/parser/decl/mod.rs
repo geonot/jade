@@ -11,7 +11,8 @@ pub(super) enum Either<A, B> {
     Method(B),
 }
 
-impl Parser {    pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
+impl Parser {
+    pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError> {
         match self.peek() {
             Token::Star => Ok(Decl::Fn(self.parse_fn()?)),
             Token::At => {
@@ -102,5 +103,9 @@ impl Parser {    pub(super) fn parse_decl(&mut self) -> Result<Decl, ParseError>
             }
         }
     }
-
-}mod actor_store;mod r#fn;mod trait_sup;mod types;pub(super) mod yield_scan;
+}
+mod actor_store;
+mod r#fn;
+mod trait_sup;
+mod types;
+pub(super) mod yield_scan;

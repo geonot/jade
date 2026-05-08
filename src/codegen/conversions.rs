@@ -112,11 +112,9 @@ impl<'ctx> Compiler<'ctx> {
             } else {
                 val.into()
             };
-            b!(self.bld.build_call(
-                printf,
-                &[fs.as_pointer_value().into(), print_val],
-                "print"
-            ));
+            b!(self
+                .bld
+                .build_call(printf, &[fs.as_pointer_value().into(), print_val], "print"));
         }
         Ok(val)
     }
@@ -222,7 +220,12 @@ impl<'ctx> Compiler<'ctx> {
         };
         let len_i32 = b!(self.bld.build_call(
             snprintf,
-            &[buf.into(), cap.into(), fmt.as_pointer_value().into(), wide.into()],
+            &[
+                buf.into(),
+                cap.into(),
+                fmt.as_pointer_value().into(),
+                wide.into()
+            ],
             "ts.ilen"
         ))
         .try_as_basic_value()

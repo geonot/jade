@@ -1,7 +1,7 @@
 //! Memory passes: store-load forwarding, redundant store elim, branch elim.
 
-use super::subst::{subst_inst, subst_term};
 use super::super::*;
+use super::subst::{subst_inst, subst_term};
 use std::collections::{HashMap, HashSet};
 
 pub fn store_load_forwarding(func: &mut Function) -> bool {

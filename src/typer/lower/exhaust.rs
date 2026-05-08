@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn check_exhaustiveness(
@@ -54,7 +54,11 @@ impl Typer {
         Ok(())
     }
 
-    pub(in crate::typer) fn find_missing_patterns(&self, pats: &[&hir::Pat], ty: &Type) -> Vec<String> {
+    pub(in crate::typer) fn find_missing_patterns(
+        &self,
+        pats: &[&hir::Pat],
+        ty: &Type,
+    ) -> Vec<String> {
         let mut flat: Vec<&hir::Pat> = Vec::new();
         for p in pats {
             Self::flatten_or_pat(p, &mut flat);

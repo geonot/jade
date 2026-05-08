@@ -1,6 +1,5 @@
 //! Tree walks for `verify_*` and `verify_pat`.
 
-
 use super::{DiagKind, OwnershipDiag, OwnershipVerifier, VarState};
 use crate::hir::*;
 

@@ -26,4 +26,3 @@ pub(super) fn stmt_has_yield(s: &Stmt) -> bool {
 pub(super) fn expr_has_yield(e: &Expr) -> bool {
     matches!(e, Expr::Yield(_, _))
 }
-

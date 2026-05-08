@@ -3,9 +3,9 @@
 use super::eval::try_eval_pure_call;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
+use crate::intern::Symbol;
 use crate::types::Type;
 use std::collections::HashMap;
-use crate::intern::Symbol;
 
 pub(super) fn fold_block_with_fns(block: &mut Block, pure_fns: &HashMap<Symbol, hir::Fn>) {
     for stmt in block.iter_mut() {
@@ -510,7 +510,9 @@ pub(super) fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
         BinOp::Mod if b != 0 => Some(ExprKind::Int(a % b)),
         BinOp::Shl if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shl(b as u32))),
         BinOp::Shr if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shr(b as u32))),
-        BinOp::Ushr if b >= 0 && b < 64 => Some(ExprKind::Int((a as u64).wrapping_shr(b as u32) as i64)),
+        BinOp::Ushr if b >= 0 && b < 64 => {
+            Some(ExprKind::Int((a as u64).wrapping_shr(b as u32) as i64))
+        }
         BinOp::BitAnd => Some(ExprKind::Int(a & b)),
         BinOp::BitOr => Some(ExprKind::Int(a | b)),
         BinOp::BitXor => Some(ExprKind::Int(a ^ b)),
@@ -594,7 +596,12 @@ pub(super) fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
     }
 }
 
-pub(super) fn fold_builtin(builtin: &hir::BuiltinFn, args: &[Expr], ty: Type, span: Span) -> Option<Expr> {
+pub(super) fn fold_builtin(
+    builtin: &hir::BuiltinFn,
+    args: &[Expr],
+    ty: Type,
+    span: Span,
+) -> Option<Expr> {
     use hir::BuiltinFn::*;
     let kind = match builtin {
         Ln | Log2 | Log10 | Exp | Exp2 => {

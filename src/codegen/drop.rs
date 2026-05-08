@@ -566,7 +566,9 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         // Check if this struct has self-referencing fields (directly or via Vec/Map).
-        let is_recursive = fields.iter().any(|(_, ty)| Self::type_references_struct(ty, name));
+        let is_recursive = fields
+            .iter()
+            .any(|(_, ty)| Self::type_references_struct(ty, name));
 
         if !is_recursive {
             // Inline the drop as before.
@@ -596,7 +598,10 @@ impl<'ctx> Compiler<'ctx> {
         let entry = self.ctx.append_basic_block(dfn, "entry");
         self.bld.position_at_end(entry);
 
-        let param_ptr = dfn.get_first_param().expect("ICE: function has no first param").into_pointer_value();
+        let param_ptr = dfn
+            .get_first_param()
+            .expect("ICE: function has no first param")
+            .into_pointer_value();
         for (i, (_, ty)) in fields.iter().enumerate() {
             if ty.is_trivially_droppable() {
                 continue;
@@ -625,11 +630,17 @@ impl<'ctx> Compiler<'ctx> {
         match ty {
             Type::Struct(n, _) => n == name,
             Type::Vec(inner) => Self::type_references_struct(inner, name),
-            Type::Map(k, v) => Self::type_references_struct(k, name) || Self::type_references_struct(v, name),
+            Type::Map(k, v) => {
+                Self::type_references_struct(k, name) || Self::type_references_struct(v, name)
+            }
             Type::Set(inner) => Self::type_references_struct(inner, name),
             Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
-            Type::Rc(inner) | Type::Weak(inner) | Type::Cow(inner) => Self::type_references_struct(inner, name),
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_references_struct(inner, name),
+            Type::Rc(inner) | Type::Weak(inner) | Type::Cow(inner) => {
+                Self::type_references_struct(inner, name)
+            }
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+                Self::type_references_struct(inner, name)
+            }
             _ => false,
         }
     }

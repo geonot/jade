@@ -1,7 +1,7 @@
 //! Path resolution for the typer (vs. `src/resolve.rs` which handles modules).
 
-use crate::intern::Symbol;
 use crate::ast::{self, Span};
+use crate::intern::Symbol;
 use crate::types::Type;
 
 use super::Typer;
@@ -246,8 +246,10 @@ impl Typer {
             .collect();
         self.traits.insert(td.name.clone(), sigs);
         if !td.assoc_types.is_empty() {
-            self.trait_assoc_types
-                .insert(td.name.clone(), td.assoc_types.iter().map(|s| s.as_str()).collect());
+            self.trait_assoc_types.insert(
+                td.name.clone(),
+                td.assoc_types.iter().map(|s| s.as_str()).collect(),
+            );
         }
     }
 
@@ -289,7 +291,8 @@ impl Typer {
                     trait_name
                 )
             });
-            let impl_method_names: Vec<String> = ib.methods.iter().map(|m| m.name.as_str()).collect();
+            let impl_method_names: Vec<String> =
+                ib.methods.iter().map(|m| m.name.as_str()).collect();
             for sig in &trait_sigs {
                 if !sig.has_default && !impl_method_names.contains(&sig.name.as_str()) {
                     return Err(format!(

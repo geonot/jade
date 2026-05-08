@@ -86,8 +86,14 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
 
-        let mb_st = self.module.get_struct_type(&mb_name).expect("ICE: struct type not declared");
-        let msg_st = self.module.get_struct_type(&msg_name).expect("ICE: struct type not declared");
+        let mb_st = self
+            .module
+            .get_struct_type(&mb_name)
+            .expect("ICE: struct type not declared");
+        let msg_st = self
+            .module
+            .get_struct_type(&msg_name)
+            .expect("ICE: struct type not declared");
 
         let loop_handler = ad.handlers.iter().find(|h| h.is_loop);
         let message_handlers: Vec<&hir::HandlerDef> =
@@ -106,7 +112,10 @@ impl<'ctx> Compiler<'ctx> {
         let old_fn = self.cur_fn;
         self.cur_fn = Some(fv);
 
-        let mb_ptr = fv.get_nth_param(0).expect("ICE: missing param").into_pointer_value();
+        let mb_ptr = fv
+            .get_nth_param(0)
+            .expect("ICE: missing param")
+            .into_pointer_value();
 
         self.bld.position_at_end(entry);
         let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
@@ -122,7 +131,10 @@ impl<'ctx> Compiler<'ctx> {
             self.push_var_scope();
 
             let state_name = format!("{name}_state");
-            let state_st = self.module.get_struct_type(&state_name).expect("ICE: struct type not declared");
+            let state_st = self
+                .module
+                .get_struct_type(&state_name)
+                .expect("ICE: struct type not declared");
             for (fi, field) in ad.fields.iter().enumerate() {
                 let field_ptr = b!(self.bld.build_struct_gep(
                     state_st,
@@ -207,13 +219,14 @@ impl<'ctx> Compiler<'ctx> {
                 .build_conditional_branch(is_closed, exit_bb, loop_bb));
         } else {
             let chan_recv = crate::codegen::fn_or_die(&self.module, "jade_chan_recv");
-            let recv_ok = b!(self
-                .bld
-                .build_call(chan_recv, &[ch_ptr.into(), msg_alloca.into()], "recv_ok"))
-            .try_as_basic_value()
-            .basic()
-            .expect("ICE: call returned void")
-            .into_int_value();
+            let recv_ok =
+                b!(self
+                    .bld
+                    .build_call(chan_recv, &[ch_ptr.into(), msg_alloca.into()], "recv_ok"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: call returned void")
+                .into_int_value();
 
             let ok = b!(self.bld.build_int_compare(
                 IntPredicate::NE,
@@ -257,7 +270,10 @@ impl<'ctx> Compiler<'ctx> {
             ));
 
             let state_name = format!("{name}_state");
-            let state_st = self.module.get_struct_type(&state_name).expect("ICE: struct type not declared");
+            let state_st = self
+                .module
+                .get_struct_type(&state_name)
+                .expect("ICE: struct type not declared");
 
             for (i, h) in message_handlers.iter().enumerate() {
                 let bb = handler_bbs[i].1;
@@ -335,7 +351,10 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_struct_type(&mb_name)
             .ok_or_else(|| format!("actor '{actor_name}' not declared"))?;
-        let msg_st = self.module.get_struct_type(&msg_name).expect("ICE: struct type not declared");
+        let msg_st = self
+            .module
+            .get_struct_type(&msg_name)
+            .expect("ICE: struct type not declared");
 
         let mb_size = self.type_store_size(mb_st.into());
         let msg_size = self.type_store_size(msg_st.into());
@@ -455,13 +474,18 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_struct_type(&mb_name)
             .ok_or_else(|| format!("actor '{actor_name}' not declared"))?;
-        let msg_st = self.module.get_struct_type(&msg_name).expect("ICE: struct type not declared");
+        let msg_st = self
+            .module
+            .get_struct_type(&msg_name)
+            .expect("ICE: struct type not declared");
 
         let mb_size = self.type_store_size(mb_st.into());
         let msg_size = self.type_store_size(msg_st.into());
 
         let ft = ptr.fn_type(&[], false);
-        let fv = self.module.add_function(&fn_name, ft, Some(Linkage::Internal));
+        let fv = self
+            .module
+            .add_function(&fn_name, ft, Some(Linkage::Internal));
         let entry = self.ctx.append_basic_block(fv, "entry");
 
         let old_fn = self.cur_fn;

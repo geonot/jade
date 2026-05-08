@@ -2458,7 +2458,10 @@ fn auto_import_qualified_signal_name_without_use() {
 
 #[test]
 fn auto_import_qualified_terminal_size_without_use() {
-    expect("*main\n    sz is terminal.size()\n    log(sz.cols > 0)\n", "1");
+    expect(
+        "*main\n    sz is terminal.size()\n    log(sz.cols > 0)\n",
+        "1",
+    );
 }
 
 // ── Atomic Keyword Binding ──────────────────────────────────────
@@ -3264,10 +3267,7 @@ store bench
 
 #[test]
 fn defer_runs_on_normal_exit() {
-    expect(
-        "*main()\n    defer\n        log(2)\n    log(1)\n",
-        "1\n2",
-    );
+    expect("*main()\n    defer\n        log(2)\n    log(1)\n", "1\n2");
 }
 
 #[test]

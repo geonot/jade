@@ -144,7 +144,12 @@ impl PrettyPrinter {
                     .as_ref()
                     .map(|e| self.expr_str(e))
                     .unwrap_or_else(|| "0".to_string());
-                self.line(&format!("loop {}({}) [sleep_ms={}]:", h.name, params.join(", "), sleep));
+                self.line(&format!(
+                    "loop {}({}) [sleep_ms={}]:",
+                    h.name,
+                    params.join(", "),
+                    sleep
+                ));
             } else {
                 self.line(&format!(
                     "on {}({}) [tag={}]:",
@@ -170,7 +175,10 @@ impl PrettyPrinter {
     }
 
     fn trait_impl(&mut self, ti: &TraitImpl) {
-        let trait_part = ti.trait_name.map(|s| s.as_str()).unwrap_or_else(|| "_".to_string());
+        let trait_part = ti
+            .trait_name
+            .map(|s| s.as_str())
+            .unwrap_or_else(|| "_".to_string());
         self.line(&format!("impl {} for {}:", trait_part, ti.type_name));
         self.push();
         for m in &ti.methods {
@@ -563,7 +571,10 @@ impl PrettyPrinter {
                 let fs: Vec<String> = fields
                     .iter()
                     .map(|f| {
-                        let n = f.name.map(|s| s.as_str()).unwrap_or_else(|| "_".to_string());
+                        let n = f
+                            .name
+                            .map(|s| s.as_str())
+                            .unwrap_or_else(|| "_".to_string());
                         format!("{n}: {}", self.expr_str(&f.value))
                     })
                     .collect();
@@ -573,7 +584,10 @@ impl PrettyPrinter {
                 let fs: Vec<String> = fields
                     .iter()
                     .map(|f| {
-                        let n = f.name.map(|s| s.as_str()).unwrap_or_else(|| "_".to_string());
+                        let n = f
+                            .name
+                            .map(|s| s.as_str())
+                            .unwrap_or_else(|| "_".to_string());
                         format!("{n}: {}", self.expr_str(&f.value))
                     })
                     .collect();

@@ -2,8 +2,8 @@ use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
 
-use super::yield_scan::body_contains_yield;
 use super::super::{ParseError, Parser};
+use super::yield_scan::body_contains_yield;
 
 impl Parser {
     pub(in crate::parser) fn parse_fn_attrs(&mut self) -> Result<FnAttrs, ParseError> {
@@ -26,7 +26,9 @@ impl Parser {
         Ok(attrs)
     }
 
-    pub(in crate::parser) fn parse_type_params(&mut self) -> (Vec<Symbol>, Vec<(Symbol, Vec<Symbol>)>) {
+    pub(in crate::parser) fn parse_type_params(
+        &mut self,
+    ) -> (Vec<Symbol>, Vec<(Symbol, Vec<Symbol>)>) {
         let mut tp = Vec::new();
         let mut bounds = Vec::new();
         if !self.check(Token::Of) {
@@ -163,7 +165,11 @@ impl Parser {
         })
     }
 
-    pub(in crate::parser) fn parse_fn_param(&mut self, idx: usize, typed: bool) -> Result<Param, ParseError> {
+    pub(in crate::parser) fn parse_fn_param(
+        &mut self,
+        idx: usize,
+        typed: bool,
+    ) -> Result<Param, ParseError> {
         match self.peek() {
             Token::Int(_)
             | Token::CharLit(_)
@@ -219,5 +225,4 @@ impl Parser {
             span: sp,
         })
     }
-
 }

@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn hir_tail_type(&self, body: &[hir::Stmt]) -> Option<Type> {
@@ -276,5 +276,4 @@ impl Typer {
                 | Type::Coroutine(_)
         )
     }
-
 }

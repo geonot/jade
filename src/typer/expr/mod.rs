@@ -1,15 +1,15 @@
 //! Per-expression typing rules.
 
-mod ident;
-mod typeargs;
-mod op;
 mod access;
-mod control;
-mod store;
 mod concur;
 mod construct;
+mod control;
+mod ident;
 mod lambda;
 mod misc;
+mod op;
+mod store;
+mod typeargs;
 
 use crate::intern::Symbol;
 use std::path::PathBuf;
@@ -18,8 +18,8 @@ use crate::ast::{self, BinOp, Span, UnaryOp};
 use crate::hir::{self, CoercionKind, DefId, Ownership};
 use crate::types::Type;
 
-use super::{Typer, VarInfo};
 pub(super) use super::{DeferredField, unify};
+use super::{Typer, VarInfo};
 
 impl Typer {
     pub(crate) fn lower_expr(&mut self, expr: &ast::Expr) -> Result<hir::Expr, String> {
@@ -141,12 +141,8 @@ impl Typer {
                 // For partial ternaries (if-only or else-only), skip unification
                 // when one branch is Void — the result type comes from the non-Void branch.
                 let ty = match (&ht.ty, &he.ty) {
-                    (Type::Void, _) => {
-                        he.ty.clone()
-                    }
-                    (_, Type::Void) => {
-                        ht.ty.clone()
-                    }
+                    (Type::Void, _) => he.ty.clone(),
+                    (_, Type::Void) => ht.ty.clone(),
                     _ => {
                         let _ = self
                             .infer_ctx

@@ -1,7 +1,7 @@
 //! High-level IR data types produced by the typer and consumed by Perceus, MIR lower, and codegen.
 
-use crate::intern::Symbol;
 use crate::ast::{self, Span};
+use crate::intern::Symbol;
 use crate::types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -629,7 +629,6 @@ pub struct AsmBlock {
     pub clobbers: Vec<String>,
     pub span: Span,
 }
-
 
 mod print;
 pub use print::pretty_print;

@@ -10,13 +10,13 @@ use crate::types::Type;
 use super::{Typer, VarInfo};
 use resolve::type_references_name;
 
+mod block;
+mod decl;
 mod deferred;
 mod display;
-mod resolve;
-mod decl;
-mod iter;
-mod block;
 mod exhaust;
+mod iter;
+mod resolve;
 
 impl Typer {
     pub fn lower_program(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
@@ -25,7 +25,8 @@ impl Typer {
         }
         self.register_prelude_types();
 
-        let mut alias_map: std::collections::HashMap<Symbol, Type> = std::collections::HashMap::new();
+        let mut alias_map: std::collections::HashMap<Symbol, Type> =
+            std::collections::HashMap::new();
         for d in &prog.decls {
             match d {
                 ast::Decl::Fn(f) if Self::is_generic_fn(f) => {
@@ -110,8 +111,10 @@ impl Typer {
                             fields.push((f.name.clone(), f.ty.clone().unwrap_or(Type::I64)));
                         }
                     }
-                    self.structs
-                        .insert(Symbol::intern(&format!("__store_{}", sd.name)), fields.clone());
+                    self.structs.insert(
+                        Symbol::intern(&format!("__store_{}", sd.name)),
+                        fields.clone(),
+                    );
                     self.store_schemas.insert(sd.name.clone(), fields);
                     self.store_decorators
                         .insert(sd.name.clone(), sd.decorators.clone());
@@ -242,10 +245,8 @@ impl Typer {
         let call_graph = super::scc::build_call_graph(&non_generic_fns);
         let sccs = super::scc::tarjan_scc(&call_graph);
 
-        let fn_lookup: std::collections::HashMap<Symbol, &ast::Fn> = non_generic_fns
-            .iter()
-            .map(|f| (f.name, *f))
-            .collect();
+        let fn_lookup: std::collections::HashMap<Symbol, &ast::Fn> =
+            non_generic_fns.iter().map(|f| (f.name, *f)).collect();
 
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {
@@ -533,5 +534,4 @@ impl Typer {
         }
         Ok(program)
     }
-
 }

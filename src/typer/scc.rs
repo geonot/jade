@@ -1,7 +1,7 @@
 //! Strongly-connected-component analysis for mutually recursive let-groups.
 
-use crate::intern::Symbol;
 use crate::ast;
+use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet};
 
 fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<Symbol>) {

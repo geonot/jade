@@ -7,13 +7,21 @@ use crate::hir::*;
 use super::super::{PerceusPass, UseInfo};
 
 impl PerceusPass {
-    pub(in crate::perceus) fn count_uses_block(&mut self, block: &Block, uses: &mut HashMap<DefId, UseInfo>) {
+    pub(in crate::perceus) fn count_uses_block(
+        &mut self,
+        block: &Block,
+        uses: &mut HashMap<DefId, UseInfo>,
+    ) {
         for stmt in block {
             self.count_uses_stmt(stmt, uses);
         }
     }
 
-    pub(in crate::perceus) fn count_uses_stmt(&mut self, stmt: &Stmt, uses: &mut HashMap<DefId, UseInfo>) {
+    pub(in crate::perceus) fn count_uses_stmt(
+        &mut self,
+        stmt: &Stmt,
+        uses: &mut HashMap<DefId, UseInfo>,
+    ) {
         match stmt {
             Stmt::Bind(b) => {
                 self.count_uses_expr(&b.value, uses);
@@ -145,7 +153,11 @@ impl PerceusPass {
         }
     }
 
-    pub(in crate::perceus) fn count_uses_block_conservative(&mut self, block: &Block, uses: &mut HashMap<DefId, UseInfo>) {
+    pub(in crate::perceus) fn count_uses_block_conservative(
+        &mut self,
+        block: &Block,
+        uses: &mut HashMap<DefId, UseInfo>,
+    ) {
         let mut refs = Vec::new();
         self.collect_refs_block(block, &mut refs);
         for def_id in &refs {
@@ -156,5 +168,4 @@ impl PerceusPass {
         }
         self.count_uses_block(block, uses);
     }
-
 }

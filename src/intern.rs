@@ -68,7 +68,10 @@ impl Symbol {
 
     /// Join a slice of Symbols with a separator into a String.
     pub fn join_vec(syms: &[Symbol], sep: &str) -> String {
-        syms.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(sep)
+        syms.iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(sep)
     }
 
     /// Strip a prefix from the symbol's string, returning a new Symbol if matched.

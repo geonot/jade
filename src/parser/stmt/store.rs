@@ -1,10 +1,10 @@
-use crate::ast::*;
-use crate::lexer::Token;
 use super::super::expr::{
     contains_index_placeholder_in_block, contains_placeholder_in_block,
     replace_index_placeholder_in_block, replace_placeholder_in_block,
 };
 use super::super::{ParseError, Parser};
+use crate::ast::*;
+use crate::lexer::Token;
 
 impl Parser {
     pub(in crate::parser) fn parse_insert_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -28,7 +28,9 @@ impl Parser {
     }
 
     /// Parse one insert value: either `name is expr` (named) or a bare expr.
-    pub(in crate::parser) fn parse_insert_value(&mut self) -> Result<crate::ast::FieldInit, ParseError> {
+    pub(in crate::parser) fn parse_insert_value(
+        &mut self,
+    ) -> Result<crate::ast::FieldInit, ParseError> {
         // Look-ahead for `Ident is …` — but only when the rhs is a value
         // expression, not a relational comparison (so `users where age is 30`
         // is unaffected — `where` parses separately).

@@ -103,7 +103,10 @@ impl<'ctx> Compiler<'ctx> {
         self.push_var_scope();
 
         // Load captures from env struct (param 0 is env_ptr)
-        let env_param = lambda_fv.get_nth_param(0).expect("ICE: missing param").into_pointer_value();
+        let env_param = lambda_fv
+            .get_nth_param(0)
+            .expect("ICE: missing param")
+            .into_pointer_value();
         for (i, (name, _, ty)) in captures.iter().enumerate() {
             let lt = self.llvm_ty(ty);
             let field_ptr =

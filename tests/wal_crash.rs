@@ -3,7 +3,7 @@
 //! `jade_wal_write` under the default `fdatasync` policy must survive a
 //! `SIGKILL` of the writing process.
 
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::path::PathBuf;
 
 use jadec::runtime_ffi::{
@@ -11,13 +11,7 @@ use jadec::runtime_ffi::{
     jade_wal_write,
 };
 
-extern "C" fn count_cb(
-    _op: u8,
-    _payload: *const c_void,
-    _len: u32,
-    _ts: i64,
-    ud: *mut c_void,
-) {
+extern "C" fn count_cb(_op: u8, _payload: *const c_void, _len: u32, _ts: i64, ud: *mut c_void) {
     let counter = unsafe { &mut *(ud as *mut u64) };
     *counter += 1;
 }

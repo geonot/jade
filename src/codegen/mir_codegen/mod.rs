@@ -16,19 +16,12 @@
 //!   3. Walk blocks in order — emit phi placeholders, instructions, terminator.
 //!   4. Back-patch phi incoming edges once all blocks are materialised.
 
+mod emit_inst;
 mod helpers;
 mod intrinsics;
 mod magic;
 mod store;
 mod store_ext;
-#[path = "emit_inst_parts/part0.rs"]
-mod emit_inst_part0;
-#[path = "emit_inst_parts/part1.rs"]
-mod emit_inst_part1;
-#[path = "emit_inst_parts/part2.rs"]
-mod emit_inst_part2;
-#[path = "emit_inst_parts/part3.rs"]
-mod emit_inst_part3;
 
 use crate::intern::Symbol;
 use std::collections::HashMap;
@@ -103,14 +96,15 @@ impl<'ctx> Compiler<'ctx> {
 
         // Register struct types from MIR type defs.
         for td in &prog.types {
-            let ltys: Vec<BasicTypeEnum<'ctx>> = td
-                .fields
-                .iter()
-                .map(|(_, ty)| self.llvm_ty(ty))
-                .collect();
+            let ltys: Vec<BasicTypeEnum<'ctx>> =
+                td.fields.iter().map(|(_, ty)| self.llvm_ty(ty)).collect();
             let st = self.ctx.opaque_struct_type(&td.name.as_str());
             st.set_body(&ltys, false);
-            let fields: Vec<(String, Type)> = td.fields.iter().map(|(n, t)| (n.as_str(), t.clone())).collect();
+            let fields: Vec<(String, Type)> = td
+                .fields
+                .iter()
+                .map(|(n, t)| (n.as_str(), t.clone()))
+                .collect();
             self.structs.insert(td.name, fields);
         }
 
@@ -147,9 +141,7 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|t| {
                     // Extern functions use C ABI: String → ptr (char*)
                     if matches!(t, Type::String) {
-                        self.ctx
-                            .ptr_type(inkwell::AddressSpace::default())
-                            .into()
+                        self.ctx.ptr_type(inkwell::AddressSpace::default()).into()
                     } else {
                         self.llvm_ty(t).into()
                     }
@@ -164,8 +156,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.attr("nounwind"),
             );
             let param_tys: Vec<Type> = ext.params.clone();
-            self.fns
-                .insert(ext.name, (fv, param_tys, ext.ret.clone()));
+            self.fns.insert(ext.name, (fv, param_tys, ext.ret.clone()));
         }
 
         // ── Detect runtime needs from MIR (BEFORE declaring functions so
@@ -217,7 +208,10 @@ impl<'ctx> Compiler<'ctx> {
         self.needs_ssl = needs_ssl;
 
         // ── Detect SQLite usage ──
-        let needs_sqlite = prog.externs.iter().any(|e| e.name.starts_with("jade_sqlite_"));
+        let needs_sqlite = prog
+            .externs
+            .iter()
+            .any(|e| e.name.starts_with("jade_sqlite_"));
         self.needs_sqlite = needs_sqlite;
 
         // ── Also detect coroutine/generator usage and declare gen runtime ──
@@ -279,7 +273,9 @@ impl<'ctx> Compiler<'ctx> {
         // ── Declare global mutable variables ──
         for gdef in &prog.globals {
             let llvm_ty = self.llvm_ty(&gdef.ty);
-            let gv = self.module.add_global(llvm_ty, None, &format!("__jade_global_{}", gdef.name));
+            let gv = self
+                .module
+                .add_global(llvm_ty, None, &format!("__jade_global_{}", gdef.name));
             gv.set_initializer(&self.zero_init(&gdef.ty));
             gv.set_linkage(Linkage::Internal);
             self.globals.insert(gdef.name, (gv, gdef.ty.clone()));
@@ -288,7 +284,9 @@ impl<'ctx> Compiler<'ctx> {
         // ── Declare global initializer function (called from main wrapper) ──
         if !hir_prog.globals.is_empty() {
             let void_ty = self.ctx.void_type().fn_type(&[], false);
-            let init_fn = self.module.add_function("__jade_init_globals", void_ty, None);
+            let init_fn = self
+                .module
+                .add_function("__jade_init_globals", void_ty, None);
             let entry = self.ctx.append_basic_block(init_fn, "entry");
             self.bld.position_at_end(entry);
             for g in &hir_prog.globals {
@@ -359,8 +357,7 @@ impl<'ctx> Compiler<'ctx> {
             self.tag_fn(user_fv);
             self.apply_fn_attrs(user_fv, &func.attrs);
             user_fv.set_linkage(Linkage::Internal);
-            self.fns
-                .insert(func.name, (user_fv, ptys, ret));
+            self.fns.insert(func.name, (user_fv, ptys, ret));
 
             // Build main wrapper (same logic as decl.rs).
             let i32t = self.ctx.i32_type();
@@ -501,9 +498,7 @@ impl<'ctx> Compiler<'ctx> {
             // 3a. Emit phi nodes.
             for phi in &bb.phis {
                 let llvm_ty = self.llvm_ty(&phi.ty);
-                let phi_val = b!(self
-                    .bld
-                    .build_phi(llvm_ty, &format!("v{}", phi.dest.0)));
+                let phi_val = b!(self.bld.build_phi(llvm_ty, &format!("v{}", phi.dest.0)));
                 self.value_map.insert(phi.dest, phi_val.as_basic_value());
                 self.pending_phis.push(PendingPhi {
                     phi: phi_val,
@@ -528,7 +523,10 @@ impl<'ctx> Compiler<'ctx> {
 
             // Record actual exit block (helpers like string_concat may have
             // repositioned the builder to intermediate LLVM blocks).
-            let exit_bb = self.bld.get_insert_block().expect("ICE: builder has no insert block");
+            let exit_bb = self
+                .bld
+                .get_insert_block()
+                .expect("ICE: builder has no insert block");
             self.block_exit_map.insert(bb.id, exit_bb);
 
             // 3c. Emit terminator.
@@ -600,21 +598,20 @@ impl<'ctx> Compiler<'ctx> {
     // ── instruction emission ───────────────────────────────────────
 
     fn emit_inst(&mut self, inst: &mir::Instruction) -> Result<BasicValueEnum<'ctx>, String> {
-        if let Some(v) = self.emit_inst_part0(inst)? {
+        if let Some(v) = self.emit_core_inst(inst)? {
             return Ok(v);
         }
-        if let Some(v) = self.emit_inst_part1(inst)? {
+        if let Some(v) = self.emit_aggregate_memory_inst(inst)? {
             return Ok(v);
         }
-        if let Some(v) = self.emit_inst_part2(inst)? {
+        if let Some(v) = self.emit_ownership_collection_inst(inst)? {
             return Ok(v);
         }
-        if let Some(v) = self.emit_inst_part3(inst)? {
+        if let Some(v) = self.emit_runtime_inst(inst)? {
             return Ok(v);
         }
         Err(format!("unsupported MIR instruction: {:?}", inst.kind))
     }
-
 
     // ── terminator emission ────────────────────────────────────────
 
@@ -718,5 +715,4 @@ impl<'ctx> Compiler<'ctx> {
         }
         v
     }
-
 }

@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
+use super::super::unify;
+use super::super::{DeferredField, Typer, VarInfo};
 use crate::ast::{self, Expr, Span};
 use crate::hir::{self, ExprKind};
-use crate::types::Type;
 use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField};
-use super::super::unify;
+use crate::types::Type;
 
 impl Typer {
     pub(crate) fn lower_method_call(
@@ -29,7 +29,6 @@ impl Typer {
             return Ok(e);
         }
 
-
         let hobj = self.lower_expr(obj)?;
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
@@ -42,11 +41,7 @@ impl Typer {
             let (handler_name, handler_ptys, tag) = handlers
                 .iter()
                 .find(|(n, _, _)| n.as_str() == method)
-                .ok_or_else(|| {
-                    format!(
-                        "actor '{actor_name}' has no handler '.{method}()'"
-                    )
-                })?
+                .ok_or_else(|| format!("actor '{actor_name}' has no handler '.{method}()'"))?
                 .clone();
 
             if tag == u32::MAX {
@@ -177,11 +172,7 @@ impl Typer {
                         .infer_ctx
                         .unify_at(&fn_ty, &harg.ty, span, "predicate callback");
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::VecMethod(
-                            Box::new(hobj),
-                            method.into(),
-                            vec![harg],
-                        ),
+                        kind: hir::ExprKind::VecMethod(Box::new(hobj), method.into(), vec![harg]),
                         ty: Type::Bool,
                         span,
                     });
@@ -667,9 +658,13 @@ impl Typer {
                     let narrowed: Vec<(String, Vec<Type>, Type)> = candidates
                         .iter()
                         .filter(|(type_name, _, _)| {
-                            self.trait_impls.get(type_name.as_str()).map_or(false, |impls| {
-                                impls.iter().any(|i| defining_traits.iter().any(|t| **t == i.as_str()))
-                            })
+                            self.trait_impls
+                                .get(type_name.as_str())
+                                .map_or(false, |impls| {
+                                    impls
+                                        .iter()
+                                        .any(|i| defining_traits.iter().any(|t| **t == i.as_str()))
+                                })
                         })
                         .cloned()
                         .collect();
@@ -757,5 +752,4 @@ impl Typer {
             span,
         })
     }
-
 }

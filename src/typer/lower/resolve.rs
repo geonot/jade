@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
     match ty {
@@ -40,7 +40,6 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
         _ => false,
     }
 }
-
 
 impl Typer {
     pub(in crate::typer) fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
@@ -80,7 +79,8 @@ impl Typer {
                         if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                             std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                         {
-                            expr.kind = hir::ExprKind::Method(recv, method_name.into(), method, args);
+                            expr.kind =
+                                hir::ExprKind::Method(recv, method_name.into(), method, args);
                         }
                     }
                 }
@@ -461,12 +461,12 @@ impl Typer {
                             // Only monomorphize if all types are fully resolved (no type vars)
                             if expr.ty.has_type_var() {
                                 // Leave unresolved — codegen will emit a proper error
-                            } else if let Some(inf_fn) =
-                                self.inferable_fns.get(&*name).cloned()
-                            {
+                            } else if let Some(inf_fn) = self.inferable_fns.get(&*name).cloned() {
                                 let normalized = Self::normalize_inferable_fn(&inf_fn);
-                                let type_map = self.build_type_map(&name.as_str(), &normalized, param_tys);
-                                if let Ok(mangled) = self.monomorphize_fn(&name.as_str(), &type_map) {
+                                let type_map =
+                                    self.build_type_map(&name.as_str(), &normalized, param_tys);
+                                if let Ok(mangled) = self.monomorphize_fn(&name.as_str(), &type_map)
+                                {
                                     if let Some((mid, _, _)) = self.fns.get(&mangled).cloned() {
                                         *id = mid;
                                         *name = mangled.into();
@@ -769,5 +769,4 @@ impl Typer {
             self.resolve_expr(&mut cond.value);
         }
     }
-
 }

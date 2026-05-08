@@ -16,13 +16,8 @@ pub struct CFile {
     _opaque: [u8; 0],
 }
 
-pub type WalReplayCb = extern "C" fn(
-    op: c_uchar,
-    payload: *const c_void,
-    len: u32,
-    ts: i64,
-    user_data: *mut c_void,
-);
+pub type WalReplayCb =
+    extern "C" fn(op: c_uchar, payload: *const c_void, len: u32, ts: i64, user_data: *mut c_void);
 
 unsafe extern "C" {
     pub fn jade_wal_open(path: *const c_char) -> *mut CFile;

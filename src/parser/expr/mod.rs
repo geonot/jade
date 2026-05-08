@@ -105,12 +105,11 @@ impl Parser {
         }
         Ok(e)
     }
-
 }
 
+mod parse_primary;
 mod placeholder;
 mod pratt;
 mod primary;
-mod parse_primary;
 
 pub(super) use placeholder::*;

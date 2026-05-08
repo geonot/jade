@@ -2,13 +2,13 @@
 
 #![allow(unused_imports, unused_variables)]
 
-use crate::intern::Symbol;
-use std::path::PathBuf;
+use super::super::unify;
+use super::super::{Typer, VarInfo};
 use crate::ast::{self, BinOp, Span, UnaryOp};
 use crate::hir::{self, CoercionKind, DefId, Ownership};
+use crate::intern::Symbol;
 use crate::types::Type;
-use super::super::{Typer, VarInfo};
-use super::super::unify;
+use std::path::PathBuf;
 
 impl Typer {
     pub(in crate::typer) fn lower_expr_lambda(
@@ -18,12 +18,12 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         let _ = expected;
         match expr {
-            ast::Expr::Lambda(params, ret, body, span) => {                self.lower_lambda_with_expected(params, ret, body, *span, expected)
-        },
+            ast::Expr::Lambda(params, ret, body, span) => {
+                self.lower_lambda_with_expected(params, ret, body, *span, expected)
+            }
             _ => unreachable!(),
         }
     }
-
 }
 
 impl Typer {
@@ -107,5 +107,4 @@ impl Typer {
             span,
         })
     }
-
 }

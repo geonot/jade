@@ -1,12 +1,12 @@
 //! Magic call handling for MIR codegen: coroutines, generators, actors, and select.
 
-use inkwell::AddressSpace;
-use inkwell::values::{BasicValue, BasicValueEnum};
-use crate::mir;
-use crate::types::Type;
-use crate::intern::Symbol;
 use super::super::Compiler;
 use super::super::b;
+use crate::intern::Symbol;
+use crate::mir;
+use crate::types::Type;
+use inkwell::AddressSpace;
+use inkwell::values::{BasicValue, BasicValueEnum};
 
 impl<'ctx> Compiler<'ctx> {
     /// Handle "magic" call names emitted by MIR lowering that need special
@@ -73,9 +73,7 @@ impl<'ctx> Compiler<'ctx> {
                 // Clear has_value
                 let has_val_ptr =
                     self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.hv.ptr")?;
-                b!(self
-                    .bld
-                    .build_store(has_val_ptr, i8t.const_int(0, false)));
+                b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
                 return Ok(Some(result));
             }
         }
@@ -261,7 +259,8 @@ impl<'ctx> Compiler<'ctx> {
                 let ptr = self.val(ptr_val).into_pointer_value();
                 let i64t = self.ctx.i64_type();
                 let load = b!(self.bld.build_load(i64t, ptr, "atomic.load"));
-                load.as_instruction_value().expect("ICE: not an instruction")
+                load.as_instruction_value()
+                    .expect("ICE: not an instruction")
                     .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
                     .map_err(|_| "failed to set atomic ordering")?;
                 return Ok(Some(load));
@@ -334,13 +333,11 @@ impl<'ctx> Compiler<'ctx> {
                 let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
                 let malloc = self.ensure_malloc();
                 let size = cow_st.size_of().expect("ICE: type has no size");
-                let ptr = b!(self
-                    .bld
-                    .build_call(malloc, &[size.into()], "cow.alloc"))
-                .try_as_basic_value()
-                .basic()
-                .expect("ICE: call returned void")
-                .into_pointer_value();
+                let ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.alloc"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void")
+                    .into_pointer_value();
                 let rc_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 0, "cow.rc"));
                 b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
                 let data_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 1, "cow.data"));
@@ -364,9 +361,7 @@ impl<'ctx> Compiler<'ctx> {
                 let i64t = self.ctx.i64_type();
                 let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
 
-                let rc_gep = b!(self
-                    .bld
-                    .build_struct_gep(cow_st, cow_ptr, 0, "cow.rcp"));
+                let rc_gep = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 0, "cow.rcp"));
                 let rc = b!(self.bld.build_load(i64t, rc_gep, "cow.rc")).into_int_value();
                 let needs_clone = b!(self.bld.build_int_compare(
                     inkwell::IntPredicate::UGT,
@@ -378,7 +373,10 @@ impl<'ctx> Compiler<'ctx> {
                 let fn_val = self.cur_fn.expect("ICE: cur_fn not set");
                 let clone_bb = self.ctx.append_basic_block(fn_val, "cow.clone");
                 let done_bb = self.ctx.append_basic_block(fn_val, "cow.done");
-                let cur_bb = self.bld.get_insert_block().expect("ICE: builder has no insert block");
+                let cur_bb = self
+                    .bld
+                    .get_insert_block()
+                    .expect("ICE: builder has no insert block");
                 b!(self
                     .bld
                     .build_conditional_branch(needs_clone, clone_bb, done_bb));
@@ -391,16 +389,10 @@ impl<'ctx> Compiler<'ctx> {
                     .basic()
                     .expect("ICE: call returned void")
                     .into_pointer_value();
-                let new_rc = b!(self
-                    .bld
-                    .build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
+                let new_rc = b!(self.bld.build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
                 b!(self.bld.build_store(new_rc, i64t.const_int(1, false)));
-                let new_data = b!(self
-                    .bld
-                    .build_struct_gep(cow_st, new_ptr, 1, "cow.ndata"));
-                let old_data = b!(self
-                    .bld
-                    .build_struct_gep(cow_st, cow_ptr, 1, "cow.odata"));
+                let new_data = b!(self.bld.build_struct_gep(cow_st, new_ptr, 1, "cow.ndata"));
+                let old_data = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 1, "cow.odata"));
                 let old_val = b!(self.bld.build_load(data_ty, old_data, "cow.oval"));
                 b!(self.bld.build_store(new_data, old_val));
                 let dec = b!(self
@@ -439,7 +431,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Resume a coroutine/generator and read the yielded value.
-    pub(super) fn emit_coro_next(&mut self, gen_val_id: mir::ValueId) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(super) fn emit_coro_next(
+        &mut self,
+        gen_val_id: mir::ValueId,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let gen_ptr = self.val(gen_val_id).into_pointer_value();
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
@@ -452,16 +447,12 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // Read the yielded value
-        let value_ptr = self
-            .gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.n.val")?;
+        let value_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.n.val")?;
         let result = b!(self.bld.build_load(i64t, value_ptr, "gen.result"));
 
         // Clear has_value
-        let has_val_ptr =
-            self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.n.hv")?;
-        b!(self
-            .bld
-            .build_store(has_val_ptr, i8t.const_int(0, false)));
+        let has_val_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.n.hv")?;
+        b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
 
         Ok(result)
     }
@@ -470,7 +461,10 @@ impl<'ctx> Compiler<'ctx> {
     /// When called from the parent function (no __coro_ctx), this is an inlined
     /// artifact from MIR lowering — the real yield is compiled by compile_coroutine_create
     /// from the extracted HIR body. Just return a dummy value.
-    pub(super) fn emit_coro_yield(&mut self, val_id: mir::ValueId) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(super) fn emit_coro_yield(
+        &mut self,
+        val_id: mir::ValueId,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         // If __coro_ctx doesn't exist, we're in the parent function —
         // this yield was inlined by MIR lowering and will be handled
         // by compile_coroutine_create from the HIR body.
@@ -486,17 +480,13 @@ impl<'ctx> Compiler<'ctx> {
         let gen_ptr = b!(self.bld.build_load(ptr, gen_alloca, "gen.ctx")).into_pointer_value();
 
         // Write value to gen block
-        let value_ptr = self
-            .gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.y.val")?;
+        let value_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.y.val")?;
         let i64_val = self.coerce_to_i64(val);
         b!(self.bld.build_store(value_ptr, i64_val));
 
         // Set has_value = 1
-        let has_val_ptr =
-            self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.y.hv")?;
-        b!(self
-            .bld
-            .build_store(has_val_ptr, i8t.const_int(1, false)));
+        let has_val_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.y.hv")?;
+        b!(self.bld.build_store(has_val_ptr, i8t.const_int(1, false)));
 
         // Suspend back to caller
         let gen_suspend = self
@@ -511,7 +501,10 @@ impl<'ctx> Compiler<'ctx> {
     // ── Actor codegen ────────────────────────────────────────────
 
     /// Spawn an actor: malloc mailbox, create channel, create coro, schedule it.
-    pub(super) fn emit_spawn_actor(&mut self, actor_name: &str) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(super) fn emit_spawn_actor(
+        &mut self,
+        actor_name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         // Delegate to the existing HIR actor codegen
         self.compile_spawn(actor_name)
     }
@@ -565,17 +558,13 @@ impl<'ctx> Compiler<'ctx> {
         let mb_ptr = self.val(args[0]).into_pointer_value();
 
         // Load channel pointer from mailbox
-        let ch_ptr_ptr = b!(self
-            .bld
-            .build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
+        let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
         let ch_ptr = b!(self.bld.build_load(ptr_ty, ch_ptr_ptr, "ch_ptr"));
 
         // Build message: {tag, payload}
         let msg_alloca = self.entry_alloca(msg_st.into(), "send_msg");
 
-        let tag_ptr = b!(self
-            .bld
-            .build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
+        let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
         b!(self
             .bld
             .build_store(tag_ptr, i32t.const_int(tag as u64, false)));
@@ -637,16 +626,14 @@ impl<'ctx> Compiler<'ctx> {
             .ctx
             .struct_type(&[ptr_ty.into(), ptr_ty.into(), i32t.into()], false);
         let cases_array_ty = case_struct_ty.array_type(n as u32);
-        let cases_alloca = self
-            .entry_alloca(cases_array_ty.into(), "select.cases");
+        let cases_alloca = self.entry_alloca(cases_array_ty.into(), "select.cases");
 
         let mut data_bufs = Vec::new();
         for (i, ch_vid) in channels.iter().enumerate() {
             let ch_val = self.val(*ch_vid).into_pointer_value();
 
             // Allocate recv buffer for each channel
-            let data_alloca = self
-                .entry_alloca(i64t.into(), &format!("select.data.{i}"));
+            let data_alloca = self.entry_alloca(i64t.into(), &format!("select.data.{i}"));
             data_bufs.push(data_alloca);
 
             let idx0 = i32t.const_int(0, false);
@@ -691,10 +678,7 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_function("jade_select")
             .ok_or("jade_select not declared")?;
-        let has_default = self
-            .ctx
-            .bool_type()
-            .const_int(has_default as u64, false);
+        let has_default = self.ctx.bool_type().const_int(has_default as u64, false);
         let result = b!(self.bld.build_call(
             select_fn,
             &[

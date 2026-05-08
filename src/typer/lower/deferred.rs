@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn resolve_deferred_methods(&mut self) {
@@ -75,7 +75,8 @@ impl Typer {
                         }
                         _ => {}
                     }
-                    let actual_ret = match Self::map_method_ret_ty(&dm.method.as_str(), &key, &val) {
+                    let actual_ret = match Self::map_method_ret_ty(&dm.method.as_str(), &key, &val)
+                    {
                         Some(ty) => ty,
                         None => continue,
                     };
@@ -139,7 +140,9 @@ impl Typer {
                                 dm.span,
                                 "deferred string-exclusive method implies String",
                             );
-                            if let Some(actual_ret) = Self::string_method_ret_ty(&dm.method.as_str()) {
+                            if let Some(actual_ret) =
+                                Self::string_method_ret_ty(&dm.method.as_str())
+                            {
                                 let _ = self.infer_ctx.unify_at(
                                     &dm.ret_ty,
                                     &actual_ret,
@@ -156,7 +159,10 @@ impl Typer {
                             .iter()
                             .filter(|(name, _)| name.ends_with(&suffix))
                             .map(|(name, (_, ptys, ret))| {
-                                let type_name = { let __n = name.as_str(); Symbol::intern(&__n[..__n.len() - suffix.len()]) };
+                                let type_name = {
+                                    let __n = name.as_str();
+                                    Symbol::intern(&__n[..__n.len() - suffix.len()])
+                                };
                                 (type_name, ptys.clone(), ret.clone())
                             })
                             .filter(|(type_name, _, _)| self.structs.contains_key(type_name))
@@ -194,7 +200,9 @@ impl Typer {
                                     .iter()
                                     .filter(|(type_name, _, _)| {
                                         self.trait_impls.get(type_name).map_or(false, |impls| {
-                                            impls.iter().any(|i| defining_traits.iter().any(|dt| **dt == i.as_str()))
+                                            impls.iter().any(|i| {
+                                                defining_traits.iter().any(|dt| **dt == i.as_str())
+                                            })
                                         })
                                     })
                                     .cloned()
@@ -208,7 +216,8 @@ impl Typer {
                         candidates.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
 
                         if candidates.len() > 1 {
-                            let names: Vec<String> = candidates.iter().map(|(n, _, _)| n.as_str()).collect();
+                            let names: Vec<String> =
+                                candidates.iter().map(|(n, _, _)| n.as_str()).collect();
                             self.type_errors.push(format!(
                                 "line {}:{}: ambiguous method `{}`: multiple types have this method: {}",
                                 dm.span.line, dm.span.col, dm.method, names.join(", ")
@@ -313,11 +322,14 @@ impl Typer {
             candidates.sort();
 
             if candidates.len() > 1 {
-                let field_names: Vec<String> = fields.iter().map(|f| f.field_name.as_str()).collect();
+                let field_names: Vec<String> =
+                    fields.iter().map(|f| f.field_name.as_str()).collect();
                 self.type_errors.push(format!(
                     "line {}:{}: ambiguous field access ({}): multiple types have these fields: {}",
-                    fields[0].span.line, fields[0].span.col,
-                    field_names.join(", "), Symbol::join_vec(&candidates, ", ")
+                    fields[0].span.line,
+                    fields[0].span.col,
+                    field_names.join(", "),
+                    Symbol::join_vec(&candidates, ", ")
                 ));
             } else if candidates.len() == 1 {
                 let sname = &candidates[0];
@@ -374,7 +386,8 @@ impl Typer {
                 if candidates.len() > 1 {
                     self.type_errors.push(format!(
                         "ambiguous type: multiple types implement traits {}: {}",
-                        required_traits.join(" + "), candidates.join(", ")
+                        required_traits.join(" + "),
+                        candidates.join(", ")
                     ));
                 } else if candidates.len() == 1 {
                     let ty = match &*candidates[0].as_str() {
@@ -397,5 +410,4 @@ impl Typer {
             }
         }
     }
-
 }

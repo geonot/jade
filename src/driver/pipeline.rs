@@ -8,9 +8,9 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use crate::ast::{Decl, Program, Stmt};
-use crate::intern::Symbol;
 use crate::cache::{Cache, build_package_map};
 use crate::codegen::Compiler;
+use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
@@ -22,8 +22,9 @@ use crate::typer::Typer;
 
 use super::cli::*;
 use super::project::*;
-use super::sources::{EntityIndex, merge_source_files, load_packages, resolve_modules, resolve_implicit_imports};
-
+use super::sources::{
+    EntityIndex, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules,
+};
 
 pub(super) fn compile_and_link(
     input: &std::path::Path,
@@ -198,17 +199,28 @@ pub(super) fn compile_and_link(
     }
     if comp.needs_ssl {
         if env!("JADE_HAS_SSL") != "1" {
-            die("program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built");
+            die(
+                "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
+            );
         }
         let rt_dir = env!("JADE_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljade_ssl").arg("-lssl").arg("-lcrypto");
+        cc.arg("-L")
+            .arg(rt_dir)
+            .arg("-ljade_ssl")
+            .arg("-lssl")
+            .arg("-lcrypto");
     }
     if comp.needs_sqlite {
         if env!("JADE_HAS_SQLITE") != "1" {
-            die("program uses std.sqlite but SQLite3 was not available when the compiler was built");
+            die(
+                "program uses std.sqlite but SQLite3 was not available when the compiler was built",
+            );
         }
         let rt_dir = env!("JADE_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljade_sqlite").arg("-lsqlite3");
+        cc.arg("-L")
+            .arg(rt_dir)
+            .arg("-ljade_sqlite")
+            .arg("-lsqlite3");
     }
     cc.arg("-lm");
     if lto {

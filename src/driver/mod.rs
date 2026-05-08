@@ -33,7 +33,10 @@ use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
-use sources::{EntityIndex, collect_jade_files, find_project_entry, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules};
+use sources::{
+    EntityIndex, collect_jade_files, find_project_entry, load_packages, merge_source_files,
+    resolve_implicit_imports, resolve_modules,
+};
 
 pub fn run() {
     let cli = Cli::parse();
@@ -569,17 +572,28 @@ pub fn run() {
     }
     if comp.needs_ssl {
         if env!("JADE_HAS_SSL") != "1" {
-            die("program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built");
+            die(
+                "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
+            );
         }
         let rt_dir = env!("JADE_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljade_ssl").arg("-lssl").arg("-lcrypto");
+        cc.arg("-L")
+            .arg(rt_dir)
+            .arg("-ljade_ssl")
+            .arg("-lssl")
+            .arg("-lcrypto");
     }
     if comp.needs_sqlite {
         if env!("JADE_HAS_SQLITE") != "1" {
-            die("program uses std.sqlite but SQLite3 was not available when the compiler was built");
+            die(
+                "program uses std.sqlite but SQLite3 was not available when the compiler was built",
+            );
         }
         let rt_dir = env!("JADE_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljade_sqlite").arg("-lsqlite3");
+        cc.arg("-L")
+            .arg(rt_dir)
+            .arg("-ljade_sqlite")
+            .arg("-lsqlite3");
     }
     cc.arg("-lm");
     for extra in &cli.link {

@@ -1,8 +1,8 @@
 //! Per-statement typing rules.
 
-use crate::intern::Symbol;
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
+use crate::intern::Symbol;
 use crate::types::{Scheme, Type};
 
 use super::super::{Typer, VarInfo};
@@ -213,20 +213,19 @@ impl Typer {
 
                     if !where_exprs.is_empty() && has_delete {
                         let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
+                        let hfilter =
+                            self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
                         return Ok(hir::Stmt::StoreDelete(store_name, Box::new(hfilter), *span));
                     }
 
                     if !where_exprs.is_empty() && !sets.is_empty() {
                         let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                        let hfilter = self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
+                        let hfilter =
+                            self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
                         let mut hassigns = Vec::new();
                         for (fname, fval) in &sets {
                             if let Some((_, fty)) = schema.iter().find(|(n, _)| n == fname) {
-                                hassigns.push((
-                                    *fname,
-                                    self.lower_expr_expected(fval, Some(fty))?,
-                                ));
+                                hassigns.push((*fname, self.lower_expr_expected(fval, Some(fty))?));
                             } else {
                                 return Err(format!("store '{store_name}' has no field '{fname}'"));
                             }
@@ -267,7 +266,14 @@ impl Typer {
 
                 // Map iteration: for k, v in map → desugar to keys-based iteration
                 if let (Some(val_bind), Type::Map(key_ty, val_ty)) = (&f.bind2, &resolved_iter_ty) {
-                    return self.desugar_for_map(f, &val_bind.as_str(), iter, key_ty, val_ty, ret_ty);
+                    return self.desugar_for_map(
+                        f,
+                        &val_bind.as_str(),
+                        iter,
+                        key_ty,
+                        val_ty,
+                        ret_ty,
+                    );
                 }
 
                 let iter_is_int = resolved_iter_ty.is_int()
@@ -294,7 +300,13 @@ impl Typer {
                             if let Type::Struct(tn, _) = iter_ty {
                                 if self.type_implements_trait(&tn.as_str(), "Iter") {
                                     let elem_ty = self.iter_element_type(&tn.as_str());
-                                    return self.desugar_for_iter(f, iter, tn.as_str(), elem_ty, ret_ty);
+                                    return self.desugar_for_iter(
+                                        f,
+                                        iter,
+                                        tn.as_str(),
+                                        elem_ty,
+                                        ret_ty,
+                                    );
                                 }
                             }
                             self.infer_ctx.fresh_var()
@@ -313,22 +325,21 @@ impl Typer {
                     },
                 );
                 // If bind2 is present, it's the index variable (i64)
-                let (bind2_id, bind2, bind2_ty) =
-                    if let Some(ref b2) = f.bind2 {
-                        let id2 = self.fresh_id();
-                        self.define_var(
-                            &b2.as_str(),
-                            VarInfo {
-                                def_id: id2,
-                                ty: Type::I64,
-                                ownership: Ownership::Owned,
-                                scheme: None,
-                            },
-                        );
-                        (Some(id2), Some(b2.clone()), Some(Type::I64))
-                    } else {
-                        (None, None, None)
-                    };
+                let (bind2_id, bind2, bind2_ty) = if let Some(ref b2) = f.bind2 {
+                    let id2 = self.fresh_id();
+                    self.define_var(
+                        &b2.as_str(),
+                        VarInfo {
+                            def_id: id2,
+                            ty: Type::I64,
+                            ownership: Ownership::Owned,
+                            scheme: None,
+                        },
+                    );
+                    (Some(id2), Some(b2.clone()), Some(Type::I64))
+                } else {
+                    (None, None, None)
+                };
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();
                 Ok(hir::Stmt::For(hir::For {
@@ -515,9 +526,7 @@ impl Typer {
                             .iter()
                             .find(|fi| fi.name.as_ref() == Some(fname))
                             .ok_or_else(|| {
-                                format!(
-                                    "store '{store}' insert: missing field '{fname}'"
-                                )
+                                format!("store '{store}' insert: missing field '{fname}'")
                             })?;
                         hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
                     }
@@ -526,9 +535,7 @@ impl Typer {
                     for fi in values {
                         let n = fi.name.as_ref().unwrap();
                         if !user_schema.iter().any(|(sn, _)| sn == n) {
-                            return Err(format!(
-                                "store '{store}' has no field '{n}'"
-                            ));
+                            return Err(format!("store '{store}' has no field '{n}'"));
                         }
                         if !seen.insert(n.clone()) {
                             return Err(format!(
@@ -537,11 +544,7 @@ impl Typer {
                             ));
                         }
                     }
-                    return Ok(hir::Stmt::StoreInsert(
-                        store.clone(),
-                        hvalues,
-                        *span,
-                    ));
+                    return Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span));
                 }
 
                 if values.len() != user_schema.len() {
@@ -712,5 +715,4 @@ impl Typer {
             )),
         }
     }
-
 }

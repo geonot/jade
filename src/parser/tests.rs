@@ -316,8 +316,7 @@ fn index_expr() {
 
 #[test]
 fn pipeline_simple() {
-    let p =
-        parse("*double(x as i64) returns i64\n    x * 2\n\n*main()\n    x is 10 ~ double\n");
+    let p = parse("*double(x as i64) returns i64\n    x * 2\n\n*main()\n    x is 10 ~ double\n");
     if let Decl::Fn(f) = &p.decls[1] {
         if let Stmt::Bind(b) = &f.body[0] {
             assert!(matches!(b.value, Expr::Pipe(_, _, _, _)));
@@ -345,9 +344,8 @@ fn pipeline_chain() {
 
 #[test]
 fn pipeline_with_call() {
-    let p = parse(
-        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n",
-    );
+    let p =
+        parse("*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n");
     if let Decl::Fn(f) = &p.decls[1] {
         if let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Pipe(_, right, _, _) = &b.value {

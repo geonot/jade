@@ -1,9 +1,9 @@
 //! Primary expression parsing — literals, idents, calls, types, interpolation.
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
-use super::{ParseError, Parser};
 
 impl Parser {
     pub(in crate::parser) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
@@ -316,7 +316,9 @@ impl Parser {
                     self.expect(Token::RParen)?;
                     return Ok(Expr::SIMDLit(elem_ty, lanes, elems, sp));
                 }
-                if name.with_str(|s| s.starts_with(|c: char| c.is_uppercase())) && self.check(Token::LParen) {
+                if name.with_str(|s| s.starts_with(|c: char| c.is_uppercase()))
+                    && self.check(Token::LParen)
+                {
                     self.advance();
                     let mut fields = Vec::new();
                     while !self.check(Token::RParen) && !self.eof() {
@@ -683,5 +685,4 @@ impl Parser {
             _ => Err(self.error(&format!("unexpected token: {}", self.peek()))),
         }
     }
-
 }

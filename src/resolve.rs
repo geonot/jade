@@ -1,8 +1,8 @@
 //! Module/path resolution: maps qualified names to defining items.
 
+use crate::ast::{self, Decl, Expr, Stmt};
 use crate::intern::Symbol;
 use std::collections::HashMap;
-use crate::ast::{self, Decl, Expr, Stmt};
 
 /// Prefix a declaration's function/const name with a module name for qualified access.
 /// ONLY the prefixed version is emitted — bare names are NOT registered.

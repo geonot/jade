@@ -1,10 +1,10 @@
-use crate::ast::*;
-use crate::lexer::Token;
 use super::super::expr::{
     contains_index_placeholder_in_block, contains_placeholder_in_block,
     replace_index_placeholder_in_block, replace_placeholder_in_block,
 };
 use super::super::{ParseError, Parser};
+use crate::ast::*;
+use crate::lexer::Token;
 
 impl Parser {
     pub(in crate::parser) fn parse_if(&mut self) -> Result<If, ParseError> {
@@ -165,10 +165,8 @@ impl Parser {
                 let tok_str = t.token.to_string();
                 if !line.is_empty() {
                     // Don't insert space before closing delimiters or comma
-                    let no_space_before = matches!(
-                        t.token,
-                        Token::RParen | Token::RBracket | Token::Comma
-                    );
+                    let no_space_before =
+                        matches!(t.token, Token::RParen | Token::RBracket | Token::Comma);
                     // Don't insert space after opening delimiters
                     let no_space_after = line.ends_with('(') || line.ends_with('[');
                     if !no_space_before && !no_space_after {
@@ -195,5 +193,4 @@ impl Parser {
             span: sp,
         }))
     }
-
 }

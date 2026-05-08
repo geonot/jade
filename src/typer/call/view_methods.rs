@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
+use super::super::unify;
+use super::super::{DeferredField, Typer, VarInfo};
 use crate::ast::{self, Expr, Span};
 use crate::hir::{self, ExprKind};
-use crate::types::Type;
 use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField};
-use super::super::unify;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn dispatch_view_methods(
@@ -65,7 +65,8 @@ impl Typer {
                             }
                             let filter_expr = &args[0];
                             let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
-                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
+                            let hfilter =
+                                self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
                             let struct_name = Symbol::intern(&format!("__store_{source}"));
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
@@ -79,7 +80,8 @@ impl Typer {
                             }
                             let filter_expr = &args[0];
                             let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
-                            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
+                            let hfilter =
+                                self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
                                 ty: Type::Bool,
@@ -140,5 +142,4 @@ impl Typer {
 
         Ok(None)
     }
-
 }

@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn auto_derive_display(&mut self, prog: &mut hir::Program) {
@@ -107,13 +107,19 @@ impl Typer {
         }
     }
 
-    pub(in crate::typer) fn collect_display_usage(block: &[hir::Stmt], needs: &mut std::collections::HashSet<Symbol>) {
+    pub(in crate::typer) fn collect_display_usage(
+        block: &[hir::Stmt],
+        needs: &mut std::collections::HashSet<Symbol>,
+    ) {
         for stmt in block {
             Self::collect_display_usage_stmt(stmt, needs);
         }
     }
 
-    pub(in crate::typer) fn collect_display_usage_stmt(stmt: &hir::Stmt, needs: &mut std::collections::HashSet<Symbol>) {
+    pub(in crate::typer) fn collect_display_usage_stmt(
+        stmt: &hir::Stmt,
+        needs: &mut std::collections::HashSet<Symbol>,
+    ) {
         match stmt {
             hir::Stmt::Bind(b) => Self::collect_display_usage_expr(&b.value, needs),
             hir::Stmt::TupleBind(_, e, _) => Self::collect_display_usage_expr(e, needs),
@@ -155,7 +161,10 @@ impl Typer {
         }
     }
 
-    pub(in crate::typer) fn collect_display_usage_expr(expr: &hir::Expr, needs: &mut std::collections::HashSet<Symbol>) {
+    pub(in crate::typer) fn collect_display_usage_expr(
+        expr: &hir::Expr,
+        needs: &mut std::collections::HashSet<Symbol>,
+    ) {
         match &expr.kind {
             hir::ExprKind::Builtin(hir::BuiltinFn::Log, args) => {
                 for a in args {
@@ -228,5 +237,4 @@ impl Typer {
             _ => {}
         }
     }
-
 }

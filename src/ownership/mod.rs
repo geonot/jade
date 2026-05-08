@@ -234,7 +234,6 @@ impl OwnershipVerifier {
             _ => None,
         }
     }
-
 }
 
 #[cfg(test)]

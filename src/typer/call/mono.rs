@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
+use super::super::unify;
+use super::super::{DeferredField, Typer, VarInfo};
 use crate::ast::{self, Expr, Span};
 use crate::hir::{self, ExprKind};
-use crate::types::Type;
 use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField};
-use super::super::unify;
+use crate::types::Type;
 
 impl Typer {
     pub(crate) fn build_type_map(
@@ -19,8 +19,7 @@ impl Typer {
         arg_tys: &[Type],
     ) -> HashMap<Symbol, Type> {
         if !self.generic_fns.contains_key(name) {
-            self.generic_fns
-                .insert(name.into(), generic_fn.clone());
+            self.generic_fns.insert(name.into(), generic_fn.clone());
         }
         let mut type_map = HashMap::new();
         for (i, p) in generic_fn.params.iter().enumerate() {

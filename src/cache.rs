@@ -219,7 +219,10 @@ pub fn build_package_map(cache: &Cache, lockfile: &Lockfile) -> HashMap<Symbol, 
 }
 
 fn collect_paths(cache: &Cache, entry: &LockEntry, map: &mut HashMap<Symbol, PathBuf>) {
-    map.insert(Symbol::intern(&entry.name), cache.package_path_from_entry(entry));
+    map.insert(
+        Symbol::intern(&entry.name),
+        cache.package_path_from_entry(entry),
+    );
     for dep in &entry.deps {
         collect_paths(cache, dep, map);
     }

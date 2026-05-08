@@ -2,13 +2,13 @@
 
 #![allow(unused_imports, unused_variables)]
 
-use crate::intern::Symbol;
-use std::path::PathBuf;
+use super::super::unify;
+use super::super::{Typer, VarInfo};
 use crate::ast::{self, BinOp, Span, UnaryOp};
 use crate::hir::{self, CoercionKind, DefId, Ownership};
+use crate::intern::Symbol;
 use crate::types::Type;
-use super::super::{Typer, VarInfo};
-use super::super::unify;
+use std::path::PathBuf;
 
 impl Typer {
     pub(in crate::typer) fn lower_expr_struct(
@@ -18,29 +18,30 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         let _ = expected;
         match expr {
-            ast::Expr::Struct(name, inits, span) => {                // The parser routes `Uppercase(args)` directly to Expr::Struct
-            // (per N-2 generic-ctor support). If no struct/generic/variant
-            // exists with this name but a function does, fall back to a
-            // regular function call. This permits identifiers like
-            // `MySupervisor_start()` or any uppercase-prefixed function.
-            let known_struct = self.structs.contains_key(name)
-                || self.generic_types.contains_key(name)
-                || self.variant_tags.contains_key(name)
-                || name.as_str() == "Arena"
-                || name.as_str() == "Pool";
-            if !known_struct
-                && inits.iter().all(|fi| fi.name.is_none())
-                && (self.fns.contains_key(name)
-                    || self.inferable_fns.contains_key(name)
-                    || self.generic_fns.contains_key(name)
-                    || self.externs.contains_key(name))
-            {
-                let args: Vec<ast::Expr> = inits.iter().map(|fi| fi.value.clone()).collect();
-                let callee = ast::Expr::Ident(name.clone(), *span);
-                return self.lower_call(&callee, &args, *span);
+            ast::Expr::Struct(name, inits, span) => {
+                // The parser routes `Uppercase(args)` directly to Expr::Struct
+                // (per N-2 generic-ctor support). If no struct/generic/variant
+                // exists with this name but a function does, fall back to a
+                // regular function call. This permits identifiers like
+                // `MySupervisor_start()` or any uppercase-prefixed function.
+                let known_struct = self.structs.contains_key(name)
+                    || self.generic_types.contains_key(name)
+                    || self.variant_tags.contains_key(name)
+                    || name.as_str() == "Arena"
+                    || name.as_str() == "Pool";
+                if !known_struct
+                    && inits.iter().all(|fi| fi.name.is_none())
+                    && (self.fns.contains_key(name)
+                        || self.inferable_fns.contains_key(name)
+                        || self.generic_fns.contains_key(name)
+                        || self.externs.contains_key(name))
+                {
+                    let args: Vec<ast::Expr> = inits.iter().map(|fi| fi.value.clone()).collect();
+                    let callee = ast::Expr::Ident(name.clone(), *span);
+                    return self.lower_call(&callee, &args, *span);
+                }
+                self.lower_struct_or_variant(&name.as_str(), inits, *span)
             }
-            self.lower_struct_or_variant(&name.as_str(), inits, *span)
-        },
             _ => unreachable!(),
         }
     }
@@ -52,20 +53,20 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         let _ = expected;
         match expr {
-            ast::Expr::Builder(name, fields, span) => {                let hfields: Vec<(Symbol, hir::Expr)> = fields
-                .iter()
-                .map(|f| Ok((f.name, self.lower_expr(&f.value)?)))
-                .collect::<Result<_, String>>()?;
-            Ok(hir::Expr {
-                kind: hir::ExprKind::Builder(*name, hfields),
-                ty: Type::Void,
-                span: *span,
-            })
-        },
+            ast::Expr::Builder(name, fields, span) => {
+                let hfields: Vec<(Symbol, hir::Expr)> = fields
+                    .iter()
+                    .map(|f| Ok((f.name, self.lower_expr(&f.value)?)))
+                    .collect::<Result<_, String>>()?;
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Builder(*name, hfields),
+                    ty: Type::Void,
+                    span: *span,
+                })
+            }
             _ => unreachable!(),
         }
     }
-
 }
 
 impl Typer {
@@ -96,11 +97,10 @@ impl Typer {
                 .fields
                 .iter()
                 .map(|f| {
-                    let ty = f
-                        .ty
-                        .as_ref()
-                        .map(|t| Self::substitute_type_params(t, &type_map))
-                        .unwrap_or(Type::I64);
+                    let ty =
+                        f.ty.as_ref()
+                            .map(|t| Self::substitute_type_params(t, &type_map))
+                            .unwrap_or(Type::I64);
                     (f.name, ty)
                 })
                 .collect();
@@ -142,8 +142,7 @@ impl Typer {
                         }
                     }
                     if let Some(ref ret) = mono_method.ret {
-                        mono_method.ret =
-                            Some(Self::substitute_type_params(ret, &type_map));
+                        mono_method.ret = Some(Self::substitute_type_params(ret, &type_map));
                     }
                     self.methods
                         .entry(mangled)
@@ -165,15 +164,11 @@ impl Typer {
                 } else {
                     concrete_fields.get(i).map(|(_, ty)| ty.clone())
                 };
-                let val =
-                    self.lower_expr_expected(&fi.value, declared_ty.as_ref())?;
+                let val = self.lower_expr_expected(&fi.value, declared_ty.as_ref())?;
                 if let Some(declared_ty) = declared_ty.as_ref() {
-                    let r = self.infer_ctx.unify_at(
-                        declared_ty,
-                        &val.ty,
-                        span,
-                        "generic struct field",
-                    );
+                    let r =
+                        self.infer_ctx
+                            .unify_at(declared_ty, &val.ty, span, "generic struct field");
                     self.collect_unify_error(r);
                 }
                 hinits.push(hir::FieldInit {
@@ -303,11 +298,10 @@ impl Typer {
                     .fields
                     .iter()
                     .map(|f| {
-                        let ty = f
-                            .ty
-                            .as_ref()
-                            .map(|t| Self::substitute_type_params(t, &type_map))
-                            .unwrap_or(Type::I64);
+                        let ty =
+                            f.ty.as_ref()
+                                .map(|t| Self::substitute_type_params(t, &type_map))
+                                .unwrap_or(Type::I64);
                         (f.name, ty)
                     })
                     .collect();
@@ -355,8 +349,7 @@ impl Typer {
                             }
                         }
                         if let Some(ref ret) = mono_method.ret {
-                            mono_method.ret =
-                                Some(Self::substitute_type_params(ret, &type_map));
+                            mono_method.ret = Some(Self::substitute_type_params(ret, &type_map));
                         }
                         self.methods
                             .entry(mangled)
@@ -417,11 +410,7 @@ impl Typer {
 
         let arg_tys: Vec<Type> = hinits.iter().map(|fi| fi.value.ty.clone()).collect();
         if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, Some(&arg_tys)) {
-            let (_, tag) = self
-                .variant_tags
-                .get(name)
-                .cloned()
-                .unwrap_or((mangled, 0));
+            let (_, tag) = self.variant_tags.get(name).cloned().unwrap_or((mangled, 0));
             return Ok(hir::Expr {
                 kind: hir::ExprKind::VariantCtor(mangled, name.into(), tag, hinits),
                 ty: Type::Enum(mangled),
@@ -435,8 +424,7 @@ impl Typer {
             if self.inferred_field_structs.contains(&Symbol::intern(name)) {
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
                     let resolved = self.infer_ctx.shallow_resolve(declared_ty);
-                    let arg_ty = if let Some(fi) =
-                        hinits.iter().find(|fi| fi.name == Some(*fname))
+                    let arg_ty = if let Some(fi) = hinits.iter().find(|fi| fi.name == Some(*fname))
                     {
                         Some(&fi.value.ty)
                     } else {
@@ -547,5 +535,4 @@ impl Typer {
             span,
         })
     }
-
 }

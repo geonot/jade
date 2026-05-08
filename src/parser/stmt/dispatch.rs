@@ -1,10 +1,10 @@
-use crate::ast::*;
-use crate::lexer::Token;
 use super::super::expr::{
     contains_index_placeholder_in_block, contains_placeholder_in_block,
     replace_index_placeholder_in_block, replace_placeholder_in_block,
 };
 use super::super::{ParseError, Parser};
+use crate::ast::*;
+use crate::lexer::Token;
 
 impl Parser {
     pub(in crate::parser) fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
@@ -326,9 +326,7 @@ impl Parser {
                     // shape applies we splice the rest of the expression
                     // back together and behave exactly as `parse_expr`.
                     let head = self.parse_pipeline()?;
-                    if self.check(Token::Question)
-                        && matches!(head, Expr::Call(..))
-                    {
+                    if self.check(Token::Question) && matches!(head, Expr::Call(..)) {
                         return self.finish_bare_handler_chain(head);
                     }
                     if self.check(Token::BangBang) {
@@ -416,5 +414,4 @@ impl Parser {
         self.advance();
         Some(op)
     }
-
 }

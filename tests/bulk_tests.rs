@@ -7415,7 +7415,10 @@ fn b_ushr_zero_shift() {
 #[test]
 fn b_ushr_vs_shr_positive() {
     // For positive numbers, >>> and >> should be identical
-    expect("*main()\n    a is 1024 >> 3\n    b is 1024 >>> 3\n    log(a)\n    log(b)\n", "128\n128");
+    expect(
+        "*main()\n    a is 1024 >> 3\n    b is 1024 >>> 3\n    log(a)\n    log(b)\n",
+        "128\n128",
+    );
 }
 
 #[test]
@@ -7434,7 +7437,10 @@ fn b_shebang_skipped() {
 
 #[test]
 fn b_shebang_with_args() {
-    expect("#!/usr/local/bin/jadec run --\n*main()\n    log(\"hello\")\n", "hello");
+    expect(
+        "#!/usr/local/bin/jadec run --\n*main()\n    log(\"hello\")\n",
+        "hello",
+    );
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

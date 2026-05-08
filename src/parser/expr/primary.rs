@@ -1,9 +1,9 @@
 //! Primary expression parsing — literals, idents, calls, types, interpolation.
 
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
-use super::{ParseError, Parser};
 
 impl Parser {
     pub(in crate::parser) fn parse_literal_token(&mut self) -> Result<Expr, ParseError> {
@@ -41,7 +41,10 @@ impl Parser {
         }
     }
 
-    pub(in crate::parser) fn parse_query_block(&mut self, source: Expr) -> Result<Expr, ParseError> {
+    pub(in crate::parser) fn parse_query_block(
+        &mut self,
+        source: Expr,
+    ) -> Result<Expr, ParseError> {
         let sp = source.span();
         self.expect(Token::Query)?;
         self.expect(Token::Newline)?;
@@ -101,7 +104,11 @@ impl Parser {
         }
     }
 
-    pub(in crate::parser) fn parse_builtin_call(&mut self, name: &str, sp: Span) -> Result<Expr, ParseError> {
+    pub(in crate::parser) fn parse_builtin_call(
+        &mut self,
+        name: &str,
+        sp: Span,
+    ) -> Result<Expr, ParseError> {
         let arg = if self.check(Token::LParen) {
             self.advance();
             let a = self.parse_expr()?;
@@ -244,7 +251,11 @@ impl Parser {
         }
     }
 
-    pub(in crate::parser) fn parse_interp(&mut self, first: String, sp: Span) -> Result<Expr, ParseError> {
+    pub(in crate::parser) fn parse_interp(
+        &mut self,
+        first: String,
+        sp: Span,
+    ) -> Result<Expr, ParseError> {
         let mut result: Expr = Expr::Str(first, sp);
         while self.check(Token::InterpStart) {
             self.advance();

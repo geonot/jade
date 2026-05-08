@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::ast::{self, Span};
-use crate::intern::Symbol;
 use crate::hir::{self, DefId, Ownership};
+use crate::intern::Symbol;
 use crate::types::{Scheme, Type};
 
 #[derive(Debug, Clone)]
@@ -59,7 +59,8 @@ pub struct Typer {
     pub(crate) inferred_field_structs: std::collections::HashSet<Symbol>,
     pub(crate) source_dir: Option<PathBuf>,
     pub(crate) test_mode: bool,
-    pub(crate) actors: IndexMap<Symbol, (DefId, Vec<(Symbol, Type)>, Vec<(Symbol, Vec<Type>, u32)>)>,
+    pub(crate) actors:
+        IndexMap<Symbol, (DefId, Vec<(Symbol, Type)>, Vec<(Symbol, Vec<Type>, u32)>)>,
     pub(crate) store_schemas: IndexMap<Symbol, Vec<(Symbol, Type)>>,
     pub(crate) store_decorators: IndexMap<Symbol, Vec<crate::ast::StoreDecorator>>,
     pub(crate) view_defs: IndexMap<Symbol, (Symbol, Vec<crate::ast::QueryClause>)>,
@@ -82,7 +83,8 @@ pub struct Typer {
     pub(crate) inferable_fns: IndexMap<Symbol, ast::Fn>,
     pub(crate) fn_schemes: IndexMap<Symbol, (Vec<u32>, Vec<Type>, Type)>,
     pub(crate) unannotated_struct_fields: Vec<(String, String, Type, Span)>,
-    pub(crate) poly_lambda_asts: IndexMap<Symbol, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
+    pub(crate) poly_lambda_asts:
+        IndexMap<Symbol, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
     pub(crate) type_errors: Vec<String>,
     pub(crate) fn_param_names: IndexMap<Symbol, Vec<String>>,
     pub(crate) fn_defaults: IndexMap<Symbol, Vec<Option<ast::Expr>>>,
@@ -436,7 +438,6 @@ mod infer;
 mod lower;
 pub(crate) mod scc;
 mod stmt;
-
 
 #[cfg(test)]
 mod tests;

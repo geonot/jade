@@ -7,7 +7,11 @@ use crate::hir::*;
 use super::super::{PerceusPass, UseInfo};
 
 impl PerceusPass {
-    pub(in crate::perceus) fn count_uses_pat(&mut self, pat: &Pat, uses: &mut HashMap<DefId, UseInfo>) {
+    pub(in crate::perceus) fn count_uses_pat(
+        &mut self,
+        pat: &Pat,
+        uses: &mut HashMap<DefId, UseInfo>,
+    ) {
         match pat {
             Pat::Wild(_) => {}
             Pat::Bind(def_id, _, ty, _) => {
@@ -39,7 +43,11 @@ impl PerceusPass {
         }
     }
 
-    pub(in crate::perceus) fn count_uses_expr(&mut self, expr: &Expr, uses: &mut HashMap<DefId, UseInfo>) {
+    pub(in crate::perceus) fn count_uses_expr(
+        &mut self,
+        expr: &Expr,
+        uses: &mut HashMap<DefId, UseInfo>,
+    ) {
         match &expr.kind {
             ExprKind::Var(def_id, _) => {
                 if let Some(info) = uses.get_mut(def_id) {
@@ -359,7 +367,11 @@ impl PerceusPass {
         }
     }
 
-    pub(in crate::perceus) fn count_uses_expr_escaping(&mut self, expr: &Expr, uses: &mut HashMap<DefId, UseInfo>) {
+    pub(in crate::perceus) fn count_uses_expr_escaping(
+        &mut self,
+        expr: &Expr,
+        uses: &mut HashMap<DefId, UseInfo>,
+    ) {
         if let ExprKind::Var(def_id, _) = &expr.kind {
             if let Some(info) = uses.get_mut(def_id) {
                 info.use_count += 1;

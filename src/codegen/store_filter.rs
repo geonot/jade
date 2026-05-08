@@ -68,31 +68,34 @@ impl<'ctx> Compiler<'ctx> {
                 .build_int_compare(IntPredicate::UGT, len, max_data, "str.clamp"));
 
         // Emit a runtime stderr warning when truncation occurs.
-        let cur_fn = self
-            .bld
-            .get_insert_block()
-            .unwrap()
-            .get_parent()
-            .unwrap();
+        let cur_fn = self.bld.get_insert_block().unwrap().get_parent().unwrap();
         let trunc_bb = self.ctx.append_basic_block(cur_fn, "str.trunc_warn");
         let cont_bb = self.ctx.append_basic_block(cur_fn, "str.cont");
-        b!(self.bld.build_conditional_branch(is_truncated, trunc_bb, cont_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_truncated, trunc_bb, cont_bb));
         self.bld.position_at_end(trunc_bb);
-        let warn_fn = self.module.get_function("jade_store_truncation_warn").unwrap_or_else(|| {
-            let void_ty = self.ctx.void_type();
-            let ft = void_ty.fn_type(&[i64t.into(), i64t.into()], false);
-            self.module.add_function("jade_store_truncation_warn", ft, Some(inkwell::module::Linkage::External))
-        });
-        b!(self.bld.build_call(warn_fn, &[len.into(), max_data.into()], ""));
+        let warn_fn = self
+            .module
+            .get_function("jade_store_truncation_warn")
+            .unwrap_or_else(|| {
+                let void_ty = self.ctx.void_type();
+                let ft = void_ty.fn_type(&[i64t.into(), i64t.into()], false);
+                self.module.add_function(
+                    "jade_store_truncation_warn",
+                    ft,
+                    Some(inkwell::module::Linkage::External),
+                )
+            });
+        b!(self
+            .bld
+            .build_call(warn_fn, &[len.into(), max_data.into()], ""));
         b!(self.bld.build_unconditional_branch(cont_bb));
         self.bld.position_at_end(cont_bb);
 
-        let clamped = b!(self.bld.build_select(
-            is_truncated,
-            max_data,
-            len,
-            "str.len"
-        ));
+        let clamped = b!(self
+            .bld
+            .build_select(is_truncated, max_data, len, "str.len"));
 
         b!(self.bld.build_store(buf_ptr, clamped));
 
@@ -347,8 +350,12 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(phi.as_basic_value().into_int_value())
                     }
                     _ => {
-                        result_bb.remove_from_function().expect("ICE: remove_from_function failed");
-                        len_eq_bb.remove_from_function().expect("ICE: remove_from_function failed");
+                        result_bb
+                            .remove_from_function()
+                            .expect("ICE: remove_from_function failed");
+                        len_eq_bb
+                            .remove_from_function()
+                            .expect("ICE: remove_from_function failed");
 
                         let min_len = b!(self.bld.build_select(
                             b!(self.bld.build_int_compare(

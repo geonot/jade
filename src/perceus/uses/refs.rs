@@ -1,6 +1,5 @@
 //! Sub-pass of perceus/uses split.
 
-
 use crate::hir::*;
 
 use super::super::PerceusPass;
@@ -343,5 +342,4 @@ impl PerceusPass {
             ExprKind::GraphFrom(_, e) | ExprKind::GraphTo(_, e) => self.collect_refs_expr(e, refs),
         }
     }
-
 }

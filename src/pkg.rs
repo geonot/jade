@@ -116,7 +116,9 @@ impl Package {
         }
 
         Ok(Package {
-            name: name.ok_or("jade.pkg: missing 'package' directive")?.as_str(),
+            name: name
+                .ok_or("jade.pkg: missing 'package' directive")?
+                .as_str(),
             version: version.ok_or("jade.pkg: missing 'version' directive")?,
             author,
             requires,

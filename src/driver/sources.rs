@@ -8,9 +8,9 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use crate::ast::{Decl, Program, Stmt};
-use crate::intern::Symbol;
 use crate::cache::{Cache, build_package_map};
 use crate::codegen::Compiler;
+use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
@@ -213,7 +213,6 @@ pub(super) fn resolve_modules(
     }
 }
 
-
 pub(super) fn find_project_entry() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let project_jade = cwd.join("project.jade");
@@ -241,7 +240,6 @@ pub(super) fn find_project_entry() -> PathBuf {
         "no entry file found: create project.jade with `entry is 'source/main.jade'` or add source/main.jade",
     );
 }
-
 
 /// Find all .jade files in source_dir (recursively), excluding the entry file,
 /// parse them, and merge their declarations into the program.
@@ -335,7 +333,6 @@ pub(super) fn merge_source_files(
     }
     merged_keys
 }
-
 
 /// Entity index for implicit module resolution.
 pub(super) struct EntityIndex {
@@ -455,7 +452,6 @@ impl EntityIndex {
         idx
     }
 }
-
 
 /// Auto-import modules based on undefined references found in the program.
 /// Uses the entity index to find which files provide the needed symbols.
@@ -689,7 +685,9 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             | Expr::Grad(e, _)
             | Expr::NamedArg(_, e, _)
             | Expr::Spread(e, _) => walk_expr(e, modules, defs),
-            Expr::Block(stmts, _) | Expr::DispatchBlock(_, stmts, _) => walk_block(stmts, modules, defs),
+            Expr::Block(stmts, _) | Expr::DispatchBlock(_, stmts, _) => {
+                walk_block(stmts, modules, defs)
+            }
             Expr::Ternary(c, t, f, _) => {
                 walk_expr(c, modules, defs);
                 walk_expr(t, modules, defs);
@@ -792,7 +790,11 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
         }
     }
 
-    fn walk_block(stmts: &[crate::ast::Stmt], modules: &mut HashSet<Symbol>, defs: &mut HashSet<Symbol>) {
+    fn walk_block(
+        stmts: &[crate::ast::Stmt],
+        modules: &mut HashSet<Symbol>,
+        defs: &mut HashSet<Symbol>,
+    ) {
         for stmt in stmts {
             walk_stmt(stmt, modules, defs);
         }
@@ -809,7 +811,11 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
         }
     }
 
-    fn walk_stmt(stmt: &crate::ast::Stmt, modules: &mut HashSet<Symbol>, defs: &mut HashSet<Symbol>) {
+    fn walk_stmt(
+        stmt: &crate::ast::Stmt,
+        modules: &mut HashSet<Symbol>,
+        defs: &mut HashSet<Symbol>,
+    ) {
         use crate::ast::Stmt;
         match stmt {
             Stmt::Expr(e) => walk_expr(e, modules, defs),
@@ -956,7 +962,6 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
 
     modules
 }
-
 
 pub(super) fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {
     let project_root = find_project_root(base_dir).unwrap_or_else(|| base_dir.to_path_buf());

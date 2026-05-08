@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
+use super::super::unify;
+use super::super::{DeferredField, Typer, VarInfo};
 use crate::ast::{self, Expr, Span};
 use crate::hir::{self, ExprKind};
-use crate::types::Type;
 use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField};
-use super::super::unify;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn dispatch_store_methods(
@@ -471,5 +471,4 @@ impl Typer {
 
         Ok(None)
     }
-
 }

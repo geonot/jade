@@ -1,9 +1,7 @@
-// Auto-split from lower.rs.
-#![allow(unused_imports, unused_variables)]
-use crate::intern::Symbol;
 use super::super::*;
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, Pat};
+use crate::ast::Span;
+use crate::hir::{self, ExprKind};
+use crate::intern::Symbol;
 use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
@@ -74,7 +72,13 @@ impl Lowerer {
     ///   updated_inner = FieldSet(inner, "val", 42)
     ///   updated_o = FieldSet(o, "inner", updated_inner)
     ///   var_map["o"] = updated_o
-    pub(super) fn lower_field_assign(&mut self, obj: &hir::Expr, field: &str, val: ValueId, span: Span) {
+    pub(super) fn lower_field_assign(
+        &mut self,
+        obj: &hir::Expr,
+        field: &str,
+        val: ValueId,
+        span: Span,
+    ) {
         let obj_val = self.lower_expr(obj);
         let obj_ty = obj.ty.clone();
         let updated = self.emit(
@@ -205,5 +209,4 @@ impl Lowerer {
             val
         )
     }
-
 }

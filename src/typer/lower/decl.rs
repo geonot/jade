@@ -4,15 +4,18 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 impl Typer {
-    pub(in crate::typer) fn lower_actor_def(&mut self, ad: &ast::ActorDef) -> Result<hir::ActorDef, String> {
+    pub(in crate::typer) fn lower_actor_def(
+        &mut self,
+        ad: &ast::ActorDef,
+    ) -> Result<hir::ActorDef, String> {
         let (id, ref declared_fields, ref handler_info) = self
             .actors
             .get(&ad.name)
@@ -125,7 +128,10 @@ impl Typer {
         })
     }
 
-    pub(in crate::typer) fn lower_store_def(&mut self, sd: &ast::StoreDef) -> Result<hir::StoreDef, String> {
+    pub(in crate::typer) fn lower_store_def(
+        &mut self,
+        sd: &ast::StoreDef,
+    ) -> Result<hir::StoreDef, String> {
         let id = self.fresh_id();
         let is_simple = sd
             .decorators
@@ -325,7 +331,10 @@ impl Typer {
         // Final error union: union of declared + inferred.
         let mut error_types: Vec<Type> = Vec::new();
         let mut seen: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
-        for n in declared_err_names.into_iter().chain(self.current_fn_error_types.iter().cloned()) {
+        for n in declared_err_names
+            .into_iter()
+            .chain(self.current_fn_error_types.iter().cloned())
+        {
             if seen.insert(n.clone()) {
                 error_types.push(Type::Enum(n));
             }
@@ -361,7 +370,11 @@ impl Typer {
         })
     }
 
-    pub(in crate::typer) fn lower_test_block(&mut self, tb: &ast::TestBlock, fn_name: &str) -> Result<hir::Fn, String> {
+    pub(in crate::typer) fn lower_test_block(
+        &mut self,
+        tb: &ast::TestBlock,
+        fn_name: &str,
+    ) -> Result<hir::Fn, String> {
         let id = self.fresh_id();
         self.push_scope();
         let body = self.lower_block(&tb.body, &Type::Void)?;
@@ -430,7 +443,10 @@ impl Typer {
         }
     }
 
-    pub(in crate::typer) fn lower_type_def(&mut self, td: &ast::TypeDef) -> Result<hir::TypeDef, String> {
+    pub(in crate::typer) fn lower_type_def(
+        &mut self,
+        td: &ast::TypeDef,
+    ) -> Result<hir::TypeDef, String> {
         let id = self.fresh_id();
         let declared_fields = self.structs.get(&td.name).cloned().unwrap_or_default();
         let fields: Vec<hir::Field> = td
@@ -485,7 +501,11 @@ impl Typer {
     }
 
     #[allow(dead_code)]
-    pub(in crate::typer) fn lower_method(&mut self, type_name: &str, m: &ast::Fn) -> Result<hir::Fn, String> {
+    pub(in crate::typer) fn lower_method(
+        &mut self,
+        type_name: &str,
+        m: &ast::Fn,
+    ) -> Result<hir::Fn, String> {
         self.lower_method_impl(type_name, m, false)
     }
 
@@ -664,11 +684,14 @@ impl Typer {
         }
     }
 
-    pub(in crate::typer) fn type_implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+    pub(in crate::typer) fn type_implements_trait(
+        &self,
+        type_name: &str,
+        trait_name: &str,
+    ) -> bool {
         self.trait_impls
             .get(type_name)
             .map(|impls| impls.contains(&trait_name.to_string()))
             .unwrap_or(false)
     }
-
 }

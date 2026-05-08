@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
+use super::super::unify;
+use super::super::{DeferredField, Typer, VarInfo};
 use crate::ast::{self, Expr, Span};
 use crate::hir::{self, ExprKind};
-use crate::types::Type;
 use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField};
-use super::super::unify;
+use crate::types::Type;
 
 impl Typer {
     pub(crate) fn lower_call(
@@ -140,8 +140,15 @@ impl Typer {
                             });
                         if needs_mono {
                             let normalized = Self::normalize_inferable_fn(&inf_fn);
-                            let type_map = self.build_type_map(&name.as_str(), &normalized, &arg_tys);
-                            return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, false);
+                            let type_map =
+                                self.build_type_map(&name.as_str(), &normalized, &arg_tys);
+                            return self.monomorphize_call(
+                                &name.as_str(),
+                                &type_map,
+                                hargs,
+                                span,
+                                false,
+                            );
                         }
                     }
                 }
@@ -415,5 +422,4 @@ impl Typer {
             span,
         })
     }
-
 }

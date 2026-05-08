@@ -8,9 +8,9 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use crate::ast::{Decl, Program, Stmt};
-use crate::intern::Symbol;
 use crate::cache::{Cache, build_package_map};
 use crate::codegen::Compiler;
+use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
@@ -21,7 +21,6 @@ use crate::resolve::prefix_module;
 use crate::typer::Typer;
 
 use super::cli::*;
-
 
 #[derive(Debug, Default)]
 pub(super) struct ProjectConfig {

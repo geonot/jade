@@ -1,8 +1,8 @@
 //! Per-statement typing rules.
 
-use crate::intern::Symbol;
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
+use crate::intern::Symbol;
 use crate::types::{Scheme, Type};
 
 use super::super::{Typer, VarInfo};
@@ -149,5 +149,4 @@ impl Typer {
         }
         Ok(filter)
     }
-
 }

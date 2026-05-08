@@ -1,10 +1,10 @@
-use crate::ast::*;
-use crate::lexer::Token;
 use super::super::expr::{
     contains_index_placeholder_in_block, contains_placeholder_in_block,
     replace_index_placeholder_in_block, replace_placeholder_in_block,
 };
 use super::super::{ParseError, Parser};
+use crate::ast::*;
+use crate::lexer::Token;
 
 impl Parser {
     pub(in crate::parser) fn parse_bind(&mut self) -> Result<Stmt, ParseError> {
@@ -131,22 +131,14 @@ impl Parser {
                         sp,
                     );
                     ok_arm = Arm {
-                        pat: Pat::Ctor(
-                            "Ok".into(),
-                            vec![Pat::Ident(v_name, sp)],
-                            sp,
-                        ),
+                        pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(v_name, sp)], sp),
                         guard: None,
                         body: vec![Stmt::Expr(ternary)],
                         span: sp,
                     };
                 } else {
                     ok_arm = Arm {
-                        pat: Pat::Ctor(
-                            "Ok".into(),
-                            vec![Pat::Ident(name.clone(), sp)],
-                            sp,
-                        ),
+                        pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name.clone(), sp)], sp),
                         guard: None,
                         body: vec![Stmt::Expr(on_ok)],
                         span: sp,
@@ -161,11 +153,7 @@ impl Parser {
             } else {
                 // No `!!`: `! on_err` is the error/else handler with implicit `err` binding.
                 ok_arm = Arm {
-                    pat: Pat::Ctor(
-                        "Ok".into(),
-                        vec![Pat::Ident(name.clone(), sp)],
-                        sp,
-                    ),
+                    pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name.clone(), sp)], sp),
                     guard: None,
                     body: vec![Stmt::Expr(on_ok)],
                     span: sp,
@@ -293,10 +281,7 @@ impl Parser {
                         let propagate_arm = Arm {
                             pat: Pat::Ctor(variant_name.clone(), vec![], var_sp),
                             guard: None,
-                            body: vec![Stmt::ErrReturn(
-                                Expr::Ident(tmp_name.clone(), sp),
-                                sp,
-                            )],
+                            body: vec![Stmt::ErrReturn(Expr::Ident(tmp_name.clone(), sp), sp)],
                             span: sp,
                         };
                         let fall_arm = Arm {
@@ -337,12 +322,7 @@ impl Parser {
             if self.check(Token::Bang) {
                 self.advance();
                 let f = self.parse_pipeline()?;
-                Expr::Ternary(
-                    Box::new(value),
-                    Box::new(Expr::Void(qsp)),
-                    Box::new(f),
-                    qsp,
-                )
+                Expr::Ternary(Box::new(value), Box::new(Expr::Void(qsp)), Box::new(f), qsp)
             } else {
                 let t = self.parse_pipeline()?;
                 if self.check(Token::Bang) {
@@ -350,24 +330,14 @@ impl Parser {
                     let f = self.parse_expr()?;
                     Expr::Ternary(Box::new(value), Box::new(t), Box::new(f), qsp)
                 } else {
-                    Expr::Ternary(
-                        Box::new(value),
-                        Box::new(t),
-                        Box::new(Expr::Void(qsp)),
-                        qsp,
-                    )
+                    Expr::Ternary(Box::new(value), Box::new(t), Box::new(Expr::Void(qsp)), qsp)
                 }
             }
         } else if self.check(Token::Bang) && !self.suppress_bang_else {
             let bsp = self.span();
             self.advance();
             let f = self.parse_pipeline()?;
-            Expr::Ternary(
-                Box::new(value),
-                Box::new(Expr::Void(bsp)),
-                Box::new(f),
-                bsp,
-            )
+            Expr::Ternary(Box::new(value), Box::new(Expr::Void(bsp)), Box::new(f), bsp)
         } else {
             value
         };
@@ -384,7 +354,10 @@ impl Parser {
     /// the same ternary / query-block continuations that `parse_expr` would
     /// have. Used by callers that intercept tokens between the pipeline and
     /// the rest of the expression (e.g. the bare-statement handler chain).
-    pub(in crate::parser) fn complete_expr_after_pipeline(&mut self, head: Expr) -> Result<Expr, ParseError> {
+    pub(in crate::parser) fn complete_expr_after_pipeline(
+        &mut self,
+        head: Expr,
+    ) -> Result<Expr, ParseError> {
         // Ternary continuations. We mirror parse_ternary's logic.
         let value = if self.check(Token::Question) {
             let qsp = self.span();
@@ -392,12 +365,7 @@ impl Parser {
             if self.check(Token::Bang) {
                 self.advance();
                 let f = self.parse_pipeline()?;
-                Expr::Ternary(
-                    Box::new(head),
-                    Box::new(Expr::Void(qsp)),
-                    Box::new(f),
-                    qsp,
-                )
+                Expr::Ternary(Box::new(head), Box::new(Expr::Void(qsp)), Box::new(f), qsp)
             } else {
                 let t = self.parse_pipeline()?;
                 if self.check(Token::Bang) {
@@ -405,24 +373,14 @@ impl Parser {
                     let f = self.parse_expr()?;
                     Expr::Ternary(Box::new(head), Box::new(t), Box::new(f), qsp)
                 } else {
-                    Expr::Ternary(
-                        Box::new(head),
-                        Box::new(t),
-                        Box::new(Expr::Void(qsp)),
-                        qsp,
-                    )
+                    Expr::Ternary(Box::new(head), Box::new(t), Box::new(Expr::Void(qsp)), qsp)
                 }
             }
         } else if self.check(Token::Bang) && !self.suppress_bang_else {
             let bsp = self.span();
             self.advance();
             let f = self.parse_pipeline()?;
-            Expr::Ternary(
-                Box::new(head),
-                Box::new(Expr::Void(bsp)),
-                Box::new(f),
-                bsp,
-            )
+            Expr::Ternary(Box::new(head), Box::new(Expr::Void(bsp)), Box::new(f), bsp)
         } else {
             head
         };
@@ -438,7 +396,10 @@ impl Parser {
     /// Bare `!! Variant` form: `expr !! Variant`.
     /// On any error from `head`, propagate as a freshly-constructed `Variant`.
     /// On Ok, silently fall through.
-    pub(in crate::parser) fn finish_bare_bangbang(&mut self, head: Expr) -> Result<Stmt, ParseError> {
+    pub(in crate::parser) fn finish_bare_bangbang(
+        &mut self,
+        head: Expr,
+    ) -> Result<Stmt, ParseError> {
         let sp = head.span();
         debug_assert!(self.check(Token::BangBang));
         self.advance(); // consume `!!`
@@ -481,7 +442,10 @@ impl Parser {
     ///
     /// When `!!` is present, `!` is the ternary-else (falsy non-error) branch, NOT an error
     /// handler. `!` is only the error handler (with implicit `err` binding) when `!!` is absent.
-    pub(in crate::parser) fn finish_bare_handler_chain(&mut self, call: Expr) -> Result<Stmt, ParseError> {
+    pub(in crate::parser) fn finish_bare_handler_chain(
+        &mut self,
+        call: Expr,
+    ) -> Result<Stmt, ParseError> {
         let sp = call.span();
         debug_assert!(self.check(Token::Question));
         self.advance(); // consume `?`
@@ -580,5 +544,4 @@ impl Parser {
             span: sp,
         }))
     }
-
 }

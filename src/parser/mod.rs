@@ -405,7 +405,12 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         if c.params.len() != param_count {
             panic!(
                 "line {}:{}: multi-clause function `{}` clause {} has {} parameters, but first clause has {}",
-                c.span.line, c.span.col, first.name, i + 1, c.params.len(), param_count
+                c.span.line,
+                c.span.col,
+                first.name,
+                i + 1,
+                c.params.len(),
+                param_count
             );
         }
     }
@@ -518,7 +523,6 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         attrs: FnAttrs::default(),
     }
 }
-
 
 #[cfg(test)]
 mod tests;

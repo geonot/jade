@@ -1,9 +1,9 @@
 //! Operator-precedence ladder (ternary → pipeline → eq → cmp → exp → unary → postfix).
 
 use super::placeholder::{contains_placeholder, replace_placeholder};
+use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Token;
-use super::{ParseError, Parser};
 
 impl Parser {
     pub(in crate::parser) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
@@ -310,5 +310,4 @@ impl Parser {
         }
         Ok(e)
     }
-
 }

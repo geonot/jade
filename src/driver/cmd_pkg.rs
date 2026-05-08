@@ -8,9 +8,9 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use crate::ast::{Decl, Program, Stmt};
-use crate::intern::Symbol;
 use crate::cache::{Cache, build_package_map};
 use crate::codegen::Compiler;
+use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
@@ -22,7 +22,6 @@ use crate::typer::Typer;
 
 use super::cli::*;
 use super::project::*;
-
 
 pub(super) fn cmd_fetch() {
     let project_path = PathBuf::from("project.jade");

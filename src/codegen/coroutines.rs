@@ -90,7 +90,10 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(entry);
 
         // arg is the generator control block pointer
-        let gen_ptr_param = coro_fn.get_first_param().expect("ICE: function has no first param").into_pointer_value();
+        let gen_ptr_param = coro_fn
+            .get_first_param()
+            .expect("ICE: function has no first param")
+            .into_pointer_value();
         let gen_ptr_alloca = self.entry_alloca(ptr.into(), "__coro_ctx");
         b!(self.bld.build_store(gen_ptr_alloca, gen_ptr_param));
 

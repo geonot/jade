@@ -2,24 +2,25 @@
 //!
 //! Converts HIR functions into MIR basic blocks with explicit control flow.
 
-use crate::intern::Symbol;
 use super::*;
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, Pat};
+use crate::ast;
+use crate::hir::{self, ExprKind};
 use crate::types::Type;
-use std::collections::{HashMap, HashSet};
 
+mod analysis;
+mod closures;
+mod collections;
+mod concurrency;
+mod control;
 mod ctx;
-mod expr_p0;
-mod expr_p1;
-mod expr_p2;
-mod expr_p3;
-mod stmt_p0;
-mod stmt_p1;
-mod stmt_p2;
-mod stmt_p3;
-mod stmt_p4;
-mod util;
+mod effects;
+mod expr;
+mod expr_control;
+mod intrinsics;
+mod loops;
+mod stmt;
+mod store_expr;
+mod store_stmt;
 
 use ctx::Lowerer;
 
@@ -76,7 +77,6 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         globals,
     }
 }
-
 
 fn lower_function(f: &hir::Fn) -> Vec<Function> {
     let mut lowerer = Lowerer::new(&f.name.as_str(), f.def_id, f.span);
@@ -162,18 +162,150 @@ fn lower_unaryop(op: &ast::UnaryOp) -> UnaryOp {
 
 impl Lowerer {
     pub(super) fn lower_expr(&mut self, expr: &hir::Expr) -> ValueId {
-        if let Some(v) = self.lower_expr_p0(expr) { return v; }
-        if let Some(v) = self.lower_expr_p1(expr) { return v; }
-        if let Some(v) = self.lower_expr_p2(expr) { return v; }
-        if let Some(v) = self.lower_expr_p3(expr) { return v; }
-        panic!("unhandled ExprKind in lower_expr: {:?}", expr.kind)
+        match &expr.kind {
+            ExprKind::BinOp(_, ast::BinOp::And | ast::BinOp::Or, _)
+            | ExprKind::Block(..)
+            | ExprKind::IfExpr(..)
+            | ExprKind::Ternary(..) => self.lower_expr_control(expr),
+            ExprKind::Int(..)
+            | ExprKind::Float(..)
+            | ExprKind::Bool(..)
+            | ExprKind::Str(..)
+            | ExprKind::Void
+            | ExprKind::None
+            | ExprKind::Var(..)
+            | ExprKind::BinOp(..)
+            | ExprKind::UnaryOp(..)
+            | ExprKind::Call(..)
+            | ExprKind::IndirectCall(..)
+            | ExprKind::Method(..)
+            | ExprKind::Field(..)
+            | ExprKind::Index(..)
+            | ExprKind::Struct(..)
+            | ExprKind::VariantCtor(..)
+            | ExprKind::VariantRef(..)
+            | ExprKind::Coerce(..)
+            | ExprKind::Pipe(..)
+            | ExprKind::Cast(..)
+            | ExprKind::StrictCast(..)
+            | ExprKind::Ref(..)
+            | ExprKind::Deref(..)
+            | ExprKind::Array(..)
+            | ExprKind::Tuple(..)
+            | ExprKind::Slice(..)
+            | ExprKind::FnRef(..)
+            | ExprKind::Builder(..)
+            | ExprKind::AsFormat(..)
+            | ExprKind::CowWrap(..)
+            | ExprKind::CowClone(..)
+            | ExprKind::EnumUnwrap(..)
+            | ExprKind::EnumIs(..)
+            | ExprKind::GlobalLoad(..)
+            | ExprKind::Unreachable => self.lower_expr_value(expr),
+            ExprKind::Lambda(..) => self.lower_expr_closure(expr),
+            ExprKind::StringMethod(..)
+            | ExprKind::DeferredMethod(..)
+            | ExprKind::VecMethod(..)
+            | ExprKind::MapMethod(..)
+            | ExprKind::SetMethod(..)
+            | ExprKind::PQMethod(..)
+            | ExprKind::DequeMethod(..)
+            | ExprKind::VecNew(..)
+            | ExprKind::NDArrayNew(..)
+            | ExprKind::SIMDNew(..)
+            | ExprKind::MapNew
+            | ExprKind::SetNew
+            | ExprKind::PQNew
+            | ExprKind::DequeNew
+            | ExprKind::ListComp(..)
+            | ExprKind::IterNext(..) => self.lower_expr_collections(expr),
+            ExprKind::Spawn(..)
+            | ExprKind::Send(..)
+            | ExprKind::ChannelCreate(..)
+            | ExprKind::ChannelSend(..)
+            | ExprKind::ChannelRecv(..)
+            | ExprKind::Select(..)
+            | ExprKind::CoroutineCreate(..)
+            | ExprKind::CoroutineNext(..)
+            | ExprKind::Yield(..)
+            | ExprKind::GeneratorCreate(..)
+            | ExprKind::GeneratorNext(..) => self.lower_expr_concurrency(expr),
+            ExprKind::StoreQuery(..)
+            | ExprKind::StoreCount(..)
+            | ExprKind::StoreAll(..)
+            | ExprKind::ViewCount(..)
+            | ExprKind::ViewAll(..)
+            | ExprKind::StoreGet(..)
+            | ExprKind::StoreFirst(..)
+            | ExprKind::StoreExists(..)
+            | ExprKind::StoreDistinct(..)
+            | ExprKind::StoreSum(..)
+            | ExprKind::StoreAvg(..)
+            | ExprKind::StoreMin(..)
+            | ExprKind::StoreMax(..)
+            | ExprKind::StoreVersionCount(..)
+            | ExprKind::StoreHistory(..)
+            | ExprKind::StoreAtVersion(..)
+            | ExprKind::KvGet(..)
+            | ExprKind::KvHas(..)
+            | ExprKind::KvCount(..)
+            | ExprKind::KvSet(..)
+            | ExprKind::KvDel(..)
+            | ExprKind::KvIncr(..)
+            | ExprKind::VecInsert(..)
+            | ExprKind::VecCount(..)
+            | ExprKind::BloomTest(..)
+            | ExprKind::FtsSearch(..)
+            | ExprKind::FtsCount(..)
+            | ExprKind::VecNearest(..)
+            | ExprKind::GraphFrom(..)
+            | ExprKind::GraphTo(..)
+            | ExprKind::TsLatest(..) => self.lower_expr_store(expr),
+            ExprKind::AtomicLoad(..)
+            | ExprKind::AtomicStore(..)
+            | ExprKind::AtomicAdd(..)
+            | ExprKind::AtomicSub(..)
+            | ExprKind::AtomicCas(..)
+            | ExprKind::Builtin(..)
+            | ExprKind::Syscall(..)
+            | ExprKind::DynDispatch(..)
+            | ExprKind::DynCoerce(..)
+            | ExprKind::Grad(..)
+            | ExprKind::Einsum(..) => self.lower_expr_intrinsics(expr),
+        }
     }
+
     pub(super) fn lower_stmt(&mut self, stmt: &hir::Stmt) -> ValueId {
-        if let Some(v) = self.lower_stmt_p0(stmt) { return v; }
-        if let Some(v) = self.lower_stmt_p1(stmt) { return v; }
-        if let Some(v) = self.lower_stmt_p2(stmt) { return v; }
-        if let Some(v) = self.lower_stmt_p3(stmt) { return v; }
-        if let Some(v) = self.lower_stmt_p4(stmt) { return v; }
-        panic!("unhandled Stmt in lower_stmt")
+        match stmt {
+            hir::Stmt::Bind(..)
+            | hir::Stmt::Assign(..)
+            | hir::Stmt::Expr(..)
+            | hir::Stmt::Drop(..)
+            | hir::Stmt::TupleBind(..)
+            | hir::Stmt::Defer(..) => self.lower_stmt_core(stmt),
+            hir::Stmt::If(..)
+            | hir::Stmt::Match(..)
+            | hir::Stmt::Ret(..)
+            | hir::Stmt::ErrReturn(..)
+            | hir::Stmt::Break(..)
+            | hir::Stmt::Continue(..) => self.lower_stmt_control(stmt),
+            hir::Stmt::While(..)
+            | hir::Stmt::For(..)
+            | hir::Stmt::Loop(..)
+            | hir::Stmt::SimFor(..) => self.lower_stmt_loops(stmt),
+            hir::Stmt::StoreInsert(..)
+            | hir::Stmt::StoreDelete(..)
+            | hir::Stmt::StoreDestroy(..)
+            | hir::Stmt::StoreRestore(..)
+            | hir::Stmt::StoreSave(..)
+            | hir::Stmt::StoreSet(..)
+            | hir::Stmt::Transaction(..) => self.lower_stmt_store(stmt),
+            hir::Stmt::ChannelClose(..)
+            | hir::Stmt::Stop(..)
+            | hir::Stmt::Asm(..)
+            | hir::Stmt::SimBlock(..)
+            | hir::Stmt::UseLocal(..)
+            | hir::Stmt::GlobalStore(..) => self.lower_stmt_effects(stmt),
+        }
     }
 }

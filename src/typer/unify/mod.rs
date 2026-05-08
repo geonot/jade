@@ -1,7 +1,7 @@
 //! Type unification with occurs check and row/effect handling.
 
-use crate::intern::Symbol;
 use crate::ast::Span;
+use crate::intern::Symbol;
 use crate::types::Type;
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -560,5 +560,7 @@ impl InferCtx {
         }
         Ok(())
     }
-
-}mod resolve;#[cfg(test)] mod tests;
+}
+mod resolve;
+#[cfg(test)]
+mod tests;

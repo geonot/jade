@@ -32,8 +32,8 @@ mod types;
 mod vec;
 
 use crate::intern::Symbol;
-use std::collections::HashSet;
 use indexmap::IndexMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 use inkwell::basic_block::BasicBlock;
@@ -51,8 +51,8 @@ use inkwell::{AddressSpace, OptimizationLevel};
 use inkwell::attributes::{Attribute, AttributeLoc};
 
 use inkwell::debug_info::{
-    DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind,
-    DWARFSourceLanguage, DebugInfoBuilder,
+    DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind, DWARFSourceLanguage,
+    DebugInfoBuilder,
 };
 
 use crate::hir;
@@ -200,14 +200,6 @@ pub(crate) struct LoopCtx<'ctx> {
     pub break_bb: BasicBlock<'ctx>,
 }
 
-#[path = "mod_parts/impl0_part0.rs"]
-mod mod_mod_parts_impl0_part0_rs;
-
-#[allow(dead_code)]
-#[path = "mod_parts/impl1_part0.rs"]
-mod mod_mod_parts_impl1_part0_rs;
-
-#[path = "mod_parts/impl2_part0.rs"]
-mod mod_mod_parts_impl2_part0_rs;
-#[path = "mod_parts/impl2_part1.rs"]
-mod mod_mod_parts_impl2_part1_rs;
+mod debug;
+mod supervisor;
+mod support;

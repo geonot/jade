@@ -2,8 +2,8 @@ use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
 
-use super::Either;
 use super::super::{ParseError, Parser};
+use super::Either;
 
 impl Parser {
     pub(in crate::parser) fn parse_trait_def(&mut self) -> Result<TraitDef, ParseError> {

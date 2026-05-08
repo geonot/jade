@@ -2,13 +2,13 @@
 
 #![allow(unused_imports, unused_variables)]
 
-use crate::intern::Symbol;
-use std::path::PathBuf;
+use super::super::unify;
+use super::super::{Typer, VarInfo};
 use crate::ast::{self, BinOp, Span, UnaryOp};
 use crate::hir::{self, CoercionKind, DefId, Ownership};
+use crate::intern::Symbol;
 use crate::types::Type;
-use super::super::{Typer, VarInfo};
-use super::super::unify;
+use std::path::PathBuf;
 
 impl Typer {
     pub(in crate::typer) fn collect_type_mapping(

@@ -3,9 +3,9 @@
 use super::subst::{subst_inst, subst_term};
 use super::uses::{collect_inst_operands, is_pure};
 
-use crate::intern::Symbol;
 use super::super::*;
 use crate::ast::Span;
+use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub fn global_value_numbering(func: &mut Function) -> bool {

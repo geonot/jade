@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{self, Span};
-use crate::hir::{self, ExprKind, DefId, Ownership, CoercionKind};
-use crate::types::Type;
-use crate::intern::Symbol;
-use super::super::{Typer, VarInfo, DeferredField, DeferredMethod};
 use super::super::unify;
+use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use crate::ast::{self, Span};
+use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::intern::Symbol;
+use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn iter_element_type(&self, type_name: &str) -> Type {
@@ -89,7 +89,11 @@ impl Typer {
         }
 
         let next_call = hir::Expr {
-            kind: hir::ExprKind::IterNext(Symbol::intern(&iter_var_name), type_name.into(), "next".into()),
+            kind: hir::ExprKind::IterNext(
+                Symbol::intern(&iter_var_name),
+                type_name.into(),
+                "next".into(),
+            ),
             ty: ret,
             span,
         };
@@ -362,5 +366,4 @@ impl Typer {
             span,
         }))
     }
-
 }

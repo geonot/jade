@@ -292,8 +292,7 @@ impl Typer {
             .unwrap_or_else(|| self.infer_ctx.fresh_var());
         self.pop_scope();
         let id = self.fresh_id();
-        self.fns
-            .insert(mangled, (id, ptys.clone(), ret.clone()));
+        self.fns.insert(mangled, (id, ptys.clone(), ret.clone()));
 
         let mono_fn = self.lower_generic_fn_body(&gf, &mangled.as_str(), id, &ptys, &ret, name)?;
         self.mono_fns.push(mono_fn);
@@ -392,8 +391,7 @@ impl Typer {
                 .iter()
                 .map(|f| Self::substitute_type(&f.ty, type_map))
                 .collect();
-            self.variant_tags
-                .insert(v.name, (mangled, tag as u32));
+            self.variant_tags.insert(v.name, (mangled, tag as u32));
             let hv = hir::Variant {
                 name: v.name.clone(),
                 fields: ftys

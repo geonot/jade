@@ -304,7 +304,10 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
         Expr::Pipe(l, r, extra, sp) => Expr::Pipe(
             Box::new(replace_index_placeholder(l, name)),
             Box::new(replace_index_placeholder(r, name)),
-            extra.iter().map(|e| replace_index_placeholder(e, name)).collect(),
+            extra
+                .iter()
+                .map(|e| replace_index_placeholder(e, name))
+                .collect(),
             *sp,
         ),
         other => other.clone(),
@@ -313,9 +316,7 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
 
 /// Check if any statement in a block contains `$$`.
 pub(in crate::parser) fn contains_index_placeholder_in_block(block: &[Stmt]) -> bool {
-    block
-        .iter()
-        .any(|s| contains_index_placeholder_in_stmt(s))
+    block.iter().any(|s| contains_index_placeholder_in_stmt(s))
 }
 
 pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool {
@@ -327,9 +328,7 @@ pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool
         }
         Stmt::If(i) => {
             contains_index_placeholder(&i.cond)
-                || i.then
-                    .iter()
-                    .any(|s| contains_index_placeholder_in_stmt(s))
+                || i.then.iter().any(|s| contains_index_placeholder_in_stmt(s))
                 || i.elifs.iter().any(|(c, b)| {
                     contains_index_placeholder(c)
                         || b.iter().any(|s| contains_index_placeholder_in_stmt(s))
@@ -340,42 +339,34 @@ pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool
         }
         Stmt::While(w) => {
             contains_index_placeholder(&w.cond)
-                || w.body
-                    .iter()
-                    .any(|s| contains_index_placeholder_in_stmt(s))
+                || w.body.iter().any(|s| contains_index_placeholder_in_stmt(s))
         }
         Stmt::For(f) => {
             contains_index_placeholder(&f.iter)
-                || f.body
-                    .iter()
-                    .any(|s| contains_index_placeholder_in_stmt(s))
+                || f.body.iter().any(|s| contains_index_placeholder_in_stmt(s))
         }
         Stmt::SimFor(f, _) => {
             contains_index_placeholder(&f.iter)
-                || f.body
-                    .iter()
-                    .any(|s| contains_index_placeholder_in_stmt(s))
+                || f.body.iter().any(|s| contains_index_placeholder_in_stmt(s))
         }
-        Stmt::Loop(l) => l
-            .body
-            .iter()
-            .any(|s| contains_index_placeholder_in_stmt(s)),
+        Stmt::Loop(l) => l.body.iter().any(|s| contains_index_placeholder_in_stmt(s)),
         Stmt::Ret(Some(e), _) => contains_index_placeholder(e),
         Stmt::Break(Some(e), _) => contains_index_placeholder(e),
         Stmt::Match(m) => {
             contains_index_placeholder(&m.subject)
-                || m.arms.iter().any(|a| {
-                    a.body
-                        .iter()
-                        .any(|s| contains_index_placeholder_in_stmt(s))
-                })
+                || m.arms
+                    .iter()
+                    .any(|a| a.body.iter().any(|s| contains_index_placeholder_in_stmt(s)))
         }
         _ => false,
     }
 }
 
 /// Replace all `$$` in a block with `Ident(name)`.
-pub(in crate::parser) fn replace_index_placeholder_in_block(block: &[Stmt], name: &str) -> Vec<Stmt> {
+pub(in crate::parser) fn replace_index_placeholder_in_block(
+    block: &[Stmt],
+    name: &str,
+) -> Vec<Stmt> {
     block
         .iter()
         .map(|s| replace_index_placeholder_in_stmt(s, name))
@@ -427,10 +418,7 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
             bind2: f.bind2.clone(),
             iter: replace_index_placeholder(&f.iter, name),
             end: f.end.as_ref().map(|e| replace_index_placeholder(e, name)),
-            step: f
-                .step
-                .as_ref()
-                .map(|e| replace_index_placeholder(e, name)),
+            step: f.step.as_ref().map(|e| replace_index_placeholder(e, name)),
             body: replace_index_placeholder_in_block(&f.body, name),
             span: f.span,
         }),
@@ -453,10 +441,7 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
                 .iter()
                 .map(|a| Arm {
                     pat: a.pat.clone(),
-                    guard: a
-                        .guard
-                        .as_ref()
-                        .map(|e| replace_index_placeholder(e, name)),
+                    guard: a.guard.as_ref().map(|e| replace_index_placeholder(e, name)),
                     body: replace_index_placeholder_in_block(&a.body, name),
                     span: a.span,
                 })

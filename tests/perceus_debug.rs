@@ -66,7 +66,9 @@ fn parse_summary_line(line: &str, prefix: &str, expect_mir: bool) -> Option<Perc
     })
 }
 
-fn compile_and_collect_summaries(src: &str) -> (Option<PerceusSummary>, Option<PerceusSummary>, String) {
+fn compile_and_collect_summaries(
+    src: &str,
+) -> (Option<PerceusSummary>, Option<PerceusSummary>, String) {
     let dir = tempfile::tempdir().expect("tempdir");
     let jade = dir.path().join("case.jade");
     let out = dir.path().join("case_bin");
@@ -111,7 +113,8 @@ fn require_mir(summary: Option<PerceusSummary>, stderr: &str) -> PerceusSummary 
 
 #[test]
 fn perceus_debug_drop_elision_visible() {
-    let src = "*main() returns i32\n    a is 1\n    b is 2\n    c is 3\n    log(a + b + c)\n    0\n";
+    let src =
+        "*main() returns i32\n    a is 1\n    b is 2\n    c is 3\n    log(a + b + c)\n    0\n";
     let (perceus, _, stderr) = compile_and_collect_summaries(src);
     let p = require_perceus(perceus, &stderr);
     assert!(p.drops_elided > 0, "expected drops elided > 0, got {p:?}");
@@ -120,7 +123,8 @@ fn perceus_debug_drop_elision_visible() {
 
 #[test]
 fn perceus_debug_reuse_visible() {
-    let src = "*main() returns i32\n    x is rc(10)\n    y is rc(20)\n    log(@y)\n    log(@y)\n    0\n";
+    let src =
+        "*main() returns i32\n    x is rc(10)\n    y is rc(20)\n    log(@y)\n    log(@y)\n    0\n";
     let (perceus, mir, stderr) = compile_and_collect_summaries(src);
     let p = require_perceus(perceus, &stderr);
     let m = require_mir(mir, &stderr);
@@ -198,5 +202,8 @@ fn perceus_debug_combo_reuse_tail() {
     assert!(p.reuse > 0, "expected reuse in combo, got {p:?}");
     assert!(p.tail_reuse > 0, "expected tail-reuse in combo, got {p:?}");
     assert!(m.reuse > 0, "expected MIR reuse in combo, got {m:?}");
-    assert!(m.tail_reuse > 0, "expected MIR tail-reuse in combo, got {m:?}");
+    assert!(
+        m.tail_reuse > 0,
+        "expected MIR tail-reuse in combo, got {m:?}"
+    );
 }

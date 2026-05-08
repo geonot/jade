@@ -2,8 +2,8 @@ use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
 
-use super::Either;
 use super::super::{ParseError, Parser};
+use super::Either;
 
 impl Parser {
     pub(in crate::parser) fn parse_actor_def(&mut self) -> Result<ActorDef, ParseError> {
@@ -178,7 +178,9 @@ impl Parser {
         })
     }
 
-    pub(in crate::parser) fn parse_store_field(&mut self) -> Result<crate::ast::StoreField, ParseError> {
+    pub(in crate::parser) fn parse_store_field(
+        &mut self,
+    ) -> Result<crate::ast::StoreField, ParseError> {
         let sp = self.span();
 
         // Check for relationship prefix: &
@@ -288,7 +290,9 @@ impl Parser {
     }
 
     /// Parse `migration 'name' version N` block with indented up/down containing alter ops.
-    pub(in crate::parser) fn parse_migration_def(&mut self) -> Result<crate::ast::MigrationDef, ParseError> {
+    pub(in crate::parser) fn parse_migration_def(
+        &mut self,
+    ) -> Result<crate::ast::MigrationDef, ParseError> {
         use crate::ast::MigrationDef;
         let sp = self.span();
         self.expect(Token::Migration)?;
@@ -416,12 +420,17 @@ impl Parser {
                     })
                 } else if action_name == "drop" {
                     let field_name = p.ident()?;
-                    Ok(AlterAction::Drop { name: field_name.as_str() })
+                    Ok(AlterAction::Drop {
+                        name: field_name.as_str(),
+                    })
                 } else if action_name == "rename" {
                     let from = p.ident()?;
                     p.expect(Token::To)?;
                     let to = p.ident()?;
-                    Ok(AlterAction::Rename { from: from.as_str(), to: to.as_str() })
+                    Ok(AlterAction::Rename {
+                        from: from.as_str(),
+                        to: to.as_str(),
+                    })
                 } else {
                     Err(p.error(&format!(
                         "expected 'add', 'drop', or 'rename', got '{action_name}'"
@@ -436,5 +445,4 @@ impl Parser {
             actions,
         })
     }
-
 }

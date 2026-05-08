@@ -36,8 +36,7 @@ fn test_rc_binding_no_errors() {
 
 #[test]
 fn test_function_params_no_errors() {
-    let diags = verify(
-        "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n",
-    );
+    let diags =
+        verify("*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n");
     assert!(diags.is_empty());
 }

@@ -2,8 +2,8 @@ use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
 
-use super::Either;
 use super::super::{ParseError, Parser};
+use super::Either;
 
 impl Parser {
     pub(in crate::parser) fn parse_type_def(&mut self) -> Result<TypeDef, ParseError> {
@@ -42,7 +42,9 @@ impl Parser {
         })
     }
 
-    pub(in crate::parser) fn parse_layout_attrs(&mut self) -> Result<crate::ast::LayoutAttrs, ParseError> {
+    pub(in crate::parser) fn parse_layout_attrs(
+        &mut self,
+    ) -> Result<crate::ast::LayoutAttrs, ParseError> {
         let mut layout = crate::ast::LayoutAttrs::default();
         while self.check(Token::At) {
             self.advance();
@@ -261,5 +263,4 @@ impl Parser {
             span: sp,
         })
     }
-
 }

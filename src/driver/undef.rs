@@ -8,9 +8,9 @@ use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
 use crate::ast::{Decl, Program, Stmt};
-use crate::intern::Symbol;
 use crate::cache::{Cache, build_package_map};
 use crate::codegen::Compiler;
+use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
@@ -22,7 +22,6 @@ use crate::typer::Typer;
 
 use super::cli::*;
 use super::project::*;
-
 
 /// Collect all identifiers referenced in the program (function calls, type refs,
 /// variable refs, struct constructors, etc.) that are not defined by the program itself.

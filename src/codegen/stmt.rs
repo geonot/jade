@@ -270,13 +270,19 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(None)
             }
             hir::Stmt::StoreDestroy(store_name, _filter, _) => {
-                return Err(format!("store.destroy is not yet implemented (store '{store_name}')"));
+                return Err(format!(
+                    "store.destroy is not yet implemented (store '{store_name}')"
+                ));
             }
             hir::Stmt::StoreRestore(store_name, _filter, _) => {
-                return Err(format!("store.restore is not yet implemented (store '{store_name}')"));
+                return Err(format!(
+                    "store.restore is not yet implemented (store '{store_name}')"
+                ));
             }
             hir::Stmt::StoreSave(store_name, _) => {
-                return Err(format!("store.save is not yet implemented (store '{store_name}')"));
+                return Err(format!(
+                    "store.save is not yet implemented (store '{store_name}')"
+                ));
             }
             hir::Stmt::StoreSet(store_name, assignments, filter, _) => {
                 let sd = self
@@ -284,7 +290,10 @@ impl<'ctx> Compiler<'ctx> {
                     .get(store_name)
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
-                let assignments_str: Vec<(String, hir::Expr)> = assignments.iter().map(|(s, e)| (s.as_str(), e.clone())).collect();
+                let assignments_str: Vec<(String, hir::Expr)> = assignments
+                    .iter()
+                    .map(|(s, e)| (s.as_str(), e.clone()))
+                    .collect();
                 self.compile_store_set(&store_name.as_str(), &assignments_str, filter, &sd)?;
                 Ok(None)
             }

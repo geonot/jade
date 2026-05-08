@@ -351,8 +351,12 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
     let mut type_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for sym in &analysis.symbols {
         match sym.kind {
-            SymbolKind::Function => { fn_names.insert(sym.name.clone()); }
-            SymbolKind::Struct | SymbolKind::Enum => { type_names.insert(sym.name.clone()); }
+            SymbolKind::Function => {
+                fn_names.insert(sym.name.clone());
+            }
+            SymbolKind::Struct | SymbolKind::Enum => {
+                type_names.insert(sym.name.clone());
+            }
             _ => {}
         }
     }
@@ -365,28 +369,68 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
         let span = &sp.span;
         let (token_type, length) = match &sp.token {
             // Keywords
-            Token::If | Token::Elif | Token::Else | Token::While | Token::For
-            | Token::In | Token::Loop | Token::Break | Token::Continue | Token::Return
-            | Token::Match | Token::When | Token::Type | Token::Enum | Token::Trait
-            | Token::Impl | Token::Use | Token::As | Token::From | Token::To
-            | Token::By | Token::Extern | Token::Is | Token::Returns
-            | Token::And | Token::Or | Token::Not | Token::Equals | Token::Neq
-            | Token::Unless | Token::Until | Token::Of | Token::Store | Token::Migration
-            | Token::Insert | Token::Delete | Token::Set | Token::Transaction
-            | Token::View | Token::Actor | Token::Spawn | Token::Send | Token::Receive
-            | Token::Dispatch | Token::Yield | Token::Channel | Token::Close
-            | Token::Select | Token::Stop | Token::Default | Token::Sim
-            | Token::Supervisor | Token::Atomic | Token::Strict | Token::Defer
-            | Token::Global | Token::Pub => {
-                (ST_KEYWORD, (span.end - span.start) as u32)
-            }
+            Token::If
+            | Token::Elif
+            | Token::Else
+            | Token::While
+            | Token::For
+            | Token::In
+            | Token::Loop
+            | Token::Break
+            | Token::Continue
+            | Token::Return
+            | Token::Match
+            | Token::When
+            | Token::Type
+            | Token::Enum
+            | Token::Trait
+            | Token::Impl
+            | Token::Use
+            | Token::As
+            | Token::From
+            | Token::To
+            | Token::By
+            | Token::Extern
+            | Token::Is
+            | Token::Returns
+            | Token::And
+            | Token::Or
+            | Token::Not
+            | Token::Equals
+            | Token::Neq
+            | Token::Unless
+            | Token::Until
+            | Token::Of
+            | Token::Store
+            | Token::Migration
+            | Token::Insert
+            | Token::Delete
+            | Token::Set
+            | Token::Transaction
+            | Token::View
+            | Token::Actor
+            | Token::Spawn
+            | Token::Send
+            | Token::Receive
+            | Token::Dispatch
+            | Token::Yield
+            | Token::Channel
+            | Token::Close
+            | Token::Select
+            | Token::Stop
+            | Token::Default
+            | Token::Sim
+            | Token::Supervisor
+            | Token::Atomic
+            | Token::Strict
+            | Token::Defer
+            | Token::Global
+            | Token::Pub => (ST_KEYWORD, (span.end - span.start) as u32),
             Token::True | Token::False | Token::None => {
                 (ST_KEYWORD, (span.end - span.start) as u32)
             }
             // Strings
-            Token::Str(_) => {
-                (ST_STRING, (span.end - span.start) as u32)
-            }
+            Token::Str(_) => (ST_STRING, (span.end - span.start) as u32),
             // Numbers
             Token::Int(_) | Token::Float(_) | Token::CharLit(_) => {
                 (ST_NUMBER, (span.end - span.start) as u32)
@@ -405,15 +449,23 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
             // Built-in call keywords
             Token::Log => (ST_FUNCTION, 3),
             // Operators
-            Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::Percent
-            | Token::Pipe | Token::Caret | Token::Ampersand | Token::Shl | Token::Shr
-            | Token::Lt | Token::Gt | Token::LtEq | Token::GtEq
-            | Token::StarStar | Token::Bang => {
-                (ST_OPERATOR, (span.end - span.start) as u32)
-            }
-            Token::At | Token::AtKw => {
-                (ST_OPERATOR, (span.end - span.start) as u32)
-            }
+            Token::Plus
+            | Token::Minus
+            | Token::Star
+            | Token::Slash
+            | Token::Percent
+            | Token::Pipe
+            | Token::Caret
+            | Token::Ampersand
+            | Token::Shl
+            | Token::Shr
+            | Token::Lt
+            | Token::Gt
+            | Token::LtEq
+            | Token::GtEq
+            | Token::StarStar
+            | Token::Bang => (ST_OPERATOR, (span.end - span.start) as u32),
+            Token::At | Token::AtKw => (ST_OPERATOR, (span.end - span.start) as u32),
             // Skip whitespace/structural tokens
             _ => continue,
         };
