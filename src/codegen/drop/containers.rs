@@ -1,106 +1,15 @@
-//! Codegen for destructor / drop-glue insertion.
+//! Container and runtime-object drop helpers.
 
-use inkwell::AddressSpace;
-use inkwell::types::BasicType;
-use inkwell::values::BasicValueEnum;
-
-use crate::types::Type;
-
-use super::Compiler;
-use super::b;
+use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Unified drop dispatcher. Emits code to release all resources owned by a
-    /// value of the given type. For types that are trivially droppable (scalars,
-    /// bools, pointers-as-raw), this is a no-op. For heap-owning types, this
-    /// recursively frees inner allocations before releasing the outer container.
-    ///
-    /// This produces a deterministic, zero-overhead destruction sequence with
-    /// no dynamic dispatch and no RTTI. Each drop path is monomorphized at
-    /// compile time — the generated code is a flat, branchless (per-type)
-    /// sequence of frees. No GC, no finalizer queues.
-    pub(crate) fn drop_value(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        ty: &Type,
-    ) -> Result<(), String> {
-        if ty.is_trivially_droppable() {
-            return Ok(());
-        }
-        match ty {
-            Type::String => {
-                self.drop_string(val)?;
-            }
-            Type::Vec(elem) => {
-                // Vec: free element storage if elements need dropping, then
-                // free the data buffer and header. The element loop runs only
-                // for non-trivially-droppable element types. For POD vecs this
-                // collapses to two frees.
-                self.drop_vec_deep(val, elem)?;
-            }
-            Type::Map(kt, vt) => {
-                self.drop_map_deep(val, kt, vt)?;
-            }
-            Type::Set(elem) => {
-                self.drop_set_deep(val, elem)?;
-            }
-            Type::Rc(inner) => {
-                self.rc_release_deep(val, inner)?;
-            }
-            Type::Weak(inner) => {
-                self.weak_release(val, inner)?;
-            }
-            Type::Arena => {
-                self.drop_arena(val)?;
-            }
-            Type::Deque(elem) => {
-                self.drop_container_header(val, elem)?;
-            }
-            Type::PriorityQueue(elem) => {
-                self.drop_container_header(val, elem)?;
-            }
-            Type::NDArray(_, _) => {
-                self.drop_ndarray(val)?;
-            }
-            Type::Generator(_) => {
-                self.drop_ptr_allocated(val)?;
-            }
-            Type::Tuple(tys) => {
-                self.drop_tuple(val, tys)?;
-            }
-            Type::Struct(name, _) => {
-                self.drop_struct_fields(val, &name.as_str())?;
-            }
-            Type::Array(elem, n) => {
-                if !elem.is_trivially_droppable() {
-                    self.drop_array_elements(val, elem, *n)?;
-                }
-            }
-            Type::Enum(name) => {
-                self.drop_enum_variants(val, &name.as_str())?;
-            }
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
-                self.drop_value(val, inner)?;
-            }
-            // Coroutine — needs jade_gen_destroy to free both coroutine stack and gen block
-            Type::Coroutine(_) => {
-                self.drop_generator(val)?;
-            }
-            // Channel, Cow — ptr-based, free the allocation if non-null.
-            Type::Channel(_) | Type::Cow(_) => {
-                self.drop_ptr_allocated(val)?;
-            }
-            _ => {
-                // Scalars, bools, raw ptrs, ActorRef — no-op.
-                // is_trivially_droppable should have caught these above.
-            }
-        }
-        Ok(())
-    }
-
     /// Drop a Vec, recursively destroying elements if they are non-trivially
     /// droppable. O(n) in element count, O(1) for POD elements.
-    fn drop_vec_deep(&mut self, val: BasicValueEnum<'ctx>, elem: &Type) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_vec_deep(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        elem: &Type,
+    ) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
         let i64t = self.ctx.i64_type();
@@ -190,7 +99,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Drop a Map, recursively destroying keys and values if they are non-trivially
     /// droppable. Iterates all capacity slots, checking the occupancy marker at
     /// bucket offset 40. Bucket layout: [8B hash][24B key][8B value][1B occ][7B pad].
-    fn drop_map_deep(
+    pub(in crate::codegen::drop) fn drop_map_deep(
         &mut self,
         val: BasicValueEnum<'ctx>,
         kt: &Type,
@@ -305,7 +214,11 @@ impl<'ctx> Compiler<'ctx> {
     /// Drop a Set, recursively destroying elements if they are non-trivially
     /// droppable. Same bucket layout as Map: 48-byte entries, occupancy at offset 40,
     /// element at offset 8.
-    fn drop_set_deep(&mut self, val: BasicValueEnum<'ctx>, elem: &Type) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_set_deep(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        elem: &Type,
+    ) -> Result<(), String> {
         if elem.is_trivially_droppable() {
             return self.drop_container_simple(val);
         }
@@ -399,7 +312,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Free a container with {ptr, len, cap} header: free data, free header.
-    fn drop_container_simple(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_container_simple(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
         let free = self.ensure_free();
@@ -431,7 +347,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Drop containers with the same {ptr, len, cap} header (Deque, PriorityQueue).
-    fn drop_container_header(
+    pub(in crate::codegen::drop) fn drop_container_header(
         &mut self,
         val: BasicValueEnum<'ctx>,
         _elem: &Type,
@@ -440,7 +356,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Drop Arena: free the base pointer.
-    fn drop_arena(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_arena(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<(), String> {
         let arena_ty = self.arena_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let ptr = val.into_pointer_value();
@@ -452,13 +371,19 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Drop NDArray: free the data buffer (raw malloc'd).
-    fn drop_ndarray(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_ndarray(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<(), String> {
         self.drop_ptr_allocated(val)
     }
 
     /// Free a pointer-allocated value (generator, coroutine, channel, etc.)
     /// Null-check, then free.
-    fn drop_ptr_allocated(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_ptr_allocated(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let fv = self.current_fn();
         let free = self.ensure_free();
@@ -487,7 +412,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Drop a generator: calls jade_gen_destroy to free coroutine stack + gen block.
-    fn drop_generator(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+    pub(in crate::codegen::drop) fn drop_generator(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let fv = self.current_fn();
 
@@ -514,295 +442,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(done_bb);
-        Ok(())
-    }
-
-    /// Drop a tuple: recursively drop each non-trivially-droppable element.
-    fn drop_tuple(&mut self, val: BasicValueEnum<'ctx>, tys: &[Type]) -> Result<(), String> {
-        let st = self.ctx.struct_type(
-            &tys.iter().map(|t| self.llvm_ty(t)).collect::<Vec<_>>(),
-            false,
-        );
-        let ptr = self.entry_alloca(st.into(), "dt.tmp");
-        b!(self.bld.build_store(ptr, val));
-        for (i, ty) in tys.iter().enumerate() {
-            if ty.is_trivially_droppable() {
-                continue;
-            }
-            let gep = b!(self.bld.build_struct_gep(st, ptr, i as u32, "dt.f"));
-            let fval = b!(self.bld.build_load(self.llvm_ty(ty), gep, "dt.fv"));
-            self.drop_value(fval, ty)?;
-        }
-        Ok(())
-    }
-
-    /// Drop a struct by dropping each field that needs it.
-    /// For recursive structs (e.g. Value containing Vec of Value), we
-    /// generate a named drop function `__drop_<Name>` and call it to
-    /// break infinite codegen recursion.
-    fn drop_struct_fields(&mut self, val: BasicValueEnum<'ctx>, name: &str) -> Result<(), String> {
-        let fields = match self.structs.get(name) {
-            Some(f) => f.clone(),
-            None => return Ok(()), // unknown struct — can't drop fields
-        };
-        let any_needs_drop = fields.iter().any(|(_, ty)| !ty.is_trivially_droppable());
-        if !any_needs_drop {
-            return Ok(());
-        }
-        let st = match self.module.get_struct_type(name) {
-            Some(s) => s,
-            None => return Ok(()),
-        };
-
-        // Check if a recursive struct type needs an out-of-line drop function.
-        let drop_fn_name = format!("__drop_{}", name);
-
-        // If the drop function already exists, just call it.
-        if let Some(dfn) = self.module.get_function(&drop_fn_name) {
-            let ptr = self.entry_alloca(st.into(), "ds.tmp");
-            b!(self.bld.build_store(ptr, val));
-            b!(self.bld.build_call(dfn, &[ptr.into()], ""));
-            return Ok(());
-        }
-
-        // Check if this struct has self-referencing fields (directly or via Vec/Map).
-        let is_recursive = fields
-            .iter()
-            .any(|(_, ty)| Self::type_references_struct(ty, name));
-
-        if !is_recursive {
-            // Inline the drop as before.
-            let ptr = self.entry_alloca(st.into(), "ds.tmp");
-            b!(self.bld.build_store(ptr, val));
-            for (i, (_, ty)) in fields.iter().enumerate() {
-                if ty.is_trivially_droppable() {
-                    continue;
-                }
-                let gep = b!(self.bld.build_struct_gep(st, ptr, i as u32, "ds.f"));
-                let fval = b!(self.bld.build_load(self.llvm_ty(ty), gep, "ds.fv"));
-                self.drop_value(fval, ty)?;
-            }
-            return Ok(());
-        }
-
-        // Recursive struct: generate __drop_<Name>(ptr) function and call it.
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let fn_ty = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
-        let dfn = self.module.add_function(&drop_fn_name, fn_ty, None);
-
-        // Save current state.
-        let saved_fn = self.cur_fn;
-        let saved_bb = self.bld.get_insert_block();
-
-        self.cur_fn = Some(dfn);
-        let entry = self.ctx.append_basic_block(dfn, "entry");
-        self.bld.position_at_end(entry);
-
-        let param_ptr = dfn
-            .get_first_param()
-            .expect("ICE: function has no first param")
-            .into_pointer_value();
-        for (i, (_, ty)) in fields.iter().enumerate() {
-            if ty.is_trivially_droppable() {
-                continue;
-            }
-            let gep = b!(self.bld.build_struct_gep(st, param_ptr, i as u32, "ds.f"));
-            let fval = b!(self.bld.build_load(self.llvm_ty(ty), gep, "ds.fv"));
-            self.drop_value(fval, ty)?;
-        }
-        b!(self.bld.build_return(None));
-
-        // Restore state.
-        self.cur_fn = saved_fn;
-        if let Some(bb) = saved_bb {
-            self.bld.position_at_end(bb);
-        }
-
-        // Now call the generated function.
-        let ptr = self.entry_alloca(st.into(), "ds.tmp");
-        b!(self.bld.build_store(ptr, val));
-        b!(self.bld.build_call(dfn, &[ptr.into()], ""));
-        Ok(())
-    }
-
-    /// Check if a type references a named struct (directly or nested in containers).
-    fn type_references_struct(ty: &Type, name: &str) -> bool {
-        match ty {
-            Type::Struct(n, _) => n == name,
-            Type::Vec(inner) => Self::type_references_struct(inner, name),
-            Type::Map(k, v) => {
-                Self::type_references_struct(k, name) || Self::type_references_struct(v, name)
-            }
-            Type::Set(inner) => Self::type_references_struct(inner, name),
-            Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
-            Type::Rc(inner) | Type::Weak(inner) | Type::Cow(inner) => {
-                Self::type_references_struct(inner, name)
-            }
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
-                Self::type_references_struct(inner, name)
-            }
-            _ => false,
-        }
-    }
-
-    /// Drop array elements one by one.
-    fn drop_array_elements(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        elem: &Type,
-        count: usize,
-    ) -> Result<(), String> {
-        let elem_llvm = self.llvm_ty(elem);
-        let arr_ty = elem_llvm.array_type(count as u32);
-        let ptr = self.entry_alloca(arr_ty.into(), "dae.tmp");
-        b!(self.bld.build_store(ptr, val));
-        for i in 0..count {
-            let idx = self.ctx.i64_type().const_int(i as u64, false);
-            let zero = self.ctx.i64_type().const_int(0, false);
-            let gep = unsafe { b!(self.bld.build_gep(arr_ty, ptr, &[zero, idx], "dae.e")) };
-            let ev = b!(self.bld.build_load(elem_llvm, gep, "dae.v"));
-            self.drop_value(ev, elem)?;
-        }
-        Ok(())
-    }
-
-    /// Drop an enum: switch on the discriminant, then drop the active variant's
-    /// payload fields. This is the enum analog of drop_struct_fields.
-    fn drop_enum_variants(&mut self, val: BasicValueEnum<'ctx>, name: &str) -> Result<(), String> {
-        let variants = match self.enums.get(name) {
-            Some(v) => v.clone(),
-            None => return Ok(()),
-        };
-        // Check if any variant has non-trivially-droppable fields
-        let any_needs_drop = variants
-            .iter()
-            .any(|(_, tys)| tys.iter().any(|t| !t.is_trivially_droppable()));
-        if !any_needs_drop {
-            return Ok(());
-        }
-
-        let st = match self.module.get_struct_type(name) {
-            Some(s) => s,
-            None => return Ok(()),
-        };
-        let fv = self.current_fn();
-        let i32t = self.ctx.i32_type();
-
-        let ptr = self.entry_alloca(st.into(), "de.tmp");
-        b!(self.bld.build_store(ptr, val));
-
-        // Field 0 is the tag (i32)
-        let tag_gep = b!(self.bld.build_struct_gep(st, ptr, 0, "de.tag"));
-        let tag = b!(self.bld.build_load(i32t, tag_gep, "de.tv")).into_int_value();
-
-        let done_bb = self.ctx.append_basic_block(fv, "de.done");
-
-        // Collect variant case blocks that need drops
-        struct VariantDrop {
-            tag_val: u32,
-            field_types: Vec<Type>,
-        }
-        let mut drop_variants: Vec<VariantDrop> = Vec::new();
-        for (vname, vtys) in &variants {
-            let tag_val = match self.variant_tags.get(vname) {
-                Some((_, t)) => *t,
-                None => continue,
-            };
-            let has_drops = vtys.iter().any(|t| !t.is_trivially_droppable());
-            if has_drops {
-                drop_variants.push(VariantDrop {
-                    tag_val,
-                    field_types: vtys.clone(),
-                });
-            }
-        }
-
-        // Pre-create basic blocks for each variant
-        let case_bbs: Vec<_> = drop_variants
-            .iter()
-            .map(|vd| {
-                let bb = self
-                    .ctx
-                    .append_basic_block(fv, &format!("de.v{}", vd.tag_val));
-                (i32t.const_int(vd.tag_val as u64, false), bb)
-            })
-            .collect();
-
-        b!(self.bld.build_switch(tag, done_bb, &case_bbs));
-
-        // Emit drop code for each variant
-        for (vd, (_tag_iv, case_bb)) in drop_variants.iter().zip(case_bbs.iter()) {
-            self.bld.position_at_end(*case_bb);
-            for (fi, fty) in vd.field_types.iter().enumerate() {
-                if fty.is_trivially_droppable() {
-                    continue;
-                }
-                // fi+1 because field 0 is the tag
-                let f_gep = b!(self.bld.build_struct_gep(st, ptr, (fi + 1) as u32, "de.vf"));
-                let f_val = b!(self.bld.build_load(self.llvm_ty(fty), f_gep, "de.vfv"));
-                self.drop_value(f_val, fty)?;
-            }
-            b!(self.bld.build_unconditional_branch(done_bb));
-        }
-
-        self.bld.position_at_end(done_bb);
-        Ok(())
-    }
-
-    /// Rc release with recursive inner value drop. When the refcount reaches
-    /// zero, we drop the inner value FIRST, then free the allocation. This
-    /// ensures no leaks for Rc<Vec<String>> or Rc<SomeStruct>.
-    pub(crate) fn rc_release_deep(
-        &mut self,
-        ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<(), String> {
-        let fv = self.current_fn();
-        let layout = self.rc_layout_ty(inner);
-        let i64t = self.ctx.i64_type();
-        let heap_ptr = ptr.into_pointer_value();
-        let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
-        let old = if inner.needs_atomic_rc() {
-            b!(self.bld.build_atomicrmw(
-                inkwell::AtomicRMWBinOp::Sub,
-                rc_gep,
-                i64t.const_int(1, false),
-                inkwell::AtomicOrdering::AcquireRelease,
-            ))
-        } else {
-            let loaded = b!(self.bld.build_load(i64t, rc_gep, "rc.cnt.ld")).into_int_value();
-            let dec = b!(self
-                .bld
-                .build_int_nsw_sub(loaded, i64t.const_int(1, false), "rc.dec"));
-            b!(self.bld.build_store(rc_gep, dec));
-            loaded
-        };
-        let is_zero = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            old,
-            i64t.const_int(1, false),
-            "rc.dead"
-        ));
-        let free_bb = self.ctx.append_basic_block(fv, "rc.free");
-        let cont_bb = self.ctx.append_basic_block(fv, "rc.cont");
-        b!(self.bld.build_conditional_branch(is_zero, free_bb, cont_bb));
-
-        self.bld.position_at_end(free_bb);
-        // Drop the inner value before freeing the Rc allocation
-        if !inner.is_trivially_droppable() {
-            let val_gep = b!(self
-                .bld
-                .build_struct_gep(layout, heap_ptr, 1, "rc.val.drop"));
-            let inner_val = b!(self
-                .bld
-                .build_load(self.llvm_ty(inner), val_gep, "rc.inner"));
-            self.drop_value(inner_val, inner)?;
-        }
-        let free_fn = self.ensure_free();
-        b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(cont_bb));
-
-        self.bld.position_at_end(cont_bb);
         Ok(())
     }
 }

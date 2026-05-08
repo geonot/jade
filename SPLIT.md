@@ -1,5 +1,48 @@
 # SPLIT.md — C.2 Megafile Decomposition Plan
 
+## Current pass — post-C.1 codegen cleanup (May 2026)
+
+The original audit below predates the C.1 codegen/MIR-codegen cleanup and is
+kept as historical context. After the checkpoint commits, the active >800-line
+`src/**/*.rs` set was concentrated in codegen plus `driver/sources.rs` and
+`lexer/mod.rs`; the typer, parser, MIR lowering, and MIR opt files from the
+older audit had already been split or otherwise reduced.
+
+This pass keeps the same C.2 invariant: split by real responsibility, keep
+public API shape stable, and avoid generated names such as `partN` or
+`implN_partN`.
+
+| File before split | Target layout | Rationale |
+| --- | --- | --- |
+| `src/codegen/mir_codegen/store.rs` | `store/{insert,query,read,delete,mutation,lifecycle}.rs` | MIR store operations split by data mutation/read lifecycle. |
+| `src/codegen/builtins.rs` | `builtins/{dispatch_math,intrinsics,float_string,runtime_alloc}.rs` | Dispatch/math, low-level intrinsics, float/string methods, runtime allocation helpers. |
+| `src/codegen/expr.rs` | `expr/{core,access,runtime}.rs` | HIR expression dispatch, access/lvalue/dynamic helpers, runtime/atomic/COW helpers. |
+| `src/codegen/vec.rs` | `vec/{core,transforms,ordering}.rs` | Vector storage primitives, higher-order transforms/reductions, ordering/joining/membership. |
+| `src/codegen/stores.rs` | `stores/{runtime,handles,indexing}.rs` | Runtime declarations, handle/open/WAL helpers, indexes/versioning/migrations. |
+| `src/codegen/mir_codegen/emit_inst.rs` | `emit_inst/{core,aggregates,collections,runtime}.rs` | MIR instruction dispatch split by instruction family. |
+| `src/codegen/mir_codegen/store_ext.rs` | `store_ext/{specialized,analytics,history}.rs` | Specialized store engines, analytics/version counts, history reads. |
+| `src/codegen/mir_codegen/helpers.rs` | `helpers/{values,runtime}.rs` | Scalar/value helpers separated from closure/channel/type-layout/runtime helpers. |
+| `src/driver/sources.rs` | `sources/{modules,index,implicit,packages}.rs` | Source discovery/merge, entity index, implicit imports, package manifests. |
+| `src/codegen/support.rs` | `support/{module,runtime}.rs` | Compiler/module setup separated from target/runtime/LLVM utility support. |
+| `src/codegen/loops.rs` | `loops/{sequential,parallel}.rs` | Sequential loop forms separated from sim/parallel loop lowering. |
+| `src/codegen/mir_codegen/intrinsics.rs` | `intrinsics/{overflow,formatting}.rs` | Overflow arithmetic separated from bit/string-format/sleep intrinsics. |
+| `src/codegen/store_ops.rs` | `store_ops/{query,mutation}.rs` | High-level HIR store reads/inserts/queries separated from delete/set mutation. |
+| `src/codegen/drop.rs` | `drop/{mod,containers,aggregates}.rs` | Public drop entry remains in `mod.rs`; deep container and aggregate drops move to helpers. |
+| `src/lexer/mod.rs` | `lexer/literals.rs` plus smaller `lexer/mod.rs` | Numeric/string/raw-string/identifier lexing extracted from scanner core. |
+
+Acceptance after this pass:
+
+```bash
+rg --files src -g '*.rs' | xargs wc -l \
+  | awk '$1 > 800 && $2 != "total" { print $1, $2 }'
+# → no output
+```
+
+Large test and fixture aggregators such as `tests/bulk_tests.rs`,
+`tests/integration.rs`, and `tests/programs/syntax.jade` are intentionally out
+of C.2 scope; the cleanup target here is maintainable `src/` implementation
+files.
+
 Operational, file-by-file plan to action **CLEANUP.md §C.2** ("Decompose the
 megafiles") for every `src/` Rust file currently > 800 LOC, **excluding files
 that are owned by the in-flight C.1 work** (HIR↔MIR codegen seam).
