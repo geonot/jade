@@ -96,7 +96,16 @@ def collect_path_renames() -> list[tuple[Path, Path]]:
 
 def rename_paths(apply: bool, use_git_mv: bool) -> int:
     moves = collect_path_renames()
-    for old, new in moves:
+    # Split into files and dirs. Move files first (deepest path among them
+    # first, though order doesn't really matter for files), then handle
+    # directories. By the time we get to a directory rename, all of its
+    # contents have already been moved into the new location, so the old
+    # dir is empty and the new dir already exists with the moved content —
+    # we just need to remove the now-empty old shell.
+    file_moves = [(o, n) for o, n in moves if o.is_file() or o.is_symlink()]
+    dir_moves = [(o, n) for o, n in moves if o.is_dir()]
+
+    for old, new in file_moves:
         rel_old = cfg.path_rel(old)
         rel_new = cfg.path_rel(new)
         print(f"  MOVE  {rel_old}  ->  {rel_new}")
@@ -104,8 +113,6 @@ def rename_paths(apply: bool, use_git_mv: bool) -> int:
             continue
         new.parent.mkdir(parents=True, exist_ok=True)
         if use_git_mv:
-            # `git mv` requires the source be tracked. If it isn't, fall back
-            # to os.rename so untracked files still move.
             res = subprocess.run(
                 ["git", "mv", "-f", str(old), str(new)],
                 cwd=cfg.REPO_ROOT,
@@ -120,7 +127,39 @@ def rename_paths(apply: bool, use_git_mv: bool) -> int:
                 os.replace(old, new)
         else:
             os.replace(old, new)
-    return len(moves)
+
+    # Directories: deepest first so children empty before their parents.
+    dir_moves.sort(key=lambda pair: len(pair[0].parts), reverse=True)
+    for old, new in dir_moves:
+        rel_old = cfg.path_rel(old)
+        rel_new = cfg.path_rel(new)
+        if not old.exists():
+            continue  # already gone (moved as part of an ancestor)
+        if new.exists():
+            # New location was auto-created by file moves. Just remove the
+            # empty old shell.
+            print(f"  RMDIR {rel_old}  (content already at {rel_new})")
+            if apply:
+                try:
+                    old.rmdir()
+                except OSError as e:
+                    # Not empty — leftover untracked junk. Report and skip.
+                    print(f"    cannot rmdir {rel_old}: {e}", file=sys.stderr)
+        else:
+            print(f"  MVDIR {rel_old}  ->  {rel_new}")
+            if apply:
+                if use_git_mv:
+                    res = subprocess.run(
+                        ["git", "mv", "-f", str(old), str(new)],
+                        cwd=cfg.REPO_ROOT,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if res.returncode != 0:
+                        os.replace(old, new)
+                else:
+                    os.replace(old, new)
+    return len(file_moves) + len(dir_moves)
 
 
 def main() -> int:
