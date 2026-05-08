@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
-#define KV_MAGIC      "JADEKV\0\0"
+#define KV_MAGIC      "JINNKV\0\0"
 #define KV_MAGIC_SIZE 8
 #define KV_KEY_SIZE   256
 #define KV_INIT_CAP   64

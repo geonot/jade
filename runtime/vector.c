@@ -2,7 +2,7 @@
  * Jinn @vector store runtime — brute-force nearest-neighbor search.
  *
  * Vectors are stored as contiguous arrays of f64 values.
- * File format: [8B magic "JADEVEC\0"][8B count][8B dims][f64 vectors...]
+ * File format: [8B magic "JINNVEC\0"][8B count][8B dims][f64 vectors...]
  * Each vector is dims * 8 bytes.
  */
 
@@ -12,7 +12,7 @@
 #include <math.h>
 #include "jinn_rt.h"
 
-#define VEC_MAGIC "JADEVEC\0"
+#define VEC_MAGIC "JINNVEC\0"
 
 struct JinnVec {
     FILE   *fp;

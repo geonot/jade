@@ -10,10 +10,10 @@
  *   - jinn_mig_log_record:  record a newly applied migration
  *
  * Store file format (header = 24 bytes):
- *   [8B magic "JADESTR\0"][8B count][8B rec_size][records...]
+ *   [8B magic "JINNSTR\0"][8B count][8B rec_size][records...]
  *
  * Migration log format (header = 8 bytes):
- *   [8B magic "JADEMIG\0"][entries...]
+ *   [8B magic "JINNMIG\0"][entries...]
  *   Entry: [8B version][8B timestamp][1B direction (1=up, 0=down)]
  */
 
@@ -25,9 +25,9 @@
 #include "jinn_rt.h"
 
 #define STORE_HEADER 24
-#define STORE_MAGIC  "JADESTR\0"
+#define STORE_MAGIC  "JINNSTR\0"
 #define MIG_HEADER   8
-#define MIG_MAGIC    "JADEMIG\0"
+#define MIG_MAGIC    "JINNMIG\0"
 #define MIG_ENTRY    17   /* 8 + 8 + 1 */
 
 /* ─── Migration log ─────────────────────────────────────────────── */

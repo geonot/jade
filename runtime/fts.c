@@ -16,7 +16,7 @@
 #include <ctype.h>
 #include "jinn_rt.h"
 
-#define FTS_MAGIC "JADEFTS\0"
+#define FTS_MAGIC "JINNFTS\0"
 
 struct JinnFts {
     FILE   *fp;

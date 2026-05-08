@@ -173,6 +173,7 @@ CONTENT_ALLOWLIST: frozenset[str] = frozenset(
         "scripts/rename/rename.py",
         "scripts/rename/verify.py",
         "scripts/rename/README.md",
+        "ok",
     }
 )
 

@@ -4,7 +4,7 @@
  * Provides probabilistic set membership testing for fast negative lookups
  * on non-indexed fields. Uses double hashing with FNV-1a.
  *
- * File format: [8B magic "JADEBLM\0"][8B num_bits][8B num_hashes][bit array...]
+ * File format: [8B magic "JINNBLM\0"][8B num_bits][8B num_hashes][bit array...]
  */
 
 #include <stdio.h>
@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
-#define BLOOM_MAGIC "JADEBLM\0"
+#define BLOOM_MAGIC "JINNBLM\0"
 #define BLOOM_HEADER_SIZE 24
 
 struct JinnBloom {

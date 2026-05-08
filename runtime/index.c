@@ -1,7 +1,7 @@
 /* runtime/index.c – Hash-index and B-tree-stub helpers for Jinn stores.
  *
  * Hash index file layout:
- *   [8B  magic   "JADEIDX\0"]
+ *   [8B  magic   "JINNIDX\0"]
  *   [8B  capacity (power-of-2 slot count)]
  *   [8B  count   (number of occupied slots)]
  *   [capacity × 24B slots ...]
@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
-#define IDX_MAGIC     "JADEIDX\0"
+#define IDX_MAGIC     "JINNIDX\0"
 #define IDX_MAGIC_LEN 8
 #define IDX_HEADER    24          /* magic + capacity + count */
 #define SLOT_SIZE     24          /* hash + offset + status */

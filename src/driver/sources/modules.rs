@@ -230,7 +230,7 @@ pub(in crate::driver) fn collect_jinn_files(dir: &std::path::Path, files: &mut V
             let path = entry.path();
             if path.is_dir() {
                 collect_jinn_files(&path, files);
-            } else if path.extension().map_or(false, |e| e == "jinn") {
+            } else if path.extension().map_or(false, |e| e == "jn") {
                 files.push(path);
             }
         }

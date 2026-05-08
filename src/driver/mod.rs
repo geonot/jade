@@ -198,7 +198,7 @@ pub fn run() {
                                     if name != "target" && name != ".git" {
                                         collect_jinn_files(&path, out);
                                     }
-                                } else if path.extension().map_or(false, |e| e == "jinn") {
+                                } else if path.extension().map_or(false, |e| e == "jn") {
                                     out.push(path);
                                 }
                             }

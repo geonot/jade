@@ -4,7 +4,7 @@
  * Per-field column files enable vectorized aggregation (sum/avg/min/max)
  * on contiguous typed arrays without deserializing full records.
  *
- * File format: [8B magic "JADECOL\0"][8B count][8B elem_size][column data...]
+ * File format: [8B magic "JINNCOL\0"][8B count][8B elem_size][column data...]
  * Each element is elem_size bytes, stored contiguously.
  *
  * For integer columns (i64), SIMD-accelerated aggregation is available
@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
-#define COL_MAGIC "JADECOL\0"
+#define COL_MAGIC "JINNCOL\0"
 #define COL_HEADER_SIZE 24
 
 /* Safe multiplication with overflow check.  Returns 0 on overflow. */

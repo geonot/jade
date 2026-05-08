@@ -23,7 +23,7 @@ impl EntityIndex {
                     let path = entry.path();
                     if path.is_dir() {
                         collect(&path, files);
-                    } else if path.extension().map_or(false, |e| e == "jinn") {
+                    } else if path.extension().map_or(false, |e| e == "jn") {
                         files.push(path);
                     }
                 }

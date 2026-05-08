@@ -3,7 +3,7 @@
  *
  * Append-only version log for @versioned stores.
  *
- * File format: [8B magic "JADEVER\0"][entries...]
+ * File format: [8B magic "JINNVER\0"][entries...]
  * Entry:       [8B sid][8B version_num][8B timestamp][rec_size bytes of record data]
  *
  * Each entry is a snapshot of the record BEFORE mutation.
@@ -19,7 +19,7 @@
 #include <unistd.h>
 #include "jinn_rt.h"
 
-static const char VER_MAGIC[8] = {'J','A','D','E','V','E','R','\0'};
+static const char VER_MAGIC[8] = {'J','I','N','N','V','E','R','\0'};
 #define VER_HEADER 8   /* just the magic */
 #define VER_ENTRY_HDR 24  /* sid(8) + version(8) + timestamp(8) */
 

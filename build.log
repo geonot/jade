@@ -1,5 +1,0 @@
-Script started on 2026-05-07 06:36:50-07:00 [COMMAND="cargo build" TERM="xterm-256color" TTY="/dev/pts/3" COLUMNS="-1" LINES="-1"]
-[1m[92m   Compiling[0m jadec v0.0.0 (/home/rome/Glitch/software/jade)
-[1m[96m    Building[0m [========================>  ] 78/84: jadec(build.rs)             [1m[96m    Building[0m [========================>  ] 79/84: jadec(build)                [1m[96m    Building[0m [========================>  ] 80/84: jadec                       [1m[96m    Building[0m [=========================> ] 81/84: jadec(bin), jade(bin), ja...[1m[96m    Building[0m [=========================> ] 82/84: jadec(bin), jade(bin)       [1m[96m    Building[0m [=========================> ] 83/84: jadec(bin)                  [K[1m[92m    Finished[0m ]8;;https://doc.rust-lang.org/cargo/reference/profiles.html#default-profiles\`dev` profile [unoptimized + debuginfo]]8;;\ target(s) in 32.36s
-
-Script done on 2026-05-07 06:37:22-07:00 [COMMAND_EXIT_CODE="0"]

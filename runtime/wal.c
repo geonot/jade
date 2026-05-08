@@ -1,7 +1,7 @@
 /*
  * Jinn WAL (Write-Ahead Log) Runtime
  *
- * File format: [8B magic "JADEWAL\0"][entries...]
+ * File format: [8B magic "JINNWAL\0"][entries...]
  * Entry:       [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
  *
  * Ops: 1=Insert, 2=Update, 3=Delete(soft), 4=Destroy(hard)
@@ -98,7 +98,7 @@ void jinn_wal_commit_group(FILE *wal) {
     (void)fsync(fd);
 }
 
-static const char WAL_MAGIC[8] = {'J','A','D','E','W','A','L','\0'};
+static const char WAL_MAGIC[8] = {'J','I','N','N','W','A','L','\0'};
 
 /* Simple CRC32 (IEEE polynomial) */
 static uint32_t crc32_table[256];
