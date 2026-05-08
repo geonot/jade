@@ -15,7 +15,7 @@ impl<'ctx> Compiler<'ctx> {
         let field_name = parts[1];
 
         let fts = self.load_fts_handle(store_name, field_name)?;
-        let count_fn = self.module.get_function("jade_fts_posting_count").unwrap();
+        let count_fn = self.module.get_function("jinn_fts_posting_count").unwrap();
         let count = self
             .call_result(b!(self.bld.build_call(count_fn, &[fts.into()], "fts.cnt")))
             .into_int_value();
@@ -275,7 +275,7 @@ impl<'ctx> Compiler<'ctx> {
                 let is_float = matches!(norm, crate::types::Type::F64 | crate::types::Type::F32);
                 if !is_float {
                     let col = self.load_col_handle(store_name, field_name, 8)?;
-                    let fn_name = format!("jade_col_{op}_i64");
+                    let fn_name = format!("jinn_col_{op}_i64");
                     let col_fn = self.module.get_function(&fn_name).unwrap();
                     let result = self
                         .call_result(b!(self.bld.build_call(col_fn, &[col.into()], "col.agg")))
@@ -546,7 +546,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
 
         let ver_fp = self.load_store_ver(store_name)?;
-        let ver_count_fn = crate::codegen::fn_or_die(&self.module, "jade_ver_count");
+        let ver_count_fn = crate::codegen::fn_or_die(&self.module, "jinn_ver_count");
         let count = self
             .call_result(b!(self.bld.build_call(
                 ver_count_fn,
@@ -595,7 +595,7 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_pointer_value();
 
-        let ver_at_fn = crate::codegen::fn_or_die(&self.module, "jade_ver_at");
+        let ver_at_fn = crate::codegen::fn_or_die(&self.module, "jinn_ver_at");
         let found = self
             .call_result(b!(self.bld.build_call(
                 ver_at_fn,

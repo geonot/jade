@@ -72,7 +72,7 @@ impl Lowerer {
                         cases.push((i as i64, arm_bb));
                         self.switch_to(arm_bb);
                         if let Some(bind_name) = &arm.binding {
-                            // Use __select_recv instead of ChanRecv — jade_select
+                            // Use __select_recv instead of ChanRecv — jinn_select
                             // already received the data into the case data buffer.
                             let idx_val = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
                             let recv_val = self.emit(
@@ -111,7 +111,7 @@ impl Lowerer {
                         Terminator::Switch(select_val, cases, default_bb);
                     self.switch_to(merge_bb);
                 }
-                // Return 0 from the merge block, not the jade_select result
+                // Return 0 from the merge block, not the jinn_select result
                 self.emit(InstKind::IntConst(0), Type::I64, span)
             }
 

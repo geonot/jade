@@ -102,10 +102,10 @@ impl<'ctx> Compiler<'ctx> {
                 let fn_type = bool_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
                 let func = self
                     .module
-                    .get_function("__jade_regex_match")
+                    .get_function("__jinn_regex_match")
                     .unwrap_or_else(|| {
                         self.module
-                            .add_function("__jade_regex_match", fn_type, None)
+                            .add_function("__jinn_regex_match", fn_type, None)
                     });
                 let result =
                     b!(self
@@ -124,10 +124,10 @@ impl<'ctx> Compiler<'ctx> {
                 let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
                 let func = self
                     .module
-                    .get_function("__jade_regex_find_all")
+                    .get_function("__jinn_regex_find_all")
                     .unwrap_or_else(|| {
                         self.module
-                            .add_function("__jade_regex_find_all", fn_type, None)
+                            .add_function("__jinn_regex_find_all", fn_type, None)
                     });
                 let result =
                     b!(self
@@ -148,10 +148,10 @@ impl<'ctx> Compiler<'ctx> {
                 let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into(), ptr_t.into()], false);
                 let func = self
                     .module
-                    .get_function("__jade_regex_replace")
+                    .get_function("__jinn_regex_replace")
                     .unwrap_or_else(|| {
                         self.module
-                            .add_function("__jade_regex_replace", fn_type, None)
+                            .add_function("__jinn_regex_replace", fn_type, None)
                     });
                 let result = b!(self.bld.build_call(
                     func,

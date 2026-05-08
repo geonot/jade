@@ -1,5 +1,5 @@
 /**
- * Jade @vector store runtime — brute-force nearest-neighbor search.
+ * Jinn @vector store runtime — brute-force nearest-neighbor search.
  *
  * Vectors are stored as contiguous arrays of f64 values.
  * File format: [8B magic "JADEVEC\0"][8B count][8B dims][f64 vectors...]
@@ -10,18 +10,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 #define VEC_MAGIC "JADEVEC\0"
 
-struct JadeVec {
+struct JinnVec {
     FILE   *fp;
     int64_t count;
     int64_t dims;
 };
 
-JadeVec *jade_vec_open(const char *path, int64_t dims) {
-    JadeVec *v = calloc(1, sizeof(JadeVec));
+JinnVec *jinn_vec_open(const char *path, int64_t dims) {
+    JinnVec *v = calloc(1, sizeof(JinnVec));
     if (!v) return NULL;
     v->dims = dims;
     v->fp = fopen(path, "r+b");
@@ -49,13 +49,13 @@ JadeVec *jade_vec_open(const char *path, int64_t dims) {
     return v;
 }
 
-void jade_vec_close(JadeVec *v) {
+void jinn_vec_close(JinnVec *v) {
     if (!v) return;
     if (v->fp) fclose(v->fp);
     free(v);
 }
 
-void jade_vec_insert(JadeVec *v, const double *vec) {
+void jinn_vec_insert(JinnVec *v, const double *vec) {
     if (!v || !v->fp) return;
     // Seek to end and append vector
     fseek(v->fp, 0, SEEK_END);
@@ -67,7 +67,7 @@ void jade_vec_insert(JadeVec *v, const double *vec) {
     fflush(v->fp);
 }
 
-int64_t jade_vec_count(JadeVec *v) {
+int64_t jinn_vec_count(JinnVec *v) {
     return v ? v->count : 0;
 }
 
@@ -86,7 +86,7 @@ static double vec_dist_sq(const double *a, const double *b, int64_t dims) {
  * into `out_indices` (up to k). out_indices[i] is the 0-based record index.
  * Uses brute-force linear scan with a simple selection approach.
  */
-int64_t jade_vec_nearest(JadeVec *v, const double *query, int64_t k,
+int64_t jinn_vec_nearest(JinnVec *v, const double *query, int64_t k,
                          int64_t *out_indices) {
     if (!v || !v->fp || v->count == 0 || k <= 0) return 0;
     if (k > v->count) k = v->count;

@@ -1,5 +1,5 @@
 /*
- * Full-text search runtime for Jade.
+ * Full-text search runtime for Jinn.
  *
  * Provides a basic inverted index for @search-annotated string fields.
  * Supports insert (add document), search (query terms), and count.
@@ -14,11 +14,11 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 #define FTS_MAGIC "JADEFTS\0"
 
-struct JadeFts {
+struct JinnFts {
     FILE   *fp;
     char    path[256];
     int64_t posting_count;
@@ -26,8 +26,8 @@ struct JadeFts {
 
 /* ── Open / Close ─────────────────────────────────────────── */
 
-JadeFts *jade_fts_open(const char *path) {
-    JadeFts *f = (JadeFts *)calloc(1, sizeof(JadeFts));
+JinnFts *jinn_fts_open(const char *path) {
+    JinnFts *f = (JinnFts *)calloc(1, sizeof(JinnFts));
     if (!f) return NULL;
     strncpy(f->path, path, 255);
 
@@ -47,7 +47,7 @@ JadeFts *jade_fts_open(const char *path) {
     return f;
 }
 
-void jade_fts_close(JadeFts *f) {
+void jinn_fts_close(JinnFts *f) {
     if (!f) return;
     if (f->fp) fclose(f->fp);
     free(f);
@@ -73,7 +73,7 @@ static int next_token(const char *text, int pos, char *tok, int max_tok) {
 
 /* ── Index a document ─────────────────────────────────────── */
 
-void jade_fts_add(JadeFts *f, int64_t doc_id, const char *text, int64_t text_len) {
+void jinn_fts_add(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len) {
     if (!f || !f->fp || !text) return;
 
     char tok[128];
@@ -88,7 +88,7 @@ void jade_fts_add(JadeFts *f, int64_t doc_id, const char *text, int64_t text_len
             fwrite(&tlen, 4, 1, f->fp) != 1 ||
             fwrite(tok, 1, tlen, f->fp) != (size_t)tlen ||
             fwrite(&doc_id, 8, 1, f->fp) != 1) {
-            fprintf(stderr, "jade: fts: write posting failed\n");
+            fprintf(stderr, "jinn: fts: write posting failed\n");
             break;
         }
         added++;
@@ -98,7 +98,7 @@ void jade_fts_add(JadeFts *f, int64_t doc_id, const char *text, int64_t text_len
     /* Update posting count in header */
     if (fseek(f->fp, 8, SEEK_SET) != 0 ||
         fwrite(&f->posting_count, 8, 1, f->fp) != 1) {
-        fprintf(stderr, "jade: fts: failed to update posting count\n");
+        fprintf(stderr, "jinn: fts: failed to update posting count\n");
     }
     fflush(f->fp);
 }
@@ -107,7 +107,7 @@ void jade_fts_add(JadeFts *f, int64_t doc_id, const char *text, int64_t text_len
 
 /* Search for a single term. Returns count of matching doc_ids.
  * If out_ids is non-NULL, fills up to max_ids matching doc_ids. */
-int64_t jade_fts_search(JadeFts *f, const char *query, int64_t *out_ids, int64_t max_ids) {
+int64_t jinn_fts_search(JinnFts *f, const char *query, int64_t *out_ids, int64_t max_ids) {
     if (!f || !f->fp || !query) return 0;
 
     /* Lowercase the query term */
@@ -152,34 +152,34 @@ int64_t jade_fts_search(JadeFts *f, const char *query, int64_t *out_ids, int64_t
 }
 
 /* Count documents matching a query term */
-int64_t jade_fts_count(JadeFts *f, const char *query) {
-    return jade_fts_search(f, query, NULL, 0);
+int64_t jinn_fts_count(JinnFts *f, const char *query) {
+    return jinn_fts_search(f, query, NULL, 0);
 }
 
-/* ── Convenience wrappers for Jade string type (data + len) ── */
+/* ── Convenience wrappers for Jinn string type (data + len) ── */
 
-int64_t jade_fts_search_n(JadeFts *f, const char *query, int64_t qlen) {
+int64_t jinn_fts_search_n(JinnFts *f, const char *query, int64_t qlen) {
     /* Null-terminate a copy */
     char buf[256];
     if (qlen > 255) qlen = 255;
     memcpy(buf, query, qlen);
     buf[qlen] = '\0';
-    return jade_fts_search(f, buf, NULL, 0);
+    return jinn_fts_search(f, buf, NULL, 0);
 }
 
-int64_t jade_fts_count_n(JadeFts *f, const char *query, int64_t qlen) {
-    return jade_fts_search_n(f, query, qlen);
+int64_t jinn_fts_count_n(JinnFts *f, const char *query, int64_t qlen) {
+    return jinn_fts_search_n(f, query, qlen);
 }
 
-void jade_fts_add_n(JadeFts *f, int64_t doc_id, const char *text, int64_t text_len) {
+void jinn_fts_add_n(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len) {
     char buf[4096];
     if (text_len > 4095) text_len = 4095;
     memcpy(buf, text, text_len);
     buf[text_len] = '\0';
-    jade_fts_add(f, doc_id, buf, text_len);
+    jinn_fts_add(f, doc_id, buf, text_len);
 }
 
-int64_t jade_fts_posting_count(JadeFts *f) {
+int64_t jinn_fts_posting_count(JinnFts *f) {
     if (!f) return 0;
     return f->posting_count;
 }

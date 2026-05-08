@@ -1,22 +1,22 @@
 # std.process — Subprocess spawning and command execution
 #
 # Usage:
-#   result is process.run("ls -la")          # shell mode (requires JADE_ALLOW_SHELL=1)
+#   result is process.run("ls -la")          # shell mode (requires JINN_ALLOW_SHELL=1)
 #   log(result.output)
 #   log(result.exit_code)
 #
-#   code is process.exec("make build")       # shell mode (requires JADE_ALLOW_SHELL=1)
-#   lines is process.lines("find . -name '*.jade'")  # shell mode
+#   code is process.exec("make build")       # shell mode (requires JINN_ALLOW_SHELL=1)
+#   lines is process.lines("find . -name '*.jn'")  # shell mode
 #
-#   # Safe argv-based execution (no shell, no JADE_ALLOW_SHELL needed):
+#   # Safe argv-based execution (no shell, no JINN_ALLOW_SHELL needed):
 #   result is process.spawn("ls", vec("-la", "/tmp"))
 #   code is process.spawn_exec("git", vec("status"))
 
-extern *jade_popen_read(cmd as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
-extern *jade_system(cmd as %i8) returns i32
-extern *jade_exec_capture(prog as %i8, argv as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
-extern *jade_spawn_capture(vec_ptr as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
-extern *jade_spawn_exec(vec_ptr as %i8, exit_code as %i32) returns i32
+extern *jinn_popen_read(cmd as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jinn_system(cmd as %i8) returns i32
+extern *jinn_exec_capture(prog as %i8, argv as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jinn_spawn_capture(vec_ptr as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jinn_spawn_exec(vec_ptr as %i8, exit_code as %i32) returns i32
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -36,7 +36,7 @@ type ProcessResult
     buf_size is 65536
     buf is extern.malloc(buf_size)
     exit_code is 0
-    n is extern.jade_popen_read(%cmd, buf, buf_size, %exit_code as %i32)
+    n is extern.jinn_popen_read(%cmd, buf, buf_size, %exit_code as %i32)
     if n < 0
         extern.free(buf)
         return ProcessResult(output is "", exit_code is -1)
@@ -49,7 +49,7 @@ type ProcessResult
 # Run a shell command and return just its exit code.
 # Stdout/stderr go to the parent process's terminal.
 *exec(cmd as String) returns i32
-    extern.jade_system(%cmd)
+    extern.jinn_system(%cmd)
 
 # Run a command and return its stdout as a string (trimmed).
 *capture(cmd as String) returns String
@@ -71,7 +71,7 @@ type ProcessResult
 
 # Check if a command succeeds (exit code 0).
 *succeeds(cmd as String) returns bool
-    extern.jade_system(%cmd) equals 0
+    extern.jinn_system(%cmd) equals 0
 
 # Run a command, return output on success or empty string on failure.
 *try_run(cmd as String) returns String
@@ -105,7 +105,7 @@ type ProcessResult
 *with_env(name as String, value as String, command as String) returns ProcessResult
     run(name + "=" + value + " " + command)
 
-# ── Safe argv-based execution (no shell, no JADE_ALLOW_SHELL needed) ─────────
+# ── Safe argv-based execution (no shell, no JINN_ALLOW_SHELL needed) ─────────
 
 # Spawn a program with explicit argument list and capture its stdout.
 # Does NOT invoke a shell — arguments are passed verbatim, preventing injection.
@@ -116,7 +116,7 @@ type ProcessResult
     exit_code is 0
     # Build a single Vec with prog prepended to args for the C ABI
     argv is vec(prog) + args
-    n is extern.jade_spawn_capture(%argv, buf, buf_size, %exit_code as %i32)
+    n is extern.jinn_spawn_capture(%argv, buf, buf_size, %exit_code as %i32)
     if n < 0
         extern.free(buf)
         return ProcessResult(output is "", exit_code is -1)
@@ -131,7 +131,7 @@ type ProcessResult
 *spawn_exec(prog as String, args as Vec of String) returns i32
     exit_code is 0
     argv is vec(prog) + args
-    extern.jade_spawn_exec(%argv, %exit_code as %i32)
+    extern.jinn_spawn_exec(%argv, %exit_code as %i32)
     exit_code
 
 # Spawn a program and return its stdout lines as a vector.

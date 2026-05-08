@@ -1,6 +1,6 @@
-# Jade Language — Multi-Perspective Analysis & Remediation Plan
+# Jinn Language — Multi-Perspective Analysis & Remediation Plan
 
-> Evaluation of Jade from 24 professional developer perspectives.
+> Evaluation of Jinn from 24 professional developer perspectives.
 > Each section: what works, what's missing, severity rating, and concrete remediation.
 > Severity: **BLOCKER** (unusable), **MAJOR** (painful workaround), **MINOR** (inconvenient), **WISH** (nice-to-have)
 
@@ -47,13 +47,13 @@
 
 ### What Works
 - Compiles to native binary — no runtime dependency (except libc)
-- `os.jade`: env vars, PID, CLI args
-- `fs.jade`: mkdir, rmdir, list_dir, walk, copy, rename, file_size, exists
-- `io.jade`: read_file, write_file, read_lines, read_stdin
-- `path.jade`: join, normalize, dir/base/ext/stem
-- `json.jade`: full parse/stringify — handles config files
-- `time.jade`: monotonic clock, sleep, elapsed
-- `signal.jade`: handle, ignore, raise
+- `os.jn`: env vars, PID, CLI args
+- `fs.jn`: mkdir, rmdir, list_dir, walk, copy, rename, file_size, exists
+- `io.jn`: read_file, write_file, read_lines, read_stdin
+- `path.jn`: join, normalize, dir/base/ext/stem
+- `json.jn`: full parse/stringify — handles config files
+- `time.jn`: monotonic clock, sleep, elapsed
+- `signal.jn`: handle, ignore, raise
 - Pattern-directed functions — clean CLI dispatch
 - 0.94× C performance — monitoring agents won't bottleneck
 
@@ -82,9 +82,9 @@
 
 ### What Works
 - Full libm math library — sqrt, trig, exp, log, constants
-- `rand.jade`: xoshiro256** PRNG, seeding, range, shuffle, choice — good for Monte Carlo
-- `sort.jade`: introsort — efficient in-place sorting
-- `json.jade`: can parse data files
+- `rand.jn`: xoshiro256** PRNG, seeding, range, shuffle, choice — good for Monte Carlo
+- `sort.jn`: introsort — efficient in-place sorting
+- `json.jn`: can parse data files
 - NDArray type in grammar — matrix creation `3 by 3`
 - Pipeline operator `~` — data transformation chains
 - List comprehensions — `[x pow 2 for x in 0 to 100]`
@@ -116,9 +116,9 @@
 
 ### What Works
 - 0.94× C performance — CPU-bound game logic is fast
-- `math.jade`: trig, lerp, clamp, map_range — useful for game math
-- `rand.jade`: good PRNG for procedural generation, loot tables
-- `time.jade`: monotonic clock for delta time, frame timing
+- `math.jn`: trig, lerp, clamp, map_range — useful for game math
+- `rand.jn`: good PRNG for procedural generation, loot tables
+- `time.jn`: monotonic clock for delta time, frame timing
 - Structs with methods — can model entities, components
 - Enum pattern matching — state machines for AI, UI
 - Actor model — could model game entities as actors
@@ -150,11 +150,11 @@
 **Profile**: Builds web applications — frontend (SPA, SSR) or backend (REST APIs, microservices). Expects HTTP, templating, database drivers, auth.
 
 ### What Works
-- `http.jade`: basic HTTP/1.1 client — fetch, post_json, get_header
-- `net.jade`: TCP listener/stream — can accept connections
-- `json.jade`: full JSON parse/stringify — API payloads
-- `strings.jade`: StringBuilder — efficient response construction
-- `fmt.jade`: pad, join, hex — formatting helpers
+- `http.jn`: basic HTTP/1.1 client — fetch, post_json, get_header
+- `net.jn`: TCP listener/stream — can accept connections
+- `json.jn`: full JSON parse/stringify — API payloads
+- `strings.jn`: StringBuilder — efficient response construction
+- `fmt.jn`: pad, join, hex — formatting helpers
 - Pattern-directed functions — could model route dispatch
 - Persistent stores — basic CRUD without external DB
 - Actor model — request-per-actor concurrency
@@ -231,7 +231,7 @@
 | Gap | Severity | Detail |
 |-----|----------|--------|
 | No B-tree / B+ tree implementation | **MAJOR** | The fundamental indexing structure for ordered data. Hash index only supports equality. |
-| No mmap support from Jade | **MAJOR** | Memory-mapped I/O is critical for database buffer pools. Runtime uses it internally but not exposed. |
+| No mmap support from Jinn | **MAJOR** | Memory-mapped I/O is critical for database buffer pools. Runtime uses it internally but not exposed. |
 | No async / non-blocking disk I/O (io_uring, AIO) | **MAJOR** | High-throughput databases need async I/O to overlap disk and compute. |
 | No fine-grained locking (rwlock, optimistic CC) | **MAJOR** | Runtime only has spinlocks. No reader-writer locks, no MVCC support. |
 | No SIMD for scan/filter operations | **MAJOR** | Columnar scan with AVX2 predicate evaluation is 10-20× faster than scalar. |
@@ -242,7 +242,7 @@
 | Transaction is a no-op (no rollback) | **MINOR** | `transaction { ... }` compiles but has no ACID semantics. |
 | No concurrent reader support | **MINOR** | Store file format assumes single-process access. |
 
-### Verdict: **PARTIALLY VIABLE** — Jade's built-in store is a strong conceptual foundation, but lacks range queries, indexing, real transactions, and async I/O for a production database.
+### Verdict: **PARTIALLY VIABLE** — Jinn's built-in store is a strong conceptual foundation, but lacks range queries, indexing, real transactions, and async I/O for a production database.
 
 ---
 
@@ -251,14 +251,14 @@
 **Profile**: Builds proxies, load balancers, RPC frameworks, consensus protocols, service meshes. Needs non-blocking I/O, protocol parsers, connection pools, observability.
 
 ### What Works
-- `net.jade`: TCP and UDP sockets — listen, accept, connect, send, recv
+- `net.jn`: TCP and UDP sockets — listen, accept, connect, send, recv
 - Channels — pipeline concurrency between protocol stages
 - Actor model — natural fit for per-connection actors
 - Select — multiplexing across channels (not sockets, but useful internally)
 - Work-stealing scheduler — efficient concurrent request handling
 - Coroutines — lightweight connection handlers (64 KB stack each)
 - `sim for` — parallel request fanout
-- `json.jade` — JSON-based protocol parsing
+- `json.jn` — JSON-based protocol parsing
 
 ### What's Missing
 
@@ -268,7 +268,7 @@
 | No TLS (OpenSSL / rustls / boringssl) | **BLOCKER** | Cannot build secure services. |
 | No DNS resolution | **BLOCKER** | `getaddrinfo` not exposed. Cannot resolve hostnames. |
 | IPv4 only | **MAJOR** | Production networks require IPv6 support. |
-| No socket select/poll/epoll from Jade | **MAJOR** | `select` only works on channels, not network sockets. |
+| No socket select/poll/epoll from Jinn | **MAJOR** | `select` only works on channels, not network sockets. |
 | No connection pooling | **MAJOR** | Every request opens a new TCP connection. |
 | No gRPC / protobuf support | **MAJOR** | Standard for microservice communication. |
 | No binary protocol parser combinators | **MAJOR** | Hand-writing byte-level parsers is error-prone. |
@@ -310,7 +310,7 @@
 | No custom panic handler | **MINOR** | Kernel panic ≠ process abort — needs custom handler. |
 | No noinline / cold / hot attributes | **MINOR** | Code placement optimization for icache. |
 
-### Verdict: **NOT VIABLE** — 5 blockers. OS development requires freestanding compilation and ABI control that Jade doesn't offer.
+### Verdict: **NOT VIABLE** — 5 blockers. OS development requires freestanding compilation and ABI control that Jinn doesn't offer.
 
 ---
 
@@ -339,7 +339,7 @@
 | No trait method default implementations | **MAJOR** | Visitor pattern needs defaults that do nothing for unhandled nodes. |
 | No HashMap with custom types as keys | **MAJOR** | Symbol tables need struct keys. Map keys are String-only. |
 | No `?` error propagation operator | **MAJOR** | Compiler passes return Result everywhere — manual match is verbose. |
-| No recursive enum (direct) | **MAJOR** | `enum Expr { Add(Expr, Expr) }` requires `Box` — Jade has no explicit Box. |
+| No recursive enum (direct) | **MAJOR** | `enum Expr { Add(Expr, Expr) }` requires `Box` — Jinn has no explicit Box. |
 | No string interning / symbol table | **MINOR** | Repeated string comparison is slow for large programs. |
 | No mutable captures in closures | **MINOR** | Transformation passes that accumulate state in closures. |
 | No custom iterators easily | **MINOR** | Walking complex trees requires manual iterator implementation. |
@@ -355,7 +355,7 @@
 **Profile**: Proves theorems computationally, explores number theory, symbolic algebra, numerical methods, combinatorics. Cares about mathematical notation in code, precision, and the ability to express abstract structures. Often switches between exploratory scripts and production implementations.
 
 ### What Works
-- Full libm via `math.jade` — sqrt, trig, exp, log, gamma, floor, ceil, copysign, fma
+- Full libm via `math.jn` — sqrt, trig, exp, log, gamma, floor, ceil, copysign, fma
 - Constants: PI, E, TAU, INF, NEG_INF
 - `pow` operator reads naturally: `x pow 2` instead of `pow(x, 2)`
 - Pattern-directed functions — mathematical piecewise definitions feel native:
@@ -366,7 +366,7 @@
   ```
 - List comprehensions — set-builder notation: `[x pow 2 for x in 1 to 100 if is_prime(x)]`
 - Pipeline `~` — function composition chains: `x ~ normalize ~ transform ~ round`
-- `rand.jade` — Monte Carlo sampling, shuffle for randomized algorithms
+- `rand.jn` — Monte Carlo sampling, shuffle for randomized algorithms
 - Recursive functions — natural expression of inductive definitions
 - Wrapping/saturating/checked arithmetic — control over overflow behavior
 - 0.94× C performance — competitive for numerical experiments
@@ -399,16 +399,16 @@
 ### What Works
 - Raw pointers (`%`/`@`) — arbitrary memory read/write
 - Integer width control (i8..u64) — match target architecture word sizes
-- `net.jade` — TCP/UDP raw sockets for port scanning, protocol probing
-- `io.jade` — binary file read/write for parsing file formats
+- `net.jn` — TCP/UDP raw sockets for port scanning, protocol probing
+- `io.jn` — binary file read/write for parsing file formats
 - Extern C FFI — call any C library (ptrace, syscalls, libpcap)
 - `@packed`/`@strict` — reproduce exact binary structures from specifications
 - Wrapping arithmetic — overflow-deliberate calculations for hash collisions, ROP gadgets
 - Pattern matching — protocol state machine parsing
-- `regex.jade` (PCRE2) — log analysis, pattern extraction
-- `strings.jade` — StringBuilder for payload construction
+- `regex.jn` (PCRE2) — log analysis, pattern extraction
+- `strings.jn` — StringBuilder for payload construction
 - Compiles to native binary — no VM/interpreter overhead, harder to reverse
-- `signal.jade` — handle SIGSEGV for crash analysis
+- `signal.jn` — handle SIGSEGV for crash analysis
 
 ### What's Missing
 
@@ -459,7 +459,7 @@
 | No HTTP/2 multiplexing | **MINOR** | Mobile networks benefit from multiplexed requests. |
 | No Keychain / secure storage | **MINOR** | Credential storage on mobile platforms. |
 
-### Verdict: **NOT VIABLE** — 4 blockers. Mobile development requires platform SDK integration that Jade has no path to today. The viable route would be Jade-to-C for shared business logic, with platform-native UI.
+### Verdict: **NOT VIABLE** — 4 blockers. Mobile development requires platform SDK integration that Jinn has no path to today. The viable route would be Jinn-to-C for shared business logic, with platform-native UI.
 
 ---
 
@@ -504,7 +504,7 @@
 - Deterministic Perceus RC — no GC pauses in hot path (critical for latency)
 - 0.94× C performance — competitive for pricing kernels
 - Full libm math — Black-Scholes, Greeks calculations
-- `time.jade` monotonic clock — nanosecond latency measurement
+- `time.jn` monotonic clock — nanosecond latency measurement
 - Channels — market data fan-out, order routing pipelines
 - Actor model — per-instrument actors, per-strategy actors
 - Pattern matching — order type dispatch, state machine for order lifecycle
@@ -559,14 +559,14 @@
 | Error messages could be more pedagogical | **MAJOR** | Compiler errors are functional but don't suggest *why* something went wrong or *how* to fix it. |
 | No playground / web IDE | **MAJOR** | Try-without-installing lowers the barrier to zero. Rust Playground, Go Playground set this expectation. |
 | No debugger integration | **MAJOR** | Students need to step through code, inspect variables. DWARF info exists but no GDB/LLDB walkthrough. |
-| No standard tutorials / book | **MAJOR** | Learning material. jade.md exists but isn't a progressive tutorial. |
-| No package manager | **MINOR** | Students sharing code need `jadec install student-lib` simplicity. |
+| No standard tutorials / book | **MAJOR** | Learning material. jinn.md exists but isn't a progressive tutorial. |
+| No package manager | **MINOR** | Students sharing code need `jinnc install student-lib` simplicity. |
 | No test framework | **MINOR** | Teaching TDD requires built-in assertion + test runner. |
 | Confusing dual syntax (`as` vs `:` for types, `is` for binding vs equality) | **MINOR** | Parser accepts both old and new syntax — confusing when reading examples. |
 | No string interpolation | **MINOR** | `log('x is {x}')` is more natural than concatenation for beginners. |
 | No visual debugger / step-through | **WISH** | Visualize execution flow. |
 
-### Verdict: **PARTIALLY VIABLE** — Jade's English-like syntax is arguably the best beginner syntax of any compiled language. A REPL and better error messages would make it genuinely excellent for education.
+### Verdict: **PARTIALLY VIABLE** — Jinn's English-like syntax is arguably the best beginner syntax of any compiled language. A REPL and better error messages would make it genuinely excellent for education.
 
 ---
 
@@ -589,7 +589,7 @@
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
-| No callback function registration with C | **BLOCKER** | Audio APIs (ALSA, CoreAudio, JACK, PortAudio) call your function. Need to pass Jade function pointer to C callback slot. |
+| No callback function registration with C | **BLOCKER** | Audio APIs (ALSA, CoreAudio, JACK, PortAudio) call your function. Need to pass Jinn function pointer to C callback slot. |
 | No `f32` array operations | **BLOCKER** | Audio is f32 buffers. No bulk f32 add/multiply/copy — must loop element-by-element. |
 | No SIMD for buffer processing | **MAJOR** | 4× throughput with SSE for sample processing. Without SIMD, cannot meet real-time budget for complex effects. |
 | No ring buffer with f32 | **MAJOR** | std/collections RingBuffer is i64-only. Delay lines, circular buffers are core DSP primitives. |
@@ -609,14 +609,14 @@
 **Profile**: Writes glue code, build scripts, data migration tools, cron jobs, system administration scripts. Values fast startup, easy file manipulation, text processing, and low ceremony.
 
 ### What Works
-- `fs.jade` — walk directories, copy/move/rename files, check existence
-- `io.jade` — read/write files, read_lines for text processing
-- `path.jade` — join, normalize, dir/base/ext manipulation
-- `regex.jade` (PCRE2) — powerful text pattern matching
-- `json.jade` — parse configs, transform data files
-- `os.jade` — env vars, PID, basic CLI args
-- `strings.jade` — StringBuilder for output construction
-- `fmt.jade` — pad, join, hex formatting
+- `fs.jn` — walk directories, copy/move/rename files, check existence
+- `io.jn` — read/write files, read_lines for text processing
+- `path.jn` — join, normalize, dir/base/ext manipulation
+- `regex.jn` (PCRE2) — powerful text pattern matching
+- `json.jn` — parse configs, transform data files
+- `os.jn` — env vars, PID, basic CLI args
+- `strings.jn` — StringBuilder for output construction
+- `fmt.jn` — pad, join, hex formatting
 - Pipeline `~` — chain text transformations naturally
 - `for line in read_lines(path)` — idiomatic line processing
 - Pattern matching — dispatch on file types, error conditions
@@ -627,18 +627,18 @@
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
-| No subprocess / shell command execution | **BLOCKER** | Scripts orchestrate other programs. `system()` exists in os.jade but no stdout capture. |
-| No glob / pattern matching on filenames | **MAJOR** | `*.log`, `src/**/*.jade` directory filtering is essential for file-processing scripts. |
+| No subprocess / shell command execution | **BLOCKER** | Scripts orchestrate other programs. `system()` exists in os.jn but no stdout capture. |
+| No glob / pattern matching on filenames | **MAJOR** | `*.log`, `src/**/*.jn` directory filtering is essential for file-processing scripts. |
 | No string interpolation | **MAJOR** | Building commands and messages with `'cp ' + src + ' ' + dst` is painful. `f'cp {src} {dst}'` expected. |
 | No REPL for quick experiments | **MAJOR** | Often want to test a regex or file operation interactively before scripting. |
-| No shebang support | **MAJOR** | `#!/usr/bin/env jadec run` for executable scripts. Currently must compile first. |
+| No shebang support | **MAJOR** | `#!/usr/bin/env jinnc run` for executable scripts. Currently must compile first. |
 | No `system()` with stdout capture | **MAJOR** | `os.system(cmd)` returns exit code only. Need stdout/stderr capture. |
 | No temporary file/directory utilities | **MINOR** | `mktemp`, `with_temp_dir { ... }` patterns. |
 | No colored terminal output | **MINOR** | Progress indicators, error highlighting for interactive scripts. |
 | No CSV parsing | **MINOR** | Common data migration source format. |
 | Compile time overhead for small scripts | **MINOR** | Even 100ms compile penalizes rapid iteration vs Python/Bash. |
 
-### Verdict: **NOT VIABLE** — no subprocess execution with output capture is the single blocker. With that plus string interpolation, Jade could be a strong compiled scripting language.
+### Verdict: **NOT VIABLE** — no subprocess execution with output capture is the single blocker. With that plus string interpolation, Jinn could be a strong compiled scripting language.
 
 ---
 
@@ -661,9 +661,9 @@
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
-| No qualified compiler (DO-330 TQL) | **BLOCKER** | Compilers used in DAL A/B software must be qualified or all output must be verified. Jade has no qualification kit. |
+| No qualified compiler (DO-330 TQL) | **BLOCKER** | Compilers used in DAL A/B software must be qualified or all output must be verified. Jinn has no qualification kit. |
 | No MCDC coverage tooling | **BLOCKER** | DO-178C requires Modified Condition/Decision Coverage. No built-in or compatible coverage tool. |
-| No formal semantics | **BLOCKER** | Certification requires a precise, unambiguous language specification. jade.md/jade.ebnf is informal. |
+| No formal semantics | **BLOCKER** | Certification requires a precise, unambiguous language specification. jinn.md/jinn.ebnf is informal. |
 | No traceability from requirements → code → tests | **BLOCKER** | Every line must trace to a requirement. No annotation or reporting mechanism. |
 | No static analysis (MISRA-like rules) | **BLOCKER** | Avionics requires static analysis proving absence of undefined behavior, dead code, unreachable code. |
 | No freestanding / bare-metal target | **BLOCKER** | Avionics runs on VxWorks, RTEMS, or bare-metal ARM/PowerPC. Runtime assumes Linux. |
@@ -695,7 +695,7 @@
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
-| No MISRA-equivalent coding standard | **BLOCKER** | ISO 26262 requires an "appropriate" language subset. No Jade subset is defined. |
+| No MISRA-equivalent coding standard | **BLOCKER** | ISO 26262 requires an "appropriate" language subset. No Jinn subset is defined. |
 | No qualified compiler | **BLOCKER** | ASIL C/D requires tool qualification or independent output verification. |
 | No static analysis framework | **BLOCKER** | Polyspace, Coverity equivalents needed for absence-of-runtime-error proofs. |
 | No unit test framework with coverage | **BLOCKER** | Must demonstrate structural coverage (statement, branch, MCDC at higher ASIL). |
@@ -716,7 +716,7 @@
 
 ### What Works
 - 0.94× C performance — viable for control loops at 1kHz+
-- `math.jade` — trig, atan2, sqrt for kinematics/transforms
+- `math.jn` — trig, atan2, sqrt for kinematics/transforms
 - `sim for` — parallel sensor data processing
 - Channels — pipeline architecture (sensor → filter → planner → actuator)
 - Actor model — per-subsystem actors (vision, navigation, control)
@@ -751,13 +751,13 @@
 ### What Works
 - Compiles to static native binary — ideal for `FROM scratch` Docker images
 - Fast startup — no runtime initialization (unlike JVM, .NET)
-- `json.jade` — Kubernetes API responses are JSON
-- `os.jade` — environment variables for 12-factor app config
-- `fs.jade` — file manipulation for config templating
-- `path.jade` — path operations for build artifact management
+- `json.jn` — Kubernetes API responses are JSON
+- `os.jn` — environment variables for 12-factor app config
+- `fs.jn` — file manipulation for config templating
+- `path.jn` — path operations for build artifact management
 - Actor model — operator reconciliation loops
 - Channels — event stream processing
-- `signal.jade` — graceful SIGTERM handling for container shutdown
+- `signal.jn` — graceful SIGTERM handling for container shutdown
 
 ### What's Missing
 
@@ -783,12 +783,12 @@
 **Profile**: Processes genomes (FASTA/FASTQ), runs sequence alignment, builds phylogenetic trees, analyzes protein structures. Deals with terabyte-scale data, string matching on 4-letter alphabets, and statistical models.
 
 ### What Works
-- `regex.jade` (PCRE2) — pattern matching on DNA sequences
-- `strings.jade` / `fmt.jade` — sequence manipulation and formatting
-- `io.jade` — line-by-line file reading for FASTA parsing
-- `sort.jade` — sorting alignment hits
-- `math.jade` — log-likelihood scoring
-- `rand.jade` — Monte Carlo for phylogenetics bootstrapping
+- `regex.jn` (PCRE2) — pattern matching on DNA sequences
+- `strings.jn` / `fmt.jn` — sequence manipulation and formatting
+- `io.jn` — line-by-line file reading for FASTA parsing
+- `sort.jn` — sorting alignment hits
+- `math.jn` — log-likelihood scoring
+- `rand.jn` — Monte Carlo for phylogenetics bootstrapping
 - `sim for` — parallel alignment of independent sequences
 - Pipeline `~` — data transformation chains (read → filter → align → score)
 - Compiles to native — performance-sensitive for genome-scale data
@@ -818,12 +818,12 @@
 
 ### What Works
 - 0.94× C performance — viable for inference engines if tensors existed
-- `math.jade` — activation functions (exp, log, tanh available via libm)
-- `rand.jade` — weight initialization, data augmentation shuffling
+- `math.jn` — activation functions (exp, log, tanh available via libm)
+- `rand.jn` — weight initialization, data augmentation shuffling
 - `sim for` — parallel data preprocessing
 - Pipeline `~` — model as chain of transforms
 - Actor model — distributed training coordination (conceptually)
-- `json.jade` — model config files, dataset metadata
+- `json.jn` — model config files, dataset metadata
 - Arena allocator — per-batch memory
 
 ### What's Missing
@@ -847,7 +847,7 @@
 
 # Formal Verification: Analysis & Roadmap
 
-## Can Jade Be Formally Verified?
+## Can Jinn Be Formally Verified?
 
 **Short answer**: Partially, with significant investment. Full formal verification of the compiler to aerospace certification standards (DO-330 TQL-1) is theoretically possible but practically a multi-year, multi-million-dollar effort. However, *incremental* formal methods can yield high confidence at much lower cost.
 
@@ -858,7 +858,7 @@
 | **Test coverage** | Moderate | 1,282 tests (221 unit + 800 bulk + 261 integration), all passing |
 | **Compiler written in** | Rust | Memory-safe, no undefined behavior in the compiler itself |
 | **LLVM backend** | Shared with Clang | LLVM is battle-tested but not formally verified |
-| **Formal spec** | None | jade.ebnf is informal, jade.md is a guide — neither is a formal semantics |
+| **Formal spec** | None | jinn.ebnf is informal, jinn.md is a guide — neither is a formal semantics |
 | **Type soundness proof** | None | Type system is tested but not proven sound |
 | **Memory safety proof** | None | Perceus RC is deterministic but correctness not formally established |
 | **Certified compilation** | None | No CompCert-like guarantee that codegen preserves semantics |
@@ -868,10 +868,10 @@
 Three distinct levels of rigor, each independently valuable:
 
 ### Level 1: Formal Language Specification
-**What**: An unambiguous, mathematical definition of Jade's syntax and semantics.
+**What**: An unambiguous, mathematical definition of Jinn's syntax and semantics.
 **Why**: Required for DO-178C/DO-330, ISO 26262, IEC 61508. Also eliminates "implementation is the spec" ambiguity.
 **How**:
-1. **Formalize the grammar** — Convert jade.ebnf to a parser-generator-verified grammar (ANTLR, Menhir) with proven unambiguity
+1. **Formalize the grammar** — Convert jinn.ebnf to a parser-generator-verified grammar (ANTLR, Menhir) with proven unambiguity
 2. **Operational semantics** — Write small-step or big-step rules for each expression/statement form in a proof assistant (Coq, Lean 4, Isabelle/HOL)
 3. **Type system specification** — Define typing judgments (`Γ ⊢ e : τ`) covering inference, unification, monomorphization, and trait resolution
 4. **Memory model** — Formalize Perceus RC rules: when retains/releases are inserted, when reuse is safe, when borrows are valid
@@ -881,7 +881,7 @@ Three distinct levels of rigor, each independently valuable:
 **Deliverable**: Machine-checked specification in Lean 4 or Coq, publishable as a reference semantics
 
 ### Level 2: Type Soundness & Memory Safety Proofs
-**What**: Mathematical proof that well-typed Jade programs do not exhibit type errors or memory violations at runtime.
+**What**: Mathematical proof that well-typed Jinn programs do not exhibit type errors or memory violations at runtime.
 **Why**: The "progress + preservation" theorem. Proves the type checker and ownership system are correct — not just tested.
 **How**:
 1. **Formalize the core type system** — Hindley-Milner with extensions (TypeVar unification, traits, monomorphization)
@@ -910,7 +910,7 @@ Three distinct levels of rigor, each independently valuable:
 
 **Effort**: 3–5+ years, 4–6 researchers (CompCert took ~6 person-years for a simpler C subset)
 **Prerequisite**: Levels 1 and 2
-**Deliverable**: A mechanically verified Jade compiler, potentially the first verified compiler for a language with Perceus RC
+**Deliverable**: A mechanically verified Jinn compiler, potentially the first verified compiler for a language with Perceus RC
 
 ## Pragmatic Intermediate Steps
 
@@ -918,23 +918,23 @@ Full Level 3 verification is years away, but these steps provide increasing assu
 
 ### Step 1: Property-Based Testing (Effort: Weeks)
 - Add QuickCheck/proptest to the Rust test suite
-- Generate random Jade programs, compile, execute, check invariants:
+- Generate random Jinn programs, compile, execute, check invariants:
   - Type checker accepts → program doesn't crash with type error at runtime
   - Perceus hints → no leak (compare valgrind output)
   - Optimizer → same output as unoptimized
-- **Tools**: proptest (Rust), Csmith-like generator for Jade ASTs
+- **Tools**: proptest (Rust), Csmith-like generator for Jinn ASTs
 - **Already feasible** with current infrastructure
 
 ### Step 2: Differential Testing Against C (Effort: Weeks)
-- For each Jade program with a C equivalent (28 benchmarks exist), compile both and compare outputs
+- For each Jinn program with a C equivalent (28 benchmarks exist), compile both and compare outputs
 - Extend to auto-generated programs with known semantics
 - Catches codegen bugs, optimizer regressions
 - **Already partially done** — benchmark comparison infrastructure exists
 
 ### Step 3: Formal Grammar Verification (Effort: 1–2 Months)
-- Convert jade.ebnf to a formally verified parser in Menhir or tree-sitter with conflict-free proof
+- Convert jinn.ebnf to a formally verified parser in Menhir or tree-sitter with conflict-free proof
 - Guarantees: no ambiguity, every valid program parses to exactly one AST
-- **Low-hanging fruit** — tree-sitter-jade already exists; add unambiguity proofs
+- **Low-hanging fruit** — tree-sitter-jinn already exists; add unambiguity proofs
 
 ### Step 4: LLVM IR Validation (Effort: 1–2 Months)
 - Run `llvm-verify` / `opt -verify` on all emitted IR
@@ -943,8 +943,8 @@ Full Level 3 verification is years away, but these steps provide increasing assu
 - **Already feasible** — just needs CI integration
 
 ### Step 5: Rust Type System as Leverage (Effort: Ongoing)
-- The Jade compiler is written in Rust — already memory-safe, no buffer overflows, no use-after-free *in the compiler itself*
-- Add `#[deny(unsafe_code)]` to the compiler crate (Jade uses zero unsafe blocks already)
+- The Jinn compiler is written in Rust — already memory-safe, no buffer overflows, no use-after-free *in the compiler itself*
+- Add `#[deny(unsafe_code)]` to the compiler crate (Jinn uses zero unsafe blocks already)
 - This provides a partial argument: the compiler cannot corrupt its own memory, reducing the class of possible miscompilations
 - **Already true** — just needs documentation for certification artifacts
 
@@ -967,12 +967,12 @@ For a language to be used in certified avionics software, one of these must be t
 - Don't qualify the compiler; instead, independently verify every emitted binary
 - Disassemble output, prove it matches source semantics via review + analysis
 - Cost: $50K–$500K per application (proportional to code size)
-- Practical for small, safety-critical Jade programs (< 10K LOC)
+- Practical for small, safety-critical Jinn programs (< 10K LOC)
 
-**Option C: Use Jade as a Design Language Only**
-- Write algorithms in Jade, verify behavior, then manually translate to qualified Ada/C
-- Jade serves as executable specification
-- Lowest barrier — leverages Jade's readable syntax for design documents
+**Option C: Use Jinn as a Design Language Only**
+- Write algorithms in Jinn, verify behavior, then manually translate to qualified Ada/C
+- Jinn serves as executable specification
+- Lowest barrier — leverages Jinn's readable syntax for design documents
 
 **Recommendation**: Start with Step 1–6 (pragmatic testing hardening, ~3 months). Then pursue Level 1 formalization (formal spec, ~12 months). This combination provides evidence for ISO 26262 ASIL B and below. Aviation DAL A/B certification (Levels 2–3) is a long-term research investment.
 
@@ -986,22 +986,22 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 
 ### 1.1 Subprocess Spawning
 **Unblocks**: DevOps, Web, Game (asset pipelines), Networking, OS (testing), Hacker, Automation
-**Scope**: Add `process.spawn(cmd, args)`, `process.output(cmd)`, `process.pipe()` to std/os.jade
+**Scope**: Add `process.spawn(cmd, args)`, `process.output(cmd)`, `process.pipe()` to std/os.jn
 **Effort**: Small — wraps `posix_spawn` / `fork`+`exec` via extern C
 **Implementation**:
 - Add extern declarations for `posix_spawn`, `waitpid`, `pipe`, `dup2`
-- Create `std/process.jade` with `run(cmd, args) returns ProcessResult` and `spawn(cmd, args) returns Process`
+- Create `std/process.jn` with `run(cmd, args) returns ProcessResult` and `spawn(cmd, args) returns Process`
 - `Process` type with `stdin_write`, `stdout_read`, `wait`, `kill` methods
 - `ProcessResult` type with `exit_code`, `stdout`, `stderr` fields
 
 ### 1.2 TLS / HTTPS Support  
 **Unblocks**: DevOps, Web, Networking, Blockchain (P2P), Hacker, FinTech
 **Scope**: Bind to OpenSSL (or BearSSL for minimal footprint)
-**Effort**: Medium — extern C bindings + wrapper in `std/tls.jade`
+**Effort**: Medium — extern C bindings + wrapper in `std/tls.jn`
 **Implementation**:
 - Add extern declarations for `SSL_CTX_new`, `SSL_new`, `SSL_connect`, `SSL_read`, `SSL_write`
-- Create `std/tls.jade` with `TlsStream` wrapping `TcpStream`
-- Update `std/http.jade` to use TLS when URL scheme is `https`
+- Create `std/tls.jn` with `TlsStream` wrapping `TcpStream`
+- Update `std/http.jn` to use TLS when URL scheme is `https`
 - Link `-lssl -lcrypto` when TLS module is imported
 
 ### 1.3 DNS Resolution
@@ -1009,14 +1009,14 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Expose `getaddrinfo` via extern
 **Effort**: Small
 **Implementation**:
-- Add `resolve(host) returns Vec of String` to `std/net.jade`
+- Add `resolve(host) returns Vec of String` to `std/net.jn`
 - Extern `getaddrinfo`, `freeaddrinfo`, iterate linked list of results
 - Update `tcp_connect` and `http.request` to auto-resolve hostnames
 
 ### 1.4 Cross-Compilation Support
 **Unblocks**: Embedded, DevOps, Game, OS
 **Scope**: `--target <triple>` flag using LLVM's target infrastructure
-**Effort**: Medium — Jade already has LLVM; needs target triple propagation
+**Effort**: Medium — Jinn already has LLVM; needs target triple propagation
 **Implementation**:
 - Accept `--target <triple>` in CLI, pass to `TargetMachine::create`
 - Accept `--cpu <name>` and `--features <+avx2,+sse4.2>` flags
@@ -1038,7 +1038,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 ### 2.1 Generic Collections
 **Unblocks**: Data Scientist, Game, Compiler, Database, DSP, FinTech, Mathematician
 **Scope**: Make Stack, Queue, RingBuffer generic; add custom Map key support
-**Effort**: Small — rewrite std/collections.jade using `of T`
+**Effort**: Small — rewrite std/collections.jn using `of T`
 **Implementation**:
 - Replace `i64` with `of T` parameter in Stack, Queue, RingBuffer
 - Extend Map to support struct keys via `Hash` and `Eq` trait requirements
@@ -1050,7 +1050,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Minimal router over existing TCP + coroutines
 **Effort**: Medium
 **Implementation**:
-- Create `std/http_server.jade` with `Server` type
+- Create `std/http_server.jn` with `Server` type
 - `Server.route(method, path, handler)` — path with `:param` extraction
 - `Server.listen(host, port)` — accept loop, spawn coroutine per connection
 - Parse request line + headers, pass `Request` to handler, write `Response`
@@ -1062,7 +1062,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Effort**: Medium
 **Implementation**:
 - Extern declarations for `sqlite3_open`, `sqlite3_prepare_v2`, `sqlite3_step`, `sqlite3_column_*`, `sqlite3_finalize`
-- Create `std/sqlite.jade` with `Db`, `Statement`, `Row` types
+- Create `std/sqlite.jn` with `Db`, `Statement`, `Row` types
 - `Db.open(path)`, `Db.exec(sql)`, `Db.query(sql, params) returns Vec of Row`
 - Parameterized queries to prevent SQL injection
 - Link `-lsqlite3` when imported
@@ -1070,18 +1070,18 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 ### 2.4 TOML / YAML Parser
 **Unblocks**: DevOps, Web (config)
 **Scope**: At minimum TOML (simpler spec). YAML can follow.
-**Effort**: Medium — pure Jade recursive-descent (like json.jade)
+**Effort**: Medium — pure Jinn recursive-descent (like json.jn)
 **Implementation**:
-- Create `std/toml.jade` with `parse(text) returns TomlValue`
+- Create `std/toml.jn` with `parse(text) returns TomlValue`
 - `enum TomlValue { TStr, TInt, TFloat, TBool, TArray, TTable, TDatetime }`
 - Nested table support, array-of-tables, inline tables
 
 ### 2.5 CSV Parser
 **Unblocks**: Data Scientist, DevOps (log analysis), Automation, FinTech
 **Scope**: RFC 4180 CSV parser
-**Effort**: Small — pure Jade
+**Effort**: Small — pure Jinn
 **Implementation**:
-- Create `std/csv.jade` with `parse(text) returns Vec of Vec of String`
+- Create `std/csv.jn` with `parse(text) returns Vec of Vec of String`
 - Handle quoted fields, escaped quotes, newlines in fields
 - `parse_with_headers(text) returns Vec of Map`
 - Streaming: `read_csv(path, callback)` processes row-by-row
@@ -1123,7 +1123,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Integrate epoll/kqueue with coroutine scheduler
 **Effort**: Large
 **Implementation**:
-- Add `jade_epoll_create`, `jade_epoll_ctl`, `jade_epoll_wait` to runtime
+- Add `jinn_epoll_create`, `jinn_epoll_ctl`, `jinn_epoll_wait` to runtime
 - When coroutine does `recv()` on non-ready socket, park and register with epoll
 - Scheduler polls epoll in idle loop instead of spinning
 - Expose as `async_read`, `async_write` that yield coroutine on EAGAIN
@@ -1145,7 +1145,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Bind to a C crypto library (libsodium or OpenSSL libcrypto)
 **Effort**: Medium
 **Implementation**:
-- Create `std/crypto.jade` with extern bindings
+- Create `std/crypto.jn` with extern bindings
 - Hashing: `sha256(data)`, `sha512(data)`, `blake2b(data)`
 - HMAC: `hmac_sha256(key, data)`
 - Symmetric: `aes256_gcm_encrypt(key, nonce, plaintext)`, `aes256_gcm_decrypt(...)`
@@ -1155,7 +1155,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 
 ### 3.4 IPv6 Support
 **Unblocks**: Networking, Web, DevOps
-**Scope**: Extend net.jade socket types
+**Scope**: Extend net.jn socket types
 **Effort**: Small
 **Implementation**:
 - Add `sockaddr_in6` handling alongside `sockaddr_in`
@@ -1165,9 +1165,9 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 ### 3.5 Big Integer Library
 **Unblocks**: Blockchain, Data Scientist, Crypto, Mathematician, FinTech
 **Scope**: Arbitrary-precision integer arithmetic
-**Effort**: Medium — can bind to GMP or implement in Jade
+**Effort**: Medium — can bind to GMP or implement in Jinn
 **Implementation**:
-- Create `std/bigint.jade` with `BigInt` type
+- Create `std/bigint.jn` with `BigInt` type
 - Backed by `Vec of u64` limbs with schoolbook multiply (or GMP extern)
 - Operations: add, sub, mul, div, mod, pow, gcd, modpow
 - Conversion: `from_string`, `to_string`, `to_hex`
@@ -1177,9 +1177,9 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: `Rational` (exact fractions) and `Complex` (a + bi) types
 **Effort**: Medium
 **Implementation**:
-- Create `std/rational.jade`: `Rational(num as i64, den as i64)` with auto-normalization via GCD
+- Create `std/rational.jn`: `Rational(num as i64, den as i64)` with auto-normalization via GCD
 - Operations: add, sub, mul, div, compare, `to_float`, `from_int`
-- Create `std/complex.jade`: `Complex(re as f64, im as f64)`
+- Create `std/complex.jn`: `Complex(re as f64, im as f64)`
 - Operations: add, sub, mul, div, magnitude, phase, conjugate, `exp`, `log`
 - Future: extend to `BigRational` backed by BigInt once 3.5 lands
 
@@ -1188,7 +1188,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Exact decimal arithmetic without floating-point error
 **Effort**: Medium
 **Implementation**:
-- Create `std/decimal.jade`: `Decimal` type backed by i128 or BigInt + scale
+- Create `std/decimal.jn`: `Decimal` type backed by i128 or BigInt + scale
 - Parse: `Decimal.from_string("123.45")`, `Decimal.new(12345, 2)` (value, decimal places)
 - Operations: add, sub, mul, div (with rounding mode), compare
 - Rounding modes: `ROUND_HALF_UP`, `ROUND_HALF_EVEN` (banker's), `ROUND_DOWN`, `ROUND_CEILING`
@@ -1212,7 +1212,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Declarative CLI parser
 **Effort**: Small
 **Implementation**:
-- Create `std/cli.jade` with builder pattern:
+- Create `std/cli.jn` with builder pattern:
   ```
   app is Cli 'myapp', '1.0'
   app.flag 'verbose', 'v', 'Enable verbose output'
@@ -1228,7 +1228,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 **Scope**: Encode/decode structs to raw bytes
 **Effort**: Medium
 **Implementation**:
-- Create `std/binary.jade` with `ByteBuffer` type
+- Create `std/binary.jn` with `ByteBuffer` type
 - `write_u8`, `write_u16_le`, `write_u32_be`, `write_i64_le`, `write_bytes`
 - `read_u8`, `read_u16_le`, etc. with cursor position
 - Compile-time `@serialize` decorator auto-generates encode/decode for structs
@@ -1256,10 +1256,10 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 
 ### 4.5 Mmap Exposure
 **Unblocks**: Database, OS, Networking (zero-copy), Hacker
-**Scope**: Expose mmap/munmap to Jade code
+**Scope**: Expose mmap/munmap to Jinn code
 **Effort**: Small — extern bindings
 **Implementation**:
-- Add `mmap(size, prot, flags)` and `munmap(ptr, size)` to `std/os.jade`
+- Add `mmap(size, prot, flags)` and `munmap(ptr, size)` to `std/os.jn`
 - Prot constants: `PROT_READ`, `PROT_WRITE`, `PROT_EXEC`
 - Flag constants: `MAP_PRIVATE`, `MAP_SHARED`, `MAP_ANONYMOUS`
 - Return `%i8` (raw pointer to mapped region)
@@ -1297,7 +1297,7 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 
 ### 5.4 REPL / Interpreter Mode
 **Unblocks**: Data Scientist, Educator, Mathematician, Automation
-**Scope**: `jadec repl` for interactive exploration
+**Scope**: `jinnc repl` for interactive exploration
 **Effort**: Large — requires eval loop over compiler pipeline
 **Implementation**:
 - Wrap lex → parse → type → compile per-line
@@ -1317,30 +1317,30 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 
 ### 5.6 Glob / File Pattern Matching
 **Unblocks**: Automation, DevOps, Build tools
-**Scope**: `glob("src/**/*.jade")` returns matching file paths
-**Effort**: Small — pure Jade over fs.walk
+**Scope**: `glob("src/**/*.jn")` returns matching file paths
+**Effort**: Small — pure Jinn over fs.walk
 **Implementation**:
-- Create `std/glob.jade` with `glob(pattern) returns Vec of String`
+- Create `std/glob.jn` with `glob(pattern) returns Vec of String`
 - Support `*` (any file), `**` (recursive), `?` (single char), `[abc]` (char class)
 - Implement as filtered `fs.walk()` with pattern matching
 - Expose `matches(path, pattern) returns bool` for individual checks
 
 ### 5.7 Shebang / Script Mode
 **Unblocks**: Automation, Educator, scripting use cases
-**Scope**: `jadec run file.jade` for immediate compile-and-execute, plus shebang support
+**Scope**: `jinnc run file.jn` for immediate compile-and-execute, plus shebang support
 **Effort**: Small
 **Implementation**:
-- `jadec run file.jade [args]` — compile to temp, execute, delete
+- `jinnc run file.jn [args]` — compile to temp, execute, delete
 - Lexer: skip `#!` line at position 0
-- Cache compiled binaries by source hash in `~/.jade/cache/` for instant re-runs
-- Unix: `#!/usr/bin/env jadec run` at file top makes .jade files executable
+- Cache compiled binaries by source hash in `~/.jn/cache/` for instant re-runs
+- Unix: `#!/usr/bin/env jinnc run` at file top makes .jn files executable
 
 ### 5.8 Statistics Library
 **Unblocks**: Data Scientist, FinTech, Mathematician, HPC
 **Scope**: Common statistical functions
-**Effort**: Small — pure Jade
+**Effort**: Small — pure Jinn
 **Implementation**:
-- Create `std/stats.jade`
+- Create `std/stats.jn`
 - Descriptive: `mean`, `median`, `mode`, `stdev`, `variance`, `percentile`, `iqr`
 - Correlation: `pearson(xs, ys)`, `spearman(xs, ys)`
 - Distribution sampling: `normal(rng, mu, sigma)`, `uniform(rng, lo, hi)`, `exponential(rng, lambda)`
@@ -1349,9 +1349,9 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 ### 5.9 FFT Library
 **Unblocks**: DSP, HPC, Mathematician, Data Scientist
 **Scope**: Fast Fourier Transform for signal/spectral analysis
-**Effort**: Medium — can bind to FFTW or implement Cooley-Tukey in Jade
+**Effort**: Medium — can bind to FFTW or implement Cooley-Tukey in Jinn
 **Implementation**:
-- Create `std/fft.jade`
+- Create `std/fft.jn`
 - `fft(data as Vec of f64) returns Vec of Complex` — radix-2 Cooley-Tukey
 - `ifft(freq as Vec of Complex) returns Vec of f64` — inverse FFT
 - `magnitude_spectrum(data)`, `power_spectrum(data)` convenience functions
@@ -1402,6 +1402,6 @@ Prioritized by cross-cutting impact (number of perspectives unblocked).
 2. **Certification-locked** (Aviation, Automotive) — require formal verification and toolchain qualification costing millions
 3. **Ecosystem-locked** (Bioinformatics, Robotics) — viable once foundation exists, but need domain-specific libraries
 
-**Jade's strongest near-term positions**: DevOps tooling, automation/scripting, web backends, database engines, and compiler development. The English-like syntax makes it uniquely positioned for education once a REPL exists.
+**Jinn's strongest near-term positions**: DevOps tooling, automation/scripting, web backends, database engines, and compiler development. The English-like syntax makes it uniquely positioned for education once a REPL exists.
 
-**Formal verification is the long game**: Steps 1–6 from the Formal Verification roadmap (property testing, differential testing, grammar verification, LLVM IR validation, coverage analysis) are achievable in ~3 months and dramatically increase confidence. Full compiler qualification for aviation (DO-330) is a 3–5 year research investment but would make Jade the first Perceus-RC language with a verified compiler — a publishable, fundable outcome.
+**Formal verification is the long game**: Steps 1–6 from the Formal Verification roadmap (property testing, differential testing, grammar verification, LLVM IR validation, coverage analysis) are achievable in ~3 months and dramatically increase confidence. Full compiler qualification for aviation (DO-330) is a 3–5 year research investment but would make Jinn the first Perceus-RC language with a verified compiler — a publishable, fundable outcome.

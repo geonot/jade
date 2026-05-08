@@ -120,8 +120,8 @@ impl<'ctx> Compiler<'ctx> {
             .build_store(counter_alloca, i64t.const_int(0, false)));
 
         let malloc_fn = self.ensure_malloc();
-        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
-        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jade_sched_spawn");
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
 
         // Spawn loop: for i in start..end step step
         let spawn_var = self.entry_alloca(i64t.into(), "sim.i");
@@ -216,7 +216,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(all_done, wait_done, wait_yield));
 
         self.bld.position_at_end(wait_yield);
-        let sched_yield = crate::codegen::fn_or_die(&self.module, "jade_sched_yield");
+        let sched_yield = crate::codegen::fn_or_die(&self.module, "jinn_sched_yield");
         b!(self.bld.build_call(sched_yield, &[], ""));
         b!(self.bld.build_unconditional_branch(wait_cond));
 
@@ -311,8 +311,8 @@ impl<'ctx> Compiler<'ctx> {
             .build_store(counter_alloca, i64t.const_int(n, false)));
 
         let malloc_fn = self.ensure_malloc();
-        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
-        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jade_sched_spawn");
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
 
         for wrapper in &stmt_fns {
             // Allocate arg struct (8 bytes: just a pointer to counter)
@@ -362,7 +362,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(all_done, wait_done, wait_yield));
 
         self.bld.position_at_end(wait_yield);
-        let sched_yield = crate::codegen::fn_or_die(&self.module, "jade_sched_yield");
+        let sched_yield = crate::codegen::fn_or_die(&self.module, "jinn_sched_yield");
         b!(self.bld.build_call(sched_yield, &[], ""));
         b!(self.bld.build_unconditional_branch(wait_cond));
 

@@ -16,12 +16,12 @@
 #   r   is aes.gcm_encrypt(key, iv, "secret message", "")
 #   pt  is aes.gcm_decrypt(key, iv, r.ciphertext, "", r.tag)
 
-extern *jade_aes_gcm_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
-extern *jade_aes_gcm_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
-extern *jade_aes_cbc_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, out as %i8) returns i64
-extern *jade_aes_cbc_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, out as %i8) returns i64
-extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
-extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *jinn_aes_gcm_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
+extern *jinn_aes_gcm_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
+extern *jinn_aes_cbc_encrypt(key as %i8, iv as %i8, pt as %i8, pt_len as i64, out as %i8) returns i64
+extern *jinn_aes_cbc_decrypt(key as %i8, iv as %i8, ct as %i8, ct_len as i64, out as %i8) returns i64
+extern *jinn_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jinn_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -49,7 +49,7 @@ type GcmHex
         return GcmResult(ciphertext is "", tag is "", ok is false)
     ct_buf is extern.malloc(plaintext.length + 16)
     tag_buf is extern.malloc(16)
-    ct_len is extern.jade_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    ct_len is extern.jinn_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
     if ct_len < 0
         extern.free(ct_buf)
         extern.free(tag_buf)
@@ -65,7 +65,7 @@ type GcmHex
     if key.length neq 32 or iv.length neq 12 or tag.length neq 16
         return ""
     pt_buf is extern.malloc(ciphertext.length + 1)
-    pt_len is extern.jade_aes_gcm_decrypt(%key, %iv, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
+    pt_len is extern.jinn_aes_gcm_decrypt(%key, %iv, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
     if pt_len < 0
         extern.free(pt_buf)
         return ""
@@ -92,7 +92,7 @@ type GcmHex
     if key.length neq 32 or iv.length neq 16
         return ""
     out_buf is extern.malloc(plaintext.length + 32)
-    n is extern.jade_aes_cbc_encrypt(%key, %iv, %plaintext, plaintext.length, out_buf)
+    n is extern.jinn_aes_cbc_encrypt(%key, %iv, %plaintext, plaintext.length, out_buf)
     if n < 0
         extern.free(out_buf)
         return ""
@@ -104,7 +104,7 @@ type GcmHex
     if key.length neq 32 or iv.length neq 16
         return ""
     out_buf is extern.malloc(ciphertext.length + 1)
-    n is extern.jade_aes_cbc_decrypt(%key, %iv, %ciphertext, ciphertext.length, out_buf)
+    n is extern.jinn_aes_cbc_decrypt(%key, %iv, %ciphertext, ciphertext.length, out_buf)
     if n < 0
         extern.free(out_buf)
         return ""
@@ -118,7 +118,7 @@ type GcmHex
     if data.length equals 0
         return ""
     hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
@@ -130,7 +130,7 @@ type GcmHex
         return ""
     n is hex.length / 2
     buf is extern.malloc(n)
-    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
     if rc < 0
         extern.free(buf)
         return ""

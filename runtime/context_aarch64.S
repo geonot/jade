@@ -1,8 +1,8 @@
 /*
  * aarch64 context switch: save/restore callee-saved registers.
- * jade_context_swap(jade_context_t *from, jade_context_t *to)
+ * jinn_context_swap(jinn_context_t *from, jinn_context_t *to)
  *
- * jade_context_t layout:
+ * jinn_context_t layout:
  *   [0]    sp
  *   [8]    lr (x30)
  *   [16]   fp (x29)
@@ -12,10 +12,10 @@
  */
 
 .text
-.globl jade_context_swap
-.type jade_context_swap, %function
+.globl jinn_context_swap
+.type jinn_context_swap, %function
 .p2align 4
-jade_context_swap:
+jinn_context_swap:
     /* Save callee-saved registers into *x0 (from) */
     mov  x2, sp
     str  x2,  [x0, #0]
@@ -47,7 +47,7 @@ jade_context_swap:
     ldp  d14, d15, [x1, #152]
 
     ret
-.size jade_context_swap, . - jade_context_swap
+.size jinn_context_swap, . - jinn_context_swap
 
 /* Mark the stack as non-executable */
 #if defined(__linux__) && defined(__ELF__)

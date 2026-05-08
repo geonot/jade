@@ -1,5 +1,5 @@
 /*
- * Jade Pool Allocator — Fixed-size slab allocator for hot-path objects.
+ * Jinn Pool Allocator — Fixed-size slab allocator for hot-path objects.
  *
  * O(1) alloc and free via an intrusive freelist.
  * Page-aligned backing store for cache friendliness.
@@ -8,24 +8,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
-typedef struct jade_pool {
+typedef struct jinn_pool {
     void    *backing;       /* raw backing memory */
     void    *freelist;      /* head of intrusive freelist */
     size_t   obj_size;      /* bytes per object (>= sizeof(void*)) */
     size_t   capacity;      /* total slots */
     size_t   allocated;     /* currently in use */
-} jade_pool_t;
+} jinn_pool_t;
 
-jade_pool_t *jade_pool_create(size_t obj_size, size_t count) {
+jinn_pool_t *jinn_pool_create(size_t obj_size, size_t count) {
     /* Ensure objects are large enough to hold a freelist pointer */
     if (obj_size < sizeof(void *))
         obj_size = sizeof(void *);
     /* Align obj_size to 8-byte boundary */
     obj_size = (obj_size + 7) & ~(size_t)7;
 
-    jade_pool_t *pool = (jade_pool_t *)malloc(sizeof(jade_pool_t));
+    jinn_pool_t *pool = (jinn_pool_t *)malloc(sizeof(jinn_pool_t));
     if (!pool) return NULL;
 
     size_t total = obj_size * count;
@@ -54,7 +54,7 @@ jade_pool_t *jade_pool_create(size_t obj_size, size_t count) {
     return pool;
 }
 
-void *jade_pool_alloc(jade_pool_t *pool) {
+void *jinn_pool_alloc(jinn_pool_t *pool) {
     if (!pool || !pool->freelist)
         return NULL;
     void *slot = pool->freelist;
@@ -63,7 +63,7 @@ void *jade_pool_alloc(jade_pool_t *pool) {
     return slot;
 }
 
-void jade_pool_free(jade_pool_t *pool, void *ptr) {
+void jinn_pool_free(jinn_pool_t *pool, void *ptr) {
     if (!pool || !ptr) return;
 
     /* Validate ptr is within the pool's backing store */
@@ -80,7 +80,7 @@ void jade_pool_free(jade_pool_t *pool, void *ptr) {
     pool->allocated--;
 }
 
-void jade_pool_reset(jade_pool_t *pool) {
+void jinn_pool_reset(jinn_pool_t *pool) {
     if (!pool) return;
     pool->allocated = 0;
     /* Rebuild freelist */
@@ -93,16 +93,16 @@ void jade_pool_reset(jade_pool_t *pool) {
     }
 }
 
-void jade_pool_destroy(jade_pool_t *pool) {
+void jinn_pool_destroy(jinn_pool_t *pool) {
     if (!pool) return;
     free(pool->backing);
     free(pool);
 }
 
-size_t jade_pool_count(jade_pool_t *pool) {
+size_t jinn_pool_count(jinn_pool_t *pool) {
     return pool ? pool->allocated : 0;
 }
 
-size_t jade_pool_capacity(jade_pool_t *pool) {
+size_t jinn_pool_capacity(jinn_pool_t *pool) {
     return pool ? pool->capacity : 0;
 }

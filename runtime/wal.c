@@ -1,5 +1,5 @@
 /*
- * Jade WAL (Write-Ahead Log) Runtime
+ * Jinn WAL (Write-Ahead Log) Runtime
  *
  * File format: [8B magic "JADEWAL\0"][entries...]
  * Entry:       [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
@@ -13,13 +13,13 @@
  *   data and minimum file metadata required to retrieve it survive an OS
  *   crash or power loss.
  *
- *   The sync policy is selected at runtime by the JADE_WAL_SYNC environment
+ *   The sync policy is selected at runtime by the JINN_WAL_SYNC environment
  *   variable, parsed once on first WAL open:
  *     - "none"      : no sync; fastest but unsafe (test/bench only)
  *     - "fdatasync" : default; sync after every entry append
  *     - "fsync"     : full fsync after every entry append
  *     - "group"     : do not sync per-entry; caller must invoke
- *                     jade_wal_commit_group() at transaction boundaries
+ *                     jinn_wal_commit_group() at transaction boundaries
  *
  *   Group-commit lets a higher-level coordinator amortize fsync latency
  *   across many records of one logical transaction. Records written between
@@ -32,48 +32,48 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 /* Sync policy --------------------------------------------------------- */
-#define JADE_WAL_SYNC_NONE       0
-#define JADE_WAL_SYNC_FDATASYNC  1
-#define JADE_WAL_SYNC_FSYNC      2
-#define JADE_WAL_SYNC_GROUP      3
+#define JINN_WAL_SYNC_NONE       0
+#define JINN_WAL_SYNC_FDATASYNC  1
+#define JINN_WAL_SYNC_FSYNC      2
+#define JINN_WAL_SYNC_GROUP      3
 
-static int  jade_wal_sync_policy = -1;
+static int  jinn_wal_sync_policy = -1;
 
-static int jade_wal_get_policy(void) {
-    if (jade_wal_sync_policy >= 0) return jade_wal_sync_policy;
-    const char *env = getenv("JADE_WAL_SYNC");
+static int jinn_wal_get_policy(void) {
+    if (jinn_wal_sync_policy >= 0) return jinn_wal_sync_policy;
+    const char *env = getenv("JINN_WAL_SYNC");
     if (!env || !*env) {
-        jade_wal_sync_policy = JADE_WAL_SYNC_FDATASYNC;
+        jinn_wal_sync_policy = JINN_WAL_SYNC_FDATASYNC;
     } else if (strcmp(env, "none") == 0) {
-        jade_wal_sync_policy = JADE_WAL_SYNC_NONE;
+        jinn_wal_sync_policy = JINN_WAL_SYNC_NONE;
     } else if (strcmp(env, "fsync") == 0) {
-        jade_wal_sync_policy = JADE_WAL_SYNC_FSYNC;
+        jinn_wal_sync_policy = JINN_WAL_SYNC_FSYNC;
     } else if (strcmp(env, "group") == 0) {
-        jade_wal_sync_policy = JADE_WAL_SYNC_GROUP;
+        jinn_wal_sync_policy = JINN_WAL_SYNC_GROUP;
     } else {
         /* Default for unknown values: fdatasync. */
-        jade_wal_sync_policy = JADE_WAL_SYNC_FDATASYNC;
+        jinn_wal_sync_policy = JINN_WAL_SYNC_FDATASYNC;
     }
-    return jade_wal_sync_policy;
+    return jinn_wal_sync_policy;
 }
 
-static void jade_wal_force(FILE *wal, int policy) {
+static void jinn_wal_force(FILE *wal, int policy) {
     if (!wal) return;
     /* Push libc buffers to the kernel first. */
     fflush(wal);
     int fd = fileno(wal);
     if (fd < 0) return;
     switch (policy) {
-        case JADE_WAL_SYNC_NONE:
-        case JADE_WAL_SYNC_GROUP:
+        case JINN_WAL_SYNC_NONE:
+        case JINN_WAL_SYNC_GROUP:
             return;
-        case JADE_WAL_SYNC_FSYNC:
+        case JINN_WAL_SYNC_FSYNC:
             (void)fsync(fd);
             return;
-        case JADE_WAL_SYNC_FDATASYNC:
+        case JINN_WAL_SYNC_FDATASYNC:
         default:
 #if defined(__linux__)
             if (fdatasync(fd) == 0) return;
@@ -87,7 +87,7 @@ static void jade_wal_force(FILE *wal, int policy) {
  * (or fsync where fdatasync is unavailable) regardless of the configured
  * default policy. Used by transaction coordinators to make a batch of
  * appended records durable. */
-void jade_wal_commit_group(FILE *wal) {
+void jinn_wal_commit_group(FILE *wal) {
     if (!wal) return;
     fflush(wal);
     int fd = fileno(wal);
@@ -127,7 +127,7 @@ static uint32_t crc32(const void *data, size_t len) {
 }
 
 /* Open or create a WAL file. Returns FILE* or NULL. */
-FILE *jade_wal_open(const char *path) {
+FILE *jinn_wal_open(const char *path) {
     FILE *f = fopen(path, "r+b");
     if (f) {
         /* Verify magic */
@@ -144,9 +144,9 @@ FILE *jade_wal_open(const char *path) {
     fwrite(WAL_MAGIC, 1, 8, f);
     /* The magic header itself must be durable so a torn create cannot
      * later be mistaken for a valid empty WAL with garbage entries. */
-    jade_wal_force(f, jade_wal_get_policy() == JADE_WAL_SYNC_NONE
-                          ? JADE_WAL_SYNC_NONE
-                          : JADE_WAL_SYNC_FDATASYNC);
+    jinn_wal_force(f, jinn_wal_get_policy() == JINN_WAL_SYNC_NONE
+                          ? JINN_WAL_SYNC_NONE
+                          : JINN_WAL_SYNC_FDATASYNC);
     return f;
 }
 
@@ -155,14 +155,14 @@ FILE *jade_wal_open(const char *path) {
  * payload: record bytes (for insert/update) or offset bytes (for delete/destroy)
  * payload_len: size of payload
  */
-void jade_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len) {
+void jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len) {
     if (!wal) return;
 
     int64_t ts = (int64_t)time(NULL);
 
     /* Seek to end */
     if (fseek(wal, 0, SEEK_END) != 0) {
-        fprintf(stderr, "jade: wal: fseek failed\n");
+        fprintf(stderr, "jinn: wal: fseek failed\n");
         return;
     }
 
@@ -170,12 +170,12 @@ void jade_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload
     if (fwrite(&payload_len, 4, 1, wal) != 1 ||
         fwrite(&op, 1, 1, wal) != 1 ||
         fwrite(&ts, 8, 1, wal) != 1) {
-        fprintf(stderr, "jade: wal: write header failed\n");
+        fprintf(stderr, "jinn: wal: write header failed\n");
         return;
     }
     if (payload_len > 0 && payload) {
         if (fwrite(payload, 1, payload_len, wal) != payload_len) {
-            fprintf(stderr, "jade: wal: write payload failed\n");
+            fprintf(stderr, "jinn: wal: write payload failed\n");
             return;
         }
     }
@@ -196,13 +196,13 @@ void jade_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload
         uint32_t zero = 0;
         fwrite(&zero, 4, 1, wal);
     }
-    /* Per-record durability per JADE_WAL_SYNC. Group-commit policy defers
-     * until jade_wal_commit_group(). */
-    jade_wal_force(wal, jade_wal_get_policy());
+    /* Per-record durability per JINN_WAL_SYNC. Group-commit policy defers
+     * until jinn_wal_commit_group(). */
+    jinn_wal_force(wal, jinn_wal_get_policy());
 }
 
 /* Checkpoint: truncate WAL back to just the magic header. */
-void jade_wal_checkpoint(FILE *wal) {
+void jinn_wal_checkpoint(FILE *wal) {
     if (!wal) return;
     /* Reopen as truncate — we can't just ftruncate portably, so rewrite magic */
     int fd = fileno(wal);
@@ -214,19 +214,19 @@ void jade_wal_checkpoint(FILE *wal) {
     /* Checkpoint is a durability boundary: callers expect that on return,
      * the truncated state is on stable storage. Always force regardless of
      * the per-record sync policy (except explicit "none" for tests). */
-    int policy = jade_wal_get_policy();
-    jade_wal_force(wal, policy == JADE_WAL_SYNC_NONE
-                            ? JADE_WAL_SYNC_NONE
-                            : JADE_WAL_SYNC_FDATASYNC);
+    int policy = jinn_wal_get_policy();
+    jinn_wal_force(wal, policy == JINN_WAL_SYNC_NONE
+                            ? JINN_WAL_SYNC_NONE
+                            : JINN_WAL_SYNC_FDATASYNC);
 }
 
 /* Close WAL file. */
-void jade_wal_close(FILE *wal) {
+void jinn_wal_close(FILE *wal) {
     if (wal) fclose(wal);
 }
 
 /* Get WAL size (number of bytes of entries after magic). Returns 0 if empty. */
-int64_t jade_wal_size(FILE *wal) {
+int64_t jinn_wal_size(FILE *wal) {
     if (!wal) return 0;
     long cur = ftell(wal);
     fseek(wal, 0, SEEK_END);
@@ -242,7 +242,7 @@ int64_t jade_wal_size(FILE *wal) {
  * Returns number of entries successfully replayed, or -1 on error.
  */
 
-int64_t jade_wal_replay(FILE *wal, jade_wal_replay_cb callback, void *user_data) {
+int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data) {
     if (!wal || !callback) return -1;
 
     /* Save current position, seek past magic */

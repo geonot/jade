@@ -52,7 +52,7 @@ impl<'ctx> Compiler<'ctx> {
         // proper per-Type DI metadata is a follow-up. lldb still prints
         // the address and bytes, which is the main thing the user gets.
         let di_ty = di.create_basic_type(
-            "__jade_local",
+            "__jinn_local",
             64,
             0x07, /* DW_ATE_unsigned */
             DIFlags::PUBLIC,

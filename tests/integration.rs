@@ -1,22 +1,22 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-fn jadec() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
+fn jinnc() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
 fn compile_and_run(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for:\n{src}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -32,13 +32,13 @@ fn compile_and_run(src: &str) -> String {
 fn compile_file_and_run(path: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("test_bin");
-    let status = Command::new(jadec())
+    let status = Command::new(jinnc())
         .arg(path)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for: {path}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for: {path}");
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -63,15 +63,15 @@ fn expect_file(path: &str, expected: &str) {
 
 fn expect_compile_fail(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let output = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(
         !output.status.success(),
         "expected compilation failure for:\n{src}"
@@ -82,16 +82,16 @@ fn expect_compile_fail(src: &str) -> String {
 /// Like compile_and_run but sets working directory to temp dir so .store files are isolated.
 fn compile_and_run_in_dir(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for:\n{src}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
         .current_dir(dir.path())
         .output()
@@ -151,7 +151,7 @@ fn arithmetic_exp() {
 
 #[test]
 fn arithmetic_combined() {
-    expect_file("tests/programs/arithmetic.jade", "5\n6\n42\n5\n2\n1024");
+    expect_file("tests/programs/arithmetic.jn", "5\n6\n42\n5\n2\n1024");
 }
 
 // ── Exponentiation ──────────────────────────────────────────────────
@@ -219,7 +219,7 @@ fn binding_basic() {
 
 #[test]
 fn binding_computed() {
-    expect_file("tests/programs/bindings.jade", "30\n20");
+    expect_file("tests/programs/bindings.jn", "30\n20");
 }
 
 // ── Literals ────────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ fn if_false() {
 
 #[test]
 fn elif_chain() {
-    expect_file("tests/programs/elif_chain.jade", "1");
+    expect_file("tests/programs/elif_chain.jn", "1");
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn elif_else_branch() {
 
 #[test]
 fn while_loop() {
-    expect_file("tests/programs/while_loop.jade", "0\n1\n2\n3\n4");
+    expect_file("tests/programs/while_loop.jn", "0\n1\n2\n3\n4");
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn while_zero_iter() {
 
 #[test]
 fn for_loop() {
-    expect_file("tests/programs/for_loop.jade", "0\n1\n2\n3\n4");
+    expect_file("tests/programs/for_loop.jn", "0\n1\n2\n3\n4");
 }
 
 #[test]
@@ -338,19 +338,19 @@ fn for_range_by() {
 
 #[test]
 fn loop_break() {
-    expect_file("tests/programs/loop_break.jade", "0\n1\n2\n3\n4");
+    expect_file("tests/programs/loop_break.jn", "0\n1\n2\n3\n4");
 }
 
 #[test]
 fn while_continue() {
-    expect_file("tests/programs/continue_loop.jade", "1\n3\n5\n7\n9");
+    expect_file("tests/programs/continue_loop.jn", "1\n3\n5\n7\n9");
 }
 
 // ── Functions ───────────────────────────────────────────────────────
 
 #[test]
 fn function_calls() {
-    expect_file("tests/programs/functions.jade", "7\n25\n25");
+    expect_file("tests/programs/functions.jn", "7\n25\n25");
 }
 
 // ── Recursion ───────────────────────────────────────────────────────
@@ -358,28 +358,28 @@ fn function_calls() {
 #[test]
 fn factorial() {
     expect_file(
-        "tests/programs/recursion.jade",
+        "tests/programs/recursion.jn",
         "3628800\n1\n1\n2432902008176640000",
     );
 }
 
 #[test]
 fn fibonacci_35() {
-    expect_file("tests/fibonacci.jade", "9227465");
+    expect_file("tests/fibonacci.jn", "9227465");
 }
 
 // ── Ternary ─────────────────────────────────────────────────────────
 
 #[test]
 fn ternary_ops() {
-    expect_file("tests/programs/ternary.jade", "42\n42\n20\n30\n50\n0\n100");
+    expect_file("tests/programs/ternary.jn", "42\n42\n20\n30\n50\n0\n100");
 }
 
 // ── Bitwise ─────────────────────────────────────────────────────────
 
 #[test]
 fn bitwise_ops() {
-    expect_file("tests/programs/bitwise.jade", "15\n255\n240\n1024\n32\n-1");
+    expect_file("tests/programs/bitwise.jn", "15\n255\n240\n1024\n32\n-1");
 }
 
 // ── Casts ───────────────────────────────────────────────────────────
@@ -398,7 +398,7 @@ fn cast_float_to_int() {
 
 #[test]
 fn string_output() {
-    expect("*main()\n    log('jade')\n", "jade");
+    expect("*main()\n    log('jinn')\n", "jinn");
 }
 
 #[test]
@@ -432,37 +432,37 @@ fn string_concat_length() {
 #[test]
 fn collatz_27() {
     // collatz(27) = 111 steps
-    expect_file("tests/programs/algorithms.jade", "111\n6\n25");
+    expect_file("tests/programs/algorithms.jn", "111\n6\n25");
 }
 
 // ── Iterative ───────────────────────────────────────────────────────
 
 #[test]
 fn iterative_fib() {
-    expect_file("tests/programs/iterative.jade", "55\n6765\n4950\n499500");
+    expect_file("tests/programs/iterative.jn", "55\n6765\n4950\n499500");
 }
 
 // ── Nesting ─────────────────────────────────────────────────────────
 
 #[test]
 fn nested_if() {
-    expect_file("tests/programs/nested_if.jade", "10\n11\n5");
+    expect_file("tests/programs/nested_if.jn", "10\n11\n5");
 }
 
 #[test]
 fn nested_loops() {
-    expect_file("tests/programs/nested_loops.jade", "100\n100");
+    expect_file("tests/programs/nested_loops.jn", "100\n100");
 }
 
 // ── IR Emission ─────────────────────────────────────────────────────
 
 #[test]
 fn emit_ir_flag() {
-    let output = Command::new(jadec())
-        .arg("tests/hello.jade")
+    let output = Command::new(jinnc())
+        .arg("tests/hello.jn")
         .arg("--emit-ir")
         .output()
-        .expect("jadec failed");
+        .expect("jinnc failed");
     assert!(output.status.success());
     let ir = String::from_utf8(output.stdout).unwrap();
     assert!(ir.contains("define i32 @main(i32") || ir.contains("define i32 @main()"));
@@ -473,22 +473,22 @@ fn emit_ir_flag() {
 
 #[test]
 fn error_on_missing_file() {
-    let output = Command::new(jadec())
-        .arg("nonexistent.jade")
+    let output = Command::new(jinnc())
+        .arg("nonexistent.jn")
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(!output.status.success());
 }
 
 #[test]
 fn error_on_tab() {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("bad.jade");
-    std::fs::write(&jade, "*main()\n\tlog(1)\n").unwrap();
-    let output = Command::new(jadec())
-        .arg(&jade)
+    let jinn = dir.path().join("bad.jn");
+    std::fs::write(&jinn, "*main()\n\tlog(1)\n").unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
         .output()
-        .expect("jadec failed");
+        .expect("jinnc failed");
     assert!(!output.status.success());
 }
 
@@ -1116,8 +1116,8 @@ fn pointer_write_through() {
 fn module_import() {
     // test module system: create a helper module and import it
     let dir = tempfile::tempdir().unwrap();
-    let helper = dir.path().join("helper.jade");
-    let main = dir.path().join("main.jade");
+    let helper = dir.path().join("helper.jn");
+    let main = dir.path().join("main.jn");
     let out = dir.path().join("test_bin");
     std::fs::write(&helper, "*double(x as i64) returns i64\n    x + x\n").unwrap();
     std::fs::write(
@@ -1125,13 +1125,13 @@ fn module_import() {
         "use helper\n\n*main() returns i32\n    log(helper.double(21))\n    0\n",
     )
     .unwrap();
-    let status = Command::new(jadec())
+    let status = Command::new(jinnc())
         .arg(&main)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "module import: jadec compilation failed");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "module import: jinnc compilation failed");
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -1463,7 +1463,7 @@ fn ternary_else_only_bang() {
 #[test]
 fn ternary_variants() {
     expect_file(
-        "tests/programs/ternary_variants.jade",
+        "tests/programs/ternary_variants.jn",
         "10\n10\nbig\nB\nif-only-yes\nqbang-yes\nbang-yes",
     );
 }
@@ -1513,7 +1513,7 @@ fn loop_range_step() {
 #[test]
 fn loop_patterns() {
     expect_file(
-        "tests/programs/loop_patterns.jade",
+        "tests/programs/loop_patterns.jn",
         "a\nb\nc\n0:a\n1:b\n2:c\n0\n1\n2\n0=5\n1=6\n2=7\n0\n3\n6\n9\n0>1\n1>2\n2>3\n0\n1\n2",
     );
 }
@@ -3386,7 +3386,7 @@ fn try_result_err() {
 
 #[test]
 fn err_enum_as_return_type_ok_branch() {
-    // Canonical jade convention: a function may return an err enum directly.
+    // Canonical jinn convention: a function may return an err enum directly.
     // Plain return / final expression yields a success-tagged variant.
     let src = r#"
 err Outcome
@@ -3436,7 +3436,7 @@ err Outcome
 #[test]
 fn err_return_to_incompatible_t_rejected() {
     // T = i64, but `! Bad` returns an err-variant value of type `Fail`.
-    // The jade convention says: errors are values; encode them as values of T
+    // The jinn convention says: errors are values; encode them as values of T
     // (a sentinel) or declare the function to return the err enum directly.
     let src = r#"
 err Fail
@@ -3950,30 +3950,30 @@ err Res
 #[test]
 fn sqlite_basic() {
     let src = r#"
-extern *jade_sqlite_open(path as %i8) returns %i8
-extern *jade_sqlite_close(db as %i8) returns i32
-extern *jade_sqlite_exec(db as %i8, sql as %i8) returns i32
-extern *jade_sqlite_prepare(db as %i8, sql as %i8) returns %i8
-extern *jade_sqlite_finalize(stmt as %i8)
-extern *jade_sqlite_step(stmt as %i8) returns i32
-extern *jade_sqlite_bind_text(stmt as %i8, idx as i32, val as %i8, len as i64) returns i32
-extern *jade_sqlite_column_int(stmt as %i8, idx as i32) returns i64
-extern *jade_sqlite_column_text(stmt as %i8, idx as i32) returns %i8
-extern *jade_sqlite_last_insert_id(db as %i8) returns i64
+extern *jinn_sqlite_open(path as %i8) returns %i8
+extern *jinn_sqlite_close(db as %i8) returns i32
+extern *jinn_sqlite_exec(db as %i8, sql as %i8) returns i32
+extern *jinn_sqlite_prepare(db as %i8, sql as %i8) returns %i8
+extern *jinn_sqlite_finalize(stmt as %i8)
+extern *jinn_sqlite_step(stmt as %i8) returns i32
+extern *jinn_sqlite_bind_text(stmt as %i8, idx as i32, val as %i8, len as i64) returns i32
+extern *jinn_sqlite_column_int(stmt as %i8, idx as i32) returns i64
+extern *jinn_sqlite_column_text(stmt as %i8, idx as i32) returns %i8
+extern *jinn_sqlite_last_insert_id(db as %i8) returns i64
 
 *main()
-    db is extern.jade_sqlite_open(":memory:")
-    extern.jade_sqlite_exec(db, "create table t (id integer primary key, name text)")
-    extern.jade_sqlite_exec(db, "insert into t (name) values ('alice')")
-    extern.jade_sqlite_exec(db, "insert into t (name) values ('bob')")
+    db is extern.jinn_sqlite_open(":memory:")
+    extern.jinn_sqlite_exec(db, "create table t (id integer primary key, name text)")
+    extern.jinn_sqlite_exec(db, "insert into t (name) values ('alice')")
+    extern.jinn_sqlite_exec(db, "insert into t (name) values ('bob')")
 
-    stmt is extern.jade_sqlite_prepare(db, "select id, name from t order by id")
+    stmt is extern.jinn_sqlite_prepare(db, "select id, name from t order by id")
     total is 0
-    while extern.jade_sqlite_step(stmt) equals 1
-        total is total + extern.jade_sqlite_column_int(stmt, 0)
-    extern.jade_sqlite_finalize(stmt)
+    while extern.jinn_sqlite_step(stmt) equals 1
+        total is total + extern.jinn_sqlite_column_int(stmt, 0)
+    extern.jinn_sqlite_finalize(stmt)
     log(total)
-    extern.jade_sqlite_close(db)
+    extern.jinn_sqlite_close(db)
 "#;
     expect(src, "3");
 }
@@ -4499,7 +4499,7 @@ fn store_insert_named_duplicate_fails() {
 #[test]
 fn query_block_executes_full_program() {
     expect_store(
-        &std::fs::read_to_string("tests/programs/query_parse.jade").unwrap(),
+        &std::fs::read_to_string("tests/programs/query_parse.jn").unwrap(),
         "Alice\n30\n26\n1",
     );
 }

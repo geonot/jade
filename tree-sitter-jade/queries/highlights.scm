@@ -1,4 +1,4 @@
-; Tree-sitter highlight queries for the Jade programming language
+; Tree-sitter highlight queries for the Jinn programming language
 
 ; ── Comments ──────────────────────────────────────────────────
 (comment) @comment.line

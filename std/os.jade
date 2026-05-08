@@ -10,15 +10,15 @@ extern *setenv(name as %i8, value as %i8, overwrite as i32) returns i32
 extern *unsetenv(name as %i8) returns i32
 extern *exit(code as i32)
 extern *getpid() returns i32
-extern *jade_hostname() returns %i8
-extern *jade_cwd() returns %i8
+extern *jinn_hostname() returns %i8
+extern *jinn_cwd() returns %i8
 extern *sysconf(name as i32) returns i64
 extern *mmap(addr as %i8, length as i64, prot as i32, flags as i32, fd as i32, offset as i64) returns %i8
 extern *munmap(addr as %i8, length as i64) returns i32
 extern *mprotect(addr as %i8, length as i64, prot as i32) returns i32
 extern *msync(addr as %i8, length as i64, flags as i32) returns i32
 extern *open(path as %i8, flags as i32, mode as i32) returns i32
-extern *jade_fd_close(fd as i32) returns i32
+extern *jinn_fd_close(fd as i32) returns i32
 extern *fstat_size(fd as i32) returns i64
 
 *env(name as String)
@@ -64,13 +64,13 @@ extern *fstat_size(fd as i32) returns i64
     extern.getpid()
 
 *hostname
-    ptr is extern.jade_hostname()
+    ptr is extern.jinn_hostname()
     if ptr as i64 equals 0
         return ""
     __string_from_ptr(ptr)
 
 *cwd
-    ptr is extern.jade_cwd()
+    ptr is extern.jinn_cwd()
     if ptr as i64 equals 0
         return ""
     __string_from_ptr(ptr)
@@ -121,11 +121,11 @@ type MmapRegion
         return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
     size is extern.fstat_size(fd)
     if size <= 0
-        extern.jade_fd_close(fd)
+        extern.jinn_fd_close(fd)
         return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
     ptr is extern.mmap(0 as %i8, size, PROT_READ, MAP_PRIVATE, fd, 0)
     if ptr as i64 equals -1
-        extern.jade_fd_close(fd)
+        extern.jinn_fd_close(fd)
         return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
     MmapRegion(addr is ptr, length is size, fd is fd, ok is true)
 
@@ -136,11 +136,11 @@ type MmapRegion
         return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
     size is extern.fstat_size(fd)
     if size <= 0
-        extern.jade_fd_close(fd)
+        extern.jinn_fd_close(fd)
         return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
     ptr is extern.mmap(0 as %i8, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
     if ptr as i64 equals -1
-        extern.jade_fd_close(fd)
+        extern.jinn_fd_close(fd)
         return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
     MmapRegion(addr is ptr, length is size, fd is fd, ok is true)
 
@@ -164,5 +164,5 @@ type MmapRegion
         return false
     rc is extern.munmap(region.addr, region.length)
     if region.fd >= 0
-        extern.jade_fd_close(region.fd)
+        extern.jinn_fd_close(region.fd)
     rc equals 0

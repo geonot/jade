@@ -9,7 +9,7 @@ fn ensure_allowed_dep_url(url: &str) -> Result<(), String> {
     if url.starts_with("https://") {
         return Ok(());
     }
-    let allow_non_https = std::env::var("JADE_ALLOW_NON_HTTPS_DEPS")
+    let allow_non_https = std::env::var("JINN_ALLOW_NON_HTTPS_DEPS")
         .ok()
         .map(|v| v == "1")
         .unwrap_or(false);
@@ -22,7 +22,7 @@ fn ensure_allowed_dep_url(url: &str) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "dependency URL '{url}' is not allowed; use https:// or set JADE_ALLOW_NON_HTTPS_DEPS=1"
+        "dependency URL '{url}' is not allowed; use https:// or set JINN_ALLOW_NON_HTTPS_DEPS=1"
     ))
 }
 
@@ -35,7 +35,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn new() -> Self {
-        let root = dirs_cache().join("jade").join("cache");
+        let root = dirs_cache().join("jinn").join("cache");
         Cache { root }
     }
 
@@ -189,7 +189,7 @@ impl Cache {
         };
 
         let pkg_dir = self.package_path(dep);
-        let sub_proj_file = pkg_dir.join("project.jade");
+        let sub_proj_file = pkg_dir.join("project.jn");
         let mut sub_deps = Vec::new();
         if sub_proj_file.exists() {
             let sub_pkg = Package::from_project_file(&sub_proj_file)?;

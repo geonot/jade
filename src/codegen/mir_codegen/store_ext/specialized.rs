@@ -18,7 +18,7 @@ impl<'ctx> Compiler<'ctx> {
         let key_data = self.string_data(key_val)?;
         let key_len = self.string_len(key_val)?;
 
-        let set_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_set");
+        let set_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_set");
         b!(self.bld.build_call(
             set_fn,
             &[kv.into(), key_data.into(), key_len.into(), val_val.into()],
@@ -41,7 +41,7 @@ impl<'ctx> Compiler<'ctx> {
         let key_data = self.string_data(key_val)?;
         let key_len = self.string_len(key_val)?;
 
-        let get_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_get");
+        let get_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_get");
         let result = self
             .call_result(b!(self.bld.build_call(
                 get_fn,
@@ -66,7 +66,7 @@ impl<'ctx> Compiler<'ctx> {
         let key_data = self.string_data(key_val)?;
         let key_len = self.string_len(key_val)?;
 
-        let has_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_has");
+        let has_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_has");
         let result = self
             .call_result(b!(self.bld.build_call(
                 has_fn,
@@ -98,7 +98,7 @@ impl<'ctx> Compiler<'ctx> {
         let key_data = self.string_data(key_val)?;
         let key_len = self.string_len(key_val)?;
 
-        let del_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_del");
+        let del_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_del");
         b!(self
             .bld
             .build_call(del_fn, &[kv.into(), key_data.into(), key_len.into()], ""));
@@ -120,7 +120,7 @@ impl<'ctx> Compiler<'ctx> {
         let key_data = self.string_data(key_val)?;
         let key_len = self.string_len(key_val)?;
 
-        let incr_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_incr");
+        let incr_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_incr");
         b!(self.bld.build_call(
             incr_fn,
             &[kv.into(), key_data.into(), key_len.into(), delta_val.into()],
@@ -134,7 +134,7 @@ impl<'ctx> Compiler<'ctx> {
         store_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let kv = self.load_kv_handle(store_name)?;
-        let count_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_count");
+        let count_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_count");
         let result = self
             .call_result(b!(self.bld.build_call(count_fn, &[kv.into()], "kv.cnt")))
             .into_int_value();
@@ -407,7 +407,7 @@ impl<'ctx> Compiler<'ctx> {
 
     // ── @vector store codegen ───────────────────────────────────
 
-    /// Emit vec.nearest(query_array, k) — calls jade_vec_nearest with stack-allocated buffers.
+    /// Emit vec.nearest(query_array, k) — calls jinn_vec_nearest with stack-allocated buffers.
     /// Returns the count of results found (up to k). For now we return just the count.
     pub(in crate::codegen) fn emit_vec_nearest(
         &mut self,
@@ -436,7 +436,7 @@ impl<'ctx> Compiler<'ctx> {
         // Load the vector handle (lazy open)
         let vec_handle = self.load_vec_handle(store_name, dims)?;
 
-        // args[0] = query vector — could be PointerValue (Jade Vec) or ArrayValue (literal)
+        // args[0] = query vector — could be PointerValue (Jinn Vec) or ArrayValue (literal)
         let arg_val = self.val(args[0]);
         let query_ptr = if arg_val.is_pointer_value() {
             let header_ty = self.vec_header_type();
@@ -456,8 +456,8 @@ impl<'ctx> Compiler<'ctx> {
         // Allocate output indices buffer on stack (k * sizeof(i64))
         let out_indices = b!(self.bld.build_array_alloca(i64t, k_val, "vec.out"));
 
-        // Call jade_vec_nearest(handle, query_ptr, k, out_indices) -> count
-        let nearest_fn = crate::codegen::fn_or_die(&self.module, "jade_vec_nearest");
+        // Call jinn_vec_nearest(handle, query_ptr, k, out_indices) -> count
+        let nearest_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_nearest");
         let result = self.call_result(b!(self.bld.build_call(
             nearest_fn,
             &[
@@ -495,11 +495,11 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
         // args[0] is the vector data — could be:
-        // 1. A PointerValue to a Jade Vec header {ptr, len, cap} — extract field 0
+        // 1. A PointerValue to a Jinn Vec header {ptr, len, cap} — extract field 0
         // 2. An ArrayValue [N x double] from a literal — alloca + store, pass pointer
         let arg_val = self.val(args[0]);
         let data_ptr = if arg_val.is_pointer_value() {
-            // Jade Vec: extract data pointer from header field 0
+            // Jinn Vec: extract data pointer from header field 0
             let header_ty = self.vec_header_type();
             let gep =
                 b!(self
@@ -513,13 +513,13 @@ impl<'ctx> Compiler<'ctx> {
             alloca
         };
 
-        let insert_fn = crate::codegen::fn_or_die(&self.module, "jade_vec_insert");
+        let insert_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_insert");
         b!(self
             .bld
             .build_call(insert_fn, &[vec_handle.into(), data_ptr.into()], ""));
 
         // Return the new count
-        let count_fn = crate::codegen::fn_or_die(&self.module, "jade_vec_count");
+        let count_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_count");
         let count = self.call_result(b!(self.bld.build_call(
             count_fn,
             &[vec_handle.into()],
@@ -548,7 +548,7 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("store '{store_name}' is not @vector"))?;
 
         let vec_handle = self.load_vec_handle(store_name, dims)?;
-        let count_fn = crate::codegen::fn_or_die(&self.module, "jade_vec_count");
+        let count_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_count");
         let count = self.call_result(b!(self.bld.build_call(
             count_fn,
             &[vec_handle.into()],
@@ -573,7 +573,7 @@ impl<'ctx> Compiler<'ctx> {
         let bloom = self.load_bloom_handle(store_name, field_name, 10000)?;
         let val = self.val(args[0]);
 
-        let test_fn = self.module.get_function("jade_bloom_test_i64").unwrap();
+        let test_fn = self.module.get_function("jinn_bloom_test_i64").unwrap();
         let result = self
             .call_result(b!(self.bld.build_call(
                 test_fn,
@@ -611,7 +611,7 @@ impl<'ctx> Compiler<'ctx> {
         let query_data = self.string_data(query_val)?;
         let query_len = self.string_len(query_val)?;
 
-        let search_fn = crate::codegen::fn_or_die(&self.module, "jade_fts_search_n");
+        let search_fn = crate::codegen::fn_or_die(&self.module, "jinn_fts_search_n");
         let count = self
             .call_result(b!(self.bld.build_call(
                 search_fn,

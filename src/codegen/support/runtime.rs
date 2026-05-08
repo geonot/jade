@@ -107,7 +107,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Emit LLVM parameter attributes based on Jade's ownership model.
+    /// Emit LLVM parameter attributes based on Jinn's ownership model.
     ///
     /// - Owned pointer params  → `noalias` (exclusive, no other ref exists)
     /// - Borrowed pointer params → `noalias readonly` (shared read-only)
@@ -124,7 +124,7 @@ impl<'ctx> Compiler<'ctx> {
         if !ty.is_ptr_represented() {
             return;
         }
-        // All pointer params are non-nullable in Jade
+        // All pointer params are non-nullable in Jinn
         fv.add_attribute(loc, self.attr("nonnull"));
         match ownership {
             hir::Ownership::Owned | hir::Ownership::BorrowMut => {
@@ -235,9 +235,9 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         llvm_ty: BasicTypeEnum<'ctx>,
         name: &str,
-        jade_ty: &Type,
+        jinn_ty: &Type,
     ) -> PointerValue<'ctx> {
-        let align = if let Type::Struct(sname, _) = jade_ty {
+        let align = if let Type::Struct(sname, _) = jinn_ty {
             self.struct_layouts.get(sname).and_then(|l| l.align)
         } else {
             None
@@ -289,7 +289,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn ensure_malloc(&mut self) -> FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("jade_xmalloc") {
+        if let Some(f) = self.module.get_function("jinn_xmalloc") {
             return f;
         }
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
@@ -297,7 +297,7 @@ impl<'ctx> Compiler<'ctx> {
         let ft = ptr_ty.fn_type(&[i64t.into()], false);
         let func = self
             .module
-            .add_function("jade_xmalloc", ft, Some(Linkage::WeakAny));
+            .add_function("jinn_xmalloc", ft, Some(Linkage::WeakAny));
 
         // Define the function body inline: call malloc, abort on NULL
         let entry = self.ctx.append_basic_block(func, "entry");
@@ -514,7 +514,7 @@ impl<'ctx> Compiler<'ctx> {
         prog.fns.iter().any(|f| scan_block(&f.body))
     }
 
-    pub(crate) fn declare_jade_runtime(&mut self) {
+    pub(crate) fn declare_jinn_runtime(&mut self) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
@@ -531,54 +531,54 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         decl!(
-            "jade_coro_create",
+            "jinn_coro_create",
             ptr.fn_type(&[ptr.into(), ptr.into()], false)
         );
-        decl!("jade_coro_destroy", void.fn_type(&[ptr.into()], false));
-        decl!("jade_coro_set_daemon", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_coro_destroy", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_coro_set_daemon", void.fn_type(&[ptr.into()], false));
 
-        decl!("jade_sched_init", void.fn_type(&[i32t.into()], false));
-        decl!("jade_sched_run", void.fn_type(&[], false));
-        decl!("jade_sched_shutdown", void.fn_type(&[], false));
-        decl!("jade_sched_spawn", void.fn_type(&[ptr.into()], false));
-        decl!("jade_sched_enqueue", void.fn_type(&[ptr.into()], false));
-        decl!("jade_sched_yield", void.fn_type(&[], false));
-        decl!("jade_sched_park", void.fn_type(&[], false));
-        decl!("jade_sched_unpark", void.fn_type(&[ptr.into()], false));
-        decl!("jade_current_coro", ptr.fn_type(&[], false));
+        decl!("jinn_sched_init", void.fn_type(&[i32t.into()], false));
+        decl!("jinn_sched_run", void.fn_type(&[], false));
+        decl!("jinn_sched_shutdown", void.fn_type(&[], false));
+        decl!("jinn_sched_spawn", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_sched_enqueue", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_sched_yield", void.fn_type(&[], false));
+        decl!("jinn_sched_park", void.fn_type(&[], false));
+        decl!("jinn_sched_unpark", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_current_coro", ptr.fn_type(&[], false));
 
         decl!(
-            "jade_chan_create",
+            "jinn_chan_create",
             ptr.fn_type(&[i64t.into(), i64t.into()], false)
         );
-        decl!("jade_chan_destroy", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_chan_destroy", void.fn_type(&[ptr.into()], false));
         decl!(
-            "jade_chan_send",
+            "jinn_chan_send",
             void.fn_type(&[ptr.into(), ptr.into()], false)
         );
         decl!(
-            "jade_chan_recv",
+            "jinn_chan_recv",
             i32t.fn_type(&[ptr.into(), ptr.into()], false)
         );
         decl!(
-            "jade_chan_try_recv",
+            "jinn_chan_try_recv",
             i32t.fn_type(&[ptr.into(), ptr.into()], false)
         );
-        decl!("jade_chan_close", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_chan_close", void.fn_type(&[ptr.into()], false));
 
-        decl!("jade_actor_destroy", void.fn_type(&[ptr.into()], false));
-        decl!("jade_actor_stop", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_actor_destroy", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_actor_stop", void.fn_type(&[ptr.into()], false));
 
         decl!(
-            "jade_select",
+            "jinn_select",
             i32t.fn_type(&[ptr.into(), i32t.into(), bool_t.into()], false)
         );
 
         decl!(
-            "jade_timer_set",
+            "jinn_timer_set",
             void.fn_type(&[ptr.into(), i64t.into()], false)
         );
-        decl!("jade_timer_check", void.fn_type(&[], false));
+        decl!("jinn_timer_check", void.fn_type(&[], false));
 
         self.ensure_malloc();
         self.ensure_free();

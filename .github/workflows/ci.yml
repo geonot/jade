@@ -1,4 +1,4 @@
-name: jade-ci
+name: jinn-ci
 
 on:
   push:

@@ -85,7 +85,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.drop_value(val, inner)?;
             }
-            // Coroutine — needs jade_gen_destroy to free both coroutine stack and gen block
+            // Coroutine — needs jinn_gen_destroy to free both coroutine stack and gen block
             Type::Coroutine(_) => {
                 self.drop_generator(val)?;
             }

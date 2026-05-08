@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 /*
  * Vec header layout (matches codegen):
@@ -13,7 +13,7 @@ typedef struct {
     void    *ptr;
     int64_t  len;
     int64_t  cap;
-} jade_vec_header_t;
+} jinn_vec_header_t;
 
 /*
  * String SSO layout (24 bytes):
@@ -21,14 +21,14 @@ typedef struct {
  *   If tag bit is set → heap: {ptr, len, cap} packed in 24 bytes
  */
 
-/* __jade_vec_slice(header_ptr, start, end, elem_size) -> new header_ptr */
-void *__jade_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size) {
-    jade_vec_header_t *src = (jade_vec_header_t *)hdr;
+/* __jinn_vec_slice(header_ptr, start, end, elem_size) -> new header_ptr */
+void *__jinn_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size) {
+    jinn_vec_header_t *src = (jinn_vec_header_t *)hdr;
     if (start < 0) start = 0;
     if (end > src->len) end = src->len;
     if (start >= end) {
         /* Empty slice */
-        jade_vec_header_t *dst = (jade_vec_header_t *)malloc(sizeof(jade_vec_header_t));
+        jinn_vec_header_t *dst = (jinn_vec_header_t *)malloc(sizeof(jinn_vec_header_t));
         dst->ptr = NULL;
         dst->len = 0;
         dst->cap = 0;
@@ -38,7 +38,7 @@ void *__jade_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size)
     int64_t byte_len = new_len * elem_size;
     void *buf = malloc((size_t)byte_len);
     memcpy(buf, (char *)src->ptr + start * elem_size, (size_t)byte_len);
-    jade_vec_header_t *dst = (jade_vec_header_t *)malloc(sizeof(jade_vec_header_t));
+    jinn_vec_header_t *dst = (jinn_vec_header_t *)malloc(sizeof(jinn_vec_header_t));
     dst->ptr = buf;
     dst->len = new_len;
     dst->cap = new_len;
@@ -52,11 +52,11 @@ void *__jade_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size)
  * Heap:   ptr at offset 0 (8 bytes), len at offset 8 (8 bytes), cap stored with tag.
  */
 
-static inline int sso_is_heap(const jade_sso_t *s) {
+static inline int sso_is_heap(const jinn_sso_t *s) {
     return (s->bytes[23] & 0x80) != 0;
 }
 
-static inline const char *sso_data(const jade_sso_t *s, int64_t *out_len) {
+static inline const char *sso_data(const jinn_sso_t *s, int64_t *out_len) {
     if (sso_is_heap(s)) {
         const char *ptr;
         int64_t len;
@@ -71,8 +71,8 @@ static inline const char *sso_data(const jade_sso_t *s, int64_t *out_len) {
     }
 }
 
-static inline jade_sso_t sso_from_parts(const char *data, int64_t len) {
-    jade_sso_t result;
+static inline jinn_sso_t sso_from_parts(const char *data, int64_t len) {
+    jinn_sso_t result;
     memset(&result, 0, 24);
     if (len <= 23) {
         memcpy(result.bytes, data, (size_t)len);
@@ -91,8 +91,8 @@ static inline jade_sso_t sso_from_parts(const char *data, int64_t len) {
     return result;
 }
 
-/* __jade_str_slice(sso_str, start, end) -> new sso_str */
-jade_sso_t __jade_str_slice(jade_sso_t str, int64_t start, int64_t end) {
+/* __jinn_str_slice(sso_str, start, end) -> new sso_str */
+jinn_sso_t __jinn_str_slice(jinn_sso_t str, int64_t start, int64_t end) {
     int64_t len;
     const char *data = sso_data(&str, &len);
     if (start < 0) start = 0;
@@ -112,10 +112,10 @@ typedef struct {
     int64_t  head;
     int64_t  tail;
     int64_t  cap;
-} jade_udeque_t;
+} jinn_udeque_t;
 
-void *__jade_deque_new(void) {
-    jade_udeque_t *dq = (jade_udeque_t *)malloc(sizeof(jade_udeque_t));
+void *__jinn_deque_new(void) {
+    jinn_udeque_t *dq = (jinn_udeque_t *)malloc(sizeof(jinn_udeque_t));
     dq->cap = 8;
     dq->buf = (int64_t *)calloc((size_t)dq->cap, sizeof(int64_t));
     dq->head = 0;
@@ -123,7 +123,7 @@ void *__jade_deque_new(void) {
     return dq;
 }
 
-static void udeque_grow(jade_udeque_t *dq) {
+static void udeque_grow(jinn_udeque_t *dq) {
     int64_t old_cap = dq->cap;
     int64_t new_cap = old_cap * 2;
     int64_t *new_buf = (int64_t *)calloc((size_t)new_cap, sizeof(int64_t));
@@ -138,36 +138,36 @@ static void udeque_grow(jade_udeque_t *dq) {
     dq->cap = new_cap;
 }
 
-void __jade_deque_push_back(void *handle, int64_t val) {
-    jade_udeque_t *dq = (jade_udeque_t *)handle;
+void __jinn_deque_push_back(void *handle, int64_t val) {
+    jinn_udeque_t *dq = (jinn_udeque_t *)handle;
     if ((dq->tail + 1) % dq->cap == dq->head) udeque_grow(dq);
     dq->buf[dq->tail] = val;
     dq->tail = (dq->tail + 1) % dq->cap;
 }
 
-void __jade_deque_push_front(void *handle, int64_t val) {
-    jade_udeque_t *dq = (jade_udeque_t *)handle;
+void __jinn_deque_push_front(void *handle, int64_t val) {
+    jinn_udeque_t *dq = (jinn_udeque_t *)handle;
     if ((dq->tail + 1) % dq->cap == dq->head) udeque_grow(dq);
     dq->head = (dq->head - 1 + dq->cap) % dq->cap;
     dq->buf[dq->head] = val;
 }
 
-int64_t __jade_deque_pop_front(void *handle) {
-    jade_udeque_t *dq = (jade_udeque_t *)handle;
+int64_t __jinn_deque_pop_front(void *handle) {
+    jinn_udeque_t *dq = (jinn_udeque_t *)handle;
     if (dq->head == dq->tail) return 0;
     int64_t val = dq->buf[dq->head];
     dq->head = (dq->head + 1) % dq->cap;
     return val;
 }
 
-int64_t __jade_deque_pop_back(void *handle) {
-    jade_udeque_t *dq = (jade_udeque_t *)handle;
+int64_t __jinn_deque_pop_back(void *handle) {
+    jinn_udeque_t *dq = (jinn_udeque_t *)handle;
     if (dq->head == dq->tail) return 0;
     dq->tail = (dq->tail - 1 + dq->cap) % dq->cap;
     return dq->buf[dq->tail];
 }
 
-int64_t __jade_deque_len(void *handle) {
-    jade_udeque_t *dq = (jade_udeque_t *)handle;
+int64_t __jinn_deque_len(void *handle) {
+    jinn_udeque_t *dq = (jinn_udeque_t *)handle;
     return (dq->tail - dq->head + dq->cap) % dq->cap;
 }

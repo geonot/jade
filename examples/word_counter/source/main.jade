@@ -2,10 +2,10 @@
 # Computes text analysis metrics on generated text
 # Demonstrates: functions, loops, sim for parallelism, computation
 # 
-# Since Jade uses ownership semantics for strings,
+# Since Jinn uses ownership semantics for strings,
 # we generate text inline and do integer-heavy analysis
 
-extern *jade_time_now_ns() returns i64
+extern *jinn_time_now_ns() returns i64
 
 # Simulate character-level text analysis using LCG-generated "text"
 # Each "character" is a pseudo-random value 0..127 (ASCII range)
@@ -111,12 +111,12 @@ extern *jade_time_now_ns() returns i64
     log(n)
 
     # --- Sequential: run all 4 analyses one at a time ---
-    t0 is jade_time_now_ns()
+    t0 is jinn_time_now_ns()
     s1 is count_spaces_synthetic(n, seed)
     s2 is count_vowels_synthetic(n, seed)
     s3 is count_upper_synthetic(n, seed)
     s4 is text_hash(n, seed)
-    t1 is jade_time_now_ns()
+    t1 is jinn_time_now_ns()
     seq_ms is (t1 - t0) / 1000000
 
     log("Spaces:")
@@ -132,13 +132,13 @@ extern *jade_time_now_ns() returns i64
 
     # --- Parallel: run all 4 analyses concurrently ---
     log("=== Parallel (sim block) ===")
-    t2 is jade_time_now_ns()
+    t2 is jinn_time_now_ns()
     sim
         analyze_spaces(10000000, 42)
         analyze_vowels(10000000, 42)
         analyze_upper(10000000, 42)
         analyze_hash(10000000, 42)
-    t3 is jade_time_now_ns()
+    t3 is jinn_time_now_ns()
     par_ms is (t3 - t2) / 1000000
     log("Parallel ms:")
     log(par_ms)

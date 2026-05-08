@@ -47,12 +47,12 @@ fn main() {
         .flag("-Wstrict-prototypes")
         .flag("-Wmissing-prototypes")
         .flag("-Wno-unused-parameter")
-        .compile("jade_rt");
+        .compile("jinn_rt");
 
     println!("cargo:rustc-link-search=native={out}");
-    println!("cargo:rustc-link-lib=static=jade_rt");
+    println!("cargo:rustc-link-lib=static=jinn_rt");
     println!("cargo:rustc-link-lib=pthread");
-    println!("cargo:rustc-env=JADE_RT_DIR={out}");
+    println!("cargo:rustc-env=JINN_RT_DIR={out}");
 
     // ── Optional: compile TLS + crypto modules if OpenSSL is available ──
     let has_openssl = std::process::Command::new("pkg-config")
@@ -86,11 +86,11 @@ fn main() {
             ssl_build.flag(flag);
         }
 
-        ssl_build.compile("jade_ssl");
-        println!("cargo:rustc-link-lib=static=jade_ssl");
-        println!("cargo:rustc-env=JADE_HAS_SSL=1");
+        ssl_build.compile("jinn_ssl");
+        println!("cargo:rustc-link-lib=static=jinn_ssl");
+        println!("cargo:rustc-env=JINN_HAS_SSL=1");
     } else {
-        println!("cargo:rustc-env=JADE_HAS_SSL=0");
+        println!("cargo:rustc-env=JINN_HAS_SSL=0");
         println!("cargo:warning=OpenSSL not found; std.tls and std.crypto will not be available");
     }
 
@@ -125,11 +125,11 @@ fn main() {
             sqlite_build.flag(flag);
         }
 
-        sqlite_build.compile("jade_sqlite");
-        println!("cargo:rustc-link-lib=static=jade_sqlite");
-        println!("cargo:rustc-env=JADE_HAS_SQLITE=1");
+        sqlite_build.compile("jinn_sqlite");
+        println!("cargo:rustc-link-lib=static=jinn_sqlite");
+        println!("cargo:rustc-env=JINN_HAS_SQLITE=1");
     } else {
-        println!("cargo:rustc-env=JADE_HAS_SQLITE=0");
+        println!("cargo:rustc-env=JINN_HAS_SQLITE=0");
         println!("cargo:warning=SQLite3 not found; std.sqlite will not be available");
     }
 

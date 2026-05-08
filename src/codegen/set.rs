@@ -59,8 +59,8 @@ impl<'ctx> Compiler<'ctx> {
             "len" => self.vec_len(header_ptr),
             "add" | "remove" | "contains" | "clear" | "union" | "difference" | "intersection"
             | "to_vec" => {
-                // Runtime stubs — call __jade_set_<method>
-                let rt_name = format!("__jade_set_{method}");
+                // Runtime stubs — call __jinn_set_<method>
+                let rt_name = format!("__jinn_set_{method}");
                 let i64t = self.ctx.i64_type();
                 let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
@@ -202,7 +202,7 @@ impl<'ctx> Compiler<'ctx> {
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let obj_val = self.compile_expr(obj)?;
-        let rt_name = format!("__jade_pq_{method}");
+        let rt_name = format!("__jinn_pq_{method}");
         let i64t = self.ctx.i64_type();
         let ptr_t = self.ctx.ptr_type(AddressSpace::default());
 

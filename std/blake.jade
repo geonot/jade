@@ -11,20 +11,20 @@
 #
 # Standards: RFC 7693 (BLAKE2), BLAKE3 spec (2020).
 
-extern *jade_evp_digest(alg as %i8, data as %i8, len as i64, out as %i8) returns i64
-extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jinn_evp_digest(alg as %i8, data as %i8, len as i64, out as %i8) returns i64
+extern *jinn_bytes_to_hex(data as %i8, len as i64, out as %i8)
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
 *__digest_hex(alg as String, data as String, out_size as i64) returns String
     out_buf is extern.malloc(out_size)
     hex_buf is extern.malloc(out_size * 2 + 1)
-    n is extern.jade_evp_digest(%alg, %data, data.length, out_buf)
+    n is extern.jinn_evp_digest(%alg, %data, data.length, out_buf)
     if n < 0
         extern.free(out_buf)
         extern.free(hex_buf)
         return ""
-    extern.jade_bytes_to_hex(out_buf, n, hex_buf)
+    extern.jinn_bytes_to_hex(out_buf, n, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(out_buf)
     extern.free(hex_buf)
@@ -32,7 +32,7 @@ extern *free(ptr as %i8)
 
 *__digest_raw(alg as String, data as String, out_size as i64) returns String
     out_buf is extern.malloc(out_size)
-    n is extern.jade_evp_digest(%alg, %data, data.length, out_buf)
+    n is extern.jinn_evp_digest(%alg, %data, data.length, out_buf)
     if n < 0
         extern.free(out_buf)
         return ""

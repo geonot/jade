@@ -1,4 +1,4 @@
-# Jade — Defect Log & Remediation Roadmap
+# Jinn — Defect Log & Remediation Roadmap
 
 Evidence-based, derived from the audit session of May 2026. Every item references a
 file, line, or empirical observation. Items are sized in t-shirt units (S ≤ 1 day,
@@ -14,12 +14,12 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 - **Severity:** P0 (blocks any user touching generics)
 - **Symptom:** `box is Box of i64(7)` type-checks, then MIR codegen emits
   `Load of undefined variable 'Box'`.
-- **Repro:** [/tmp/jade_eval/poly2.jade](file:///tmp/jade_eval/poly2.jade)
+- **Repro:** [/tmp/jinn_eval/poly2.jn](file:///tmp/jinn_eval/poly2.jn)
 - **Suspected location:** [src/mir/lower.rs](src/mir/lower.rs) — `Expr::Call` lowering
   for a `Type::Generic` constructor probably resolves the callee as a value-name
   lookup (`Operand::Var("Box")`) instead of as a constructor reference.
 - **Tasks:**
-  1. Add a failing unit test under `tests/programs/generic_ctor.jade`.
+  1. Add a failing unit test under `tests/programs/generic_ctor.jn`.
   2. In [src/typer/call.rs](src/typer/call.rs) confirm the call's `resolved_kind` is
      marked as `Constructor` rather than `Function` for generic types.
   3. In `mir::lower::lower_call` branch on `ResolvedKind::Constructor` and emit
@@ -38,7 +38,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 - **Suspected location:** parser likely parses `count users` as expression then
   trips over `where` because `count` is not wired to absorb the `where` clause.
 - **Tasks:**
-  1. Add failing test `tests/programs/count_where.jade`.
+  1. Add failing test `tests/programs/count_where.jn`.
   2. In [src/parser/expr.rs](src/parser/expr.rs), find `Token::Count` handling and
      extend with optional `Token::Where` clause; produce
      `Expr::StoreCount { store, predicate }`.
@@ -83,12 +83,12 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
   `sup.strategy` and child arguments; runtime has no link/monitor/restart.
 - **Tasks (Option A — implement):**
   1. Add fields to `runtime/actor.c`: `parent_sup`, `link_set`, `restart_policy`.
-  2. New runtime APIs: `jade_sup_create(strategy)`, `jade_sup_register_child`,
-     `jade_sup_on_child_exit(actor_id, status)`.
+  2. New runtime APIs: `jinn_sup_create(strategy)`, `jinn_sup_register_child`,
+     `jinn_sup_on_child_exit(actor_id, status)`.
   3. Implement OneForOne / OneForAll / RestForOne in `runtime/actor.c`.
-  4. Wire `compile_supervisor` to call `jade_sup_create` then register each child
+  4. Wire `compile_supervisor` to call `jinn_sup_create` then register each child
      and bind into a static descriptor.
-  5. Spawn each child via `jade_sup_spawn_child(sup, factory_fn, args)`.
+  5. Spawn each child via `jinn_sup_spawn_child(sup, factory_fn, args)`.
   6. Emit a global initializer that starts the supervisor on `main` entry.
   7. Acceptance test: kill child, observe restart counter increment.
 - **Tasks (Option B — strike):**
@@ -107,7 +107,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 - **Tasks:**
   1. After every WAL append, call `fdatasync(fileno(wal->fp))` on Linux;
      `fsync` on macOS.
-  2. Add `JADE_WAL_SYNC` env var with values `none|fdatasync|fsync` for tuning.
+  2. Add `JINN_WAL_SYNC` env var with values `none|fdatasync|fsync` for tuning.
      Default `fdatasync`.
   3. Add `wal_commit_group()` API for batched fsync at transaction boundaries.
   4. Crash-recovery integration test: child process appends N records,
@@ -158,7 +158,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 #### Asm path unverified
 - **Severity:** P1
 - **Tasks:**
-  1. Write `tests/programs/asm_smoke.jade`: trivial inline-asm block (e.g.
+  1. Write `tests/programs/asm_smoke.jn`: trivial inline-asm block (e.g.
      `asm x86_64 "mov rax, 42; ret"`).
   2. If codegen path is missing, either implement via LLVM `InlineAsm` or reject
      `asm` at parse time with NYI diagnostic.
@@ -166,10 +166,10 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 
 ### A.4 Documentation
 
-#### N-9 — `jade.md` line 1 corruption
+#### N-9 — `jinn.md` line 1 corruption
 - **Severity:** P0 (first impression)
 - **Tasks:** delete the leading `fdddddddddddddd` and trailing whitespace; verify
-  with `head -1 jade.md`.
+  with `head -1 jinn.md`.
 - **Estimate:** trivial
 
 ### A.5 Benchmark honesty
@@ -180,7 +180,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
   1. Replace [benchmarks/comparison/channel_throughput.c](benchmarks/comparison/channel_throughput.c)
      with an in-process MPMC ring buffer (lock-free or with a single mutex +
      condvar — match the runtime's actual design).
-  2. Re-run; expect Jade ≈ 0.9–1.2× C.
+  2. Re-run; expect Jinn ≈ 0.9–1.2× C.
 - **Estimate:** S
 
 #### B-SELECT — select_latency baseline
@@ -192,7 +192,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 #### B-DISPATCH — dispatch_yield, sim_for
 - **Severity:** P1
 - **Tasks:** if the C side cannot model coroutine-yield without ucontext, label
-  these "no comparable C baseline" and report Jade absolute throughput only.
+  these "no comparable C baseline" and report Jinn absolute throughput only.
 - **Estimate:** S
 
 #### B-ACTOR — actor_pingpong, actor_throughput, actor_fanout
@@ -204,7 +204,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 #### B-STORE — store_ops 43,549×
 - **Severity:** P0 (visible in any benchmark report)
 - **Tasks:**
-  1. Either move Jade benchmark to use `@kv` store (which has true O(1) lookup)
+  1. Either move Jinn benchmark to use `@kv` store (which has true O(1) lookup)
      and keep C as in-memory hash, or
   2. Write an on-disk hash-store C reference for like-for-like comparison.
   3. Tag the existing benchmark `store_ops_inmem_vs_disk` so reviewers know
@@ -221,7 +221,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
      desugaring to existing `<store> where … then map`.
   2. Implement desugar in [src/typer/lower.rs](src/typer/lower.rs).
   3. Remove the "future work" comment in
-     [tests/programs/query_parse.jade](tests/programs/query_parse.jade); add
+     [tests/programs/query_parse.jn](tests/programs/query_parse.jn); add
      execution assertion.
 - **Estimate:** M
 
@@ -263,7 +263,7 @@ M ≤ 1 week, L ≤ 1 month, XL multi-month).
 #### R5 — Green CI (covers N-8)
 - See §A.1.
 
-#### R6 — Fix jade.md (covers N-9)
+#### R6 — Fix jinn.md (covers N-9)
 - See §A.4.
 
 #### R7 — Re-baseline benchmarks (covers store_ops outlier)

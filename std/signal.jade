@@ -1,8 +1,8 @@
 # std.signal — POSIX signal handling
 #
-# Async-signal-safe handlers are difficult; in Jade, the runtime
+# Async-signal-safe handlers are difficult; in Jinn, the runtime
 # delivers signals via a coroutine-friendly callback after returning
-# from the kernel handler. Treat handlers as ordinary Jade code.
+# from the kernel handler. Treat handlers as ordinary Jinn code.
 #
 # Usage:
 #   signal.handle(signal.SIGINT, fn() { log("ctrl-c") })
@@ -37,7 +37,7 @@ SIGWINCH is 28
 
 # ── Core API ─────────────────────────────────────────────────
 
-# Install a Jade closure as the handler for `sig`.
+# Install a Jinn closure as the handler for `sig`.
 *handle(sig as i32, handler)
     __signal_handle(sig, handler)
 

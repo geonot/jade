@@ -146,7 +146,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        if let Some(fv) = self.module.get_function("jade_chan_create") {
+        if let Some(fv) = self.module.get_function("jinn_chan_create") {
             let elem_size = self
                 .llvm_ty(elem_ty)
                 .size_of()
@@ -172,7 +172,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ch_val = self.val(ch);
         let v = self.val(val);
-        if let Some(fv) = self.module.get_function("jade_chan_send") {
+        if let Some(fv) = self.module.get_function("jinn_chan_send") {
             let alloca = self.entry_alloca(v.get_type(), "send.tmp");
             b!(self.bld.build_store(alloca, v));
             b!(self.bld.build_call(fv, &[ch_val.into(), alloca.into()], ""));
@@ -186,7 +186,7 @@ impl<'ctx> Compiler<'ctx> {
         result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ch_val = self.val(ch);
-        if let Some(fv) = self.module.get_function("jade_chan_recv") {
+        if let Some(fv) = self.module.get_function("jinn_chan_recv") {
             let elem_llvm = self.llvm_ty(result_ty);
             let alloca = self.entry_alloca(elem_llvm, "recv.tmp");
             b!(self.bld.build_call(fv, &[ch_val.into(), alloca.into()], ""));
@@ -322,11 +322,11 @@ impl<'ctx> Compiler<'ctx> {
                 let i64t = self.ctx.i64_type();
                 let slice_fn = self
                     .module
-                    .get_function("__jade_vec_slice")
+                    .get_function("__jinn_vec_slice")
                     .unwrap_or_else(|| {
                         let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
                         self.module
-                            .add_function("__jade_vec_slice", ft, Some(Linkage::External))
+                            .add_function("__jinn_vec_slice", ft, Some(Linkage::External))
                     });
                 let result = b!(self.bld.build_call(
                     slice_fn,
@@ -340,11 +340,11 @@ impl<'ctx> Compiler<'ctx> {
                 let i64t = self.ctx.i64_type();
                 let slice_fn = self
                     .module
-                    .get_function("__jade_str_slice")
+                    .get_function("__jinn_str_slice")
                     .unwrap_or_else(|| {
                         let ft = st.fn_type(&[st.into(), i64t.into(), i64t.into()], false);
                         self.module
-                            .add_function("__jade_str_slice", ft, Some(Linkage::External))
+                            .add_function("__jinn_str_slice", ft, Some(Linkage::External))
                     });
                 let result = b!(self.bld.build_call(
                     slice_fn,

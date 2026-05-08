@@ -24,12 +24,12 @@ use super::cli::*;
 use super::project::*;
 
 pub(super) fn cmd_fetch() {
-    let project_path = PathBuf::from("project.jade");
+    let project_path = PathBuf::from("project.jn");
     if !project_path.exists() {
-        die("no project.jade found in current directory (run `jadec init` to create one)");
+        die("no project.jn found in current directory (run `jinnc init` to create one)");
     }
     let cfg = ProjectConfig::from_file(&project_path)
-        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+        .unwrap_or_else(|e| die(&format!("project.jn: {e}")));
     if cfg.requires.is_empty() {
         println!("no dependencies to fetch");
         return;
@@ -48,9 +48,9 @@ pub(super) fn cmd_fetch() {
         requires: cfg.requires,
     };
     let cache = Cache::new();
-    let lock_path = PathBuf::from("jade.lock");
+    let lock_path = PathBuf::from("jinn.lock");
     let existing_lock = if lock_path.exists() {
-        Some(Lockfile::from_file(&lock_path).unwrap_or_else(|e| die(&format!("jade.lock: {e}"))))
+        Some(Lockfile::from_file(&lock_path).unwrap_or_else(|e| die(&format!("jinn.lock: {e}"))))
     } else {
         None
     };
@@ -63,12 +63,12 @@ pub(super) fn cmd_fetch() {
 }
 
 pub(super) fn cmd_update() {
-    let project_path = PathBuf::from("project.jade");
+    let project_path = PathBuf::from("project.jn");
     if !project_path.exists() {
-        die("no project.jade found in current directory (run `jadec init` to create one)");
+        die("no project.jn found in current directory (run `jinnc init` to create one)");
     }
     let cfg = ProjectConfig::from_file(&project_path)
-        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+        .unwrap_or_else(|e| die(&format!("project.jn: {e}")));
     if cfg.requires.is_empty() {
         println!("no dependencies to update");
         return;
@@ -86,7 +86,7 @@ pub(super) fn cmd_update() {
         author: None,
         requires: cfg.requires,
     };
-    let lock_path = PathBuf::from("jade.lock");
+    let lock_path = PathBuf::from("jinn.lock");
     let _ = fs::remove_file(&lock_path);
     let cache = Cache::new();
     let resolved = cache
@@ -132,16 +132,16 @@ pub(super) fn run_git(args: &[&str]) -> Result<String, String> {
 }
 
 pub(super) fn cmd_package(output: Option<PathBuf>, no_archive: bool) {
-    let project_path = PathBuf::from("project.jade");
+    let project_path = PathBuf::from("project.jn");
     if !project_path.exists() {
-        die("no project.jade found in current directory (run `jadec init` to create one)");
+        die("no project.jn found in current directory (run `jinnc init` to create one)");
     }
 
     let cfg = ProjectConfig::from_file(&project_path)
-        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+        .unwrap_or_else(|e| die(&format!("project.jn: {e}")));
     let pkg = project_config_to_package(cfg);
 
-    let pkg_out = output.unwrap_or_else(|| PathBuf::from("jade.pkg"));
+    let pkg_out = output.unwrap_or_else(|| PathBuf::from("jinn.pkg"));
     fs::write(&pkg_out, pkg.to_string_repr())
         .unwrap_or_else(|e| die(&format!("cannot write {}: {e}", pkg_out.display())));
     println!("wrote {}", pkg_out.display());
@@ -161,7 +161,7 @@ pub(super) fn cmd_package(output: Option<PathBuf>, no_archive: bool) {
     let mut tar_args = vec![
         "-czf".to_string(),
         archive_path.to_string_lossy().to_string(),
-        "project.jade".to_string(),
+        "project.jn".to_string(),
         pkg_out.to_string_lossy().to_string(),
     ];
     if PathBuf::from("source").is_dir() {
@@ -188,13 +188,13 @@ pub(super) fn cmd_package(output: Option<PathBuf>, no_archive: bool) {
 }
 
 pub(super) fn cmd_publish(push: bool, remote: Option<String>, force: bool) {
-    let project_path = PathBuf::from("project.jade");
+    let project_path = PathBuf::from("project.jn");
     if !project_path.exists() {
-        die("no project.jade found in current directory (run `jadec init` to create one)");
+        die("no project.jn found in current directory (run `jinnc init` to create one)");
     }
 
     let cfg = ProjectConfig::from_file(&project_path)
-        .unwrap_or_else(|e| die(&format!("project.jade: {e}")));
+        .unwrap_or_else(|e| die(&format!("project.jn: {e}")));
     let pkg = project_config_to_package(cfg);
     let tag = format!("v{}", pkg.version);
 
@@ -227,7 +227,7 @@ pub(super) fn cmd_publish(push: bool, remote: Option<String>, force: bool) {
         "-a",
         &tag,
         "-m",
-        &format!("jade publish {} {}", pkg.name, pkg.version),
+        &format!("jinn publish {} {}", pkg.name, pkg.version),
     ])
     .unwrap_or_else(|e| die(&e));
 

@@ -1,20 +1,20 @@
 {
   "grammars": [
     {
-      "name": "jade",
-      "camelcase": "Jade",
-      "scope": "source.jade",
+      "name": "jinn",
+      "camelcase": "Jinn",
+      "scope": "source.jn",
       "path": ".",
-      "file-types": ["jade"],
+      "file-types": ["jinn"],
       "highlights": "queries/highlights.scm",
-      "injection-regex": "^jade$"
+      "injection-regex": "^jinn$"
     }
   ],
   "metadata": {
     "version": "0.1.0",
     "license": "MIT",
-    "description": "Tree-sitter grammar for the Jade programming language",
-    "authors": [{ "name": "Jade Contributors" }]
+    "description": "Tree-sitter grammar for the Jinn programming language",
+    "authors": [{ "name": "Jinn Contributors" }]
   },
   "bindings": {
     "c": true,

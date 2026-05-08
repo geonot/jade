@@ -8,13 +8,13 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
-        let argc_g = self.module.get_global("__jade_argc").unwrap_or_else(|| {
-            let g = self.module.add_global(i32t, None, "__jade_argc");
+        let argc_g = self.module.get_global("__jinn_argc").unwrap_or_else(|| {
+            let g = self.module.add_global(i32t, None, "__jinn_argc");
             g.set_initializer(&i32t.const_int(0, false));
             g
         });
-        let argv_g = self.module.get_global("__jade_argv").unwrap_or_else(|| {
-            let g = self.module.add_global(ptr_ty, None, "__jade_argv");
+        let argv_g = self.module.get_global("__jinn_argv").unwrap_or_else(|| {
+            let g = self.module.add_global(ptr_ty, None, "__jinn_argv");
             g.set_initializer(&ptr_ty.const_null());
             g
         });
@@ -283,7 +283,7 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_t = self.ctx.ptr_type(AddressSpace::default());
         let i64t = self.ctx.i64_type();
         let ft = ptr_t.fn_type(&[i64t.into(), i64t.into()], false);
-        let func = self.ensure_pool_fn("jade_pool_create", ft);
+        let func = self.ensure_pool_fn("jinn_pool_create", ft);
         let result = b!(self
             .bld
             .build_call(func, &[obj_size.into(), count.into()], "pool.new"));
@@ -300,7 +300,7 @@ impl<'ctx> Compiler<'ctx> {
         let pool_ptr = self.compile_expr(&args[0])?.into_pointer_value();
         let ptr_t = self.ctx.ptr_type(AddressSpace::default());
         let ft = ptr_t.fn_type(&[ptr_t.into()], false);
-        let func = self.ensure_pool_fn("jade_pool_alloc", ft);
+        let func = self.ensure_pool_fn("jinn_pool_alloc", ft);
         let result = b!(self.bld.build_call(func, &[pool_ptr.into()], "pool.alloc"));
         Ok(self.call_result(result))
     }
@@ -317,7 +317,7 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_t = self.ctx.ptr_type(AddressSpace::default());
         let void_t = self.ctx.void_type();
         let ft = void_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
-        let func = self.ensure_pool_fn("jade_pool_free", ft);
+        let func = self.ensure_pool_fn("jinn_pool_free", ft);
         b!(self
             .bld
             .build_call(func, &[pool_ptr.into(), obj_ptr.into()], ""));
@@ -335,7 +335,7 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_t = self.ctx.ptr_type(AddressSpace::default());
         let void_t = self.ctx.void_type();
         let ft = void_t.fn_type(&[ptr_t.into()], false);
-        let func = self.ensure_pool_fn("jade_pool_destroy", ft);
+        let func = self.ensure_pool_fn("jinn_pool_destroy", ft);
         b!(self.bld.build_call(func, &[pool_ptr.into()], ""));
         Ok(self.ctx.i64_type().const_int(0, false).into())
     }

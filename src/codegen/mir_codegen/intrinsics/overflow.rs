@@ -54,10 +54,10 @@ impl<'ctx> Compiler<'ctx> {
                 let ft = ptr_t.fn_type(&[i64t.into(), i64t.into()], false);
                 let func = self
                     .module
-                    .get_function("jade_pool_create")
+                    .get_function("jinn_pool_create")
                     .unwrap_or_else(|| {
                         self.module.add_function(
-                            "jade_pool_create",
+                            "jinn_pool_create",
                             ft,
                             Some(inkwell::module::Linkage::External),
                         )
@@ -79,10 +79,10 @@ impl<'ctx> Compiler<'ctx> {
                 let ft = ptr_t.fn_type(&[ptr_t.into()], false);
                 let func = self
                     .module
-                    .get_function("jade_pool_alloc")
+                    .get_function("jinn_pool_alloc")
                     .unwrap_or_else(|| {
                         self.module.add_function(
-                            "jade_pool_alloc",
+                            "jinn_pool_alloc",
                             ft,
                             Some(inkwell::module::Linkage::External),
                         )
@@ -104,10 +104,10 @@ impl<'ctx> Compiler<'ctx> {
                 let ft = void_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
                 let func = self
                     .module
-                    .get_function("jade_pool_free")
+                    .get_function("jinn_pool_free")
                     .unwrap_or_else(|| {
                         self.module.add_function(
-                            "jade_pool_free",
+                            "jinn_pool_free",
                             ft,
                             Some(inkwell::module::Linkage::External),
                         )
@@ -127,10 +127,10 @@ impl<'ctx> Compiler<'ctx> {
                 let ft = void_t.fn_type(&[ptr_t.into()], false);
                 let func = self
                     .module
-                    .get_function("jade_pool_destroy")
+                    .get_function("jinn_pool_destroy")
                     .unwrap_or_else(|| {
                         self.module.add_function(
-                            "jade_pool_destroy",
+                            "jinn_pool_destroy",
                             ft,
                             Some(inkwell::module::Linkage::External),
                         )

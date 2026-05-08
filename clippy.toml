@@ -1,4 +1,4 @@
-## clippy.toml — Jade compiler lint configuration
+## clippy.toml — Jinn compiler lint configuration
 ##
 ## Stable clippy options only. Lint-allow/deny live in src/lib.rs and src/main.rs.
 

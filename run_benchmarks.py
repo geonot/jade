@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Jade benchmark runner — Jade vs C vs Rust vs Python with full statistics.
+"""Jinn benchmark runner — Jinn vs C vs Rust vs Python with full statistics.
 
 Usage:
-    python3 run_benchmarks.py                        # default: O3, 5 runs, jade+c
+    python3 run_benchmarks.py                        # default: O3, 5 runs, jinn+c
     python3 run_benchmarks.py --opt=all --runs=7     # O0-O3, 7 runs each
-    python3 run_benchmarks.py --langs=jade,c,rust    # jade + C + Rust
+    python3 run_benchmarks.py --langs=jinn,c,rust    # jinn + C + Rust
     python3 run_benchmarks.py --save=v0.0.0-rc1      # tag this run in history
     python3 run_benchmarks.py --compare              # compare vs last saved run
     python3 run_benchmarks.py --bench=fib,sieve      # run only matching benchmarks
     python3 run_benchmarks.py --warmup=2             # 2 warmup runs (not measured)
     python3 run_benchmarks.py --csv                  # also emit CSV file
-    python3 run_benchmarks.py --sort=ratio            # sort output by jade/c ratio
-    python3 run_benchmarks.py --sort=jade             # sort by jade median time
+    python3 run_benchmarks.py --sort=ratio            # sort output by jinn/c ratio
+    python3 run_benchmarks.py --sort=jinn             # sort by jinn median time
     python3 run_benchmarks.py --quiet                # compact output, less detail
     python3 run_benchmarks.py --detail               # show min/max/stddev/variance
 """
@@ -20,32 +20,32 @@ import os, subprocess, sys, time, json, shutil, platform, math, re, csv as csvmo
 from datetime import datetime
 from io import StringIO
 
-JADE_DIR = os.path.dirname(os.path.abspath(__file__))
-JADEC = os.path.join(JADE_DIR, "target", "release", "jadec")
-BENCH_DIR = os.path.join(JADE_DIR, "benchmarks")
+JINN_DIR = os.path.dirname(os.path.abspath(__file__))
+JADEC = os.path.join(JINN_DIR, "target", "release", "jinnc")
+BENCH_DIR = os.path.join(JINN_DIR, "benchmarks")
 CMP_DIR = os.path.join(BENCH_DIR, "comparison")
 HISTORY_FILE = os.path.join(BENCH_DIR, "history.json")
 CC = "clang"
 RUSTC = "rustc"
 PYTHON = "python3"
 
-ALL_LANGS = ["jade", "c", "rust", "python"]
+ALL_LANGS = ["jinn", "c", "rust", "python"]
 
 def build_compiler():
-    print("Building jadec (release)...")
+    print("Building jinnc (release)...")
     env = os.environ.copy()
     env["LLVM_SYS_211_PREFIX"] = "/usr/lib/llvm-21"
-    r = subprocess.run(["cargo", "build", "--release"], cwd=JADE_DIR, env=env, capture_output=True)
+    r = subprocess.run(["cargo", "build", "--release"], cwd=JINN_DIR, env=env, capture_output=True)
     if r.returncode != 0:
         print("Build failed:", r.stderr.decode())
         sys.exit(1)
     print("Build OK\n")
 
 
-def compile_jade(jade_path, opt, out_dir):
-    name = os.path.basename(jade_path).replace(".jade", "")
-    out = os.path.join(out_dir, f"{name}_jade_O{opt}")
-    r = subprocess.run([JADEC, jade_path, "-o", out, f"--opt={opt}"], capture_output=True)
+def compile_jinn(jinn_path, opt, out_dir):
+    name = os.path.basename(jinn_path).replace(".jn", "")
+    out = os.path.join(out_dir, f"{name}_jinn_O{opt}")
+    r = subprocess.run([JADEC, jinn_path, "-o", out, f"--opt={opt}"], capture_output=True)
     return (out, None) if r.returncode == 0 else (None, r.stderr.decode())
 
 
@@ -134,12 +134,12 @@ def ms(s):
     return f"{s:.2f}s"
 
 
-def ratio_str(jade_s, other_s):
-    if jade_s is None or other_s is None:
+def ratio_str(jinn_s, other_s):
+    if jinn_s is None or other_s is None:
         return "-"
     if other_s == 0:
         return "inf"
-    r = jade_s / other_s
+    r = jinn_s / other_s
     return f"{r:.2f}x"
 
 
@@ -178,9 +178,9 @@ def save_history(history):
 SKIP_BENCHMARKS = set()
 
 def discover_benchmarks(bench_filter=None):
-    """Find .jade benchmarks, optionally filtered by comma-separated patterns."""
-    all_benches = sorted(f.replace(".jade", "") for f in os.listdir(BENCH_DIR)
-                         if f.endswith(".jade") and f.replace(".jade", "") not in SKIP_BENCHMARKS)
+    """Find .jn benchmarks, optionally filtered by comma-separated patterns."""
+    all_benches = sorted(f.replace(".jn", "") for f in os.listdir(BENCH_DIR)
+                         if f.endswith(".jn") and f.replace(".jn", "") not in SKIP_BENCHMARKS)
     if not bench_filter:
         return all_benches
     patterns = [p.strip() for p in bench_filter.split(",")]
@@ -206,8 +206,8 @@ def run_lang(lang, name, opt, runs, warmup, timeout, out_dir, c_files, rs_files,
     """Compile and time a single benchmark for a single language.
     Returns (stats_dict | None, output_str | None, error_str | None, raw_times | None)
     """
-    if lang == "jade":
-        binary, err = compile_jade(os.path.join(BENCH_DIR, f"{name}.jade"), opt, out_dir)
+    if lang == "jinn":
+        binary, err = compile_jinn(os.path.join(BENCH_DIR, f"{name}.jn"), opt, out_dir)
         if err:
             return None, None, err.strip()[:80], None
         times, out, rerr = time_binary(binary, runs, warmup, timeout)
@@ -262,7 +262,7 @@ def print_detail_block(name, lang_stats):
 
 def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
               sort_by, quiet, detail, emit_csv, emit_json):
-    if "jade" in langs:
+    if "jinn" in langs:
         build_compiler()
 
     benchmarks = discover_benchmarks(bench_filter)
@@ -284,7 +284,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
     for opt in opt_levels:
         active = [l for l in langs if l != "python"]
         cols = [l.upper() for l in active]
-        ratios_from = [l for l in active if l != "jade"]
+        ratios_from = [l for l in active if l != "jinn"]
         if "python" in langs:
             cols.append("PYTHON")
             ratios_from.append("python")
@@ -339,7 +339,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
                     lang_stats_map[lang] = st
                     if raw_times:
                         raw_entry[lang] = [round(t * 1000, 3) for t in raw_times]
-                    if lang == "jade" and out:
+                    if lang == "jinn" and out:
                         entry["output"] = (out or "")[:50]
 
             # Build display row
@@ -359,7 +359,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
                     else:
                         row += f" {'-':>{w}}"
 
-            jmed = medians.get("jade")
+            jmed = medians.get("jinn")
             for r in ratios_from:
                 omed = medians.get(r)
                 row += f" {ratio_str(jmed, omed):>{w}}"
@@ -373,7 +373,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
             rows_for_sort.append((name, row, entry, raw_entry, jmed, medians, lang_stats_map))
 
         # Sort rows
-        if sort_by == "jade":
+        if sort_by == "jinn":
             rows_for_sort.sort(key=lambda x: x[4] if x[4] else float("inf"))
         elif sort_by == "ratio":
             rows_for_sort.sort(key=lambda x: x[2].get("ratio_c", float("inf")))
@@ -403,7 +403,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
             row += f" {ms(totals.get(l, 0)):>{w}}"
         if detail:
             row += f" {' ':>{w}}" * len(cols)  # no stddev for totals
-        jt = totals.get("jade", 0)
+        jt = totals.get("jinn", 0)
         for r in ratios_from:
             ot = totals.get(r, 0)
             row += f" {ratio_str(jt, ot):>{w}}"
@@ -446,7 +446,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
             header = ["opt", "benchmark"]
             for l in langs:
                 header.extend([f"{l}_median_ms", f"{l}_stddev_ms", f"{l}_min_ms", f"{l}_max_ms"])
-            header.extend([f"ratio_{r}" for r in langs if r != "jade"])
+            header.extend([f"ratio_{r}" for r in langs if r != "jinn"])
             writer.writerow(header)
             for opt_key, level_data in all_results.items():
                 for name, entry in sorted(level_data.items()):
@@ -457,7 +457,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
                         row.append(entry.get(f"{l}_min_ms", ""))
                         row.append(entry.get(f"{l}_max_ms", ""))
                     for r in langs:
-                        if r != "jade":
+                        if r != "jinn":
                             row.append(entry.get(f"ratio_{r}", ""))
                     writer.writerow(row)
         print(f"CSV -> {csv_path}")
@@ -478,9 +478,9 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
         print(f"History -> {HISTORY_FILE} (tag: {save_tag}, {len(history)} entries)")
 
     # Cross-opt summary
-    if len(opt_levels) > 1 and "jade" in langs:
+    if len(opt_levels) > 1 and "jinn" in langs:
         print(f"\n{'='*80}")
-        print("  SUMMARY: Jade/C ratio across optimization levels")
+        print("  SUMMARY: Jinn/C ratio across optimization levels")
         print(f"{'='*80}")
         header = f"{'Benchmark':<18}"
         for opt in opt_levels:
@@ -506,7 +506,7 @@ def main():
     detail = False
     emit_csv = False
     emit_json = False
-    langs = ["jade", "c"]  # default: jade + c (fast)
+    langs = ["jinn", "c"]  # default: jinn + c (fast)
 
     for arg in sys.argv[1:]:
         if arg.startswith("--runs="):
@@ -565,7 +565,7 @@ def compare_with_last():
     print(f"\n{'='*90}")
     print(f"  COMPARE: {prev['tag']} -> {curr['tag']}")
     print(f"{'='*90}")
-    print(f"{'Bench':<18} {'Prev Jade':>12} {'Curr Jade':>12} {'Delta':>10} {'Change':>10}")
+    print(f"{'Bench':<18} {'Prev Jinn':>12} {'Curr Jinn':>12} {'Delta':>10} {'Change':>10}")
     print("-" * 90)
 
     for opt_key in sorted(set(list(prev["results"].keys()) + list(curr["results"].keys()))):
@@ -573,8 +573,8 @@ def compare_with_last():
         curr_level = curr["results"].get(opt_key, {})
         benchmarks = sorted(set(list(prev_level.keys()) + list(curr_level.keys())))
         for name in benchmarks:
-            p_ms = prev_level.get(name, {}).get("jade_ms")
-            c_ms = curr_level.get(name, {}).get("jade_ms")
+            p_ms = prev_level.get(name, {}).get("jinn_ms")
+            c_ms = curr_level.get(name, {}).get("jinn_ms")
             if p_ms and c_ms:
                 delta = c_ms - p_ms
                 pct = ((c_ms / p_ms) - 1) * 100

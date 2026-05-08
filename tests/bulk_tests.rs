@@ -1,24 +1,24 @@
-use jadec::lock::Lockfile;
-use jadec::pkg::Package;
+use jinnc::lock::Lockfile;
+use jinnc::pkg::Package;
 use std::path::PathBuf;
 use std::process::Command;
 
-fn jadec() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
+fn jinnc() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
 fn compile_and_run(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for:\n{src}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -38,15 +38,15 @@ fn expect(src: &str, expected: &str) {
 
 fn expect_compile_fail(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let output = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(
         !output.status.success(),
         "expected compilation to fail for:\n{src}"
@@ -56,19 +56,19 @@ fn expect_compile_fail(src: &str) -> String {
 
 fn compile_with_strict(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
         .arg("--strict-types")
-        .arg(&jade)
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(
         status.success(),
-        "jadec --strict-types compilation failed for:\n{src}"
+        "jinnc --strict-types compilation failed for:\n{src}"
     );
     let output = Command::new(&out)
         .output()
@@ -84,16 +84,16 @@ fn compile_with_strict(src: &str) -> String {
 
 fn expect_strict_fail(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let output = Command::new(jadec())
+    std::fs::write(&jinn, src).unwrap();
+    let output = Command::new(jinnc())
         .arg("--strict-types")
-        .arg(&jade)
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(
         !output.status.success(),
         "expected --strict-types compilation to fail for:\n{src}"
@@ -103,16 +103,16 @@ fn expect_strict_fail(src: &str) -> String {
 
 fn expect_pedantic_fail(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let output = Command::new(jadec())
+    std::fs::write(&jinn, src).unwrap();
+    let output = Command::new(jinnc())
         .arg("--pedantic")
-        .arg(&jade)
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(
         !output.status.success(),
         "expected --pedantic compilation to fail for:\n{src}"
@@ -122,19 +122,19 @@ fn expect_pedantic_fail(src: &str) -> String {
 
 fn compile_and_run_test_mode(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
         .arg("--test")
-        .arg(&jade)
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(
         status.success(),
-        "jadec --test compilation failed for:\n{src}"
+        "jinnc --test compilation failed for:\n{src}"
     );
     let output = Command::new(&out)
         .output()
@@ -150,16 +150,16 @@ fn compile_and_run_test_mode(src: &str) -> String {
 
 fn expect_runtime_fail(src: &str) {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for:\n{src}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -171,18 +171,18 @@ fn expect_runtime_fail(src: &str) {
 
 fn compile_and_run_with_file(src: &str, extra_name: &str, extra_content: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let extra = dir.path().join(extra_name);
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
+    std::fs::write(&jinn, src).unwrap();
     std::fs::write(&extra, extra_content).unwrap();
-    let status = Command::new(jadec())
-        .arg(&jade)
+    let status = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for:\n{src}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
         .output()
         .expect("compiled binary failed to start");
@@ -1747,8 +1747,8 @@ fn b_extern_puts() {
 #[test]
 fn b_module_import() {
     let dir = tempfile::tempdir().unwrap();
-    let helper = dir.path().join("helper.jade");
-    let main = dir.path().join("main.jade");
+    let helper = dir.path().join("helper.jn");
+    let main = dir.path().join("main.jn");
     let out = dir.path().join("test_bin");
     std::fs::write(&helper, "*double(x as i64) returns i64\n    x + x\n").unwrap();
     std::fs::write(
@@ -1756,12 +1756,12 @@ fn b_module_import() {
         "use helper\n\n*main() returns i32\n    log(helper.double(21))\n    0\n",
     )
     .unwrap();
-    let status = Command::new(jadec())
+    let status = Command::new(jinnc())
         .arg(&main)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
     assert!(status.success(), "module import: compilation failed");
     let output = Command::new(&out).output().expect("binary failed to start");
     assert!(output.status.success());
@@ -2960,20 +2960,20 @@ fn b_inline_fib_all_clauses() {
 
 // ── Actor tests ──────────────────────────────────────────────────────
 
-// Helper: compile and run a Jade program, executing the binary inside the tempdir
+// Helper: compile and run a Jinn program, executing the binary inside the tempdir
 // so that .store files are created in isolation.
 fn compile_and_run_in_dir(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
-    std::fs::write(&jade, src).unwrap();
-    let status = Command::new(jadec())
-        .arg(&jade)
+    std::fs::write(&jinn, src).unwrap();
+    let status = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec compilation failed for:\n{src}");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
         .current_dir(dir.path())
         .output()
@@ -3497,8 +3497,8 @@ fn b_str_to_upper_mixed() {
 #[test]
 fn b_str_replace_basic() {
     expect(
-        "*main()\n    log('hello world'.replace('world', 'jade'))\n",
-        "hello jade",
+        "*main()\n    log('hello world'.replace('world', 'jinn'))\n",
+        "hello jinn",
     );
 }
 
@@ -5029,14 +5029,14 @@ fn b_pkg_parse_multiple_requires() {
     let input = "\
 package myapp
 version 2.1.0
-require http https://github.com/jade-lang/http 0.3.0
-require json https://github.com/jade-lang/json 1.0.2
+require http https://github.com/jinn-lang/http 0.3.0
+require json https://github.com/jinn-lang/json 1.0.2
 ";
     let pkg = Package::parse(input).unwrap();
     assert_eq!(pkg.name, "myapp");
     assert_eq!(pkg.requires.len(), 2);
     assert_eq!(pkg.requires[0].name, "http");
-    assert_eq!(pkg.requires[0].url, "https://github.com/jade-lang/http");
+    assert_eq!(pkg.requires[0].url, "https://github.com/jinn-lang/http");
     assert_eq!(pkg.requires[0].version.minor, 3);
     assert_eq!(pkg.requires[1].name, "json");
     assert_eq!(pkg.requires[1].version.major, 1);
@@ -5076,9 +5076,9 @@ require lib1 https://example.com/lib1 0.1.0
 #[test]
 fn b_lock_parse_write_roundtrip() {
     let input = "\
-# jade.lock — auto-generated, do not edit
-http https://github.com/jade-lang/http 0.3.0 abc123
-json https://github.com/jade-lang/json 1.0.2 def456
+# jinn.lock — auto-generated, do not edit
+http https://github.com/jinn-lang/http 0.3.0 abc123
+json https://github.com/jinn-lang/json 1.0.2 def456
 ";
     let lock = Lockfile::parse(input).unwrap();
     assert_eq!(lock.entries.len(), 2);
@@ -5094,9 +5094,9 @@ json https://github.com/jade-lang/json 1.0.2 def456
 #[test]
 fn b_lock_parse_transitive() {
     let input = "\
-http https://github.com/jade-lang/http 0.3.0 abc123
-  tls https://github.com/jade-lang/tls 0.1.0 xyz789
-json https://github.com/jade-lang/json 1.0.2 def456
+http https://github.com/jinn-lang/http 0.3.0 abc123
+  tls https://github.com/jinn-lang/tls 0.1.0 xyz789
+json https://github.com/jinn-lang/json 1.0.2 def456
 ";
     let lock = Lockfile::parse(input).unwrap();
     assert_eq!(lock.entries.len(), 2);
@@ -5706,7 +5706,7 @@ fn b_hm_identity_int_and_string() {
 
 #[test]
 fn b_hm_identity_bool_and_int() {
-    // Bools are printed as 1/0 in Jade
+    // Bools are printed as 1/0 in Jinn
     expect(
         "*id(x)\n    x\n\n*main() returns i32\n    log(id(true))\n    log(id(7))\n    0\n",
         "1\n7",
@@ -5902,21 +5902,21 @@ fn b_strict_float_literal_defaults() {
 #[test]
 fn b_lenient_flag() {
     let dir = tempfile::tempdir().unwrap();
-    let jade = dir.path().join("test.jade");
+    let jinn = dir.path().join("test.jn");
     let out = dir.path().join("test_bin");
     std::fs::write(
-        &jade,
+        &jinn,
         "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    0\n",
     )
     .unwrap();
-    let status = Command::new(jadec())
+    let status = Command::new(jinnc())
         .arg("--lenient")
-        .arg(&jade)
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("jadec failed to start");
-    assert!(status.success(), "jadec --lenient compilation failed");
+        .expect("jinnc failed to start");
+    assert!(status.success(), "jinnc --lenient compilation failed");
 }
 
 // Phase 3A: standalone method function with inferred self type
@@ -7432,13 +7432,13 @@ fn b_ushr_augmented_assign() {
 
 #[test]
 fn b_shebang_skipped() {
-    expect("#!/usr/bin/env jadec run\n*main()\n    log(42)\n", "42");
+    expect("#!/usr/bin/env jinnc run\n*main()\n    log(42)\n", "42");
 }
 
 #[test]
 fn b_shebang_with_args() {
     expect(
-        "#!/usr/local/bin/jadec run --\n*main()\n    log(\"hello\")\n",
+        "#!/usr/local/bin/jinnc run --\n*main()\n    log(\"hello\")\n",
         "hello",
     );
 }
@@ -7449,7 +7449,7 @@ fn b_shebang_with_args() {
 
 #[test]
 fn b_toml_round_trip() {
-    // Use Jade single-quoted strings (support \n escapes)
+    // Use Jinn single-quoted strings (support \n escapes)
     expect(
         "use toml\n\n*main()\n    src is '[settings]\\ncount = 42\\nenabled = true'\n    t is toml.parse(src)\n    s is toml.stringify(t)\n    log(s.contains('count'))\n    log(s.contains('42'))\n",
         "1\n1",

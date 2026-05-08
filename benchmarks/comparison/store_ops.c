@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 
-/* Equivalent store benchmark in C using in-memory array (matches Jade store semantics) */
+/* Equivalent store benchmark in C using in-memory array (matches Jinn store semantics) */
 
 typedef struct {
     int64_t key;

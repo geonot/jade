@@ -149,7 +149,7 @@ impl<'s> Lexer<'s> {
     pub fn tokenize(&mut self) -> Result<Vec<Spanned>, LexError> {
         let mut out = Vec::new();
 
-        // Skip shebang line (e.g. #!/usr/bin/env jadec run)
+        // Skip shebang line (e.g. #!/usr/bin/env jinnc run)
         if self.pos == 0 && self.src.len() >= 2 && self.src[0] == b'#' && self.src[1] == b'!' {
             while self.pos < self.src.len() && self.src[self.pos] != b'\n' {
                 self.advance();

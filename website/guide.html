@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Jade Language Guide: syntax, modules, packages, actors, store, testing, cross compilation, and release workflows.">
-    <title>Jade Language Guide</title>
+    <meta name="description" content="Jinn Language Guide: syntax, modules, packages, actors, store, testing, cross compilation, and release workflows.">
+    <title>Jinn Language Guide</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -55,7 +55,7 @@
             margin: 1.2rem 0 2rem;
         }
         .guide .toc a {
-            color: var(--jade-200);
+            color: var(--jinn-200);
         }
         .guide .pill {
             display: inline-block;
@@ -65,7 +65,7 @@
             margin-right: 0.45rem;
             margin-bottom: 0.45rem;
             font-size: 0.8rem;
-            color: var(--jade-200);
+            color: var(--jinn-200);
         }
         .guide .back {
             margin-top: 2.5rem;
@@ -75,8 +75,8 @@
 <body>
 <nav class="nav" role="navigation" aria-label="Guide navigation">
     <div class="nav__inner">
-        <a href="index.html" class="nav__logo" aria-label="Jade home">
-            <span class="nav__logo-text">Jade</span>
+        <a href="index.html" class="nav__logo" aria-label="Jinn home">
+            <span class="nav__logo-text">Jinn</span>
         </a>
         <ul class="nav__links" role="list">
             <li><a href="index.html">Home</a></li>
@@ -89,8 +89,8 @@
 </nav>
 
 <main class="guide">
-    <h1>Jade Language Guide</h1>
-    <p>Jade is a compiled systems language focused on readability, static typing with inference, actor concurrency, and built-in persistence.</p>
+    <h1>Jinn Language Guide</h1>
+    <p>Jinn is a compiled systems language focused on readability, static typing with inference, actor concurrency, and built-in persistence.</p>
 
     <div>
         <span class="pill">Type Inference</span>
@@ -118,22 +118,22 @@
     </section>
 
     <h2 id="quickstart">1. Quick Start</h2>
-    <pre><code>jade init demo
+    <pre><code>jinn init demo
 cd demo
-jade run
-jade test
-jade build -o demo_bin</code></pre>
+jinn run
+jinn test
+jinn build -o demo_bin</code></pre>
 
-    <p>If your environment uses the legacy binary name, replace <code>jade</code> with <code>jadec</code>.</p>
+    <p>If your environment uses the legacy binary name, replace <code>jinn</code> with <code>jinnc</code>.</p>
 
     <h2 id="layout">2. Project Layout and Modules</h2>
     <pre><code>demo/
-  project.jade
+  project.jn
   source/
-    main.jade
-    analytics.jade
+    main.jn
+    analytics.jn
     workers/
-      ingest.jade</code></pre>
+      ingest.jn</code></pre>
 
     <p>Imports use slash paths:</p>
     <pre><code>use analytics
@@ -147,37 +147,37 @@ now is time.monotonic()</code></pre>
 
     <h2 id="cli">3. Compiler and CLI Workflows</h2>
     <ul>
-        <li><code>jade build</code>: compile project entry.</li>
-        <li><code>jade run</code>: compile and execute.</li>
-        <li><code>jade test</code>: run inline tests.</li>
-        <li><code>jade check</code>: type-check only.</li>
-        <li><code>jade fmt</code>: format source files.</li>
-        <li><code>jade bind header.h</code>: generate extern declarations from C headers.</li>
-        <li><code>jade fetch</code>: resolve and cache package dependencies.</li>
-        <li><code>jade update</code>: refresh lockfile dependency commits.</li>
-        <li><code>jade package</code>: emit <code>jade.pkg</code> and source archive.</li>
-        <li><code>jade publish</code>: publish by creating git tag <code>vX.Y.Z</code>.</li>
+        <li><code>jinn build</code>: compile project entry.</li>
+        <li><code>jinn run</code>: compile and execute.</li>
+        <li><code>jinn test</code>: run inline tests.</li>
+        <li><code>jinn check</code>: type-check only.</li>
+        <li><code>jinn fmt</code>: format source files.</li>
+        <li><code>jinn bind header.h</code>: generate extern declarations from C headers.</li>
+        <li><code>jinn fetch</code>: resolve and cache package dependencies.</li>
+        <li><code>jinn update</code>: refresh lockfile dependency commits.</li>
+        <li><code>jinn package</code>: emit <code>jinn.pkg</code> and source archive.</li>
+        <li><code>jinn publish</code>: publish by creating git tag <code>vX.Y.Z</code>.</li>
     </ul>
 
     <h2 id="packages">4. Package Includes and Publish Workflow</h2>
-    <p>Dependencies are declared in <code>project.jade</code> and resolved through git URLs + semantic version tags.</p>
+    <p>Dependencies are declared in <code>project.jn</code> and resolved through git URLs + semantic version tags.</p>
 
     <pre><code>name is 'consumer'
 version is '0.1.0'
-entry is 'source/main.jade'
+entry is 'source/main.jn'
 require 'mathlib' 'https://example.com/mathlib.git' '0.2.1'</code></pre>
 
     <p>Typical flow:</p>
     <pre><code># package author
-jade package
-jade publish --push
+jinn package
+jinn publish --push
 
 # package consumer
-jade fetch
-jade build
-jade run</code></pre>
+jinn fetch
+jinn build
+jinn run</code></pre>
 
-    <p>For local development-only dependency tests, you can opt in to non-HTTPS URLs by setting <code>JADE_ALLOW_NON_HTTPS_DEPS=1</code> and using <code>file://</code> URLs.</p>
+    <p>For local development-only dependency tests, you can opt in to non-HTTPS URLs by setting <code>JINN_ALLOW_NON_HTTPS_DEPS=1</code> and using <code>file://</code> URLs.</p>
 
     <h2 id="actors">5. Actors and Loop Handlers</h2>
     <p>Actor handlers are declared inside actor blocks; messages are sent with regular method-call syntax.</p>
@@ -226,12 +226,12 @@ test 'addition'
 *main
     log('normal runtime entry')</code></pre>
 
-    <p>Run all inline tests with <code>jade test</code>.</p>
+    <p>Run all inline tests with <code>jinn test</code>.</p>
 
     <h2 id="cross">8. Cross Compilation and Standalone Builds</h2>
-    <pre><code>jade build --target aarch64-unknown-linux-gnu -o app-aarch64
-jade build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
-jade build --target wasm32-wasi --standalone -o app.wasm</code></pre>
+    <pre><code>jinn build --target aarch64-unknown-linux-gnu -o app-aarch64
+jinn build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
+jinn build --target wasm32-wasi --standalone -o app.wasm</code></pre>
 
     <p><code>--standalone</code> enables no-runtime/no-libc-style builds useful for embedded, boot, and low-level environments where minimal linkage is required.</p>
 

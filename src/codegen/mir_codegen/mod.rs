@@ -188,22 +188,22 @@ impl<'ctx> Compiler<'ctx> {
                 })
             })
         }) || !hir_prog.actors.is_empty()
-            || prog.externs.iter().any(|e| e.name.starts_with("jade_"))
+            || prog.externs.iter().any(|e| e.name.starts_with("jinn_"))
             || super::Compiler::uses_concurrency(hir_prog)
             || super::Compiler::uses_pool(hir_prog);
         self.needs_runtime = needs_runtime;
         if needs_runtime {
-            self.declare_jade_runtime();
+            self.declare_jinn_runtime();
         }
 
         // ── Detect TLS / crypto usage (requires OpenSSL) ──
         let needs_ssl = prog.externs.iter().any(|e| {
-            e.name.starts_with("jade_tls_")
-                || e.name.starts_with("jade_sha")
-                || e.name.starts_with("jade_hmac")
-                || e.name.starts_with("jade_aes")
-                || e.name == "jade_random_bytes"
-                || e.name == "jade_bytes_to_hex"
+            e.name.starts_with("jinn_tls_")
+                || e.name.starts_with("jinn_sha")
+                || e.name.starts_with("jinn_hmac")
+                || e.name.starts_with("jinn_aes")
+                || e.name == "jinn_random_bytes"
+                || e.name == "jinn_bytes_to_hex"
         });
         self.needs_ssl = needs_ssl;
 
@@ -211,7 +211,7 @@ impl<'ctx> Compiler<'ctx> {
         let needs_sqlite = prog
             .externs
             .iter()
-            .any(|e| e.name.starts_with("jade_sqlite_"));
+            .any(|e| e.name.starts_with("jinn_sqlite_"));
         self.needs_sqlite = needs_sqlite;
 
         // ── Also detect coroutine/generator usage and declare gen runtime ──
@@ -231,7 +231,7 @@ impl<'ctx> Compiler<'ctx> {
         });
         if uses_coro {
             self.declare_actor_runtime(); // malloc, memset, free
-            self.declare_gen_runtime(); // jade_gen_resume/suspend/destroy
+            self.declare_gen_runtime(); // jinn_gen_resume/suspend/destroy
         }
 
         // ── Declare HIR actors (just declarations, no body compilation yet) ──
@@ -268,14 +268,14 @@ impl<'ctx> Compiler<'ctx> {
 
         // ── Declare all MIR functions (forward-declare so calls resolve) ──
         // NOTE: This must be AFTER runtime declarations so main wrapper
-        // can find jade_sched_init/run/shutdown.
+        // can find jinn_sched_init/run/shutdown.
 
         // ── Declare global mutable variables ──
         for gdef in &prog.globals {
             let llvm_ty = self.llvm_ty(&gdef.ty);
             let gv = self
                 .module
-                .add_global(llvm_ty, None, &format!("__jade_global_{}", gdef.name));
+                .add_global(llvm_ty, None, &format!("__jinn_global_{}", gdef.name));
             gv.set_initializer(&self.zero_init(&gdef.ty));
             gv.set_linkage(Linkage::Internal);
             self.globals.insert(gdef.name, (gv, gdef.ty.clone()));
@@ -286,7 +286,7 @@ impl<'ctx> Compiler<'ctx> {
             let void_ty = self.ctx.void_type().fn_type(&[], false);
             let init_fn = self
                 .module
-                .add_function("__jade_init_globals", void_ty, None);
+                .add_function("__jinn_init_globals", void_ty, None);
             let entry = self.ctx.append_basic_block(init_fn, "entry");
             self.bld.position_at_end(entry);
             for g in &hir_prog.globals {
@@ -333,7 +333,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         self.finalize_debug();
-        if std::env::var("JADE_DUMP_IR").is_ok() {
+        if std::env::var("JINN_DUMP_IR").is_ok() {
             self.module.print_to_stderr();
         }
         self.module.verify().map_err(|e| e.to_string())
@@ -351,9 +351,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let is_main = func.name == "main";
         if is_main && !self.lib_mode {
-            // Create __jade_user_main + wrapper main that initialises runtime.
+            // Create __jinn_user_main + wrapper main that initialises runtime.
             let ft = self.mk_fn_type(&ret, &lp, false);
-            let user_fv = self.module.add_function("__jade_user_main", ft, None);
+            let user_fv = self.module.add_function("__jinn_user_main", ft, None);
             self.tag_fn(user_fv);
             self.apply_fn_attrs(user_fv, &func.attrs);
             user_fv.set_linkage(Linkage::Internal);
@@ -365,9 +365,9 @@ impl<'ctx> Compiler<'ctx> {
             let main_ft = i32t.fn_type(&[i32t.into(), ptr_ty.into()], false);
             let main_fv = self.module.add_function("main", main_ft, None);
 
-            let argc_global = self.module.add_global(i32t, None, "__jade_argc");
+            let argc_global = self.module.add_global(i32t, None, "__jinn_argc");
             argc_global.set_initializer(&i32t.const_int(0, false));
-            let argv_global = self.module.add_global(ptr_ty, None, "__jade_argv");
+            let argv_global = self.module.add_global(ptr_ty, None, "__jinn_argv");
             argv_global.set_initializer(&ptr_ty.const_null());
 
             let entry = self.ctx.append_basic_block(main_fv, "entry");
@@ -381,7 +381,7 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_store(argv_global.as_pointer_value(), argv_param));
 
-            if let Some(sched_init) = self.module.get_function("jade_sched_init") {
+            if let Some(sched_init) = self.module.get_function("jinn_sched_init") {
                 b!(self
                     .bld
                     .build_call(sched_init, &[i32t.const_int(0, false).into()], ""));
@@ -395,10 +395,10 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(*mig_fn, &[], ""));
             }
             let call_result = b!(self.bld.build_call(user_fv, &[], "user_main"));
-            if let Some(sched_run) = self.module.get_function("jade_sched_run") {
+            if let Some(sched_run) = self.module.get_function("jinn_sched_run") {
                 b!(self.bld.build_call(sched_run, &[], ""));
             }
-            if let Some(sched_shutdown) = self.module.get_function("jade_sched_shutdown") {
+            if let Some(sched_shutdown) = self.module.get_function("jinn_sched_shutdown") {
                 b!(self.bld.build_call(sched_shutdown, &[], ""));
             }
             if let Some(rv) = call_result.try_as_basic_value().basic() {
@@ -508,7 +508,7 @@ impl<'ctx> Compiler<'ctx> {
 
             // 3b. Emit instructions.
             for inst in &bb.insts {
-                if std::env::var("JADE_DEBUG_MIR_CODEGEN").is_ok() {
+                if std::env::var("JINN_DEBUG_MIR_CODEGEN").is_ok() {
                     eprintln!(
                         "  emit {:?} dest={:?} kind={:?}",
                         inst.dest, inst.dest, inst.kind

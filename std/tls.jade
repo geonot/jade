@@ -19,16 +19,16 @@
 #   client.write("hello\n")
 #   client.shut()
 
-extern *jade_tls_connect(host as %i8, port as i32) returns %i8
-extern *jade_tls_send(conn as %i8, buf as %i8, len as i64) returns i64
-extern *jade_tls_recv(conn as %i8, buf as %i8, len as i64) returns i64
-extern *jade_tls_close(conn as %i8)
-extern *jade_tls_listen(host as %i8, port as i32, cert as %i8, key as %i8) returns %i8
-extern *jade_tls_accept(listener as %i8) returns %i8
-extern *jade_tls_listener_close(listener as %i8)
-extern *jade_tls_last_error(buf as %i8, len as i64) returns i64
-extern *jade_tls_peer_cert_subject(conn as %i8, buf as %i8, len as i64) returns i64
-extern *jade_tls_protocol_version(conn as %i8, buf as %i8, len as i64) returns i64
+extern *jinn_tls_connect(host as %i8, port as i32) returns %i8
+extern *jinn_tls_send(conn as %i8, buf as %i8, len as i64) returns i64
+extern *jinn_tls_recv(conn as %i8, buf as %i8, len as i64) returns i64
+extern *jinn_tls_close(conn as %i8)
+extern *jinn_tls_listen(host as %i8, port as i32, cert as %i8, key as %i8) returns %i8
+extern *jinn_tls_accept(listener as %i8) returns %i8
+extern *jinn_tls_listener_close(listener as %i8)
+extern *jinn_tls_last_error(buf as %i8, len as i64) returns i64
+extern *jinn_tls_peer_cert_subject(conn as %i8, buf as %i8, len as i64) returns i64
+extern *jinn_tls_protocol_version(conn as %i8, buf as %i8, len as i64) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -40,7 +40,7 @@ type TlsStream
 
     *read(max_bytes as i64) returns String
         buf is extern.malloc(max_bytes + 1)
-        n is extern.jade_tls_recv(self.handle, buf, max_bytes)
+        n is extern.jinn_tls_recv(self.handle, buf, max_bytes)
         if n <= 0
             extern.free(buf)
             return ""
@@ -65,13 +65,13 @@ type TlsStream
         out
 
     *write(data as String) returns i64
-        extern.jade_tls_send(self.handle, %data, data.length)
+        extern.jinn_tls_send(self.handle, %data, data.length)
 
     *write_all(data as String) returns bool
         sent is 0
         while sent < data.length
             remaining is data.slice(sent, data.length)
-            n is extern.jade_tls_send(self.handle, %remaining, remaining.length)
+            n is extern.jinn_tls_send(self.handle, %remaining, remaining.length)
             if n <= 0
                 return false
             sent is sent + n
@@ -84,7 +84,7 @@ type TlsStream
         if not self.is_valid()
             return ""
         buf is extern.malloc(1024)
-        n is extern.jade_tls_peer_cert_subject(self.handle, buf, 1024)
+        n is extern.jinn_tls_peer_cert_subject(self.handle, buf, 1024)
         if n <= 0
             extern.free(buf)
             return ""
@@ -94,7 +94,7 @@ type TlsStream
         if not self.is_valid()
             return ""
         buf is extern.malloc(64)
-        n is extern.jade_tls_protocol_version(self.handle, buf, 64)
+        n is extern.jinn_tls_protocol_version(self.handle, buf, 64)
         if n <= 0
             extern.free(buf)
             return ""
@@ -102,7 +102,7 @@ type TlsStream
 
     *shut
         if self.handle as i64 neq 0
-            extern.jade_tls_close(self.handle)
+            extern.jinn_tls_close(self.handle)
 
 type TlsListener
     handle as %i8
@@ -111,16 +111,16 @@ type TlsListener
         self.handle as i64 neq 0
 
     *accept returns TlsStream
-        h is extern.jade_tls_accept(self.handle)
+        h is extern.jinn_tls_accept(self.handle)
         TlsStream(handle is h)
 
     *shut
         if self.handle as i64 neq 0
-            extern.jade_tls_listener_close(self.handle)
+            extern.jinn_tls_listener_close(self.handle)
 
 # Open a TLS client connection.
 *connect(host as String, port as i64) returns TlsStream
-    handle is extern.jade_tls_connect(%host, port as i32)
+    handle is extern.jinn_tls_connect(%host, port as i32)
     TlsStream(handle is handle)
 
 # Backwards-compat alias.
@@ -130,14 +130,14 @@ type TlsListener
 # Start a TLS server listening on `host:port` with the given PEM
 # certificate and private-key files.
 *listen(host as String, port as i64, cert_path as String, key_path as String) returns TlsListener
-    handle is extern.jade_tls_listen(%host, port as i32, %cert_path, %key_path)
+    handle is extern.jinn_tls_listen(%host, port as i32, %cert_path, %key_path)
     TlsListener(handle is handle)
 
 # Last OpenSSL error string, or "" if none. Useful right after a
 # failed `connect`, `listen`, or `accept`.
 *last_error returns String
     buf is extern.malloc(512)
-    n is extern.jade_tls_last_error(buf, 512)
+    n is extern.jinn_tls_last_error(buf, 512)
     if n <= 0
         extern.free(buf)
         return ""

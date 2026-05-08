@@ -1,5 +1,5 @@
 /*
- * Jade Version File Runtime
+ * Jinn Version File Runtime
  *
  * Append-only version log for @versioned stores.
  *
@@ -17,14 +17,14 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 static const char VER_MAGIC[8] = {'J','A','D','E','V','E','R','\0'};
 #define VER_HEADER 8   /* just the magic */
 #define VER_ENTRY_HDR 24  /* sid(8) + version(8) + timestamp(8) */
 
 /* ── Open / create a versions file ──────────────────────────────── */
-FILE *jade_ver_open(const char *path) {
+FILE *jinn_ver_open(const char *path) {
     FILE *f = fopen(path, "r+b");
     if (f) {
         char magic[8];
@@ -43,13 +43,13 @@ FILE *jade_ver_open(const char *path) {
 }
 
 /* ── Close a versions file ──────────────────────────────────────── */
-void jade_ver_close(FILE *f) {
+void jinn_ver_close(FILE *f) {
     if (f) fclose(f);
 }
 
 /* ── Append a version entry ─────────────────────────────────────── */
 /* Writes the old record data before mutation. */
-void jade_ver_append(FILE *f, int64_t sid, int64_t version,
+void jinn_ver_append(FILE *f, int64_t sid, int64_t version,
                      const void *record_data, int64_t rec_size) {
     if (!f) return;
     fseek(f, 0, SEEK_END);
@@ -62,7 +62,7 @@ void jade_ver_append(FILE *f, int64_t sid, int64_t version,
 }
 
 /* ── Count versions for a given sid ─────────────────────────────── */
-int64_t jade_ver_count(FILE *f, int64_t sid, int64_t rec_size) {
+int64_t jinn_ver_count(FILE *f, int64_t sid, int64_t rec_size) {
     if (!f) return 0;
     int64_t count = 0;
     (void)rec_size; /* entry_size implied by skip in fseek below */
@@ -78,7 +78,7 @@ int64_t jade_ver_count(FILE *f, int64_t sid, int64_t rec_size) {
 
 /* ── Retrieve a specific version of a record ────────────────────── */
 /* Returns 1 if found, 0 if not. Writes record data into out_buf. */
-int64_t jade_ver_at(FILE *f, int64_t sid, int64_t version,
+int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version,
                     void *out_buf, int64_t rec_size) {
     if (!f) return 0;
     fseek(f, VER_HEADER, SEEK_SET);
@@ -100,7 +100,7 @@ int64_t jade_ver_at(FILE *f, int64_t sid, int64_t version,
 /* Returns the number of versions written.
  * out_buf must be large enough: max_versions * rec_size bytes.
  * Versions are returned in file order (oldest first). */
-int64_t jade_ver_history(FILE *f, int64_t sid,
+int64_t jinn_ver_history(FILE *f, int64_t sid,
                          void *out_buf, int64_t rec_size,
                          int64_t max_versions) {
     if (!f) return 0;
@@ -122,7 +122,7 @@ int64_t jade_ver_history(FILE *f, int64_t sid,
 }
 
 /* ── Compact: keep only the latest N versions per record ────────── */
-void jade_ver_compact(FILE *f, int64_t rec_size, int64_t keep_n) {
+void jinn_ver_compact(FILE *f, int64_t rec_size, int64_t keep_n) {
     if (!f || keep_n <= 0) return;
 
     /* First pass: count entries per sid */

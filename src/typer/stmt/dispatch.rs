@@ -432,7 +432,7 @@ impl Typer {
                 }
 
                 // Unify the err-return value with the function's return type T.
-                // In jade's unitary errors-as-values convention, `! value` returns
+                // In jinn's unitary errors-as-values convention, `! value` returns
                 // a value of type T just like `return value` does. The `! E`
                 // signature suffix is a declarative annotation that constrains
                 // *which* variants can be early-returned this way; the value
@@ -465,11 +465,11 @@ impl Typer {
                 if let Err(_) = &unify_res {
                     if let Some(en) = &enum_name {
                         // Tailor the message to point users at the canonical
-                        // jade convention: declare the function as returning the
+                        // jinn convention: declare the function as returning the
                         // err enum directly (`returns E`), or encode errors as
                         // values of T (e.g., sentinel codes for primitives).
                         return Err(format!(
-                            "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jade, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
+                            "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jinn, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
                             en, span, resolved_ret
                         ));
                     }

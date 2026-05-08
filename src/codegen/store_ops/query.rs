@@ -229,13 +229,13 @@ impl<'ctx> Compiler<'ctx> {
         // region after a prior reserve.
         let reserve_fn = self
             .module
-            .get_function("jade_store_reserve")
+            .get_function("jinn_store_reserve")
             .unwrap_or_else(|| {
                 let void_ty = self.ctx.void_type();
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
                 self.module.add_function(
-                    "jade_store_reserve",
+                    "jinn_store_reserve",
                     ft,
                     Some(inkwell::module::Linkage::External),
                 )
@@ -452,7 +452,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[rec_buf.into()], ""));
-        let result = self.load_store_record_as_jade(st, result_ptr, sd)?;
+        let result = self.load_store_record_as_jinn(st, result_ptr, sd)?;
         Ok(result)
     }
 
@@ -474,39 +474,39 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(sd);
 
-        let jade_name = format!("__store_{store_name}");
-        let jade_st = self
+        let jinn_name = format!("__store_{store_name}");
+        let jinn_st = self
             .module
-            .get_struct_type(&jade_name)
+            .get_struct_type(&jinn_name)
             .expect("ICE: struct type not declared");
-        let jade_size = self.type_store_size(jade_st.into());
+        let jinn_size = self.type_store_size(jinn_st.into());
 
         let count = self.store_read_count(fp)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
 
-        let jade_total =
+        let jinn_total =
             b!(self
                 .bld
-                .build_int_mul(count, i64t.const_int(jade_size, false), "all.jade_total"));
+                .build_int_mul(count, i64t.const_int(jinn_size, false), "all.jinn_total"));
         let one = i64t.const_int(1, false);
-        let jade_alloc = b!(self.bld.build_select(
+        let jinn_alloc = b!(self.bld.build_select(
             b!(self.bld.build_int_compare(
                 IntPredicate::EQ,
-                jade_total,
+                jinn_total,
                 i64t.const_int(0, false),
-                "all.jade_isz"
+                "all.jinn_isz"
             )),
             one,
-            jade_total,
-            "all.jade_alloc"
+            jinn_total,
+            "all.jinn_alloc"
         ))
         .into_int_value();
         let malloc_fn = self.ensure_malloc();
-        let jade_buf = self
+        let jinn_buf = self
             .call_result(b!(self.bld.build_call(
                 malloc_fn,
-                &[jade_alloc.into()],
-                "all.jade"
+                &[jinn_alloc.into()],
+                "all.jn"
             )))
             .into_pointer_value();
 
@@ -540,17 +540,17 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "all.rptr"))
             };
-            let jade_val = self.load_store_record_as_jade(rec_st, raw_ptr, sd)?;
-            let jade_off =
+            let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, sd)?;
+            let jinn_off =
                 b!(self
                     .bld
-                    .build_int_mul(idx, i64t.const_int(jade_size, false), "all.joff"));
-            let jade_ptr = unsafe {
+                    .build_int_mul(idx, i64t.const_int(jinn_size, false), "all.joff"));
+            let jinn_ptr = unsafe {
                 b!(self
                     .bld
-                    .build_gep(self.ctx.i8_type(), jade_buf, &[jade_off], "all.jptr"))
+                    .build_gep(self.ctx.i8_type(), jinn_buf, &[jinn_off], "all.jptr"))
             };
-            b!(self.bld.build_store(jade_ptr, jade_val));
+            b!(self.bld.build_store(jinn_ptr, jinn_val));
 
             let next_idx = b!(self
                 .bld
@@ -567,7 +567,7 @@ impl<'ctx> Compiler<'ctx> {
             let memcpy_fn = self.ensure_memcpy();
             b!(self.bld.build_call(
                 memcpy_fn,
-                &[jade_buf.into(), raw_buf.into(), total.into()],
+                &[jinn_buf.into(), raw_buf.into(), total.into()],
                 ""
             ));
         }
@@ -575,6 +575,6 @@ impl<'ctx> Compiler<'ctx> {
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[raw_buf.into()], ""));
 
-        Ok(jade_buf.into())
+        Ok(jinn_buf.into())
     }
 }

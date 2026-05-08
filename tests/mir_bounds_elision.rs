@@ -1,24 +1,24 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-fn jadec() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
+fn jinnc() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
 fn compile_and_emit_mir(src: &str) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
-    let jade = dir.path().join("test.jade");
-    std::fs::write(&jade, src).expect("write source");
+    let jinn = dir.path().join("test.jn");
+    std::fs::write(&jinn, src).expect("write source");
 
-    let output = Command::new(jadec())
-        .arg(&jade)
+    let output = Command::new(jinnc())
+        .arg(&jinn)
         .arg("--emit-mir")
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
 
     assert!(
         output.status.success(),
-        "jadec compilation failed\nstderr: {}\nsource:\n{}",
+        "jinnc compilation failed\nstderr: {}\nsource:\n{}",
         String::from_utf8_lossy(&output.stderr),
         src
     );

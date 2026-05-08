@@ -67,7 +67,7 @@ impl Package {
             }
             let tokens = Lexer::new(trimmed)
                 .tokenize()
-                .map_err(|e| format!("jade.pkg line {}: {e}", line_num + 1))?;
+                .map_err(|e| format!("jinn.pkg line {}: {e}", line_num + 1))?;
             let toks: Vec<&Token> = tokens.iter().map(|s| &s.token).collect();
             match toks.first() {
                 Some(Token::Ident(kw)) if kw == "package" => {
@@ -75,7 +75,7 @@ impl Package {
                         name = Some(n.clone());
                     } else {
                         return Err(format!(
-                            "jade.pkg line {}: expected package name",
+                            "jinn.pkg line {}: expected package name",
                             line_num + 1
                         ));
                     }
@@ -84,7 +84,7 @@ impl Package {
                     let rest = trimmed.strip_prefix("version").unwrap().trim();
                     version = Some(
                         SemVer::parse(rest)
-                            .map_err(|e| format!("jade.pkg line {}: {e}", line_num + 1))?,
+                            .map_err(|e| format!("jinn.pkg line {}: {e}", line_num + 1))?,
                     );
                 }
                 Some(Token::Ident(kw)) if kw == "author" => {
@@ -95,7 +95,7 @@ impl Package {
                     let parts: Vec<&str> = trimmed.splitn(4, char::is_whitespace).collect();
                     if parts.len() < 4 {
                         return Err(format!(
-                            "jade.pkg line {}: require needs name url version",
+                            "jinn.pkg line {}: require needs name url version",
                             line_num + 1
                         ));
                     }
@@ -103,12 +103,12 @@ impl Package {
                         name: parts[1].to_string(),
                         url: parts[2].to_string(),
                         version: SemVer::parse(parts[3].trim())
-                            .map_err(|e| format!("jade.pkg line {}: {e}", line_num + 1))?,
+                            .map_err(|e| format!("jinn.pkg line {}: {e}", line_num + 1))?,
                     });
                 }
                 _ => {
                     return Err(format!(
-                        "jade.pkg line {}: unknown directive: {trimmed}",
+                        "jinn.pkg line {}: unknown directive: {trimmed}",
                         line_num + 1
                     ));
                 }
@@ -117,9 +117,9 @@ impl Package {
 
         Ok(Package {
             name: name
-                .ok_or("jade.pkg: missing 'package' directive")?
+                .ok_or("jinn.pkg: missing 'package' directive")?
                 .as_str(),
-            version: version.ok_or("jade.pkg: missing 'version' directive")?,
+            version: version.ok_or("jinn.pkg: missing 'version' directive")?,
             author,
             requires,
         })

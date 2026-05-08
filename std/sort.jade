@@ -60,12 +60,12 @@
 
 # ── f64 sort (uses runtime helper if available) ──────────────
 
-extern *jade_sort_f64(data as %f64, len as i64)
+extern *jinn_sort_f64(data as %f64, len as i64)
 
 *sort_f64(arr as Vec of f64)
     if arr.length <= 1
         return
-    extern.jade_sort_f64(%arr, arr.length)
+    extern.jinn_sort_f64(%arr, arr.length)
 
 # ── String sort ──────────────────────────────────────────────
 

@@ -1,22 +1,22 @@
 /* ═══════════════════════════════════════════════════════════
-   JADE LANGUAGE — WEBSITE STYLESHEET
-   Brand: Imperial Jade, Eastern Philosophy, Performance
+   JINN LANGUAGE — WEBSITE STYLESHEET
+   Brand: Imperial Jinn, Eastern Philosophy, Performance
    ═══════════════════════════════════════════════════════════ */
 
 /* ─── CUSTOM PROPERTIES ─────────────────────────────────── */
 :root {
-    /* Jade Greens */
-    --jade-50:  #E8F5EE;
-    --jade-100: #C8E6D4;
-    --jade-200: #8FCFAB;
-    --jade-300: #4DB87E;
-    --jade-400: #2DA365;
-    --jade-500: #00A86B;  /* Imperial Jade */
-    --jade-600: #008F5A;
-    --jade-700: #236B47;  /* Kosmochlor / Maw Sit Sit */
-    --jade-800: #0B3D2E;  /* Deep Jade */
-    --jade-900: #071F18;
-    --jade-950: #040F0C;
+    /* Jinn Greens */
+    --jinn-50:  #E8F5EE;
+    --jinn-100: #C8E6D4;
+    --jinn-200: #8FCFAB;
+    --jinn-300: #4DB87E;
+    --jinn-400: #2DA365;
+    --jinn-500: #00A86B;  /* Imperial Jinn */
+    --jinn-600: #008F5A;
+    --jinn-700: #236B47;  /* Kosmochlor / Maw Sit Sit */
+    --jinn-800: #0B3D2E;  /* Deep Jinn */
+    --jinn-900: #071F18;
+    --jinn-950: #040F0C;
 
     /* Imperial Purples */
     --purple-50:  #F3EFF8;
@@ -48,14 +48,14 @@
     --amber:     #E8A838;
 
     /* Semantic */
-    --bg:        var(--jade-950);
-    --bg-alt:    var(--jade-900);
+    --bg:        var(--jinn-950);
+    --bg-alt:    var(--jinn-900);
     --bg-card:   rgba(11, 61, 46, 0.25);
     --text:      var(--white);
     --text-dim:  var(--cloud);
     --text-muted: var(--mist);
-    --accent:    var(--jade-500);
-    --accent-dim: var(--jade-700);
+    --accent:    var(--jinn-500);
+    --accent-dim: var(--jinn-700);
 
     /* Typography */
     --font-display: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -110,22 +110,22 @@ body {
 
 /* Focus styles */
 :focus-visible {
-    outline: 2px solid var(--jade-400);
+    outline: 2px solid var(--jinn-400);
     outline-offset: 3px;
     border-radius: 2px;
 }
 
 a {
-    color: var(--jade-300);
+    color: var(--jinn-300);
     text-decoration: none;
     transition: color var(--duration-fast) var(--ease-out);
 }
-a:hover { color: var(--jade-200); }
+a:hover { color: var(--jinn-200); }
 
 code {
     font-family: var(--font-mono);
     font-size: 0.875em;
-    color: var(--jade-300);
+    color: var(--jinn-300);
     background: rgba(0, 168, 107, 0.08);
     padding: 0.1em 0.35em;
     border-radius: 4px;
@@ -135,7 +135,7 @@ img, svg { display: block; max-width: 100%; }
 ul { list-style: none; }
 
 ::selection {
-    background: var(--jade-700);
+    background: var(--jinn-700);
     color: var(--white);
 }
 
@@ -197,11 +197,11 @@ ul { list-style: none; }
     font-weight: 600;
     text-decoration: none;
 }
-.nav__logo:hover { color: var(--jade-300); }
+.nav__logo:hover { color: var(--jinn-300); }
 .nav__logo-icon {
     width: 28px;
     height: 28px;
-    color: var(--jade-400);
+    color: var(--jinn-400);
 }
 .nav__logo-text {
     font-family: var(--font-display);
@@ -229,7 +229,7 @@ ul { list-style: none; }
     left: 0;
     width: 0;
     height: 1px;
-    background: var(--jade-400);
+    background: var(--jinn-400);
     transition: width var(--duration-fast) var(--ease-out);
 }
 .nav__links a:hover::after { width: 100%; }
@@ -237,7 +237,7 @@ ul { list-style: none; }
 
 .nav__cta {
     padding: 0.4rem 1rem;
-    border: 1px solid var(--jade-600);
+    border: 1px solid var(--jinn-600);
     border-radius: 6px;
     font-size: 0.8rem !important;
     letter-spacing: 0.04em;
@@ -245,8 +245,8 @@ ul { list-style: none; }
     transition: all var(--duration-fast) var(--ease-out) !important;
 }
 .nav__cta:hover {
-    background: var(--jade-700);
-    border-color: var(--jade-500);
+    background: var(--jinn-700);
+    border-color: var(--jinn-500);
 }
 .nav__cta::after { display: none !important; }
 
@@ -353,7 +353,7 @@ ul { list-style: none; }
     font-size: 0.75rem;
     letter-spacing: 0.25em;
     text-transform: uppercase;
-    color: var(--jade-400);
+    color: var(--jinn-400);
     margin-bottom: var(--space-lg);
     animation: fade-up 0.8s var(--ease-out) 0.2s both;
 }
@@ -377,7 +377,7 @@ ul { list-style: none; }
 .hero__title-line em {
     font-weight: 600;
     font-style: italic;
-    color: var(--jade-400);
+    color: var(--jinn-400);
 }
 
 @keyframes fade-up {
@@ -419,13 +419,13 @@ ul { list-style: none; }
     text-decoration: none;
 }
 .btn--primary {
-    background: var(--jade-600);
+    background: var(--jinn-600);
     color: var(--white);
     box-shadow: 0 2px 20px rgba(0, 168, 107, 0.25),
                 inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 .btn--primary:hover {
-    background: var(--jade-500);
+    background: var(--jinn-500);
     color: var(--white);
     box-shadow: 0 4px 30px rgba(0, 168, 107, 0.35),
                 inset 0 1px 0 rgba(255, 255, 255, 0.15);
@@ -459,7 +459,7 @@ ul { list-style: none; }
     font-family: var(--font-mono);
     font-size: 1.5rem;
     font-weight: 600;
-    color: var(--jade-300);
+    color: var(--jinn-300);
     letter-spacing: -0.01em;
 }
 .stat__label {
@@ -507,7 +507,7 @@ ul { list-style: none; }
 .section-header__kana {
     display: block;
     font-size: 2.5rem;
-    color: var(--jade-600);
+    color: var(--jinn-600);
     opacity: 0.4;
     margin-bottom: var(--space-sm);
     font-family: serif;
@@ -573,7 +573,7 @@ ul { list-style: none; }
 
 .principle__number {
     font-size: 2rem;
-    color: var(--jade-600);
+    color: var(--jinn-600);
     opacity: 0.3;
     margin-bottom: var(--space-md);
     font-family: serif;
@@ -584,7 +584,7 @@ ul { list-style: none; }
     font-family: var(--font-display);
     font-size: 1.3rem;
     font-weight: 600;
-    color: var(--jade-200);
+    color: var(--jinn-200);
     margin-bottom: var(--space-sm);
 }
 
@@ -783,7 +783,7 @@ ul { list-style: none; }
 .feature-card__icon {
     width: 40px;
     height: 40px;
-    color: var(--jade-500);
+    color: var(--jinn-500);
     margin-bottom: var(--space-md);
     opacity: 0.7;
 }
@@ -792,7 +792,7 @@ ul { list-style: none; }
     font-family: var(--font-display);
     font-size: 1.15rem;
     font-weight: 600;
-    color: var(--jade-200);
+    color: var(--jinn-200);
     margin-bottom: var(--space-sm);
 }
 
@@ -835,7 +835,7 @@ ul { list-style: none; }
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--jade-400);
+    color: var(--jinn-400);
     margin-bottom: var(--space-md);
 }
 
@@ -885,7 +885,7 @@ ul { list-style: none; }
 .start-step__number {
     width: 48px;
     height: 48px;
-    color: var(--jade-500);
+    color: var(--jinn-500);
     opacity: 0.7;
 }
 
@@ -893,7 +893,7 @@ ul { list-style: none; }
     font-family: var(--font-display);
     font-size: 1.2rem;
     font-weight: 600;
-    color: var(--jade-200);
+    color: var(--jinn-200);
 }
 
 .start-step__code {
@@ -909,7 +909,7 @@ ul { list-style: none; }
 .footer {
     border-top: 1px solid rgba(0, 168, 107, 0.08);
     padding: var(--space-3xl) 0 var(--space-xl);
-    background: var(--jade-950);
+    background: var(--jinn-950);
 }
 
 .footer__inner {
@@ -927,7 +927,7 @@ ul { list-style: none; }
 .footer__logo {
     width: 32px;
     height: 32px;
-    color: var(--jade-500);
+    color: var(--jinn-500);
     flex-shrink: 0;
 }
 .footer__name {
@@ -952,7 +952,7 @@ ul { list-style: none; }
     font-family: var(--font-display);
     font-size: 0.9rem;
     font-weight: 600;
-    color: var(--jade-300);
+    color: var(--jinn-300);
     margin-bottom: var(--space-md);
 }
 .footer__col ul {
@@ -986,7 +986,7 @@ ul { list-style: none; }
     font-family: var(--font-display);
     font-size: 0.85rem;
     font-style: italic;
-    color: var(--jade-700);
+    color: var(--jinn-700);
     letter-spacing: 0.02em;
 }
 

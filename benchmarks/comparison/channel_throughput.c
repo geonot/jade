@@ -1,6 +1,6 @@
 /* R9/B-CHANNEL — In-process single-producer/single-consumer ring buffer
  * baseline matching the single-thread ping-pong pattern used by
- * benchmarks/channel_throughput.jade. The previous baseline used
+ * benchmarks/channel_throughput.jn. The previous baseline used
  * pipe(2)+read/write per element which incurs a pair of syscalls per
  * iteration and is not representative of an in-process channel. */
 

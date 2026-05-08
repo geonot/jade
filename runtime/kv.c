@@ -1,4 +1,4 @@
-/* ── Jade KV Store Runtime ────────────────────────────────────────
+/* ── Jinn KV Store Runtime ────────────────────────────────────────
  *  In-memory hash map with disk persistence.
  *  Keys: null-terminated strings (max 255 bytes).
  *  Values: i64 (8 bytes).
@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 #define KV_MAGIC      "JADEKV\0\0"
 #define KV_MAGIC_SIZE 8
@@ -29,7 +29,7 @@ typedef struct {
     int64_t  status;
 } KvSlot;
 
-struct JadeKV {
+struct JinnKV {
     FILE    *fp;
     KvSlot  *slots;
     int64_t  capacity;
@@ -49,7 +49,7 @@ static uint64_t kv_hash(const char *key, int64_t len) {
 
 /* ── Internal helpers ─────────────────────────────────────────── */
 
-static int64_t kv_find_slot(JadeKV *kv, uint64_t hash, const char *key, int64_t key_len) {
+static int64_t kv_find_slot(JinnKV *kv, uint64_t hash, const char *key, int64_t key_len) {
     int64_t mask = kv->capacity - 1;
     int64_t slot = (int64_t)(hash & (uint64_t)mask);
     for (;;) {
@@ -65,7 +65,7 @@ static int64_t kv_find_slot(JadeKV *kv, uint64_t hash, const char *key, int64_t 
     }
 }
 
-static void kv_grow(JadeKV *kv) {
+static void kv_grow(JinnKV *kv) {
     int64_t old_cap = kv->capacity;
     KvSlot *old_slots = kv->slots;
 
@@ -90,10 +90,10 @@ static void kv_grow(JadeKV *kv) {
     free(old_slots);
 }
 
-static void kv_save(JadeKV *kv) {
+static void kv_save(JinnKV *kv) {
     if (!kv->fp) return;
     if (fseek(kv->fp, 0, SEEK_SET) != 0) {
-        fprintf(stderr, "jade: kv: fseek failed during save\n");
+        fprintf(stderr, "jinn: kv: fseek failed during save\n");
         return;
     }
 
@@ -101,7 +101,7 @@ static void kv_save(JadeKV *kv) {
     memcpy(magic, KV_MAGIC, KV_MAGIC_SIZE);
     if (fwrite(magic, 1, KV_MAGIC_SIZE, kv->fp) != KV_MAGIC_SIZE ||
         fwrite(&kv->count, sizeof(int64_t), 1, kv->fp) != 1) {
-        fprintf(stderr, "jade: kv: write header failed\n");
+        fprintf(stderr, "jinn: kv: write header failed\n");
         return;
     }
 
@@ -109,7 +109,7 @@ static void kv_save(JadeKV *kv) {
     for (int64_t i = 0; i < kv->capacity; i++) {
         if (kv->slots[i].status == KV_OCCUPIED) {
             if (fwrite(&kv->slots[i], sizeof(KvSlot), 1, kv->fp) != 1) {
-                fprintf(stderr, "jade: kv: write entry failed\n");
+                fprintf(stderr, "jinn: kv: write entry failed\n");
                 return;
             }
         }
@@ -119,8 +119,8 @@ static void kv_save(JadeKV *kv) {
 
 /* ── Public API ───────────────────────────────────────────────── */
 
-JadeKV *jade_kv_open(const char *path) {
-    JadeKV *kv = (JadeKV *)calloc(1, sizeof(JadeKV));
+JinnKV *jinn_kv_open(const char *path) {
+    JinnKV *kv = (JinnKV *)calloc(1, sizeof(JinnKV));
     kv->capacity = KV_INIT_CAP;
     kv->slots = (KvSlot *)calloc((size_t)kv->capacity, sizeof(KvSlot));
     kv->count = 0;
@@ -166,7 +166,7 @@ JadeKV *jade_kv_open(const char *path) {
     return kv;
 }
 
-void jade_kv_close(JadeKV *kv) {
+void jinn_kv_close(JinnKV *kv) {
     if (!kv) return;
     kv_save(kv);
     if (kv->fp) fclose(kv->fp);
@@ -174,7 +174,7 @@ void jade_kv_close(JadeKV *kv) {
     free(kv);
 }
 
-void jade_kv_set(JadeKV *kv, const char *key, int64_t key_len, int64_t value) {
+void jinn_kv_set(JinnKV *kv, const char *key, int64_t key_len, int64_t value) {
     if (!kv || !key || key_len <= 0) return;
     if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
 
@@ -203,7 +203,7 @@ void jade_kv_set(JadeKV *kv, const char *key, int64_t key_len, int64_t value) {
     kv_save(kv);
 }
 
-int64_t jade_kv_get(JadeKV *kv, const char *key, int64_t key_len) {
+int64_t jinn_kv_get(JinnKV *kv, const char *key, int64_t key_len) {
     if (!kv || !key || key_len <= 0) return 0;
     if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
 
@@ -213,7 +213,7 @@ int64_t jade_kv_get(JadeKV *kv, const char *key, int64_t key_len) {
     return 0; /* not found → return 0 */
 }
 
-int jade_kv_has(JadeKV *kv, const char *key, int64_t key_len) {
+int jinn_kv_has(JinnKV *kv, const char *key, int64_t key_len) {
     if (!kv || !key || key_len <= 0) return 0;
     if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
 
@@ -222,7 +222,7 @@ int jade_kv_has(JadeKV *kv, const char *key, int64_t key_len) {
     return slot >= 0 ? 1 : 0;
 }
 
-void jade_kv_del(JadeKV *kv, const char *key, int64_t key_len) {
+void jinn_kv_del(JinnKV *kv, const char *key, int64_t key_len) {
     if (!kv || !key || key_len <= 0) return;
     if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
 
@@ -235,7 +235,7 @@ void jade_kv_del(JadeKV *kv, const char *key, int64_t key_len) {
     }
 }
 
-void jade_kv_incr(JadeKV *kv, const char *key, int64_t key_len, int64_t delta) {
+void jinn_kv_incr(JinnKV *kv, const char *key, int64_t key_len, int64_t delta) {
     if (!kv || !key || key_len <= 0) return;
     if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
 
@@ -263,12 +263,12 @@ void jade_kv_incr(JadeKV *kv, const char *key, int64_t key_len, int64_t delta) {
     kv_save(kv);
 }
 
-int64_t jade_kv_count(JadeKV *kv) {
+int64_t jinn_kv_count(JinnKV *kv) {
     if (!kv) return 0;
     return kv->count;
 }
 
-void jade_kv_persist(JadeKV *kv) {
+void jinn_kv_persist(JinnKV *kv) {
     if (!kv) return;
     kv_save(kv);
 }

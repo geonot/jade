@@ -15,7 +15,7 @@ pub(in crate::driver) fn resolve_implicit_imports(
     if module_refs.is_empty() {
         return;
     }
-    if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
+    if std::env::var("JINN_DEBUG_IMPORTS").is_ok() {
         eprintln!("[auto-import] qualified module refs: {:?}", module_refs);
     }
 
@@ -58,7 +58,7 @@ pub(in crate::driver) fn resolve_implicit_imports(
             .unwrap_or_else(|_| file_path.clone());
         let key = file_canon.to_string_lossy().to_string();
         if loaded.contains(&Symbol::intern(&key)) {
-            if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
+            if std::env::var("JINN_DEBUG_IMPORTS").is_ok() {
                 eprintln!(
                     "[auto-import] SKIP (already loaded): {}",
                     file_path.display()
@@ -66,7 +66,7 @@ pub(in crate::driver) fn resolve_implicit_imports(
             }
             continue;
         }
-        if std::env::var("JADE_DEBUG_IMPORTS").is_ok() {
+        if std::env::var("JINN_DEBUG_IMPORTS").is_ok() {
             eprintln!(
                 "[auto-import] IMPORTING: {} for {:?}",
                 file_path.display(),
@@ -96,7 +96,7 @@ pub(in crate::driver) fn resolve_implicit_imports(
             packages,
         );
 
-        // Derive module name from file path (e.g., "/path/to/json.jade" → "json")
+        // Derive module name from file path (e.g., "/path/to/json.jn" → "json")
         let mod_name = file_path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())

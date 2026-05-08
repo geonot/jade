@@ -320,11 +320,11 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let f = self
             .module
-            .get_function("__jade_deque_new")
+            .get_function("__jinn_deque_new")
             .unwrap_or_else(|| {
                 let ft = ptr_ty.fn_type(&[], false);
                 self.module.add_function(
-                    "__jade_deque_new",
+                    "__jinn_deque_new",
                     ft,
                     Some(inkwell::module::Linkage::External),
                 )
@@ -347,9 +347,9 @@ impl<'ctx> Compiler<'ctx> {
         match method {
             "push_back" | "push_front" => {
                 let rt_name = if method == "push_back" {
-                    "__jade_deque_push_back"
+                    "__jinn_deque_push_back"
                 } else {
-                    "__jade_deque_push_front"
+                    "__jinn_deque_push_front"
                 };
                 let f = self.module.get_function(rt_name).unwrap_or_else(|| {
                     let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into()], false);
@@ -362,16 +362,16 @@ impl<'ctx> Compiler<'ctx> {
             }
             "pop_front" | "pop_back" => {
                 let rt_name = if method == "pop_front" {
-                    "__jade_deque_pop_front"
+                    "__jinn_deque_pop_front"
                 } else {
-                    "__jade_deque_pop_back"
+                    "__jinn_deque_pop_back"
                 };
                 let f = self.ensure_deque_fn(rt_name, &[ptr_ty.into()], i64t.into());
                 let result = b!(self.bld.build_call(f, &[handle.into()], "dq.pop"));
                 Ok(self.call_result(result))
             }
             "len" => {
-                let f = self.ensure_deque_fn("__jade_deque_len", &[ptr_ty.into()], i64t.into());
+                let f = self.ensure_deque_fn("__jinn_deque_len", &[ptr_ty.into()], i64t.into());
                 let result = b!(self.bld.build_call(f, &[handle.into()], "dq.len"));
                 Ok(self.call_result(result))
             }
@@ -393,13 +393,13 @@ impl<'ctx> Compiler<'ctx> {
         let end_val = self.compile_expr(end)?;
         match &obj.ty {
             Type::Vec(elem_ty) => {
-                // Vec slice: call jade_vec_slice(vec_ptr, start, end, elem_size) → new vec
+                // Vec slice: call jinn_vec_slice(vec_ptr, start, end, elem_size) → new vec
                 let lty = self.llvm_ty(elem_ty);
                 let elem_size = self.type_store_size(lty);
                 let i64t = self.ctx.i64_type();
                 let slice_fn = self
                     .module
-                    .get_function("__jade_vec_slice")
+                    .get_function("__jinn_vec_slice")
                     .unwrap_or_else(|| {
                         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                         let ft = ptr_ty.fn_type(
@@ -407,7 +407,7 @@ impl<'ctx> Compiler<'ctx> {
                             false,
                         );
                         self.module.add_function(
-                            "__jade_vec_slice",
+                            "__jinn_vec_slice",
                             ft,
                             Some(inkwell::module::Linkage::External),
                         )
@@ -424,16 +424,16 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
             }
             Type::String => {
-                // String slice: call jade_str_slice(str, start, end) → new str
+                // String slice: call jinn_str_slice(str, start, end) → new str
                 let slice_fn = self
                     .module
-                    .get_function("__jade_str_slice")
+                    .get_function("__jinn_str_slice")
                     .unwrap_or_else(|| {
                         let st = self.string_type();
                         let i64t = self.ctx.i64_type();
                         let ft = st.fn_type(&[st.into(), i64t.into(), i64t.into()], false);
                         self.module.add_function(
-                            "__jade_str_slice",
+                            "__jinn_str_slice",
                             ft,
                             Some(inkwell::module::Linkage::External),
                         )

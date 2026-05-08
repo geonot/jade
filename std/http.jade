@@ -64,7 +64,7 @@ type ParsedUrl
     sb.write(method + " " + parsed.path + " HTTP/1.1\r\n")
     sb.write("Host: " + parsed.host + "\r\n")
     sb.write("Connection: close\r\n")
-    sb.write("User-Agent: jade/0.5\r\n")
+    sb.write("User-Agent: jinn/0.5\r\n")
     if body.length > 0
         sb.write("Content-Length: " + to_string(body.length) + "\r\n")
     loop extra_headers
@@ -89,13 +89,13 @@ type ParsedUrl
     parse_response(response)
 
 *__request_plain(parsed as ParsedUrl, req_str as String) returns HttpResponse
-    fd is extern.jade_socket(2, 1, 0)
+    fd is extern.jinn_socket(2, 1, 0)
     if fd < 0
         return HttpResponse(status is 0, headers is vec(), body is "connection failed")
     addr is net.__make_sockaddr(parsed.host, parsed.port)
     if extern.connect(fd, addr, 16) < 0
         extern.free(addr)
-        extern.jade_close(fd)
+        extern.jinn_close(fd)
         return HttpResponse(status is 0, headers is vec(), body is "connection failed")
     extern.free(addr)
 
@@ -103,7 +103,7 @@ type ParsedUrl
     sent is 0
     while sent < req_str.length
         remaining is req_str.slice(sent, req_str.length)
-        n is extern.jade_send(fd, %remaining, remaining.length, 0)
+        n is extern.jinn_send(fd, %remaining, remaining.length, 0)
         if n <= 0
             break
         sent is sent + n
@@ -112,7 +112,7 @@ type ParsedUrl
     response is ""
     loop
         buf is extern.malloc(8193)
-        n is extern.jade_recv(fd, buf, 8192, 0)
+        n is extern.jinn_recv(fd, buf, 8192, 0)
         if n <= 0
             extern.free(buf)
             break
@@ -120,7 +120,7 @@ type ParsedUrl
         response is response + chunk
 
     extern.shutdown(fd, 2)
-    extern.jade_close(fd)
+    extern.jinn_close(fd)
     parse_response(response)
 
 *parse_response(raw as String) returns HttpResponse
@@ -198,7 +198,7 @@ type ConnectionPool
         sb.write(method + " " + parsed.path + " HTTP/1.1\r\n")
         sb.write("Host: " + parsed.host + "\r\n")
         sb.write("Connection: keep-alive\r\n")
-        sb.write("User-Agent: jade/0.5\r\n")
+        sb.write("User-Agent: jinn/0.5\r\n")
         if body.length > 0
             sb.write("Content-Length: " + to_string(body.length) + "\r\n")
         loop extra_headers
@@ -216,7 +216,7 @@ type ConnectionPool
         loop self.entries
             if $.is_tls is false
                 extern.shutdown($.fd, 2)
-                extern.jade_close($.fd)
+                extern.jinn_close($.fd)
         self.entries is vec()
 
 *pool(max as i64) returns ConnectionPool
@@ -233,19 +233,19 @@ type ConnectionPool
     if idx >= 0
         fd is p.entries.get(idx).fd
     else
-        fd is extern.jade_socket(2, 1, 0)
+        fd is extern.jinn_socket(2, 1, 0)
         if fd < 0
             return HttpResponse(status is 0, headers is vec(), body is "connection failed")
         addr is net.__make_sockaddr(parsed.host, parsed.port)
         if extern.connect(fd, addr, 16) < 0
             extern.free(addr)
-            extern.jade_close(fd)
+            extern.jinn_close(fd)
             return HttpResponse(status is 0, headers is vec(), body is "connection failed")
         extern.free(addr)
         if p.entries.length >= p.max_size
             old is p.entries.get(0)
             extern.shutdown(old.fd, 2)
-            extern.jade_close(old.fd)
+            extern.jinn_close(old.fd)
             # Remove first entry by rebuilding
             new_entries is vec()
             loop p.entries
@@ -258,7 +258,7 @@ type ConnectionPool
     sent is 0
     while sent < req_str.length
         remaining is req_str.slice(sent, req_str.length)
-        n is extern.jade_send(fd, %remaining, remaining.length, 0)
+        n is extern.jinn_send(fd, %remaining, remaining.length, 0)
         if n <= 0
             break
         sent is sent + n
@@ -267,7 +267,7 @@ type ConnectionPool
     response is ""
     loop
         buf is extern.malloc(8193)
-        n is extern.jade_recv(fd, buf, 8192, 0)
+        n is extern.jinn_recv(fd, buf, 8192, 0)
         if n <= 0
             extern.free(buf)
             break

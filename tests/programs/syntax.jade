@@ -1,7 +1,7 @@
                                                                                  # ============================================================================
-# syntax.jade — Complete Jade Language Reference
+# syntax.jn — Complete Jinn Language Reference
 # ============================================================================
-# This file demonstrates every Jade syntax feature and builtin.
+# This file demonstrates every Jinn syntax feature and builtin.
 # It serves as a quick-reference programmer's guide.
 # Some features shown here are planned and may not yet compile.
 # ============================================================================
@@ -36,7 +36,7 @@
     neg is -42
 
     # Strings — single quotes, with {interpolation}
-    name is 'jade'
+    name is 'jinn'
     greeting is 'hello {name}'
     expr_interp is 'two plus two is {2 + 2}'
 
@@ -478,17 +478,17 @@ err FileError
 # ── 16. String Operations ──────────────────────────────────────────────────
 
 *demo_strings
-    s is 'hello jade'
+    s is 'hello jinn'
 
     # String methods
-    log(s.contains('jade'))       # true
+    log(s.contains('jinn'))       # true
     log(s.starts_with('hello'))   # true
-    log(s.ends_with('jade'))      # true
+    log(s.ends_with('jinn'))      # true
     log(s.char_at(0))             # 104 (ascii 'h')
-    log(s.to_upper())             # HELLO JADE
-    log(s.to_lower())             # hello jade
-    log(s.trim())                 # hello jade
-    log(s.replace('jade', 'world'))  # hello world
+    log(s.to_upper())             # HELLO JINN
+    log(s.to_lower())             # hello jinn
+    log(s.trim())                 # hello jinn
+    log(s.replace('jinn', 'world'))  # hello world
 
     # Split / join
     parts is 'a,b,c'.split(',')  # ['a', 'b', 'c']
@@ -502,7 +502,7 @@ err FileError
         log(line)
 
     # Find
-    idx is s.find('jade')         # 6
+    idx is s.find('jinn')         # 6
     log(idx)
 
     # String interpolation
@@ -758,7 +758,7 @@ actor Counter
 
 
 # ── 31. Persistent Stores (0.2.0 — planned) ────────────────────────────────
-# Jade treats persistence as a first-class language feature.
+# Jinn treats persistence as a first-class language feature.
 # Stores are typed, transactional, and queryable — no ORM layer.
 
 # store Users
@@ -774,8 +774,8 @@ actor Counter
 #
 # *demo_stores
 #     # Insert records
-#     Users.insert name is 'alice', email is 'alice@jade.dev', age is 30
-#     Users.insert name is 'bob', email is 'bob@jade.dev', age is 25
+#     Users.insert name is 'alice', email is 'alice@jinn.dev', age is 30
+#     Users.insert name is 'bob', email is 'bob@jinn.dev', age is 25
 #
 #     # Query — returns matching records
 #     admins is Users.where age >= 18
@@ -1000,7 +1000,7 @@ alias Seconds is f64
 # ── Main: Run all demos ────────────────────────────────────────────────────
 
 *main
-    log('=== Jade Language Syntax Reference ===')
+    log('=== Jinn Language Syntax Reference ===')
 
     log('--- primitives ---')
     primitives()

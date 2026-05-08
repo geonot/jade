@@ -38,8 +38,8 @@ impl<'ctx> Compiler<'ctx> {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
                 let gen_resume = self
                     .module
-                    .get_function("jade_gen_resume")
-                    .ok_or("jade_gen_resume not declared")?;
+                    .get_function("jinn_gen_resume")
+                    .ok_or("jinn_gen_resume not declared")?;
                 b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
                 return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
             }
@@ -83,7 +83,7 @@ impl<'ctx> Compiler<'ctx> {
                 return self.emit_coro_yield(val).map(Some);
             }
         }
-        // ── Select recv (reads from select data buffer, not jade_chan_recv) ──
+        // ── Select recv (reads from select data buffer, not jinn_chan_recv) ──
         if name == "__select_recv" {
             if args.len() >= 2 {
                 let select_vid = args[0];
@@ -232,8 +232,8 @@ impl<'ctx> Compiler<'ctx> {
                 let ch_ptr = self.val(ch_val).into_pointer_value();
                 let chan_close = self
                     .module
-                    .get_function("jade_chan_close")
-                    .ok_or("jade_chan_close not declared")?;
+                    .get_function("jinn_chan_close")
+                    .ok_or("jinn_chan_close not declared")?;
                 b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
@@ -247,8 +247,8 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self.bld.build_load(ptr_ty, actor_ptr, "stop.ch")).into_pointer_value();
                 let chan_close = self
                     .module
-                    .get_function("jade_chan_close")
-                    .ok_or("jade_chan_close not declared")?;
+                    .get_function("jinn_chan_close")
+                    .ok_or("jinn_chan_close not declared")?;
                 b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
@@ -414,7 +414,7 @@ impl<'ctx> Compiler<'ctx> {
     // ── Coroutine/Generator codegen ──────────────────────────────
 
     /// Create a coroutine/generator: builds __coro_{name} function,
-    /// allocates 32-byte gen control block, creates coro via jade_coro_create.
+    /// allocates 32-byte gen control block, creates coro via jinn_coro_create.
     pub(super) fn emit_coro_create(&mut self, name: &str) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let _i64t = self.ctx.i64_type();
@@ -442,8 +442,8 @@ impl<'ctx> Compiler<'ctx> {
         // Resume the producer coroutine (direct context swap)
         let gen_resume = self
             .module
-            .get_function("jade_gen_resume")
-            .ok_or("jade_gen_resume not declared")?;
+            .get_function("jinn_gen_resume")
+            .ok_or("jinn_gen_resume not declared")?;
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // Read the yielded value
@@ -491,8 +491,8 @@ impl<'ctx> Compiler<'ctx> {
         // Suspend back to caller
         let gen_suspend = self
             .module
-            .get_function("jade_gen_suspend")
-            .ok_or("jade_gen_suspend not declared")?;
+            .get_function("jinn_gen_suspend")
+            .ok_or("jinn_gen_suspend not declared")?;
         b!(self.bld.build_call(gen_suspend, &[gen_ptr.into()], ""));
 
         Ok(self.ctx.i8_type().const_int(0, false).into())
@@ -598,8 +598,8 @@ impl<'ctx> Compiler<'ctx> {
         // Send message
         let chan_send = self
             .module
-            .get_function("jade_chan_send")
-            .ok_or("jade_chan_send not declared")?;
+            .get_function("jinn_chan_send")
+            .ok_or("jinn_chan_send not declared")?;
         b!(self
             .bld
             .build_call(chan_send, &[ch_ptr.into(), msg_alloca.into()], ""));
@@ -609,7 +609,7 @@ impl<'ctx> Compiler<'ctx> {
 
     // ── Select codegen ──────────────────────────────────────────
 
-    /// Build jade_select call: construct case array, call jade_select(), return index.
+    /// Build jinn_select call: construct case array, call jinn_select(), return index.
     pub(super) fn emit_select(
         &mut self,
         channels: &[mir::ValueId],
@@ -621,7 +621,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let n = channels.len();
 
-        // jade_select_case_t = { chan: ptr, data: ptr, is_send: i32 }
+        // jinn_select_case_t = { chan: ptr, data: ptr, is_send: i32 }
         let case_struct_ty = self
             .ctx
             .struct_type(&[ptr_ty.into(), ptr_ty.into(), i32t.into()], false);
@@ -676,8 +676,8 @@ impl<'ctx> Compiler<'ctx> {
 
         let select_fn = self
             .module
-            .get_function("jade_select")
-            .ok_or("jade_select not declared")?;
+            .get_function("jinn_select")
+            .ok_or("jinn_select not declared")?;
         let has_default = self.ctx.bool_type().const_int(has_default as u64, false);
         let result = b!(self.bld.build_call(
             select_fn,

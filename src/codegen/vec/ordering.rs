@@ -265,7 +265,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::I64 => {
                 let sort_fn = self
                     .module
-                    .get_function("jade_sort_i64")
+                    .get_function("jinn_sort_i64")
                     .unwrap_or_else(|| {
                         let sig = self.ctx.void_type().fn_type(
                             &[
@@ -275,7 +275,7 @@ impl<'ctx> Compiler<'ctx> {
                             false,
                         );
                         self.module
-                            .add_function("jade_sort_i64", sig, Some(Linkage::External))
+                            .add_function("jinn_sort_i64", sig, Some(Linkage::External))
                     });
                 let cast = b!(self.bld.build_pointer_cast(
                     out_data,
@@ -291,7 +291,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::F64 => {
                 let sort_fn = self
                     .module
-                    .get_function("jade_sort_f64")
+                    .get_function("jinn_sort_f64")
                     .unwrap_or_else(|| {
                         let sig = self.ctx.void_type().fn_type(
                             &[
@@ -301,7 +301,7 @@ impl<'ctx> Compiler<'ctx> {
                             false,
                         );
                         self.module
-                            .add_function("jade_sort_f64", sig, Some(Linkage::External))
+                            .add_function("jinn_sort_f64", sig, Some(Linkage::External))
                     });
                 let cast = b!(self.bld.build_pointer_cast(
                     out_data,

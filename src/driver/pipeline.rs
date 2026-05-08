@@ -51,7 +51,7 @@ pub(super) fn compile_and_link(
         .parse_program()
         .unwrap_or_else(|e| die(&format!("{e}")));
 
-    // Multi-file project: merge all .jade files from the source directory
+    // Multi-file project: merge all .jn files from the source directory
     let base_dir = input.parent().unwrap_or(std::path::Path::new("."));
     let input_canon = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
     let merged = merge_source_files(&mut prog, base_dir, &input_canon);
@@ -194,32 +194,32 @@ pub(super) fn compile_and_link(
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(output);
     if comp.needs_runtime {
-        let rt_dir = env!("JADE_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljade_rt").arg("-lpthread");
+        let rt_dir = env!("JINN_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
     }
     if comp.needs_ssl {
-        if env!("JADE_HAS_SSL") != "1" {
+        if env!("JINN_HAS_SSL") != "1" {
             die(
                 "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
             );
         }
-        let rt_dir = env!("JADE_RT_DIR");
+        let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L")
             .arg(rt_dir)
-            .arg("-ljade_ssl")
+            .arg("-ljinn_ssl")
             .arg("-lssl")
             .arg("-lcrypto");
     }
     if comp.needs_sqlite {
-        if env!("JADE_HAS_SQLITE") != "1" {
+        if env!("JINN_HAS_SQLITE") != "1" {
             die(
                 "program uses std.sqlite but SQLite3 was not available when the compiler was built",
             );
         }
-        let rt_dir = env!("JADE_RT_DIR");
+        let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L")
             .arg(rt_dir)
-            .arg("-ljade_sqlite")
+            .arg("-ljinn_sqlite")
             .arg("-lsqlite3");
     }
     cc.arg("-lm");

@@ -18,7 +18,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
 
         let ver_fp = self.load_store_ver(store_name)?;
-        let ver_count_fn = crate::codegen::fn_or_die(&self.module, "jade_ver_count");
+        let ver_count_fn = crate::codegen::fn_or_die(&self.module, "jinn_ver_count");
         let count = self
             .call_result(b!(self.bld.build_call(
                 ver_count_fn,

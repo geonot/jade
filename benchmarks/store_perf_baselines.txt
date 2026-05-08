@@ -1,6 +1,6 @@
 # Store Performance Baselines
 #
-# Test: benchmarks/store_perf.jade
+# Test: benchmarks/store_perf.jn
 # Store: 5000 records × 3 user fields (i64, i64, f64)
 # Measured: 2 consistent runs on development machine
 # Units: seconds

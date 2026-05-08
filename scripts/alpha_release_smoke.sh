@@ -2,17 +2,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT_DIR/target/debug/jade"
+BIN="$ROOT_DIR/target/debug/jinn"
 
 log() {
   printf '[alpha-smoke] %s\n' "$*"
 }
 
-log "building jade and jadec binaries"
-cargo build --quiet --manifest-path "$ROOT_DIR/Cargo.toml" --bin jade --bin jadec
+log "building jinn and jinnc binaries"
+cargo build --quiet --manifest-path "$ROOT_DIR/Cargo.toml" --bin jinn --bin jinnc
 
 if [[ ! -x "$BIN" ]]; then
-  echo "jade binary not found at $BIN" >&2
+  echo "jinn binary not found at $BIN" >&2
   exit 1
 fi
 
@@ -35,46 +35,46 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p "$TMP_DIR/mathlib/source"
-cat > "$TMP_DIR/mathlib/project.jade" <<'JADE'
+cat > "$TMP_DIR/mathlib/project.jn" <<'JINN'
 name is 'mathlib'
 version is '0.1.0'
-entry is 'source/mathlib.jade'
-JADE
+entry is 'source/mathlib.jn'
+JINN
 
-cat > "$TMP_DIR/mathlib/source/mathlib.jade" <<'JADE'
+cat > "$TMP_DIR/mathlib/source/mathlib.jn" <<'JINN'
 *answer() returns i64
     42
-JADE
+JINN
 
 pushd "$TMP_DIR/mathlib" >/dev/null
 git init >/dev/null
-git config user.email "alpha-smoke@jade.local"
-git config user.name "Jade Alpha Smoke"
-git add project.jade source/mathlib.jade
+git config user.email "alpha-smoke@jinn.local"
+git config user.name "Jinn Alpha Smoke"
+git add project.jn source/mathlib.jn
 git commit -m "init mathlib" >/dev/null
 "$BIN" package --no-archive
 "$BIN" publish --force
 popd >/dev/null
 
 mkdir -p "$TMP_DIR/consumer/source"
-cat > "$TMP_DIR/consumer/project.jade" <<JADE
+cat > "$TMP_DIR/consumer/project.jn" <<JINN
 name is 'consumer'
 version is '0.1.0'
-entry is 'source/main.jade'
+entry is 'source/main.jn'
 require('mathlib', 'file://$TMP_DIR/mathlib', '0.1.0')
-JADE
+JINN
 
-cat > "$TMP_DIR/consumer/source/main.jade" <<'JADE'
+cat > "$TMP_DIR/consumer/source/main.jn" <<'JINN'
 use mathlib
 
 *main
     log(mathlib.answer())
-JADE
+JINN
 
 pushd "$TMP_DIR/consumer" >/dev/null
-JADE_ALLOW_NON_HTTPS_DEPS=1 "$BIN" fetch
-JADE_ALLOW_NON_HTTPS_DEPS=1 "$BIN" build -o consumer_app
-CONS_OUT="$(JADE_ALLOW_NON_HTTPS_DEPS=1 ./consumer_app)"
+JINN_ALLOW_NON_HTTPS_DEPS=1 "$BIN" fetch
+JINN_ALLOW_NON_HTTPS_DEPS=1 "$BIN" build -o consumer_app
+CONS_OUT="$(JINN_ALLOW_NON_HTTPS_DEPS=1 ./consumer_app)"
 if [[ "$CONS_OUT" != "42" ]]; then
   echo "consumer_app produced unexpected output: $CONS_OUT" >&2
   exit 1
@@ -92,7 +92,7 @@ popd >/dev/null
 
 log "running focused actor/store benchmark sample"
 if command -v python3 >/dev/null 2>&1; then
-  python3 "$ROOT_DIR/run_benchmarks.py" --bench=actor_single,actor_pingpong,store_ops --langs=jade --runs=2 --quiet >/dev/null
+  python3 "$ROOT_DIR/run_benchmarks.py" --bench=actor_single,actor_pingpong,store_ops --langs=jinn --runs=2 --quiet >/dev/null
   log "benchmark sample completed"
 else
   log "python3 not available; benchmark sample skipped"

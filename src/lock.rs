@@ -50,7 +50,7 @@ impl Lockfile {
     fn parse_entry(line: &str) -> Result<LockEntry, String> {
         let parts: Vec<&str> = line.trim().split_whitespace().collect();
         if parts.len() < 4 {
-            return Err(format!("jade.lock: invalid entry: {line}"));
+            return Err(format!("jinn.lock: invalid entry: {line}"));
         }
         Ok(LockEntry {
             name: parts[0].to_string(),
@@ -62,7 +62,7 @@ impl Lockfile {
     }
 
     pub fn write(&self) -> String {
-        let mut out = String::from("# jade.lock — auto-generated, do not edit\n");
+        let mut out = String::from("# jinn.lock — auto-generated, do not edit\n");
         let mut sorted = self.entries.clone();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
         for entry in &sorted {

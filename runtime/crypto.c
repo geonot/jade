@@ -15,12 +15,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 /* ── Hashing ─────────────────────────────────────────────── */
 
 /* SHA-256 hash. Writes 32 bytes to out. Returns 0 on success. */
-int jade_sha256(const unsigned char *data, long len, unsigned char *out) {
+int jinn_sha256(const unsigned char *data, long len, unsigned char *out) {
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     if (!ctx) return -1;
     if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1 ||
@@ -34,7 +34,7 @@ int jade_sha256(const unsigned char *data, long len, unsigned char *out) {
 }
 
 /* SHA-512 hash. Writes 64 bytes to out. Returns 0 on success. */
-int jade_sha512(const unsigned char *data, long len, unsigned char *out) {
+int jinn_sha512(const unsigned char *data, long len, unsigned char *out) {
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     if (!ctx) return -1;
     if (EVP_DigestInit_ex(ctx, EVP_sha512(), NULL) != 1 ||
@@ -50,7 +50,7 @@ int jade_sha512(const unsigned char *data, long len, unsigned char *out) {
 /* ── HMAC ────────────────────────────────────────────────── */
 
 /* HMAC-SHA256. Writes 32 bytes to out. Returns 0 on success. */
-int jade_hmac_sha256(const unsigned char *key, long key_len,
+int jinn_hmac_sha256(const unsigned char *key, long key_len,
                      const unsigned char *data, long data_len,
                      unsigned char *out) {
     unsigned int out_len = 32;
@@ -66,7 +66,7 @@ int jade_hmac_sha256(const unsigned char *key, long key_len,
  * Writes ciphertext to out (same length as plaintext).
  * Writes 16-byte tag to tag_out.
  * Returns ciphertext length on success, -1 on failure. */
-long jade_aes_gcm_encrypt(const unsigned char *key, const unsigned char *iv,
+long jinn_aes_gcm_encrypt(const unsigned char *key, const unsigned char *iv,
                            const unsigned char *plaintext, long pt_len,
                            const unsigned char *aad, long aad_len,
                            unsigned char *out, unsigned char *tag_out) {
@@ -103,7 +103,7 @@ fail:
 /* AES-256-GCM decrypt.
  * key: 32 bytes, iv: 12 bytes, tag: 16 bytes
  * Returns plaintext length on success, -1 on failure (including auth failure). */
-long jade_aes_gcm_decrypt(const unsigned char *key, const unsigned char *iv,
+long jinn_aes_gcm_decrypt(const unsigned char *key, const unsigned char *iv,
                            const unsigned char *ciphertext, long ct_len,
                            const unsigned char *aad, long aad_len,
                            const unsigned char *tag,
@@ -143,7 +143,7 @@ fail:
 /* ── Random ──────────────────────────────────────────────── */
 
 /* Fill buf with n cryptographically secure random bytes. Returns 0 on success. */
-int jade_random_bytes(unsigned char *buf, long n) {
+int jinn_random_bytes(unsigned char *buf, long n) {
     return RAND_bytes(buf, (int)n) == 1 ? 0 : -1;
 }
 
@@ -152,7 +152,7 @@ int jade_random_bytes(unsigned char *buf, long n) {
 static const char hex_chars[] = "0123456789abcdef";
 
 /* Encode raw bytes to hex string. out must be at least 2*len+1 bytes. */
-void jade_bytes_to_hex(const unsigned char *data, long len, char *out) {
+void jinn_bytes_to_hex(const unsigned char *data, long len, char *out) {
     for (long i = 0; i < len; i++) {
         out[i*2]     = hex_chars[(data[i] >> 4) & 0x0f];
         out[i*2 + 1] = hex_chars[data[i] & 0x0f];
@@ -166,7 +166,7 @@ void jade_bytes_to_hex(const unsigned char *data, long len, char *out) {
  * Returns digest size on success, -1 on failure.
  * Algorithms: "SHA3-256", "SHA3-512", "BLAKE2B512", "BLAKE2S256", "SHA1",
  * "MD5", "SHA384", "SHA224". */
-long jade_evp_digest(const char *alg, const unsigned char *data, long len,
+long jinn_evp_digest(const char *alg, const unsigned char *data, long len,
                      unsigned char *out) {
     const EVP_MD *md = EVP_get_digestbyname(alg);
     if (!md) return -1;
@@ -185,7 +185,7 @@ done:
 
 /* Generic HMAC. out must be at least EVP_MAX_MD_SIZE.
  * Returns mac size on success, -1 on failure. */
-long jade_evp_hmac(const char *alg, const unsigned char *key, long key_len,
+long jinn_evp_hmac(const char *alg, const unsigned char *key, long key_len,
                    const unsigned char *data, long data_len,
                    unsigned char *out) {
     const EVP_MD *md = EVP_get_digestbyname(alg);
@@ -198,7 +198,7 @@ long jade_evp_hmac(const char *alg, const unsigned char *key, long key_len,
 
 /* PBKDF2-HMAC.
  * Returns 0 on success. dklen bytes written to out. */
-int jade_pbkdf2(const char *alg, const unsigned char *pass, long pass_len,
+int jinn_pbkdf2(const char *alg, const unsigned char *pass, long pass_len,
                 const unsigned char *salt, long salt_len, long iters,
                 long dklen, unsigned char *out) {
     const EVP_MD *md = EVP_get_digestbyname(alg);
@@ -211,7 +211,7 @@ int jade_pbkdf2(const char *alg, const unsigned char *pass, long pass_len,
 }
 
 /* AES-256-CBC encrypt with PKCS#7 padding. Returns ciphertext length or -1. */
-long jade_aes_cbc_encrypt(const unsigned char *key, const unsigned char *iv,
+long jinn_aes_cbc_encrypt(const unsigned char *key, const unsigned char *iv,
                           const unsigned char *pt, long pt_len,
                           unsigned char *out) {
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
@@ -228,7 +228,7 @@ done:
     return total;
 }
 
-long jade_aes_cbc_decrypt(const unsigned char *key, const unsigned char *iv,
+long jinn_aes_cbc_decrypt(const unsigned char *key, const unsigned char *iv,
                           const unsigned char *ct, long ct_len,
                           unsigned char *out) {
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
@@ -246,7 +246,7 @@ done:
 }
 
 /* ChaCha20-Poly1305 AEAD encrypt. Returns ct len or -1. tag is 16 bytes. */
-long jade_chacha20_poly1305_encrypt(const unsigned char *key, const unsigned char *nonce,
+long jinn_chacha20_poly1305_encrypt(const unsigned char *key, const unsigned char *nonce,
                                     const unsigned char *pt, long pt_len,
                                     const unsigned char *aad, long aad_len,
                                     unsigned char *out, unsigned char *tag) {
@@ -268,7 +268,7 @@ done:
     return total;
 }
 
-long jade_chacha20_poly1305_decrypt(const unsigned char *key, const unsigned char *nonce,
+long jinn_chacha20_poly1305_decrypt(const unsigned char *key, const unsigned char *nonce,
                                     const unsigned char *ct, long ct_len,
                                     const unsigned char *aad, long aad_len,
                                     const unsigned char *tag, unsigned char *out) {
@@ -292,7 +292,7 @@ done:
 
 /* Argon2id KDF via OpenSSL 3.2+ EVP_KDF.
  * Returns 0 on success. */
-int jade_argon2id(const unsigned char *pass, long pass_len,
+int jinn_argon2id(const unsigned char *pass, long pass_len,
                   const unsigned char *salt, long salt_len,
                   long t_cost, long m_cost_kib, long parallelism,
                   long dklen, unsigned char *out) {
@@ -325,7 +325,7 @@ int jade_argon2id(const unsigned char *pass, long pass_len,
 }
 
 /* scrypt KDF via OpenSSL EVP_PBE_scrypt. Returns 0 on success. */
-int jade_scrypt(const unsigned char *pass, long pass_len,
+int jinn_scrypt(const unsigned char *pass, long pass_len,
                 const unsigned char *salt, long salt_len,
                 long n, long r, long p, long dklen, unsigned char *out) {
     return EVP_PBE_scrypt((const char *)pass, (size_t)pass_len, salt,
@@ -336,7 +336,7 @@ int jade_scrypt(const unsigned char *pass, long pass_len,
 }
 
 /* Decode hex string to bytes. Returns bytes written or -1. */
-long jade_hex_to_bytes(const char *hex, long hex_len, unsigned char *out) {
+long jinn_hex_to_bytes(const char *hex, long hex_len, unsigned char *out) {
     if (hex_len % 2 != 0) return -1;
     long bytes = hex_len / 2;
     for (long i = 0; i < bytes; i++) {

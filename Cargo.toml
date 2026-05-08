@@ -1,21 +1,21 @@
 [workspace]
 
 [package]
-name = "jadec"
+name = "jinnc"
 version = "0.0.0"
 edition = "2024"
-default-run = "jadec"
+default-run = "jinnc"
 
 [[bin]]
-name = "jadec"
+name = "jinnc"
 path = "src/main.rs"
 
 [[bin]]
-name = "jade"
-path = "src/bin/jade.rs"
+name = "jinn"
+path = "src/bin/jinn.rs"
 
 [[bin]]
-name = "jadec-lsp"
+name = "jinnc-lsp"
 path = "src/lsp/main.rs"
 
 [dependencies]

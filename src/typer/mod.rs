@@ -90,7 +90,7 @@ pub struct Typer {
     pub(crate) fn_defaults: IndexMap<Symbol, Vec<Option<ast::Expr>>>,
     pub(crate) current_method_type: Option<String>,
     pub(crate) modules: std::collections::HashSet<Symbol>,
-    /// Extern functions tracked separately from Jade functions.
+    /// Extern functions tracked separately from Jinn functions.
     /// Key: C symbol name. Value: (DefId, param types, return type).
     /// Externs are NOT module-prefixed — they keep their C symbol names.
     pub(crate) externs: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,

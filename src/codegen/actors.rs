@@ -154,7 +154,7 @@ impl<'ctx> Compiler<'ctx> {
                 ));
             }
 
-            let sched_yield = crate::codegen::fn_or_die(&self.module, "jade_sched_yield");
+            let sched_yield = crate::codegen::fn_or_die(&self.module, "jinn_sched_yield");
             if let Some(sleep_expr) = &loop_h.loop_sleep_ms {
                 let i64t = self.ctx.i64_type();
                 let sleep_ms = self.compile_expr(sleep_expr)?.into_int_value();
@@ -185,7 +185,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(sched_yield, &[], ""));
             }
 
-            let chan_try_recv = crate::codegen::fn_or_die(&self.module, "jade_chan_try_recv");
+            let chan_try_recv = crate::codegen::fn_or_die(&self.module, "jinn_chan_try_recv");
             let recv_state = b!(self.bld.build_call(
                 chan_try_recv,
                 &[ch_ptr.into(), msg_alloca.into()],
@@ -218,7 +218,7 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_conditional_branch(is_closed, exit_bb, loop_bb));
         } else {
-            let chan_recv = crate::codegen::fn_or_die(&self.module, "jade_chan_recv");
+            let chan_recv = crate::codegen::fn_or_die(&self.module, "jinn_chan_recv");
             let recv_ok =
                 b!(self
                     .bld
@@ -326,7 +326,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(exit_bb);
         // Clean up: destroy the mailbox (frees channel + mailbox memory)
-        if let Some(destroy_fn) = self.module.get_function("jade_actor_destroy") {
+        if let Some(destroy_fn) = self.module.get_function("jinn_actor_destroy") {
             b!(self.bld.build_call(destroy_fn, &[mb_ptr.into()], ""));
         }
         b!(self.bld.build_return(None));
@@ -382,7 +382,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let mb_ptr_v = mb_ptr.into_pointer_value();
 
-        let chan_create = crate::codegen::fn_or_die(&self.module, "jade_chan_create");
+        let chan_create = crate::codegen::fn_or_die(&self.module, "jinn_chan_create");
         let ch = b!(self.bld.build_call(
             chan_create,
             &[
@@ -427,7 +427,7 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_function(&loop_name)
             .ok_or_else(|| format!("actor loop fn '{loop_name}' not found"))?;
-        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
         let coro = b!(self.bld.build_call(
             coro_create,
             &[
@@ -440,10 +440,10 @@ impl<'ctx> Compiler<'ctx> {
         .basic()
         .expect("ICE: call returned void");
 
-        let set_daemon = crate::codegen::fn_or_die(&self.module, "jade_coro_set_daemon");
+        let set_daemon = crate::codegen::fn_or_die(&self.module, "jinn_coro_set_daemon");
         b!(self.bld.build_call(set_daemon, &[coro.into()], ""));
 
-        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jade_sched_spawn");
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
         b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
 
         Ok(mb_ptr_v.into())
@@ -495,7 +495,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let malloc_fn = crate::codegen::fn_or_die(&self.module, "malloc");
         let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
-        let chan_create = crate::codegen::fn_or_die(&self.module, "jade_chan_create");
+        let chan_create = crate::codegen::fn_or_die(&self.module, "jinn_chan_create");
 
         let mb_ptr = b!(self.bld.build_call(
             malloc_fn,
@@ -621,7 +621,7 @@ impl<'ctx> Compiler<'ctx> {
             arg_offset += psize;
         }
 
-        let chan_send = crate::codegen::fn_or_die(&self.module, "jade_chan_send");
+        let chan_send = crate::codegen::fn_or_die(&self.module, "jinn_chan_send");
         b!(self
             .bld
             .build_call(chan_send, &[ch_ptr.into(), msg_alloca.into()], ""));

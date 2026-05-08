@@ -1,10 +1,10 @@
-# Jade
+# Jinn
 
 **Systems language. Scripting readability. C performance.**
 
-Jade inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/`!` ternary, `~` pipelines, indentation structure — and compiles through LLVM 21 to native code that matches Clang -O3. No runtime. No GC. No 64-byte Value class. Every integer is a register. Every class is contiguous memory. Every function is a native call.
+Jinn inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/`!` ternary, `~` pipelines, indentation structure — and compiles through LLVM 21 to native code that matches Clang -O3. No runtime. No GC. No 64-byte Value class. Every integer is a register. Every class is contiguous memory. Every function is a native call.
 
-```jade
+```jinn
 *fib n
     if n < 2
         return n
@@ -44,7 +44,7 @@ Integer literals infer width from context. `42` is `i64` by default, narrows to 
 
 ### Compound Types
 
-```jade
+```jinn
 # Classes — value types, contiguous memory
 type Vec3
     x as i64
@@ -62,7 +62,7 @@ nums is [1, 2, 3, 4, 5]
 
 ### Generics — the `of` keyword
 
-```jade
+```jinn
 *max of T(a as T, b as T)
     a > b ? a ! b
 
@@ -79,7 +79,7 @@ Single uppercase letters by convention. Monomorphized at compile time — zero r
 
 ### Type Aliases & Newtypes
 
-```jade
+```jinn
 # Alias — transparent, interchangeable with the underlying type
 alias Seconds is f64
 alias UserId is i64
@@ -97,9 +97,9 @@ type Fahrenheit
 
 ## Bindings
 
-```jade
+```jinn
 x is 42                    # inferred i64
-name is 'jade'             # String
+name is 'jinn'             # String
 pi is 3.14159              # f64
 done is true               # bool
 
@@ -131,13 +131,13 @@ p is Vec3(x is 1, y is 2, z is 3)
 
 Top-level constants use `ALL_CAPS` by convention. Constants cannot be reassigned — the compiler enforces this.
 
-```jade
+```jinn
 MAX_SIZE is 1024
 PI is 3.14159265
 DEFAULT_PORT is 8080
 ```
 The same convention applies inside types, where `FIELD is value` provides a default:
-```jade
+```jinn
 type Foo
     BAR is 10
     BAZ as i64
@@ -150,7 +150,7 @@ log x.BAZ   # 5
 
 ## Functions
 
-```jade
+```jinn
 # Parentheses are optional on definitions and calls
 *add a, b
     a + b
@@ -163,7 +163,7 @@ log x.BAZ   # 5
     ...
 ```
 
-```jade
+```jinn
 # No-arg functions — no parens needed
 *hello
     log 'hi'
@@ -183,7 +183,7 @@ Parameters infer types from usage. Return type inferred from body. Explicit anno
 
 `of` can be used as an alternative to parentheses for single-argument calls:
 
-```jade
+```jinn
 *double x is x * 2
 
 result is double of 5      # same as double(5)
@@ -195,7 +195,7 @@ result is double of 5      # same as double(5)
 
 Multiple definitions of the same function with literal parameters. The compiler merges them into a single function with conditional dispatch.
 
-```jade
+```jinn
 # Fibonacci by pattern
 *fib(0) is 0
 *fib(1) is 1
@@ -219,7 +219,7 @@ Literal parameters (`0`, `1`, `true`, `3.14`, `'hello'`) match by equality. Non-
 
 Single-expression functions use `is` instead of an indented block.
 
-```jade
+```jinn
 *double x is x * 2
 *square(x as i64) is x * x
 *add a, b is a + b
@@ -228,7 +228,7 @@ Single-expression functions use `is` instead of an indented block.
 
 Combines naturally with pattern clauses:
 
-```jade
+```jinn
 *fib(0) is 0
 *fib(1) is 1
 *fib n is fib(n - 1) + fib(n - 2)
@@ -236,7 +236,7 @@ Combines naturally with pattern clauses:
 
 ### Higher-Order Functions
 
-```jade
+```jinn
 *apply(f as (i64) returns i64, x as i64)
     f(x)
 
@@ -249,7 +249,7 @@ Function-typed parameters use the form `f as (ParamTypes) returns RetType`. Pare
 
 ### Lambdas
 
-```jade
+```jinn
 # Inline
 square is |x| x * x
 
@@ -269,7 +269,7 @@ The `|params| body` form defines an anonymous function.
 
 ### Pipelines
 
-```jade
+```jinn
 result is value ~ double ~ add_one ~ square
 ```
 
@@ -277,7 +277,7 @@ result is value ~ double ~ add_one ~ square
 
 ### Named Arguments
 
-```jade
+```jinn
 *connect(host as String, port as i64 is 8080)
     log 'connecting to {host}:{port}'
 
@@ -290,7 +290,7 @@ Parentheses are required when using `as` type annotations on parameters.
 
 Placeholder for partial application in pipelines. In pipeline context, `$ expr` desugars to an implicit lambda at parse time:
 
-```jade
+```jinn
 # In named calls (pipeline + call with $ in args)
 result is value ~ add(5, $)       # → add(5, value)
 
@@ -308,7 +308,7 @@ For expressions outside pipeline context, use explicit lambdas: `nums.map(|x| x 
 
 The preferred conditional expression. `condition ? then ! else`.
 
-```jade
+```jinn
 # Basic
 sign is x > 0 ? 1 ! -1
 
@@ -341,7 +341,7 @@ Ternary binds looser than pipelines — `value ~ transform ? check ! default` wo
 
 ### Conditionals
 
-```jade
+```jinn
 if x > 0
     log 'positive'
 elif x equals 0
@@ -355,7 +355,7 @@ sign is x > 0 ? 1 ! -1
 
 ### Loops
 
-```jade
+```jinn
 # While
 while n > 0
     n is n - 1
@@ -393,7 +393,7 @@ sub is items from 2 to 5    # elements at indices 2, 3, 4
 
 ### Match
 
-```jade
+```jinn
 match shape
     Circle(r) ? log 3.14 * r * r
     Rect(w, h) ? log w * h
@@ -434,7 +434,7 @@ Pattern types: literals, identifiers (bind), constructors with destructuring, wi
 
 `equals` (shorthand `eq`) and `neq` / `not equals` — not `==` or `!=`. Reads like language.
 
-```jade
+```jinn
 if x equals 0
     log 'zero'
 if x eq 0
@@ -449,7 +449,7 @@ if x not equals y
 
 Math-style chained comparisons without double-evaluating the middle operand:
 
-```jade
+```jinn
 if 0 < x < 100
     log 'in range'
 if a <= b <= c
@@ -458,7 +458,7 @@ if a <= b <= c
 
 ### Membership — `in`
 
-```jade
+```jinn
 if x in [1, 2, 3]
     log 'found'
 if key in my_map
@@ -473,14 +473,14 @@ Works with arrays, vectors, strings (substring search), and maps (key lookup).
 
 `and`, `or`, `not`, `xor` — not `&&`, `||`, `!`.
 
-```jade
+```jinn
 if a xor b
     log 'exactly one is true'
 ```
 
 ### Type Casting
 
-```jade
+```jinn
 x is 42
 y is x as f64           # widening — always safe
 z is big as strict i16   # strict narrowing — panics if value doesn't fit
@@ -489,7 +489,7 @@ w is big as i16          # truncating — silently truncates (compiler warning)
 
 ### Serialization Casts
 
-```jade
+```jinn
 data is my_struct as json    # serialize struct to JSON string
 ```
 
@@ -499,7 +499,7 @@ data is my_struct as json    # serialize struct to JSON string
 
 ## Classes
 
-```jade
+```jinn
 type Point
     x as i64
     y as i64
@@ -525,7 +525,7 @@ type Vec3
 
 Classes are value types. Passed by value (move), stack allocated. Methods take `self` explicitly, or omit it and access fields by name directly — `self` is injected by the compiler.
 
-```jade
+```jinn
 type Vec3
     x as i64
     y as i64
@@ -544,7 +544,7 @@ type Vec3
 
 ## Enums
 
-```jade
+```jinn
 enum Color
     Red
     Green
@@ -565,7 +565,7 @@ Enums compile to tagged unions. Pattern matching is the primary dispatch mechani
 
 Explicit discriminant values for C interop and bitflags:
 
-```jade
+```jinn
 enum Permission
     Read is 1
     Write is 2
@@ -581,7 +581,7 @@ enum HttpStatus
 
 ## Error Handling
 
-Errors are values, not exceptions. Jade has one error convention: declare an
+Errors are values, not exceptions. Jinn has one error convention: declare an
 err enum, return it from your function, and pattern-match at the call site.
 There is no `try`, no `catch`, no exception machinery, no two-color
 `async`/`throws` split.
@@ -599,7 +599,7 @@ There is no `try`, no `catch`, no exception machinery, no two-color
 
 ### The canonical form — return the err enum directly
 
-```jade
+```jinn
 err Outcome
     Ok(i64)
     Bad
@@ -620,7 +620,7 @@ err Outcome
 
 ### The sentinel form — encode errors as values of `T`
 
-```jade
+```jinn
 *lookup(k as string) returns i64
     if missing
         ! -1
@@ -629,7 +629,7 @@ err Outcome
 
 ### `! E` annotation — declarative validation
 
-```jade
+```jinn
 err Network
     Timeout
 err Disk
@@ -654,7 +654,7 @@ forms above.
 
 ### `defer` — universal cleanup
 
-```jade
+```jinn
 *compute(x as i64) returns Outcome
     defer
         log("cleanup")    // runs whether the function returns normally,
@@ -672,7 +672,7 @@ fires it at function exit, in reverse order of registration.
 When `!` might be ambiguous with the ternary `!` (else branch), use `!!` to
 make intent explicit:
 
-```jade
+```jinn
 result is condition ? value ! fallback     # ternary: condition ? then ! else
 !! NotFound                                # early return (unambiguous)
 ```
@@ -682,7 +682,7 @@ result is condition ? value ! fallback     # ternary: condition ? then ! else
 
 ## List Comprehensions
 
-```jade
+```jinn
 squares is [x pow 2 for x in 0 to 10]
 evens is [x for x in 0 to 100 if x mod 2 eq 0]
 ```
@@ -691,7 +691,7 @@ Syntax: `[expr for bind in start to end]` or `[expr for bind in start to end if 
 
 For a fixed-size array instead:
 
-```jade
+```jinn
 squares is array[x pow 2 for x in 0 to 10]
 ```
 
@@ -701,7 +701,7 @@ squares is array[x pow 2 for x in 0 to 10]
 
 Vector methods for functional data transformation. Chain with `.method()` syntax or `~` pipelines with named functions.
 
-```jade
+```jinn
 *double(x as i64) returns i64 is x * 2
 *big(x as i64) returns bool is x > 10
 
@@ -732,7 +732,7 @@ Available methods: `map`, `filter`, `fold`, `any`, `all`, `find`, `zip`, `take`,
 
 A function containing `yield` is automatically a generator. Calling it returns a lazy sequence.
 
-```jade
+```jinn
 *fibonacci()
     a is 0
     b is 1
@@ -758,7 +758,7 @@ Generators are backed by the coroutine runtime (cooperative context switching). 
 
 ### Vector (dynamic array)
 
-```jade
+```jinn
 v is vector()
 v.push(1)
 v.push(2)
@@ -768,7 +768,7 @@ log v.pop()       # 2
 
 ### Map (hash map)
 
-```jade
+```jinn
 m is map()
 m.set('key', 42)
 log m.get('key')   # 42
@@ -781,7 +781,7 @@ log m.has('key')   # true
 
 Pattern matching via the `regex` standard library module:
 
-```jade
+```jinn
 use regex
 
 log regex.is_match('hello123', '[0-9]+')        # true
@@ -797,7 +797,7 @@ Backed by PCRE2 at the runtime level. Also available with flat imports: `is_matc
 
 Native query syntax for structured data operations. Store queries are operational; general query blocks are parsed but execution is deferred.
 
-```jade
+```jinn
 # Query with clauses
 query users
     where age > 21
@@ -813,12 +813,12 @@ Query blocks produce a `query` expression over a source with typed clauses. The 
 
 ## Modules
 
-```jade
-# math.jade
+```jinn
+# math.jn
 *add a, b
     a + b
 
-# main.jade — implicit import (no `use` required)
+# main.jn — implicit import (no `use` required)
 *main
     log math.add(1, 2)
 ```
@@ -827,7 +827,7 @@ File = module. The compiler automatically resolves module references — `math.a
 
 ### Explicit Imports
 
-```jade
+```jinn
 use math                     # import module explicitly
 use math [sin, cos, pi]      # import specific symbols
 log sin(pi)
@@ -835,7 +835,7 @@ log sin(pi)
 
 ### Import Aliases
 
-```jade
+```jinn
 use long_module_name as lmn
 lmn.do_thing()
 ```
@@ -846,7 +846,7 @@ lmn.do_thing()
 
 Stores are typed, persistent data collections that survive across program runs. They compile to flat binary files with compile-time query validation.
 
-```jade
+```jinn
 # Define a store with typed fields
 store users
     name as String
@@ -908,16 +908,16 @@ transaction
 
 ### Extern Functions (C FFI)
 
-```jade
+```jinn
 extern *printf(fmt as %i8, ...) returns i32
 
 *main
-    printf 'hello from jade\n'
+    printf 'hello from jinn\n'
 ```
 
 ### System Calls
 
-```jade
+```jinn
 *main
     syscall 1, 1, 'hello\n', 6   # write(stdout, msg, len)
 ```
@@ -926,7 +926,7 @@ Direct system call interface for low-level OS interaction.
 
 ### Inline Assembly
 
-```jade
+```jinn
 asm
     nop
 ```
@@ -935,7 +935,7 @@ Assembly lines are bare instructions (no quotes). The parser collects indented l
 
 ### Raw Pointers
 
-```jade
+```jinn
 ptr is %value
 val is @ptr        # dereference
 ```
@@ -944,7 +944,7 @@ val is @ptr        # dereference
 
 Hardware-observable reads and writes via the `volatile` standard library module. The compiler will not reorder, combine, or elide these operations — every load/store hits memory exactly as written. Required for memory-mapped I/O, hardware registers, and shared-memory communication where the compiler must not optimize away accesses.
 
-```jade
+```jinn
 use volatile
 
 *poll_device
@@ -959,7 +959,7 @@ use volatile
 
 Strings and vectors use copy-on-write when reference count > 1. Shared reads are zero-copy; mutation transparently clones on first write.
 
-```jade
+```jinn
 a is 'hello'
 b is a              # shared — no copy
 b is b + ' world'   # COW triggers: b gets its own copy
@@ -969,7 +969,7 @@ b is b + ' world'   # COW triggers: b gets its own copy
 
 POSIX signal infrastructure via the `signal` standard library module.
 
-```jade
+```jinn
 use signal
 
 *handler(sig as i32)
@@ -983,13 +983,13 @@ use signal
 
 ### C Header Import
 
-Generate Jade extern declarations from C headers automatically:
+Generate Jinn extern declarations from C headers automatically:
 
 ```bash
-jade bind /usr/include/sqlite3.h > std/sqlite.jade
+jinn bind /usr/include/sqlite3.h > std/sqlite.jn
 ```
 
-Parses function declarations, types, typedefs and generates corresponding Jade `extern` declarations with correct type mappings.
+Parses function declarations, types, typedefs and generates corresponding Jinn `extern` declarations with correct type mappings.
 
 ---
 
@@ -997,7 +997,7 @@ Parses function declarations, types, typedefs and generates corresponding Jade `
 
 ### Actors
 
-```jade
+```jinn
 actor Counter
     count is 0
 
@@ -1019,7 +1019,7 @@ Actor handlers use `@name` syntax. Fields are defined in the actor body. Message
 
 Erlang/OTP-style supervision for fault-tolerant actor hierarchies:
 
-```jade
+```jinn
 supervisor my_system
     strategy one_for_one    # restart only the failed child
     children
@@ -1034,7 +1034,7 @@ Strategies: `one_for_one`, `one_for_all`, `rest_for_one`.
 
 ### Channels
 
-```jade
+```jinn
 ch is channel of i64(10)     # buffered channel, capacity 10
 send ch, 42                  # send value
 val is receive ch            # receive value
@@ -1043,7 +1043,7 @@ close ch                     # close channel
 
 ### Select
 
-```jade
+```jinn
 select
     receive ch1 as val
         log 'got {val} from ch1'
@@ -1059,7 +1059,7 @@ select
 
 ### Multi-Dimensional Arrays
 
-```jade
+```jinn
 # 3×3 matrix (created with the `by` keyword)
 m is 3 by 3
 
@@ -1083,7 +1083,7 @@ The `by` keyword creates an NDArray. `3 by 3` produces a 3×3 matrix of f64 zero
 
 Pure functions with constant arguments are evaluated at compile time automatically — no keyword needed:
 
-```jade
+```jinn
 *fib(0) is 0
 *fib(1) is 1
 *fib n is fib(n - 1) + fib(n - 2)
@@ -1097,7 +1097,7 @@ The compiler detects pure functions (no side effects) and evaluates them when al
 
 The compiler auto-generates descriptive failure messages:
 
-```jade
+```jinn
 assert x > 0 and x < 100
 # On failure: "assertion failed: x > 0 and x < 100 where x = -5"
 ```
@@ -1117,23 +1117,23 @@ Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST
 ### CLI
 
 ```
-jadec <INPUT> [-o OUTPUT] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [--debug] [--hir-codegen] [--fast-math] [--deterministic-fp] [--threads N]
+jinnc <INPUT> [-o OUTPUT] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [--debug] [--hir-codegen] [--fast-math] [--deterministic-fp] [--threads N]
 ```
 
 Subcommands:
 
 ```bash
-jade init [name]           # create new project with project.jade
-jade build [-o out] [--opt N] [--lto]  # compile the project
-jade run [-- args]         # compile and run
-jade test                  # run project tests
-jade check                 # type-check without codegen
-jade fmt [files]           # format Jade source files
-jade fetch                 # download dependencies
-jade update                # update dependency lock file
-jade package               # emit jade.pkg (+ dist tarball)
-jade publish               # create git tag v<version> for package release
-jade bind header.h         # generate extern declarations from C header
+jinn init [name]           # create new project with project.jn
+jinn build [-o out] [--opt N] [--lto]  # compile the project
+jinn run [-- args]         # compile and run
+jinn test                  # run project tests
+jinn check                 # type-check without codegen
+jinn fmt [files]           # format Jinn source files
+jinn fetch                 # download dependencies
+jinn update                # update dependency lock file
+jinn package               # emit jinn.pkg (+ dist tarball)
+jinn publish               # create git tag v<version> for package release
+jinn bind header.h         # generate extern declarations from C header
 ```
 
 - `--emit-llvm` — print LLVM IR
@@ -1151,9 +1151,9 @@ jade bind header.h         # generate extern declarations from C header
 Cross compilation and embedded/OS-style builds:
 
 ```bash
-jadec --target aarch64-unknown-linux-gnu source/main.jade -o app-aarch64
-jade build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
-jade build --target wasm32-wasi --standalone -o app.wasm
+jinnc --target aarch64-unknown-linux-gnu source/main.jn -o app-aarch64
+jinn build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
+jinn build --target wasm32-wasi --standalone -o app.wasm
 ```
 
 ### Codegen Optimizations
@@ -1171,9 +1171,9 @@ jade build --target wasm32-wasi --standalone -o app.wasm
 
 ## Performance
 
-Jade compiles to identical LLVM IR as equivalent C. Benchmark suite tested against C (Clang 21 -O3, same LLVM backend). Five runs, median reported.
+Jinn compiles to identical LLVM IR as equivalent C. Benchmark suite tested against C (Clang 21 -O3, same LLVM backend). Five runs, median reported.
 
-| Benchmark | Jade | Clang | J/C |
+| Benchmark | Jinn | Clang | J/C |
 |-----------|------|-------|-----|
 | ackermann(3,10) | 186ms | 202ms | 0.92× |
 | fibonacci(40) | 339ms | 336ms | 1.01× |
@@ -1191,13 +1191,13 @@ Jade compiles to identical LLVM IR as equivalent C. Benchmark suite tested again
 | tight_loop | 390μs | 450μs | 0.87× |
 | **TOTAL** | **1.21s** | **1.25s** | **0.97×** |
 
-Jade matches Clang across the full compute suite — **0.97× C performance**.
+Jinn matches Clang across the full compute suite — **0.97× C performance**.
 
 Run benchmarks:
 ```
 python3 run_benchmarks.py --opt=3 --runs=5 --save=v0.5.0
 python3 run_benchmarks.py --opt=all --runs=5    # O0–O3 sweep
-python3 run_benchmarks.py --langs=jade,c        # subset
+python3 run_benchmarks.py --langs=jinn,c        # subset
 ```
 
 ---
@@ -1209,17 +1209,17 @@ python3 run_benchmarks.py --langs=jade,c        # subset
 export LLVM_SYS_211_PREFIX=/usr/lib/llvm-21
 
 # Build
-cd jade && cargo build --release
+cd jinn && cargo build --release
 
 # Compile a program
-./target/release/jadec hello.jade -o hello
+./target/release/jinnc hello.jn -o hello
 ./hello
 
 # Run tests
 cargo test
 
 # Emit LLVM IR
-./target/release/jadec hello.jade --emit-llvm
+./target/release/jinnc hello.jn --emit-llvm
 ```
 
 ---
@@ -1254,7 +1254,7 @@ Three tiers, determined at compile time:
 
 ### Memory Layout Control
 
-```jade
+```jinn
 # Default — compiler may reorder fields for optimal alignment
 type Example
     a as u8
@@ -1316,7 +1316,7 @@ Structured error system with codes, spans, labels, and suggestions:
 
 ```
 error[E301]: use of moved value 'data'
-  --> src/main.jade:12:5
+  --> src/main.jn:12:5
    |
 10 |     result is process(data)
    |                       ---- value moved here
@@ -1343,7 +1343,7 @@ error[E301]: use of moved value 'data'
 
 ### Integer
 
-```jade
+```jinn
 popcount(x)             # count set bits
 clz(x)                  # count leading zeros
 ctz(x)                  # count trailing zeros
@@ -1355,7 +1355,7 @@ x pow n                 # square-and-multiply exponentiation
 
 ### Float
 
-```jade
+```jinn
 x.sqrt()    x.sin()     x.cos()     x.tan()
 x.abs()     x.floor()   x.ceil()    x.round()
 x.is_nan()  x.is_infinite()  x.is_finite()
@@ -1364,7 +1364,7 @@ x.min(y)    x.max(y)
 
 ### Array/Slice
 
-```jade
+```jinn
 a.length              # length (property access)
 a.len()               # length (method call)
 a[i]                  # bounds-checked index
@@ -1375,7 +1375,7 @@ a.join(sep)           # join elements with separator string
 
 ### String
 
-```jade
+```jinn
 s.contains('sub')       # true if s contains substring
 s.starts_with('pre')    # true if s starts with prefix
 s.ends_with('suf')      # true if s ends with suffix
@@ -1396,7 +1396,7 @@ s.trim_right()          # strip trailing whitespace
 
 String interpolation with `{expr}` inside single-quoted strings:
 
-```jade
+```jinn
 name is 'world'
 log('hello {name}')           # hello world
 x is 42
@@ -1405,7 +1405,7 @@ log('x={x} x2={x * 2}')      # x=42 x2=84
 
 ### Global
 
-```jade
+```jinn
 log(value)              # print to stdout
 to_string(x)            # convert to string
 time_now()              # nanosecond timestamp
@@ -1417,10 +1417,10 @@ assert(cond)            # rich assert with auto-generated messages
 Compile with `--debug` to emit DWARF debug info. Use with lldb or gdb:
 
 ```bash
-jadec main.jade -o main --debug
+jinnc main.jn -o main --debug
 lldb ./main
 ```
 
 ---
 
-*Jade: Hard. Dense. Beautiful.*
+*Jinn: Hard. Dense. Beautiful.*

@@ -93,16 +93,16 @@ This requires a `Resolved<Type>` wrapper or similar pattern where codegen calls
 
 ### Phase 4: Cross-Module Signature Export (Moderate — est. 300 lines)
 
-Currently Jade inlines all module declarations into one compilation unit. For true
+Currently Jinn inlines all module declarations into one compilation unit. For true
 separate compilation:
 
-1. After lowering a module, export resolved function signatures as a `.jadei` interface file
-2. When importing a module, read the `.jadei` file instead of re-parsing/lowering
+1. After lowering a module, export resolved function signatures as a `.jni` interface file
+2. When importing a module, read the `.jni` file instead of re-parsing/lowering
 3. Signatures contain only concrete types (all TypeVars resolved at export boundary)
 
 Format (simple, human-readable):
 ```
-# std/fmt.jadei — auto-generated
+# std/fmt.jni — auto-generated
 fn pad_left(String, i64, String) -> String
 fn pad_right(String, i64, String) -> String
 fn join(Vec<String>, String) -> String

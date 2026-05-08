@@ -1,10 +1,10 @@
-# Jade Language for VS Code
+# Jinn Language for VS Code
 
-Syntax highlighting and language support for the [Jade programming language](https://github.com/your-org/jade).
+Syntax highlighting and language support for the [Jinn programming language](https://github.com/your-org/jinn).
 
 ## Features
 
-- Syntax highlighting for all Jade constructs
+- Syntax highlighting for all Jinn constructs
 - Proper indentation rules for block-based syntax
 - Comment toggling with `#`
 - Auto-closing pairs for brackets and strings
@@ -32,15 +32,15 @@ Syntax highlighting and language support for the [Jade programming language](htt
 npm install -g @vscode/vsce
 
 # Package the extension
-cd vscode-jade
+cd vscode-jinn
 vsce package
 
 # Install the .vsix file
-code --install-extension jade-lang-0.1.0.vsix
+code --install-extension jinn-lang-0.1.0.vsix
 ```
 
 ### Development
 
 1. Open this folder in VS Code
 2. Press `F5` to launch the Extension Development Host
-3. Open any `.jade` file to see syntax highlighting
+3. Open any `.jn` file to see syntax highlighting

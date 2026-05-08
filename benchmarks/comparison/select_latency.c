@@ -1,5 +1,5 @@
 /* R9/B-SELECT — In-process select baseline using two SPSC ring buffers
- * matching benchmarks/select_latency.jade. The previous baseline used
+ * matching benchmarks/select_latency.jn. The previous baseline used
  * poll(2) over pipe(2) which incurs per-event syscalls and is not
  * representative of an in-process select primitive. */
 

@@ -17,10 +17,10 @@
 #   ok is argon.verify_password("hunter2", stored)
 #   key is argon.derive_key("master-secret", salt, 32)
 
-extern *jade_argon2id(pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, t_cost as i64, m_cost as i64, parallel as i64, dklen as i64, out as %i8) returns i32
-extern *jade_random_bytes(buf as %i8, n as i64) returns i32
-extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
-extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *jinn_argon2id(pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, t_cost as i64, m_cost as i64, parallel as i64, dklen as i64, out as %i8) returns i32
+extern *jinn_random_bytes(buf as %i8, n as i64) returns i32
+extern *jinn_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jinn_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -38,7 +38,7 @@ DEFAULT_SALT_LEN is 16
     if dklen <= 0 or password.length equals 0 or salt.length < 8
         return ""
     out is extern.malloc(dklen)
-    rc is extern.jade_argon2id(%password, password.length, %salt, salt.length, t_cost, m_cost, parallelism, dklen, out)
+    rc is extern.jinn_argon2id(%password, password.length, %salt, salt.length, t_cost, m_cost, parallelism, dklen, out)
     if rc neq 0
         extern.free(out)
         return ""
@@ -58,7 +58,7 @@ DEFAULT_SALT_LEN is 16
 # Hash a password with random salt. Returns PHC-formatted string.
 *hash_password(password as String) returns String
     salt_buf is extern.malloc(DEFAULT_SALT_LEN)
-    rc is extern.jade_random_bytes(salt_buf, DEFAULT_SALT_LEN)
+    rc is extern.jinn_random_bytes(salt_buf, DEFAULT_SALT_LEN)
     if rc neq 0
         extern.free(salt_buf)
         return ""
@@ -115,7 +115,7 @@ DEFAULT_SALT_LEN is 16
     if data.length equals 0
         return ""
     hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
@@ -125,7 +125,7 @@ DEFAULT_SALT_LEN is 16
         return ""
     n is hex.length / 2
     buf is extern.malloc(n)
-    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
     if rc < 0
         extern.free(buf)
         return ""

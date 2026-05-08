@@ -53,7 +53,7 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::ChanSend(ch, val) => self.emit_chan_send(*ch, *val),
                 mir::InstKind::ChanRecv(ch) => self.emit_chan_recv(*ch, &inst.ty),
                 mir::InstKind::SelectArm(channels, has_default) => {
-                    // Select: build case array, call jade_select, return index.
+                    // Select: build case array, call jinn_select, return index.
                     let ch_vids: Vec<mir::ValueId> = channels.clone();
                     let dest = inst.dest.unwrap();
                     self.emit_select(&ch_vids, dest, *has_default)

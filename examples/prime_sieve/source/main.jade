@@ -5,7 +5,7 @@
 # Since sim for doesn't capture outer variables, we use
 # functions with inlined parameters for parallel work
 
-extern *jade_time_now_ns() returns i64
+extern *jinn_time_now_ns() returns i64
 
 # Trial division primality test
 *is_prime(n as i64) returns i64
@@ -122,12 +122,12 @@ extern *jade_time_now_ns() returns i64
     log("Range: 2 to 1000000")
 
     # --- Sequential: all analyses one by one ---
-    t0 is jade_time_now_ns()
+    t0 is jinn_time_now_ns()
     primes is count_primes_range(2, limit)
     prime_sum is sum_primes_range(2, limit)
     largest is largest_prime_below(limit)
     twins is count_twin_primes_range(2, limit)
-    t1 is jade_time_now_ns()
+    t1 is jinn_time_now_ns()
     seq_ms is (t1 - t0) / 1000000
 
     log("Sequential results:")
@@ -144,23 +144,23 @@ extern *jade_time_now_ns() returns i64
 
     # --- Parallel: run 4 different analyses concurrently ---
     log("=== Parallel Analysis (sim block) ===")
-    t2 is jade_time_now_ns()
+    t2 is jinn_time_now_ns()
     sim
         analyze_count(2, 1000000)
         analyze_sum(2, 1000000)
         analyze_largest(1000000)
         analyze_twins(2, 1000000)
-    t3 is jade_time_now_ns()
+    t3 is jinn_time_now_ns()
     par_ms is (t3 - t2) / 1000000
     log("Parallel ms:")
     log(par_ms)
 
     # --- Parallel chunked: divide range into 8 for counting ---
     log("=== Parallel Chunked (sim for 8) ===")
-    t4 is jade_time_now_ns()
+    t4 is jinn_time_now_ns()
     sim for i in 8
         count_primes_chunk(i)
-    t5 is jade_time_now_ns()
+    t5 is jinn_time_now_ns()
     chunk_ms is (t5 - t4) / 1000000
     log("Chunked parallel ms:")
     log(chunk_ms)

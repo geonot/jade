@@ -1,4 +1,4 @@
-# Jade Reserved Keywords
+# Jinn Reserved Keywords
 
 Auto-generated overview of every reserved word the lexer recognises.
 

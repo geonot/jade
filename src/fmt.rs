@@ -1,4 +1,4 @@
-//! Source code formatter (`jade fmt`).
+//! Source code formatter (`jinn fmt`).
 
 use crate::ast::*;
 use crate::lexer::Lexer;

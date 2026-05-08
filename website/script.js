@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   JADE LANGUAGE WEBSITE — SCRIPT
+   JINN LANGUAGE WEBSITE — SCRIPT
    Scroll-driven reveals, nav state
    ═══════════════════════════════════════════════════════════ */
 

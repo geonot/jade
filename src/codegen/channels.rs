@@ -28,7 +28,7 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             i64t.const_int(64, false)
         };
-        let chan_create = crate::codegen::fn_or_die(&self.module, "jade_chan_create");
+        let chan_create = crate::codegen::fn_or_die(&self.module, "jinn_chan_create");
         let ch = b!(self.bld.build_call(
             chan_create,
             &[i64t.const_int(elem_size, false).into(), cap_i64.into(),],
@@ -50,7 +50,7 @@ impl<'ctx> Compiler<'ctx> {
         let val_ty = val.get_type();
         let val_alloca = self.entry_alloca(val_ty, "chan.send.val");
         b!(self.bld.build_store(val_alloca, val));
-        let chan_send = crate::codegen::fn_or_die(&self.module, "jade_chan_send");
+        let chan_send = crate::codegen::fn_or_die(&self.module, "jinn_chan_send");
         b!(self
             .bld
             .build_call(chan_send, &[ch_ptr.into(), val_alloca.into()], ""));
@@ -65,7 +65,7 @@ impl<'ctx> Compiler<'ctx> {
         let ch_ptr = self.compile_expr(ch_expr)?.into_pointer_value();
         let elem_llvm_ty = self.llvm_ty(result_ty);
         let recv_alloca = self.entry_alloca(elem_llvm_ty, "chan.recv.val");
-        let chan_recv = crate::codegen::fn_or_die(&self.module, "jade_chan_recv");
+        let chan_recv = crate::codegen::fn_or_die(&self.module, "jinn_chan_recv");
         b!(self.bld.build_call(
             chan_recv,
             &[ch_ptr.into(), recv_alloca.into()],
@@ -79,7 +79,7 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn compile_channel_close(&mut self, ch_expr: &hir::Expr) -> Result<(), String> {
         let ch_ptr = self.compile_expr(ch_expr)?.into_pointer_value();
-        let chan_close = crate::codegen::fn_or_die(&self.module, "jade_chan_close");
+        let chan_close = crate::codegen::fn_or_die(&self.module, "jinn_chan_close");
         b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
         Ok(())
     }
@@ -88,7 +88,7 @@ impl<'ctx> Compiler<'ctx> {
         let actor_ptr = self.compile_expr(actor_expr)?.into_pointer_value();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let ch_ptr = b!(self.bld.build_load(ptr_ty, actor_ptr, "stop_ch_ptr"));
-        let chan_close = crate::codegen::fn_or_die(&self.module, "jade_chan_close");
+        let chan_close = crate::codegen::fn_or_die(&self.module, "jinn_chan_close");
         b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
         Ok(())
     }
@@ -159,7 +159,7 @@ impl<'ctx> Compiler<'ctx> {
             ));
         }
 
-        let select_fn = crate::codegen::fn_or_die(&self.module, "jade_select");
+        let select_fn = crate::codegen::fn_or_die(&self.module, "jinn_select");
         let has_default_val = self
             .ctx
             .bool_type()

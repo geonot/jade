@@ -1,11 +1,11 @@
-# Jade — Vision Roadmap
+# Jinn — Vision Roadmap
 
 A forward-looking design document for the features, syntax, sugar, tooling, and
-ecosystem moves that would make Jade the quintessential modern systems +
-applications language. Each item is grounded in (a) what Jade already promises
+ecosystem moves that would make Jinn the quintessential modern systems +
+applications language. Each item is grounded in (a) what Jinn already promises
 (C performance, Python readability, Erlang-class concurrency, built-in
 persistence), (b) what's empirically missing as of the May 2026 audit, and (c)
-what each developer archetype needs to choose Jade over the incumbent.
+what each developer archetype needs to choose Jinn over the incumbent.
 
 Items are tagged by **archetype** — Systems (`SYS`), Application (`APP`),
 Data/Scientific (`DAT`), Web/Backend (`WEB`), Embedded (`EMB`), Game/Realtime
@@ -50,7 +50,7 @@ These constrain every item below.
   - Exhaustiveness checking with helpful diagnostics: "missing case `None`,
     cases handled: `Some(_)`".
 - **Why:** Pattern matching is the most-used syntactic feature in modern
-  languages; if Jade's is even slightly worse than Rust's, users notice
+  languages; if Jinn's is even slightly worse than Rust's, users notice
   immediately.
 
 ### V1.2 Traits / typeclasses, real ones `[APP][SYS]` — L
@@ -63,7 +63,7 @@ These constrain every item below.
   - Default methods, associated types, blanket impls.
   - Type-class style monomorphization (Rust model) — no v-tables unless
     requested via `dyn Trait`.
-- **Why:** without traits, Jade can't express generic algorithms cleanly. The
+- **Why:** without traits, Jinn can't express generic algorithms cleanly. The
   HM core is already there; lifting it to Hindley-Milner-with-typeclasses
   (System F-ω lite) is a known design.
 
@@ -146,7 +146,7 @@ These constrain every item below.
 - Send on full bounded channel suspends; `try_send` returns `Result`.
 
 ### V2.7 Deterministic test mode `[DIST][APP]` — M
-- `jade test --deterministic`: scheduler runs in a single thread with a
+- `jinn test --deterministic`: scheduler runs in a single thread with a
   reproducible task ordering seeded from CLI; channels record their
   receive order; reruns match exactly.
 - Critical for actor-system testing.
@@ -203,13 +203,13 @@ These constrain every item below.
 - Memory transfer explicit; enforces cost transparency principle.
 
 ### V4.3 Profile-guided optimization `[SYS]` — M
-- `jade build --pgo-collect` then `--pgo-use`.
+- `jinn build --pgo-collect` then `--pgo-use`.
 - Reuses LLVM PGO machinery.
 
 ### V4.4 No-allocation mode for hot paths `[RT][EMB]` — M
 - `*tick #[no_alloc] returns ()` — compiler errors on any code path that
   allocates.
-- Enables Jade in real-time game loops, audio callbacks, embedded ISRs.
+- Enables Jinn in real-time game loops, audio callbacks, embedded ISRs.
 
 ### V4.5 Inline assembly with verified clobbers `[SYS][EMB]` — M
 - Today: `asm` parses; codegen unverified.
@@ -238,37 +238,37 @@ These constrain every item below.
 ### V5.2 Native debugger via DWARF `[ALL]` — covered in roadmap R15.
 
 ### V5.3 Built-in profiler `[SYS][RT]` — M
-- `jade run --profile` writes a flame graph compatible with Brendan Gregg's
+- `jinn run --profile` writes a flame graph compatible with Brendan Gregg's
   tooling.
 - Sampling profiler in the runtime; symbol resolution via DWARF.
 
-### V5.4 `jade fmt` is a hard requirement `[ALL]` — S
+### V5.4 `jinn fmt` is a hard requirement `[ALL]` — S
 - Today: [src/fmt.rs](src/fmt.rs) exists; verify it's complete and
   idempotent; CI gate.
 
-### V5.5 `jade fix` for compiler suggestions `[BEG][APP]` — M
+### V5.5 `jinn fix` for compiler suggestions `[BEG][APP]` — M
 - Auto-applies `suggest_fix` outputs from typer (e.g., `use \`x as i64\` to
   convert`).
 
-### V5.6 Package manager `jade pkg` `[ALL]` — L
+### V5.6 Package manager `jinn pkg` `[ALL]` — L
 - Today: [src/pkg.rs](src/pkg.rs) exists. Need:
-  - `jade pkg add <name>` resolves and installs.
+  - `jinn pkg add <name>` resolves and installs.
   - Lockfile with content hash.
   - Registry (cargo-style) or git-based (Go-style) — pick one, ship.
   - SBOM emission for security archetypes.
 
 ### V5.7 REPL `[BEG][DAT]` — M
-- `jade repl` — incremental compile, persistent variable bindings, multiline
+- `jinn repl` — incremental compile, persistent variable bindings, multiline
   editing.
 
 ### V5.8 Notebook integration `[DAT][BEG]` — M
 - Jupyter kernel using the REPL backend.
 
-### V5.9 `jade doc` with hosted docs `[ALL]` — M
+### V5.9 `jinn doc` with hosted docs `[ALL]` — M
 - Extract `///` doc comments, render to static site.
 - Embed runnable examples that the test suite verifies.
 
-### V5.10 `jade bench` first-class `[SYS][RT]` — S
+### V5.10 `jinn bench` first-class `[SYS][RT]` — S
 - `*bench tight_loop { ... }` — recognized and compiled with PGO,
   iteration count auto-tuned.
 
@@ -304,7 +304,7 @@ These constrain every item below.
 - ICU integration for collation/locale-aware formatting.
 
 ### V6.5 Cryptography surface `[WEB][SYS]` — M
-- Today: `std/crypto.jade` 239 LOC. Verify covers: hashes (SHA2/3, BLAKE3),
+- Today: `std/crypto.jn` 239 LOC. Verify covers: hashes (SHA2/3, BLAKE3),
   HMAC, AEAD (ChaCha20-Poly1305, AES-GCM), KDF (Argon2id, scrypt), Ed25519,
   X25519, secure random, constant-time compare.
 
@@ -374,16 +374,16 @@ Each of these is a small, targeted convenience that pulls weight.
 ## V.8 Ecosystem & Community
 
 ### V8.1 Public registry & docs site `[ALL]` — L
-- `pkg.jade.dev` with searchable index, versioning, ownership.
-- `docs.jade.dev` auto-built from any published package.
+- `pkg.jn.dev` with searchable index, versioning, ownership.
+- `docs.jn.dev` auto-built from any published package.
 
 ### V8.2 Editor support beyond VS Code `[ALL]` — M each
-- Today: `vscode-jade/` and `tree-sitter-jade/` exist.
+- Today: `vscode-jinn/` and `tree-sitter-jinn/` exist.
 - Add: Neovim (LSP + tree-sitter), Emacs (eglot + tree-sitter), Zed,
   IntelliJ.
 
 ### V8.3 Online playground `[ALL]` — M
-- Browser-based: edit, compile (server-side or wasm-jade), run, share by URL.
+- Browser-based: edit, compile (server-side or wasm-jinn), run, share by URL.
 
 ### V8.4 First-party reference applications `[ALL]` — L
 - A web framework, a TUI framework, a small game (verifying RT archetype),
@@ -391,24 +391,24 @@ Each of these is a small, targeted convenience that pulls weight.
 - These prove the language can do real work and seed user habits.
 
 ### V8.5 Style guide & idiom collection `[ALL]` — M
-- "Effective Jade" — patterns, anti-patterns, performance tips.
+- "Effective Jinn" — patterns, anti-patterns, performance tips.
 
 ---
 
 ## V.9 Archetype Coverage Matrix
 
-What does each archetype need *today* to choose Jade?
+What does each archetype need *today* to choose Jinn?
 
 | Archetype | Top-3 must-have | Strategic |
 |---|---|---|
 | **Systems (`SYS`)** | V1.3 borrow tracking · V4.1 SIMD · V5.10 bench | V4.5 asm · V4.6 freestanding |
-| **Application (`APP`)** | V1.6 `?` · V7.1 interpolation · V5.5 jade fix | V1.5 effects |
+| **Application (`APP`)** | V1.6 `?` · V7.1 interpolation · V5.5 jinn fix | V1.5 effects |
 | **Data/Scientific (`DAT`)** | V5.7 REPL · V5.8 notebooks · V3.8 dataframe↔store | V4.2 GPU |
 | **Web/Backend (`WEB`)** | V3.5 transactions · V3.4 EXPLAIN · V2.5 await | V2.3 distributed actors |
 | **Embedded (`EMB`)** | V4.4 no_alloc · V4.6 freestanding · V4.7 stack size | V4.5 asm |
 | **Game/Realtime (`RT`)** | V4.4 no_alloc · V4.1 SIMD · V5.3 profiler | V4.2 GPU |
 | **Distributed (`DIST`)** | V2.1 supervisors · V2.2 selective recv · V2.7 deterministic | V2.3 dist actors · V6.6 raft |
-| **Beginner (`BEG`)** | V5.5 jade fix · V5.7 REPL · V7.1 interpolation | V8.4 reference apps |
+| **Beginner (`BEG`)** | V5.5 jinn fix · V5.7 REPL · V7.1 interpolation | V8.4 reference apps |
 
 ---
 

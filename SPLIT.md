@@ -39,7 +39,7 @@ rg --files src -g '*.rs' | xargs wc -l \
 ```
 
 Large test and fixture aggregators such as `tests/bulk_tests.rs`,
-`tests/integration.rs`, and `tests/programs/syntax.jade` are intentionally out
+`tests/integration.rs`, and `tests/programs/syntax.jn` are intentionally out
 of C.2 scope; the cleanup target here is maintainable `src/` implementation
 files.
 
@@ -110,10 +110,10 @@ Every split follows this exact recipe to guarantee no behaviour change:
 4. **Visibility:** functions called from sibling files become `pub(super)`
    (preferred) or `pub(crate)`. **Never** `pub`. This is a refactor invariant.
 5. **Imports:** copy the original `use` block into the new file then run
-   `cargo fix --allow-dirty --bin jade --tests` to prune unused imports.
+   `cargo fix --allow-dirty --bin jinn --tests` to prune unused imports.
 6. **Compile** (`cargo check`) after every move, **before** moving the next
    block. Splits done in tiny commits avoid hour-long bisection later.
-7. **Run the affected test slice** (`cargo test -p jade <module>`) and the full
+7. **Run the affected test slice** (`cargo test -p jinn <module>`) and the full
    suite at the end of each megafile. The baseline is **1565 passed / 0
    failed**; any deviation aborts the split.
 8. **Update `wc -l`** in the table at the end of each megafile in this file as
@@ -123,7 +123,7 @@ Every split follows this exact recipe to guarantee no behaviour change:
 
 | Task | Owner file | Why |
 | --- | --- | --- |
-| Add `pub(crate) use` re-exports if any module is imported by name from outside its parent | `lib.rs`, parent `mod.rs` | Avoids breaking external `use jade::typer::lower::X` paths used by `tests/`. |
+| Add `pub(crate) use` re-exports if any module is imported by name from outside its parent | `lib.rs`, parent `mod.rs` | Avoids breaking external `use jinn::typer::lower::X` paths used by `tests/`. |
 | `grep -rn 'use crate::typer::lower::' src tests` etc. for each megafile **before** splitting | n/a | Records every external import so the new layout preserves them via re-exports. |
 | Snapshot the test count + LOC | n/a | Acceptance gate: `cargo test --release` must report `1565 passed / 0 failed` at the end of every megafile split. |
 | Snapshot the public symbol surface: `cargo public-api --simplified > /tmp/before.txt` | n/a | At the end of C.2 the diff must be empty (modulo doc-only changes). |
@@ -380,7 +380,7 @@ src/
                                  cmd_package (625), cmd_publish (681),
                                  load_packages (1657).
     sources.rs       ~600 LOC  — find_project_entry (746),
-                                 merge_source_files (777), collect_jade_files
+                                 merge_source_files (777), collect_jinn_files
                                  (782 + 2062), EntityIndex + impl
                                  (868–1024), resolve_modules (238),
                                  resolve_implicit_imports (1556),
@@ -410,8 +410,8 @@ src/
 4. Move project commands one at a time (`cmd_init`, `cmd_fetch`, …). Each is
    self-contained; no shared state.
 5. Move `EntityIndex` + the source loader (`merge_source_files`,
-   `collect_jade_files`, `resolve_modules`) into `sources.rs`. **Note:**
-   `collect_jade_files` is defined twice (lines 782 and 2062 — likely an
+   `collect_jinn_files`, `resolve_modules`) into `sources.rs`. **Note:**
+   `collect_jinn_files` is defined twice (lines 782 and 2062 — likely an
    oversight). De-duplicate while moving; leave a comment justifying
    the choice. Verify both call sites resolve to one definition before
    committing.
@@ -427,10 +427,10 @@ hit that.
 
 ### 3.4 Risks / impact
 
-- **`bin/jadec` stays as-is.** Verify with `ls src/bin/` whether other binaries
+- **`bin/jinnc` stays as-is.** Verify with `ls src/bin/` whether other binaries
   duplicate any of the moved code; if so they should switch to importing from
   `driver::*` (only possible if `driver/` is exposed via `lib.rs`).
-- **Tests in `tests/`** that shell out to the `jade` binary are unaffected.
+- **Tests in `tests/`** that shell out to the `jinn` binary are unaffected.
 - **`cargo install` / package metadata:** no change to `Cargo.toml`.
 - **Fragility:** `compile_and_link` reaches into nearly every crate module;
   do this move *after* every other helper has moved, and only when
@@ -1066,7 +1066,7 @@ After all 18 splits land, the changes outside the split files themselves are:
 | `src/main.rs` | Becomes ~80 LOC; the giant body lives in `src/driver/`. |
 | `tests/*` | No changes — they import via the crate's public API which is preserved by `pub use` re-exports. |
 | `Cargo.toml` | No changes. The `[[bin]]` section continues to point at `src/main.rs`. |
-| `src/bin/*` | Audit for direct imports of moved symbols; expected to be unaffected. Run `grep -rn 'use jade::' src/bin/` once before starting and once after. |
+| `src/bin/*` | Audit for direct imports of moved symbols; expected to be unaffected. Run `grep -rn 'use jinn::' src/bin/` once before starting and once after. |
 
 ---
 

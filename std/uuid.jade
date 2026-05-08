@@ -10,9 +10,9 @@
 #   parsed is uuid.parse(id)
 #   ms is uuid.timestamp_ms(parsed)         # only meaningful for v7
 
-extern *jade_random_bytes(buf as %i8, n as i64) returns i32
-extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
-extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *jinn_random_bytes(buf as %i8, n as i64) returns i32
+extern *jinn_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jinn_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
 extern *time(t as %i8) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
@@ -53,7 +53,7 @@ type Uuid
 # UUIDv4 — 122 random bits, 4 reserved bits set to indicate version+variant.
 *v4 returns String
     buf is extern.malloc(16)
-    rc is extern.jade_random_bytes(buf, 16)
+    rc is extern.jinn_random_bytes(buf, 16)
     if rc neq 0
         extern.free(buf)
         return ""
@@ -70,7 +70,7 @@ type Uuid
     if ms <= 0
         ms is extern.time(0 as %i8) * 1000
     rand_buf is extern.malloc(10)
-    rc is extern.jade_random_bytes(rand_buf, 10)
+    rc is extern.jinn_random_bytes(rand_buf, 10)
     if rc neq 0
         extern.free(rand_buf)
         return ""
@@ -151,7 +151,7 @@ MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
     if data.length equals 0
         return ""
     hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
@@ -161,7 +161,7 @@ MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
         return ""
     n is hex.length / 2
     buf is extern.malloc(n)
-    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
     if rc < 0
         extern.free(buf)
         return ""

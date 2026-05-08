@@ -1,4 +1,4 @@
-# Jade — Codebase Cleanup & Structural Refactor Plan
+# Jinn — Codebase Cleanup & Structural Refactor Plan
 
 A non-functional refactor program to bring the codebase to a state of brevity,
 clarity, and architectural consistency worthy of a reference language
@@ -18,10 +18,10 @@ flagged.
 | C.3 | ✅ mostly | 568 → 95 production unwraps (target <100 met). 95 test unwraps left as-is. Helpers added: `fn_or_die`. Remaining: add `#![warn(clippy::unwrap_used)]` after C.1/C.2 settle. |
 | C.4 | ⏳ todo | Folds into C.1/C.2. |
 | C.5 | ✅ done | 90 keywords audited; all 85 unique tokens reachable. `docs/lexer/keywords.md` generated. |
-| C.6 | ✅ done | FNV consolidated into `runtime/util.c`; strict warning flags applied to all 3 cc::Build invocations; 41 missing prototypes added; opaque types unified via `runtime/jade_rt.h`; `runtime/README.md` written. |
+| C.6 | ✅ done | FNV consolidated into `runtime/util.c`; strict warning flags applied to all 3 cc::Build invocations; 41 missing prototypes added; opaque types unified via `runtime/jinn_rt.h`; `runtime/README.md` written. |
 | C.7 | ⏳ todo | Test categorization, golden MIR/LLVM dumps, `insta` snapshots, coverage gating. |
 | C.8 | ✅ partial | `rust-toolchain.toml` (1.91.1), `rustfmt.toml`, `clippy.toml` created. CI matrix and pre-commit hook still todo. |
-| C.9 | ✅ partial | `docs/architecture.md` and `CONTRIBUTING.md` written; top-of-file `//!` headers added to all 69 missing src/.rs files. User-facing doc audit (jade.md, perspectives.md, etc.) still todo. |
+| C.9 | ✅ partial | `docs/architecture.md` and `CONTRIBUTING.md` written; top-of-file `//!` headers added to all 69 missing src/.rs files. User-facing doc audit (jinn.md, perspectives.md, etc.) still todo. |
 | C.10 | ✅ done | Stdlib already had `#`-prefixed module headers; no camelCase outliers found. |
 | C.11 | ⏳ todo | Pending C.1/C.2 completion. |
 
@@ -33,7 +33,7 @@ Test baseline preserved throughout: **1565 passed / 0 failed**.
 
 - **src/**: 68,823 LOC across ~70 files, edition 2024.
 - **runtime/**: 5,138 LOC across 30 .c/.h files.
-- **std/**: 7,245 LOC across 40 .jade files. Zero TODO/FIXME markers.
+- **std/**: 7,245 LOC across 40 .jn files. Zero TODO/FIXME markers.
 - **Largest files** (refactor targets):
   - [src/mir/lower.rs](src/mir/lower.rs) — 3,488
   - [src/typer/lower.rs](src/typer/lower.rs) — 3,281
@@ -94,7 +94,7 @@ lowering) tracked as a follow-on roadmap ticket — see "Residual work" below.
    and [store_filter.rs](src/codegen/store_filter.rs) are reached by
    `mir_codegen/store.rs` via `gen_store_ensure_open`, `store_record_size`,
    `store_load_records`, `store_read_count`, `eval_store_filter`,
-   `load_store_record_as_jade`, `gen_migration`. They could be physically
+   `load_store_record_as_jinn`, `gen_migration`. They could be physically
    relocated into `mir_codegen/store/` as additional impl blocks — the type
    system would not change since the struct is one — but doing so is pure file
    reorganization and the directory layout is already clear. Deferred.
@@ -143,7 +143,7 @@ alive by these MIR call sites:
 | `gen_migration(mig)` | 1 | `hir::Migration` |
 | `make_closure` / `fn_ref_wrapper` | 2 | closure body (HIR) |
 | `compile_str_literal` | 3 | `&str` (trivial — could be inlined) |
-| `eval_store_filter`, `load_store_record_as_jade` | 13 | filter / record AST |
+| `eval_store_filter`, `load_store_record_as_jinn` | 13 | filter / record AST |
 
 Eliminating these requires extending MIR with native opcodes for actor message
 loops, coroutine state machines, supervisor trees, schema migrations, and
@@ -178,7 +178,7 @@ Files > 2,000 LOC are read-hostile. Decompose along natural axes.
   - `store/decl.rs` — `declare_store_runtime`, schema codegen
   - `store/insert.rs`
   - `store/query.rs` — where/select/aggregations
-  - `store/index.rs` — `jade_idx_*` calls
+  - `store/index.rs` — `jinn_idx_*` calls
   - `store/persistence.rs` — WAL, file IO
   - `store/extensions.rs` — kv/timeseries/fts/vector/bloom variants
 
@@ -279,7 +279,7 @@ mask real bugs.
 
 ### Tasks
 1. **Add a single header `runtime/internal.h`** for cross-module structs that
-   currently leak through duplicated typedefs (e.g., `JadeIndex` in
+   currently leak through duplicated typedefs (e.g., `JinnIndex` in
    [runtime/index.c](runtime/index.c) appears similar to slot structs in
    `kv.c`).
 2. **Standardize error returns.** Some functions return `int` (0/-1), some
@@ -301,7 +301,7 @@ mask real bugs.
 ## C.7 Test suite organization
 
 `cargo test` runs 1,119 tests (1 failing — see N-8). Likely dominated by
-`tests/bulk_tests.rs` which sweeps `tests/programs/*.jade`.
+`tests/bulk_tests.rs` which sweeps `tests/programs/*.jn`.
 
 ### Tasks
 1. **Categorize `tests/programs/`** into subdirectories by feature:
@@ -325,8 +325,8 @@ mask real bugs.
 ## C.8 Build, lint, CI
 
 ### Tasks
-1. **`Cargo.toml`:** declare `[workspace]` properly; consider splitting `jadec`
-   library out of `src/main.rs` into a real `[lib]` so `jadec-lsp` and `jade`
+1. **`Cargo.toml`:** declare `[workspace]` properly; consider splitting `jinnc`
+   library out of `src/main.rs` into a real `[lib]` so `jinnc-lsp` and `jinn`
    subcommand can depend without duplicating types.
 2. **`rust-toolchain.toml`** pinning the exact toolchain (currently implicit).
 3. **`rustfmt.toml`** — codify line width, import grouping.
@@ -350,8 +350,8 @@ mask real bugs.
 3. **`CONTRIBUTING.md`** — codify the conventions from §C.3 (.unwrap policy),
    §C.5 (keyword reservations), §C.7 (test organization).
 4. **Audit user-facing docs**:
-   - [jade.md](jade.md) — fix N-9 corruption.
-   - [the-way-of-jade.md](the-way-of-jade.md) — review for outdated claims.
+   - [jinn.md](jinn.md) — fix N-9 corruption.
+   - [the-way-of-jinn.md](the-way-of-jinn.md) — review for outdated claims.
    - [perspectives.md](perspectives.md), [ddr-plan.md](ddr-plan.md),
      [err.md](err.md), [pass.save](pass.save) — clarify status of each
      (active/archive/draft) and move accordingly.
@@ -365,14 +365,14 @@ mask real bugs.
 `std/` is healthy (7,245 LOC, no stubs) but worth a uniformity pass.
 
 ### Tasks
-1. **Module headers.** Every `std/*.jade` should open with a 5-line doc
+1. **Module headers.** Every `std/*.jn` should open with a 5-line doc
    comment: purpose, primary types, primary functions, examples.
 2. **Naming convention.** Audit for snake_case vs camelCase function names;
    pick one (snake_case fits Python-readability claim) and rename outliers.
 3. **Re-exports.** Decide if `std.collections` should re-export `Vec`, `Map`,
    `Set` for ergonomic access, or if direct module imports are canonical.
-4. **Coverage tests.** Each `std/X.jade` should have at least one test in
-   `tests/programs/std/X.jade` exercising every exported symbol.
+4. **Coverage tests.** Each `std/X.jn` should have at least one test in
+   `tests/programs/std/X.jn` exercising every exported symbol.
 
 **Estimate:** M.
 

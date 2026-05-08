@@ -183,7 +183,7 @@ Move into the appropriate `src/codegen/mir_codegen/` file.
 - All `stores.rs` and `store_ops.rs` helpers tagged Promote-MIR above →
   [src/codegen/mir_codegen/store.rs](../../src/codegen/mir_codegen/store.rs)
   (where most equivalents already live).
-- `eval_store_filter`, `load_store_record_as_jade`, `copy_string_to_fixed_buf`
+- `eval_store_filter`, `load_store_record_as_jinn`, `copy_string_to_fixed_buf`
   from `store_filter.rs` → mir_codegen/store.rs.
 - All `string_*` transform/op helpers
   (`string_concat`, `string_eq`, `string_split`, `string_case`, `string_trim`,
@@ -256,7 +256,7 @@ LLVM fields directly onto it, and delete `Compiler`. All
  9  store_record_size     9  load_store_fp         9  gen_store_ensure_open
  8  vec_header_type       7  type_store_size       6  store_unlock
  6  set_tbaa              6  load_kv_handle        5  store_lock
- 5  load_store_record_as_jade  5  ensure_memcpy   5  attr
+ 5  load_store_record_as_jinn  5  ensure_memcpy   5  attr
  4  load_store_ver        4  int_to_string         4  default_val
  4  copy_string_to_fixed_buf
  3  tag_fn                3  string_trim           3  snprintf_to_string
@@ -283,7 +283,7 @@ LLVM fields directly onto it, and delete `Compiler`. All
  1  fn_ref_wrapper        1  float_to_string       1  finalize_debug
  1  ensure_calloc         1  emit_vec_bounds_check 1  emit_log
  1  drop_value            1  declare_store         1  declare_method
- 1  declare_jade_runtime  1  declare_gen_runtime   1  declare_err_def
+ 1  declare_jinn_runtime  1  declare_gen_runtime   1  declare_err_def
  1  declare_enum          1  declare_builtins      1  declare_actor
  1  compile_time_monotonic 1 compile_supervisor    1  compile_spawn
  1  compile_map_new       1  compile_get_args      1  compile_expr
@@ -308,7 +308,7 @@ Order chosen to keep tests green at every commit and to minimise rebase pain.
    `compile_expr`.
 3. **Task 4 (Store helpers → MIR).** The largest live cluster. Move
    `store_*`, `load_*`, `wal_*`, `gen_store_*`, `idx_hash_field`,
-   `eval_store_filter`, `load_store_record_as_jade` into
+   `eval_store_filter`, `load_store_record_as_jinn` into
    `mir_codegen/store.rs` / `store_ext.rs`. Then delete `store_ops.rs`
    wholesale and most of `stores.rs` / `store_filter.rs`.
 4. **Task 5 (Concurrency).** Create `mir_codegen/concurrency.rs`; move actors,

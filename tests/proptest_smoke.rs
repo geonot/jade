@@ -7,8 +7,8 @@
 // Bug-finding tool, not a correctness oracle. Runs ~256 cases per prop
 // per invocation; cheap enough to keep in the regular cargo test gate.
 
-use jadec::lexer::Lexer;
-use jadec::parser::Parser as JadeParser;
+use jinnc::lexer::Lexer;
+use jinnc::parser::Parser as JinnParser;
 use proptest::prelude::*;
 
 fn safe_chars() -> impl Strategy<Value = String> {
@@ -57,7 +57,7 @@ proptest! {
     fn parser_never_panics_on_lexer_output(s in safe_chars()) {
         let mut lx = Lexer::new(&s);
         if let Ok(tokens) = lx.tokenize() {
-            let mut p = JadeParser::new(tokens);
+            let mut p = JinnParser::new(tokens);
             let _ = p.parse_program();
         }
     }
@@ -69,6 +69,6 @@ fn known_good_program_parses() {
     let src = "*main\n    log(1)\n";
     let mut lx = Lexer::new(src);
     let toks = lx.tokenize().expect("lex");
-    let mut p = JadeParser::new(toks);
+    let mut p = JinnParser::new(toks);
     p.parse_program().expect("parse");
 }

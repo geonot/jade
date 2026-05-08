@@ -1,10 +1,10 @@
 # alpha_release_demo
 
-Comprehensive Jade sample project used for alpha release readiness checks.
+Comprehensive Jinn sample project used for alpha release readiness checks.
 
 ## What It Exercises
 
-- Multi-file and nested modules (`source/analytics.jade`, `source/models/metric.jade`, `source/workers/ingest.jade`, `source/reports/reporter.jade`)
+- Multi-file and nested modules (`source/analytics.jn`, `source/models/metric.jn`, `source/workers/ingest.jn`, `source/reports/reporter.jn`)
 - Standard library includes (`use std/time`)
 - Typed domain model (`Metric` object creation and field access)
 - Actor runtime (`Aggregator` with `*loop` flush and method-call messaging)
@@ -13,15 +13,15 @@ Comprehensive Jade sample project used for alpha release readiness checks.
 	- `metric_windows` (windowed aggregate rows)
 - Store operations in one workflow:
 	- `insert`, `count`, `sum`, `max`, `min`, `exists`, `first`, `set`, `delete`
-- Inline tests (`jade test`)
+- Inline tests (`jinn test`)
 
 ## Commands
 
 ```bash
-jade test
-jade build -o alpha_demo
+jinn test
+jinn build -o alpha_demo
 ./alpha_demo
-jade package
+jinn package
 ```
 
 ## Expected Output Markers

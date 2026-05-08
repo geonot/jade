@@ -1,8 +1,8 @@
 //! Name binding utilities used by the typer (resolve identifiers to symbols).
 
-/// C header import tool — parses C function declarations and generates Jade `extern` declarations.
+/// C header import tool — parses C function declarations and generates Jinn `extern` declarations.
 ///
-/// Usage: `jade bind header.h` → prints Jade extern declarations to stdout.
+/// Usage: `jinn bind header.h` → prints Jinn extern declarations to stdout.
 ///
 /// Handles: function declarations, typedefs (ignored), structs (comments), macros (ignored).
 /// Does NOT handle: templates, C++ features, complex macros, inline functions.
@@ -16,7 +16,7 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
     let cleaned = strip_preprocessor(&strip_comments(&src));
     let mut out = String::new();
     out.push_str(&format!(
-        "// Auto-generated Jade bindings from {}\n\n",
+        "// Auto-generated Jinn bindings from {}\n\n",
         path.display()
     ));
 
@@ -433,7 +433,7 @@ fn is_type_keyword(s: &str) -> bool {
 }
 
 fn sanitize_name(name: &str) -> String {
-    // Jade reserved words get suffixed with _
+    // Jinn reserved words get suffixed with _
     let reserved = [
         "fn", "let", "if", "else", "for", "while", "loop", "match", "return", "break", "continue",
         "type", "enum", "use", "as", "true", "false", "none", "and", "or", "not", "in", "is",
@@ -446,7 +446,7 @@ fn sanitize_name(name: &str) -> String {
     }
 }
 
-fn ctype_to_jade(ty: &CType) -> String {
+fn ctype_to_jinn(ty: &CType) -> String {
     match ty {
         CType::Void => "void".to_string(),
         CType::Char | CType::Int8 => "i8".to_string(),
@@ -464,7 +464,7 @@ fn ctype_to_jade(ty: &CType) -> String {
         | CType::UInt64 => "i64".to_string(),
         CType::Float => "f32".to_string(),
         CType::Double => "f64".to_string(),
-        CType::Ptr(inner) => format!("%{}", ctype_to_jade(inner)),
+        CType::Ptr(inner) => format!("%{}", ctype_to_jinn(inner)),
         CType::Named(n) => format!("%void /* {n} */"),
     }
 }
@@ -479,7 +479,7 @@ fn emit_extern(f: &CFn) -> String {
         }
         out.push_str(&p.name);
         out.push_str(" as ");
-        out.push_str(&ctype_to_jade(&p.ty));
+        out.push_str(&ctype_to_jinn(&p.ty));
     }
     out.push(')');
 
@@ -488,7 +488,7 @@ fn emit_extern(f: &CFn) -> String {
         CType::Void => {}
         ty => {
             out.push_str(" returns ");
-            out.push_str(&ctype_to_jade(ty));
+            out.push_str(&ctype_to_jinn(ty));
         }
     }
 

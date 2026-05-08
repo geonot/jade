@@ -1,4 +1,4 @@
-# The Way of Jade
+# The Way of Jinn
 
 *A manifesto for those who believe code should be hard, dense, and beautiful.*
 
@@ -6,11 +6,11 @@
 
 ## I. The Stone
 
-Jade is not soft. It does not yield. It does not bend to fashion or compromise for convenience. Like the mineral it is named for, it is hard — harder than steel — yet carved into forms of astonishing elegance by those who understand its grain.
+Jinn is not soft. It does not yield. It does not bend to fashion or compromise for convenience. Like the mineral it is named for, it is hard — harder than steel — yet carved into forms of astonishing elegance by those who understand its grain.
 
-A Jade program is a small, dense thing. Every line carries weight. There is no ceremony, no boilerplate, no scaffolding propping up the real work. What remains after everything unnecessary is stripped away is not minimalism — it is essence.
+A Jinn program is a small, dense thing. Every line carries weight. There is no ceremony, no boilerplate, no scaffolding propping up the real work. What remains after everything unnecessary is stripped away is not minimalism — it is essence.
 
-```jade
+```jinn
 *fib(0) is 0
 *fib(1) is 1
 *fib n is fib(n - 1) + fib(n - 2)
@@ -22,18 +22,18 @@ Three lines. A complete, recursive, pattern-directed definition of the Fibonacci
 
 ## II. The First Principle — Performance Is Non-Negotiable
 
-Every design decision in Jade is evaluated against one question:
+Every design decision in Jinn is evaluated against one question:
 
 > *Does this prevent generating the same code C would?*
 
 If the answer is yes, the design is wrong. Not deferred. Not traded off. Wrong.
 
-Jade does not ask you to choose between beauty and speed. That choice is a failure of imagination. A language that reads like pseudocode and runs like C is not a contradiction — it is the only goal worth pursuing.
+Jinn does not ask you to choose between beauty and speed. That choice is a failure of imagination. A language that reads like pseudocode and runs like C is not a contradiction — it is the only goal worth pursuing.
 
 An integer is a register. A class is contiguous memory at known offsets. A function is a native call. There is no universal value type. No NaN-boxing. No 64-byte wrapper class standing between your intent and the machine.
 
 ```
-| Benchmark       | Jade   | Clang -O3 | Ratio |
+| Benchmark       | Jinn   | Clang -O3 | Ratio |
 |-----------------|--------|-----------|-------|
 | ackermann(3,10) | 186ms  | 202ms     | 0.92× |
 | fibonacci(40)   | 339ms  | 336ms     | 1.01× |
@@ -47,9 +47,9 @@ An integer is a register. A class is contiguous memory at known offsets. A funct
 
 ## III. The Asterisk — Functions Are Actions
 
-In Jade, a function begins with `*`. Not `func`. Not `def`. Not `fn`. A single mark — the smallest possible signal that says: *here is something that does work.*
+In Jinn, a function begins with `*`. Not `func`. Not `def`. Not `fn`. A single mark — the smallest possible signal that says: *here is something that does work.*
 
-```jade
+```jinn
 *greet name
     log 'hello {name}'
 
@@ -59,11 +59,11 @@ In Jade, a function begins with `*`. Not `func`. Not `def`. Not `fn`. A single m
     a > b ? a ! b
 ```
 
-The asterisk is a philosophical statement. Keywords are tax. Every character of `function` or `define` that isn't your logic is noise. Jade pays the minimum toll and moves on.
+The asterisk is a philosophical statement. Keywords are tax. Every character of `function` or `define` that isn't your logic is noise. Jinn pays the minimum toll and moves on.
 
 Parentheses are optional — on definitions and calls alike. When the meaning is clear, punctuation is clutter:
 
-```jade
+```jinn
 result is add 1, 2
 greet 'world'
 ```
@@ -74,21 +74,21 @@ When clarity demands grouping, parentheses are there. They serve you. You do not
 
 ## IV. The Binding — `is` Means Equals
 
-```jade
+```jinn
 x is 42
-name is 'jade'
+name is 'jinn'
 pi is 3.14159
 ```
 
 `is`. Not `=`. Not `:=`. Not `let`. The most natural word in the English language for associating a name with a value.
 
-A Jade program reads the way you would explain it to another person. `x is 42`. `name is 'jade'`. There is no translation step between thought and code, between intent and expression. You think it, you write it, and the machine does it — at the speed of C.
+A Jinn program reads the way you would explain it to another person. `x is 42`. `name is 'jinn'`. There is no translation step between thought and code, between intent and expression. You think it, you write it, and the machine does it — at the speed of C.
 
 ---
 
 ## V. Words Over Symbols
 
-```jade
+```jinn
 if x equals 0
     log 'zero'
 
@@ -102,17 +102,17 @@ if done or timeout
     log 'stop'
 ```
 
-`equals`. `not equals`. `and`. `or`. `not`. These are not syntactic sugar over operators. They *are* the operators. Jade chooses English where English is clearer, and symbols where symbols are clearer.
+`equals`. `not equals`. `and`. `or`. `not`. These are not syntactic sugar over operators. They *are* the operators. Jinn chooses English where English is clearer, and symbols where symbols are clearer.
 
 `~` for pipelines — because data flows. `?` `!` for ternary — because conditionals decide. `*` for functions — because functions act. `%` for address-of — because pointers point. `@` for dereference — because you reach through.
 
-The rule is simple: **use the form that carries the most meaning in the fewest characters.** Sometimes that is a word. Sometimes it is a symbol. Jade does not have a dogma. It has taste.
+The rule is simple: **use the form that carries the most meaning in the fewest characters.** Sometimes that is a word. Sometimes it is a symbol. Jinn does not have a dogma. It has taste.
 
 ---
 
 ## VI. The Pipeline — Data Flows Forward
 
-```jade
+```jinn
 result is value ~ double ~ add_one ~ square
 ```
 
@@ -131,13 +131,13 @@ Pipelines are not decoration. They are how humans process transformation. *Start
 
 ## VII. The Ternary — Decisions in a Breath
 
-```jade
+```jinn
 sign is x > 0 ? 1 ! -1
 ```
 
 Condition. Question mark — *what if yes?* Exclamation mark — *otherwise!* A complete conditional expression in one line, in one breath, with one thought.
 
-```jade
+```jinn
 grade is score > 90 ? 'A'
     ! score > 80 ? 'B'
     ! score > 70 ? 'C'
@@ -150,7 +150,7 @@ Nesting reads naturally. Each `!` is an *otherwise*. The structure cascades like
 
 ## VIII. Pattern Direction — Functions That Know Their Shape
 
-```jade
+```jinn
 *fib(0) is 0
 *fib(1) is 1
 *fib n is fib(n - 1) + fib(n - 2)
@@ -164,13 +164,13 @@ Nesting reads naturally. Each `!` is an *otherwise*. The structure cascades like
 
 Define a function multiple times. Each definition handles a shape. The compiler merges them into efficient dispatch — the conditional logic you would have written by hand, but didn't have to.
 
-This is not overloading. This is mathematical definition. The same way you would write it on a whiteboard, the same way it appears in a textbook. Jade does not invent a new way to express old ideas. It honors them.
+This is not overloading. This is mathematical definition. The same way you would write it on a whiteboard, the same way it appears in a textbook. Jinn does not invent a new way to express old ideas. It honors them.
 
 ---
 
 ## IX. Ownership Without Ceremony
 
-Jade manages memory. You do not.
+Jinn manages memory. You do not.
 
 One owner per value. The compiler inserts drops statically. Reads borrow — zero cost, no retain, no release. When sharing is needed, the compiler infers it and inserts reference counting automatically.
 
@@ -178,7 +178,7 @@ There are no lifetime annotations. No `'a` plastered across your function signat
 
 You write:
 
-```jade
+```jinn
 a is 'hello'
 b is a
 b is b + ' world'
@@ -188,13 +188,13 @@ The compiler sees: `a` is created. `b` shares `a` — no copy needed. `b` mutate
 
 **Perceus reference counting** — nine optimization passes that analyze your program and eliminate every retain/release that isn't strictly necessary. Borrows are elided. Drops are fused. In-place reuse replaces allocation when the layout matches and the count is one.
 
-The result: memory safety with zero annotations and near-zero overhead. The machine handles the bookkeeping because the machine is better at bookkeeping than you are. Your job is to think clearly. Jade's job is to make that thought run fast and safe.
+The result: memory safety with zero annotations and near-zero overhead. The machine handles the bookkeeping because the machine is better at bookkeeping than you are. Your job is to think clearly. Jinn's job is to make that thought run fast and safe.
 
 ---
 
 ## X. Inference Does the Work
 
-```jade
+```jinn
 *add a, b
     a + b
 ```
@@ -203,7 +203,7 @@ No type annotations. The compiler knows `a` and `b` are `i64` because `+` operat
 
 When you want to be explicit, you can:
 
-```jade
+```jinn
 *connect(host as String, port as i64 is 8080)
     ...
 ```
@@ -214,7 +214,7 @@ When you want to be explicit, you can:
 
 ## XI. Indentation Is Structure
 
-```jade
+```jinn
 if x > 0
     log 'positive'
     process x
@@ -224,7 +224,7 @@ else
 
 No braces. No `end`. No `fi`. The indentation you write for readability *is* the structure. There is no divergence between what the code looks like and what it means.
 
-This is not controversial. This is honest. Every programmer indents their code. Jade simply refuses to make you say the same thing twice — once with whitespace for humans, once with delimiters for the machine.
+This is not controversial. This is honest. Every programmer indents their code. Jinn simply refuses to make you say the same thing twice — once with whitespace for humans, once with delimiters for the machine.
 
 ---
 
@@ -232,7 +232,7 @@ This is not controversial. This is honest. Every programmer indents their code. 
 
 ### Actors speak in messages.
 
-```jade
+```jinn
 actor Counter
     count is 0
 
@@ -248,7 +248,7 @@ c.increment(5)
 
 ### Channels carry values.
 
-```jade
+```jinn
 ch is channel of i64(10)
 send ch, 42
 val is receive ch
@@ -256,7 +256,7 @@ val is receive ch
 
 ### Parallel loops just work.
 
-```jade
+```jinn
 sim for x in items
     process x
 ```
@@ -267,9 +267,9 @@ No thread pools to configure. No mutex to forget. No data race to debug at 3 AM.
 
 ## XIII. Systems Depth
 
-Jade is not a scripting language wearing a systems costume. It goes all the way down.
+Jinn is not a scripting language wearing a systems costume. It goes all the way down.
 
-```jade
+```jinn
 extern *printf(fmt as %i8, ...) returns i32
 
 ptr is %value
@@ -295,7 +295,7 @@ Every tool a systems programmer needs exists. Not as an afterthought bolted onto
 
 ## XIV. The Standard Library — Batteries, Not Bloat
 
-```jade
+```jinn
 use fs
 use json
 use crypto
@@ -305,13 +305,13 @@ use net
 
 File systems. JSON. Cryptography. Regular expressions. Networking. CSV. HTTP. Time. Random numbers. Sorting. Statistics. Path manipulation. Signal handling. Processes.
 
-Each module is a `.jade` file. No hidden magic. No special compiler support. The same language you write your programs in is the language the standard library is written in.
+Each module is a `.jn` file. No hidden magic. No special compiler support. The same language you write your programs in is the language the standard library is written in.
 
 ---
 
 ## XV. Errors Are Values
 
-Jade has one error convention. There is no `try`, no `catch`, no exceptions, no
+Jinn has one error convention. There is no `try`, no `catch`, no exceptions, no
 stack unwinding, no panic-and-pray. Errors are values returned by functions and
 handled by pattern-matching at the call site.
 
@@ -327,7 +327,7 @@ handled by pattern-matching at the call site.
 
 ### The canonical form — return the err enum directly
 
-```jade
+```jinn
 err Outcome
     Ok(i64)
     Bad
@@ -354,7 +354,7 @@ pattern-matches every outcome. The compiler sees every path.
 
 When `T` is a primitive and the failure space is small, use a sentinel:
 
-```jade
+```jinn
 *lookup(k as string) returns i64
     if missing
         ! -1
@@ -365,7 +365,7 @@ When `T` is a primitive and the failure space is small, use a sentinel:
 
 A signature may declare which err enums a function may early-return:
 
-```jade
+```jinn
 *fetch(url as string) returns i64 ! Network ! Disk
     if down
         ! Timeout      // must be a variant of Network or Disk
@@ -388,7 +388,7 @@ points you at one of the two canonical forms above.
 
 ### `defer` runs on every exit
 
-```jade
+```jinn
 err Outcome
     Ok(i64)
     Bad
@@ -405,7 +405,7 @@ err Outcome
 `defer` is function-scoped: a `defer` placed inside an `if` or `while` block
 still runs at function exit, in reverse order of registration.
 
-### What jade does not have
+### What jinn does not have
 
 - No `try` keyword. No `try/catch`. No two-color functions (`async`/`sync`,
   `throws`/`nothrows`).
@@ -428,7 +428,7 @@ Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership 
 One command. One binary. No runtime. No garbage collector. No virtual machine. No JIT warmup. The compiler transforms your source into a native executable that depends on nothing but the operating system.
 
 ```bash
-jadec hello.jade -o hello
+jinnc hello.jn -o hello
 ./hello
 ```
 
@@ -438,7 +438,7 @@ The output is a native binary. It starts instantly. It runs at full speed. It li
 
 ## XVII. The Ethos
 
-Jade is guided by a set of convictions, not a committee:
+Jinn is guided by a set of convictions, not a committee:
 
 1. **Clarity is not the enemy of performance.** The belief that readable code must be slow is a myth perpetuated by languages that made poor tradeoffs.
 
@@ -448,23 +448,23 @@ Jade is guided by a set of convictions, not a committee:
 
 4. **Every feature must earn its place.** If it cannot be justified against the question *"does this make the common case clearer without making the machine slower?"* — it does not belong.
 
-5. **Complexity is debt.** Every knob, every annotation, every special case is a cost. Jade pays that cost in the compiler so you don't pay it in your code.
+5. **Complexity is debt.** Every knob, every annotation, every special case is a cost. Jinn pays that cost in the compiler so you don't pay it in your code.
 
-6. **One way to do it.** Not enforced rigidly — but Jade gravitates toward single, clear idioms rather than offering five syntactic paths to the same result.
+6. **One way to do it.** Not enforced rigidly — but Jinn gravitates toward single, clear idioms rather than offering five syntactic paths to the same result.
 
 7. **Code is read more than it is written.** Every syntactic choice — `is`, `equals`, `and`, `~`, `?!` — was made for the reader, not the writer.
 
 ---
 
-## XVIII. What Jade Is Not
+## XVIII. What Jinn Is Not
 
-Jade is not a research language. It ships binaries.
+Jinn is not a research language. It ships binaries.
 
-Jade is not a safe language that forgot about performance. It is a fast language that refuses to be unsafe.
+Jinn is not a safe language that forgot about performance. It is a fast language that refuses to be unsafe.
 
-Jade is not minimal for the sake of minimalism. Every feature that exists is load-bearing. Every feature that doesn't exist was weighed and found wanting.
+Jinn is not minimal for the sake of minimalism. Every feature that exists is load-bearing. Every feature that doesn't exist was weighed and found wanting.
 
-Jade is not trying to be everything to everyone. It is a systems language with scripting readability and C performance. That sentence is the entire design space. Everything flows from it.
+Jinn is not trying to be everything to everyone. It is a systems language with scripting readability and C performance. That sentence is the entire design space. Everything flows from it.
 
 ---
 
@@ -474,7 +474,7 @@ Write a function. Compile it. Run it. Read the LLVM IR if you want — it looks 
 
 Then write something larger. Notice how the types disappear but the safety doesn't. Notice how the memory management vanishes but the determinism remains. Notice how the syntax gets out of your way and all that's left is the algorithm, the logic, the *thought*.
 
-That is the way of Jade.
+That is the way of Jinn.
 
 Not a language that makes hard things easy — a language that makes hard things *clear*.
 

@@ -20,15 +20,15 @@
 # All inputs/outputs are raw byte strings unless suffixed with `_hex`.
 # Standards: RFC 2104, RFC 7914, RFC 8018, RFC 8439, RFC 9106.
 
-extern *jade_random_bytes(buf as %i8, n as i64) returns i32
-extern *jade_evp_hmac(alg as %i8, key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i64
-extern *jade_hmac_sha256(key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i32
-extern *jade_pbkdf2(alg as %i8, pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, iters as i64, dklen as i64, out as %i8) returns i32
-extern *jade_scrypt(pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, n as i64, r as i64, p as i64, dklen as i64, out as %i8) returns i32
-extern *jade_chacha20_poly1305_encrypt(key as %i8, nonce as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
-extern *jade_chacha20_poly1305_decrypt(key as %i8, nonce as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
-extern *jade_bytes_to_hex(data as %i8, len as i64, out as %i8)
-extern *jade_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
+extern *jinn_random_bytes(buf as %i8, n as i64) returns i32
+extern *jinn_evp_hmac(alg as %i8, key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i64
+extern *jinn_hmac_sha256(key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i32
+extern *jinn_pbkdf2(alg as %i8, pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, iters as i64, dklen as i64, out as %i8) returns i32
+extern *jinn_scrypt(pass as %i8, pass_len as i64, salt as %i8, salt_len as i64, n as i64, r as i64, p as i64, dklen as i64, out as %i8) returns i32
+extern *jinn_chacha20_poly1305_encrypt(key as %i8, nonce as %i8, pt as %i8, pt_len as i64, aad as %i8, aad_len as i64, out as %i8, tag as %i8) returns i64
+extern *jinn_chacha20_poly1305_decrypt(key as %i8, nonce as %i8, ct as %i8, ct_len as i64, aad as %i8, aad_len as i64, tag as %i8, out as %i8) returns i64
+extern *jinn_bytes_to_hex(data as %i8, len as i64, out as %i8)
+extern *jinn_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -38,7 +38,7 @@ extern *free(ptr as %i8)
     if n <= 0
         return ""
     buf is extern.malloc(n)
-    rc is extern.jade_random_bytes(buf, n)
+    rc is extern.jinn_random_bytes(buf, n)
     if rc neq 0
         extern.free(buf)
         return ""
@@ -51,12 +51,12 @@ extern *free(ptr as %i8)
         return ""
     buf is extern.malloc(n)
     hex_buf is extern.malloc(n * 2 + 1)
-    rc is extern.jade_random_bytes(buf, n)
+    rc is extern.jinn_random_bytes(buf, n)
     if rc neq 0
         extern.free(buf)
         extern.free(hex_buf)
         return ""
-    extern.jade_bytes_to_hex(buf, n, hex_buf)
+    extern.jinn_bytes_to_hex(buf, n, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(buf)
     extern.free(hex_buf)
@@ -75,7 +75,7 @@ extern *free(ptr as %i8)
 
 *hmac(alg as String, key as String, data as String) returns String
     out is extern.malloc(64)
-    n is extern.jade_evp_hmac(%alg, %key, key.length, %data, data.length, out)
+    n is extern.jinn_evp_hmac(%alg, %key, key.length, %data, data.length, out)
     if n < 0
         extern.free(out)
         return ""
@@ -92,12 +92,12 @@ extern *free(ptr as %i8)
 *hmac_sha256(key as String, data as String) returns String
     out_buf is extern.malloc(32)
     hex_buf is extern.malloc(65)
-    rc is extern.jade_hmac_sha256(%key, key.length, %data, data.length, out_buf)
+    rc is extern.jinn_hmac_sha256(%key, key.length, %data, data.length, out_buf)
     if rc neq 0
         extern.free(out_buf)
         extern.free(hex_buf)
         return ""
-    extern.jade_bytes_to_hex(out_buf, 32, hex_buf)
+    extern.jinn_bytes_to_hex(out_buf, 32, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(out_buf)
     extern.free(hex_buf)
@@ -118,7 +118,7 @@ type AeadResult
         return AeadResult(ciphertext is "", tag is "", ok is false)
     ct_buf is extern.malloc(plaintext.length + 16)
     tag_buf is extern.malloc(16)
-    n is extern.jade_chacha20_poly1305_encrypt(%key, %nonce, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    n is extern.jinn_chacha20_poly1305_encrypt(%key, %nonce, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
     if n < 0
         extern.free(ct_buf)
         extern.free(tag_buf)
@@ -133,7 +133,7 @@ type AeadResult
     if key.length neq 32 or nonce.length neq 12 or tag.length neq 16
         return ""
     pt_buf is extern.malloc(ciphertext.length + 1)
-    n is extern.jade_chacha20_poly1305_decrypt(%key, %nonce, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
+    n is extern.jinn_chacha20_poly1305_decrypt(%key, %nonce, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
     if n < 0
         extern.free(pt_buf)
         return ""
@@ -147,7 +147,7 @@ type AeadResult
     if dklen <= 0 or iters < 1
         return ""
     out is extern.malloc(dklen)
-    rc is extern.jade_pbkdf2(%alg, %password, password.length, %salt, salt.length, iters, dklen, out)
+    rc is extern.jinn_pbkdf2(%alg, %password, password.length, %salt, salt.length, iters, dklen, out)
     if rc neq 0
         extern.free(out)
         return ""
@@ -167,7 +167,7 @@ type AeadResult
     if dklen <= 0
         return ""
     out is extern.malloc(dklen)
-    rc is extern.jade_scrypt(%password, password.length, %salt, salt.length, n, r, p, dklen, out)
+    rc is extern.jinn_scrypt(%password, password.length, %salt, salt.length, n, r, p, dklen, out)
     if rc neq 0
         extern.free(out)
         return ""
@@ -202,7 +202,7 @@ type AeadResult
     if data.length equals 0
         return ""
     hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jade_bytes_to_hex(%data, data.length, hex_buf)
+    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
@@ -212,7 +212,7 @@ type AeadResult
         return ""
     n is hex.length / 2
     buf is extern.malloc(n)
-    rc is extern.jade_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
     if rc < 0
         extern.free(buf)
         return ""

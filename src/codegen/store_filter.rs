@@ -77,12 +77,12 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(trunc_bb);
         let warn_fn = self
             .module
-            .get_function("jade_store_truncation_warn")
+            .get_function("jinn_store_truncation_warn")
             .unwrap_or_else(|| {
                 let void_ty = self.ctx.void_type();
                 let ft = void_ty.fn_type(&[i64t.into(), i64t.into()], false);
                 self.module.add_function(
-                    "jade_store_truncation_warn",
+                    "jinn_store_truncation_warn",
                     ft,
                     Some(inkwell::module::Linkage::External),
                 )
@@ -151,18 +151,18 @@ impl<'ctx> Compiler<'ctx> {
         self.build_string(heap, len, i64t.const_int(0, false), "str.from_store")
     }
 
-    pub(crate) fn load_store_record_as_jade(
+    pub(crate) fn load_store_record_as_jinn(
         &mut self,
         st: inkwell::types::StructType<'ctx>,
         raw_ptr: PointerValue<'ctx>,
         sd: &hir::StoreDef,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let jade_struct_name = format!("__store_{}", sd.name);
-        let jade_st = self
+        let jinn_struct_name = format!("__store_{}", sd.name);
+        let jinn_st = self
             .module
-            .get_struct_type(&jade_struct_name)
-            .ok_or_else(|| format!("no jade store struct '{jade_struct_name}'"))?;
-        let jade_ptr = self.entry_alloca(jade_st.into(), "jade.rec");
+            .get_struct_type(&jinn_struct_name)
+            .ok_or_else(|| format!("no jinn store struct '{jinn_struct_name}'"))?;
+        let jinn_ptr = self.entry_alloca(jinn_st.into(), "jinn.rec");
 
         for (i, field) in sd.fields.iter().enumerate() {
             let src_gep = b!(self.bld.build_struct_gep(
@@ -172,10 +172,10 @@ impl<'ctx> Compiler<'ctx> {
                 &format!("raw.{}", field.name)
             ));
             let dst_gep = b!(self.bld.build_struct_gep(
-                jade_st,
-                jade_ptr,
+                jinn_st,
+                jinn_ptr,
                 i as u32,
-                &format!("jade.{}", field.name)
+                &format!("jinn.{}", field.name)
             ));
             match &field.ty {
                 Type::String => {
@@ -190,7 +190,7 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        Ok(b!(self.bld.build_load(jade_st, jade_ptr, "jade.result")))
+        Ok(b!(self.bld.build_load(jinn_st, jinn_ptr, "jinn.result")))
     }
 
     pub(crate) fn precompile_filter_values(

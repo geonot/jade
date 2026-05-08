@@ -1,8 +1,8 @@
 # std.glob — Glob pattern matching
 #
 # Usage:
-#   if glob.matches("*.jade", "main.jade")   # true
-#   files is glob.find("src/**/*.jade")
+#   if glob.matches("*.jn", "main.jn")   # true
+#   files is glob.find("src/**/*.jn")
 
 extern *c_opendir(path as %i8) returns %i8
 extern *c_readdir_name(d as %i8) returns %i8
@@ -14,7 +14,7 @@ extern *strlen(s as %i8) returns i64
 extern *opendir(path as %i8) returns %i8
 extern *closedir(dir as %i8) returns i32
 extern *readdir(dir as %i8) returns %i8
-extern *jade_dirent_name(ent as %i8) returns %i8
+extern *jinn_dirent_name(ent as %i8) returns %i8
 
 # Match a glob pattern against a string.
 # Supports: * (any chars), ? (single char), ** (recursive), [abc] char classes.
@@ -123,7 +123,7 @@ extern *jade_dirent_name(ent as %i8) returns %i8
         ent is extern.readdir(d)
         if ent as i64 equals 0
             break
-        name_ptr is extern.jade_dirent_name(ent)
+        name_ptr is extern.jinn_dirent_name(ent)
         name is __string_from_ptr(name_ptr)
         if name neq "." and name neq ".."
             full is dir + "/" + name

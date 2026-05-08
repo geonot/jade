@@ -13,8 +13,8 @@ struct PerceusSummary {
     bindings: u32,
 }
 
-fn jadec() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_jadec"))
+fn jinnc() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
 fn leading_u32(part: &str) -> Option<u32> {
@@ -70,22 +70,22 @@ fn compile_and_collect_summaries(
     src: &str,
 ) -> (Option<PerceusSummary>, Option<PerceusSummary>, String) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let jade = dir.path().join("case.jade");
+    let jinn = dir.path().join("case.jn");
     let out = dir.path().join("case_bin");
-    std::fs::write(&jade, src).expect("write case source");
+    std::fs::write(&jinn, src).expect("write case source");
 
-    let output = Command::new(jadec())
-        .arg(&jade)
+    let output = Command::new(jinnc())
+        .arg(&jinn)
         .arg("-o")
         .arg(&out)
         .arg("--debug-perceus")
         .output()
-        .expect("jadec failed to start");
+        .expect("jinnc failed to start");
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     assert!(
         output.status.success(),
-        "jadec compilation failed:\n{}\nsource:\n{}",
+        "jinnc compilation failed:\n{}\nsource:\n{}",
         stderr,
         src
     );

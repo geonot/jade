@@ -74,94 +74,94 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         // WAL runtime functions
-        if self.module.get_function("jade_wal_open").is_none() {
+        if self.module.get_function("jinn_wal_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_wal_open", ft, Some(Linkage::External));
+                .add_function("jinn_wal_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_wal_write").is_none() {
+        if self.module.get_function("jinn_wal_write").is_none() {
             let void_ty = self.ctx.void_type();
             let u8t = self.ctx.i8_type();
             let ft = void_ty.fn_type(&[ptr.into(), u8t.into(), ptr.into(), i32t.into()], false);
             self.module
-                .add_function("jade_wal_write", ft, Some(Linkage::External));
+                .add_function("jinn_wal_write", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_wal_checkpoint").is_none() {
+        if self.module.get_function("jinn_wal_checkpoint").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_wal_checkpoint", ft, Some(Linkage::External));
+                .add_function("jinn_wal_checkpoint", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_wal_close").is_none() {
+        if self.module.get_function("jinn_wal_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_wal_close", ft, Some(Linkage::External));
+                .add_function("jinn_wal_close", ft, Some(Linkage::External));
         }
 
         // Index runtime functions
-        if self.module.get_function("jade_idx_open").is_none() {
+        if self.module.get_function("jinn_idx_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_idx_open", ft, Some(Linkage::External));
+                .add_function("jinn_idx_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_close").is_none() {
+        if self.module.get_function("jinn_idx_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_idx_close", ft, Some(Linkage::External));
+                .add_function("jinn_idx_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_insert").is_none() {
+        if self.module.get_function("jinn_idx_insert").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false);
             self.module
-                .add_function("jade_idx_insert", ft, Some(Linkage::External));
+                .add_function("jinn_idx_insert", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_lookup").is_none() {
+        if self.module.get_function("jinn_idx_lookup").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_idx_lookup", ft, Some(Linkage::External));
+                .add_function("jinn_idx_lookup", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_contains").is_none() {
+        if self.module.get_function("jinn_idx_contains").is_none() {
             let ft = i32t.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_idx_contains", ft, Some(Linkage::External));
+                .add_function("jinn_idx_contains", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_delete").is_none() {
+        if self.module.get_function("jinn_idx_delete").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_idx_delete", ft, Some(Linkage::External));
+                .add_function("jinn_idx_delete", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_hash_i64").is_none() {
+        if self.module.get_function("jinn_idx_hash_i64").is_none() {
             let ft = i64t.fn_type(&[i64t.into()], false);
             self.module
-                .add_function("jade_idx_hash_i64", ft, Some(Linkage::External));
+                .add_function("jinn_idx_hash_i64", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_hash_str").is_none() {
+        if self.module.get_function("jinn_idx_hash_str").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_idx_hash_str", ft, Some(Linkage::External));
+                .add_function("jinn_idx_hash_str", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_idx_hash_f64").is_none() {
+        if self.module.get_function("jinn_idx_hash_f64").is_none() {
             let ft = i64t.fn_type(&[self.ctx.f64_type().into()], false);
             self.module
-                .add_function("jade_idx_hash_f64", ft, Some(Linkage::External));
+                .add_function("jinn_idx_hash_f64", ft, Some(Linkage::External));
         }
 
         // Version runtime functions
-        if self.module.get_function("jade_ver_open").is_none() {
+        if self.module.get_function("jinn_ver_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_ver_open", ft, Some(Linkage::External));
+                .add_function("jinn_ver_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_ver_close").is_none() {
+        if self.module.get_function("jinn_ver_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_ver_close", ft, Some(Linkage::External));
+                .add_function("jinn_ver_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_ver_append").is_none() {
+        if self.module.get_function("jinn_ver_append").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(
                 &[
@@ -174,14 +174,14 @@ impl<'ctx> Compiler<'ctx> {
                 false,
             );
             self.module
-                .add_function("jade_ver_append", ft, Some(Linkage::External));
+                .add_function("jinn_ver_append", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_ver_count").is_none() {
+        if self.module.get_function("jinn_ver_count").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false);
             self.module
-                .add_function("jade_ver_count", ft, Some(Linkage::External));
+                .add_function("jinn_ver_count", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_ver_at").is_none() {
+        if self.module.get_function("jinn_ver_at").is_none() {
             let ft = i64t.fn_type(
                 &[
                     ptr.into(),
@@ -193,9 +193,9 @@ impl<'ctx> Compiler<'ctx> {
                 false,
             );
             self.module
-                .add_function("jade_ver_at", ft, Some(Linkage::External));
+                .add_function("jinn_ver_at", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_ver_history").is_none() {
+        if self.module.get_function("jinn_ver_history").is_none() {
             let ft = i64t.fn_type(
                 &[
                     ptr.into(),
@@ -207,218 +207,218 @@ impl<'ctx> Compiler<'ctx> {
                 false,
             );
             self.module
-                .add_function("jade_ver_history", ft, Some(Linkage::External));
+                .add_function("jinn_ver_history", ft, Some(Linkage::External));
         }
 
         // Migration runtime functions
-        if self.module.get_function("jade_mig_log_open").is_none() {
+        if self.module.get_function("jinn_mig_log_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_mig_log_open", ft, Some(Linkage::External));
+                .add_function("jinn_mig_log_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_mig_log_close").is_none() {
+        if self.module.get_function("jinn_mig_log_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_mig_log_close", ft, Some(Linkage::External));
+                .add_function("jinn_mig_log_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_mig_log_applied").is_none() {
+        if self.module.get_function("jinn_mig_log_applied").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_mig_log_applied", ft, Some(Linkage::External));
+                .add_function("jinn_mig_log_applied", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_mig_log_record").is_none() {
+        if self.module.get_function("jinn_mig_log_record").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false);
             self.module
-                .add_function("jade_mig_log_record", ft, Some(Linkage::External));
+                .add_function("jinn_mig_log_record", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_mig_add_field").is_none() {
+        if self.module.get_function("jinn_mig_add_field").is_none() {
             let ft = i64t.fn_type(
                 &[ptr.into(), ptr.into(), i64t.into(), i64t.into(), ptr.into()],
                 false,
             );
             self.module
-                .add_function("jade_mig_add_field", ft, Some(Linkage::External));
+                .add_function("jinn_mig_add_field", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_mig_drop_field").is_none() {
+        if self.module.get_function("jinn_mig_drop_field").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into(), i64t.into()], false);
             self.module
-                .add_function("jade_mig_drop_field", ft, Some(Linkage::External));
+                .add_function("jinn_mig_drop_field", ft, Some(Linkage::External));
         }
 
         // KV store runtime functions
-        if self.module.get_function("jade_kv_open").is_none() {
+        if self.module.get_function("jinn_kv_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_kv_open", ft, Some(Linkage::External));
+                .add_function("jinn_kv_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_close").is_none() {
+        if self.module.get_function("jinn_kv_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_kv_close", ft, Some(Linkage::External));
+                .add_function("jinn_kv_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_set").is_none() {
+        if self.module.get_function("jinn_kv_set").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), ptr.into(), i64t.into(), i64t.into()], false);
             self.module
-                .add_function("jade_kv_set", ft, Some(Linkage::External));
+                .add_function("jinn_kv_set", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_get").is_none() {
+        if self.module.get_function("jinn_kv_get").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_kv_get", ft, Some(Linkage::External));
+                .add_function("jinn_kv_get", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_has").is_none() {
+        if self.module.get_function("jinn_kv_has").is_none() {
             let ft = i32t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_kv_has", ft, Some(Linkage::External));
+                .add_function("jinn_kv_has", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_del").is_none() {
+        if self.module.get_function("jinn_kv_del").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_kv_del", ft, Some(Linkage::External));
+                .add_function("jinn_kv_del", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_incr").is_none() {
+        if self.module.get_function("jinn_kv_incr").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), ptr.into(), i64t.into(), i64t.into()], false);
             self.module
-                .add_function("jade_kv_incr", ft, Some(Linkage::External));
+                .add_function("jinn_kv_incr", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_count").is_none() {
+        if self.module.get_function("jinn_kv_count").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_kv_count", ft, Some(Linkage::External));
+                .add_function("jinn_kv_count", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_kv_persist").is_none() {
+        if self.module.get_function("jinn_kv_persist").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_kv_persist", ft, Some(Linkage::External));
+                .add_function("jinn_kv_persist", ft, Some(Linkage::External));
         }
 
         // Vector store runtime functions
-        if self.module.get_function("jade_vec_open").is_none() {
+        if self.module.get_function("jinn_vec_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_vec_open", ft, Some(Linkage::External));
+                .add_function("jinn_vec_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_vec_close").is_none() {
+        if self.module.get_function("jinn_vec_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_vec_close", ft, Some(Linkage::External));
+                .add_function("jinn_vec_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_vec_insert").is_none() {
+        if self.module.get_function("jinn_vec_insert").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), ptr.into()], false);
             self.module
-                .add_function("jade_vec_insert", ft, Some(Linkage::External));
+                .add_function("jinn_vec_insert", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_vec_count").is_none() {
+        if self.module.get_function("jinn_vec_count").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_vec_count", ft, Some(Linkage::External));
+                .add_function("jinn_vec_count", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_vec_nearest").is_none() {
-            // (JadeVec*, query_ptr, k, out_indices) -> count
+        if self.module.get_function("jinn_vec_nearest").is_none() {
+            // (JinnVec*, query_ptr, k, out_indices) -> count
             let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into(), ptr.into()], false);
             self.module
-                .add_function("jade_vec_nearest", ft, Some(Linkage::External));
+                .add_function("jinn_vec_nearest", ft, Some(Linkage::External));
         }
 
         // Column store runtime functions
-        if self.module.get_function("jade_col_open").is_none() {
+        if self.module.get_function("jinn_col_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_col_open", ft, Some(Linkage::External));
+                .add_function("jinn_col_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_col_close").is_none() {
+        if self.module.get_function("jinn_col_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_col_close", ft, Some(Linkage::External));
+                .add_function("jinn_col_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_col_append").is_none() {
+        if self.module.get_function("jinn_col_append").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), ptr.into()], false);
             self.module
-                .add_function("jade_col_append", ft, Some(Linkage::External));
+                .add_function("jinn_col_append", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_col_count").is_none() {
+        if self.module.get_function("jinn_col_count").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_col_count", ft, Some(Linkage::External));
+                .add_function("jinn_col_count", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_col_sum_i64").is_none() {
+        if self.module.get_function("jinn_col_sum_i64").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_col_sum_i64", ft, Some(Linkage::External));
+                .add_function("jinn_col_sum_i64", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_col_min_i64").is_none() {
+        if self.module.get_function("jinn_col_min_i64").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_col_min_i64", ft, Some(Linkage::External));
+                .add_function("jinn_col_min_i64", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_col_max_i64").is_none() {
+        if self.module.get_function("jinn_col_max_i64").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_col_max_i64", ft, Some(Linkage::External));
+                .add_function("jinn_col_max_i64", ft, Some(Linkage::External));
         }
 
         // Bloom filter runtime functions
-        if self.module.get_function("jade_bloom_open").is_none() {
+        if self.module.get_function("jinn_bloom_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_bloom_open", ft, Some(Linkage::External));
+                .add_function("jinn_bloom_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_bloom_close").is_none() {
+        if self.module.get_function("jinn_bloom_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_bloom_close", ft, Some(Linkage::External));
+                .add_function("jinn_bloom_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_bloom_add_i64").is_none() {
+        if self.module.get_function("jinn_bloom_add_i64").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_bloom_add_i64", ft, Some(Linkage::External));
+                .add_function("jinn_bloom_add_i64", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_bloom_test_i64").is_none() {
+        if self.module.get_function("jinn_bloom_test_i64").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_bloom_test_i64", ft, Some(Linkage::External));
+                .add_function("jinn_bloom_test_i64", ft, Some(Linkage::External));
         }
 
         // Full-text search runtime functions
-        if self.module.get_function("jade_fts_open").is_none() {
+        if self.module.get_function("jinn_fts_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_fts_open", ft, Some(Linkage::External));
+                .add_function("jinn_fts_open", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_fts_close").is_none() {
+        if self.module.get_function("jinn_fts_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_fts_close", ft, Some(Linkage::External));
+                .add_function("jinn_fts_close", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_fts_add").is_none() {
+        if self.module.get_function("jinn_fts_add").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), i64t.into(), ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_fts_add", ft, Some(Linkage::External));
+                .add_function("jinn_fts_add", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_fts_search_n").is_none() {
+        if self.module.get_function("jinn_fts_search_n").is_none() {
             let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false);
             self.module
-                .add_function("jade_fts_search_n", ft, Some(Linkage::External));
+                .add_function("jinn_fts_search_n", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jade_fts_posting_count").is_none() {
+        if self.module.get_function("jinn_fts_posting_count").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jade_fts_posting_count", ft, Some(Linkage::External));
+                .add_function("jinn_fts_posting_count", ft, Some(Linkage::External));
         }
     }
 
@@ -434,10 +434,10 @@ impl<'ctx> Compiler<'ctx> {
         let rec_st = self.ctx.opaque_struct_type(&rec_name);
         rec_st.set_body(&rec_field_tys, false);
 
-        let jade_field_tys: Vec<BasicTypeEnum<'ctx>> =
+        let jinn_field_tys: Vec<BasicTypeEnum<'ctx>> =
             sd.fields.iter().map(|f| self.llvm_ty(&f.ty)).collect();
-        let jade_st = self.ctx.opaque_struct_type(&struct_name);
-        jade_st.set_body(&jade_field_tys, false);
+        let jinn_st = self.ctx.opaque_struct_type(&struct_name);
+        jinn_st.set_body(&jinn_field_tys, false);
 
         let fields: Vec<(String, Type)> = sd
             .fields
@@ -521,7 +521,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Lazily open a @kv store handle, returning the JadeKV pointer.
+    /// Lazily open a @kv store handle, returning the JinnKV pointer.
     pub(crate) fn load_kv_handle(
         &mut self,
         store_name: &str,
@@ -546,7 +546,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let kv_path = format!("{store_name}.kv\0");
         let kv_str = b!(self.bld.build_global_string_ptr(&kv_path, "kv.path"));
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_kv_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -565,7 +565,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Lazily open a @vector store handle, returning the JadeVec pointer.
+    /// Lazily open a @vector store handle, returning the JinnVec pointer.
     pub(crate) fn load_vec_handle(
         &mut self,
         store_name: &str,
@@ -593,7 +593,7 @@ impl<'ctx> Compiler<'ctx> {
         let vec_path = format!("{store_name}.vec\0");
         let vec_str = b!(self.bld.build_global_string_ptr(&vec_path, "vec.path"));
         let dims_val = i64t.const_int(dims, false);
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_vec_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,

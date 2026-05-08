@@ -58,7 +58,7 @@ impl ProjectConfig {
                                 (&args[0], &args[1], &args[2])
                             {
                                 let version = SemVer::parse(ver)
-                                    .map_err(|e| format!("project.jade require: {e}"))?;
+                                    .map_err(|e| format!("project.jn require: {e}"))?;
                                 cfg.requires.push(Dependency {
                                     name: name.clone(),
                                     url: url.clone(),

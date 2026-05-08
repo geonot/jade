@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Jade — Systems language. Scripting readability. C performance. A compiled language that reads like poetry and runs like lightning.">
+    <meta name="description" content="Jinn — Systems language. Scripting readability. C performance. A compiled language that reads like poetry and runs like lightning.">
     <meta name="theme-color" content="#0B3D2E">
-    <title>Jade — Systems Language</title>
+    <title>Jinn — Systems Language</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -18,12 +18,12 @@
     <!-- ═══════════════════════════════════════════ -->
     <nav class="nav" role="navigation" aria-label="Main navigation">
         <div class="nav__inner">
-            <a href="#" class="nav__logo" aria-label="Jade home">
+            <a href="#" class="nav__logo" aria-label="Jinn home">
                 <svg class="nav__logo-icon" viewBox="0 0 40 40" aria-hidden="true">
                     <path d="M20 2 L36 14 L30 38 L10 38 L4 14 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
                     <path d="M20 8 L30 16 L26 32 L14 32 L10 16 Z" fill="currentColor" opacity="0.15"/>
                 </svg>
-                <span class="nav__logo-text">Jade</span>
+                <span class="nav__logo-text">Jinn</span>
             </a>
             <button class="nav__toggle" aria-label="Toggle menu" aria-expanded="false">
                 <span></span><span></span><span></span>
@@ -34,7 +34,7 @@
                 <li><a href="#features">Features</a></li>
                 <li><a href="#start">Get Started</a></li>
                 <li><a href="guide.html">Guide</a></li>
-                <li><a href="https://github.com/example/jade" class="nav__cta" aria-label="View Jade on GitHub">GitHub</a></li>
+                <li><a href="https://github.com/example/jinn" class="nav__cta" aria-label="View Jinn on GitHub">GitHub</a></li>
             </ul>
         </div>
     </nav>
@@ -86,7 +86,7 @@
                 <article class="principle" data-reveal>
                     <div class="principle__number" aria-hidden="true">三</div>
                     <h3 class="principle__title">Readable Syntax</h3>
-                    <p class="principle__text">No arcane syntactical invocations or symbolic litter. Jade reads like pseudocode.</p>
+                    <p class="principle__text">No arcane syntactical invocations or symbolic litter. Jinn reads like pseudocode.</p>
                 </article>
                 <article class="principle" data-reveal>
                     <div class="principle__number" aria-hidden="true">四</div>
@@ -127,7 +127,7 @@
                         <span class="scroll-block__title">Patterns &amp; Pipelines</span>
                     </div>
                     <div class="scroll-block__body">
-                        <pre class="code-block"><code class="jade"><span class="c-comment"># Pattern-directed functions</span>
+                        <pre class="code-block"><code class="jinn"><span class="c-comment"># Pattern-directed functions</span>
 <span class="c-keyword">*</span><span class="c-fn">fib</span>(<span class="c-number">0</span>) <span class="c-keyword">is</span> <span class="c-number">0</span>
 <span class="c-keyword">*</span><span class="c-fn">fib</span>(<span class="c-number">1</span>) <span class="c-keyword">is</span> <span class="c-number">1</span>
 <span class="c-keyword">*</span><span class="c-fn">fib</span>(n) <span class="c-keyword">is</span> <span class="c-fn">fib</span>(n - <span class="c-number">1</span>) + <span class="c-fn">fib</span>(n - <span class="c-number">2</span>)
@@ -152,7 +152,7 @@ result <span class="c-keyword">is</span> <span class="c-number">5</span> <span c
                         <span class="scroll-block__title">Structs &amp; Enums</span>
                     </div>
                     <div class="scroll-block__body">
-                        <pre class="code-block"><code class="jade"><span class="c-keyword">type</span> <span class="c-type">Vec3</span>
+                        <pre class="code-block"><code class="jinn"><span class="c-keyword">type</span> <span class="c-type">Vec3</span>
     x <span class="c-keyword">as</span> <span class="c-type">f64</span>
     y <span class="c-keyword">as</span> <span class="c-type">f64</span>
     z <span class="c-keyword">as</span> <span class="c-type">f64</span>
@@ -182,7 +182,7 @@ result <span class="c-keyword">is</span> <span class="c-number">5</span> <span c
                         <span class="scroll-block__title">Actors &amp; Channels</span>
                     </div>
                     <div class="scroll-block__body">
-                        <pre class="code-block"><code class="jade"><span class="c-keyword">actor</span> <span class="c-type">Counter</span>
+                        <pre class="code-block"><code class="jinn"><span class="c-keyword">actor</span> <span class="c-type">Counter</span>
     count <span class="c-keyword">is</span> <span class="c-number">0</span>
 
     <span class="c-decorator">@ping</span> n
@@ -210,7 +210,7 @@ result <span class="c-keyword">is</span> <span class="c-number">5</span> <span c
                         <span class="scroll-block__title">Built-in Stores</span>
                     </div>
                     <div class="scroll-block__body">
-                        <pre class="code-block"><code class="jade"><span class="c-keyword">store</span> <span class="c-type">records</span>
+                        <pre class="code-block"><code class="jinn"><span class="c-keyword">store</span> <span class="c-type">records</span>
     key
     value
 
@@ -280,7 +280,7 @@ result <span class="c-keyword">is</span> <span class="c-number">5</span> <span c
                         <svg viewBox="0 0 48 48"><path d="M8 38V10l16 14L8 38z" fill="currentColor" opacity="0.2"/><path d="M24 38V10l16 14L24 38z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
                     </div>
                     <h3 class="feature-card__title">C FFI</h3>
-                    <p class="feature-card__text">Direct <code>extern</code> declarations. Automatic header binding with <code>jade bind</code>.</p>
+                    <p class="feature-card__text">Direct <code>extern</code> declarations. Automatic header binding with <code>jinn bind</code>.</p>
                 </article>
 
                 <article class="feature-card" data-reveal>
@@ -331,7 +331,7 @@ result <span class="c-keyword">is</span> <span class="c-number">5</span> <span c
                 <div class="glance-item" data-reveal>
                     <div class="glance-item__label">Bindings &amp; Control Flow</div>
                     <pre class="glance-item__code"><code>x <span class="c-keyword">is</span> <span class="c-number">42</span>
-name <span class="c-keyword">is</span> <span class="c-string">'jade'</span>
+name <span class="c-keyword">is</span> <span class="c-string">'jinn'</span>
 result <span class="c-keyword">is</span> x &gt; <span class="c-number">0</span> <span class="c-operator">?</span> <span class="c-string">'yes'</span> <span class="c-operator">!</span> <span class="c-string">'no'</span>
 
 <span class="c-keyword">if</span> x &gt; <span class="c-number">10</span>
@@ -416,8 +416,8 @@ r <span class="c-keyword">is</span> users <span class="c-keyword">where</span> n
                     <h3 class="start-step__title">Build the Compiler</h3>
                     <div class="start-step__code">
                         <pre class="code-block code-block--terminal"><code><span class="c-comment"># Requires Rust and LLVM 21</span>
-<span class="c-prompt">$</span> git clone https://github.com/example/jade
-<span class="c-prompt">$</span> cd jade
+<span class="c-prompt">$</span> git clone https://github.com/example/jinn
+<span class="c-prompt">$</span> cd jinn
 <span class="c-prompt">$</span> cargo build --release</code></pre>
                     </div>
                 </div>
@@ -428,7 +428,7 @@ r <span class="c-keyword">is</span> users <span class="c-keyword">where</span> n
                     </div>
                     <h3 class="start-step__title">Write Your First Program</h3>
                     <div class="start-step__code">
-                        <pre class="code-block code-block--terminal"><code class="jade"><span class="c-comment"># hello.jade</span>
+                        <pre class="code-block code-block--terminal"><code class="jinn"><span class="c-comment"># hello.jn</span>
 <span class="c-keyword">*</span><span class="c-fn">greet</span>(name)
     <span class="c-string">'hello, {name}'</span>
 
@@ -443,7 +443,7 @@ r <span class="c-keyword">is</span> users <span class="c-keyword">where</span> n
                     </div>
                     <h3 class="start-step__title">Compile &amp; Run</h3>
                     <div class="start-step__code">
-                        <pre class="code-block code-block--terminal"><code><span class="c-prompt">$</span> jadec hello.jade -o hello
+                        <pre class="code-block code-block--terminal"><code><span class="c-prompt">$</span> jinnc hello.jn -o hello
 <span class="c-prompt">$</span> ./hello
 <span class="c-output">hello, world</span></code></pre>
                     </div>
@@ -463,7 +463,7 @@ r <span class="c-keyword">is</span> users <span class="c-keyword">where</span> n
                     <path d="M20 8 L30 16 L26 32 L14 32 L10 16 Z" fill="currentColor" opacity="0.15"/>
                 </svg>
                 <div>
-                    <p class="footer__name">Jade</p>
+                    <p class="footer__name">Jinn</p>
                     <p class="footer__tagline">Systems language. Scripting readability. C performance.</p>
                 </div>
             </div>
@@ -496,8 +496,8 @@ r <span class="c-keyword">is</span> users <span class="c-keyword">where</span> n
                 </div>
             </div>
             <div class="footer__bottom">
-                <p class="footer__copy">Jade Programming Language</p>
-                <p class="footer__verse" aria-hidden="true">玉不琢，不成器 — Uncut jade is not a vessel</p>
+                <p class="footer__copy">Jinn Programming Language</p>
+                <p class="footer__verse" aria-hidden="true">玉不琢，不成器 — Uncut jinn is not a vessel</p>
             </div>
         </div>
     </footer>

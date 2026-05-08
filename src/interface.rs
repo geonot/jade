@@ -1,8 +1,8 @@
-//! `.jadei` — Jade Interface File Format
+//! `.jni` — Jinn Interface File Format
 //!
 //! After type inference resolves all types, function signatures, type/enum/trait
-//! definitions can be serialized to `.jadei` files. When a module is imported
-//! via `use`, the compiler can load the `.jadei` file instead of re-parsing and
+//! definitions can be serialized to `.jni` files. When a module is imported
+//! via `use`, the compiler can load the `.jni` file instead of re-parsing and
 //! re-typing the source, enabling separate compilation.
 
 use crate::intern::Symbol;
@@ -330,7 +330,7 @@ impl InterfaceFile {
             .map_err(|e| format!("failed to serialize interface: {e}"))?;
 
         let mut tmp = path.to_path_buf();
-        tmp.set_extension("jadei.tmp");
+        tmp.set_extension("jni.tmp");
 
         let mut file = File::create(&tmp)
             .map_err(|e| format!("failed to create temp file {}: {e}", tmp.display()))?;
@@ -584,7 +584,7 @@ mod tests {
         });
 
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.jadei");
+        let path = dir.path().join("test.jni");
         iface.write_to(&path).unwrap();
         let loaded = InterfaceFile::read_from(&path).unwrap();
         assert_eq!(loaded.module, "test");

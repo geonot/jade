@@ -164,7 +164,7 @@ impl<'ctx> Compiler<'ctx> {
         let fn_val = self.bld.get_insert_block().unwrap().get_parent().unwrap();
         let insert_done_bb = self.ctx.append_basic_block(fn_val, "insert.done");
         {
-            let contains_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_contains");
+            let contains_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_contains");
             let mut user_idx = 0usize;
             for field_def in &sd.fields {
                 let is_unique = Compiler::field_is_unique(field_def);
@@ -214,13 +214,13 @@ impl<'ctx> Compiler<'ctx> {
         let header_size = crate::codegen::stores::HEADER_SIZE;
         let reserve_fn = self
             .module
-            .get_function("jade_store_reserve")
+            .get_function("jinn_store_reserve")
             .unwrap_or_else(|| {
                 let void_ty = self.ctx.void_type();
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
                 self.module.add_function(
-                    "jade_store_reserve",
+                    "jinn_store_reserve",
                     ft,
                     Some(inkwell::module::Linkage::External),
                 )
@@ -330,7 +330,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Index insertion: update all @index/@unique indexes with (hash, offset)
         {
-            let insert_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_insert");
+            let insert_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_insert");
             let mut user_idx = 0usize;
             for field_def in &sd.fields {
                 let has_idx = Compiler::field_has_index(field_def);
@@ -361,7 +361,7 @@ impl<'ctx> Compiler<'ctx> {
             .any(|d| *d == crate::ast::StoreDecorator::Column);
         if is_column {
             let i64t = self.ctx.i64_type();
-            let col_append_fn = crate::codegen::fn_or_die(&self.module, "jade_col_append");
+            let col_append_fn = crate::codegen::fn_or_die(&self.module, "jinn_col_append");
             let mut col_user_idx = 0usize;
             for field_def in &sd.fields {
                 if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
@@ -401,7 +401,7 @@ impl<'ctx> Compiler<'ctx> {
                         self.load_bloom_handle(store_name, &field_def.name.as_str(), 10000)?;
                     if field_def.ty == Type::I64 {
                         let val = self.val(args[bloom_user_idx]);
-                        let add_fn = crate::codegen::fn_or_die(&self.module, "jade_bloom_add_i64");
+                        let add_fn = crate::codegen::fn_or_die(&self.module, "jinn_bloom_add_i64");
                         b!(self.bld.build_call(add_fn, &[bloom.into(), val.into()], ""));
                     }
                 }
@@ -425,7 +425,7 @@ impl<'ctx> Compiler<'ctx> {
                     let val = self.val(args[fts_user_idx]);
                     let data = self.string_data(val)?;
                     let len = self.string_len(val)?;
-                    let add_fn = crate::codegen::fn_or_die(&self.module, "jade_fts_add");
+                    let add_fn = crate::codegen::fn_or_die(&self.module, "jinn_fts_add");
                     let doc_id = new_sid; // use the record's sid as document id
                     b!(self.bld.build_call(
                         add_fn,

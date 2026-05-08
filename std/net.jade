@@ -9,14 +9,14 @@
 
 # ── POSIX socket externs (via runtime/net.c wrappers) ────────
 
-extern *jade_socket(domain as i32, kind as i32, protocol as i32) returns i32
+extern *jinn_socket(domain as i32, kind as i32, protocol as i32) returns i32
 extern *bind(fd as i32, addr as %i8, addrlen as i32) returns i32
 extern *listen_sock(fd as i32, backlog as i32) returns i32
 extern *accept(fd as i32, addr as %i8, addrlen as %i32) returns i32
 extern *connect(fd as i32, addr as %i8, addrlen as i32) returns i32
-extern *jade_send(fd as i32, buf as %i8, len as i64, flags as i32) returns i64
-extern *jade_recv(fd as i32, buf as %i8, len as i64, flags as i32) returns i64
-extern *jade_close(fd as i32) returns i32
+extern *jinn_send(fd as i32, buf as %i8, len as i64, flags as i32) returns i64
+extern *jinn_recv(fd as i32, buf as %i8, len as i64, flags as i32) returns i64
+extern *jinn_close(fd as i32) returns i32
 extern *setsockopt(fd as i32, level as i32, optname as i32, optval as %i8, optlen as i32) returns i32
 extern *htons(port as i16) returns i16
 extern *inet_pton(af as i32, src as %i8, dst as %i8) returns i32
@@ -24,8 +24,8 @@ extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 extern *memset(s as %i8, c as i32, n as i64) returns %i8
 extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
-extern *jade_sendto(fd as i32, buf as %i8, len as i64, flags as i32, addr as %i8, addrlen as i32) returns i64
-extern *jade_recvfrom(fd as i32, buf as %i8, len as i64, flags as i32, addr as %i8, addrlen as %i32) returns i64
+extern *jinn_sendto(fd as i32, buf as %i8, len as i64, flags as i32, addr as %i8, addrlen as i32) returns i64
+extern *jinn_recvfrom(fd as i32, buf as %i8, len as i64, flags as i32, addr as %i8, addrlen as %i32) returns i64
 extern *strlen(s as %i8) returns i64
 extern *shutdown(fd as i32, how as i32) returns i32
 
@@ -51,27 +51,27 @@ type TcpListener
         TcpStream(fd is client_fd)
 
     *shut
-        extern.jade_close(self.fd)
+        extern.jinn_close(self.fd)
 
 type TcpStream
     fd as i32
 
     *read(max_bytes)
         buf is extern.malloc(max_bytes + 1)
-        n is extern.jade_recv(self.fd, buf, max_bytes, 0)
+        n is extern.jinn_recv(self.fd, buf, max_bytes, 0)
         if n <= 0
             extern.free(buf)
             return ""
         __string_from_raw(buf, n, max_bytes + 1)
 
     *write(data as String)
-        extern.jade_send(self.fd, %data, data.length, 0)
+        extern.jinn_send(self.fd, %data, data.length, 0)
 
     *write_all(data as String)
         sent is 0
         while sent < data.length
             remaining is data.slice(sent, data.length)
-            n is extern.jade_send(self.fd, %remaining, remaining.length, 0)
+            n is extern.jinn_send(self.fd, %remaining, remaining.length, 0)
             if n <= 0
                 return false
             sent is sent + n
@@ -79,7 +79,7 @@ type TcpStream
 
     *shut
         extern.shutdown(self.fd, SHUT_RDWR)
-        extern.jade_close(self.fd)
+        extern.jinn_close(self.fd)
 
 # ── UDP type ─────────────────────────────────────────────────
 
@@ -88,19 +88,19 @@ type UdpSocket
 
     *send_to(data as String, host as String, port as i64)
         addr is __make_sockaddr(host, port)
-        extern.jade_sendto(self.fd, %data, data.length, 0, addr, SOCKADDR_IN_SIZE)
+        extern.jinn_sendto(self.fd, %data, data.length, 0, addr, SOCKADDR_IN_SIZE)
         extern.free(addr)
 
     *recv_from(max_bytes)
         buf is extern.malloc(max_bytes + 1)
-        n is extern.jade_recvfrom(self.fd, buf, max_bytes, 0, 0 as %i8, 0 as %i32)
+        n is extern.jinn_recvfrom(self.fd, buf, max_bytes, 0, 0 as %i8, 0 as %i32)
         if n <= 0
             extern.free(buf)
             return ""
         __string_from_raw(buf, n, max_bytes + 1)
 
     *shut
-        extern.jade_close(self.fd)
+        extern.jinn_close(self.fd)
 
 # ── Helpers ──────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ type UdpSocket
 *tcp_listen(host as String, port as i64)
     if port < 0 or port > 65535
         return false
-    fd is extern.jade_socket(AF_INET, SOCK_STREAM, 0)
+    fd is extern.jinn_socket(AF_INET, SOCK_STREAM, 0)
     if fd < 0
         return false
     one is 1
@@ -127,38 +127,38 @@ type UdpSocket
     addr is __make_sockaddr(host, port)
     if extern.bind(fd, addr, SOCKADDR_IN_SIZE) < 0
         extern.free(addr)
-        extern.jade_close(fd)
+        extern.jinn_close(fd)
         return false
     extern.free(addr)
     if extern.listen_sock(fd, 128) < 0
-        extern.jade_close(fd)
+        extern.jinn_close(fd)
         return false
     TcpListener(fd is fd, port is port)
 
 *tcp_connect(host as String, port as i64)
     if port < 0 or port > 65535
         return false
-    fd is extern.jade_socket(AF_INET, SOCK_STREAM, 0)
+    fd is extern.jinn_socket(AF_INET, SOCK_STREAM, 0)
     if fd < 0
         return false
     addr is __make_sockaddr(host, port)
     if extern.connect(fd, addr, SOCKADDR_IN_SIZE) < 0
         extern.free(addr)
-        extern.jade_close(fd)
+        extern.jinn_close(fd)
         return false
     extern.free(addr)
     TcpStream(fd is fd)
 
 # ── DNS resolution ───────────────────────────────────────────
 
-extern *jade_dns_resolve(host as %i8, buf as %i8, buf_len as i32) returns i32
-extern *jade_dns_resolve_all(host as %i8, buf as %i8, buf_len as i32) returns i32
+extern *jinn_dns_resolve(host as %i8, buf as %i8, buf_len as i32) returns i32
+extern *jinn_dns_resolve_all(host as %i8, buf as %i8, buf_len as i32) returns i32
 
 # Resolve a hostname to its first IP address.
 *resolve(host as String) returns String
     buf is extern.malloc(256)
     extern.memset(buf, 0, 256)
-    result is extern.jade_dns_resolve(%host, buf, 255)
+    result is extern.jinn_dns_resolve(%host, buf, 255)
     if result < 0
         extern.free(buf)
         return ""
@@ -170,7 +170,7 @@ extern *jade_dns_resolve_all(host as %i8, buf as %i8, buf_len as i32) returns i3
 *resolve_all(host as String) returns Vec of String
     buf is extern.malloc(4096)
     extern.memset(buf, 0, 4096)
-    count is extern.jade_dns_resolve_all(%host, buf, 4095)
+    count is extern.jinn_dns_resolve_all(%host, buf, 4095)
     if count equals 0
         extern.free(buf)
         return vec()
@@ -204,13 +204,13 @@ SOCKADDR_IN6_SIZE is 28
     if resolved.length equals 0
         resolved is host
     if __is_ipv6(resolved)
-        fd is extern.jade_socket(AF_INET6, SOCK_STREAM, 0)
+        fd is extern.jinn_socket(AF_INET6, SOCK_STREAM, 0)
         if fd < 0
             return false
         addr is __make_sockaddr6(resolved, port)
         if extern.connect(fd, addr, SOCKADDR_IN6_SIZE) < 0
             extern.free(addr)
-            extern.jade_close(fd)
+            extern.jinn_close(fd)
             return false
         extern.free(addr)
         return TcpStream(fd is fd)
@@ -219,19 +219,19 @@ SOCKADDR_IN6_SIZE is 28
 # ── UDP factory functions ────────────────────────────────────
 
 *udp_bind(host as String, port as i64)
-    fd is extern.jade_socket(AF_INET, SOCK_DGRAM, 0)
+    fd is extern.jinn_socket(AF_INET, SOCK_DGRAM, 0)
     if fd < 0
         return false
     addr is __make_sockaddr(host, port)
     if extern.bind(fd, addr, SOCKADDR_IN_SIZE) < 0
         extern.free(addr)
-        extern.jade_close(fd)
+        extern.jinn_close(fd)
         return false
     extern.free(addr)
     UdpSocket(fd is fd)
 
 *udp_open
-    fd is extern.jade_socket(AF_INET, SOCK_DGRAM, 0)
+    fd is extern.jinn_socket(AF_INET, SOCK_DGRAM, 0)
     if fd < 0
         return false
     UdpSocket(fd is fd)

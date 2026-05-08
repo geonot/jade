@@ -12,11 +12,11 @@ use super::Compiler;
 use super::b;
 
 /// Generator control block layout (shared between producer coroutine and consumer):
-///   offset 0:  coro_ptr        (*jade_coro_t)    — 8 bytes
+///   offset 0:  coro_ptr        (*jinn_coro_t)    — 8 bytes
 ///   offset 8:  value           (i64)             — 8 bytes
 ///   offset 16: has_value       (u8)              — 1 byte
 ///   offset 17: done            (u8)              — 1 byte
-///   offset 24: caller_ctx_ptr  (*jade_context_t) — 8 bytes
+///   offset 24: caller_ctx_ptr  (*jinn_context_t) — 8 bytes
 /// Total: 32 bytes
 impl<'ctx> Compiler<'ctx> {
     pub(crate) const GEN_CORO_PTR_OFF: u64 = 0;
@@ -44,13 +44,13 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Declare jade_gen_resume, jade_gen_suspend, jade_gen_destroy if not already declared.
+    /// Declare jinn_gen_resume, jinn_gen_suspend, jinn_gen_destroy if not already declared.
     pub(crate) fn declare_gen_runtime(&mut self) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let void = self.ctx.void_type();
         let ft = void.fn_type(&[ptr.into()], false);
 
-        for name in &["jade_gen_resume", "jade_gen_suspend", "jade_gen_destroy"] {
+        for name in &["jinn_gen_resume", "jinn_gen_suspend", "jinn_gen_destroy"] {
             if self.module.get_function(name).is_none() {
                 self.module.add_function(name, ft, Some(Linkage::External));
             }
@@ -107,7 +107,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_load(ptr, gen_ptr_alloca, "gen.ptr")).into_pointer_value();
             let done_ptr = self.gen_field_ptr(gen_ptr_val, Self::GEN_DONE_OFF, "gen.done")?;
             b!(self.bld.build_store(done_ptr, i8t.const_int(1, false)));
-            let gen_suspend = crate::codegen::fn_or_die(&self.module, "jade_gen_suspend");
+            let gen_suspend = crate::codegen::fn_or_die(&self.module, "jinn_gen_suspend");
             b!(self.bld.build_call(gen_suspend, &[gen_ptr_val.into()], ""));
             b!(self.bld.build_unreachable());
         }
@@ -150,8 +150,8 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Create coroutine via jade_coro_create and store ptr in gen block
-        let coro_create = crate::codegen::fn_or_die(&self.module, "jade_coro_create");
+        // Create coroutine via jinn_coro_create and store ptr in gen block
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
         let coro = b!(self.bld.build_call(
             coro_create,
             &[
@@ -167,7 +167,7 @@ impl<'ctx> Compiler<'ctx> {
         let coro_ptr_field = self.gen_field_ptr(gen_mem, Self::GEN_CORO_PTR_OFF, "gen.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
 
-        // Generator is NOT scheduled — it runs via direct context swap (jade_gen_resume/suspend)
+        // Generator is NOT scheduled — it runs via direct context swap (jinn_gen_resume/suspend)
 
         if name != "__anon" {
             let name_alloca = self.entry_alloca(ptr.into(), name);
@@ -268,7 +268,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(has_val_ptr, i8t.const_int(1, false)));
 
         // Suspend back to caller via direct context swap
-        let gen_suspend = crate::codegen::fn_or_die(&self.module, "jade_gen_suspend");
+        let gen_suspend = crate::codegen::fn_or_die(&self.module, "jinn_gen_suspend");
         b!(self.bld.build_call(gen_suspend, &[gen_ptr.into()], ""));
 
         Ok(())
@@ -310,7 +310,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
 
         // Resume the producer coroutine (direct context swap)
-        let gen_resume = crate::codegen::fn_or_die(&self.module, "jade_gen_resume");
+        let gen_resume = crate::codegen::fn_or_die(&self.module, "jinn_gen_resume");
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // After resume returns, the producer has either yielded a value or finished.

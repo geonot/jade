@@ -1,4 +1,4 @@
-/* runtime/index.c – Hash-index and B-tree-stub helpers for Jade stores.
+/* runtime/index.c – Hash-index and B-tree-stub helpers for Jinn stores.
  *
  * Hash index file layout:
  *   [8B  magic   "JADEIDX\0"]
@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 #define IDX_MAGIC     "JADEIDX\0"
 #define IDX_MAGIC_LEN 8
@@ -28,28 +28,28 @@
 #define STATUS_TOMBSTONE 2
 
 /* ── Hash a store field value (i64 or fixed string) ─────────────── */
-uint64_t jade_idx_hash_i64(int64_t val) {
-    return jade_fnv1a(&val, sizeof(val));
+uint64_t jinn_idx_hash_i64(int64_t val) {
+    return jinn_fnv1a(&val, sizeof(val));
 }
 
-uint64_t jade_idx_hash_str(const char *buf, int64_t len) {
-    return jade_fnv1a(buf, len);
+uint64_t jinn_idx_hash_str(const char *buf, int64_t len) {
+    return jinn_fnv1a(buf, len);
 }
 
-uint64_t jade_idx_hash_f64(double val) {
-    return jade_fnv1a(&val, sizeof(val));
+uint64_t jinn_idx_hash_f64(double val) {
+    return jinn_fnv1a(&val, sizeof(val));
 }
 
 /* ── Index file management ──────────────────────────────────────── */
 
-struct JadeIndex {
+struct JinnIndex {
     FILE   *fp;
     int64_t capacity;
     int64_t count;
 };
 
 /* Read header from an open index file */
-static int read_header(JadeIndex *idx) {
+static int read_header(JinnIndex *idx) {
     fseek(idx->fp, 0, SEEK_SET);
     char mag[IDX_MAGIC_LEN];
     if (fread(mag, 1, IDX_MAGIC_LEN, idx->fp) != IDX_MAGIC_LEN) return -1;
@@ -60,19 +60,19 @@ static int read_header(JadeIndex *idx) {
 }
 
 /* Write header */
-static int write_header(JadeIndex *idx) {
+static int write_header(JinnIndex *idx) {
     if (fseek(idx->fp, 0, SEEK_SET) != 0 ||
         fwrite(IDX_MAGIC, 1, IDX_MAGIC_LEN, idx->fp) != IDX_MAGIC_LEN ||
         fwrite(&idx->capacity, 8, 1, idx->fp) != 1 ||
         fwrite(&idx->count, 8, 1, idx->fp) != 1) {
-        fprintf(stderr, "jade: index: write_header failed\n");
+        fprintf(stderr, "jinn: index: write_header failed\n");
         return -1;
     }
     return 0;
 }
 
 /* Create a fresh index file with initial capacity */
-static void init_file(JadeIndex *idx) {
+static void init_file(JinnIndex *idx) {
     idx->capacity = INITIAL_CAP;
     idx->count = 0;
     write_header(idx);
@@ -86,8 +86,8 @@ static void init_file(JadeIndex *idx) {
 }
 
 /* Open (or create) an index file.  Returns opaque pointer. */
-JadeIndex *jade_idx_open(const char *path) {
-    JadeIndex *idx = (JadeIndex *)calloc(1, sizeof(JadeIndex));
+JinnIndex *jinn_idx_open(const char *path) {
+    JinnIndex *idx = (JinnIndex *)calloc(1, sizeof(JinnIndex));
     idx->fp = fopen(path, "r+b");
     if (idx->fp && read_header(idx) == 0) {
         return idx;
@@ -100,7 +100,7 @@ JadeIndex *jade_idx_open(const char *path) {
     return idx;
 }
 
-void jade_idx_close(JadeIndex *idx) {
+void jinn_idx_close(JinnIndex *idx) {
     if (!idx) return;
     if (idx->fp) fclose(idx->fp);
     free(idx);
@@ -108,7 +108,7 @@ void jade_idx_close(JadeIndex *idx) {
 
 /* ── Slot I/O ───────────────────────────────────────────────────── */
 
-static void read_slot(JadeIndex *idx, int64_t slot,
+static void read_slot(JinnIndex *idx, int64_t slot,
                       uint64_t *hash, int64_t *offset, int64_t *status) {
     fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET);
     fread(hash, 8, 1, idx->fp);
@@ -116,13 +116,13 @@ static void read_slot(JadeIndex *idx, int64_t slot,
     fread(status, 8, 1, idx->fp);
 }
 
-static int write_slot(JadeIndex *idx, int64_t slot,
+static int write_slot(JinnIndex *idx, int64_t slot,
                       uint64_t hash, int64_t offset, int64_t status) {
     if (fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET) != 0 ||
         fwrite(&hash, 8, 1, idx->fp) != 1 ||
         fwrite(&offset, 8, 1, idx->fp) != 1 ||
         fwrite(&status, 8, 1, idx->fp) != 1) {
-        fprintf(stderr, "jade: index: write_slot failed\n");
+        fprintf(stderr, "jinn: index: write_slot failed\n");
         return -1;
     }
     return 0;
@@ -130,7 +130,7 @@ static int write_slot(JadeIndex *idx, int64_t slot,
 
 /* ── Grow (rehash) ──────────────────────────────────────────────── */
 
-static void grow(JadeIndex *idx) {
+static void grow(JinnIndex *idx) {
     int64_t old_cap = idx->capacity;
 
     /* Overflow guard: capacity can never exceed 2^60 slots (prevents
@@ -187,7 +187,7 @@ static void grow(JadeIndex *idx) {
 
 /* ── Insert into index ──────────────────────────────────────────── */
 
-void jade_idx_insert(JadeIndex *idx, uint64_t hash, int64_t record_offset) {
+void jinn_idx_insert(JinnIndex *idx, uint64_t hash, int64_t record_offset) {
     if (!idx) return;
     /* Check load factor */
     if (idx->count * 10 >= idx->capacity * 7) {
@@ -210,7 +210,7 @@ void jade_idx_insert(JadeIndex *idx, uint64_t hash, int64_t record_offset) {
 
 /* ── Lookup: returns record offset or -1 if not found ───────────── */
 
-int64_t jade_idx_lookup(JadeIndex *idx, uint64_t hash) {
+int64_t jinn_idx_lookup(JinnIndex *idx, uint64_t hash) {
     if (!idx) return -1;
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
     for (;;) {
@@ -224,13 +224,13 @@ int64_t jade_idx_lookup(JadeIndex *idx, uint64_t hash) {
 
 /* ── Check if a hash exists (for @unique enforcement) ───────────── */
 
-int jade_idx_contains(JadeIndex *idx, uint64_t hash) {
-    return jade_idx_lookup(idx, hash) >= 0 ? 1 : 0;
+int jinn_idx_contains(JinnIndex *idx, uint64_t hash) {
+    return jinn_idx_lookup(idx, hash) >= 0 ? 1 : 0;
 }
 
 /* ── Delete by hash ─────────────────────────────────────────────── */
 
-void jade_idx_delete(JadeIndex *idx, uint64_t hash) {
+void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
     if (!idx) return;
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
     for (;;) {
@@ -250,7 +250,7 @@ void jade_idx_delete(JadeIndex *idx, uint64_t hash) {
 
 /* ── Rebuild (clear all entries) ────────────────────────────────── */
 
-void jade_idx_clear(JadeIndex *idx) {
+void jinn_idx_clear(JinnIndex *idx) {
     if (!idx) return;
     init_file(idx);
 }

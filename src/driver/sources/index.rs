@@ -15,7 +15,7 @@ impl EntityIndex {
         }
     }
 
-    /// Scan a directory recursively for .jade files and index their exported symbols.
+    /// Scan a directory recursively for .jn files and index their exported symbols.
     fn scan_dir(&mut self, dir: &std::path::Path) {
         fn collect(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
             if let Ok(entries) = fs::read_dir(dir) {
@@ -23,7 +23,7 @@ impl EntityIndex {
                     let path = entry.path();
                     if path.is_dir() {
                         collect(&path, files);
-                    } else if path.extension().map_or(false, |e| e == "jade") {
+                    } else if path.extension().map_or(false, |e| e == "jinn") {
                         files.push(path);
                     }
                 }
@@ -36,7 +36,7 @@ impl EntityIndex {
         }
     }
 
-    /// Index a single .jade file by its module/file stem.
+    /// Index a single .jn file by its module/file stem.
     fn scan_file(&mut self, path: &std::path::Path) {
         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
             self.modules
@@ -110,8 +110,8 @@ impl EntityIndex {
             }
         }
 
-        // 4. JADE_PACKAGE_PATH directories
-        if let Ok(pkg_paths) = std::env::var("JADE_PACKAGE_PATH") {
+        // 4. JINN_PACKAGE_PATH directories
+        if let Ok(pkg_paths) = std::env::var("JINN_PACKAGE_PATH") {
             for pkg_dir in pkg_paths.split(':') {
                 let pkg_dir = PathBuf::from(pkg_dir);
                 if pkg_dir.is_dir() {

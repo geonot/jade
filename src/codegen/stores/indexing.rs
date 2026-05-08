@@ -50,12 +50,12 @@ impl<'ctx> Compiler<'ctx> {
                 } else {
                     i64t.const_int(0, false)
                 };
-                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_i64");
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_i64");
                 self.call_result(b!(self.bld.build_call(hash_fn, &[val.into()], "idx.hash")))
                     .into_int_value()
             }
             Type::F64 | Type::F32 => {
-                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_f64");
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_f64");
                 let fval = if field_val.is_float_value() {
                     let fv = field_val.into_float_value();
                     if fv.get_type() == self.ctx.f32_type() {
@@ -75,7 +75,7 @@ impl<'ctx> Compiler<'ctx> {
                 // Use SSO-aware helpers to get data pointer and length
                 let str_data = self.string_data(field_val)?;
                 let str_len = self.string_len(field_val)?;
-                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_str");
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_str");
                 self.call_result(b!(self.bld.build_call(
                     hash_fn,
                     &[str_data.into(), str_len.into()],
@@ -129,14 +129,14 @@ impl<'ctx> Compiler<'ctx> {
             | Type::U8
             | Type::Bool => {
                 let val = b!(self.bld.build_load(i64t, field_gep, "dist.ival")).into_int_value();
-                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_i64");
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_i64");
                 self.call_result(b!(self.bld.build_call(hash_fn, &[val.into()], "dist.hash")))
                     .into_int_value()
             }
             Type::F64 | Type::F32 => {
                 let f64t = self.ctx.f64_type();
                 let val = b!(self.bld.build_load(f64t, field_gep, "dist.fval")).into_float_value();
-                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_f64");
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_f64");
                 self.call_result(b!(self.bld.build_call(hash_fn, &[val.into()], "dist.hash")))
                     .into_int_value()
             }
@@ -152,7 +152,7 @@ impl<'ctx> Compiler<'ctx> {
                         "dist.sdata"
                     ))
                 };
-                let hash_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_hash_str");
+                let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_str");
                 self.call_result(b!(self.bld.build_call(
                     hash_fn,
                     &[data_ptr.into(), len.into()],
@@ -197,7 +197,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let ver_path = format!("{store_name}.versions\0");
         let ver_str = b!(self.bld.build_global_string_ptr(&ver_path, "ver.path"));
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_ver_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_ver_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -252,7 +252,7 @@ impl<'ctx> Compiler<'ctx> {
         let log_str = b!(self.bld.build_global_string_ptr(&log_path, "mig.path"));
 
         // Open migration log
-        let log_open = crate::codegen::fn_or_die(&self.module, "jade_mig_log_open");
+        let log_open = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_open");
         let log_fp = self
             .call_result(b!(self.bld.build_call(
                 log_open,
@@ -262,7 +262,7 @@ impl<'ctx> Compiler<'ctx> {
             .into_pointer_value();
 
         // Check if already applied
-        let log_applied = crate::codegen::fn_or_die(&self.module, "jade_mig_log_applied");
+        let log_applied = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_applied");
         let applied = self
             .call_result(b!(self.bld.build_call(
                 log_applied,
@@ -376,7 +376,7 @@ impl<'ctx> Compiler<'ctx> {
                                     .into_int_value();
 
                             let add_fn =
-                                crate::codegen::fn_or_die(&self.module, "jade_mig_add_field");
+                                crate::codegen::fn_or_die(&self.module, "jinn_mig_add_field");
                             b!(self.bld.build_call(
                                 add_fn,
                                 &[
@@ -408,7 +408,7 @@ impl<'ctx> Compiler<'ctx> {
                                 if let Some(fp_g) = fp_global {
                                     let drop_fn = crate::codegen::fn_or_die(
                                         &self.module,
-                                        "jade_mig_drop_field",
+                                        "jinn_mig_drop_field",
                                     );
                                     b!(self.bld.build_call(
                                         drop_fn,
@@ -439,7 +439,7 @@ impl<'ctx> Compiler<'ctx> {
 
         // Record the migration as applied
         self.bld.position_at_end(record_bb);
-        let log_record = crate::codegen::fn_or_die(&self.module, "jade_mig_log_record");
+        let log_record = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_record");
         b!(self.bld.build_call(
             log_record,
             &[
@@ -450,7 +450,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let log_close = crate::codegen::fn_or_die(&self.module, "jade_mig_log_close");
+        let log_close = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_close");
         b!(self.bld.build_call(log_close, &[log_fp.into()], ""));
         b!(self.bld.build_return(None));
 

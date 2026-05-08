@@ -1,10 +1,10 @@
 /*
- * Jade Runtime — Typed channels (bounded MPMC ring buffer).
+ * Jinn Runtime — Typed channels (bounded MPMC ring buffer).
  *
  * Uses an atomic spinlock instead of pthread_mutex to avoid glibc 2.42+
  * __owner assertions when coroutines migrate between worker threads.
  */
-#include "jade_rt.h"
+#include "jinn_rt.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sched.h>
@@ -19,7 +19,7 @@
 
 /* ── Spinlock helpers ────────────────────────────────────────────── */
 
-static inline void chan_lock(jade_chan_t *ch) {
+static inline void chan_lock(jinn_chan_t *ch) {
     while (atomic_exchange_explicit(&ch->lock, 1, memory_order_acquire) != 0) {
         /* Spin with a pause hint for better performance under contention */
 #if defined(__x86_64__)
@@ -30,7 +30,7 @@ static inline void chan_lock(jade_chan_t *ch) {
     }
 }
 
-static inline void chan_unlock(jade_chan_t *ch) {
+static inline void chan_unlock(jinn_chan_t *ch) {
     atomic_store_explicit(&ch->lock, 0, memory_order_release);
 }
 
@@ -47,7 +47,7 @@ static uint64_t next_pow2(uint64_t v) {
     return v + 1;
 }
 
-static inline void waitq_push(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *node) {
+static inline void waitq_push(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_t *node) {
     node->next = NULL;
     if (*tail) {
         (*tail)->next = node;
@@ -57,8 +57,8 @@ static inline void waitq_push(jade_coro_t **head, jade_coro_t **tail, jade_coro_
     *tail = node;
 }
 
-static inline jade_coro_t *waitq_pop(jade_coro_t **head, jade_coro_t **tail) {
-    jade_coro_t *node = *head;
+static inline jinn_coro_t *waitq_pop(jinn_coro_t **head, jinn_coro_t **tail) {
+    jinn_coro_t *node = *head;
     if (!node) {
         return NULL;
     }
@@ -70,8 +70,8 @@ static inline jade_coro_t *waitq_pop(jade_coro_t **head, jade_coro_t **tail) {
     return node;
 }
 
-jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity) {
-    jade_chan_t *ch = (jade_chan_t *)calloc(1, sizeof(jade_chan_t));
+jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity) {
+    jinn_chan_t *ch = (jinn_chan_t *)calloc(1, sizeof(jinn_chan_t));
     if (!ch) return NULL;
 
     if (capacity == 0) capacity = 64;
@@ -92,47 +92,47 @@ jade_chan_t *jade_chan_create(size_t elem_size, size_t capacity) {
     return ch;
 }
 
-void jade_chan_destroy(jade_chan_t *ch) {
+void jinn_chan_destroy(jinn_chan_t *ch) {
     if (!ch) return;
-    jade_chan_close(ch);
+    jinn_chan_close(ch);
     free(ch->buffer);
     free(ch);
 }
 
-void jade_chan_close(jade_chan_t *ch) {
+void jinn_chan_close(jinn_chan_t *ch) {
     atomic_store(&ch->closed, 1);
 
     /* Wake all blocked receivers so they get the close signal */
     chan_lock(ch);
-    jade_coro_t *c = ch->recv_waitq;
+    jinn_coro_t *c = ch->recv_waitq;
     ch->recv_waitq = NULL;
     ch->recv_waitq_tail = NULL;
     /* Also wake senders */
-    jade_coro_t *s = ch->send_waitq;
+    jinn_coro_t *s = ch->send_waitq;
     ch->send_waitq = NULL;
     ch->send_waitq_tail = NULL;
     chan_unlock(ch);
 
     while (c) {
-        jade_coro_t *next = c->next;
+        jinn_coro_t *next = c->next;
         c->next = NULL;
         c->wait_chan = NULL;
-        c->state = JADE_CORO_READY;
-        jade_sched_enqueue(c);
+        c->state = JINN_CORO_READY;
+        jinn_sched_enqueue(c);
         c = next;
     }
     while (s) {
-        jade_coro_t *next = s->next;
+        jinn_coro_t *next = s->next;
         s->next = NULL;
         s->wait_chan = NULL;
-        s->state = JADE_CORO_READY;
-        jade_sched_enqueue(s);
+        s->state = JINN_CORO_READY;
+        jinn_sched_enqueue(s);
         s = next;
     }
     /* Wake non-coroutine thread waiters */
 }
 
-void jade_chan_send(jade_chan_t *ch, const void *data) {
+void jinn_chan_send(jinn_chan_t *ch, const void *data) {
     for (;;) {
         chan_lock(ch);
 
@@ -152,12 +152,12 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
             atomic_store_explicit(&ch->tail, tail + 1, memory_order_release);
 
             /* Wake one blocked receiver if any */
-            jade_coro_t *waiter = waitq_pop(&ch->recv_waitq, &ch->recv_waitq_tail);
+            jinn_coro_t *waiter = waitq_pop(&ch->recv_waitq, &ch->recv_waitq_tail);
             if (waiter) {
                 waiter->wait_chan = NULL;
-                waiter->state = JADE_CORO_READY;
+                waiter->state = JINN_CORO_READY;
                 chan_unlock(ch);
-                jade_sched_enqueue(waiter);
+                jinn_sched_enqueue(waiter);
             } else {
                 chan_unlock(ch);
             }
@@ -165,7 +165,7 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
         }
 
         /* Buffer full — park this coroutine */
-        jade_worker_t *w = tl_worker;
+        jinn_worker_t *w = tl_worker;
         if (!w || !w->current) {
             /* Called from non-coroutine context — spin-wait then retry */
             chan_unlock(ch);
@@ -181,8 +181,8 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
             continue;
         }
 
-        jade_coro_t *self = w->current;
-        self->state = JADE_CORO_SUSPENDED;
+        jinn_coro_t *self = w->current;
+        self->state = JINN_CORO_SUSPENDED;
         self->wait_chan = ch;
         self->next = NULL;
 
@@ -194,12 +194,12 @@ void jade_chan_send(jade_chan_t *ch, const void *data) {
         /* Yield to scheduler — will be resumed when a recv frees space */
         w->held_chan_lock = ch;
         w->last_action = SCHED_ACTION_PARK;
-        jade_context_swap(&self->ctx, &w->sched_ctx);
+        jinn_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed here — retry send from the top */
     }
 }
 
-int jade_chan_recv(jade_chan_t *ch, void *data_out) {
+int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
     for (;;) {
         chan_lock(ch);
 
@@ -213,12 +213,12 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
             atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 
             /* Wake one blocked sender if any */
-            jade_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
+            jinn_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
             if (waiter) {
                 waiter->wait_chan = NULL;
-                waiter->state = JADE_CORO_READY;
+                waiter->state = JINN_CORO_READY;
                 chan_unlock(ch);
-                jade_sched_enqueue(waiter);
+                jinn_sched_enqueue(waiter);
             } else {
                 chan_unlock(ch);
             }
@@ -234,7 +234,7 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
         }
 
         /* Park this coroutine */
-        jade_worker_t *w = tl_worker;
+        jinn_worker_t *w = tl_worker;
         if (!w || !w->current) {
             /* Called from non-coroutine context — spin-wait then retry */
             chan_unlock(ch);
@@ -248,8 +248,8 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
             continue;
         }
 
-        jade_coro_t *self = w->current;
-        self->state = JADE_CORO_SUSPENDED;
+        jinn_coro_t *self = w->current;
+        self->state = JINN_CORO_SUSPENDED;
         self->wait_chan = ch;
         self->next = NULL;
 
@@ -261,12 +261,12 @@ int jade_chan_recv(jade_chan_t *ch, void *data_out) {
         /* Yield to scheduler */
         w->held_chan_lock = ch;
         w->last_action = SCHED_ACTION_PARK;
-        jade_context_swap(&self->ctx, &w->sched_ctx);
+        jinn_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed — retry recv */
     }
 }
 
-int jade_chan_try_recv(jade_chan_t *ch, void *data_out) {
+int jinn_chan_try_recv(jinn_chan_t *ch, void *data_out) {
     chan_lock(ch);
 
     uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
@@ -277,12 +277,12 @@ int jade_chan_try_recv(jade_chan_t *ch, void *data_out) {
         memcpy(data_out, (char *)ch->buffer + idx * ch->elem_size, ch->elem_size);
         atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 
-        jade_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
+        jinn_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
         if (waiter) {
             waiter->wait_chan = NULL;
-            waiter->state = JADE_CORO_READY;
+            waiter->state = JINN_CORO_READY;
             chan_unlock(ch);
-            jade_sched_enqueue(waiter);
+            jinn_sched_enqueue(waiter);
         } else {
             chan_unlock(ch);
         }

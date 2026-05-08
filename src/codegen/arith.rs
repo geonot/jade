@@ -329,7 +329,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn emit_trap(&mut self, msg: &str) {
         let trap_fn = self
             .module
-            .get_function("__jade_trap")
+            .get_function("__jinn_trap")
             .unwrap_or_else(|| self.build_trap_fn());
         let msg_str = self
             .bld
@@ -347,7 +347,7 @@ impl<'ctx> Compiler<'ctx> {
         let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
         let f = self
             .module
-            .add_function("__jade_trap", ft, Some(Linkage::Internal));
+            .add_function("__jinn_trap", ft, Some(Linkage::Internal));
         let entry = self.ctx.append_basic_block(f, "entry");
         let saved_bb = self.bld.get_insert_block();
         self.bld.position_at_end(entry);

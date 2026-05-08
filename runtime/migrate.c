@@ -1,13 +1,13 @@
 /*
- * runtime/migrate.c — Schema migration engine for Jade stores
+ * runtime/migrate.c — Schema migration engine for Jinn stores
  *
  * Provides:
- *   - jade_mig_add_field:  rewrite store, inserting a new field into every record
- *   - jade_mig_drop_field: rewrite store, removing a field from every record
- *   - jade_mig_log_open:   open/create the migrations.log file
- *   - jade_mig_log_close:  close the log
- *   - jade_mig_log_applied: check if a version was already applied
- *   - jade_mig_log_record:  record a newly applied migration
+ *   - jinn_mig_add_field:  rewrite store, inserting a new field into every record
+ *   - jinn_mig_drop_field: rewrite store, removing a field from every record
+ *   - jinn_mig_log_open:   open/create the migrations.log file
+ *   - jinn_mig_log_close:  close the log
+ *   - jinn_mig_log_applied: check if a version was already applied
+ *   - jinn_mig_log_record:  record a newly applied migration
  *
  * Store file format (header = 24 bytes):
  *   [8B magic "JADESTR\0"][8B count][8B rec_size][records...]
@@ -22,7 +22,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 #define STORE_HEADER 24
 #define STORE_MAGIC  "JADESTR\0"
@@ -32,7 +32,7 @@
 
 /* ─── Migration log ─────────────────────────────────────────────── */
 
-FILE *jade_mig_log_open(const char *path) {
+FILE *jinn_mig_log_open(const char *path) {
     FILE *fp = fopen(path, "r+b");
     if (fp) return fp;
     /* create new */
@@ -43,7 +43,7 @@ FILE *jade_mig_log_open(const char *path) {
     return fp;
 }
 
-void jade_mig_log_close(FILE *fp) {
+void jinn_mig_log_close(FILE *fp) {
     if (fp) fclose(fp);
 }
 
@@ -52,7 +52,7 @@ void jade_mig_log_close(FILE *fp) {
  * Scans the log in reverse so that the latest entry for a version wins.
  * Returns 1 if applied, 0 if not.
  */
-int64_t jade_mig_log_applied(FILE *fp, int64_t version) {
+int64_t jinn_mig_log_applied(FILE *fp, int64_t version) {
     if (!fp) return 0;
     fseek(fp, 0, SEEK_END);
     long end = ftell(fp);
@@ -79,7 +79,7 @@ int64_t jade_mig_log_applied(FILE *fp, int64_t version) {
  * Record that a migration was applied.
  * direction: 1 = up, 0 = down
  */
-void jade_mig_log_record(FILE *fp, int64_t version, int64_t direction) {
+void jinn_mig_log_record(FILE *fp, int64_t version, int64_t direction) {
     if (!fp) return;
     fseek(fp, 0, SEEK_END);
     fwrite(&version, 8, 1, fp);
@@ -106,7 +106,7 @@ void jade_mig_log_record(FILE *fp, int64_t version, int64_t direction) {
  *
  * Returns 0 on success, -1 on error.
  */
-int64_t jade_mig_add_field(FILE **store_fp_ptr, const char *store_path,
+int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
                            int64_t field_offset, int64_t field_size,
                            const void *default_val) {
     FILE *fp = *store_fp_ptr;
@@ -181,7 +181,7 @@ int64_t jade_mig_add_field(FILE **store_fp_ptr, const char *store_path,
  *
  * Returns 0 on success, -1 on error.
  */
-int64_t jade_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
+int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
                             int64_t field_offset, int64_t field_size) {
     FILE *fp = *store_fp_ptr;
     if (!fp) return -1;

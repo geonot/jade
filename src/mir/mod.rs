@@ -1,6 +1,6 @@
 //! Mid-level IR in SSA form.
 //!
-//! Sits between HIR and LLVM IR, providing a Jade-owned SSA-form
+//! Sits between HIR and LLVM IR, providing a Jinn-owned SSA-form
 //! representation for dataflow analysis and classical optimizations.
 
 pub mod lower;

@@ -1,8 +1,8 @@
 /*
  * x86_64 context switch: save/restore callee-saved registers.
- * jade_context_swap(jade_context_t *from, jade_context_t *to)
+ * jinn_context_swap(jinn_context_t *from, jinn_context_t *to)
  *
- * jade_context_t layout (7 × 8 = 56 bytes):
+ * jinn_context_t layout (7 × 8 = 56 bytes):
  *   [0]   rsp
  *   [8]   rbp
  *   [16]  rbx
@@ -13,10 +13,10 @@
  */
 
 .text
-.globl jade_context_swap
-.type jade_context_swap, @function
+.globl jinn_context_swap
+.type jinn_context_swap, @function
 .p2align 4
-jade_context_swap:
+jinn_context_swap:
     /* Save callee-saved registers into *rdi (from) */
     movq %rsp,  0(%rdi)
     movq %rbp,  8(%rdi)
@@ -36,7 +36,7 @@ jade_context_swap:
     movq 48(%rsi), %r15
 
     ret
-.size jade_context_swap, . - jade_context_swap
+.size jinn_context_swap, . - jinn_context_swap
 
 /* Mark the stack as non-executable (GNU ELF note) */
 #if defined(__linux__) && defined(__ELF__)

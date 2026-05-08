@@ -1,9 +1,9 @@
 {
-  "name": "jade-lang",
-  "displayName": "Jade Language",
-  "description": "Syntax highlighting and language support for the Jade programming language",
+  "name": "jinn-lang",
+  "displayName": "Jinn Language",
+  "description": "Syntax highlighting and language support for the Jinn programming language",
   "version": "0.1.0",
-  "publisher": "jade",
+  "publisher": "jinn",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -11,17 +11,17 @@
   "contributes": {
     "languages": [
       {
-        "id": "jade-lang",
-        "aliases": ["Jade", "jade"],
-        "extensions": [".jade"],
+        "id": "jinn-lang",
+        "aliases": ["Jinn", "jinn"],
+        "extensions": [".jn"],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "jade-lang",
-        "scopeName": "source.jade-lang",
-        "path": "./syntaxes/jade.tmLanguage.json"
+        "language": "jinn-lang",
+        "scopeName": "source.jn-lang",
+        "path": "./syntaxes/jinn.tmLanguage.json"
       }
     ]
   }

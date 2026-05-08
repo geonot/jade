@@ -1,9 +1,9 @@
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
 
-// Tree-sitter grammar for the Jade programming language.
+// Tree-sitter grammar for the Jinn programming language.
 //
-// Jade is indentation-sensitive. The external scanner handles
+// Jinn is indentation-sensitive. The external scanner handles
 // NEWLINE, INDENT, DEDENT tokens. Inside (...) and [...], newlines
 // are treated as whitespace via _ws_newline in extras.
 
@@ -36,7 +36,7 @@ function commaSep(rule) {
 }
 
 module.exports = grammar({
-  name: "jade",
+  name: "jinn",
 
   extras: ($) => [/[ \t\r]/, $.comment, $._ws_newline],
 

@@ -1,5 +1,5 @@
 // Compiler driver / CLI entry point. See `docs/architecture.md` for the pipeline overview.
-// (Regular comment, not a `//!` doc comment, because this file is `include!`d by `src/bin/jade.rs`.)
+// (Regular comment, not a `//!` doc comment, because this file is `include!`d by `src/bin/jinn.rs`.)
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -24,7 +24,7 @@ use crate::resolve::prefix_module;
 use crate::typer::Typer;
 
 #[derive(ClapParser)]
-#[command(name = "jadec", version = "0.0.0", about = "The Jade compiler")]
+#[command(name = "jinnc", version = "0.0.0", about = "The Jinn compiler")]
 pub(super) struct Cli {
     #[command(subcommand)]
     pub(super) command: Option<Cmd>,
@@ -107,7 +107,7 @@ pub(super) enum Cmd {
     },
     Fetch,
     Update,
-    /// Compile the project (uses project.jade entry if available)
+    /// Compile the project (uses project.jn entry if available)
     Build {
         #[arg(short, long, default_value = "a.out")]
         output: Option<PathBuf>,
@@ -128,12 +128,12 @@ pub(super) enum Cmd {
         #[arg(long)]
         standalone: bool,
     },
-    /// Generate jade.pkg and (by default) a source archive in dist/
+    /// Generate jinn.pkg and (by default) a source archive in dist/
     Package {
-        /// Output manifest path (default: ./jade.pkg)
+        /// Output manifest path (default: ./jinn.pkg)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Generate only jade.pkg (skip dist/*.tar.gz creation)
+        /// Generate only jinn.pkg (skip dist/*.tar.gz creation)
         #[arg(long)]
         no_archive: bool,
     },
@@ -161,12 +161,12 @@ pub(super) enum Cmd {
     Test,
     /// Type-check without codegen
     Check,
-    /// Format Jade source files
+    /// Format Jinn source files
     Fmt {
-        /// Files to format (default: all .jade files in current directory)
+        /// Files to format (default: all .jn files in current directory)
         files: Vec<PathBuf>,
     },
-    /// Generate Jade extern declarations from a C header file
+    /// Generate Jinn extern declarations from a C header file
     Bind {
         /// Path to the C header file
         header: PathBuf,
@@ -180,18 +180,18 @@ pub(super) fn die(msg: &str) -> ! {
 
 pub(super) fn dirs_cache() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
-        PathBuf::from(xdg).join("jade")
+        PathBuf::from(xdg).join("jinn")
     } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".cache").join("jade")
+        PathBuf::from(home).join(".cache").join("jinn")
     } else {
-        PathBuf::from(".jade_cache")
+        PathBuf::from(".jinn_cache")
     }
 }
 
 pub(super) fn find_project_root(start_dir: &std::path::Path) -> Option<PathBuf> {
     let mut dir = start_dir.to_path_buf();
     loop {
-        if dir.join("project.jade").exists() {
+        if dir.join("project.jn").exists() {
             return Some(dir);
         }
         if !dir.pop() {

@@ -1,12 +1,12 @@
-//! LSP server entry point (`jadec-lsp` binary).
+//! LSP server entry point (`jinnc-lsp` binary).
 
 use std::io::{self, BufReader, Write};
 
 use serde_json::Value;
 
-use jadec::lsp::handlers::{self, ServerState};
-use jadec::lsp::protocol::{Notification, PublishDiagnosticsParams, Response};
-use jadec::lsp::transport;
+use jinnc::lsp::handlers::{self, ServerState};
+use jinnc::lsp::protocol::{Notification, PublishDiagnosticsParams, Response};
+use jinnc::lsp::transport;
 
 fn main() {
     let stdin = io::stdin();
@@ -22,15 +22,15 @@ fn main() {
             Ok(Some(m)) => m,
             Ok(None) => break,
             Err(e) => {
-                eprintln!("jadec-lsp: read error: {e}");
+                eprintln!("jinnc-lsp: read error: {e}");
                 break;
             }
         };
 
-        let req: jadec::lsp::protocol::Request = match serde_json::from_str(&msg) {
+        let req: jinnc::lsp::protocol::Request = match serde_json::from_str(&msg) {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("jadec-lsp: invalid JSON-RPC: {e}");
+                eprintln!("jinnc-lsp: invalid JSON-RPC: {e}");
                 continue;
             }
         };
@@ -117,7 +117,7 @@ fn send_response(writer: &mut impl Write, id: Value, result: Value) {
 fn publish_diagnostics(
     writer: &mut impl Write,
     uri: &str,
-    diagnostics: Vec<jadec::lsp::protocol::Diagnostic>,
+    diagnostics: Vec<jinnc::lsp::protocol::Diagnostic>,
 ) {
     let params = PublishDiagnosticsParams {
         uri: uri.to_string(),

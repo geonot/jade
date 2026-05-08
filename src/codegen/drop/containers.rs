@@ -411,7 +411,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop a generator: calls jade_gen_destroy to free coroutine stack + gen block.
+    /// Drop a generator: calls jinn_gen_destroy to free coroutine stack + gen block.
     pub(in crate::codegen::drop) fn drop_generator(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -426,7 +426,7 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         self.declare_gen_runtime();
-        let gen_destroy = crate::codegen::fn_or_die(&self.module, "jade_gen_destroy");
+        let gen_destroy = crate::codegen::fn_or_die(&self.module, "jinn_gen_destroy");
 
         let null = ptr_ty.const_null();
         let is_null =

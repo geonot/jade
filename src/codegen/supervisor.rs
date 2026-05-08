@@ -11,9 +11,9 @@ impl<'ctx> Compiler<'ctx> {
     ///                              starts it. Subsequent calls are no-ops.
     ///   `<name>_restart_count()` — returns the runtime restart counter.
     ///
-    /// A module-private global `<name>_g` (jade_sup_t*) holds the supervisor
+    /// A module-private global `<name>_g` (jinn_sup_t*) holds the supervisor
     /// handle. The strategy enum (one_for_one / one_for_all / rest_for_one)
-    /// is passed through to `jade_sup_create`. Each child's loop function
+    /// is passed through to `jinn_sup_create`. Each child's loop function
     /// (`<actor>_loop`) is paired with a generated factory
     /// (`<actor>_create_mb`) so the runtime can re-allocate its mailbox on
     /// restart without compile-time knowledge of the layout.
@@ -29,35 +29,35 @@ impl<'ctx> Compiler<'ctx> {
         // Declare runtime functions (idempotent).
         let sup_create = self
             .module
-            .get_function("jade_sup_create")
+            .get_function("jinn_sup_create")
             .unwrap_or_else(|| {
                 let ft = ptr.fn_type(&[i32t.into()], false);
                 self.module
-                    .add_function("jade_sup_create", ft, Some(Linkage::External))
+                    .add_function("jinn_sup_create", ft, Some(Linkage::External))
             });
         let sup_register = self
             .module
-            .get_function("jade_sup_register")
+            .get_function("jinn_sup_register")
             .unwrap_or_else(|| {
                 let ft = i64t.fn_type(&[ptr.into(), ptr.into(), ptr.into(), ptr.into()], false);
                 self.module
-                    .add_function("jade_sup_register", ft, Some(Linkage::External))
+                    .add_function("jinn_sup_register", ft, Some(Linkage::External))
             });
         let sup_start_fn = self
             .module
-            .get_function("jade_sup_start")
+            .get_function("jinn_sup_start")
             .unwrap_or_else(|| {
                 let ft = void.fn_type(&[ptr.into()], false);
                 self.module
-                    .add_function("jade_sup_start", ft, Some(Linkage::External))
+                    .add_function("jinn_sup_start", ft, Some(Linkage::External))
             });
         let sup_rcount = self
             .module
-            .get_function("jade_sup_restart_count")
+            .get_function("jinn_sup_restart_count")
             .unwrap_or_else(|| {
                 let ft = i32t.fn_type(&[ptr.into()], false);
                 self.module
-                    .add_function("jade_sup_restart_count", ft, Some(Linkage::External))
+                    .add_function("jinn_sup_restart_count", ft, Some(Linkage::External))
             });
 
         // Module-private global holding the supervisor handle.

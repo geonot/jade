@@ -34,7 +34,7 @@ use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{
-    EntityIndex, collect_jade_files, find_project_entry, load_packages, merge_source_files,
+    EntityIndex, collect_jinn_files, find_project_entry, load_packages, merge_source_files,
     resolve_implicit_imports, resolve_modules,
 };
 
@@ -104,7 +104,7 @@ pub fn run() {
                 };
                 let cache_dir = dirs_cache();
                 let _ = fs::create_dir_all(&cache_dir);
-                let cached_bin = cache_dir.join(format!("jade_run_{:016x}", hash));
+                let cached_bin = cache_dir.join(format!("jinn_run_{:016x}", hash));
                 if !cached_bin.exists() {
                     compile_and_link(
                         &entry,
@@ -133,7 +133,7 @@ pub fn run() {
                 let entry = find_project_entry();
                 compile_and_link(
                     &entry,
-                    &PathBuf::from("./.jade_test_tmp"),
+                    &PathBuf::from("./.jinn_test_tmp"),
                     0,
                     false,
                     true,
@@ -147,8 +147,8 @@ pub fn run() {
                     cli.features.as_deref(),
                     cli.standalone,
                 );
-                let status = Command::new("./.jade_test_tmp").status();
-                let _ = fs::remove_file("./.jade_test_tmp");
+                let status = Command::new("./.jinn_test_tmp").status();
+                let _ = fs::remove_file("./.jinn_test_tmp");
                 match status {
                     Ok(s) if s.success() => println!("all tests passed"),
                     Ok(s) => std::process::exit(s.code().unwrap_or(1)),
@@ -188,24 +188,24 @@ pub fn run() {
             }
             Cmd::Fmt { files } => {
                 let targets: Vec<PathBuf> = if files.is_empty() {
-                    // Find all .jade files in current directory recursively
-                    fn collect_jade_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+                    // Find all .jn files in current directory recursively
+                    fn collect_jinn_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
                         if let Ok(entries) = fs::read_dir(dir) {
                             for entry in entries.flatten() {
                                 let path = entry.path();
                                 if path.is_dir() {
                                     let name = path.file_name().unwrap_or_default();
                                     if name != "target" && name != ".git" {
-                                        collect_jade_files(&path, out);
+                                        collect_jinn_files(&path, out);
                                     }
-                                } else if path.extension().map_or(false, |e| e == "jade") {
+                                } else if path.extension().map_or(false, |e| e == "jinn") {
                                     out.push(path);
                                 }
                             }
                         }
                     }
                     let mut found = Vec::new();
-                    collect_jade_files(std::path::Path::new("."), &mut found);
+                    collect_jinn_files(std::path::Path::new("."), &mut found);
                     found
                 } else {
                     files
@@ -267,12 +267,12 @@ pub fn run() {
         loaded.insert(Symbol::intern(&canon.to_string_lossy()));
     }
 
-    // Load project.jade if present
-    let project_jade = base_dir.join("project.jade");
-    let project_config = if project_jade.exists() {
+    // Load project.jn if present
+    let project_jinn = base_dir.join("project.jn");
+    let project_config = if project_jinn.exists() {
         Some(
-            ProjectConfig::from_file(&project_jade)
-                .unwrap_or_else(|e| die(&format!("project.jade: {e}"))),
+            ProjectConfig::from_file(&project_jinn)
+                .unwrap_or_else(|e| die(&format!("project.jn: {e}"))),
         )
     } else {
         None
@@ -315,7 +315,7 @@ pub fn run() {
             .and_then(|s| s.to_str())
             .unwrap_or("module");
         let iface = crate::interface::InterfaceFile::from_decls(mod_name, &prog.decls);
-        let iface_path = input.with_extension("jadei");
+        let iface_path = input.with_extension("jni");
         if let Err(e) = iface.write_to(&iface_path) {
             die(&format!("interface: {e}"));
         }
@@ -567,32 +567,32 @@ pub fn run() {
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(&cli.output);
     if comp.needs_runtime {
-        let rt_dir = env!("JADE_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljade_rt").arg("-lpthread");
+        let rt_dir = env!("JINN_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
     }
     if comp.needs_ssl {
-        if env!("JADE_HAS_SSL") != "1" {
+        if env!("JINN_HAS_SSL") != "1" {
             die(
                 "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
             );
         }
-        let rt_dir = env!("JADE_RT_DIR");
+        let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L")
             .arg(rt_dir)
-            .arg("-ljade_ssl")
+            .arg("-ljinn_ssl")
             .arg("-lssl")
             .arg("-lcrypto");
     }
     if comp.needs_sqlite {
-        if env!("JADE_HAS_SQLITE") != "1" {
+        if env!("JINN_HAS_SQLITE") != "1" {
             die(
                 "program uses std.sqlite but SQLite3 was not available when the compiler was built",
             );
         }
-        let rt_dir = env!("JADE_RT_DIR");
+        let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L")
             .arg(rt_dir)
-            .arg("-ljade_sqlite")
+            .arg("-ljinn_sqlite")
             .arg("-lsqlite3");
     }
     cc.arg("-lm");

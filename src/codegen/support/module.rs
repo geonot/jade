@@ -127,7 +127,7 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Initialize the TBAA metadata tree.  Must be called after `new()`.
     pub fn init_tbaa(&mut self) {
-        let root_name = self.ctx.metadata_string("Jade TBAA");
+        let root_name = self.ctx.metadata_string("Jinn TBAA");
         let root = self.ctx.metadata_node(&[root_name.into()]);
         self.tbaa_root = Some(root);
     }
@@ -159,7 +159,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Map a Jade type to a TBAA type name for alias analysis.
+    /// Map a Jinn type to a TBAA type name for alias analysis.
     pub(crate) fn tbaa_type_name(ty: &Type) -> &'static str {
         match ty {
             Type::I8 | Type::U8 => "i8",
@@ -241,7 +241,7 @@ impl<'ctx> Compiler<'ctx> {
             DWARFSourceLanguage::C,
             filename,
             ".",
-            "jadec",
+            "jinnc",
             false,
             "",
             0,

@@ -164,7 +164,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 // Save old record to versions file
                 let ver_fp = self.load_store_ver(store_name)?;
-                let ver_append_fn = crate::codegen::fn_or_die(&self.module, "jade_ver_append");
+                let ver_append_fn = crate::codegen::fn_or_die(&self.module, "jinn_ver_append");
                 b!(self.bld.build_call(
                     ver_append_fn,
                     &[
@@ -472,7 +472,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
-        let result = self.load_store_record_as_jade(st, result_ptr, &sd)?;
+        let result = self.load_store_record_as_jinn(st, result_ptr, &sd)?;
         Ok(result)
     }
 

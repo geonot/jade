@@ -2,7 +2,7 @@
 #
 # Compiled regex objects are cached as opaque PCRE2 handles. The
 # compile cost is amortized when the same pattern is reused. For
-# string literal patterns, the Jade compiler emits the compile call
+# string literal patterns, the Jinn compiler emits the compile call
 # at module init time.
 #
 # Usage:
@@ -30,7 +30,7 @@ extern *pcre2_match_data_free_8(match_data as %void)
 extern *pcre2_code_free_8(code as %void)
 extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %void
 extern *pcre2_substring_number_from_name_8(code as %void, name as %i8) returns i32
-extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
+extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
 
 # ── Compile / handle ─────────────────────────────────────────
 
@@ -72,8 +72,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
         extern.pcre2_code_free_8(code as %void)
         return ''
     ovector is extern.pcre2_get_ovector_pointer_8(md)
-    s is extern.jade_ovector_get(ovector, 0)
-    e is extern.jade_ovector_get(ovector, 1)
+    s is extern.jinn_ovector_get(ovector, 0)
+    e is extern.jinn_ovector_get(ovector, 1)
     out is text.slice(s, e)
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
@@ -95,8 +95,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
         if rc < 1
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
-        s is extern.jade_ovector_get(ovector, 0)
-        e is extern.jade_ovector_get(ovector, 1)
+        s is extern.jinn_ovector_get(ovector, 0)
+        e is extern.jinn_ovector_get(ovector, 1)
         results.push(text.slice(s, e))
         offset is e equals offset ? offset + 1 ! e
     extern.pcre2_match_data_free_8(md)
@@ -121,8 +121,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
     ovector is extern.pcre2_get_ovector_pointer_8(md)
     i is 0
     while i < rc
-        s is extern.jade_ovector_get(ovector, i * 2)
-        e is extern.jade_ovector_get(ovector, i * 2 + 1)
+        s is extern.jinn_ovector_get(ovector, i * 2)
+        e is extern.jinn_ovector_get(ovector, i * 2 + 1)
         out.push(text.slice(s, e))
         i is i + 1
     extern.pcre2_match_data_free_8(md)
@@ -145,12 +145,12 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
         groups is vec()
         i is 0
         while i < rc
-            s is extern.jade_ovector_get(ovector, i * 2)
-            e is extern.jade_ovector_get(ovector, i * 2 + 1)
+            s is extern.jinn_ovector_get(ovector, i * 2)
+            e is extern.jinn_ovector_get(ovector, i * 2 + 1)
             groups.push(text.slice(s, e))
             i is i + 1
         out.push(groups)
-        end_pos is extern.jade_ovector_get(ovector, 1)
+        end_pos is extern.jinn_ovector_get(ovector, 1)
         offset is end_pos equals offset ? offset + 1 ! end_pos
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
@@ -173,8 +173,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
             out is out + text.slice(offset, text.length)
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
-        s is extern.jade_ovector_get(ovector, 0)
-        e is extern.jade_ovector_get(ovector, 1)
+        s is extern.jinn_ovector_get(ovector, 0)
+        e is extern.jinn_ovector_get(ovector, 1)
         out is out + text.slice(offset, s) + replacement
         offset is e equals s ? s + 1 ! e
     extern.pcre2_match_data_free_8(md)
@@ -196,8 +196,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
             out is out + text.slice(offset, text.length)
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
-        s is extern.jade_ovector_get(ovector, 0)
-        e is extern.jade_ovector_get(ovector, 1)
+        s is extern.jinn_ovector_get(ovector, 0)
+        e is extern.jinn_ovector_get(ovector, 1)
         out is out + text.slice(offset, s) + fn(text.slice(s, e))
         offset is e equals s ? s + 1 ! e
     extern.pcre2_match_data_free_8(md)
@@ -216,8 +216,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
         extern.pcre2_code_free_8(code as %void)
         return text
     ovector is extern.pcre2_get_ovector_pointer_8(md)
-    s is extern.jade_ovector_get(ovector, 0)
-    e is extern.jade_ovector_get(ovector, 1)
+    s is extern.jinn_ovector_get(ovector, 0)
+    e is extern.jinn_ovector_get(ovector, 1)
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
     text.slice(0, s) + replacement + text.slice(e, text.length)
@@ -239,8 +239,8 @@ extern *jade_ovector_get(ovector as %void, idx as i64) returns i64
             out.push(text.slice(offset, text.length))
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
-        s is extern.jade_ovector_get(ovector, 0)
-        e is extern.jade_ovector_get(ovector, 1)
+        s is extern.jinn_ovector_get(ovector, 0)
+        e is extern.jinn_ovector_get(ovector, 1)
         out.push(text.slice(offset, s))
         offset is e equals s ? s + 1 ! e
     extern.pcre2_match_data_free_8(md)

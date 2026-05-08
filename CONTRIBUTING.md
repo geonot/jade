@@ -1,4 +1,4 @@
-# Contributing to Jade
+# Contributing to Jinn
 
 Thanks for your interest. This guide codifies the conventions enforced by
 [CLEANUP.md](CLEANUP.md). Follow them and your patches will sail through review.
@@ -40,15 +40,15 @@ file-to-role mapping.
 
 ### C runtime
 
-- All public ABI in `runtime/jade_rt.h`; every `.c` includes it.
-- Prefixes: `jade_*` (public), `c_*` (helper), `__jade_*` (codegen-internal).
+- All public ABI in `runtime/jinn_rt.h`; every `.c` includes it.
+- Prefixes: `jinn_*` (public), `c_*` (helper), `__jinn_*` (codegen-internal).
 - Opaque types: `typedef struct Foo Foo;` in header + `struct Foo { ... };` in owning `.c`.
 - Error returns: resource-creating → pointer/NULL; mutating → int errno-style.
 - See [runtime/README.md](runtime/README.md) for "Adding a new runtime function" step-by-step.
 
-### Jade stdlib
+### Jinn stdlib
 
-- Every `std/*.jade` opens with a 5-line doc comment: purpose, primary types, primary functions, examples.
+- Every `std/*.jn` opens with a 5-line doc comment: purpose, primary types, primary functions, examples.
 - Names are `snake_case`.
 - Each exported symbol has at least one test in `tests/programs/std/`.
 
@@ -78,8 +78,8 @@ file-to-role mapping.
 ## Filing issues
 
 Include:
-- Jade source that reproduces the bug (minimum failing example).
-- Output of `jade --version`.
+- Jinn source that reproduces the bug (minimum failing example).
+- Output of `jinn --version`.
 - Expected vs actual behavior.
 - For ICE bugs: full panic message including the `ICE: ...` description.
 

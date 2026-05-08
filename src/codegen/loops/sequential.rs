@@ -231,7 +231,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// for x in gen — iterate over a generator/dispatch using direct context swap.
-    /// Calls jade_gen_resume to get each value, breaks when done.
+    /// Calls jinn_gen_resume to get each value, breaks when done.
     pub(in crate::codegen) fn compile_for_coroutine(
         &mut self,
         f: &hir::For,
@@ -251,7 +251,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(loop_bb);
 
         // Resume the generator
-        let gen_resume = crate::codegen::fn_or_die(&self.module, "jade_gen_resume");
+        let gen_resume = crate::codegen::fn_or_die(&self.module, "jinn_gen_resume");
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
         // Check if done

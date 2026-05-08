@@ -1,7 +1,7 @@
-/* R7/B-STORE — in-memory baseline matching benchmarks/store_ops_inmem.jade.
- * Uses parallel int64 arrays + linear search to mirror the Jade Vec form
+/* R7/B-STORE — in-memory baseline matching benchmarks/store_ops_inmem.jn.
+ * Uses parallel int64 arrays + linear search to mirror the Jinn Vec form
  * (no hash table). The original store_ops.c kept a Record[] struct array;
- * this variant aligns the data layout with the Jade side. */
+ * this variant aligns the data layout with the Jinn side. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>

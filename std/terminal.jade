@@ -15,13 +15,13 @@
 # `disable_raw()` and read with `std.io.read_byte`.
 
 extern *isatty(fd as i32) returns i32
-extern *jade_terminal_enable_raw(fd as i32) returns i32
-extern *jade_terminal_disable_raw(fd as i32) returns i32
-extern *jade_terminal_size(out_cols as %i32, out_rows as %i32) returns i32
+extern *jinn_terminal_enable_raw(fd as i32) returns i32
+extern *jinn_terminal_disable_raw(fd as i32) returns i32
+extern *jinn_terminal_size(out_cols as %i32, out_rows as %i32) returns i32
 extern *write(fd as i32, buf as %i8, len as i64) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
-extern *jade_getenv_or_empty(name as %i8) returns %i8
+extern *jinn_getenv_or_empty(name as %i8) returns %i8
 
 ESC is "\x1b"
 CSI is "\x1b["
@@ -98,7 +98,7 @@ CSI is "\x1b["
     CSI + "0m"
 
 *__env(name as String) returns String
-    __string_from_ptr(extern.jade_getenv_or_empty(%name))
+    __string_from_ptr(extern.jinn_getenv_or_empty(%name))
 
 # ── Screen control ───────────────────────────────────────────
 
@@ -157,10 +157,10 @@ CSI is "\x1b["
 # Enable raw mode on stdin (no echo, no canonical line buffering).
 # Returns true on success. Pair with `disable_raw()`.
 *enable_raw returns bool
-    extern.jade_terminal_enable_raw(0) equals 0
+    extern.jinn_terminal_enable_raw(0) equals 0
 
 *disable_raw returns bool
-    extern.jade_terminal_disable_raw(0) equals 0
+    extern.jinn_terminal_disable_raw(0) equals 0
 
 # ── Size detection ───────────────────────────────────────────
 
@@ -171,7 +171,7 @@ type Size
 *size returns Size
     cols_buf is extern.malloc(4)
     rows_buf is extern.malloc(4)
-    rc is extern.jade_terminal_size(cols_buf, rows_buf)
+    rc is extern.jinn_terminal_size(cols_buf, rows_buf)
     if rc neq 0
         extern.free(cols_buf)
         extern.free(rows_buf)

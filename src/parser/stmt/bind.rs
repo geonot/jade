@@ -66,7 +66,7 @@ impl Parser {
         // `a is RHS ? on_ok ! on_err` (handler chain). Both desugar at
         // parse-time into a small block of statements, wrapped in an
         // `if true { ... }` so we can return a single Stmt from this
-        // function (jade has no Stmt::Block variant).
+        // function (jinn has no Stmt::Block variant).
         //
         // We parse RHS with parse_pipeline so the trailing `?` and `!`
         // are visible to us (parse_expr/parse_ternary would consume them

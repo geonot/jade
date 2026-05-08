@@ -1,6 +1,6 @@
-# Jade Error Handling — Analysis & Design Document
+# Jinn Error Handling — Analysis & Design Document
 
-> Comprehensive review of Jade's current error model, comparison with 20+ languages,
+> Comprehensive review of Jinn's current error model, comparison with 20+ languages,
 > and concrete proposals for error propagation syntax.
 
 ---
@@ -9,10 +9,10 @@
 
 ### 1.1 Error Type Declaration (`err`)
 
-Jade has a dedicated `err` keyword for declaring error types. These compile identically
+Jinn has a dedicated `err` keyword for declaring error types. These compile identically
 to `enum` (tagged unions) but carry semantic meaning:
 
-```jade
+```jinn
 err MathError
     DivisionByZero
     Overflow
@@ -29,13 +29,13 @@ err IoError
 union representation, same match dispatch. The `err` keyword exists purely for readability
 and intent signaling.
 
-**Verified**: `tests/integration.rs:1038` (`err_def_parse`), `tests/programs/error_handling.jade`.
+**Verified**: `tests/integration.rs:1038` (`err_def_parse`), `tests/programs/error_handling.jn`.
 
 ### 1.2 Early Error Return (`!` / `!!`)
 
 The `!` operator performs an early return of an error value:
 
-```jade
+```jinn
 *safe_divide(a, b)
     if b equals 0
         ! DivisionByZero
@@ -50,7 +50,7 @@ There is no stack unwinding. There are no exceptions. The `!` is a local goto to
 the function exit with a specific value.
 
 **Verified**: `tests/integration.rs:1050` (`bang_return_basic`):
-```jade
+```jinn
 *check(x as i64) returns i64
     if x < 0
         ! -1
@@ -60,9 +60,9 @@ Output: `10\n-1`.
 
 ### 1.3 Error Propagation (`try` — prefix)
 
-Jade has a **prefix** `try` keyword that desugars to a match + early return:
+Jinn has a **prefix** `try` keyword that desugars to a match + early return:
 
-```jade
+```jinn
 *process()
     val is try get_option()    # unwrap or propagate Nothing
     result is try compute(val) # unwrap or propagate Err
@@ -80,9 +80,9 @@ The enclosing function must return a compatible Option/Result type.
 **Test coverage**: **No integration tests exist for `try`.** The typer code is implemented
 but untested. The desugaring was verified by reading `src/typer/expr.rs:1580-1780`.
 
-### 1.4 Option and Result Types (`std/result.jade`)
+### 1.4 Option and Result Types (`std/result.jn`)
 
-```jade
+```jinn
 enum Option
     Some(i64)
     None
@@ -98,7 +98,7 @@ Helpers: `is_some`, `is_none`, `unwrap`, `unwrap_or`, `map_opt`, `is_ok`, `is_er
 **Critical limitation**: These are **monomorphic**. `Option` wraps `i64` only. `Result`
 is `Ok(i64) / Err(String)` only. User programs must define their own enums for other types:
 
-```jade
+```jinn
 enum MaybeString
     Some(String)
     Nothing
@@ -106,19 +106,19 @@ enum MaybeString
 
 ### 1.5 Standard Library Error Patterns
 
-The std library does **not** use `Result`/`Option` from `std/result.jade`:
+The std library does **not** use `Result`/`Option` from `std/result.jn`:
 
 | Module | Error Pattern | Example |
 |--------|--------------|---------|
-| `http.jade` | Sentinel struct | `HttpResponse(status is 0, body is "failed")` |
-| `fs.jade` | Empty string | `cwd()` returns `""` on failure |
-| `io.jade` | Empty string | `read_line()` returns `""` on EOF/error |
-| `net.jade` | Negative int | `result < 0` |
-| `crypto.jade` | Boolean field | `CipherResult(ok is false)` |
-| `sqlite.jade` | Method query | `db.error()` returns last error string |
+| `http.jn` | Sentinel struct | `HttpResponse(status is 0, body is "failed")` |
+| `fs.jn` | Empty string | `cwd()` returns `""` on failure |
+| `io.jn` | Empty string | `read_line()` returns `""` on EOF/error |
+| `net.jn` | Negative int | `result < 0` |
+| `crypto.jn` | Boolean field | `CipherResult(ok is false)` |
+| `sqlite.jn` | Method query | `db.error()` returns last error string |
 
 This inconsistency exists because: (a) generic enums don't monomorphize well yet,
-(b) the `Result` and `Option` in `std/result.jade` are i64-only, and (c) returning
+(b) the `Result` and `Option` in `std/result.jn` are i64-only, and (c) returning
 structs with ok/error fields is simpler when you can't parameterize the type.
 
 ### 1.6 What `?` Does Today
@@ -128,7 +128,7 @@ The `?` token is used for two unrelated purposes:
 1. **Ternary operator**: `cond ? true_val ! false_val`
 2. **Match arm separator**: `Some(v) ? v`
 
-There is **no postfix `?`** for error propagation. Jade uses prefix `try` instead.
+There is **no postfix `?`** for error propagation. Jinn uses prefix `try` instead.
 
 ### 1.7 Summary of Strengths
 
@@ -168,9 +168,9 @@ if err != nil {
 }
 ```
 
-**Relevance to Jade**: Jade's `err` types are strictly better than C's int codes and Go's
+**Relevance to Jinn**: Jinn's `err` types are strictly better than C's int codes and Go's
 interface errors. The tagged union gives exhaustive checking that Go lacks. But Go's
-`%w` wrapping and `errors.Is()` / `errors.As()` for error chains are missing from Jade.
+`%w` wrapping and `errors.Is()` / `errors.As()` for error chains are missing from Jinn.
 
 ### 2.2 Sum Type + Pattern Match (Rust, OCaml, Haskell)
 
@@ -205,8 +205,8 @@ process s = do
     Right (Config validated)
 ```
 
-**Relevance to Jade**: Jade already has the core — `err` types ARE sum types, `match`
-works, `try` does prefix propagation. The gap is generics (Jade's Option is i64-only)
+**Relevance to Jinn**: Jinn already has the core — `err` types ARE sum types, `match`
+works, `try` does prefix propagation. The gap is generics (Jinn's Option is i64-only)
 and conversion (no `From` trait for coercing error types during propagation).
 
 ### 2.3 Exception-Based (Java, Python, C#, C++)
@@ -222,7 +222,7 @@ Context managers (`with`) for cleanup. Exception chaining (`raise X from Y`).
 **C#**: Unchecked exceptions only. `try/catch/finally/when`. Exception filters
 (`catch (E e) when (e.Code == 42)`) are unique.
 
-**Relevance to Jade**: Jade explicitly rejects exceptions — no hidden control flow,
+**Relevance to Jinn**: Jinn explicitly rejects exceptions — no hidden control flow,
 no stack unwinding, no performance cliff. This is the right call. But exception
 languages prove the value of: (a) forced error awareness (Java checked), (b) error
 chaining (Python `from`), and (c) cleanup blocks (finally/defer).
@@ -246,8 +246,8 @@ fun main(): console ()
 **Unison**: Abilities (algebraic effects). Error handling is an ability you request.
 Handler decides policy. Functions are pure descriptions; handlers interpret them.
 
-**Relevance to Jade**: Effect systems are theoretically superior but practically
-unfamiliar and complex. Jade's target audience (readability, English-like syntax)
+**Relevance to Jinn**: Effect systems are theoretically superior but practically
+unfamiliar and complex. Jinn's target audience (readability, English-like syntax)
 would be poorly served by algebraic effects. However, the *idea* of handlers that
 decide policy (retry, log, transform, propagate) is worth noting.
 
@@ -260,7 +260,7 @@ rather than handling them after the fact."
 **Ada/SPARK**: `raise` for exceptions, but SPARK subset uses contracts + formal
 verification to prove exceptions cannot occur. Avionics standard.
 
-**Relevance to Jade**: Jade's `assert` builtin is a minimal contract. Adding
+**Relevance to Jinn**: Jinn's `assert` builtin is a minimal contract. Adding
 `require`/`ensure` blocks on functions would complement error types — contracts
 prevent errors at boundaries, error types handle recoverable failures.
 
@@ -278,7 +278,7 @@ destroying the intermediate stack frames.
   (/ x y))
 ```
 
-**Relevance to Jade**: Too complex for Jade's philosophy. But the "separate policy
+**Relevance to Jinn**: Too complex for Jinn's philosophy. But the "separate policy
 from mechanism" principle is sound — the function signals a problem, the caller
 decides the recovery strategy.
 
@@ -297,9 +297,9 @@ use validated <- result.try(validate(config))
 Ok(process(validated))
 ```
 
-**Relevance to Jade**: Jade's pipeline `~` operator could compose with Result types
+**Relevance to Jinn**: Jinn's pipeline `~` operator could compose with Result types
 naturally: `input ~ parse ~ validate ~ process` where each step can fail. This is
-the "railway" pattern. Jade's `try` already does the unwrap-or-propagate, but there's
+the "railway" pattern. Jinn's `try` already does the unwrap-or-propagate, but there's
 no pipeline-aware error composition.
 
 ### 2.8 Defer/Cleanup (Go, Zig, Swift)
@@ -308,14 +308,14 @@ no pipeline-aware error composition.
 **Zig**: `errdefer` runs only on error return path. `defer` runs always.
 **Swift**: `defer` block runs at scope exit.
 
-**Relevance to Jade**: Jade has no `defer`. Functions that open files, acquire locks,
+**Relevance to Jinn**: Jinn has no `defer`. Functions that open files, acquire locks,
 or allocate resources have no guaranteed cleanup on error paths. Perceus RC handles
 memory, but non-memory resources (file handles, network connections) need explicit
 close calls that can be missed on `!` error returns.
 
 ---
 
-## Part 3 — Design Options for Jade
+## Part 3 — Design Options for Jinn
 
 ### Constraints
 
@@ -323,7 +323,7 @@ Any error handling enhancement must:
 
 1. **Not break existing code** — `err`, `!`, `try`, `match` on errors must work unchanged.
 2. **Not add exceptions** — No stack unwinding. Errors remain values.
-3. **Preserve readability** — Jade's English-like syntax is its identity.
+3. **Preserve readability** — Jinn's English-like syntax is its identity.
 4. **Zero-cost where unused** — No overhead for functions that don't fail.
 5. **Work with current `?` usage** — `?` is used for ternary and match arms.
 
@@ -331,7 +331,7 @@ Any error handling enhancement must:
 
 Instead of Rust's `?`, use postfix `try` as a method-like call:
 
-```jade
+```jinn
 *load_config(path as String)
     text is read_file(path).try      # propagate error
     config is json.parse(text).try   # propagate error
@@ -340,7 +340,7 @@ Instead of Rust's `?`, use postfix `try` as a method-like call:
 
 Or equivalently with pipelines:
 
-```jade
+```jinn
 *load_config(path as String)
     path ~ read_file ~ try ~ json.parse ~ try
 ```
@@ -361,7 +361,7 @@ This is purely a parser change; no new semantics.
 
 ### Option B: Keyword `or` Chains for Error Recovery
 
-```jade
+```jinn
 text is read_file(path) or ! IoError:ReadFailed(path)
 text is read_file(path) or ''          # provide default
 text is read_file(path) or log('warn') # side-effect and propagate
@@ -383,14 +383,14 @@ desugar to a match: `match lhs { Ok(v)/Some(v) => v, _ => rhs }`.
 
 ### Option C: Pipeline-Aware Error Propagation
 
-```jade
+```jinn
 *process(input)
     input ~ parse ~ validate ~ transform ~? finalize
 ```
 
 The `~?` operator means "pipe, but propagate error if previous step failed":
 
-```jade
+```jinn
 # Desugars to:
 _tmp1 is parse(input)
 if is_err(_tmp1) then return _tmp1
@@ -400,7 +400,7 @@ if is_err(_tmp2) then return _tmp2
 ```
 
 **Pros**:
-- Integrates naturally with Jade's pipeline syntax
+- Integrates naturally with Jinn's pipeline syntax
 - Compact for chains of fallible operations
 - Visually distinct from regular pipes
 
@@ -413,7 +413,7 @@ if is_err(_tmp2) then return _tmp2
 
 Orthogonal to error propagation but critical for correct error handling:
 
-```jade
+```jinn
 *process_file(path)
     fd is open(path)
     defer close(fd)      # runs at function exit, even on !
@@ -437,7 +437,7 @@ Alternatively, insert cleanup in the MIR before every `Terminator::Return`.
 
 ### Option E: `try` Blocks (Scoped Error Handling)
 
-```jade
+```jinn
 result is try
     text is read_file(path).try
     config is json.parse(text).try
@@ -494,22 +494,22 @@ at the block boundary rather than the function boundary.
 
 ## Part 5 — Script Mode Evaluation
 
-### What `jadec run` Does Today
+### What `jinnc run` Does Today
 
 Implemented in `src/main.rs:2008`. Accepts optional file argument:
 
 ```bash
-jadec run hello.jade           # compile, cache, execute
-jadec run hello.jade -- arg1   # with program arguments
+jinnc run hello.jn           # compile, cache, execute
+jinnc run hello.jn -- arg1   # with program arguments
 ```
 
-**Caching**: Hashes source content, stores compiled binary in `~/.cache/jade/`
+**Caching**: Hashes source content, stores compiled binary in `~/.cache/jinn/`
 (via `dirs_cache()`). Subsequent runs with unchanged source skip compilation.
 
 **Shebang**: The lexer (`src/lexer.rs:418`) skips `#!` lines at position 0:
 
-```jade
-#!/usr/bin/env jadec run
+```jinn
+#!/usr/bin/env jinnc run
 *main()
     log('hello from script')
 ```
@@ -530,18 +530,18 @@ jadec run hello.jade -- arg1   # with program arguments
 
 **Yes, but it's already implemented.** The combination of:
 
-- `jadec run file.jade` (compile + cache + execute)
-- Shebang support (`#!/usr/bin/env jadec run`)
+- `jinnc run file.jn` (compile + cache + execute)
+- Shebang support (`#!/usr/bin/env jinnc run`)
 - Content-hash caching (instant re-runs on unchanged source)
 
-...is equivalent to the best approaches from other compiled languages. Jade's approach
+...is equivalent to the best approaches from other compiled languages. Jinn's approach
 is closest to D's `rdmd` (hash-based caching) and Nim's `nim r` (compile-and-run).
 
 **What would NOT be worthwhile**:
 
 - **Full REPL with JIT** (remediation 5.4): Massive implementation effort for OrcJIT
   integration. Julia spent years on this and it's their core differentiator. Not
-  realistic for Jade's team size. The compile-run cycle with caching is sub-second
+  realistic for Jinn's team size. The compile-run cycle with caching is sub-second
   for typical scripts.
 
 - **Interpreter mode**: Would require a second complete execution backend. Every
@@ -552,7 +552,7 @@ is closest to D's `rdmd` (hash-based caching) and Nim's `nim r` (compile-and-run
 
 - Content-hash caching (done)
 - Shebang support (done)
-- Optional file argument on `jadec run` (done)
+- Optional file argument on `jinnc run` (done)
 
 ### Benchmark Considerations
 
@@ -565,7 +565,7 @@ time** (cached binary). Relevant benchmarks:
 - Compare with `python3 -c`, `node -e`, `go run` for equivalent programs
 
 These can be measured with the existing `run_benchmarks.py` infrastructure by timing
-`jadec run` on small programs.
+`jinnc run` on small programs.
 
 ---
 
@@ -583,12 +583,12 @@ The following error handling features have **no integration test coverage**:
 
 ## Current State (verified 2026-04-15)
 
-Jade's error handling is **errors-as-values** — no exceptions, no stack unwinding, no hidden control flow. Errors are algebraic data types (tagged unions) with the same representation as enums.
+Jinn's error handling is **errors-as-values** — no exceptions, no stack unwinding, no hidden control flow. Errors are algebraic data types (tagged unions) with the same representation as enums.
 
 ### What Exists
 
 #### 1. `err` Definitions — Custom Error Types
-```jade
+```jinn
 err MathError
     DivisionByZero
     Overflow
@@ -602,7 +602,7 @@ err IoError
 Compiled as tagged unions identical to `enum`. Each variant gets a sequential tag. Payload fields are stored in a byte array alongside the tag.
 
 #### 2. `!` / `!!` — Error Return Operator
-```jade
+```jinn
 *safe_divide(a, b)
     if b equals 0
         ! DivisionByZero    # early return with error value
@@ -611,13 +611,13 @@ Compiled as tagged unions identical to `enum`. Each variant gets a sequential ta
 `!` compiles to a plain `return`. The `!!` variant exists for disambiguation from the ternary else operator (`cond ? then ! else`).
 
 #### 3. Pattern Matching on Errors
-```jade
+```jinn
 match safe_divide(10, 0)
     DivisionByZero ? log('caught division by zero')
     _ ? log('ok')
 ```
 Since errors are enums, the existing match infrastructure handles them — including variants with payloads:
-```jade
+```jinn
 match open_file('')
     FileNotFound(msg) ? log(msg)
     PermissionDenied(msg) ? log(msg)
@@ -625,7 +625,7 @@ match open_file('')
 ```
 
 #### 4. Qualified Variant Syntax
-```jade
+```jinn
 ! FileError:NotFound           # explicit type qualification
 ! IoError:Timeout(5000)        # qualified with payload
 ```
@@ -638,7 +638,7 @@ Generic types auto-registered in the prelude:
 These get monomorphized: `Result_i64_String`, `Option_f64`, etc.
 
 #### 6. `try` — Error Propagation Keyword
-```jade
+```jinn
 *do_thing() returns Option
     v is try get_val()     # unwraps Some or early-returns Nothing
     Some(v + 1)
@@ -656,14 +656,14 @@ Compiler-inserted aborts for unrecoverable conditions:
 - Strict cast overflow
 - Float NaN cast
 
-These call `__jade_trap(msg)` which prints to stderr and aborts. Not user-facing.
+These call `__jinn_trap(msg)` which prints to stderr and aborts. Not user-facing.
 
-#### 8. `std/result.jade` — Helper Functions
+#### 8. `std/result.jn` — Helper Functions
 Non-generic helpers: `is_some`, `is_none`, `unwrap`, `unwrap_or`, `map_opt`, `is_ok`, `is_err`, `unwrap_ok`, `unwrap_err`, `ok_or`, `map_res`. These are i64-specific and redundant with the prelude generics.
 
 ### Working Examples (all tested)
 
-```jade
+```jinn
 # Error definition + return
 err IoError
     NotFound
@@ -699,7 +699,7 @@ enum Result
 |---------|-------|--------|
 | `err` definitions | `err_def_basic` | Passing |
 | `!` error return | `bang_return` | Passing |
-| `match` on error variants | `error_handling.jade` | Passing |
+| `match` on error variants | `error_handling.jn` | Passing |
 | `try` with Option (Some) | `try_option_some` | Passing |
 | `try` with Option (Nothing) | `try_option_nothing` | Passing |
 | `try` with Result (Ok) | `try_result_ok` | Passing |
@@ -723,7 +723,7 @@ No mechanism to guarantee cleanup runs (close file, release lock) when errors sh
 
 ### 5. No Typed Return Annotation for Errors
 Functions don't declare what errors they can return:
-```jade
+```jinn
 *open_file(path) returns ???   # What errors can this produce?
 ```
 The caller must read the source to know what to match against.
@@ -732,7 +732,7 @@ The caller must read the source to know what to match against.
 No automatic conversion between error types. If `parse()` returns `ParseError` and `open()` returns `IoError`, a function calling both must manually map one to the other.
 
 ### 7. Collections Helpers for Result/Option Are i64-Only
-`std/result.jade` defines non-generic `Option` and `Result` (both with `i64`). The prelude generics exist but lack helper methods — no `map`, `and_then`, `or_else`, `flatten` for generic variants.
+`std/result.jn` defines non-generic `Option` and `Result` (both with `i64`). The prelude generics exist but lack helper methods — no `map`, `and_then`, `or_else`, `flatten` for generic variants.
 
 ---
 
@@ -853,14 +853,14 @@ pub fn parse_config(path: String) -> Result(Config, ConfigError) {
 
 ---
 
-## Analysis: What Fits Jade?
+## Analysis: What Fits Jinn?
 
-### Jade's Existing Strengths
+### Jinn's Existing Strengths
 1. **`err` types** — first-class error definitions, clean syntax
 2. **`!` return** — minimal ceremony for error paths
 3. **Pattern matching** — exhaustive handling of error variants
 4. **`try`** — already exists for Option/Result propagation
-5. **No exceptions** — aligned with Jade's deterministic philosophy
+5. **No exceptions** — aligned with Jinn's deterministic philosophy
 6. **English-like syntax** — errors-as-values reads naturally
 
 ### Design Constraints
@@ -868,7 +868,7 @@ pub fn parse_config(path: String) -> Result(Config, ConfigError) {
 - Must maintain zero-cost abstraction (no hidden allocation)
 - Must not introduce stack unwinding or hidden control flow
 - Must compose well with pattern-directed functions
-- Should feel like natural English, consistent with Jade's syntax philosophy
+- Should feel like natural English, consistent with Jinn's syntax philosophy
 
 ---
 
@@ -878,7 +878,7 @@ pub fn parse_config(path: String) -> Result(Config, ConfigError) {
 
 The simplest extension — make `try` work with any `err`-defined type, not just Option/Result.
 
-```jade
+```jinn
 err ParseError
     BadSyntax(String)
     UnexpectedEof
@@ -903,7 +903,7 @@ err ParseError
 
 Declare what errors a function can produce, and let `try` auto-propagate matching types.
 
-```jade
+```jinn
 *read_file(path as String) raises IoError
     if not exists(path)
         ! FileNotFound(path)
@@ -924,7 +924,7 @@ Declare what errors a function can produce, and let `try` auto-propagate matchin
 
 Allow `try` with an error transformation clause.
 
-```jade
+```jinn
 *load_config(path as String) raises ConfigError
     text is try read_file(path) or ConfigError:ReadFailed(path)
     data is try parse_toml(text) or ConfigError:ParseFailed
@@ -940,7 +940,7 @@ Allow `try` with an error transformation clause.
 
 Borrowed from Go/Zig. Runs a statement when the current scope exits, regardless of how.
 
-```jade
+```jinn
 *process_file(path as String)
     fd is open(path)
     defer close(fd)
@@ -956,7 +956,7 @@ Borrowed from Go/Zig. Runs a statement when the current scope exits, regardless 
 
 Allow catching errors without full match, for recovery.
 
-```jade
+```jinn
 val is try parse_int(text) catch 0              # default on any error
 val is try parse_int(text) catch BadSyntax ? 0  # catch specific variant
 ```
@@ -976,6 +976,6 @@ val is try parse_int(text) catch BadSyntax ? 0  # catch specific variant
 
 **Phase C** (longer-term): Add `try ... catch` for local recovery and `try ... or` for error wrapping. These compose with Phase A and provide the context-addition pattern that's currently missing.
 
-**Defer**: `raises` annotations. They add complexity for modest benefit. The Jade community can develop conventions (like Go's `error` interface) before committing to compiler-enforced error sets. The risk of Java-style checked-exception fatigue is high.
+**Defer**: `raises` annotations. They add complexity for modest benefit. The Jinn community can develop conventions (like Go's `error` interface) before committing to compiler-enforced error sets. The risk of Java-style checked-exception fatigue is high.
 
-The key insight: **Jade already has 80% of a great error system.** The `err` + `!` + `match` + `try` combination is clean and principled. What's missing is `try` generality (Phase A), cleanup guarantees (Phase B), and error recovery sugar (Phase C). None of these require fundamental changes to the language's philosophy.
+The key insight: **Jinn already has 80% of a great error system.** The `err` + `!` + `match` + `try` combination is clean and principled. What's missing is `try` generality (Phase A), cleanup guarantees (Phase B), and error recovery sugar (Phase C). None of these require fundamental changes to the language's philosophy.

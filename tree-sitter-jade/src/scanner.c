@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 /*
- * External scanner for Jade's indentation-sensitive grammar.
+ * External scanner for Jinn's indentation-sensitive grammar.
  * Emits INDENT / DEDENT / NEWLINE / WS_NEWLINE tokens.
  */
 
@@ -33,15 +33,15 @@ static void init(Scanner *s) {
   s->eof_done = false;
 }
 
-void *tree_sitter_jade_external_scanner_create(void) {
+void *tree_sitter_jinn_external_scanner_create(void) {
   Scanner *s = calloc(1, sizeof(Scanner));
   init(s);
   return s;
 }
 
-void tree_sitter_jade_external_scanner_destroy(void *p) { free(p); }
+void tree_sitter_jinn_external_scanner_destroy(void *p) { free(p); }
 
-unsigned tree_sitter_jade_external_scanner_serialize(void *p, char *buf) {
+unsigned tree_sitter_jinn_external_scanner_serialize(void *p, char *buf) {
   Scanner *s = p;
   unsigned i = 0;
   buf[i++] = s->depth;
@@ -55,7 +55,7 @@ unsigned tree_sitter_jade_external_scanner_serialize(void *p, char *buf) {
   return i;
 }
 
-void tree_sitter_jade_external_scanner_deserialize(void *p, const char *buf, unsigned len) {
+void tree_sitter_jinn_external_scanner_deserialize(void *p, const char *buf, unsigned len) {
   Scanner *s = p;
   if (len == 0) { init(s); return; }
   unsigned i = 0;
@@ -73,7 +73,7 @@ static uint16_t cur_indent(Scanner *s) {
   return s->indent_stack[s->depth - 1];
 }
 
-bool tree_sitter_jade_external_scanner_scan(void *p, TSLexer *lex, const bool *valid) {
+bool tree_sitter_jinn_external_scanner_scan(void *p, TSLexer *lex, const bool *valid) {
   Scanner *s = p;
 
   // 1. Drain queued DEDENTs

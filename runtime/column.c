@@ -1,5 +1,5 @@
 /*
- * Column store runtime for Jade.
+ * Column store runtime for Jinn.
  *
  * Per-field column files enable vectorized aggregation (sum/avg/min/max)
  * on contiguous typed arrays without deserializing full records.
@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 #define COL_MAGIC "JADECOL\0"
 #define COL_HEADER_SIZE 24
@@ -35,7 +35,7 @@ static inline void *col_alloc(int64_t count, int64_t elem_bytes) {
     return malloc(bytes);
 }
 
-struct JadeCol {
+struct JinnCol {
     FILE   *fp;
     int64_t count;
     int64_t elem_size;  /* bytes per element */
@@ -44,8 +44,8 @@ struct JadeCol {
 
 /* ── Open / Close ─────────────────────────────────────────── */
 
-JadeCol *jade_col_open(const char *path, int64_t elem_size) {
-    JadeCol *c = (JadeCol *)calloc(1, sizeof(JadeCol));
+JinnCol *jinn_col_open(const char *path, int64_t elem_size) {
+    JinnCol *c = (JinnCol *)calloc(1, sizeof(JinnCol));
     if (!c) return NULL;
     strncpy(c->path, path, 255);
     c->elem_size = elem_size;
@@ -70,7 +70,7 @@ JadeCol *jade_col_open(const char *path, int64_t elem_size) {
     return c;
 }
 
-void jade_col_close(JadeCol *c) {
+void jinn_col_close(JinnCol *c) {
     if (!c) return;
     if (c->fp) fclose(c->fp);
     free(c);
@@ -78,28 +78,28 @@ void jade_col_close(JadeCol *c) {
 
 /* ── Append / Count ───────────────────────────────────────── */
 
-void jade_col_append(JadeCol *c, const void *data) {
+void jinn_col_append(JinnCol *c, const void *data) {
     if (!c || !c->fp) return;
     /* seek to end of data */
     if (fseek(c->fp, COL_HEADER_SIZE + c->count * c->elem_size, SEEK_SET) != 0) {
-        fprintf(stderr, "jade: column: fseek to data region failed\n");
+        fprintf(stderr, "jinn: column: fseek to data region failed\n");
         return;
     }
     if (fwrite(data, c->elem_size, 1, c->fp) != 1) {
-        fprintf(stderr, "jade: column: fwrite data failed\n");
+        fprintf(stderr, "jinn: column: fwrite data failed\n");
         return;
     }
     c->count++;
     /* update count in header */
     if (fseek(c->fp, 8, SEEK_SET) != 0 ||
         fwrite(&c->count, 8, 1, c->fp) != 1) {
-        fprintf(stderr, "jade: column: failed to update count header\n");
+        fprintf(stderr, "jinn: column: failed to update count header\n");
         c->count--; /* revert in-memory state */
     }
     fflush(c->fp);
 }
 
-int64_t jade_col_count(JadeCol *c) {
+int64_t jinn_col_count(JinnCol *c) {
     return c ? c->count : 0;
 }
 
@@ -107,7 +107,7 @@ int64_t jade_col_count(JadeCol *c) {
 
 /* Read all column values into a caller-supplied buffer.
  * Returns number of elements read. */
-int64_t jade_col_read_all(JadeCol *c, void *buf, int64_t max_elems) {
+int64_t jinn_col_read_all(JinnCol *c, void *buf, int64_t max_elems) {
     if (!c || !c->fp || c->count == 0) return 0;
     int64_t n = c->count < max_elems ? c->count : max_elems;
     fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
@@ -117,7 +117,7 @@ int64_t jade_col_read_all(JadeCol *c, void *buf, int64_t max_elems) {
 
 /* ── Vectorized i64 aggregation (scalar fallback) ─────────── */
 
-int64_t jade_col_sum_i64(JadeCol *c) {
+int64_t jinn_col_sum_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
@@ -133,7 +133,7 @@ int64_t jade_col_sum_i64(JadeCol *c) {
     return sum;
 }
 
-int64_t jade_col_min_i64(JadeCol *c) {
+int64_t jinn_col_min_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
@@ -147,7 +147,7 @@ int64_t jade_col_min_i64(JadeCol *c) {
     return val;
 }
 
-int64_t jade_col_max_i64(JadeCol *c) {
+int64_t jinn_col_max_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
@@ -162,13 +162,13 @@ int64_t jade_col_max_i64(JadeCol *c) {
 }
 
 /* avg returns the sum — caller divides by count for f64 result */
-int64_t jade_col_avg_sum_i64(JadeCol *c) {
-    return jade_col_sum_i64(c);
+int64_t jinn_col_avg_sum_i64(JinnCol *c) {
+    return jinn_col_sum_i64(c);
 }
 
 /* ── Vectorized f64 aggregation ───────────────────────────── */
 
-double jade_col_sum_f64(JadeCol *c) {
+double jinn_col_sum_f64(JinnCol *c) {
     if (!c || c->count == 0) return 0.0;
     double *buf = (double *)col_alloc(c->count, 8);
     if (!buf) return 0.0;
@@ -182,7 +182,7 @@ double jade_col_sum_f64(JadeCol *c) {
     return sum;
 }
 
-double jade_col_min_f64(JadeCol *c) {
+double jinn_col_min_f64(JinnCol *c) {
     if (!c || c->count == 0) return 0.0;
     double *buf = (double *)col_alloc(c->count, 8);
     if (!buf) return 0.0;
@@ -196,7 +196,7 @@ double jade_col_min_f64(JadeCol *c) {
     return val;
 }
 
-double jade_col_max_f64(JadeCol *c) {
+double jinn_col_max_f64(JinnCol *c) {
     if (!c || c->count == 0) return 0.0;
     double *buf = (double *)col_alloc(c->count, 8);
     if (!buf) return 0.0;
@@ -212,7 +212,7 @@ double jade_col_max_f64(JadeCol *c) {
 
 /* ── Distinct count (i64) — hash-based ────────────────────── */
 
-int64_t jade_col_distinct_i64(JadeCol *c) {
+int64_t jinn_col_distinct_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;

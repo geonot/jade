@@ -1,6 +1,6 @@
-# std.bangle — Minimal HTTP server framework for Jade
+# std.bangle — Minimal HTTP server framework for Jinn
 #
-# The Jade equivalent of Flask/Sinatra/Express. Takes the best of all
+# The Jinn equivalent of Flask/Sinatra/Express. Takes the best of all
 # micro web frameworks: simplicity of Flask, middleware of Express,
 # pattern matching of Sinatra.
 #
@@ -268,7 +268,7 @@ type App
     sb.write("Content-Type: " + resp.content_type + "\r\n")
     sb.write("Content-Length: " + to_string(resp.body.length) + "\r\n")
     sb.write("Connection: close\r\n")
-    sb.write("Server: bangle/jade\r\n")
+    sb.write("Server: bangle/jinn\r\n")
     loop resp.headers
         sb.write($.name + ": " + $.value + "\r\n")
     sb.write("\r\n")

@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Jade",
-  "scopeName": "source.jade-lang",
-  "fileTypes": ["jade"],
+  "name": "Jinn",
+  "scopeName": "source.jn-lang",
+  "fileTypes": ["jinn"],
   "patterns": [
     { "include": "#comment" },
     { "include": "#function-definition" },
@@ -20,7 +20,7 @@
   ],
   "repository": {
     "comment": {
-      "name": "comment.line.number-sign.jade",
+      "name": "comment.line.number-sign.jn",
       "match": "#.*$"
     },
 
@@ -29,16 +29,16 @@
         {
           "match": "(\\*)(\\w+)\\s*(\\()",
           "captures": {
-            "1": { "name": "keyword.other.function-def.jade" },
-            "2": { "name": "entity.name.function.jade" },
-            "3": { "name": "punctuation.definition.parameters.begin.jade" }
+            "1": { "name": "keyword.other.function-def.jn" },
+            "2": { "name": "entity.name.function.jn" },
+            "3": { "name": "punctuation.definition.parameters.begin.jn" }
           }
         },
         {
           "match": "(\\*)([a-zA-Z_]\\w*)(?=\\s|$)",
           "captures": {
-            "1": { "name": "keyword.other.function-def.jade" },
-            "2": { "name": "entity.name.function.jade" }
+            "1": { "name": "keyword.other.function-def.jn" },
+            "2": { "name": "entity.name.function.jn" }
           }
         }
       ]
@@ -47,39 +47,39 @@
     "type-definition": {
       "match": "\\b(type)\\s+(\\w+)",
       "captures": {
-        "1": { "name": "keyword.declaration.type.jade" },
-        "2": { "name": "entity.name.type.jade" }
+        "1": { "name": "keyword.declaration.type.jn" },
+        "2": { "name": "entity.name.type.jn" }
       }
     },
 
     "enum-definition": {
       "match": "\\b(enum)\\s+(\\w+)",
       "captures": {
-        "1": { "name": "keyword.declaration.enum.jade" },
-        "2": { "name": "entity.name.type.jade" }
+        "1": { "name": "keyword.declaration.enum.jn" },
+        "2": { "name": "entity.name.type.jn" }
       }
     },
 
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.jade",
+          "name": "keyword.control.jn",
           "match": "\\b(if|elif|else|while|until|unless|for|in|to|by|match|return|break|continue|loop|do|end|sim|select|default|from|yield|spawn|send|supervisor|strategy|children|build|transaction|insert|delete|query)\\b"
         },
         {
-          "name": "keyword.operator.word.jade",
+          "name": "keyword.operator.word.jn",
           "match": "\\b(is|neq|eq|and|or|not|xor|as|equals|mod|returns|lt|gt|lte|gte|nlt|ngt|ngte|nlte|in|strict)\\b"
         },
         {
-          "name": "keyword.declaration.jade",
+          "name": "keyword.declaration.jn",
           "match": "\\b(type|enum|pub|fn|trait|impl|actor|store|extern|err|use|channel|alias|rc|weak)\\b"
         },
         {
-          "name": "support.function.builtin.jade",
+          "name": "support.function.builtin.jn",
           "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float|assert|panic|time_now|popcount|clz|ctz|bswap|rotate_left|rotate_right|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul|checked_add|checked_sub|checked_mul|volatile_load|volatile_store|signal_handle|signal_ignore|signal_raise|weak_upgrade|atomic_load|atomic_store|atomic_add|atomic_sub|atomic_cas|vec_with_alloc|map_with_alloc|constant_time_eq|fields_of|type_of|size_of|align_of|matmul|ndarray|priority_queue|map|filter|fold|zip|take|skip|any|all|find|flatten|chain|collect|split|join|trim|to_upper|to_lower|replace|contains|starts_with|ends_with|char_at|slice|matches|find_all|replace_re|deque|grad|einsum|contract|count|where)\\b"
         },
         {
-          "name": "support.type.jade",
+          "name": "support.type.jn",
           "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|bool|str|void|String|Vec|Map|Set|PriorityQueue|NDArray|SIMD|Arena|Char|Deque|Cow|Generator)\\b"
         }
       ]
@@ -88,27 +88,27 @@
     "constants": {
       "patterns": [
         {
-          "name": "constant.language.boolean.true.jade",
+          "name": "constant.language.boolean.true.jn",
           "match": "\\btrue\\b"
         },
         {
-          "name": "constant.language.boolean.false.jade",
+          "name": "constant.language.boolean.false.jn",
           "match": "\\bfalse\\b"
         },
         {
-          "name": "constant.language.null.jade",
+          "name": "constant.language.null.jn",
           "match": "\\bnone\\b"
         },
         {
-          "name": "constant.language.unreachable.jade",
+          "name": "constant.language.unreachable.jn",
           "match": "\\bunreachable\\b"
         },
         {
-          "name": "variable.language.self.jade",
+          "name": "variable.language.self.jn",
           "match": "\\bself\\b"
         },
         {
-          "name": "variable.language.placeholder.jade",
+          "name": "variable.language.placeholder.jn",
           "match": "\\$[0-9]*"
         }
       ]
@@ -117,43 +117,43 @@
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.hex.jade",
+          "name": "constant.numeric.hex.jn",
           "match": "\\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\\b"
         },
         {
-          "name": "constant.numeric.binary.jade",
+          "name": "constant.numeric.binary.jn",
           "match": "\\b0[bB][01][01_]*\\b"
         },
         {
-          "name": "constant.numeric.octal.jade",
+          "name": "constant.numeric.octal.jn",
           "match": "\\b0[oO][0-7][0-7_]*\\b"
         },
         {
-          "name": "constant.numeric.float.jade",
+          "name": "constant.numeric.float.jn",
           "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9]+)?\\b"
         },
         {
-          "name": "constant.numeric.integer.jade",
+          "name": "constant.numeric.integer.jn",
           "match": "\\b[0-9][0-9_]*\\b"
         }
       ]
     },
 
     "strings": {
-      "name": "string.quoted.single.jade",
+      "name": "string.quoted.single.jn",
       "begin": "'",
       "end": "'",
       "patterns": [
         {
-          "name": "constant.character.escape.jade",
+          "name": "constant.character.escape.jn",
           "match": "\\\\[nrt0\\\\']"
         },
         {
-          "name": "meta.embedded.line.jade",
+          "name": "meta.embedded.line.jn",
           "begin": "\\{",
           "end": "\\}",
-          "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.jade" } },
-          "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.jade" } },
+          "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.jn" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.jn" } },
           "patterns": [
             { "include": "#operators" },
             { "include": "#numbers" },
@@ -165,12 +165,12 @@
     },
 
     "raw-strings": {
-      "name": "string.quoted.double.jade",
+      "name": "string.quoted.double.jn",
       "begin": "\"",
       "end": "\"",
       "patterns": [
         {
-          "name": "constant.character.escape.jade",
+          "name": "constant.character.escape.jn",
           "match": "\\\\."
         }
       ]
@@ -179,43 +179,43 @@
     "operators": {
       "patterns": [
         {
-          "name": "keyword.operator.exponent.jade",
+          "name": "keyword.operator.exponent.jn",
           "match": "\\*\\*"
         },
         {
-          "name": "keyword.operator.comparison.jade",
+          "name": "keyword.operator.comparison.jn",
           "match": ">=|<=|>|<"
         },
         {
-          "name": "keyword.operator.shift.jade",
+          "name": "keyword.operator.shift.jn",
           "match": "<<|>>"
         },
         {
-          "name": "keyword.operator.arithmetic.jade",
+          "name": "keyword.operator.arithmetic.jn",
           "match": "\\+|-|/|%"
         },
         {
-          "name": "keyword.operator.bitwise.jade",
+          "name": "keyword.operator.bitwise.jn",
           "match": "\\^|&|\\|"
         },
         {
-          "name": "keyword.operator.pipeline.jade",
+          "name": "keyword.operator.pipeline.jn",
           "match": "~"
         },
         {
-          "name": "keyword.operator.ternary.jade",
+          "name": "keyword.operator.ternary.jn",
           "match": "\\?"
         },
         {
-          "name": "keyword.operator.deref.jade",
+          "name": "keyword.operator.deref.jn",
           "match": "@"
         },
         {
-          "name": "keyword.operator.ref.jade",
+          "name": "keyword.operator.ref.jn",
           "match": "%"
         },
         {
-          "name": "keyword.operator.star.jade",
+          "name": "keyword.operator.star.jn",
           "match": "\\*"
         }
       ]
@@ -224,15 +224,15 @@
     "function-call": {
       "match": "\\b(\\w+)\\s*(\\()",
       "captures": {
-        "1": { "name": "entity.name.function.call.jade" },
-        "2": { "name": "punctuation.definition.arguments.begin.jade" }
+        "1": { "name": "entity.name.function.call.jn" },
+        "2": { "name": "punctuation.definition.arguments.begin.jn" }
       }
     },
 
     "identifiers": {
       "patterns": [
         {
-          "name": "variable.other.jade",
+          "name": "variable.other.jn",
           "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
         }
       ]
@@ -241,23 +241,23 @@
     "punctuation": {
       "patterns": [
         {
-          "name": "punctuation.separator.comma.jade",
+          "name": "punctuation.separator.comma.jn",
           "match": ","
         },
         {
-          "name": "punctuation.accessor.dot.jade",
+          "name": "punctuation.accessor.dot.jn",
           "match": "\\."
         },
         {
-          "name": "punctuation.separator.colon.jade",
+          "name": "punctuation.separator.colon.jn",
           "match": ":"
         },
         {
-          "name": "punctuation.bracket.round.jade",
+          "name": "punctuation.bracket.round.jn",
           "match": "[()]"
         },
         {
-          "name": "punctuation.bracket.square.jade",
+          "name": "punctuation.bracket.square.jn",
           "match": "[\\[\\]]"
         }
       ]

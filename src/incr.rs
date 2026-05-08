@@ -165,9 +165,9 @@ pub struct ArtifactCache {
 }
 
 impl ArtifactCache {
-    /// Create a new artifact cache at `~/.cache/jade/artifacts/`.
+    /// Create a new artifact cache at `~/.cache/jinn/artifacts/`.
     pub fn new() -> Self {
-        let cache_dir = cache_root().join("jade").join("artifacts");
+        let cache_dir = cache_root().join("jinn").join("artifacts");
         ArtifactCache { cache_dir }
     }
 
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_artifact_cache_roundtrip() {
-        let dir = std::env::temp_dir().join("jade_test_cache");
+        let dir = std::env::temp_dir().join("jinn_test_cache");
         let _ = std::fs::remove_dir_all(&dir);
         let cache = ArtifactCache::with_dir(dir.clone());
 

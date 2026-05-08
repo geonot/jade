@@ -94,33 +94,33 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::MapInit => self.compile_map_new(),
                 mir::InstKind::SetInit => {
-                    if let Some(fv) = self.module.get_function("jade_set_new") {
+                    if let Some(fv) = self.module.get_function("jinn_set_new") {
                         let csv = b!(self.bld.build_call(fv, &[], "set"));
                         Ok(self.call_result(csv))
                     } else {
                         Err(
-                        "mir_codegen: SetInit used but jade_set_new runtime function not declared"
+                        "mir_codegen: SetInit used but jinn_set_new runtime function not declared"
                             .into(),
                     )
                     }
                 }
                 mir::InstKind::PQInit => {
-                    if let Some(fv) = self.module.get_function("jade_pq_new") {
+                    if let Some(fv) = self.module.get_function("jinn_pq_new") {
                         let csv = b!(self.bld.build_call(fv, &[], "pq"));
                         Ok(self.call_result(csv))
                     } else {
                         Err(
-                        "mir_codegen: PQInit used but jade_pq_new runtime function not declared"
+                        "mir_codegen: PQInit used but jinn_pq_new runtime function not declared"
                             .into(),
                     )
                     }
                 }
                 mir::InstKind::DequeInit => {
-                    if let Some(fv) = self.module.get_function("jade_deque_new") {
+                    if let Some(fv) = self.module.get_function("jinn_deque_new") {
                         let csv = b!(self.bld.build_call(fv, &[], "deque"));
                         Ok(self.call_result(csv))
                     } else {
-                        Err("mir_codegen: DequeInit used but jade_deque_new runtime function not declared".into())
+                        Err("mir_codegen: DequeInit used but jinn_deque_new runtime function not declared".into())
                     }
                 }
 

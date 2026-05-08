@@ -23,13 +23,13 @@ extern *access(path as %i8, mode as i32) returns i32
 extern *realpath(path as %i8, resolved as %i8) returns %i8
 extern *c_symlink(target as %i8, linkpath as %i8) returns i32
 extern *unlink(path as %i8) returns i32
-extern *jade_dirent_name(ent as %i8) returns %i8
-extern *jade_is_dir(path as %i8) returns i32
-extern *jade_is_file(path as %i8) returns i32
-extern *jade_is_symlink(path as %i8) returns i32
-extern *jade_file_mtime(path as %i8) returns i64
-extern *jade_file_size(path as %i8) returns i64
-extern *jade_chmod(path as %i8, mode as i32) returns i32
+extern *jinn_dirent_name(ent as %i8) returns %i8
+extern *jinn_is_dir(path as %i8) returns i32
+extern *jinn_is_file(path as %i8) returns i32
+extern *jinn_is_symlink(path as %i8) returns i32
+extern *jinn_file_mtime(path as %i8) returns i64
+extern *jinn_file_size(path as %i8) returns i64
+extern *jinn_chmod(path as %i8, mode as i32) returns i32
 
 use io
 
@@ -74,7 +74,7 @@ X_OK is 1
         ent is extern.readdir(dir)
         if ent as i64 equals 0
             break
-        name_ptr is extern.jade_dirent_name(ent)
+        name_ptr is extern.jinn_dirent_name(ent)
         name is __string_from_ptr(name_ptr)
         if name neq "." and name neq ".."
             entries.push(name)
@@ -138,24 +138,24 @@ X_OK is 1
 # ── File size ────────────────────────────────────────────────
 
 *file_size(path as String)
-    extern.jade_file_size(%path)
+    extern.jinn_file_size(%path)
 
 # ── Type checks ──────────────────────────────────────────────
 
 *is_dir(path as String)
-    extern.jade_is_dir(%path) neq 0
+    extern.jinn_is_dir(%path) neq 0
 
 *is_file(path as String)
-    extern.jade_is_file(%path) neq 0
+    extern.jinn_is_file(%path) neq 0
 
 *is_symlink(path as String)
-    extern.jade_is_symlink(%path) neq 0
+    extern.jinn_is_symlink(%path) neq 0
 
 *modified(path as String)
-    extern.jade_file_mtime(%path)
+    extern.jinn_file_mtime(%path)
 
 *chmod(path as String, mode)
-    extern.jade_chmod(%path, mode) equals 0
+    extern.jinn_chmod(%path, mode) equals 0
 
 *touch(path as String)
     fp is extern.fopen(%path, "a")

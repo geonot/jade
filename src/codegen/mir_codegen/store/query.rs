@@ -99,7 +99,7 @@ impl<'ctx> Compiler<'ctx> {
             // Hash the filter value and look up in index
             let idx_ptr = self.load_store_idx(store_name, field_name)?;
             let hash = self.idx_hash_field(filter_val, &field_ty)?;
-            let lookup_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_lookup");
+            let lookup_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_lookup");
             let file_offset = self
                 .call_result(b!(self.bld.build_call(
                     lookup_fn,
@@ -185,7 +185,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unconditional_branch(done_bb));
 
             self.bld.position_at_end(done_bb);
-            let result = self.load_store_record_as_jade(st, result_ptr, &sd)?;
+            let result = self.load_store_record_as_jinn(st, result_ptr, &sd)?;
             return Ok(result);
         }
 
@@ -300,7 +300,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
-        let result = self.load_store_record_as_jade(st, result_ptr, &sd)?;
+        let result = self.load_store_record_as_jinn(st, result_ptr, &sd)?;
         Ok(result)
     }
 

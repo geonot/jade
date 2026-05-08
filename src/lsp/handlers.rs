@@ -95,7 +95,7 @@ pub fn handle_initialize(_params: Value) -> Value {
             }),
         },
         server_info: ServerInfo {
-            name: "jadec-lsp".into(),
+            name: "jinnc-lsp".into(),
             version: "0.2.0".into(),
         },
     };
@@ -152,7 +152,7 @@ pub fn handle_hover(state: &ServerState, params: Value) -> Value {
         let hover = Hover {
             contents: MarkupContent {
                 kind: "markdown",
-                value: format!("```jade\n{sig}\n```"),
+                value: format!("```jinn\n{sig}\n```"),
             },
             range: None,
         };
@@ -470,7 +470,7 @@ fn build_diagnostics(state: &ServerState, uri: &str) -> Vec<Diagnostic> {
                     DiagSeverity::Warning => 2,
                 },
                 message: d.message.clone(),
-                source: Some("jadec"),
+                source: Some("jinnc"),
             }
         })
         .collect()

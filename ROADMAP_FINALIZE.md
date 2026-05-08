@@ -22,12 +22,12 @@ test (or runtime command) that exercises it.
 | **N-6** (R12) | Query-block desugaring (`store products … where … select …`) | [tests/integration.rs](tests/integration.rs#L2474-L2511) `query_block_select`/`and`/`delete`/`set`/`multi_where` | 5 tests pass |
 | **N-7** (R10) | Named-field insert `insert users (name is 'Alice', age is 30)` | [tests/integration.rs](tests/integration.rs#L4402-L4415) | passes; smoke run prints `30` |
 | **N-8** (R5) | Green CI / `*main` send syntax | [src/parser/expr.rs](src/parser/expr.rs) | `tests::actor_*` |
-| **N-9** (R6) | `jade.md` reflects current syntax | [jade.md](jade.md) | doc only |
+| **N-9** (R6) | `jinn.md` reflects current syntax | [jinn.md](jinn.md) | doc only |
 | **R7** | Re-baseline benchmarks with documented stub flags | [benchmarks/README.md](benchmarks/README.md), [benchmarks/comparison/](benchmarks/comparison/) | `python3 run_benchmarks.py --runs=3 --quiet` runs cleanly |
 | **R8** | Tighten BinOp validation — concrete-type check + actionable diagnostic | [src/typer/expr.rs](src/typer/expr.rs) BinOp arm | 5 negative tests in [tests/integration.rs](tests/integration.rs); ad-hoc `log(true + false)` rejected with `operator '+' not defined for 'bool' and 'bool' (line 2); requires numeric, String, types or a struct with an 'add' method` |
 | **R9** | Honest C baselines for `select_latency`, `channel_throughput` | [benchmarks/comparison/select_latency.c](benchmarks/comparison/select_latency.c) (SPSC ring), [benchmarks/comparison/channel_throughput.c](benchmarks/comparison/channel_throughput.c) | both compile via `run_benchmarks.py` |
 | **R11** | Dual-Perceus gating (`--debug-perceus` → HIR PerceusPass) | [src/main.rs](src/main.rs) `debug_perceus: bool`, [tests/perceus_debug.rs](tests/perceus_debug.rs) | 1 test passes |
-| **R13** (impl) | Amortised store growth via `ftruncate` 64 KiB chunks | [runtime/util.c](runtime/util.c) `jade_store_reserve`, [runtime/jade_rt.h](runtime/jade_rt.h), [src/codegen/store_ops.rs](src/codegen/store_ops.rs), [src/codegen/mir_codegen/store.rs](src/codegen/mir_codegen/store.rs) (logical-end seek replaces SEEK_END after ftruncate) | smoke: `store_ops`, `store_ops_inmem`, `store_perf` benchmarks compile and run correctly |
+| **R13** (impl) | Amortised store growth via `ftruncate` 64 KiB chunks | [runtime/util.c](runtime/util.c) `jinn_store_reserve`, [runtime/jinn_rt.h](runtime/jinn_rt.h), [src/codegen/store_ops.rs](src/codegen/store_ops.rs), [src/codegen/mir_codegen/store.rs](src/codegen/mir_codegen/store.rs) (logical-end seek replaces SEEK_END after ftruncate) | smoke: `store_ops`, `store_ops_inmem`, `store_perf` benchmarks compile and run correctly |
 | **R16** (proptest) | Property tests for lexer/parser stability | [tests/proptest_smoke.rs](tests/proptest_smoke.rs) — 3 tests × 256 cases (`lexer_never_panics`, `parser_never_panics_on_lexer_output`, `known_good_program_parses`); `proptest = "1.5"` in [Cargo.toml](Cargo.toml) | all 3 pass |
 | **Asm path** (A.3) | Inline asm acceptance in unsafe blocks | [src/parser/expr.rs](src/parser/expr.rs) | 1 integration test passes |
 | **Preflight script** (Part C) | 7-step gate authored | [scripts/preflight.sh](scripts/preflight.sh) | written, executable; **not yet executed end-to-end** — see §3 |
@@ -54,7 +54,7 @@ Ordered by recommended sprint priority (smaller / higher-leverage items first).
 Without this, `cargo clippy --release -- -D warnings` (preflight step 4) fails
 and the entire preflight gate is unusable.
 
-* **Symptom**: ~16 unused-variable / unused-import warnings in `jadec` lib
+* **Symptom**: ~16 unused-variable / unused-import warnings in `jinnc` lib
   (`HashMap` unused, `ptr_ty` unused, etc.).
 * **Tasks**:
   1. `cargo clippy --release --all-targets 2>&1 | grep -E "^(warning|error)"`
@@ -84,7 +84,7 @@ and the entire preflight gate is unusable.
 See §1 correction. No outstanding work; if a regression is suspected later,
 add a guard test:
 
-```jade
+```jinn
 *main
     a is true
     log(a)        # expect: true
@@ -103,7 +103,7 @@ currently demonstrates the speedup. Investigate before declaring win:
      symptomatic of per-record `fflush` or full WAL fsync per insert.
   2. Per-insert `fstat` syscall is itself the bottleneck — cache file size in
      a sidecar struct keyed by `FILE *`.
-  3. `JADE_STORE_CHUNK = 64 KiB` may be too small for a 1 M-row insert load;
+  3. `JINN_STORE_CHUNK = 64 KiB` may be too small for a 1 M-row insert load;
      try 256 KiB / 1 MiB.
 * **Tasks**:
   1. `perf record -F 999 ./store_ops_bench && perf report` — identify the top
@@ -114,7 +114,7 @@ currently demonstrates the speedup. Investigate before declaring win:
      `store_insert_million_no_wal`) and re-measure.
   4. Document final ratio in [benchmarks/README.md](benchmarks/README.md).
 * **Acceptance**: An identified, measurable benchmark improves by ≥10% with
-  R13 enabled vs `JADE_STORE_CHUNK = sizeof(record)` (one-record reservation).
+  R13 enabled vs `JINN_STORE_CHUNK = sizeof(record)` (one-record reservation).
 * **Effort**: M.
 
 ### 2.5 N-7 / N-6 — already complete (no work)
@@ -147,7 +147,7 @@ Verified: 5 query-block tests + named-field insert test pass; ad-hoc
      [src/codegen/mir_codegen/](src/codegen/mir_codegen/), invoke
      `self.set_debug_location(inst.span.line, inst.span.col)` *before* the
      first `build_*` call of that handler.
-  4. Replace stand-in DIType (currently `__jade_local`, 64-bit
+  4. Replace stand-in DIType (currently `__jinn_local`, 64-bit
      `DW_ATE_unsigned`) with proper basic types: `i32` / `i64`
      (`DW_ATE_signed`), `u32`/`u64` (`DW_ATE_unsigned`), `f64`
      (`DW_ATE_float`), pointer types via
@@ -157,11 +157,11 @@ Verified: 5 query-block tests + named-field insert test pass; ad-hoc
      in `compile_mir_fn`.
   6. Re-enable `self.attach_dbg_declare(...)` calls in stmt.rs (already
      written).
-  7. Add `tests/programs/dwarf_smoke.jade` with `--debug -O0` and an LLDB-
+  7. Add `tests/programs/dwarf_smoke.jn` with `--debug -O0` and an LLDB-
      scripted assertion.
 * **Acceptance**:
   ```
-  jadec --debug -O0 tests/programs/dwarf_smoke.jade -o /tmp/d
+  jinnc --debug -O0 tests/programs/dwarf_smoke.jn -o /tmp/d
   lldb --batch -o "br set -n main" -o "run" -o "frame variable" /tmp/d
   ```
   prints `(i64) x = 7` (or equivalent) for at least one local.
@@ -186,13 +186,13 @@ main records file.
      emit `[i64 offset][i64 length]` for variable strings; insert path appends
      the bytes to a sidecar `.blob` file (or to the tail of `.store` past a
      reserved heap region).
-  3. **Read path**: extend `jade_store_get_*` runtime helpers in
+  3. **Read path**: extend `jinn_store_get_*` runtime helpers in
      [runtime/util.c](runtime/util.c) to dereference offset+length into a
-     freshly-allocated `JadeString`.
-  4. **Predicate evaluator**: update `jade_store_predicate_eval` to load
+     freshly-allocated `JinnString`.
+  4. **Predicate evaluator**: update `jinn_store_predicate_eval` to load
      variable strings before comparison.
   5. **Migration**: stub a `runtime/migrate.c` routine
-     `jade_store_migrate_v1_to_v2(path)` that walks the old fixed-256 file
+     `jinn_store_migrate_v1_to_v2(path)` that walks the old fixed-256 file
      and rewrites it into the new layout. Gate with a one-shot `migrate <store>`
      CLI subcommand or auto-detect on open via header magic.
   6. **WAL compatibility**: bump WAL record version; ensure replay handles
@@ -210,9 +210,9 @@ main records file.
 Proptest layer landed; coverage-guided fuzzing still missing.
 
 * **Tasks**:
-  1. `cd jade && cargo install cargo-fuzz && cargo fuzz init`.
+  1. `cd jinn && cargo install cargo-fuzz && cargo fuzz init`.
   2. Write `fuzz/fuzz_targets/fuzz_target_parser.rs` — feed bytes into
-     `jade::lexer::Lexer` then `jade::parser::Parser`; assert no panic.
+     `jinn::lexer::Lexer` then `jinn::parser::Parser`; assert no panic.
   3. Write `fuzz/fuzz_targets/fuzz_target_unify.rs` — generate random
      `Type` trees via `arbitrary` and assert `unify(a, b) == unify(b, a)` and
      `unify(a, a) == a`.
@@ -256,11 +256,11 @@ strawman comparisons. **Effort**: M, low priority.
 
 | # | Item | Where | Impact |
 |---|------|-------|--------|
-| 1 | ~16 unused-variable / unused-import warnings in lib | jadec lib | Blocks `cargo clippy -D warnings` → blocks preflight step 4 |
+| 1 | ~16 unused-variable / unused-import warnings in lib | jinnc lib | Blocks `cargo clippy -D warnings` → blocks preflight step 4 |
 | 2 | DI subprogram scope never pushed | [src/codegen/mir_codegen/mod.rs](src/codegen/mir_codegen/mod.rs) `compile_mir_fn` | `attach_dbg_declare` is a silent no-op even with `--debug` |
 | 3 | R13 has no measured win on any benchmark yet | runtime/util.c | Unverified speedup claim — see §2.4 |
-| 4 | `JADE_STORE_CHUNK` = 64 KiB hard-coded | [runtime/util.c](runtime/util.c) | Possibly suboptimal for large bulk insert; needs §2.4 analysis |
-| 5 | Per-insert `fstat` syscall in `jade_store_reserve` | [runtime/util.c](runtime/util.c) | Could cache file size in a sidecar struct |
+| 4 | `JINN_STORE_CHUNK` = 64 KiB hard-coded | [runtime/util.c](runtime/util.c) | Possibly suboptimal for large bulk insert; needs §2.4 analysis |
+| 5 | Per-insert `fstat` syscall in `jinn_store_reserve` | [runtime/util.c](runtime/util.c) | Could cache file size in a sidecar struct |
 | 6 | Proptest char alphabet excludes tabs | [tests/proptest_smoke.rs](tests/proptest_smoke.rs) | Tabs short-circuit lexer with error — by design but not fuzzed |
 | 7 | `(<store> where).length` rejected (good diagnostic) | [src/typer/expr.rs](src/typer/expr.rs) | UX gap — see §2.2 |
 | 8 | preflight.sh never run end-to-end in CI | [scripts/preflight.sh](scripts/preflight.sh) | Gate is theoretical until executed |

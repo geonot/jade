@@ -7,17 +7,17 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include "jade_rt.h"
+#include "jinn_rt.h"
 
 static int tls_initialized = 0;
 
-struct jade_tls_conn {
+struct jinn_tls_conn {
     SSL_CTX *ctx;
     SSL *ssl;
     int fd;
 };
 
-void jade_tls_init(void) {
+void jinn_tls_init(void) {
     if (!tls_initialized) {
         SSL_library_init();
         SSL_load_error_strings();
@@ -27,9 +27,9 @@ void jade_tls_init(void) {
 }
 
 /* Create a TLS client connection to host:port.
- * Returns a pointer to jade_tls_conn, or NULL on failure. */
-jade_tls_conn *jade_tls_connect(const char *host, int port) {
-    jade_tls_init();
+ * Returns a pointer to jinn_tls_conn, or NULL on failure. */
+jinn_tls_conn *jinn_tls_connect(const char *host, int port) {
+    jinn_tls_init();
     
     const SSL_METHOD *method = TLS_client_method();
     SSL_CTX *ctx = SSL_CTX_new(method);
@@ -82,24 +82,24 @@ jade_tls_conn *jade_tls_connect(const char *host, int port) {
         return NULL;
     }
     
-    jade_tls_conn *conn = (jade_tls_conn *)malloc(sizeof(jade_tls_conn));
+    jinn_tls_conn *conn = (jinn_tls_conn *)malloc(sizeof(jinn_tls_conn));
     conn->ctx = ctx;
     conn->ssl = ssl;
     conn->fd = fd;
     return conn;
 }
 
-long jade_tls_send(jade_tls_conn *conn, const char *buf, long len) {
+long jinn_tls_send(jinn_tls_conn *conn, const char *buf, long len) {
     if (!conn || !conn->ssl) return -1;
     return SSL_write(conn->ssl, buf, (int)len);
 }
 
-long jade_tls_recv(jade_tls_conn *conn, char *buf, long len) {
+long jinn_tls_recv(jinn_tls_conn *conn, char *buf, long len) {
     if (!conn || !conn->ssl) return -1;
     return SSL_read(conn->ssl, buf, (int)len);
 }
 
-void jade_tls_close(jade_tls_conn *conn) {
+void jinn_tls_close(jinn_tls_conn *conn) {
     if (!conn) return;
     if (conn->ssl) {
         SSL_shutdown(conn->ssl);
@@ -113,7 +113,7 @@ void jade_tls_close(jade_tls_conn *conn) {
 /* DNS resolution: resolve hostname to first IPv4/IPv6 address string.
  * Writes result into out_buf (at most out_len bytes).
  * Returns 0 on success, -1 on failure. */
-int jade_dns_resolve(const char *host, char *out_buf, int out_len) {
+int jinn_dns_resolve(const char *host, char *out_buf, int out_len) {
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -130,7 +130,7 @@ int jade_dns_resolve(const char *host, char *out_buf, int out_len) {
 /* DNS resolution: resolve hostname to all addresses.
  * Writes newline-separated IP strings into out_buf.
  * Returns number of addresses found. */
-int jade_dns_resolve_all(const char *host, char *out_buf, int out_len) {
+int jinn_dns_resolve_all(const char *host, char *out_buf, int out_len) {
     struct addrinfo hints, *result, *rp;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -161,17 +161,17 @@ int jade_dns_resolve_all(const char *host, char *out_buf, int out_len) {
 
 /* === Server-side TLS, error retrieval, peer info === */
 
-struct jade_tls_listener {
+struct jinn_tls_listener {
     SSL_CTX *ctx;
     int listen_fd;
 };
 
 /* Start a TLS server bound to host:port using cert/key PEM files.
  * Returns a pointer or NULL on failure. */
-struct jade_tls_listener *jade_tls_listen(const char *host, int port,
+struct jinn_tls_listener *jinn_tls_listen(const char *host, int port,
                                           const char *cert_path,
                                           const char *key_path) {
-    jade_tls_init();
+    jinn_tls_init();
     const SSL_METHOD *method = TLS_server_method();
     SSL_CTX *ctx = SSL_CTX_new(method);
     if (!ctx) return NULL;
@@ -206,13 +206,13 @@ struct jade_tls_listener *jade_tls_listen(const char *host, int port,
         SSL_CTX_free(ctx);
         return NULL;
     }
-    struct jade_tls_listener *l = (struct jade_tls_listener *)malloc(sizeof(*l));
+    struct jinn_tls_listener *l = (struct jinn_tls_listener *)malloc(sizeof(*l));
     l->ctx = ctx;
     l->listen_fd = fd;
     return l;
 }
 
-jade_tls_conn *jade_tls_accept(struct jade_tls_listener *l) {
+jinn_tls_conn *jinn_tls_accept(struct jinn_tls_listener *l) {
     if (!l) return NULL;
     int cfd = accept(l->listen_fd, NULL, NULL);
     if (cfd < 0) return NULL;
@@ -223,14 +223,14 @@ jade_tls_conn *jade_tls_accept(struct jade_tls_listener *l) {
         close(cfd);
         return NULL;
     }
-    jade_tls_conn *c = (jade_tls_conn *)malloc(sizeof(*c));
+    jinn_tls_conn *c = (jinn_tls_conn *)malloc(sizeof(*c));
     c->ctx = NULL;          /* shared from listener; do not free */
     c->ssl = ssl;
     c->fd = cfd;
     return c;
 }
 
-void jade_tls_listener_close(struct jade_tls_listener *l) {
+void jinn_tls_listener_close(struct jinn_tls_listener *l) {
     if (!l) return;
     if (l->listen_fd >= 0) close(l->listen_fd);
     if (l->ctx) SSL_CTX_free(l->ctx);
@@ -239,7 +239,7 @@ void jade_tls_listener_close(struct jade_tls_listener *l) {
 
 /* Copy the most recent OpenSSL error string into buf. Returns bytes
  * written (excluding NUL), or 0 if no error. */
-long jade_tls_last_error(char *buf, long len) {
+long jinn_tls_last_error(char *buf, long len) {
     unsigned long e = ERR_peek_last_error();
     if (e == 0 || len <= 0) return 0;
     ERR_error_string_n(e, buf, (size_t)len);
@@ -247,7 +247,7 @@ long jade_tls_last_error(char *buf, long len) {
 }
 
 /* Copy the peer certificate subject DN into buf. Returns bytes written. */
-long jade_tls_peer_cert_subject(jade_tls_conn *conn, char *buf, long len) {
+long jinn_tls_peer_cert_subject(jinn_tls_conn *conn, char *buf, long len) {
     if (!conn || !conn->ssl) return 0;
     X509 *cert = SSL_get_peer_certificate(conn->ssl);
     if (!cert) return 0;
@@ -266,7 +266,7 @@ long jade_tls_peer_cert_subject(jade_tls_conn *conn, char *buf, long len) {
 }
 
 /* Copy the negotiated TLS protocol version (e.g. "TLSv1.3"). */
-long jade_tls_protocol_version(jade_tls_conn *conn, char *buf, long len) {
+long jinn_tls_protocol_version(jinn_tls_conn *conn, char *buf, long len) {
     if (!conn || !conn->ssl || len <= 0) return 0;
     const char *v = SSL_get_version(conn->ssl);
     if (!v) return 0;

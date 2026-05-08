@@ -1,9 +1,9 @@
 {
-  "name": "tree-sitter-jade",
+  "name": "tree-sitter-jinn",
   "version": "0.1.0",
-  "description": "Tree-sitter grammar for the Jade programming language",
+  "description": "Tree-sitter grammar for the Jinn programming language",
   "main": "bindings/node",
-  "keywords": ["tree-sitter", "parser", "jade"],
+  "keywords": ["tree-sitter", "parser", "jinn"],
   "files": [
     "grammar.js",
     "binding.gyp",
@@ -11,7 +11,7 @@
     "src/**",
     "queries/**"
   ],
-  "author": "Jade Contributors",
+  "author": "Jinn Contributors",
   "license": "MIT",
   "dependencies": {
     "node-addon-api": "^8.0.0",

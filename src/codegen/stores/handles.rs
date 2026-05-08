@@ -3,7 +3,7 @@
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Lazily open a column file for a specific field. Returns JadeCol* pointer.
+    /// Lazily open a column file for a specific field. Returns JinnCol* pointer.
     pub(crate) fn load_col_handle(
         &mut self,
         store_name: &str,
@@ -39,7 +39,7 @@ impl<'ctx> Compiler<'ctx> {
         let col_path = format!("{store_name}_{field_name}.col\0");
         let col_str = b!(self.bld.build_global_string_ptr(&col_path, "col.path"));
         let size_val = i64t.const_int(elem_size, false);
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_col_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_col_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -67,7 +67,7 @@ impl<'ctx> Compiler<'ctx> {
         self.type_store_size(st.into())
     }
 
-    /// Lazily open a bloom filter for a specific field. Returns JadeBloom* pointer.
+    /// Lazily open a bloom filter for a specific field. Returns JinnBloom* pointer.
     pub(crate) fn load_bloom_handle(
         &mut self,
         store_name: &str,
@@ -102,7 +102,7 @@ impl<'ctx> Compiler<'ctx> {
         let bloom_path = format!("{store_name}_{field_name}.bloom\0");
         let bloom_str = b!(self.bld.build_global_string_ptr(&bloom_path, "bloom.path"));
         let items_val = i64t.const_int(expected_items, false);
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_bloom_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_bloom_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -121,7 +121,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Lazily open an FTS index for a specific field. Returns JadeFts* pointer.
+    /// Lazily open an FTS index for a specific field. Returns JinnFts* pointer.
     pub(crate) fn load_fts_handle(
         &mut self,
         store_name: &str,
@@ -153,7 +153,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let fts_path = format!("{store_name}_{field_name}.fts\0");
         let fts_str = b!(self.bld.build_global_string_ptr(&fts_path, "fts.path"));
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_fts_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_fts_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
@@ -362,7 +362,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let wal_path = format!("{store_name}.wal\0");
         let wal_str = b!(self.bld.build_global_string_ptr(&wal_path, "wal.path"));
-        let wal_open_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_open");
+        let wal_open_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_open");
         let new_wal = self
             .call_result(b!(self.bld.build_call(
                 wal_open_fn,
@@ -390,7 +390,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_write");
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write");
         let op = self.ctx.i8_type().const_int(1, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -409,7 +409,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_write");
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write");
         let op = self.ctx.i8_type().const_int(3, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -428,7 +428,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_write");
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write");
         let op = self.ctx.i8_type().const_int(2, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -442,7 +442,7 @@ impl<'ctx> Compiler<'ctx> {
     /// Checkpoint WAL (truncate to just header).
     pub(crate) fn wal_checkpoint(&mut self, store_name: &str) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_cp_fn = crate::codegen::fn_or_die(&self.module, "jade_wal_checkpoint");
+        let wal_cp_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_checkpoint");
         b!(self.bld.build_call(wal_cp_fn, &[wal.into()], ""));
         Ok(())
     }
@@ -514,7 +514,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Build a Jade String from the buffer
+        // Build a Jinn String from the buffer
         let strlen_fn = crate::codegen::fn_or_die(&self.module, "strlen");
         let len = self
             .call_result(b!(self.bld.build_call(
@@ -562,7 +562,7 @@ impl<'ctx> Compiler<'ctx> {
             .any(|d| matches!(d, crate::ast::FieldDecorator::Unique))
     }
 
-    /// Lazily open an index file, returning the JadeIndex pointer.
+    /// Lazily open an index file, returning the JinnIndex pointer.
     /// Global: __store_{name}_idx_{field}
     pub(crate) fn load_store_idx(
         &mut self,
@@ -590,7 +590,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let idx_path = format!("{store_name}.{field_name}.idx\0");
         let idx_str = b!(self.bld.build_global_string_ptr(&idx_path, "idx.path"));
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jade_idx_open");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_open");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,

@@ -1,5 +1,5 @@
 /*
- * Jade Runtime — Multi-channel select.
+ * Jinn Runtime — Multi-channel select.
  *
  * Implements Go's select algorithm:
  * 1. Shuffle cases for fairness
@@ -10,13 +10,13 @@
  * 6. Park coroutine
  * 7. On wake: dequeue from all other channels, return fired case
  */
-#include "jade_rt.h"
+#include "jinn_rt.h"
 #include <stdlib.h>
 #include <string.h>
 
 /* ── Spinlock helpers (same as channel.c) ────────────────────────── */
 
-static inline void chan_lock(jade_chan_t *ch) {
+static inline void chan_lock(jinn_chan_t *ch) {
     while (atomic_exchange_explicit(&ch->lock, 1, memory_order_acquire) != 0) {
 #if defined(__x86_64__)
         __builtin_ia32_pause();
@@ -26,7 +26,7 @@ static inline void chan_lock(jade_chan_t *ch) {
     }
 }
 
-static inline void chan_unlock(jade_chan_t *ch) {
+static inline void chan_unlock(jinn_chan_t *ch) {
     atomic_store_explicit(&ch->lock, 0, memory_order_release);
 }
 
@@ -46,7 +46,7 @@ static void shuffle(int *arr, int n, uint64_t *rng) {
 }
 
 /* Sort by channel address for consistent locking */
-static void sort_by_addr(int *order, jade_select_case_t *cases, int n) {
+static void sort_by_addr(int *order, jinn_select_case_t *cases, int n) {
     /* Simple insertion sort — n is typically small (<10) */
     for (int i = 1; i < n; i++) {
         int key = order[i];
@@ -60,10 +60,10 @@ static void sort_by_addr(int *order, jade_select_case_t *cases, int n) {
     }
 }
 
-static void lock_all(jade_select_case_t *cases, int *lock_order, int n) {
+static void lock_all(jinn_select_case_t *cases, int *lock_order, int n) {
     uintptr_t last = 0;
     for (int i = 0; i < n; i++) {
-        jade_chan_t *ch = cases[lock_order[i]].chan;
+        jinn_chan_t *ch = cases[lock_order[i]].chan;
         if (!ch) continue;
         uintptr_t addr = (uintptr_t)ch;
         if (addr != last) {
@@ -73,10 +73,10 @@ static void lock_all(jade_select_case_t *cases, int *lock_order, int n) {
     }
 }
 
-static void unlock_all(jade_select_case_t *cases, int *lock_order, int n) {
+static void unlock_all(jinn_select_case_t *cases, int *lock_order, int n) {
     uintptr_t last = 0;
     for (int i = n - 1; i >= 0; i--) {
-        jade_chan_t *ch = cases[lock_order[i]].chan;
+        jinn_chan_t *ch = cases[lock_order[i]].chan;
         if (!ch) continue;
         uintptr_t addr = (uintptr_t)ch;
         if (addr != last) {
@@ -86,33 +86,33 @@ static void unlock_all(jade_select_case_t *cases, int *lock_order, int n) {
     }
 }
 
-static int chan_can_send(jade_chan_t *ch) {
+static int chan_can_send(jinn_chan_t *ch) {
     uint64_t head = atomic_load_explicit(&ch->head, memory_order_acquire);
     uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_relaxed);
     return (tail - head) < ch->capacity;
 }
 
-static int chan_can_recv(jade_chan_t *ch) {
+static int chan_can_recv(jinn_chan_t *ch) {
     uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
     uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_acquire);
     return head < tail;
 }
 
-static void chan_send_locked(jade_chan_t *ch, const void *data) {
+static void chan_send_locked(jinn_chan_t *ch, const void *data) {
     uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_relaxed);
     size_t idx = tail & (ch->capacity - 1);
     memcpy((char *)ch->buffer + idx * ch->elem_size, data, ch->elem_size);
     atomic_store_explicit(&ch->tail, tail + 1, memory_order_release);
 }
 
-static void chan_recv_locked(jade_chan_t *ch, void *data_out) {
+static void chan_recv_locked(jinn_chan_t *ch, void *data_out) {
     uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
     size_t idx = head & (ch->capacity - 1);
     memcpy(data_out, (char *)ch->buffer + idx * ch->elem_size, ch->elem_size);
     atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 }
 
-static inline void waitq_push(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *node) {
+static inline void waitq_push(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_t *node) {
     node->next = NULL;
     if (*tail) {
         (*tail)->next = node;
@@ -122,8 +122,8 @@ static inline void waitq_push(jade_coro_t **head, jade_coro_t **tail, jade_coro_
     *tail = node;
 }
 
-static inline jade_coro_t *waitq_pop(jade_coro_t **head, jade_coro_t **tail) {
-    jade_coro_t *node = *head;
+static inline jinn_coro_t *waitq_pop(jinn_coro_t **head, jinn_coro_t **tail) {
+    jinn_coro_t *node = *head;
     if (!node) {
         return NULL;
     }
@@ -135,9 +135,9 @@ static inline jade_coro_t *waitq_pop(jade_coro_t **head, jade_coro_t **tail) {
     return node;
 }
 
-static int waitq_remove(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *node) {
-    jade_coro_t *prev = NULL;
-    jade_coro_t *cur = *head;
+static int waitq_remove(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_t *node) {
+    jinn_coro_t *prev = NULL;
+    jinn_coro_t *cur = *head;
     while (cur && cur != node) {
         prev = cur;
         cur = cur->next;
@@ -157,10 +157,10 @@ static int waitq_remove(jade_coro_t **head, jade_coro_t **tail, jade_coro_t *nod
     return 1;
 }
 
-int jade_select(jade_select_case_t *cases, int n, int has_default) {
+int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
     if (n == 0) return -1;
 
-    jade_worker_t *w = tl_worker;
+    jinn_worker_t *w = tl_worker;
     uint64_t rng = w ? w->rng_state : 12345;
 
     /* Create shuffle and lock orders */
@@ -182,19 +182,19 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
     /* Scan for ready channel in shuffled order */
     for (int i = 0; i < limit; i++) {
         int idx = poll_order[i];
-        jade_select_case_t *c = &cases[idx];
+        jinn_select_case_t *c = &cases[idx];
         if (!c->chan) continue;
 
         if (c->is_send) {
             if (chan_can_send(c->chan)) {
                 chan_send_locked(c->chan, c->data);
                 /* Wake receiver if waiting */
-                jade_coro_t *waiter = waitq_pop(&c->chan->recv_waitq, &c->chan->recv_waitq_tail);
+                jinn_coro_t *waiter = waitq_pop(&c->chan->recv_waitq, &c->chan->recv_waitq_tail);
                 if (waiter) {
                     waiter->wait_chan = NULL;
-                    waiter->state = JADE_CORO_READY;
+                    waiter->state = JINN_CORO_READY;
                     unlock_all(cases, lock_order, limit);
-                    jade_sched_enqueue(waiter);
+                    jinn_sched_enqueue(waiter);
                     return idx;
                 }
                 unlock_all(cases, lock_order, limit);
@@ -204,12 +204,12 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             if (chan_can_recv(c->chan)) {
                 chan_recv_locked(c->chan, c->data);
                 /* Wake sender if waiting */
-                jade_coro_t *waiter = waitq_pop(&c->chan->send_waitq, &c->chan->send_waitq_tail);
+                jinn_coro_t *waiter = waitq_pop(&c->chan->send_waitq, &c->chan->send_waitq_tail);
                 if (waiter) {
                     waiter->wait_chan = NULL;
-                    waiter->state = JADE_CORO_READY;
+                    waiter->state = JINN_CORO_READY;
                     unlock_all(cases, lock_order, limit);
-                    jade_sched_enqueue(waiter);
+                    jinn_sched_enqueue(waiter);
                     return idx;
                 }
                 unlock_all(cases, lock_order, limit);
@@ -237,12 +237,12 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
         return -1;
     }
 
-    jade_coro_t *self = w->current;
+    jinn_coro_t *self = w->current;
     int enqueue_start = 0; /* rotate which channel we enqueue on */
     int max_retries = 256; /* safety bound to avoid infinite spin */
 
     for (int attempt = 0; attempt < max_retries; attempt++) {
-        self->state = JADE_CORO_SUSPENDED;
+        self->state = JINN_CORO_SUSPENDED;
         self->select_ready = -1;
         self->wait_chan = NULL;
 
@@ -250,7 +250,7 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
         int enqueued = 0;
         for (int r = 0; r < limit; r++) {
             int i = (enqueue_start + r) % limit;
-            jade_select_case_t *c = &cases[i];
+            jinn_select_case_t *c = &cases[i];
             if (!c->chan) continue;
 
             self->wait_chan = c->chan;
@@ -275,14 +275,14 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
         /* Park — scheduler will resume us when the channel we're on fires */
         w->held_chan_lock = NULL;
         w->last_action = SCHED_ACTION_PARK;
-        jade_context_swap(&self->ctx, &w->sched_ctx);
+        jinn_context_swap(&self->ctx, &w->sched_ctx);
 
         /* Woken — re-lock all channels and scan for readiness */
         lock_all(cases, lock_order, limit);
 
         /* Dequeue ourselves from whatever wait queue we were on */
         if (self->wait_chan) {
-            jade_chan_t *wch = (jade_chan_t *)self->wait_chan;
+            jinn_chan_t *wch = (jinn_chan_t *)self->wait_chan;
             /* Try both queues — we don't know if waker already removed us */
             if (!waitq_remove(&wch->send_waitq, &wch->send_waitq_tail, self)) {
                 waitq_remove(&wch->recv_waitq, &wch->recv_waitq_tail, self);
@@ -294,16 +294,16 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
         /* Scan all channels in shuffled order for a ready one */
         for (int i = 0; i < limit; i++) {
             int idx = poll_order[i];
-            jade_select_case_t *c = &cases[idx];
+            jinn_select_case_t *c = &cases[idx];
             if (!c->chan) continue;
             if (c->is_send && chan_can_send(c->chan)) {
                 chan_send_locked(c->chan, c->data);
-                jade_coro_t *waiter = waitq_pop(&c->chan->recv_waitq, &c->chan->recv_waitq_tail);
+                jinn_coro_t *waiter = waitq_pop(&c->chan->recv_waitq, &c->chan->recv_waitq_tail);
                 if (waiter) {
                     waiter->wait_chan = NULL;
-                    waiter->state = JADE_CORO_READY;
+                    waiter->state = JINN_CORO_READY;
                     unlock_all(cases, lock_order, limit);
-                    jade_sched_enqueue(waiter);
+                    jinn_sched_enqueue(waiter);
                     return idx;
                 }
                 unlock_all(cases, lock_order, limit);
@@ -311,12 +311,12 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
             }
             if (!c->is_send && chan_can_recv(c->chan)) {
                 chan_recv_locked(c->chan, c->data);
-                jade_coro_t *waiter = waitq_pop(&c->chan->send_waitq, &c->chan->send_waitq_tail);
+                jinn_coro_t *waiter = waitq_pop(&c->chan->send_waitq, &c->chan->send_waitq_tail);
                 if (waiter) {
                     waiter->wait_chan = NULL;
-                    waiter->state = JADE_CORO_READY;
+                    waiter->state = JINN_CORO_READY;
                     unlock_all(cases, lock_order, limit);
-                    jade_sched_enqueue(waiter);
+                    jinn_sched_enqueue(waiter);
                     return idx;
                 }
                 unlock_all(cases, lock_order, limit);
@@ -328,7 +328,7 @@ int jade_select(jade_select_case_t *cases, int n, int has_default) {
 
     /* Exhausted retries — potential deadlock */
     unlock_all(cases, lock_order, limit);
-    fprintf(stderr, "jade: select: exhausted %d retries — possible deadlock\n",
+    fprintf(stderr, "jinn: select: exhausted %d retries — possible deadlock\n",
             max_retries);
     return -1;
 }

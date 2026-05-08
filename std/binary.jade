@@ -7,8 +7,8 @@
 #   buf.seek(0)
 #   n is buf.read_i32()
 
-extern *jade_f64_to_bits(val as f64) returns i64
-extern *jade_bits_to_f64(bits as i64) returns f64
+extern *jinn_f64_to_bits(val as f64) returns i64
+extern *jinn_bits_to_f64(bits as i64) returns f64
 
 type Buffer
     data as Vec of i64
@@ -96,12 +96,12 @@ type Buffer
 
     *write_f64(val as f64)
         # Store as i64 bit-pattern via reinterpret
-        bits is extern.jade_f64_to_bits(val)
+        bits is extern.jinn_f64_to_bits(val)
         self.write_i64(bits)
 
     *read_f64 returns f64
         bits is self.read_i64()
-        extern.jade_bits_to_f64(bits)
+        extern.jinn_bits_to_f64(bits)
 
     # ── Big-endian variants ──────────────────────────────
 
@@ -137,12 +137,12 @@ type Buffer
         (hi << 32) | lo
 
     *write_f64_be(val as f64)
-        bits is extern.jade_f64_to_bits(val)
+        bits is extern.jinn_f64_to_bits(val)
         self.write_i64_be(bits)
 
     *read_f64_be returns f64
         bits is self.read_i64_be()
-        extern.jade_bits_to_f64(bits)
+        extern.jinn_bits_to_f64(bits)
 
     # ── Bulk operations ──────────────────────────────────
 
@@ -176,7 +176,7 @@ type Buffer
 *from_vec(data as Vec of i64) returns Buffer
     Buffer(data is data, pos is 0)
 
-# ── JadePack: compact binary serialization ───────────────────
+# ── JinnPack: compact binary serialization ───────────────────
 #
 # Type tags (1 byte):
 #   0x00 = nil
@@ -188,7 +188,7 @@ type Buffer
 #   0x06 = array (length-prefixed)
 #   0x07 = map (length-prefixed, key-value pairs)
 #
-# This is Jade's native wire format, used by actors, channels,
+# This is Jinn's native wire format, used by actors, channels,
 # and persistent storage.
 
 TAG_NIL    is 0

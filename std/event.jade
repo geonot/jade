@@ -18,19 +18,19 @@
 
 # ── Extern bindings to runtime/event.c ──────────────────────
 
-extern *jade_event_loop_create(max_events as i32) returns %i8
-extern *jade_event_loop_destroy(handle as %i8)
-extern *jade_fd_set_nonblock(fd as i32) returns i32
-extern *jade_event_loop_add_read(handle as %i8, fd as i32, waiter as %i8) returns i32
-extern *jade_event_loop_add_write(handle as %i8, fd as i32, waiter as %i8) returns i32
-extern *jade_event_loop_rearm_read(handle as %i8, fd as i32, waiter as %i8) returns i32
-extern *jade_event_loop_rearm_write(handle as %i8, fd as i32, waiter as %i8) returns i32
-extern *jade_event_loop_remove(handle as %i8, fd as i32) returns i32
-extern *jade_event_loop_poll(handle as %i8, timeout_ms as i32, ready_fds as %i32, ready_events as %i32, max_ready as i32) returns i32
-extern *jade_event_wait_readable(fd as i32, timeout_ms as i32) returns i32
-extern *jade_event_wait_writable(fd as i32, timeout_ms as i32) returns i32
-extern *jade_io_waiter_create(fd as i32) returns %i8
-extern *jade_io_waiter_destroy(waiter as %i8)
+extern *jinn_event_loop_create(max_events as i32) returns %i8
+extern *jinn_event_loop_destroy(handle as %i8)
+extern *jinn_fd_set_nonblock(fd as i32) returns i32
+extern *jinn_event_loop_add_read(handle as %i8, fd as i32, waiter as %i8) returns i32
+extern *jinn_event_loop_add_write(handle as %i8, fd as i32, waiter as %i8) returns i32
+extern *jinn_event_loop_rearm_read(handle as %i8, fd as i32, waiter as %i8) returns i32
+extern *jinn_event_loop_rearm_write(handle as %i8, fd as i32, waiter as %i8) returns i32
+extern *jinn_event_loop_remove(handle as %i8, fd as i32) returns i32
+extern *jinn_event_loop_poll(handle as %i8, timeout_ms as i32, ready_fds as %i32, ready_events as %i32, max_ready as i32) returns i32
+extern *jinn_event_wait_readable(fd as i32, timeout_ms as i32) returns i32
+extern *jinn_event_wait_writable(fd as i32, timeout_ms as i32) returns i32
+extern *jinn_io_waiter_create(fd as i32) returns %i8
+extern *jinn_io_waiter_destroy(waiter as %i8)
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
@@ -66,27 +66,27 @@ type EventLoop
 
     # Watch a file descriptor for readability.
     *watch_read(fd as i32) returns bool
-        waiter is extern.jade_io_waiter_create(fd)
-        extern.jade_event_loop_add_read(self.handle, fd, waiter) equals 0
+        waiter is extern.jinn_io_waiter_create(fd)
+        extern.jinn_event_loop_add_read(self.handle, fd, waiter) equals 0
 
     # Watch a file descriptor for writability.
     *watch_write(fd as i32) returns bool
-        waiter is extern.jade_io_waiter_create(fd)
-        extern.jade_event_loop_add_write(self.handle, fd, waiter) equals 0
+        waiter is extern.jinn_io_waiter_create(fd)
+        extern.jinn_event_loop_add_write(self.handle, fd, waiter) equals 0
 
     # Re-arm a watched fd for read (needed after oneshot fires).
     *rearm_read(fd as i32) returns bool
-        waiter is extern.jade_io_waiter_create(fd)
-        extern.jade_event_loop_rearm_read(self.handle, fd, waiter) equals 0
+        waiter is extern.jinn_io_waiter_create(fd)
+        extern.jinn_event_loop_rearm_read(self.handle, fd, waiter) equals 0
 
     # Re-arm a watched fd for write.
     *rearm_write(fd as i32) returns bool
-        waiter is extern.jade_io_waiter_create(fd)
-        extern.jade_event_loop_rearm_write(self.handle, fd, waiter) equals 0
+        waiter is extern.jinn_io_waiter_create(fd)
+        extern.jinn_event_loop_rearm_write(self.handle, fd, waiter) equals 0
 
     # Remove a file descriptor from the loop.
     *unwatch(fd as i32) returns bool
-        extern.jade_event_loop_remove(self.handle, fd) equals 0
+        extern.jinn_event_loop_remove(self.handle, fd) equals 0
 
     # Poll for ready events. Returns a list of Event structs.
     # timeout_ms: -1 = block, 0 = instant, >0 = wait up to N ms.
@@ -94,7 +94,7 @@ type EventLoop
         max is 64
         fds_buf is extern.malloc(max * 4)
         evts_buf is extern.malloc(max * 4)
-        n is extern.jade_event_loop_poll(self.handle, timeout_ms, fds_buf as %i32, evts_buf as %i32, max as i32)
+        n is extern.jinn_event_loop_poll(self.handle, timeout_ms, fds_buf as %i32, evts_buf as %i32, max as i32)
         result is [] as [Event]
         if n <= 0
             extern.free(fds_buf)
@@ -112,28 +112,28 @@ type EventLoop
 
     # Close the event loop and release resources.
     *close()
-        extern.jade_event_loop_destroy(self.handle)
+        extern.jinn_event_loop_destroy(self.handle)
 
 # ── Module-level functions ───────────────────────────────────
 
 # Create a new event loop with default capacity.
 *create() returns EventLoop
-    handle is extern.jade_event_loop_create(256)
+    handle is extern.jinn_event_loop_create(256)
     EventLoop { handle is handle }
 
 # Create a new event loop with specified max event capacity.
 *create_with_capacity(max_events as i32) returns EventLoop
-    handle is extern.jade_event_loop_create(max_events)
+    handle is extern.jinn_event_loop_create(max_events)
     EventLoop { handle is handle }
 
 # Set a file descriptor to non-blocking mode.
 *set_nonblock(fd as i32) returns bool
-    extern.jade_fd_set_nonblock(fd) equals 0
+    extern.jinn_fd_set_nonblock(fd) equals 0
 
 # Convenience: wait for an fd to become readable (blocking).
 *wait_readable(fd as i32, timeout_ms as i32) returns bool
-    extern.jade_event_wait_readable(fd, timeout_ms) equals 0
+    extern.jinn_event_wait_readable(fd, timeout_ms) equals 0
 
 # Convenience: wait for an fd to become writable (blocking).
 *wait_writable(fd as i32, timeout_ms as i32) returns bool
-    extern.jade_event_wait_writable(fd, timeout_ms) equals 0
+    extern.jinn_event_wait_writable(fd, timeout_ms) equals 0

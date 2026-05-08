@@ -86,7 +86,7 @@ pub(crate) use ice;
 
 /// Look up a runtime/builtin function by name; panic with an ICE diagnostic
 /// if it has not been declared yet. Use only for symbols that codegen
-/// guarantees to be present (declared in `runtime/jade_rt.h` or via
+/// guarantees to be present (declared in `runtime/jinn_rt.h` or via
 /// `declare_runtime_*`).
 #[inline]
 pub(crate) fn fn_or_die<'ctx>(
@@ -168,7 +168,7 @@ pub struct Compiler<'ctx> {
     pub(crate) pending_phis: Vec<PendingPhi<'ctx>>,
     /// MIR ValueId → variable alloca (for Store/Load variable pairs).
     pub(crate) var_allocs: std::collections::HashMap<Symbol, (PointerValue<'ctx>, Type)>,
-    /// MIR ValueId → Jade type (for FieldGet struct type resolution on parameters).
+    /// MIR ValueId → Jinn type (for FieldGet struct type resolution on parameters).
     pub(crate) value_types: std::collections::HashMap<mir::ValueId, Type>,
     /// Coroutine/generator bodies extracted from HIR, keyed by name.
     pub(crate) coro_bodies: std::collections::HashMap<Symbol, Vec<hir::Stmt>>,

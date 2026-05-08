@@ -299,10 +299,10 @@ impl<'ctx> Compiler<'ctx> {
             let fn_type = bool_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
             let func = self
                 .module
-                .get_function("__jade_constant_time_eq")
+                .get_function("__jinn_constant_time_eq")
                 .unwrap_or_else(|| {
                     self.module
-                        .add_function("__jade_constant_time_eq", fn_type, None)
+                        .add_function("__jinn_constant_time_eq", fn_type, None)
                 });
             let result = b!(self.bld.build_call(func, &[a.into(), b.into()], "ct.eq"));
             Ok(self.call_result(result))
@@ -346,7 +346,7 @@ impl<'ctx> Compiler<'ctx> {
             // Fallback: call runtime stub
             let rt_fn = self
                 .module
-                .get_function("__jade_matmul")
+                .get_function("__jinn_matmul")
                 .unwrap_or_else(|| {
                     let i64t = self.ctx.i64_type();
                     let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -360,7 +360,7 @@ impl<'ctx> Compiler<'ctx> {
                         ],
                         false,
                     );
-                    self.module.add_function("__jade_matmul", ft, None)
+                    self.module.add_function("__jinn_matmul", ft, None)
                 });
             let i64t = self.ctx.i64_type();
             let result = b!(self.bld.build_call(

@@ -1,6 +1,6 @@
 # std.test — Assertion library and test orchestration
 #
-# Complements Jade's built-in `*test` blocks with composable assertion
+# Complements Jinn's built-in `*test` blocks with composable assertion
 # helpers, table-driven test runners, and a tiny matcher DSL.
 #
 # Usage:
@@ -103,18 +103,18 @@
 # ── Snapshot testing ─────────────────────────────────────────
 #
 # Compares stringified output against a stored snapshot file. On first
-# run with `JADE_UPDATE_SNAPSHOTS=1`, writes the snapshot.
+# run with `JINN_UPDATE_SNAPSHOTS=1`, writes the snapshot.
 
 *snapshot(name as String, actual as String)
     extern *getenv(name as %i8) returns %i8
     path is "tests/snapshots/" + name + ".snap"
-    update is __getenv("JADE_UPDATE_SNAPSHOTS")
+    update is __getenv("JINN_UPDATE_SNAPSHOTS")
     if update equals "1"
         __write_file(path, actual)
         return
     expected is __read_file(path)
     if expected neq actual
-        __fail("snapshot mismatch for " + name + "; rerun with JADE_UPDATE_SNAPSHOTS=1 to update")
+        __fail("snapshot mismatch for " + name + "; rerun with JINN_UPDATE_SNAPSHOTS=1 to update")
 
 # ── Table-driven tests ───────────────────────────────────────
 
@@ -141,7 +141,7 @@ type Case
 *bench(iters as i64, body) returns i64
     if iters <= 0
         return 0
-    extern *jade_time_monotonic returns i64
+    extern *jinn_time_monotonic returns i64
     start is __time_monotonic()
     i is 0
     while i < iters
