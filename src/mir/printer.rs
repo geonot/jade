@@ -144,6 +144,10 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::Deref(v) => format!("deref {v}"),
         InstKind::Alloc(v) => format!("alloc {v}"),
         InstKind::Drop(v, ty) => format!("drop {v} {ty:?}"),
+        InstKind::DropMany(items) => {
+            let parts: Vec<String> = items.iter().map(|(v, ty)| format!("{v}:{ty:?}")).collect();
+            format!("drop_many [{}]", parts.join(", "))
+        }
         InstKind::RcInc(v) => format!("rc_inc {v}"),
         InstKind::RcDec(v) => format!("rc_dec {v}"),
         InstKind::Copy(v) => format!("copy {v}"),

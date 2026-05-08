@@ -27,9 +27,36 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let size = layout.size_of().expect("ICE: type has no size");
         let needed_bytes = size.get_zero_extended_constant().unwrap_or(8);
-        // Perceus reuse: try to reuse a saved heap pointer instead of malloc
+        // Perceus reuse: try to reuse a saved heap pointer instead of malloc.
+        // The runtime alloca path may return a NULL pointer (slot was empty
+        // at runtime), in which case we still need to malloc. We model this
+        // with a `phi` over the (reuse-hit, malloc-fallback) branches.
         let heap_ptr = if let Some(reused) = self.try_consume_reuse_token(needed_bytes) {
-            reused
+            // Branch on null at runtime: if NULL, malloc; else use `reused`.
+            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let is_null = b!(self.bld.build_is_null(reused, "rc.alloc.reuse.null"));
+            let fv = self.current_fn();
+            let malloc_bb = self.ctx.append_basic_block(fv, "rc.alloc.malloc");
+            let cont_bb = self.ctx.append_basic_block(fv, "rc.alloc.cont");
+            let entry_bb = self
+                .bld
+                .get_insert_block()
+                .expect("builder has no insert block");
+            b!(self
+                .bld
+                .build_conditional_branch(is_null, malloc_bb, cont_bb));
+            self.bld.position_at_end(malloc_bb);
+            let malloc = self.ensure_malloc();
+            let m = b!(self.bld.build_call(malloc, &[size.into()], "rc.alloc"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: call returned void")
+                .into_pointer_value();
+            b!(self.bld.build_unconditional_branch(cont_bb));
+            self.bld.position_at_end(cont_bb);
+            let phi = b!(self.bld.build_phi(ptr_ty, "rc.alloc.phi"));
+            phi.add_incoming(&[(&m, malloc_bb), (&reused, entry_bb)]);
+            phi.as_basic_value().into_pointer_value()
         } else {
             let malloc = self.ensure_malloc();
             b!(self.bld.build_call(malloc, &[size.into()], "rc.alloc"))

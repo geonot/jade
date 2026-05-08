@@ -1,13 +1,26 @@
-//! Perceus reference-counting insertion pass root.
+//! Perceus reference-counting optimization pass root.
+//!
+//! Perceus operates on **MIR** as a sequence of transformation passes that
+//! mutate the program in place; see [`mir_perceus::run`]. The driver invokes
+//! the MIR pipeline after lowering and reports stats via `--debug-perceus`.
+//!
+//! The HIR-level analyzer that previously lived here (`analysis.rs`,
+//! `uses/`) has been removed: it produced advisory hints keyed by `DefId`
+//! that the MIR-codegen path could not consume, so the work was diagnostic
+//! at best. Current callers retain the [`PerceusPass`] type as a shim that
+//! returns empty hints; new code should call [`mir_perceus::run`] directly
+//! after MIR lowering.
 
 use std::collections::HashMap;
 
 use crate::ast::Span;
-use crate::hir::*;
+use crate::hir::{DefId, Program};
 use crate::types::Type;
 
 #[derive(Debug, Clone, Default)]
 pub struct PerceusHints {
+    /// Drop instructions that the elision pass removed. Kept as an empty set
+    /// for backward compatibility; the IR no longer contains those drops.
     pub elide_drops: std::collections::HashSet<DefId>,
     pub reuse_candidates: HashMap<DefId, ReuseInfo>,
     pub borrow_to_move: std::collections::HashSet<DefId>,
@@ -70,36 +83,20 @@ pub struct PerceusStats {
     pub pool_hints_found: u32,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct UseInfo {
-    pub(super) use_count: u32,
-    pub(super) last_use_span: Option<Span>,
-    pub(super) escapes: bool,
-    pub(super) borrowed: bool,
-    pub(super) ty: Type,
-    pub(super) ownership: Ownership,
+pub mod mir_perceus;
+
+/// Backward-compat shim. The old HIR-level analysis is gone; this returns an
+/// empty `PerceusHints` so existing call sites compile and their stats lines
+/// remain quiet (they are now driven by [`mir_perceus::run`]).
+pub struct PerceusPass {
+    pub(crate) hints: PerceusHints,
 }
 
-impl UseInfo {
-    pub(super) fn new(ty: Type, ownership: Ownership) -> Self {
-        Self {
-            use_count: 0,
-            last_use_span: None,
-            escapes: false,
-            borrowed: false,
-            ty,
-            ownership,
-        }
+impl Default for PerceusPass {
+    fn default() -> Self {
+        Self::new()
     }
 }
-
-pub struct PerceusPass {
-    pub(super) hints: PerceusHints,
-}
-
-mod analysis;
-pub mod mir_perceus;
-mod uses;
 
 impl PerceusPass {
     pub fn new() -> Self {
@@ -108,223 +105,69 @@ impl PerceusPass {
         }
     }
 
-    pub fn optimize(&mut self, prog: &Program) -> PerceusHints {
-        for f in &prog.fns {
-            self.analyze_fn(f);
-        }
-        for td in &prog.types {
-            for m in &td.methods {
-                self.analyze_fn(m);
+    /// No-op; the HIR analyzer has been retired in favour of
+    /// [`mir_perceus::run`]. Returns an empty `PerceusHints`.
+    pub fn optimize(&mut self, _prog: &Program) -> PerceusHints {
+        PerceusHints::default()
+    }
+
+    /// Compute the layout size in bytes used by Perceus reuse matching.
+    /// Public because codegen consults it for slot-size sanity checks.
+    pub fn type_layout_size_pub(ty: &Type) -> u64 {
+        match ty {
+            Type::I8 | Type::U8 | Type::Bool => 1,
+            Type::I16 | Type::U16 => 2,
+            Type::I32 | Type::U32 | Type::F32 => 4,
+            Type::I64 | Type::U64 | Type::F64 => 8,
+            Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => 8,
+            Type::String => 24,
+            Type::Void => 0,
+            Type::Array(inner, len) => Self::type_layout_size_pub(inner) * (*len as u64),
+            Type::Tuple(tys) => tys
+                .iter()
+                .map(|t| {
+                    let sz = Self::type_layout_size_pub(t);
+                    (sz + 7) & !7
+                })
+                .sum(),
+            Type::Struct(_, _) => 0,
+            Type::Enum(_) => 0,
+            Type::Fn(_, _) => 16,
+            Type::Param(_) | Type::TypeVar(_) => 0,
+            Type::ActorRef(_) => 8,
+            Type::Coroutine(_) => 8,
+            Type::DynTrait(_) => 16,
+            Type::Vec(_) | Type::Map(_, _) | Type::Set(_) => 24,
+            Type::PriorityQueue(_) => 24,
+            Type::NDArray(inner, dims) => {
+                let elem_size = Self::type_layout_size_pub(inner);
+                let total: u64 = dims.iter().map(|&d| d as u64).product();
+                elem_size * total
             }
+            Type::Channel(_) => 8,
+            Type::SIMD(inner, lanes) => Self::type_layout_size_pub(inner) * (*lanes as u64),
+            Type::Arena => 24,
+            Type::Pool => 8,
+            Type::Deque(_) => 24,
+            Type::Cow(inner) => Self::type_layout_size_pub(inner),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size_pub(inner),
+            Type::Generator(_) => 8,
         }
-        for ti in &prog.trait_impls {
-            for m in &ti.methods {
-                self.analyze_fn(m);
-            }
-        }
-        self.hints.clone()
     }
 
-    fn analyze_fn(&mut self, f: &Fn) {
-        let mut uses: HashMap<DefId, UseInfo> = HashMap::new();
-        for p in &f.params {
-            uses.insert(p.def_id, UseInfo::new(p.ty.clone(), p.ownership));
-        }
-        self.count_uses_block(&f.body, &mut uses);
-        self.analyze_drop_specialization(&uses);
-        self.analyze_reuse(&f.body, &uses);
-        self.promote_borrows(&uses);
-        self.analyze_last_use(&uses);
-        self.analyze_fbip(&f.body, &uses);
-        self.analyze_tail_reuse(f, &uses);
-        self.analyze_drop_fusion(&f.body, &uses);
-        self.analyze_speculative_reuse(&f.body, &uses);
-        self.analyze_pool_hints(&f.body);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
-    use crate::typer::Typer;
-
-    fn analyze(src: &str) -> PerceusHints {
-        let tokens = Lexer::new(src).tokenize().unwrap();
-        let prog = Parser::new(tokens).parse_program().unwrap();
-        let mut typer = Typer::new();
-        let hir = typer.lower_program(&prog).unwrap();
-        let mut perceus = PerceusPass::new();
-        perceus.optimize(&hir)
-    }
-
-    #[test]
-    fn test_scalar_drops_elided() {
-        let hints = analyze(
-            "*main()\n    x is 42\n    y is 3.14\n    z is true\n    log(x)\n    log(y)\n    log(z)\n",
-        );
-        assert!(
-            hints.stats.drops_elided >= 3,
-            "expected >= 3 drops elided for scalars, got {}",
-            hints.stats.drops_elided
-        );
-    }
-
-    #[test]
-    fn test_array_of_scalars_drops_elided() {
-        let hints = analyze("*main()\n    arr is [1, 2, 3]\n    log(arr[0])\n");
-        assert!(
-            hints.stats.drops_elided >= 1,
-            "expected >= 1 drop elided for scalar array, got {}",
-            hints.stats.drops_elided
-        );
-    }
-
-    #[test]
-    fn test_tuple_of_scalars_drops_elided() {
-        let hints = analyze("*main()\n    t is (1, 2, 3)\n    log(t)\n");
-        assert!(hints.stats.drops_elided >= 1);
-    }
-
-    #[test]
-    fn test_string_not_elided() {
-        let hints = analyze("*main()\n    s is \"hello\"\n    log(s)\n");
-        assert!(!Type::String.is_trivially_droppable());
-        assert!(hints.stats.total_bindings_analyzed >= 1);
-    }
-
-    #[test]
-    fn test_rc_not_elided() {
-        let hints = analyze("*main()\n    x is rc(42)\n    log(@x)\n");
-        assert!(
-            hints.stats.total_bindings_analyzed >= 1,
-            "should have analyzed at least 1 binding"
-        );
-    }
-
-    #[test]
-    fn test_borrow_promoted_single_use() {
-        let hints = analyze("*main()\n    x is 42\n    p is %x\n    log(@p)\n");
-        assert!(hints.stats.total_bindings_analyzed >= 2);
-    }
-
-    #[test]
-    fn test_rc_reuse_same_type() {
-        let hints =
-            analyze("*main()\n    x is rc(10)\n    log(@x)\n    y is rc(20)\n    log(@y)\n");
-        assert!(hints.stats.total_bindings_analyzed >= 2);
-    }
-
-    #[test]
-    fn test_no_reuse_different_layout() {
-        let hints =
-            analyze("*main()\n    x is rc(10)\n    log(@x)\n    y is rc(3.14)\n    log(@y)\n");
-        assert!(hints.stats.total_bindings_analyzed >= 2);
-    }
-
-    #[test]
-    fn test_complex_program() {
-        let hints = analyze(
-            "*factorial(n as i64) returns i64\n    if n <= 1\n        1\n    else\n        n * factorial(n - 1)\n\n*main()\n    result is factorial(10)\n    log(result)\n",
-        );
-        assert!(hints.stats.total_bindings_analyzed >= 1);
-        assert!(hints.stats.drops_elided >= 1);
-    }
-
-    #[test]
-    fn test_loop_conservatism() {
-        let hints = analyze(
-            "*main()\n    x is rc(0)\n    i is 0\n    while i < 10\n        log(@x)\n        i is i + 1\n",
-        );
-        assert!(hints.reuse_candidates.is_empty() || hints.stats.reuse_sites == 0);
-    }
-
-    #[test]
-    fn test_function_params_analyzed() {
-        let hints = analyze(
-            "*add(a as i64, b as i64) returns i64\n    a + b\n*main()\n    log(add(1, 2))\n",
-        );
-        assert!(hints.stats.drops_elided >= 2);
-    }
-
-    #[test]
-    fn test_struct_not_trivially_droppable() {
-        assert!(!Type::Struct("Point".into(), vec![]).is_trivially_droppable());
-        assert!(!Type::String.is_trivially_droppable());
-        assert!(!Type::Rc(Box::new(Type::I64)).is_trivially_droppable());
-    }
-
-    #[test]
-    fn test_scalars_trivially_droppable() {
-        assert!(Type::I64.is_trivially_droppable());
-        assert!(Type::F64.is_trivially_droppable());
-        assert!(Type::Bool.is_trivially_droppable());
-        assert!(Type::Void.is_trivially_droppable());
-        assert!(Type::Ptr(Box::new(Type::I64)).is_trivially_droppable());
-    }
-
-    #[test]
-    fn test_nested_array_droppable() {
-        assert!(Type::Array(Box::new(Type::I64), 3).is_trivially_droppable());
-        assert!(!Type::Array(Box::new(Type::String), 3).is_trivially_droppable());
-    }
-
-    #[test]
-    fn test_layout_compatibility() {
-        let rc_i64 = Type::Rc(Box::new(Type::I64));
-        assert!(PerceusPass::layouts_compatible(&rc_i64, &rc_i64));
-
-        let rc_f64 = Type::Rc(Box::new(Type::F64));
-        assert!(PerceusPass::layouts_compatible(&rc_i64, &rc_f64));
-
-        let rc_i8 = Type::Rc(Box::new(Type::I8));
-        assert!(!PerceusPass::layouts_compatible(&rc_i64, &rc_i8));
-    }
-
-    #[test]
-    fn test_perceus_stats_populated() {
-        let hints = analyze(
-            "*main()\n    a is 1\n    b is 2.0\n    c is true\n    log(a)\n    log(b)\n    log(c)\n",
-        );
-        assert!(hints.stats.total_bindings_analyzed > 0);
-        assert!(hints.stats.drops_elided > 0);
-    }
-
-    #[test]
-    fn test_enum_analysis() {
-        let hints = analyze(
-            "enum Color\n    Red\n    Green\n    Blue\n\n*main() returns i32\n    c is Red\n    match c\n        Red ? log(1)\n        Green ? log(2)\n        Blue ? log(3)\n    0\n",
-        );
-        assert!(hints.stats.total_bindings_analyzed >= 1);
-    }
-
-    #[test]
-    fn test_generic_fn_analysis() {
-        let hints = analyze(
-            "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(3.14))\n",
-        );
-        assert!(hints.stats.drops_elided >= 1);
-    }
-
-    #[test]
-    fn test_match_arms_analyzed() {
-        let hints = analyze(
-            "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*area(s as Shape) returns f64\n    match s\n        Circle(r) ? 3.14159 * r * r\n        Square(side) ? side * side\n\n*main()\n    log(area(Circle(5.0)))\n",
-        );
-        assert!(hints.stats.total_bindings_analyzed >= 1);
-    }
-
-    #[test]
-    fn test_pool_hints_in_loop() {
-        let hints = analyze(
-            "*main()\n    i is 0\n    while i < 100\n        x is rc(i)\n        log(@x)\n        i is i + 1\n",
-        );
-        assert!(
-            hints.stats.pool_hints_found >= 1,
-            "expected pool hint for Rc alloc in loop, got {}",
-            hints.stats.pool_hints_found
-        );
-        assert!(!hints.pool_hints.is_empty());
+    /// Two types share a layout slot (used by reuse pairing) iff their
+    /// underlying allocation sizes match.
+    pub fn layouts_compatible(a: &Type, b: &Type) -> bool {
+        let inner_a = match a {
+            Type::Rc(inner) => inner.as_ref(),
+            _ => a,
+        };
+        let inner_b = match b {
+            Type::Rc(inner) => inner.as_ref(),
+            _ => b,
+        };
+        let sa = Self::type_layout_size_pub(inner_a);
+        let sb = Self::type_layout_size_pub(inner_b);
+        sa > 0 && sa == sb
     }
 }

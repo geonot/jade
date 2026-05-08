@@ -39,6 +39,11 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::Drop(v, _) => {
             s.insert(*v);
         }
+        InstKind::DropMany(items) => {
+            for (v, _) in items {
+                s.insert(*v);
+            }
+        }
         InstKind::Call(_, args)
         | InstKind::ArrayInit(args)
         | InstKind::VariantInit(_, _, _, args) => {

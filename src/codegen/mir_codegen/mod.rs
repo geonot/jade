@@ -465,6 +465,10 @@ impl<'ctx> Compiler<'ctx> {
         self.value_types.clear();
         self.self_allocs.clear();
         self.vec_growth_floor_by_value = Self::compute_vec_growth_floors(func);
+        self.current_perceus_meta = func.perceus.clone();
+        self.current_reuse_slots.clear();
+        self.current_reuse_alloca_slots.clear();
+        self.current_alloc_dest = None;
         self.vars = IndexMap::new();
         self.var_shadows.clear();
         self.var_scope_markers.clear();
@@ -639,6 +643,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_conditional_branch(cond_i1, t, e));
             }
             mir::Terminator::Return(val) => {
+                self.drain_reuse_slots();
                 if let Some(vid) = val {
                     let v = self.val(*vid);
                     let expected = self.llvm_ty(ret_ty);

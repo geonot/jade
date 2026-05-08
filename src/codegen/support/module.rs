@@ -59,6 +59,10 @@ impl<'ctx> Compiler<'ctx> {
             migration_fns: Vec::new(),
             global_init_fn: None,
             vec_growth_floor_by_value: std::collections::HashMap::new(),
+            current_perceus_meta: mir::PerceusMeta::default(),
+            current_reuse_slots: std::collections::HashMap::new(),
+            current_reuse_alloca_slots: std::collections::HashMap::new(),
+            current_alloc_dest: None,
         }
     }
 

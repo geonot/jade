@@ -336,34 +336,10 @@ pub fn run() {
 
     crate::comptime::fold_program(&mut hir_prog);
 
-    // ── R11: HIR-level Perceus is diagnostic-only. The MIR-level pass below
-    // is the sole consumer of refcount hints used by codegen. Skip the HIR
-    // analysis on normal compiles to avoid the redundant work; surface it
-    // only under --debug-perceus.
-    if cli.debug_perceus {
-        let mut perceus = PerceusPass::new();
-        let hints = perceus.optimize(&hir_prog);
-        if hints.stats.drops_elided > 0
-            || hints.stats.reuse_sites > 0
-            || hints.stats.borrows_promoted > 0
-            || hints.stats.fbip_sites > 0
-            || hints.stats.tail_reuse_sites > 0
-            || hints.stats.speculative_reuse_sites > 0
-            || hints.stats.pool_hints_found > 0
-        {
-            eprintln!(
-                "perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative, {} pool-hints ({} bindings)",
-                hints.stats.drops_elided,
-                hints.stats.reuse_sites,
-                hints.stats.borrows_promoted,
-                hints.stats.fbip_sites,
-                hints.stats.tail_reuse_sites,
-                hints.stats.speculative_reuse_sites,
-                hints.stats.pool_hints_found,
-                hints.stats.total_bindings_analyzed,
-            );
-        }
-    }
+    // ── R11: HIR-level Perceus has been retired; the MIR-level Perceus
+    // pipeline below is now the sole source of refcount transformations and
+    // statistics. `--debug-perceus` prints the MIR-level stats line, which
+    // is emitted unconditionally when the flag is set (see below).
 
     let mut verifier = OwnershipVerifier::new();
     let diags = verifier.verify(&hir_prog);
@@ -495,25 +471,21 @@ pub fn run() {
     {
         use crate::perceus::mir_perceus;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_perceus::analyze_mir_program(&mir_prog);
-        if mir_hints.stats.drops_elided > 0
+        let mir_hints = mir_perceus::run(&mut mir_prog);
+        if cli.debug_perceus
+            || mir_hints.stats.drops_elided > 0
             || mir_hints.stats.reuse_sites > 0
             || mir_hints.stats.borrows_promoted > 0
-            || mir_hints.stats.fbip_sites > 0
-            || mir_hints.stats.tail_reuse_sites > 0
-            || mir_hints.stats.speculative_reuse_sites > 0
-            || mir_hints.stats.pool_hints_found > 0
+            || mir_hints.stats.drops_fused > 0
+            || mir_hints.stats.last_use_tracked > 0
         {
             eprintln!(
-                "mir-perceus: {} drops elided, {} reuse, {} borrow→move, {} fbip, {} tail-reuse, {} speculative, {} pool-hints, {} drops-fused ({} bindings)",
+                "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs, {} borrows promoted ({} bindings)",
                 mir_hints.stats.drops_elided,
+                mir_hints.stats.last_use_tracked,
+                mir_hints.stats.drops_fused,
                 mir_hints.stats.reuse_sites,
                 mir_hints.stats.borrows_promoted,
-                mir_hints.stats.fbip_sites,
-                mir_hints.stats.tail_reuse_sites,
-                mir_hints.stats.speculative_reuse_sites,
-                mir_hints.stats.pool_hints_found,
-                mir_hints.stats.drops_fused,
                 mir_hints.stats.total_bindings_analyzed,
             );
         }

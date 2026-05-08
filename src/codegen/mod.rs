@@ -188,6 +188,26 @@ pub struct Compiler<'ctx> {
     pub(crate) global_init_fn: Option<FunctionValue<'ctx>>,
     /// Per-function `VecNew(ValueId)` → growth floor used for `VecPush` on that vec.
     pub(crate) vec_growth_floor_by_value: std::collections::HashMap<mir::ValueId, u64>,
+    /// Perceus side-table of the MIR function currently being compiled.
+    /// Populated at the top of `compile_mir_fn`; consulted by Drop / RcNew /
+    /// VecNew / StructInit / VariantInit handlers to decide whether to save a
+    /// reuse slot (Drop) or consume one (alloc).
+    pub(crate) current_perceus_meta: mir::PerceusMeta,
+    /// Maps the SSA `ValueId` of a `Drop`ped pointer (in the *current* MIR
+    /// function) to the heap pointer that the codegen has stashed into a
+    /// reuse slot, so a later `RcNew` in the same function can consume it.
+    /// Used for forward-pairing within a single basic block (SSA scope).
+    pub(crate) current_reuse_slots: std::collections::HashMap<u32, PointerValue<'ctx>>,
+    /// Per-slot **stack alloca** holding the current saved heap pointer at
+    /// runtime. Populated lazily on first save/consume of each slot id.
+    /// This is the storage that lets loop-body reuse work across iterations
+    /// of the dynamic loop (the SSA-scoped HashMap above does not survive
+    /// runtime back-edges).
+    pub(crate) current_reuse_alloca_slots:
+        std::collections::HashMap<u32, PointerValue<'ctx>>,
+    /// MIR ValueId of the current allocation site, so the runtime
+    /// alloc helper can consult `current_perceus_meta.reuse_consume`.
+    pub(crate) current_alloc_dest: Option<mir::ValueId>,
 }
 
 pub(crate) struct PendingPhi<'ctx> {

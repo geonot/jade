@@ -35,6 +35,7 @@ impl Lowerer {
             next_value: 0,
             next_block: 1,
             attrs: crate::ast::FnAttrs::default(),
+            perceus: crate::mir::PerceusMeta::default(),
         };
         Lowerer {
             func,

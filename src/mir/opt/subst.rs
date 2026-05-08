@@ -32,6 +32,11 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         InstKind::Drop(v, _) => {
             sub!(v);
         }
+        InstKind::DropMany(items) => {
+            for (v, _) in items {
+                sub!(v);
+            }
+        }
         InstKind::Call(_, args)
         | InstKind::ArrayInit(args)
         | InstKind::VariantInit(_, _, _, args) => {

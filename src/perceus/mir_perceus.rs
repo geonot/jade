@@ -1,135 +1,129 @@
 //! Perceus reference-counting optimization on MIR.
 //!
-//! This module re-implements the Perceus analysis passes operating directly on
-//! MIR's SSA form rather than HIR.  SSA makes several analyses exact:
+//! This module implements Perceus as a sequence of **transformation passes**
+//! over MIR (not advisory hints). Each pass mutates the program directly and
+//! updates `PerceusStats` for `--debug-perceus` reporting. Codegen consumes
+//! the post-transform IR plus the per-function `mir::PerceusMeta` side-table
+//! for slot-keyed reuse.
 //!
-//!   - **Use counting** is trivial: each ValueId has exactly one definition,
-//!     so we just count operand occurrences.
-//!   - **Last use** is determined by linear scan through blocks.
-//!   - **Escape analysis** tracks ClosureCreate captures and Call arguments.
-//!   - **Reuse matching** finds RcNew/RcDec pairs with layout-compatible types.
+//! Pass pipeline (per function, in order):
+//!   1. **count_uses**     — exact SSA use-counting (`Drop` / `RcInc` /
+//!                            `RcDec` are *not* counted as semantic uses).
+//!   2. **drop_sinking**   — move each `Drop` to immediately after the last
+//!                            semantic use of its operand within the same
+//!                            basic block.
+//!   3. **drop_elision**   — physically delete `Drop(v, ty)` when
+//!                            `ty.is_trivially_droppable()`.
+//!   4. **borrow_promote** — delete `RcInc`/`RcDec` for `Type::Rc(_)`
+//!                            values with at most one semantic use, no
+//!                            escape, no closure capture.
+//!   5. **reuse_pairing**  — pair `Drop(v_old)` with the next layout-
+//!                            compatible `RcNew` in the same block via a
+//!                            slot id stored in `func.perceus`.
+//!   6. **drop_fusion**    — coalesce runs of >=2 consecutive `Drop`s into
+//!                            a single `InstKind::DropMany`.
 //!
-//! The output is a `PerceusHints` struct identical to the HIR Perceus output,
-//! so the MIR codegen backend can consume it without changes.
+//! All passes preserve SSA: drop sinking only moves drops backward inside a
+//! single block; drop elision and fusion only delete or coalesce Drop
+//! instructions, which have no SSA dest.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::Span;
-use crate::hir::DefId;
-use crate::mir::{self, InstKind, ValueId};
+use crate::mir::{self, InstKind, Instruction, Terminator, ValueId};
 use crate::types::Type;
 
-use super::{DropFusion, FbipSite, PerceusHints, PerceusPass, PoolHint, ReuseInfo, TailReuseInfo};
+use super::{PerceusHints, PerceusPass};
 
-/// Per-value use information gathered from MIR SSA form.
-#[derive(Debug, Clone)]
-struct MirUseInfo {
-    /// Number of times this ValueId is referenced as an operand.
-    use_count: u32,
-    /// Span of the last instruction that uses this value.
-    last_use_span: Option<Span>,
-    /// Whether this value escapes (passed to a call, stored in a closure env, etc.).
-    escapes: bool,
-    /// Whether this value is captured by a closure.
-    captured: bool,
-    /// The type of this value.
-    ty: Type,
-    /// The HIR DefId, if the producing instruction was annotated with one.
-    def_id: Option<DefId>,
+// ── Public entry points ──────────────────────────────────────────
+
+/// Backward-compatible entry. Now takes `&mut` because Perceus rewrites the
+/// IR in place; the old `&` shape leaked an immutable borrow that callers
+/// have all been migrated away from.
+pub fn analyze_mir_program(prog: &mut mir::Program) -> PerceusHints {
+    run(prog)
 }
 
-/// Analyze a full MIR program and produce Perceus hints.
-pub fn analyze_mir_program(prog: &mir::Program) -> PerceusHints {
+/// Run the Perceus transform pipeline. Returns aggregate stats; per-function
+/// reuse metadata is stored on `Function::perceus`.
+pub fn run(prog: &mut mir::Program) -> PerceusHints {
     let mut hints = PerceusHints::default();
-
-    for func in &prog.functions {
-        analyze_mir_fn(func, &mut hints);
+    let mut next_slot: u32 = 0;
+    for func in &mut prog.functions {
+        run_on_function(func, &mut hints, &mut next_slot);
     }
-
     hints
 }
 
-/// Analyze a single MIR function.
-fn analyze_mir_fn(func: &mir::Function, hints: &mut PerceusHints) {
-    // 1. Build use-def information.
+fn run_on_function(func: &mut mir::Function, hints: &mut PerceusHints, next_slot: &mut u32) {
     let uses = count_uses(func);
+    hints.stats.total_bindings_analyzed += uses.len() as u32;
 
-    // 2. Borrow promotion: promote single-use non-escaping values to moves.
-    analyze_borrow_promotion(&uses, hints);
+    let sunk = drop_sinking(func, &uses);
+    hints.stats.last_use_tracked += sunk;
 
-    // 3. Drop specialization: elide drops for trivially-droppable values.
-    analyze_drop_specialization(&uses, hints);
+    drop_elision(func, hints);
 
-    // 4. Drop fusion: coalesce consecutive trivially-droppable drops.
-    analyze_drop_fusion(func, &uses, hints);
-
-    // 5. Reuse analysis: find RcNew/RcDec pairs with compatible layouts.
-    analyze_reuse(func, &uses, hints);
-
-    // 6. Last-use analysis.
-    analyze_last_use(&uses, hints);
-
-    // 7. FBIP analysis: find match+construct patterns where allocation can reuse.
-    analyze_fbip(func, &uses, hints);
-
-    // 8. Tail reuse: parameter allocation reuse for tail-position constructors.
-    analyze_tail_reuse(func, &uses, hints);
-
-    // 9. Speculative reuse: nearby Rc alloc/dealloc pairs.
-    analyze_speculative_reuse(func, &uses, hints);
-
-    // 10. Pool hints: detect loop-body allocations for pre-allocation.
-    analyze_pool_hints(func, hints);
+    let uses = count_uses(func);
+    borrow_promote(func, &uses, hints);
+    reuse_pairing(func, &uses, hints, next_slot);
+    drop_fusion(func, hints);
 }
 
-// ── Use counting ─────────────────────────────────────────────────
+// ── Use info ─────────────────────────────────────────────────────
 
-fn count_uses(func: &mir::Function) -> HashMap<ValueId, MirUseInfo> {
-    let mut uses: HashMap<ValueId, MirUseInfo> = HashMap::new();
+#[derive(Debug, Clone)]
+struct UseInfo {
+    use_count: u32,
+    escapes: bool,
+    captured: bool,
+    ty: Type,
+    /// (block_index, instruction_index) of the last *semantic* use.
+    /// `instruction_index == bb.insts.len()` means "the terminator".
+    last_use: Option<(usize, usize)>,
+}
 
-    // ── Pass 1: Register all definitions (params, phi dests, instruction dests) ──
+fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
+    let mut uses: HashMap<ValueId, UseInfo> = HashMap::new();
+
+    // Pass 1: register definitions (params, phi dests, instruction dests).
     for p in &func.params {
         uses.insert(
             p.value,
-            MirUseInfo {
+            UseInfo {
                 use_count: 0,
-                last_use_span: None,
                 escapes: false,
                 captured: false,
                 ty: p.ty.clone(),
-                def_id: None,
+                last_use: None,
             },
         );
     }
-
     for bb in &func.blocks {
         for phi in &bb.phis {
-            uses.entry(phi.dest).or_insert_with(|| MirUseInfo {
+            uses.entry(phi.dest).or_insert_with(|| UseInfo {
                 use_count: 0,
-                last_use_span: None,
                 escapes: false,
                 captured: false,
                 ty: phi.ty.clone(),
-                def_id: None,
+                last_use: None,
             });
         }
         for inst in &bb.insts {
-            if let Some(dest) = inst.dest {
-                uses.entry(dest).or_insert_with(|| MirUseInfo {
+            if let Some(d) = inst.dest {
+                uses.entry(d).or_insert_with(|| UseInfo {
                     use_count: 0,
-                    last_use_span: None,
                     escapes: false,
                     captured: false,
                     ty: inst.ty.clone(),
-                    def_id: inst.def_id,
+                    last_use: None,
                 });
             }
         }
     }
 
-    // ── Pass 2: Count all uses now that every definition is registered ──
-    for bb in &func.blocks {
-        // Phi incoming values count as uses.
+    // Pass 2: count semantic uses.
+    for (bi, bb) in func.blocks.iter().enumerate() {
         for phi in &bb.phis {
             for (_, vid) in &phi.incoming {
                 if let Some(info) = uses.get_mut(vid) {
@@ -137,26 +131,41 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, MirUseInfo> {
                 }
             }
         }
-
-        // Count each operand as a use.
-        for inst in &bb.insts {
-            for operand in inst_operands(&inst.kind) {
-                if let Some(info) = uses.get_mut(&operand) {
-                    info.use_count += 1;
-                    info.last_use_span = Some(inst.span);
+        for (ii, inst) in bb.insts.iter().enumerate() {
+            // Refcount/drop ops are NOT semantic uses. Their operands are
+            // tracked by the dedicated reuse / fusion passes.
+            match &inst.kind {
+                InstKind::Drop(_, _)
+                | InstKind::DropMany(_)
+                | InstKind::RcInc(_)
+                | InstKind::RcDec(_) => {}
+                _ => {
+                    for op in inst_operands(&inst.kind) {
+                        if let Some(info) = uses.get_mut(&op) {
+                            info.use_count += 1;
+                            info.last_use = Some((bi, ii));
+                        }
+                    }
                 }
             }
 
-            // Track escapes: values passed to calls or stored in closures.
+            // Escape tracking — a value escapes when we cannot prove the
+            // callee/peer/storage cannot stash it.
             match &inst.kind {
-                InstKind::Call(_, args) | InstKind::IndirectCall(_, args) => {
+                InstKind::Call(_, args)
+                | InstKind::IndirectCall(_, args)
+                | InstKind::ClosureCall(_, args)
+                | InstKind::SpawnActor(_, args) => {
                     for a in args {
                         if let Some(info) = uses.get_mut(a) {
                             info.escapes = true;
                         }
                     }
                 }
-                InstKind::MethodCall(_, _, args) => {
+                InstKind::MethodCall(recv, _, args) => {
+                    if let Some(info) = uses.get_mut(recv) {
+                        info.escapes = true;
+                    }
                     for a in args {
                         if let Some(info) = uses.get_mut(a) {
                             info.escapes = true;
@@ -171,14 +180,53 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, MirUseInfo> {
                         }
                     }
                 }
-                InstKind::SpawnActor(_, args) => {
-                    for a in args {
-                        if let Some(info) = uses.get_mut(a) {
+                InstKind::ChanSend(_, val) => {
+                    if let Some(info) = uses.get_mut(val) {
+                        info.escapes = true;
+                    }
+                }
+                InstKind::Store(_, val) | InstKind::GlobalStore(_, val) => {
+                    if let Some(info) = uses.get_mut(val) {
+                        info.escapes = true;
+                    }
+                }
+                InstKind::FieldStore(_, _, val) | InstKind::IndexStore(_, _, val) => {
+                    if let Some(info) = uses.get_mut(val) {
+                        info.escapes = true;
+                    }
+                }
+                InstKind::FieldSet(_, _, val) | InstKind::IndexSet(_, _, val) => {
+                    if let Some(info) = uses.get_mut(val) {
+                        info.escapes = true;
+                    }
+                }
+                InstKind::StructInit(_, fields) => {
+                    for (_, v) in fields {
+                        if let Some(info) = uses.get_mut(v) {
                             info.escapes = true;
                         }
                     }
                 }
-                InstKind::ChanSend(_, val) => {
+                InstKind::VariantInit(_, _, _, payload) => {
+                    for v in payload {
+                        if let Some(info) = uses.get_mut(v) {
+                            info.escapes = true;
+                        }
+                    }
+                }
+                InstKind::ArrayInit(elems) | InstKind::VecNew(elems) => {
+                    for v in elems {
+                        if let Some(info) = uses.get_mut(v) {
+                            info.escapes = true;
+                        }
+                    }
+                }
+                InstKind::VecPush(_, elem) => {
+                    if let Some(info) = uses.get_mut(elem) {
+                        info.escapes = true;
+                    }
+                }
+                InstKind::RcNew(val, _) => {
                     if let Some(info) = uses.get_mut(val) {
                         info.escapes = true;
                     }
@@ -186,24 +234,27 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, MirUseInfo> {
                 _ => {}
             }
         }
-
-        // Count terminator operands.
+        // Terminator operand contributions; they are the last "instruction"
+        // of the block, indexed at bb.insts.len().
+        let term_idx = bb.insts.len();
         match &bb.terminator {
-            mir::Terminator::Branch(cond, _, _) => {
-                if let Some(info) = uses.get_mut(cond) {
+            Terminator::Branch(c, _, _) => {
+                if let Some(info) = uses.get_mut(c) {
                     info.use_count += 1;
+                    info.last_use = Some((bi, term_idx));
                 }
             }
-            mir::Terminator::Return(Some(val)) => {
-                if let Some(info) = uses.get_mut(val) {
+            Terminator::Switch(d, _, _) => {
+                if let Some(info) = uses.get_mut(d) {
                     info.use_count += 1;
-                    // Returned values escape to the caller.
+                    info.last_use = Some((bi, term_idx));
+                }
+            }
+            Terminator::Return(Some(v)) => {
+                if let Some(info) = uses.get_mut(v) {
+                    info.use_count += 1;
+                    info.last_use = Some((bi, term_idx));
                     info.escapes = true;
-                }
-            }
-            mir::Terminator::Switch(disc, _, _) => {
-                if let Some(info) = uses.get_mut(disc) {
-                    info.use_count += 1;
                 }
             }
             _ => {}
@@ -213,7 +264,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, MirUseInfo> {
     uses
 }
 
-/// Extract all ValueId operands from an instruction kind.
 fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
     match kind {
         InstKind::IntConst(_)
@@ -224,7 +274,10 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         | InstKind::MapInit
         | InstKind::SetInit
         | InstKind::PQInit
-        | InstKind::DequeInit => vec![],
+        | InstKind::DequeInit
+        | InstKind::Load(_)
+        | InstKind::FnRef(_)
+        | InstKind::GlobalLoad(_) => vec![],
 
         InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => vec![*a, *b],
         InstKind::UnaryOp(_, a) => vec![*a],
@@ -241,9 +294,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
             v
         }
 
-        InstKind::Load(_) | InstKind::FnRef(_) | InstKind::GlobalLoad(_) => vec![],
         InstKind::Store(_, val) | InstKind::GlobalStore(_, val) => vec![*val],
-
         InstKind::FieldGet(obj, _) => vec![*obj],
         InstKind::FieldSet(obj, _, val) => vec![*obj, *val],
         InstKind::FieldStore(_, _, val) => vec![*val],
@@ -256,11 +307,11 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::ArrayInit(elems) => elems.clone(),
 
         InstKind::Cast(v, _) | InstKind::StrictCast(v, _) => vec![*v],
-        InstKind::Ref(v) => vec![*v],
-        InstKind::Deref(v) => vec![*v],
+        InstKind::Ref(v) | InstKind::Deref(v) => vec![*v],
 
         InstKind::Alloc(v) => vec![*v],
         InstKind::Drop(v, _) => vec![*v],
+        InstKind::DropMany(items) => items.iter().map(|(v, _)| *v).collect(),
         InstKind::RcInc(v) | InstKind::RcDec(v) => vec![*v],
         InstKind::Copy(v) => vec![*v],
         InstKind::Slice(a, b, c) => vec![*a, *b, *c],
@@ -277,8 +328,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         }
 
         InstKind::RcNew(val, _) => vec![*val],
-        InstKind::RcClone(v) => vec![*v],
-        InstKind::WeakUpgrade(v) => vec![*v],
+        InstKind::RcClone(v) | InstKind::WeakUpgrade(v) => vec![*v],
 
         InstKind::SpawnActor(_, args) => args.clone(),
         InstKind::ChanCreate(..) => vec![],
@@ -300,423 +350,510 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
     }
 }
 
-// ── Drop specialization ─────────────────────────────────────────
+// ── Pass: drop sinking ───────────────────────────────────────────
 
-fn analyze_drop_specialization(uses: &HashMap<ValueId, MirUseInfo>, hints: &mut PerceusHints) {
-    for (_, info) in uses {
-        if let Some(def_id) = info.def_id {
-            if info.ty.is_trivially_droppable() {
-                hints.elide_drops.insert(def_id);
-                hints.stats.drops_elided += 1;
-            }
-        }
-        hints.stats.total_bindings_analyzed += 1;
-    }
-}
+/// Move each `Drop(v)` instruction backward to immediately after the last
+/// semantic use of `v` within the same basic block. If the last use is in a
+/// different block (or the value has no semantic use), the drop is left in
+/// place. Returns the number of drops actually relocated.
+///
+/// Soundness: we never move a drop *across* a use of the same value (the
+/// destination is `last_use_idx + 1`, after every use). We never move a drop
+/// out of its block. We never reorder relative to other drops of the same
+/// value (each drop is processed independently against its own last-use).
+fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u32 {
+    let mut sunk = 0u32;
+    for bi in 0..func.blocks.len() {
+        let orig: Vec<Instruction> = std::mem::take(&mut func.blocks[bi].insts);
+        let mut new_insts: Vec<Instruction> = Vec::with_capacity(orig.len());
+        // (anchor_orig_idx, drop_inst). When we have just appended the
+        // instruction that lived at `anchor_orig_idx` in `orig`, we flush all
+        // deferred drops with that anchor.
+        let mut deferred: Vec<(usize, Instruction)> = Vec::new();
 
-// ── Borrow promotion ────────────────────────────────────────────
-
-/// Promote single-use, non-escaping, non-captured Rc values to moves.
-/// In SSA, a value used exactly once that doesn't escape can be moved instead of cloned.
-fn analyze_borrow_promotion(uses: &HashMap<ValueId, MirUseInfo>, hints: &mut PerceusHints) {
-    for (_, info) in uses {
-        if let Some(def_id) = info.def_id {
-            if matches!(info.ty, Type::Rc(_))
-                && info.use_count <= 1
-                && !info.escapes
-                && !info.captured
-            {
-                hints.borrow_to_move.insert(def_id);
-                hints.stats.borrows_promoted += 1;
-            }
-        }
-    }
-}
-
-// ── Drop fusion ─────────────────────────────────────────────────
-
-/// Coalesce consecutive trivially-droppable Drop instructions within a basic block.
-fn analyze_drop_fusion(
-    func: &mir::Function,
-    uses: &HashMap<ValueId, MirUseInfo>,
-    hints: &mut PerceusHints,
-) {
-    for bb in &func.blocks {
-        let mut run: Vec<DefId> = Vec::new();
-        let mut run_span: Option<Span> = None;
-
-        for inst in &bb.insts {
-            let is_trivial_drop = if let InstKind::Drop(val, ty) = &inst.kind {
-                if ty.is_trivially_droppable() {
-                    if let Some(info) = uses.get(val) {
-                        if let Some(def_id) = info.def_id {
-                            run.push(def_id);
-                            if run_span.is_none() {
-                                run_span = Some(inst.span);
-                            }
-                            true
-                        } else {
-                            false
+        for (i, inst) in orig.into_iter().enumerate() {
+            let mut deferred_this_drop = false;
+            if let InstKind::Drop(v, _) = &inst.kind {
+                if let Some(info) = uses.get(v) {
+                    if let Some((lu_bi, lu_ii)) = info.last_use {
+                        if lu_bi == bi && lu_ii > i && lu_ii < usize::MAX {
+                            deferred.push((lu_ii, inst.clone()));
+                            deferred_this_drop = true;
+                            sunk += 1;
                         }
-                    } else {
-                        false
                     }
+                }
+            }
+            if !deferred_this_drop {
+                new_insts.push(inst);
+            }
+            // Flush any deferred drops anchored at i.
+            let mut k = 0;
+            while k < deferred.len() {
+                if deferred[k].0 == i {
+                    new_insts.push(deferred.swap_remove(k).1);
                 } else {
-                    false
+                    k += 1;
                 }
-            } else {
+            }
+        }
+        // Drops anchored beyond the last instruction (e.g. last use was the
+        // terminator) get appended at the very end of the block, just before
+        // the terminator runs.
+        for (_, inst) in deferred.drain(..) {
+            new_insts.push(inst);
+        }
+        func.blocks[bi].insts = new_insts;
+    }
+    sunk
+}
+
+// ── Pass: drop elision ───────────────────────────────────────────
+
+/// Physically delete `Drop(v, ty)` whenever `ty.is_trivially_droppable()`.
+fn drop_elision(func: &mut mir::Function, hints: &mut PerceusHints) {
+    let mut elided = 0u32;
+    for bb in &mut func.blocks {
+        bb.insts.retain(|inst| match &inst.kind {
+            InstKind::Drop(_, ty) if ty.is_trivially_droppable() => {
+                elided += 1;
                 false
-            };
-
-            if !is_trivial_drop {
-                if run.len() >= 2 {
-                    hints.drop_fusions.push(DropFusion {
-                        def_ids: run.clone(),
-                        span: run_span.unwrap_or(Span::dummy()),
-                    });
-                    hints.stats.drops_fused += run.len() as u32;
-                }
-                run.clear();
-                run_span = None;
             }
-        }
-        // Flush any remaining run at block end.
-        if run.len() >= 2 {
-            hints.drop_fusions.push(DropFusion {
-                def_ids: run,
-                span: run_span.unwrap_or(Span::dummy()),
-            });
-        }
-    }
-}
-
-// ── Pool hints ──────────────────────────────────────────────────
-
-/// Detect Rc/struct allocations inside loop bodies that could benefit from
-/// pool pre-allocation. In MIR SSA, loops are back-edges in the CFG.
-/// We detect loops by looking for back-edges (blocks that branch to earlier blocks).
-fn analyze_pool_hints(func: &mir::Function, hints: &mut PerceusHints) {
-    use std::collections::HashSet;
-
-    // Simple loop detection: a back-edge target's successor blocks form the loop body.
-    // For simplicity, we check each block's successors — if any target has a lower index,
-    // the blocks between the target and current form a loop.
-    let block_ids: Vec<mir::BlockId> = func.blocks.iter().map(|b| b.id).collect();
-    let block_index: HashMap<mir::BlockId, usize> = block_ids
-        .iter()
-        .enumerate()
-        .map(|(i, id)| (*id, i))
-        .collect();
-
-    let mut loop_body_blocks: HashSet<usize> = HashSet::new();
-
-    for (i, bb) in func.blocks.iter().enumerate() {
-        let successors = terminator_successors(&bb.terminator);
-        for succ in &successors {
-            if let Some(&succ_idx) = block_index.get(succ) {
-                if succ_idx <= i {
-                    // Back-edge detected: blocks [succ_idx..=i] form a loop body.
-                    for j in succ_idx..=i {
-                        loop_body_blocks.insert(j);
-                    }
-                }
-            }
-        }
-    }
-
-    // Scan loop body blocks for allocation instructions.
-    let mut alloc_types: HashMap<u64, (Type, Span)> = HashMap::new();
-    for &idx in &loop_body_blocks {
-        let bb = &func.blocks[idx];
-        for inst in &bb.insts {
-            let alloc_ty = match &inst.kind {
-                InstKind::RcNew(_, inner_ty) => Some(inner_ty.clone()),
-                InstKind::StructInit(_, _) => Some(inst.ty.clone()),
-                InstKind::VariantInit(_, _, _, _) => Some(inst.ty.clone()),
-                _ => None,
-            };
-            if let Some(ty) = alloc_ty {
-                let size = PerceusPass::type_layout_size_pub(&ty);
-                if size > 0 {
-                    alloc_types.entry(size).or_insert((ty, inst.span));
-                }
-            }
-        }
-    }
-
-    for (size, (ty, span)) in alloc_types {
-        hints.pool_hints.push(PoolHint {
-            alloc_ty: ty,
-            size,
-            span,
+            _ => true,
         });
-        hints.stats.pool_hints_found += 1;
     }
+    hints.stats.drops_elided += elided;
 }
 
-/// Get successor block IDs from a terminator.
-fn terminator_successors(term: &mir::Terminator) -> Vec<mir::BlockId> {
-    match term {
-        mir::Terminator::Goto(b) => vec![*b],
-        mir::Terminator::Branch(_, t, e) => vec![*t, *e],
-        mir::Terminator::Switch(_, cases, default) => {
-            let mut v: Vec<mir::BlockId> = cases.iter().map(|(_, b)| *b).collect();
-            v.push(*default);
-            v
-        }
-        mir::Terminator::Return(_) | mir::Terminator::Unreachable => vec![],
-    }
-}
+// ── Pass: borrow promotion ───────────────────────────────────────
 
-// ── Reuse analysis ──────────────────────────────────────────────
-
-fn analyze_reuse(
-    func: &mir::Function,
-    uses: &HashMap<ValueId, MirUseInfo>,
+/// Delete `RcInc(v)` / `RcDec(v)` for `Type::Rc(_)` values with at most one
+/// semantic use, no escape, and no closure capture.
+fn borrow_promote(
+    func: &mut mir::Function,
+    uses: &HashMap<ValueId, UseInfo>,
     hints: &mut PerceusHints,
 ) {
-    // Collect Rc-typed values: (ValueId, Type, Span, Option<DefId>).
-    let mut rc_values: Vec<(ValueId, Type, Span, Option<DefId>)> = Vec::new();
-
-    for bb in &func.blocks {
-        for inst in &bb.insts {
-            if let Some(dest) = inst.dest {
-                if matches!(inst.ty, Type::Rc(_)) {
-                    rc_values.push((dest, inst.ty.clone(), inst.span, inst.def_id));
-                }
-                // Also catch RcNew instructions directly.
-                if matches!(inst.kind, InstKind::RcNew(_, _)) {
-                    // Already caught by type check above, but ensure it's in the list.
-                }
-            }
+    let mut promotable: HashSet<ValueId> = HashSet::new();
+    for (vid, info) in uses {
+        if matches!(info.ty, Type::Rc(_))
+            && info.use_count <= 1
+            && !info.escapes
+            && !info.captured
+        {
+            promotable.insert(*vid);
         }
     }
-
-    // Group by layout size for O(n) matching.
-    let mut released_by_size: HashMap<u64, Vec<(ValueId, Type, Span, Option<DefId>)>> =
-        HashMap::new();
-
-    for (vid, ty, span, def_id) in &rc_values {
-        let info = match uses.get(vid) {
-            Some(i) => i,
-            None => continue,
-        };
-
-        let inner_ty = match &ty {
-            Type::Rc(inner) => inner.as_ref(),
-            _ => &ty,
-        };
-        let size = PerceusPass::type_layout_size_pub(inner_ty);
-
-        // Single-use, non-escaping Rc values are release candidates.
-        if info.use_count <= 1 && !info.escapes && !info.captured {
-            released_by_size
-                .entry(size)
-                .or_default()
-                .push((*vid, ty.clone(), *span, *def_id));
-        } else {
-            // Check if we can match this allocation against a released value.
-            if let Some(candidates) = released_by_size.get_mut(&size) {
-                if let Some((_, released_ty, _, released_def_id)) = candidates.pop() {
-                    if let (Some(r_id), Some(a_id)) = (released_def_id, def_id) {
-                        hints.reuse_candidates.insert(
-                            r_id,
-                            ReuseInfo {
-                                released_ty: released_ty.clone(),
-                                allocated_ty: ty.clone(),
-                                span: *span,
-                            },
-                        );
-                        hints.reuse_candidates.insert(
-                            *a_id,
-                            ReuseInfo {
-                                released_ty,
-                                allocated_ty: ty.clone(),
-                                span: *span,
-                            },
-                        );
-                        hints.stats.reuse_sites += 1;
-                    }
-                }
-            }
-        }
+    if promotable.is_empty() {
+        return;
     }
+    let mut promoted = 0u32;
+    for bb in &mut func.blocks {
+        bb.insts.retain(|inst| match &inst.kind {
+            InstKind::RcInc(v) | InstKind::RcDec(v) if promotable.contains(v) => {
+                promoted += 1;
+                false
+            }
+            _ => true,
+        });
+    }
+    hints.stats.borrows_promoted += promoted;
 }
 
-// ── Last-use analysis ───────────────────────────────────────────
+// ── Pass: reuse pairing ──────────────────────────────────────────
 
-fn analyze_last_use(uses: &HashMap<ValueId, MirUseInfo>, hints: &mut PerceusHints) {
-    for (_, info) in uses {
-        if let Some(def_id) = info.def_id {
-            if info.use_count > 0 {
-                if let Some(span) = info.last_use_span {
-                    hints.last_use.insert(def_id, span);
-                    hints.stats.last_use_tracked += 1;
-                }
-            }
-        }
-    }
-}
-
-// ── FBIP analysis ───────────────────────────────────────────────
-
-/// Functional But In-Place: detect match patterns where a destructured value's
-/// memory can be reused for the newly constructed return value.
-fn analyze_fbip(
-    func: &mir::Function,
-    uses: &HashMap<ValueId, MirUseInfo>,
+/// Pair `Drop(v_old)` with the next layout-compatible `RcNew` in the same
+/// block, recording the pairing as a slot id in `func.perceus`. Codegen turns
+/// the pair into a literal in-place reuse: the Drop stashes the heap pointer
+/// instead of freeing it; the matching alloc consumes the slot instead of
+/// calling malloc.
+///
+/// Soundness restrictions:
+///   * `v_old` must be `Type::Rc(_)`, `use_count == 1`, `!escapes`,
+///     `!captured`.
+///   * The matching alloc must be `RcNew(_, inner)` whose inner type has the
+///     same layout size as `v_old`'s inner type.
+///   * Any intervening Call / IndirectCall / MethodCall / ClosureCall /
+///     ChanSend / SpawnActor kills the candidate (the pointer might escape
+///     and be freed underneath us).
+fn reuse_pairing(
+    func: &mut mir::Function,
+    uses: &HashMap<ValueId, UseInfo>,
     hints: &mut PerceusHints,
+    next_slot: &mut u32,
 ) {
-    // Look for patterns in the MIR:
-    //   1. A Switch terminator on some value `disc`
-    //   2. In the case arms, a VariantInit or StructInit that constructs a value
-    //      with a layout compatible with the Switch subject's type
-    //   3. The subject has use_count == 1 and doesn't escape
-
-    for bb in &func.blocks {
-        if let mir::Terminator::Switch(disc, cases, _) = &bb.terminator {
-            let disc_info = match uses.get(disc) {
-                Some(i) => i,
-                None => continue,
-            };
-            if disc_info.use_count > 2 || disc_info.escapes {
-                continue;
-            }
-
-            // Check each case arm for a constructor.
-            for (_, target_id) in cases {
-                let target_bb = match func.blocks.iter().find(|b| b.id == *target_id) {
-                    Some(b) => b,
-                    None => continue,
-                };
-                for inst in &target_bb.insts {
-                    let constructed_ty = match &inst.kind {
-                        InstKind::VariantInit(_, _, _, _) => Some(&inst.ty),
-                        InstKind::StructInit(_, _) => Some(&inst.ty),
-                        InstKind::RcNew(_, _) => Some(&inst.ty),
-                        _ => None,
-                    };
-                    if let Some(ctor_ty) = constructed_ty {
-                        if PerceusPass::layouts_compatible(&disc_info.ty, ctor_ty) {
-                            if let Some(def_id) = disc_info.def_id {
-                                hints.fbip_sites.push(FbipSite {
-                                    subject_id: def_id,
-                                    subject_ty: disc_info.ty.clone(),
-                                    constructed_ty: ctor_ty.clone(),
-                                    span: inst.span,
-                                });
-                                hints.stats.fbip_sites += 1;
+    let mut pairs = 0u32;
+    for bi in 0..func.blocks.len() {
+        // Pass A: collect Drop and RcNew positions in this block, plus
+        // positions of escape-killing operations.
+        #[derive(Debug)]
+        struct DropSite {
+            inst_idx: usize,
+            value: ValueId,
+            size: u64,
+        }
+        #[derive(Debug)]
+        struct AllocSite {
+            inst_idx: usize,
+            dest: ValueId,
+            size: u64,
+        }
+        let mut drops: Vec<DropSite> = Vec::new();
+        let mut allocs: Vec<AllocSite> = Vec::new();
+        let mut kill_idxs: Vec<usize> = Vec::new();
+        for (ii, inst) in func.blocks[bi].insts.iter().enumerate() {
+            match &inst.kind {
+                InstKind::Drop(v, Type::Rc(inner)) => {
+                    if let Some(info) = uses.get(v) {
+                        if info.use_count == 1 && !info.escapes && !info.captured {
+                            let size = PerceusPass::type_layout_size_pub(inner);
+                            if size > 0 {
+                                drops.push(DropSite { inst_idx: ii, value: *v, size });
                             }
                         }
                     }
                 }
+                InstKind::RcNew(_, alloc_inner) => {
+                    if let Some(dest) = inst.dest {
+                        let size = PerceusPass::type_layout_size_pub(alloc_inner);
+                        if size > 0 {
+                            allocs.push(AllocSite { inst_idx: ii, dest, size });
+                        }
+                    }
+                }
+                InstKind::Call(_, _)
+                | InstKind::IndirectCall(_, _)
+                | InstKind::MethodCall(_, _, _)
+                | InstKind::ClosureCall(_, _)
+                | InstKind::ChanSend(_, _)
+                | InstKind::SpawnActor(_, _) => {
+                    kill_idxs.push(ii);
+                }
+                _ => {}
             }
         }
-    }
-}
 
-// ── Tail reuse analysis ─────────────────────────────────────────
+        // Detect whether this block is on a back-edge (it is itself the
+        // target of a branch/goto from a block that comes later in the
+        // function CFG, OR it branches to itself directly). When the block
+        // is a loop body, end-of-block Drop may pair with start-of-block
+        // RcNew because the `next iteration's` RcNew comes after the Drop
+        // along the back-edge.
+        let is_loop_body = block_is_loop_body(func, bi);
 
-fn analyze_tail_reuse(
-    func: &mir::Function,
-    uses: &HashMap<ValueId, MirUseInfo>,
-    hints: &mut PerceusHints,
-) {
-    // Find the return value's type by looking at Return terminators.
-    let mut return_constructor_ty: Option<Type> = None;
+        let mut used_drops: Vec<bool> = vec![false; drops.len()];
+        let mut used_allocs: Vec<bool> = vec![false; allocs.len()];
+        let mut decisions: Vec<(ValueId, ValueId, u32)> = Vec::new();
 
-    for bb in &func.blocks {
-        if let mir::Terminator::Return(Some(ret_val)) = &bb.terminator {
-            // Check if the return value was produced by a constructor.
-            for inst in bb.insts.iter().rev() {
-                if inst.dest == Some(*ret_val) {
-                    match &inst.kind {
-                        InstKind::VariantInit(_, _, _, _)
-                        | InstKind::StructInit(_, _)
-                        | InstKind::RcNew(_, _) => {
-                            return_constructor_ty = Some(inst.ty.clone());
-                        }
-                        _ => {}
-                    }
+        // Strategy 1: forward pair Drop@i → next compatible RcNew@j>i with
+        // no kill in [i,j].
+        for (di, d) in drops.iter().enumerate() {
+            if used_drops[di] { continue; }
+            for (ai, a) in allocs.iter().enumerate() {
+                if used_allocs[ai] { continue; }
+                if a.inst_idx <= d.inst_idx { continue; }
+                if a.size != d.size { continue; }
+                let killed = kill_idxs.iter().any(|&k| k > d.inst_idx && k < a.inst_idx);
+                if killed { continue; }
+                let slot = *next_slot;
+                *next_slot += 1;
+                decisions.push((d.value, a.dest, slot));
+                used_drops[di] = true;
+                used_allocs[ai] = true;
+                break;
+            }
+        }
+
+        // Strategy 2 (loop reuse): for any remaining Drop AFTER a remaining
+        // RcNew in a loop body, pair them — the next iteration's RcNew
+        // consumes the slot saved by this iteration's Drop.
+        if is_loop_body {
+            for (di, d) in drops.iter().enumerate() {
+                if used_drops[di] { continue; }
+                for (ai, a) in allocs.iter().enumerate() {
+                    if used_allocs[ai] { continue; }
+                    if a.inst_idx >= d.inst_idx { continue; }
+                    if a.size != d.size { continue; }
+                    // Kill check on the back-edge slice (Drop..end) ∪
+                    // (start..Alloc) — any escape op invalidates the slot.
+                    let killed = kill_idxs
+                        .iter()
+                        .any(|&k| (k > d.inst_idx) || (k < a.inst_idx));
+                    if killed { continue; }
+                    let slot = *next_slot;
+                    *next_slot += 1;
+                    decisions.push((d.value, a.dest, slot));
+                    used_drops[di] = true;
+                    used_allocs[ai] = true;
                     break;
                 }
             }
         }
-    }
 
-    let alloc_ty = match return_constructor_ty {
-        Some(ty) => ty,
-        None => return,
-    };
-
-    // Check each parameter: if owned, non-escaping, and layout-compatible, tag for reuse.
-    for p in &func.params {
-        let info = match uses.get(&p.value) {
-            Some(i) => i,
-            None => continue,
-        };
-        if !info.escapes && PerceusPass::layouts_compatible(&p.ty, &alloc_ty) {
-            hints.tail_reuse.insert(
-                func.def_id,
-                TailReuseInfo {
-                    param_id: func.def_id,
-                    param_ty: p.ty.clone(),
-                    alloc_ty: alloc_ty.clone(),
-                    span: func.span,
-                },
-            );
-            hints.stats.tail_reuse_sites += 1;
-            break; // One tail reuse per function is sufficient.
+        for (drop_v, alloc_dest, slot) in decisions {
+            func.perceus.reuse_save.insert(drop_v, slot);
+            func.perceus.reuse_consume.insert(alloc_dest, slot);
+            pairs += 1;
         }
     }
+
+    // Strategy 3: cross-block reuse within a loop body. The runtime alloca
+    // slot survives back-edges, so any unpaired `Drop(Rc)` in a loop body can
+    // pair with any unpaired `RcNew` of the same payload size in the same
+    // loop body, provided the loop body contains no escape ops. The save and
+    // consume sites need not be in the same block: codegen guarantees the
+    // slot starts NULL, save stores into it (freeing prior tenant), consume
+    // loads it (mallocs on NULL), and a function-exit drain frees survivors.
+    pairs += cross_block_loop_reuse(func, uses, next_slot);
+    hints.stats.reuse_sites += pairs;
 }
 
-// ── Speculative reuse ───────────────────────────────────────────
-
-fn analyze_speculative_reuse(
-    func: &mir::Function,
-    uses: &HashMap<ValueId, MirUseInfo>,
-    hints: &mut PerceusHints,
-) {
-    // Find adjacent RcDec → RcNew pairs within the same block where the
-    // released and allocated types have compatible layouts.
-    for bb in &func.blocks {
-        let mut last_rc_dec: Option<(ValueId, &Type, Span, Option<DefId>)> = None;
-
-        for inst in &bb.insts {
-            match &inst.kind {
-                InstKind::RcDec(val) => {
-                    if let Some(info) = uses.get(val) {
-                        last_rc_dec = Some((*val, &info.ty, inst.span, info.def_id));
-                    }
-                }
-                InstKind::RcNew(_, alloc_ty) => {
-                    if let Some((_, released_ty, _, released_def_id)) = &last_rc_dec {
-                        if PerceusPass::layouts_compatible(released_ty, alloc_ty) {
-                            if let (Some(r_id), Some(_a_id)) = (released_def_id, inst.def_id) {
-                                if !hints.reuse_candidates.contains_key(r_id) {
-                                    hints.speculative_reuse.insert(
-                                        *r_id,
-                                        ReuseInfo {
-                                            released_ty: (*released_ty).clone(),
-                                            allocated_ty: alloc_ty.clone(),
-                                            span: inst.span,
-                                        },
-                                    );
-                                    hints.stats.speculative_reuse_sites += 1;
+/// Cross-block reuse pairing pass. Walks every back-edge target, materializes
+/// the loop body it heads (set of blocks dominated by the header that can
+/// reach the header), and pairs unpaired Drops with unpaired RcNews of the
+/// same payload size — but only if the loop body is escape-free (no Call /
+/// IndirectCall / MethodCall / ClosureCall / ChanSend / SpawnActor anywhere
+/// inside it).
+fn cross_block_loop_reuse(
+    func: &mut mir::Function,
+    uses: &HashMap<ValueId, UseInfo>,
+    next_slot: &mut u32,
+) -> u32 {
+    let mut paired = 0u32;
+    let loops = collect_loop_bodies(func);
+    for body in loops {
+        // Reject if any block in the body contains an escape op.
+        let has_escape = body.iter().any(|&bi| {
+            func.blocks[bi].insts.iter().any(|inst| {
+                matches!(
+                    inst.kind,
+                    InstKind::Call(_, _)
+                        | InstKind::IndirectCall(_, _)
+                        | InstKind::MethodCall(_, _, _)
+                        | InstKind::ClosureCall(_, _)
+                        | InstKind::ChanSend(_, _)
+                        | InstKind::SpawnActor(_, _)
+                )
+            })
+        });
+        if has_escape {
+            continue;
+        }
+        // Collect unpaired Drop(Rc) and RcNew sites across the body.
+        let mut drops: Vec<(ValueId, u64)> = Vec::new();
+        let mut allocs: Vec<(ValueId, u64)> = Vec::new();
+        for &bi in &body {
+            for inst in &func.blocks[bi].insts {
+                match &inst.kind {
+                    InstKind::Drop(v, Type::Rc(inner))
+                        if !func.perceus.reuse_save.contains_key(v) =>
+                    {
+                        if let Some(info) = uses.get(v) {
+                            if info.use_count == 1 && !info.escapes && !info.captured {
+                                let size = PerceusPass::type_layout_size_pub(inner);
+                                if size > 0 {
+                                    drops.push((*v, size));
                                 }
                             }
                         }
                     }
-                    last_rc_dec = None;
-                }
-                _ => {
-                    // Any intervening instruction invalidates the RcDec candidate.
-                    if !matches!(inst.kind, InstKind::Copy(_) | InstKind::Void) {
-                        last_rc_dec = None;
+                    InstKind::RcNew(_, alloc_inner) => {
+                        if let Some(dest) = inst.dest {
+                            if !func.perceus.reuse_consume.contains_key(&dest) {
+                                let size = PerceusPass::type_layout_size_pub(alloc_inner);
+                                if size > 0 {
+                                    allocs.push((dest, size));
+                                }
+                            }
+                        }
                     }
+                    _ => {}
                 }
             }
         }
+        // Greedy pair on size match.
+        let mut used_a = vec![false; allocs.len()];
+        for (dv, ds) in &drops {
+            for (ai, (av, asz)) in allocs.iter().enumerate() {
+                if used_a[ai] || asz != ds {
+                    continue;
+                }
+                let slot = *next_slot;
+                *next_slot += 1;
+                func.perceus.reuse_save.insert(*dv, slot);
+                func.perceus.reuse_consume.insert(*av, slot);
+                used_a[ai] = true;
+                paired += 1;
+                break;
+            }
+        }
+    }
+    paired
+}
+
+/// Collect each loop body in the function as a Vec of block indices. A loop
+/// body is a maximal SCC reachable from a back-edge target. We use a simple
+/// rule: for each block H that is a back-edge target (i.e., some block B has
+/// H as a successor and H ≤ B in RPO or there is a back-path from H's
+/// successors to H), the body is { blocks reachable from H that can reach H }.
+/// Bodies may overlap; we deduplicate identical bodies.
+fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
+    let n = func.blocks.len();
+    let succs = |b: usize| -> Vec<usize> {
+        match &func.blocks[b].terminator {
+            Terminator::Goto(t) => vec![t.0 as usize],
+            Terminator::Branch(_, t, e) => vec![t.0 as usize, e.0 as usize],
+            Terminator::Switch(_, arms, default) => {
+                let mut v: Vec<usize> = arms.iter().map(|(_, t)| t.0 as usize).collect();
+                v.push(default.0 as usize);
+                v
+            }
+            _ => vec![],
+        }
+    };
+    // Reverse adjacency.
+    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for b in 0..n {
+        for s in succs(b) {
+            if s < n {
+                preds[s].push(b);
+            }
+        }
+    }
+    let mut bodies: Vec<Vec<usize>> = Vec::new();
+    let mut seen: HashSet<Vec<usize>> = HashSet::new();
+    for h in 0..n {
+        // Header iff some pred is reachable from h's successors (i.e., back-edge into h).
+        if !block_is_loop_body(func, h) {
+            continue;
+        }
+        // Body = { b : b reachable from h AND h reachable from b }.
+        // Forward reachable from h.
+        let mut fwd = vec![false; n];
+        let mut stack = vec![h];
+        while let Some(b) = stack.pop() {
+            if b >= n || fwd[b] {
+                continue;
+            }
+            fwd[b] = true;
+            for s in succs(b) {
+                stack.push(s);
+            }
+        }
+        // Backward reachable from h (uses preds).
+        let mut bwd = vec![false; n];
+        let mut stack = vec![h];
+        while let Some(b) = stack.pop() {
+            if bwd[b] {
+                continue;
+            }
+            bwd[b] = true;
+            for &p in &preds[b] {
+                stack.push(p);
+            }
+        }
+        let mut body: Vec<usize> = (0..n).filter(|&b| fwd[b] && bwd[b]).collect();
+        body.sort_unstable();
+        if body.len() >= 1 && seen.insert(body.clone()) {
+            bodies.push(body);
+        }
+    }
+    bodies
+}
+
+/// Block `bi` is a loop body iff there is a path from any successor of `bi`
+/// back to `bi`. Implemented with a forward DFS from each successor.
+fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
+    let n = func.blocks.len();
+    let succs = |b: usize| -> Vec<usize> {
+        match &func.blocks[b].terminator {
+            Terminator::Goto(t) => vec![t.0 as usize],
+            Terminator::Branch(_, t, e) => vec![t.0 as usize, e.0 as usize],
+            Terminator::Switch(_, arms, default) => {
+                let mut v: Vec<usize> = arms.iter().map(|(_, t)| t.0 as usize).collect();
+                v.push(default.0 as usize);
+                v
+            }
+            _ => vec![],
+        }
+    };
+    let mut visited = vec![false; n];
+    let mut stack: Vec<usize> = succs(bi);
+    while let Some(b) = stack.pop() {
+        if b >= n {
+            continue;
+        }
+        if b == bi {
+            return true;
+        }
+        if visited[b] {
+            continue;
+        }
+        visited[b] = true;
+        for s in succs(b) {
+            stack.push(s);
+        }
+    }
+    false
+}
+
+// ── Pass: drop fusion ────────────────────────────────────────────
+
+/// Replace runs of >=2 consecutive `Drop` instructions with a single
+/// `InstKind::DropMany`. Drops tagged for reuse-save are excluded so codegen
+/// can still stash their pointers individually.
+fn drop_fusion(func: &mut mir::Function, hints: &mut PerceusHints) {
+    let mut fused = 0u32;
+    for bb in &mut func.blocks {
+        let mut new_insts: Vec<Instruction> = Vec::with_capacity(bb.insts.len());
+        let mut run: Vec<(ValueId, Type)> = Vec::new();
+        let mut run_span: Option<Span> = None;
+        let drained: Vec<Instruction> = std::mem::take(&mut bb.insts);
+        for inst in drained {
+            let is_fusible = matches!(&inst.kind, InstKind::Drop(v, _)
+                if !func.perceus.reuse_save.contains_key(v));
+            if is_fusible {
+                if let InstKind::Drop(v, ty) = inst.kind {
+                    if run.is_empty() {
+                        run_span = Some(inst.span);
+                    }
+                    run.push((v, ty));
+                }
+            } else {
+                flush_run(&mut new_insts, &mut run, &mut run_span, &mut fused);
+                new_insts.push(inst);
+            }
+        }
+        flush_run(&mut new_insts, &mut run, &mut run_span, &mut fused);
+        bb.insts = new_insts;
+    }
+    hints.stats.drops_fused += fused;
+}
+
+fn flush_run(
+    out: &mut Vec<Instruction>,
+    run: &mut Vec<(ValueId, Type)>,
+    run_span: &mut Option<Span>,
+    fused: &mut u32,
+) {
+    if run.len() >= 2 {
+        let count = run.len() as u32;
+        let items = std::mem::take(run);
+        out.push(Instruction {
+            dest: None,
+            kind: InstKind::DropMany(items),
+            ty: Type::Void,
+            span: run_span.take().unwrap_or(Span::dummy()),
+            def_id: None,
+        });
+        *fused += count;
+    } else if let Some((v, ty)) = run.pop() {
+        out.push(Instruction {
+            dest: None,
+            kind: InstKind::Drop(v, ty),
+            ty: Type::Void,
+            span: run_span.take().unwrap_or(Span::dummy()),
+            def_id: None,
+        });
     }
 }

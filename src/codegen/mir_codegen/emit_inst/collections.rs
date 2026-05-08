@@ -11,7 +11,28 @@ impl<'ctx> Compiler<'ctx> {
             (match &inst.kind {
                 mir::InstKind::Drop(val, ty) => {
                     let v = self.val(*val);
+                    // Perceus reuse: if this drop has been paired with a
+                    // following allocation, stash the heap pointer instead of
+                    // releasing it. The matching alloc site will pick it up
+                    // via `current_reuse_slots`.
+                    if matches!(ty, Type::Rc(_)) && v.is_pointer_value() {
+                        if self.try_save_reuse_slot(*val, v.into_pointer_value()) {
+                            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+                        }
+                    }
                     self.drop_value(v, ty)?;
+                    Ok(self.ctx.i8_type().const_int(0, false).into())
+                }
+                mir::InstKind::DropMany(items) => {
+                    // Fused drop run: emit the per-value drops back-to-back so
+                    // LLVM sees an unbroken sequence of free() calls and can
+                    // batch them. We do NOT save reuse slots inside a fused
+                    // run (the perceus pass excludes save-slot drops from
+                    // fusion runs by construction).
+                    for (val, ty) in items {
+                        let v = self.val(*val);
+                        self.drop_value(v, ty)?;
+                    }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
                 mir::InstKind::RcInc(val) => {
@@ -30,7 +51,10 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::RcNew(val, inner_ty) => {
                     let v = self.val(*val);
-                    self.rc_alloc(inner_ty, v)
+                    self.current_alloc_dest = inst.dest;
+                    let r = self.rc_alloc(inner_ty, v);
+                    self.current_alloc_dest = None;
+                    r
                 }
                 mir::InstKind::RcClone(val) => {
                     let v = self.val(*val);

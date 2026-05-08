@@ -7,7 +7,7 @@ pub mod lower;
 pub mod opt;
 pub mod printer;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::ast::{FnAttrs, Span};
@@ -36,6 +36,60 @@ pub struct Function {
     pub next_value: u32,
     pub next_block: u32,
     pub attrs: FnAttrs,
+    /// Side-table populated by Perceus transforms. Empty until
+    /// `crate::perceus::run` mutates the function.
+    pub perceus: PerceusMeta,
+}
+
+/// Per-function Perceus annotations attached after the perceus passes run.
+///
+/// Drop instructions for trivially-droppable values are *physically deleted*
+/// by the elision pass, so this side-table only encodes information that
+/// codegen cannot recover from the IR alone:
+///   - which non-trivial Drop should save its heap pointer for a subsequent
+///     allocation (`reuse_save`),
+///   - which allocation site should consume a saved slot (`reuse_consume`),
+///   - the slot identifier shared between the two,
+///   - which Drops form a fusion run that codegen should batch.
+#[derive(Debug, Clone, Default)]
+pub struct PerceusMeta {
+    /// Drop instruction's *operand* ValueId → reuse slot id. When codegen
+    /// processes `Drop v` and `v` is in this map, it stashes the heap pointer
+    /// in slot `reuse_save[&v]` instead of releasing the allocation.
+    pub reuse_save: HashMap<ValueId, u32>,
+    /// Allocation instruction's *dest* ValueId → reuse slot id. When codegen
+    /// processes the producer of `dest` and the dest is in this map, it tries
+    /// to consume the slot first; on miss it falls back to malloc.
+    pub reuse_consume: HashMap<ValueId, u32>,
+    /// Drop instructions that are part of a fused run. The Vec elements are
+    /// the operand ValueIds of consecutive Drop instructions; codegen emits a
+    /// single batched free for the whole run.
+    pub drop_fusion_runs: Vec<Vec<ValueId>>,
+    /// Allocation instructions whose result reuses the storage of an incoming
+    /// owned parameter (tail-call reuse). Maps alloc dest → param ValueId.
+    pub tail_reuse: HashMap<ValueId, ValueId>,
+    /// Allocation sites that occur inside a loop body and would benefit from a
+    /// pool. Currently informational only — wired into stats reporting.
+    pub pool_allocs: HashSet<ValueId>,
+    /// RcInc instructions whose operand is single-use, non-escaping, and so
+    /// can be promoted to a move (delete the inc, the matching dec is also
+    /// dropped by the elision pass).
+    pub borrow_to_move: HashSet<ValueId>,
+}
+
+/// Aggregate statistics across all functions, surfaced via `--debug-perceus`.
+#[derive(Debug, Clone, Default)]
+pub struct PerceusStats {
+    pub functions_analyzed: u32,
+    pub bindings_analyzed: u32,
+    pub drops_elided: u32,
+    pub drops_sunk: u32,
+    pub drops_fused: u32,
+    pub reuse_pairs: u32,
+    pub borrows_promoted: u32,
+    pub fbip_sites: u32,
+    pub tail_reuse_sites: u32,
+    pub pool_hints: u32,
 }
 
 impl Function {
@@ -165,6 +219,10 @@ pub enum InstKind {
 
     Alloc(ValueId),
     Drop(ValueId, Type),
+    /// Fused drop: a run of >=2 adjacent drops coalesced by the Perceus
+    /// drop-fusion pass. Codegen emits a single batched runtime call rather
+    /// than N individual drop sequences.
+    DropMany(Vec<(ValueId, Type)>),
     RcInc(ValueId),
     RcDec(ValueId),
 
