@@ -1,0 +1,20 @@
+# 8-bit shift register: shift in n bits, return value.
+*shift_in(bits as Vec of i64, n as i64) returns i64
+    reg is 0
+    i is 0
+    while i < n
+        reg is (reg * 2 + bits.get(i)) % 256
+        i is i + 1
+    reg
+
+*main
+    b is vec()
+    b.push(1)
+    b.push(0)
+    b.push(1)
+    b.push(1)
+    b.push(0)
+    b.push(0)
+    b.push(1)
+    b.push(0)
+    log shift_in(b, 8)

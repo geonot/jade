@@ -99,6 +99,8 @@ pub enum Stmt {
     Ret(Option<Expr>, Span),
     Break(Option<Expr>, Span),
     Continue(Span),
+    /// `nop` — a no-op statement (Python-style `pass`). Compiles to nothing.
+    Nop(Span),
     Match(Match),
     Asm(AsmBlock),
     ErrReturn(Expr, Span),
@@ -132,6 +134,7 @@ impl Stmt {
             Stmt::Ret(_, s) => *s,
             Stmt::Break(_, s) => *s,
             Stmt::Continue(s) => *s,
+            Stmt::Nop(s) => *s,
             Stmt::Match(m) => m.span,
             Stmt::Asm(a) => a.span,
             Stmt::ErrReturn(_, s) => *s,

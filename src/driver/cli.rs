@@ -178,6 +178,26 @@ pub(super) fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
+/// Strip internal compiler-pass prefixes (`mir_codegen:`, `hir:`, etc.) from
+/// error messages before they reach the user. The user does not need to know
+/// which compiler pass found the bug.
+pub(crate) fn strip_codegen_prefix(s: &str) -> String {
+    let trimmed = s.trim_start();
+    for p in &[
+        "mir_codegen: ",
+        "mir-codegen: ",
+        "hir: ",
+        "hir_validate: ",
+        "typer: ",
+        "codegen: ",
+    ] {
+        if let Some(rest) = trimmed.strip_prefix(p) {
+            return rest.to_string();
+        }
+    }
+    s.to_string()
+}
+
 pub(super) fn dirs_cache() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
         PathBuf::from(xdg).join("jinn")

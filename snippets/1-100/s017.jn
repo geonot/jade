@@ -1,0 +1,4 @@
+*main
+    s is 'a,b,c,d'
+    parts is s.split(',')
+    log parts.length

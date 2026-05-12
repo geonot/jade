@@ -1,0 +1,7 @@
+# Currency Bellman-Ford-ish: triangular arbitrage cycle gain.
+*tri(a_to_b as i64, b_to_c as i64, c_to_a as i64) returns i64
+    a_to_b * b_to_c / 1000 * c_to_a / 1000
+
+*main
+    log tri(1100, 950, 1050)
+    log tri(1000, 1000, 1000)

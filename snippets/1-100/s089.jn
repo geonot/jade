@@ -1,0 +1,5 @@
+use time
+
+*main
+    t is time.now()
+    log t > 0

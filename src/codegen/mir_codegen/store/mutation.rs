@@ -14,7 +14,7 @@ impl<'ctx> Compiler<'ctx> {
             (&encoded_name[..pos], &encoded_name[pos + 9..]) // skip "__fields_"
         } else {
             return Err(format!(
-                "mir_codegen: malformed store.set name '{encoded_name}'"
+                "malformed store.set name '{encoded_name}'"
             ));
         };
 

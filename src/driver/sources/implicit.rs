@@ -449,6 +449,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Stmt::Ret(None, _)
             | Stmt::Break(None, _)
             | Stmt::Continue(_)
+            | Stmt::Nop(_)
             | Stmt::Asm(_)
             | Stmt::StoreSave(_, _)
             | Stmt::StoreDelete(_, _, _)

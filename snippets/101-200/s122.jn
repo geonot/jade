@@ -1,0 +1,27 @@
+# Counting sort for bytes.
+*csort(v) returns Vec of i64
+    cnt is vec()
+    i is 0
+    while i < 256
+        cnt.push(0)
+        i is i + 1
+    j is 0
+    while j < v.length
+        x is v.get(j)
+        cnt.set(x, cnt.get(x) + 1)
+        j is j + 1
+    out is vec()
+    k is 0
+    while k < 256
+        c is cnt.get(k)
+        while c > 0
+            out.push(k)
+            c is c - 1
+        k is k + 1
+    out
+
+*main
+    a is vec(5, 200, 17, 5, 200, 99, 17)
+    s is csort(a)
+    for x in s
+        log x

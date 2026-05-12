@@ -1,0 +1,20 @@
+# UTXO selection: greedy first-fit by value.
+*sel_count(values as Vec of i64, n as i64, target as i64) returns i64
+    sel is 0
+    s is 0
+    i is 0
+    while i < n
+        if s < target
+            s is s + values.get(i)
+            sel is sel + 1
+        i is i + 1
+    sel
+
+*main
+    v is vec()
+    v.push(50)
+    v.push(20)
+    v.push(80)
+    v.push(30)
+    v.push(10)
+    log sel_count(v, 5, 100)

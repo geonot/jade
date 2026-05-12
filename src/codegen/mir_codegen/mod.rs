@@ -95,10 +95,21 @@ impl<'ctx> Compiler<'ctx> {
         self.declare_builtins();
 
         // Register struct types from MIR type defs.
+        // Two-pass: create all opaque struct types first so that mutually-
+        // referencing or out-of-order field types resolve correctly. If we
+        // computed bodies in a single pass, `llvm_ty(Struct(other))` would
+        // fall back to `i64` when `other` had not yet been registered,
+        // producing invalid `insertvalue`/`extractvalue` IR.
+        for td in &prog.types {
+            self.ctx.opaque_struct_type(&td.name.as_str());
+        }
         for td in &prog.types {
             let ltys: Vec<BasicTypeEnum<'ctx>> =
                 td.fields.iter().map(|(_, ty)| self.llvm_ty(ty)).collect();
-            let st = self.ctx.opaque_struct_type(&td.name.as_str());
+            let st = self
+                .module
+                .get_struct_type(&td.name.as_str())
+                .expect("opaque struct just created");
             st.set_body(&ltys, false);
             let fields: Vec<(String, Type)> = td
                 .fields
@@ -168,7 +179,35 @@ impl<'ctx> Compiler<'ctx> {
                     | mir::InstKind::ChanCreate(..)
                     | mir::InstKind::ChanSend(..)
                     | mir::InstKind::ChanRecv(..)
-                    | mir::InstKind::SelectArm(..) => true,
+                    | mir::InstKind::SelectArm(..)
+                    | mir::InstKind::Slice(..) => true,
+                    // Vec/array methods may emit calls to runtime helpers
+                    // (jinn_sort_i64, __jinn_vec_slice, etc.).
+                    mir::InstKind::MethodCall(_, method, _) => matches!(
+                        &*method.as_str(),
+                        "sort"
+                            | "reverse"
+                            | "sum"
+                            | "contains"
+                            | "join"
+                            | "fold"
+                            | "reduce"
+                            | "find"
+                            | "any"
+                            | "all"
+                            | "take"
+                            | "skip"
+                            | "drop"
+                            | "slice"
+                            | "zip"
+                            | "map"
+                            | "filter"
+                            | "push"
+                            | "pop"
+                            | "remove"
+                            | "clear"
+                            | "next"
+                    ),
                     mir::InstKind::Call(name, _) => {
                         name.starts_with("__coro_create_")
                             || name.starts_with("__gen_create_")
@@ -181,6 +220,8 @@ impl<'ctx> Compiler<'ctx> {
                             || name.starts_with("__graph_")
                             || name.starts_with("__ts_")
                             || name.starts_with("__vec_")
+                            || name.starts_with("__jinn_")
+                            || name.starts_with("jinn_")
                             || name.starts_with("__bloom_")
                             || name.starts_with("__fts_")
                     }
@@ -454,7 +495,7 @@ impl<'ctx> Compiler<'ctx> {
         let (fv, _, _) = self
             .fns
             .get(&func.name)
-            .ok_or_else(|| format!("mir_codegen: undeclared fn {}", func.name))?
+            .ok_or_else(|| format!("undeclared fn {}", func.name))?
             .clone();
 
         self.cur_fn = Some(fv);

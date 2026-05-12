@@ -20,8 +20,32 @@ impl Parser {
             self.expect(Token::Newline)?;
             elifs.push((c, self.parse_block()?));
         }
-        let els = if self.check(Token::Else) {
-            self.advance();
+        // Accept `elif cond` and `else if cond` interchangeably, then an
+        // optional final `else` block.
+        let mut consumed_else = false;
+        loop {
+            if self.check(Token::Elif) {
+                self.advance();
+                let c = self.parse_expr()?;
+                self.expect(Token::Newline)?;
+                elifs.push((c, self.parse_block()?));
+                continue;
+            }
+            if self.check(Token::Else) {
+                self.advance();
+                if self.check(Token::If) {
+                    self.advance();
+                    let c = self.parse_expr()?;
+                    self.expect(Token::Newline)?;
+                    elifs.push((c, self.parse_block()?));
+                    continue;
+                }
+                consumed_else = true;
+                break;
+            }
+            break;
+        }
+        let els = if consumed_else {
             self.expect(Token::Newline)?;
             Some(self.parse_block()?)
         } else {
@@ -119,7 +143,9 @@ impl Parser {
             self.advance();
             self.parse_block()?
         } else {
-            vec![Stmt::Expr(self.parse_expr()?)]
+            // Inline body: a single statement so `pat ? x is y` (assignment),
+            // `pat ? return x`, etc. all work — not just expressions.
+            vec![self.parse_stmt()?]
         };
         Ok(Arm {
             pat,

@@ -1,0 +1,4 @@
+*main
+    big is 1000000
+    n is big as f64
+    log n

@@ -1,0 +1,3 @@
+*main
+    s is 'abc'
+    log s.repeat(3)

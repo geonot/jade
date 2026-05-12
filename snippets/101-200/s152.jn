@@ -1,0 +1,35 @@
+# Spiral matrix traversal (4x4) using flat vec.
+*main
+    n is 4
+    grid is vec()
+    i is 0
+    while i < n * n
+        grid.push(i + 1)
+        i is i + 1
+    top is 0
+    bot is n - 1
+    lft is 0
+    rgt is n - 1
+    while top <= bot and lft <= rgt
+        c is lft
+        while c <= rgt
+            log grid.get(top * n + c)
+            c is c + 1
+        top is top + 1
+        r is top
+        while r <= bot
+            log grid.get(r * n + rgt)
+            r is r + 1
+        rgt is rgt - 1
+        if top <= bot
+            c is rgt
+            while c >= lft
+                log grid.get(bot * n + c)
+                c is c - 1
+            bot is bot - 1
+        if lft <= rgt
+            r is bot
+            while r >= top
+                log grid.get(r * n + lft)
+                r is r - 1
+            lft is lft + 1

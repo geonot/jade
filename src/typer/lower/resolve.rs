@@ -363,6 +363,7 @@ impl Typer {
                 }
             }
             hir::Stmt::Continue(_) => {}
+            hir::Stmt::Nop(_) => {}
             hir::Stmt::Match(m) => {
                 self.resolve_expr(&mut m.subject);
                 m.ty = self.infer_ctx.resolve(&m.ty);

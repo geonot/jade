@@ -1,0 +1,21 @@
+type Line
+
+    p1
+    p2
+
+type Point
+
+    x
+    y
+    z
+
+*main
+    p1 is Point(1,2,3)
+    p2 is Point(3,2,1)
+    n is [p1,p2]
+    l1 is Line(n[0], n[1])
+    l1.log()
+    log(p1)
+    z is n.pop()
+    log(z)
+    log(n)

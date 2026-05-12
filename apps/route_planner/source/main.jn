@@ -1,0 +1,30 @@
+use models/edge
+use graph
+use planner
+
+*main
+    g is graph.new_graph()
+    g is graph.add_undirected(g, 0, 1, 4)
+    g is graph.add_undirected(g, 0, 2, 1)
+    g is graph.add_undirected(g, 1, 2, 2)
+    g is graph.add_undirected(g, 1, 3, 5)
+    g is graph.add_undirected(g, 2, 3, 8)
+    g is graph.add_undirected(g, 3, 4, 1)
+    g is graph.add_undirected(g, 4, 5, 3)
+    g is graph.add_undirected(g, 2, 5, 12)
+
+    log 'nodes'
+    log graph.node_count(g)
+    log 'edges'
+    log g.len()
+
+    log 'd_0_3'
+    log planner.shortest(g, 0, 3)
+    log 'd_0_5'
+    log planner.shortest(g, 0, 5)
+    log 'd_3_5'
+    log planner.shortest(g, 3, 5)
+    log 'd_self'
+    log planner.shortest(g, 4, 4)
+    log 'reach_from_0'
+    log planner.reachable_count(g, 0)

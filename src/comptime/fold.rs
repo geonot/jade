@@ -87,6 +87,7 @@ pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir
         Stmt::SimBlock(b, _) => fold_block_with_fns(b, pure_fns),
         Stmt::Drop(_, _, _, _)
         | Stmt::Continue(_)
+        | Stmt::Nop(_)
         | Stmt::Ret(None, _, _)
         | Stmt::Break(None, _)
         | Stmt::Asm(_)
@@ -174,6 +175,7 @@ pub(super) fn fold_stmt(stmt: &mut Stmt) {
         Stmt::Defer(b, _) => fold_block(b),
         Stmt::Drop(_, _, _, _)
         | Stmt::Continue(_)
+        | Stmt::Nop(_)
         | Stmt::Ret(None, _, _)
         | Stmt::Break(None, _)
         | Stmt::Asm(_)

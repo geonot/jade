@@ -20,6 +20,23 @@ impl<'ctx> Compiler<'ctx> {
                             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
                         }
                     }
+                    // Perceus Vec reuse: deep-drop elements, then stash the
+                    // header (with its data buffer attached) for the matching
+                    // empty `VecNew` to pick up.
+                    if let Type::Vec(elem) = ty {
+                        if v.is_pointer_value()
+                            && self
+                                .current_perceus_meta
+                                .reuse_save
+                                .get(val)
+                                .map(|s| self.current_perceus_meta.vec_slots.contains(s))
+                                .unwrap_or(false)
+                        {
+                            self.drop_vec_elements_only(v, elem)?;
+                            self.try_save_vec_slot(*val, v.into_pointer_value());
+                            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+                        }
+                    }
                     self.drop_value(v, ty)?;
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
@@ -79,7 +96,12 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::Slice(base, lo, hi) => self.emit_slice(*base, *lo, *hi, &inst.ty),
 
                 // ── Collections ──
-                mir::InstKind::VecNew(elems) => self.emit_vec_new(elems, &inst.ty),
+                mir::InstKind::VecNew(elems) => {
+                    self.current_alloc_dest = inst.dest;
+                    let r = self.emit_vec_new(elems, &inst.ty);
+                    self.current_alloc_dest = None;
+                    r
+                }
                 mir::InstKind::VecPush(vec, elem) => {
                     let vec_val = self.val(*vec).into_pointer_value();
                     let elem_val = self.val(*elem);
@@ -113,7 +135,7 @@ impl<'ctx> Compiler<'ctx> {
                         let arr_len = vec_val.into_array_value().get_type().len();
                         Ok(i64t.const_int(arr_len as u64, false).into())
                     } else {
-                        Err("mir_codegen: VecLen on non-vec/array value".into())
+                        Err("VecLen on non-vec/array value".into())
                     }
                 }
                 mir::InstKind::MapInit => self.compile_map_new(),
@@ -123,7 +145,7 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(self.call_result(csv))
                     } else {
                         Err(
-                        "mir_codegen: SetInit used but jinn_set_new runtime function not declared"
+                        "SetInit used but jinn_set_new runtime function not declared"
                             .into(),
                     )
                     }
@@ -134,7 +156,7 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(self.call_result(csv))
                     } else {
                         Err(
-                        "mir_codegen: PQInit used but jinn_pq_new runtime function not declared"
+                        "PQInit used but jinn_pq_new runtime function not declared"
                             .into(),
                     )
                     }
@@ -144,7 +166,7 @@ impl<'ctx> Compiler<'ctx> {
                         let csv = b!(self.bld.build_call(fv, &[], "deque"));
                         Ok(self.call_result(csv))
                     } else {
-                        Err("mir_codegen: DequeInit used but jinn_deque_new runtime function not declared".into())
+                        Err("DequeInit used but jinn_deque_new runtime function not declared".into())
                     }
                 }
 

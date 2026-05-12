@@ -1,0 +1,4 @@
+*main
+    v is vector[10, 20, 30, 40, 50]
+    s is v from 1 to 4
+    print(s)

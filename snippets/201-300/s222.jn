@@ -1,0 +1,19 @@
+# Toy SWIFT-like message: count tagged fields.
+*count_tags(buf as Vec of i64, n as i64, tag as i64) returns i64
+    c is 0
+    i is 0
+    while i < n
+        if buf.get(i) equals tag
+            c is c + 1
+        i is i + 1
+    c
+
+*main
+    b is vec()
+    b.push(20)
+    b.push(50)
+    b.push(20)
+    b.push(70)
+    b.push(20)
+    b.push(99)
+    log count_tags(b, 6, 20)

@@ -120,6 +120,7 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("build", Token::Build),
         ("syscall", Token::Syscall),
         ("global", Token::Global),
+        ("nop", Token::Nop),
         ("pow", Token::StarStar),
         ("true", Token::True),
         ("false", Token::False),

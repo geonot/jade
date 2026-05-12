@@ -373,6 +373,28 @@ impl Typer {
                 }
             }
 
+            // Fall back to externs declared via `extern *name(...) returns T`
+            // — these can be invoked unqualified when the user names them
+            // directly (used for low-level helpers shipped with std/*.jn).
+            if let Some((id, ptys, ret)) = self.externs.get(name).cloned() {
+                let mut hargs = Vec::new();
+                for arg in args.iter() {
+                    hargs.push(self.lower_expr(arg)?);
+                }
+                for (i, ha) in hargs.iter().enumerate() {
+                    if let Some(pt) = ptys.get(i) {
+                        let _ = self
+                            .infer_ctx
+                            .unify_at(pt, &ha.ty, span, "extern call argument");
+                    }
+                }
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Call(id, name.clone(), hargs),
+                    ty: ret,
+                    span,
+                });
+            }
+
             return Err(format!("undefined function: '{name}'"));
         }
 

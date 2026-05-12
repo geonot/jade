@@ -1,0 +1,4 @@
+*main
+    v is vector[1, 2, 3, 4, 5, 6]
+    evens is v.filter($ % 2 equals 0)
+    print(evens)

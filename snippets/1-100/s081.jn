@@ -1,0 +1,6 @@
+*double x is x * 2
+*inc x is x + 1
+
+*main
+    r is 10 ~ double ~ inc
+    log r

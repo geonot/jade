@@ -1,0 +1,18 @@
+# SIMD-style i64 packing: pack 4 bytes, fold-add.
+*pack(b0 as i64, b1 as i64, b2 as i64, b3 as i64) returns i64
+    b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+
+*fold_add(packed as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        p is packed.get(i)
+        s is s + (p % 256) + (p / 256 % 256) + (p / 65536 % 256) + (p / 16777216 % 256)
+        i is i + 1
+    s
+
+*main
+    p is vec()
+    p.push(pack(1, 2, 3, 4))
+    p.push(pack(10, 20, 30, 40))
+    log fold_add(p, 2)

@@ -1,0 +1,19 @@
+# Monte-Carlo-ish option price using deterministic LCG.
+*lcg(s as i64) returns i64
+    (s * 1103515245 + 12345) % 2147483648
+
+*mc_call(seed as i64, strike as i64, base as i64, span as i64, paths as i64) returns i64
+    s is seed
+    sum is 0
+    i is 0
+    while i < paths
+        s is lcg(s)
+        price is base + (s % span) - span / 2
+        diff is price - strike
+        if diff > 0
+            sum is sum + diff
+        i is i + 1
+    sum / paths
+
+*main
+    log mc_call(42, 100, 100, 40, 1000)

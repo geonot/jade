@@ -69,6 +69,20 @@ impl Typer {
             ast::Expr::Yield(inner, span) => {
                 let hi = self.lower_expr(inner)?;
                 let ty = hi.ty.clone();
+                // Unify the current function's return type — known to be
+                // `Type::Generator(yield_ty)` for generator fns — with the
+                // type of the yielded expression so callers see the right
+                // element type from `gen.next()`.
+                if let Some(ref ret) = self.current_fn_ret_ty {
+                    if let Type::Generator(inner_ty) = ret {
+                        let _ = self.infer_ctx.unify_at(
+                            inner_ty,
+                            &ty,
+                            *span,
+                            "yield expression type",
+                        );
+                    }
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Yield(Box::new(hi)),
                     ty,

@@ -1,0 +1,24 @@
+use models/account
+use models/entry
+use ledger
+
+*replay(initial as Vec of Account, entries as Vec of Entry) returns Vec of Account
+    state is initial
+    i is 0
+    while i < entries.len()
+        e is entries.get(i)
+        if entry.is_balanced(e)
+            state is ledger.post(state, e)
+        i is i + 1
+    state
+
+*entry_count(entries as Vec of Entry) returns i64
+    entries.len()
+
+*total_volume(entries as Vec of Entry) returns i64
+    s is 0
+    i is 0
+    while i < entries.len()
+        s is s + entries.get(i).amount
+        i is i + 1
+    s

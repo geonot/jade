@@ -1,0 +1,6 @@
+*main
+    x is 5
+    x += 3
+    x -= 1
+    x *= 2
+    log x

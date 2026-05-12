@@ -1,0 +1,17 @@
+# Convert decimal i64 to binary string.
+*to_bin(n as i64) returns String
+    if n equals 0
+        return "0"
+    s is ""
+    while n > 0
+        if n mod 2 equals 0
+            s is "0" + s
+        else
+            s is "1" + s
+        n is n / 2
+    s
+
+*main
+    log to_bin(0)
+    log to_bin(13)
+    log to_bin(255)

@@ -1,0 +1,5 @@
+*main
+    a is 0xFF
+    b is 0b1010
+    log a
+    log b

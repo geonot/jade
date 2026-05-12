@@ -377,7 +377,23 @@ module.exports = grammar({
       ),
 
     loop_statement: ($) =>
-      seq("loop", $._newline, field("body", $.block)),
+      choice(
+        // C-style for: loop(init, cond, step) BODY
+        seq(
+          "loop",
+          "(",
+          field("init", $._expression),
+          ",",
+          field("cond", $._expression),
+          ",",
+          field("step", $._expression),
+          ")",
+          $._newline,
+          field("body", $.block),
+        ),
+        // Bare infinite loop
+        seq("loop", $._newline, field("body", $.block)),
+      ),
 
     transaction_statement: ($) =>
       seq("transaction", $._newline, field("body", $.block)),

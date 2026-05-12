@@ -11,6 +11,7 @@ pub(super) struct Lowerer {
     pub(super) var_map: HashMap<Symbol, ValueId>,
     pub(super) mem_vars: HashSet<Symbol>,
     pub(super) loop_stack: Vec<(BlockId, BlockId)>,
+    pub(super) label_stack: Vec<(Symbol, BlockId, BlockId)>,
     pub(super) lambda_fns: Vec<Function>,
     pub(super) function_defers: Vec<crate::hir::Block>,
 }
@@ -43,6 +44,7 @@ impl Lowerer {
             var_map: HashMap::new(),
             mem_vars: HashSet::new(),
             loop_stack: Vec::new(),
+            label_stack: Vec::new(),
             lambda_fns: Vec::new(),
             function_defers: Vec::new(),
         }

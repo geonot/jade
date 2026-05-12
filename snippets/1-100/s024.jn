@@ -1,0 +1,4 @@
+*main
+    score is 85
+    grade is score > 90 ? 'A' ! score > 80 ? 'B' ! 'C'
+    log grade

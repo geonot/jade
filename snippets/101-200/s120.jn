@@ -1,0 +1,17 @@
+# Two-sum: return indices of two numbers that sum to target. -1,-1 if none.
+*two_sum(nums, target as i64)
+    i is 0
+    while i < nums.length
+        j is i + 1
+        while j < nums.length
+            if nums.get(i) + nums.get(j) equals target
+                log i
+                log j
+                return
+            j is j + 1
+        i is i + 1
+    log 0 - 1
+
+*main
+    a is vec(2, 7, 11, 15)
+    two_sum(a, 9)

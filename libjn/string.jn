@@ -1,0 +1,118 @@
+# libjn.string — drop-in for C <string.h>
+
+# ── memcpy / memmove / memset / memcmp / memchr ──
+*memcpy(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+
+*memmove(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+
+*memset(s as %i8, c as i32, n as u64) returns %i8
+    nop
+    0 as %i8
+
+*memcmp(a as %i8, b as %i8, n as u64) returns i32
+    nop
+    0
+
+*memchr(s as %i8, c as i32, n as u64) returns %i8
+    nop
+    0 as %i8
+
+# ── Copy / cat ──
+*strcpy(dst as %i8, src as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strncpy(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+
+*strcat(dst as %i8, src as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strncat(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+
+# ── Compare ──
+*strcmp(a as %i8, b as %i8) returns i32
+    nop
+    0
+
+*strncmp(a as %i8, b as %i8, n as u64) returns i32
+    nop
+    0
+
+*strcoll(a as %i8, b as %i8) returns i32
+    nop
+    0
+
+*strxfrm(dst as %i8, src as %i8, n as u64) returns u64
+    nop
+    0
+
+# ── Search ──
+*strchr(s as %i8, c as i32) returns %i8
+    nop
+    0 as %i8
+
+*strrchr(s as %i8, c as i32) returns %i8
+    nop
+    0 as %i8
+
+*strspn(s as %i8, accept as %i8) returns u64
+    nop
+    0
+
+*strcspn(s as %i8, reject as %i8) returns u64
+    nop
+    0
+
+*strpbrk(s as %i8, accept as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strstr(haystack as %i8, needle as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strtok(s as %i8, delim as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strtok_r(s as %i8, delim as %i8, saveptr as %i8) returns %i8
+    nop
+    0 as %i8
+
+# ── Misc ──
+*strlen(s as %i8) returns u64
+    nop
+    0
+
+*strnlen(s as %i8, maxlen as u64) returns u64
+    nop
+    0
+
+*strerror(errnum as i32) returns %i8
+    nop
+    0 as %i8
+
+*strerror_r(errnum as i32, buf as %i8, buflen as u64) returns i32
+    nop
+    0
+
+*strdup(s as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strndup(s as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+
+*strsignal(sig as i32) returns %i8
+    nop
+    0 as %i8

@@ -110,6 +110,7 @@ impl OwnershipVerifier {
                 }
             }
             Stmt::Continue(_) => {}
+            Stmt::Nop(_) => {}
             Stmt::Match(m) => {
                 self.verify_expr(&m.subject);
                 for arm in &m.arms {

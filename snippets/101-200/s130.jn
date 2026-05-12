@@ -1,0 +1,9 @@
+# Closure-style counter via a one-cell vec.
+*main
+    c is vec(0)
+    c.set(0, c.get(0) + 1)
+    log c.get(0)
+    c.set(0, c.get(0) + 1)
+    log c.get(0)
+    c.set(0, c.get(0) + 1)
+    log c.get(0)

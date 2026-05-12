@@ -1,0 +1,14 @@
+# Newton-Raphson square root for f64.
+*sqrt(x as f64) returns f64
+    if x <= 0.0
+        return 0.0
+    g is x
+    i is 0
+    while i < 30
+        g is (g + x / g) / 2.0
+        i is i + 1
+    g
+
+*main
+    log sqrt(2.0)
+    log sqrt(16.0)

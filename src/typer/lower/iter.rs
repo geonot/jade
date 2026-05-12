@@ -357,6 +357,7 @@ impl Typer {
             end: Some(keys_len),
             step: None,
             body: for_body,
+            label: None,
             span,
         });
 

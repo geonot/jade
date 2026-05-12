@@ -1,0 +1,13 @@
+# Power of three test.
+*is_pow3(n as i64) returns bool
+    if n <= 0
+        return false
+    while n mod 3 equals 0
+        n is n / 3
+    n equals 1
+
+*main
+    log is_pow3(1)
+    log is_pow3(9)
+    log is_pow3(10)
+    log is_pow3(243)

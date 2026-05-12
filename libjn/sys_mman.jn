@@ -1,0 +1,81 @@
+# libjn.sys_mman — drop-in for POSIX <sys/mman.h>
+
+PROT_NONE  is 0
+PROT_READ  is 1
+PROT_WRITE is 2
+PROT_EXEC  is 4
+
+MAP_SHARED    is 0x01
+MAP_PRIVATE   is 0x02
+MAP_FIXED     is 0x10
+MAP_ANON      is 0x20
+MAP_ANONYMOUS is 0x20
+MAP_NORESERVE is 0x4000
+MAP_POPULATE  is 0x8000
+MAP_HUGETLB   is 0x40000
+
+MAP_FAILED is -1
+
+MS_ASYNC      is 1
+MS_INVALIDATE is 2
+MS_SYNC       is 4
+
+MCL_CURRENT is 1
+MCL_FUTURE  is 2
+
+MADV_NORMAL     is 0
+MADV_RANDOM     is 1
+MADV_SEQUENTIAL is 2
+MADV_WILLNEED   is 3
+MADV_DONTNEED   is 4
+MADV_FREE       is 8
+MADV_HUGEPAGE   is 14
+MADV_NOHUGEPAGE is 15
+
+*mmap(addr as %i8, length as u64, prot as i32, flags as i32, fd as i32, off as i64) returns %i8
+    nop
+    0 as %i8
+
+*munmap(addr as %i8, length as u64) returns i32
+    nop
+    -1
+
+*mprotect(addr as %i8, length as u64, prot as i32) returns i32
+    nop
+    -1
+
+*msync(addr as %i8, length as u64, flags as i32) returns i32
+    nop
+    -1
+
+*mlock(addr as %i8, length as u64) returns i32
+    nop
+    -1
+
+*munlock(addr as %i8, length as u64) returns i32
+    nop
+    -1
+
+*mlockall(flags as i32) returns i32
+    nop
+    -1
+
+*munlockall() returns i32
+    nop
+    -1
+
+*madvise(addr as %i8, length as u64, advice as i32) returns i32
+    nop
+    -1
+
+*posix_madvise(addr as %i8, length as u64, advice as i32) returns i32
+    nop
+    -1
+
+*shm_open(name as %i8, oflag as i32, mode as u32) returns i32
+    nop
+    -1
+
+*shm_unlink(name as %i8) returns i32
+    nop
+    -1

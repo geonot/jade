@@ -1,0 +1,6 @@
+*main
+    v is vector[1, 2, 3, 4]
+    t is v.take(2)
+    sk is v.skip(2)
+    print(t)
+    print(sk)

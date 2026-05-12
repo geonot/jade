@@ -1,0 +1,17 @@
+# HFT: aggregate book depth by summing top-N quantities.
+*depth(qs as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        s is s + qs.get(i)
+        i is i + 1
+    s
+
+*main
+    qs is vec()
+    qs.push(10)
+    qs.push(20)
+    qs.push(15)
+    qs.push(5)
+    qs.push(100)
+    log depth(qs, 3)

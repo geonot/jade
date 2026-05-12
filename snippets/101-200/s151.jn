@@ -1,0 +1,14 @@
+# Greatest digit in n.
+*greatest_digit(n as i64) returns i64
+    if n < 0
+        n is 0 - n
+    g is 0
+    while n > 0
+        d is n mod 10
+        if d > g
+            g is d
+        n is n / 10
+    g
+
+*main
+    log greatest_digit(31729)

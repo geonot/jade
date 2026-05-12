@@ -1,0 +1,3 @@
+name is 'inventory_mgr'
+version is '0.1.0'
+entry is 'source/main.jn'

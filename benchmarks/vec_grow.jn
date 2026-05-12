@@ -2,7 +2,7 @@
     v is vec()
     for i in 400000000
         v.push(i)
-    n is v.len()
+    n is v.length
     for i in 0 to n
         v.set(i, v.get(i) xor (i + 1))
     total is 0

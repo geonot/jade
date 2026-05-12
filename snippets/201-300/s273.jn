@@ -1,0 +1,13 @@
+# SPI: full-duplex shift exchange of 8 bits.
+*spi_xchg(tx as i64, rx_in as i64) returns i64
+    rx is 0
+    bit is 7
+    while bit >= 0
+        tb is (tx / (1 << bit)) % 2
+        rb is (rx_in / (1 << bit)) % 2
+        rx is rx * 2 + rb
+        bit is bit - 1
+    rx
+
+*main
+    log spi_xchg(0xA5, 0x5A)

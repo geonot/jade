@@ -1,9 +1,7 @@
-type Person
-    name
-    age
-    email
-
-brandon is Person('brandon',38,'digiphilo@gmail.com')
-
-
-log(brandon.age)
+*main
+    x is vec()
+    x.push(1)
+    x.push(2)
+    x.push(3)
+    y is map(x, $ * 2)
+    log(y[1])

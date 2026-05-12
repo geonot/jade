@@ -1,0 +1,6 @@
+*max of T(a as T, b as T)
+    a > b ? a ! b
+
+*main
+    log max(3, 7)
+    log max(1.5, 2.5)

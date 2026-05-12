@@ -28,7 +28,7 @@ use crate::parser::Parser;
 use crate::perceus::PerceusPass;
 use crate::typer::Typer;
 
-use cli::{Cli, Cmd, die, dirs_cache, find_project_root};
+use cli::{Cli, Cmd, die, dirs_cache, find_project_root, strip_codegen_prefix};
 use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
@@ -479,18 +479,20 @@ pub fn run() {
             || mir_hints.stats.drops_fused > 0
             || mir_hints.stats.last_use_tracked > 0
         {
-            eprintln!(
-                "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs, {} borrows promoted ({} bindings)",
-                mir_hints.stats.drops_elided,
-                mir_hints.stats.last_use_tracked,
-                mir_hints.stats.drops_fused,
-                mir_hints.stats.reuse_sites,
-                mir_hints.stats.borrows_promoted,
-                mir_hints.stats.total_bindings_analyzed,
-            );
+            if std::env::var("JINNC_VERBOSE").is_ok() {
+                eprintln!(
+                    "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs, {} borrows promoted ({} bindings)",
+                    mir_hints.stats.drops_elided,
+                    mir_hints.stats.last_use_tracked,
+                    mir_hints.stats.drops_fused,
+                    mir_hints.stats.reuse_sites,
+                    mir_hints.stats.borrows_promoted,
+                    mir_hints.stats.total_bindings_analyzed,
+                );
+            }
         }
         if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
-            die(&format!("mir-codegen: {e}"));
+            die(&strip_codegen_prefix(&e.to_string()));
         }
     }
 

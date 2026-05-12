@@ -1,0 +1,11 @@
+# Prefix sums.
+*main
+    a is vec(1, 2, 3, 4, 5, 6, 7, 8)
+    pre is vec()
+    pre.push(0)
+    i is 0
+    while i < a.length
+        pre.push(pre.get(i) + a.get(i))
+        i is i + 1
+    log pre.get(8) - pre.get(2)
+    log pre.get(5) - pre.get(0)

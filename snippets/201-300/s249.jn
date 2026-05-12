@@ -1,0 +1,11 @@
+# Dead reckoning: integrate velocity over n steps, return final pos.
+*dr(v as i64, dt as i64, steps as i64) returns i64
+    x is 0
+    i is 0
+    while i < steps
+        x is x + v * dt
+        i is i + 1
+    x
+
+*main
+    log dr(15, 10, 100)

@@ -1,0 +1,37 @@
+use models/item
+use models/transfer
+use warehouse
+use transfers
+
+*main
+    items is vec()
+    items is warehouse.adjust(items, 100, 1, 500)
+    items is warehouse.adjust(items, 100, 2, 200)
+    items is warehouse.adjust(items, 200, 1, 1000)
+    items is warehouse.adjust(items, 300, 3, 50)
+
+    ts is vec()
+    ts.push(transfer.new(100, 80, 1, 2, 1))
+    ts.push(transfer.new(100, 50, 2, 3, 2))
+    ts.push(transfer.new(200, 200, 1, 3, 3))
+    ts.push(transfer.new(300, 25, 3, 1, 4))
+    ts.push(transfer.new(100, 5000, 1, 2, 5))
+
+    items is transfers.replay(items, ts)
+
+    log 'sku100_total'
+    log warehouse.total(items, 100)
+    log 'sku100_w1'
+    log warehouse.qty_at(items, 100, 1)
+    log 'sku100_w2'
+    log warehouse.qty_at(items, 100, 2)
+    log 'sku100_w3'
+    log warehouse.qty_at(items, 100, 3)
+    log 'sku200_w3'
+    log warehouse.qty_at(items, 200, 3)
+    log 'sku300_w1'
+    log warehouse.qty_at(items, 300, 1)
+    log 'sku300_w3'
+    log warehouse.qty_at(items, 300, 3)
+    log 'transfers_logged'
+    log transfers.audit_count(ts)

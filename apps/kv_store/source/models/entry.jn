@@ -1,0 +1,11 @@
+type Entry
+    key as i64
+    value as i64
+    version as i64
+    expires_at as i64
+
+*new(key as i64, value as i64, version as i64, expires_at as i64) returns Entry
+    Entry(key is key, value is value, version is version, expires_at is expires_at)
+
+*is_alive(e as Entry, now as i64) returns bool
+    e.expires_at equals 0 or e.expires_at > now

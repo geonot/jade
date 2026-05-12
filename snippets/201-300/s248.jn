@@ -1,0 +1,16 @@
+# Haversine-like great-circle distance (integer approx using milli-degrees).
+*hav(lat1 as i64, lon1 as i64, lat2 as i64, lon2 as i64) returns i64
+    dx is lat2 - lat1
+    dy is lon2 - lon1
+    sq is dx * dx + dy * dy
+    if sq equals 0
+        return 0
+    s is 1
+    i is 0
+    while i < 30
+        s is (s + sq / s) / 2
+        i is i + 1
+    s
+
+*main
+    log hav(0, 0, 3000, 4000)

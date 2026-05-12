@@ -13,6 +13,12 @@
 
 # ── xoshiro256** core ────────────────────────────────────────
 
+extern *__random_u64() returns i64
+extern *__time_monotonic() returns i64
+extern *__sqrt(x as f64) returns f64
+extern *__ln(x as f64) returns f64
+extern *__cos(x as f64) returns f64
+
 *__rotl(x, k)
     (x << k) | (x >> (64 - k))
 

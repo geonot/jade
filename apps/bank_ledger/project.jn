@@ -1,0 +1,3 @@
+name is 'bank_ledger'
+version is '0.1.0'
+entry is 'source/main.jn'

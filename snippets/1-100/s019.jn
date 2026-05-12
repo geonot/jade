@@ -1,0 +1,4 @@
+*main
+    a is 'hello'
+    b is 'world'
+    log a + ' ' + b

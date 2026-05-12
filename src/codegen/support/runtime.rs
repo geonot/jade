@@ -402,6 +402,10 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Option<PointerValue<'ctx>> {
         let dest = self.current_alloc_dest?;
         let slot = *self.current_perceus_meta.reuse_consume.get(&dest)?;
+        // Vec slots are owned by `try_consume_vec_slot` — bail.
+        if self.current_perceus_meta.vec_slots.contains(&slot) {
+            return None;
+        }
         // SSA fast path.
         if let Some(p) = self.current_reuse_slots.remove(&slot) {
             return Some(p);
@@ -465,8 +469,8 @@ impl<'ctx> Compiler<'ctx> {
         ptr: PointerValue<'ctx>,
     ) -> bool {
         let slot = match self.current_perceus_meta.reuse_save.get(&dropped).copied() {
-            Some(s) => s,
-            None => return false,
+            Some(s) if !self.current_perceus_meta.vec_slots.contains(&s) => s,
+            _ => return false,
         };
         // SSA fast-path snapshot for forward-pairing within the block.
         self.current_reuse_slots.insert(slot, ptr);
@@ -505,10 +509,14 @@ impl<'ctx> Compiler<'ctx> {
             return;
         }
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let allocas: Vec<PointerValue<'ctx>> =
-            self.current_reuse_alloca_slots.values().copied().collect();
+        let pairs: Vec<(u32, PointerValue<'ctx>)> = self
+            .current_reuse_alloca_slots
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect();
         let free_fn = self.ensure_free();
-        for alloca in allocas {
+        let header_ty = self.vec_header_type();
+        for (slot, alloca) in pairs {
             let cur = match self.bld.build_load(ptr_ty, alloca, "perceus.drain.load") {
                 Ok(v) => v.into_pointer_value(),
                 Err(_) => continue,
@@ -524,6 +532,21 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_conditional_branch(is_null, cont_bb, free_bb);
             self.bld.position_at_end(free_bb);
+            // For Vec slots: also free the data buffer (header[0]).
+            if self.current_perceus_meta.vec_slots.contains(&slot) {
+                if let Ok(data_gep) =
+                    self.bld
+                        .build_struct_gep(header_ty, cur, 0, "perceus.drain.dgep")
+                {
+                    if let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "perceus.drain.d") {
+                        let _ = self.bld.build_call(
+                            free_fn,
+                            &[data_v.into_pointer_value().into()],
+                            "perceus.drain.free.buf",
+                        );
+                    }
+                }
+            }
             let _ = self.bld.build_call(free_fn, &[cur.into()], "perceus.drain.free");
             // Clear the slot (defensive — function is about to return anyway).
             let null = ptr_ty.const_null();
@@ -531,6 +554,83 @@ impl<'ctx> Compiler<'ctx> {
             let _ = self.bld.build_unconditional_branch(cont_bb);
             self.bld.position_at_end(cont_bb);
         }
+    }
+
+    /// Save a Vec header pointer into a reuse slot. Element drop has already
+    /// been performed by the caller (which knows the element type). Frees any
+    /// previously-stashed Vec (header + buffer) before storing the new one.
+    /// Returns `false` if `dropped` is not a Vec slot — the caller should
+    /// fall back to the normal `drop_value` path.
+    pub(crate) fn try_save_vec_slot(
+        &mut self,
+        dropped: mir::ValueId,
+        header_ptr: PointerValue<'ctx>,
+    ) -> bool {
+        let slot = match self.current_perceus_meta.reuse_save.get(&dropped).copied() {
+            Some(s) if self.current_perceus_meta.vec_slots.contains(&s) => s,
+            _ => return false,
+        };
+        let alloca = self.get_or_create_reuse_alloca(slot);
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let header_ty = self.vec_header_type();
+        // Free any previously-stashed (header + buffer) before overwriting.
+        if let Ok(prev) = self.bld.build_load(ptr_ty, alloca, "vec.save.prev") {
+            let prev_ptr = prev.into_pointer_value();
+            if let Ok(is_null) = self.bld.build_is_null(prev_ptr, "vec.save.prev.null") {
+                let fv = self.current_fn();
+                let free_bb = self.ctx.append_basic_block(fv, "vec.save.free");
+                let cont_bb = self.ctx.append_basic_block(fv, "vec.save.cont");
+                let _ = self
+                    .bld
+                    .build_conditional_branch(is_null, cont_bb, free_bb);
+                self.bld.position_at_end(free_bb);
+                let free_fn = self.ensure_free();
+                if let Ok(data_gep) =
+                    self.bld
+                        .build_struct_gep(header_ty, prev_ptr, 0, "vec.save.dgep")
+                {
+                    if let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "vec.save.d") {
+                        let _ = self.bld.build_call(
+                            free_fn,
+                            &[data_v.into_pointer_value().into()],
+                            "vec.save.free.buf",
+                        );
+                    }
+                }
+                let _ = self
+                    .bld
+                    .build_call(free_fn, &[prev_ptr.into()], "vec.save.free.hdr");
+                let _ = self.bld.build_unconditional_branch(cont_bb);
+                self.bld.position_at_end(cont_bb);
+            }
+        }
+        let _ = self.bld.build_store(alloca, header_ptr);
+        true
+    }
+
+    /// Try to consume a saved Vec header for the empty `VecNew` currently
+    /// being emitted. Returns the saved header pointer on hit, `None` on
+    /// miss. The caller (`emit_vec_new`) is responsible for null-checking
+    /// at runtime — a hit may still be NULL if the slot has not been
+    /// populated this far at runtime.
+    pub(crate) fn try_consume_vec_slot(&mut self) -> Option<PointerValue<'ctx>> {
+        let dest = self.current_alloc_dest?;
+        let slot = *self.current_perceus_meta.reuse_consume.get(&dest)?;
+        if !self.current_perceus_meta.vec_slots.contains(&slot) {
+            return None;
+        }
+        let alloca = self.get_or_create_reuse_alloca(slot);
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let cur = self
+            .bld
+            .build_load(ptr_ty, alloca, "vec.consume.load")
+            .ok()?
+            .into_pointer_value();
+        // Clear the slot eagerly; if `cur` turns out to be NULL the caller
+        // mallocs fresh anyway, so storing NULL is the right idle state.
+        let null = ptr_ty.const_null();
+        let _ = self.bld.build_store(alloca, null);
+        Some(cur)
     }
 
     pub(crate) fn ensure_free(&mut self) -> FunctionValue<'ctx> {

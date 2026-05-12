@@ -240,6 +240,45 @@ impl Typer {
                 }
 
                 let he = self.lower_expr(e)?;
+                // Pragmatic ergonomics: when the user writes `x.method(...)`
+                // in statement position (discarding the result) and the
+                // method returns the same type as the receiver, treat it as
+                // `x = x.method(...)`. This makes things like
+                // `xs.map($ * 2)` / `xs.filter(p)` "just work" without
+                // requiring a rebind. Only triggers when the receiver is a
+                // plain identifier (so we have a clear lvalue) and both
+                // sides are the same collection type. Backwards-compatible
+                // because discarding the result was a no-op anyway.
+                if let ast::Expr::Method(recv, _, _, mspan) = e
+                    && matches!(recv.as_ref(), ast::Expr::Ident(_, _))
+                {
+                    let target_opt = match &he.kind {
+                        hir::ExprKind::VecMethod(obj, _, _)
+                        | hir::ExprKind::MapMethod(obj, _, _)
+                        | hir::ExprKind::SetMethod(obj, _, _) => {
+                            if matches!(obj.kind, hir::ExprKind::Var(_, _)) {
+                                let obj_resolved = self.infer_ctx.resolve(&obj.ty);
+                                let he_resolved = self.infer_ctx.resolve(&he.ty);
+                                if obj_resolved == he_resolved
+                                    && matches!(
+                                        obj_resolved,
+                                        Type::Vec(_) | Type::Map(_, _) | Type::Set(_)
+                                    )
+                                {
+                                    Some((**obj).clone())
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(target) = target_opt {
+                        return Ok(hir::Stmt::Assign(target, he, *mspan));
+                    }
+                }
                 Ok(hir::Stmt::Expr(he))
             }
 
@@ -353,6 +392,7 @@ impl Typer {
                     end,
                     step,
                     body,
+                    label: f.label.clone(),
                     span: f.span,
                 }))
             }
@@ -382,6 +422,7 @@ impl Typer {
             }
 
             ast::Stmt::Continue(span) => Ok(hir::Stmt::Continue(*span)),
+            ast::Stmt::Nop(span) => Ok(hir::Stmt::Nop(*span)),
 
             ast::Stmt::Match(m) => {
                 let hm = self.lower_match(m, ret_ty)?;
@@ -698,6 +739,7 @@ impl Typer {
                         end,
                         step,
                         body,
+                        label: f.label.clone(),
                         span: f.span,
                     },
                     *span,

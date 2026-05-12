@@ -110,6 +110,42 @@ fn for_stmt() {
 }
 
 #[test]
+fn c_style_loop_desugars_to_bind_then_while() {
+    // `loop(0, $ < 3, $ + 1)` should desugar to:
+    //     __cph_N is 0
+    //     while __cph_N < 3
+    //         log(__cph_N)
+    //         __cph_N is __cph_N + 1
+    let p = parse("*main()\n    loop(0, $ < 3, $ + 1)\n        log($)\n");
+    if let Decl::Fn(f) = &p.decls[0] {
+        assert_eq!(f.body.len(), 2, "expected bind + while");
+        let ph = if let Stmt::Bind(b) = &f.body[0] {
+            assert!(matches!(b.value, Expr::Int(0, _)));
+            b.name.as_str().to_string()
+        } else {
+            panic!("expected bind, got {:?}", f.body[0]);
+        };
+        if let Stmt::While(w) = &f.body[1] {
+            // cond: ph < 3
+            if let Expr::BinOp(l, _, _, _) = &w.cond {
+                if let Expr::Ident(n, _) = l.as_ref() {
+                    assert_eq!(n.as_str(), ph);
+                } else {
+                    panic!("cond lhs not ident");
+                }
+            } else {
+                panic!("cond not binop");
+            }
+            // body: [log(ph), assign ph = ph + 1]
+            assert_eq!(w.body.len(), 2);
+            assert!(matches!(w.body[1], Stmt::Assign(..)));
+        } else {
+            panic!("expected while");
+        }
+    }
+}
+
+#[test]
 fn loop_break() {
     let p = parse("*main()\n    loop\n        break\n");
     if let Decl::Fn(f) = &p.decls[0] {
@@ -201,7 +237,26 @@ fn as_cast() {
 
 #[test]
 fn array_literal() {
+    // `[1,2,3]` desugars to a vector literal — `vector(1,2,3)`.
     let p = parse("*main()\n    x is [1, 2, 3]\n");
+    if let Decl::Fn(f) = &p.decls[0] {
+        if let Stmt::Bind(b) = &f.body[0] {
+            if let Expr::Call(callee, args, _) = &b.value {
+                if let Expr::Ident(name, _) = callee.as_ref() {
+                    assert_eq!(name, "vector");
+                    assert_eq!(args.len(), 3);
+                    return;
+                }
+            }
+            panic!("expected vector(...) call, got {:?}", b.value);
+        }
+    }
+}
+
+#[test]
+fn array_literal_fixed() {
+    // Use `array[…]` to opt back into a fixed-size array literal.
+    let p = parse("*main()\n    x is array[1, 2, 3]\n");
     if let Decl::Fn(f) = &p.decls[0] {
         if let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Array(elems, _) = &b.value {

@@ -1,0 +1,18 @@
+# Bully leader election: highest id wins.
+*leader(ids as Vec of i64, n as i64) returns i64
+    m is ids.get(0)
+    i is 1
+    while i < n
+        if ids.get(i) > m
+            m is ids.get(i)
+        i is i + 1
+    m
+
+*main
+    ids is vec()
+    ids.push(3)
+    ids.push(7)
+    ids.push(1)
+    ids.push(9)
+    ids.push(4)
+    log leader(ids, 5)

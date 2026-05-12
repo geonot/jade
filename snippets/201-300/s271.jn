@@ -1,0 +1,28 @@
+# Sleep/wake state machine: count cycles to reach DEEP_SLEEP.
+*next_state(s as i64, idle as i64) returns i64
+    if s equals 0
+        if idle > 5
+            return 1
+        return 0
+    if s equals 1
+        if idle > 20
+            return 2
+        return 1
+    2
+
+*depth(events as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        s is next_state(s, events.get(i))
+        i is i + 1
+    s
+
+*main
+    e is vec()
+    e.push(2)
+    e.push(8)
+    e.push(15)
+    e.push(25)
+    e.push(30)
+    log depth(e, 5)

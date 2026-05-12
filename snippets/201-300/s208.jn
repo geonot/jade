@@ -1,0 +1,41 @@
+# Bollinger band breakout count.
+*sma(p as Vec of i64, i as i64, w as i64) returns i64
+    s is 0
+    j is 0
+    while j < w
+        s is s + p.get(i - j)
+        j is j + 1
+    s / w
+
+*var_w(p as Vec of i64, i as i64, w as i64, m as i64) returns i64
+    s is 0
+    j is 0
+    while j < w
+        d is p.get(i - j) - m
+        s is s + d * d
+        j is j + 1
+    s / w
+
+*breakouts(p as Vec of i64, n as i64, w as i64, k as i64) returns i64
+    c is 0
+    i is w
+    while i < n
+        m is sma(p, i, w)
+        v is var_w(p, i, w, m)
+        sd is 1
+        s is 0
+        while s < 30
+            sd is (sd + v / sd) / 2
+            s is s + 1
+        if p.get(i) > m + k * sd
+            c is c + 1
+        i is i + 1
+    c
+
+*main
+    p is vec()
+    i is 0
+    while i < 60
+        p.push(100 + (i * 11 % 7))
+        i is i + 1
+    log breakouts(p, 60, 5, 1)

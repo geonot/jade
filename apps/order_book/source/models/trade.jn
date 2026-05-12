@@ -1,0 +1,11 @@
+type Trade
+    buy_id as i64
+    sell_id as i64
+    price as i64
+    qty as i64
+
+*new(buy_id as i64, sell_id as i64, price as i64, qty as i64) returns Trade
+    Trade(buy_id is buy_id, sell_id is sell_id, price is price, qty is qty)
+
+*notional(t as Trade) returns i64
+    t.price * t.qty

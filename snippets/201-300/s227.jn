@@ -1,0 +1,26 @@
+# Merkle root: xor-combine adjacent pairs in-place by levels.
+*combine(a as i64, b as i64) returns i64
+    a ^ (b * 31)
+
+*root(leaves as Vec of i64, n as i64) returns i64
+    cur is vec()
+    i is 0
+    while i < n
+        cur.push(leaves.get(i))
+        i is i + 1
+    sz is n
+    while sz > 1
+        j is 0
+        while j < sz
+            cur.set(j / 2, combine(cur.get(j), cur.get(j + 1)))
+            j is j + 2
+        sz is sz / 2
+    cur.get(0)
+
+*main
+    l is vec()
+    l.push(11)
+    l.push(22)
+    l.push(33)
+    l.push(44)
+    log root(l, 4)

@@ -1,0 +1,11 @@
+# Hamming distance between two i64 (popcount of XOR).
+*popcount(n as i64) returns i64
+    c is 0
+    while n not equals 0
+        n is n & (n - 1)
+        c is c + 1
+    c
+
+*main
+    log popcount(1 ^ 4)
+    log popcount(0xff ^ 0x0f)

@@ -1,0 +1,8 @@
+*main
+    ch is channel of i64(4)
+    send ch, 1
+    send ch, 2
+    a is receive ch
+    b is receive ch
+    log a
+    log b

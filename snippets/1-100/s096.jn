@@ -1,0 +1,14 @@
+actor Tally
+    count is 0
+
+    @add n
+        count is count + n
+
+    @show
+        log count
+
+*main
+    t is spawn Tally
+    t.add(5)
+    t.add(7)
+    t.show

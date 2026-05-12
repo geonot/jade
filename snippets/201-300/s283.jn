@@ -1,0 +1,17 @@
+# Boot counter rollback: reset to 0 if exceeds limit.
+*tick(c as i64, lim as i64) returns i64
+    if c + 1 >= lim
+        return 0
+    c + 1
+
+*after(n as i64, lim as i64) returns i64
+    c is 0
+    i is 0
+    while i < n
+        c is tick(c, lim)
+        i is i + 1
+    c
+
+*main
+    log after(7, 5)
+    log after(11, 5)

@@ -1,0 +1,3 @@
+*main
+    f is |x| x + 100
+    log f(5)

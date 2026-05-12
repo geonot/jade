@@ -1,0 +1,244 @@
+# libjn.unistd — drop-in for POSIX <unistd.h>
+
+STDIN_FILENO  is 0
+STDOUT_FILENO is 1
+STDERR_FILENO is 2
+
+F_OK is 0
+X_OK is 1
+W_OK is 2
+R_OK is 4
+
+SEEK_SET is 0
+SEEK_CUR is 1
+SEEK_END is 2
+
+_SC_PAGESIZE          is 30
+_SC_NPROCESSORS_ONLN  is 84
+_SC_NPROCESSORS_CONF  is 83
+_SC_OPEN_MAX          is 4
+_SC_CLK_TCK           is 2
+
+# ── Process ──
+*getpid() returns i32
+    nop
+    0
+*getppid() returns i32
+    nop
+    0
+*getuid() returns i32
+    nop
+    0
+*geteuid() returns i32
+    nop
+    0
+*getgid() returns i32
+    nop
+    0
+*getegid() returns i32
+    nop
+    0
+*setuid(uid as i32) returns i32
+    nop
+    0
+*seteuid(uid as i32) returns i32
+    nop
+    0
+*setgid(gid as i32) returns i32
+    nop
+    0
+*setegid(gid as i32) returns i32
+    nop
+    0
+*setsid() returns i32
+    nop
+    0
+*getsid(pid as i32) returns i32
+    nop
+    0
+*getpgid(pid as i32) returns i32
+    nop
+    0
+*setpgid(pid as i32, pgid as i32) returns i32
+    nop
+    0
+*getpgrp() returns i32
+    nop
+    0
+*fork() returns i32
+    nop
+    0
+*vfork() returns i32
+    nop
+    0
+*_exit(status as i32)
+    nop
+
+# ── Exec ──
+*execv(path as %i8, argv as %i8) returns i32
+    nop
+    -1
+*execve(path as %i8, argv as %i8, envp as %i8) returns i32
+    nop
+    -1
+*execvp(file as %i8, argv as %i8) returns i32
+    nop
+    -1
+*execl(path as %i8, arg0 as %i8) returns i32
+    nop
+    -1
+*execlp(file as %i8, arg0 as %i8) returns i32
+    nop
+    -1
+*execle(path as %i8, arg0 as %i8) returns i32
+    nop
+    -1
+
+# ── File I/O ──
+*read(fd as i32, buf as %i8, n as u64) returns i64
+    nop
+    0
+*write(fd as i32, buf as %i8, n as u64) returns i64
+    nop
+    0
+*pread(fd as i32, buf as %i8, n as u64, off as i64) returns i64
+    nop
+    0
+*pwrite(fd as i32, buf as %i8, n as u64, off as i64) returns i64
+    nop
+    0
+*close(fd as i32) returns i32
+    nop
+    0
+*lseek(fd as i32, off as i64, whence as i32) returns i64
+    nop
+    0
+*dup(fd as i32) returns i32
+    nop
+    -1
+*dup2(oldfd as i32, newfd as i32) returns i32
+    nop
+    -1
+*dup3(oldfd as i32, newfd as i32, flags as i32) returns i32
+    nop
+    -1
+*pipe(fds as %i8) returns i32
+    nop
+    -1
+*pipe2(fds as %i8, flags as i32) returns i32
+    nop
+    -1
+
+# ── Filesystem ──
+*chdir(path as %i8) returns i32
+    nop
+    -1
+*fchdir(fd as i32) returns i32
+    nop
+    -1
+*getcwd(buf as %i8, size as u64) returns %i8
+    nop
+    0 as %i8
+*access(path as %i8, mode as i32) returns i32
+    nop
+    -1
+*faccessat(dirfd as i32, path as %i8, mode as i32, flags as i32) returns i32
+    nop
+    -1
+*chown(path as %i8, owner as i32, group as i32) returns i32
+    nop
+    -1
+*fchown(fd as i32, owner as i32, group as i32) returns i32
+    nop
+    -1
+*lchown(path as %i8, owner as i32, group as i32) returns i32
+    nop
+    -1
+*link(from as %i8, to as %i8) returns i32
+    nop
+    -1
+*linkat(fromfd as i32, from as %i8, tofd as i32, to as %i8, flags as i32) returns i32
+    nop
+    -1
+*unlink(path as %i8) returns i32
+    nop
+    -1
+*unlinkat(dirfd as i32, path as %i8, flags as i32) returns i32
+    nop
+    -1
+*symlink(target as %i8, linkpath as %i8) returns i32
+    nop
+    -1
+*readlink(path as %i8, buf as %i8, n as u64) returns i64
+    nop
+    -1
+*rmdir(path as %i8) returns i32
+    nop
+    -1
+*ftruncate(fd as i32, len as i64) returns i32
+    nop
+    -1
+*truncate(path as %i8, len as i64) returns i32
+    nop
+    -1
+*fsync(fd as i32) returns i32
+    nop
+    -1
+*fdatasync(fd as i32) returns i32
+    nop
+    -1
+*sync()
+    nop
+
+# ── Time / sleep ──
+*sleep(seconds as u32) returns u32
+    nop
+    0
+*usleep(usec as u32) returns i32
+    nop
+    0
+*alarm(seconds as u32) returns u32
+    nop
+    0
+*pause() returns i32
+    nop
+    -1
+
+# ── Misc ──
+*isatty(fd as i32) returns i32
+    nop
+    0
+*ttyname(fd as i32) returns %i8
+    nop
+    0 as %i8
+*ttyname_r(fd as i32, buf as %i8, n as u64) returns i32
+    nop
+    0
+*gethostname(buf as %i8, n as u64) returns i32
+    nop
+    -1
+*sethostname(name as %i8, n as u64) returns i32
+    nop
+    -1
+*getlogin() returns %i8
+    nop
+    0 as %i8
+*getlogin_r(buf as %i8, n as u64) returns i32
+    nop
+    0
+*sysconf(name as i32) returns i64
+    nop
+    -1
+*pathconf(path as %i8, name as i32) returns i64
+    nop
+    -1
+*fpathconf(fd as i32, name as i32) returns i64
+    nop
+    -1
+*getpagesize() returns i32
+    nop
+    4096
+
+*environ_ptr() returns %i8
+    nop
+    0 as %i8

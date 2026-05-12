@@ -1,0 +1,9 @@
+# Sum of first n odd numbers (should be n^2).
+*main
+    n is 50
+    s is 0
+    i is 0
+    while i < n
+        s is s + (2 * i + 1)
+        i is i + 1
+    log s

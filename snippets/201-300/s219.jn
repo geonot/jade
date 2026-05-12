@@ -1,0 +1,19 @@
+# IBAN-style mod-97 check (simplified to digit string).
+*mod97(digits as Vec of i64, n as i64) returns i64
+    r is 0
+    i is 0
+    while i < n
+        r is (r * 10 + digits.get(i)) % 97
+        i is i + 1
+    r
+
+*main
+    d is vec()
+    d.push(1)
+    d.push(2)
+    d.push(3)
+    d.push(4)
+    d.push(5)
+    d.push(6)
+    d.push(7)
+    log mod97(d, 7)

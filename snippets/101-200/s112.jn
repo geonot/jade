@@ -1,0 +1,12 @@
+# Reverse bits in 64-bit int.
+*revbits(n as i64) returns i64
+    r is 0
+    i is 0
+    while i < 64
+        r is (r << 1) | (n & 1)
+        n is n >> 1
+        i is i + 1
+    r
+
+*main
+    log revbits(1)

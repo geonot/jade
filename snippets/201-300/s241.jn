@@ -1,0 +1,9 @@
+# Quorum check: r+w > n.
+*quorum_ok(r as i64, w as i64, n as i64) returns i64
+    if r + w > n
+        return 1
+    0
+
+*main
+    log quorum_ok(2, 2, 3)
+    log quorum_ok(1, 1, 5)

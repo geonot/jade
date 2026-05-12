@@ -1,0 +1,14 @@
+# HFT: market-maker quote at mid +/- half-spread, step inventory skew.
+*quote_bid(mid as i64, spread as i64, inventory as i64) returns i64
+    skew is inventory / 10
+    mid - spread / 2 - skew
+
+*quote_ask(mid as i64, spread as i64, inventory as i64) returns i64
+    skew is inventory / 10
+    mid + spread / 2 - skew
+
+*main
+    log quote_bid(1000, 4, 50)
+    log quote_ask(1000, 4, 50)
+    log quote_bid(1000, 4, -30)
+    log quote_ask(1000, 4, -30)

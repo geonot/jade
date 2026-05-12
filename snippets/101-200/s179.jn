@@ -1,0 +1,16 @@
+# Number of digits in n.
+*ndigits(n as i64) returns i64
+    if n equals 0
+        return 1
+    if n < 0
+        n is 0 - n
+    c is 0
+    while n > 0
+        c is c + 1
+        n is n / 10
+    c
+
+*main
+    log ndigits(0)
+    log ndigits(9)
+    log ndigits(123456789)

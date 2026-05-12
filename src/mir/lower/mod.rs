@@ -283,6 +283,7 @@ impl Lowerer {
             | hir::Stmt::Drop(..)
             | hir::Stmt::TupleBind(..)
             | hir::Stmt::Defer(..) => self.lower_stmt_core(stmt),
+            hir::Stmt::Nop(span) => self.emit(InstKind::Void, Type::Void, *span),
             hir::Stmt::If(..)
             | hir::Stmt::Match(..)
             | hir::Stmt::Ret(..)

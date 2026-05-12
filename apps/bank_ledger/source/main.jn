@@ -1,0 +1,42 @@
+use models/account
+use models/entry
+use ledger
+use journal
+
+*seed_accounts() returns Vec of Account
+    accs is vec()
+    accs.push(account.new(1, 'cash', 1))
+    accs.push(account.new(2, 'inventory', 1))
+    accs.push(account.new(3, 'loans_payable', 2))
+    accs.push(account.new(4, 'equity', 2))
+    accs
+
+*seed_entries() returns Vec of Entry
+    es is vec()
+    es.push(entry.new(1001, 1, 4, 50000, 1))
+    es.push(entry.new(1002, 2, 1, 12000, 2))
+    es.push(entry.new(1003, 1, 3, 8000, 3))
+    es.push(entry.new(1004, 2, 1, 3500, 4))
+    es.push(entry.new(1005, 1, 4, 7000, 5))
+    es
+
+*main
+    accs is seed_accounts()
+    es is seed_entries()
+    final is journal.replay(accs, es)
+    log 'tx_count'
+    log journal.entry_count(es)
+    log 'volume'
+    log journal.total_volume(es)
+    log 'assets'
+    log ledger.total_assets(final)
+    log 'liabilities'
+    log ledger.total_liabilities(final)
+    log 'cash_balance'
+    log ledger.find(final, 1).balance
+    log 'inventory_balance'
+    log ledger.find(final, 2).balance
+    log 'loans_balance'
+    log ledger.find(final, 3).balance
+    log 'equity_balance'
+    log ledger.find(final, 4).balance

@@ -1,0 +1,4 @@
+*main
+    v is vector[1, 2, 3]
+    log v.contains(2)
+    log v.contains(99)

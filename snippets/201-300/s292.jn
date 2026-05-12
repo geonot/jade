@@ -1,0 +1,16 @@
+# IIR biquad-ish: y[n] = a*y[n-1] + b*x[n].
+*iir(x as Vec of i64, n as i64, a as i64, b as i64) returns i64
+    y is 0
+    i is 0
+    while i < n
+        y is (a * y + b * x.get(i)) / 100
+        i is i + 1
+    y
+
+*main
+    x is vec()
+    i is 0
+    while i < 50
+        x.push(100 + (i * 7 % 11))
+        i is i + 1
+    log iir(x, 50, 80, 20)

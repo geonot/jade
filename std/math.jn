@@ -7,7 +7,13 @@ TAU is 6.28318530717958647692
 INF is 1.0 / 0.0
 NEG_INF is -1.0 / 0.0
 
-# sqrt, abs, floor, ceil, round, trunc are compiler builtins (called as x.sqrt(), x.floor() etc)
+# sqrt, abs, floor, ceil, round, trunc are compiler builtins (called as x.sqrt(), x.floor() etc).
+# Top-level wrappers exposed under math.* so `math.sqrt(x)` etc. work too.
+extern *sqrt(x as f64) returns f64
+extern *floor(x as f64) returns f64
+extern *ceil(x as f64) returns f64
+extern *round(x as f64) returns f64
+extern *trunc(x as f64) returns f64
 
 extern *sin(x as f64) returns f64
 extern *cos(x as f64) returns f64

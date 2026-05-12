@@ -1,0 +1,29 @@
+# Account reconciliation: missing-entry detection.
+*recon(a as Vec of i64, na as i64, b as Vec of i64, nb as i64) returns i64
+    miss is 0
+    i is 0
+    while i < na
+        found is 0
+        j is 0
+        while j < nb
+            if a.get(i) equals b.get(j)
+                found is 1
+                j is nb
+            else
+                j is j + 1
+        if found equals 0
+            miss is miss + 1
+        i is i + 1
+    miss
+
+*main
+    a is vec()
+    a.push(10)
+    a.push(20)
+    a.push(30)
+    a.push(40)
+    b is vec()
+    b.push(10)
+    b.push(30)
+    b.push(50)
+    log recon(a, 4, b, 3)

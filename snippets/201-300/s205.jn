@@ -1,0 +1,19 @@
+# Black-Scholes-ish: simplified call payoff sum over price grid.
+*call_payoff(prices as Vec of i64, strike as i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        diff is prices.get(i) - strike
+        if diff > 0
+            s is s + diff
+        i is i + 1
+    s / n
+
+*main
+    p is vec()
+    p.push(95)
+    p.push(100)
+    p.push(105)
+    p.push(110)
+    p.push(120)
+    log call_payoff(p, 100, 5)

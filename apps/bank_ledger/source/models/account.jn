@@ -1,0 +1,20 @@
+type Account
+    id as i64
+    name as String
+    balance as i64
+    kind as i64
+
+*new(id as i64, name as String, kind as i64) returns Account
+    Account(id is id, name is name, balance is 0, kind is kind)
+
+*credit(a as Account, amount as i64) returns Account
+    Account(id is a.id, name is a.name, balance is a.balance + amount, kind is a.kind)
+
+*debit(a as Account, amount as i64) returns Account
+    Account(id is a.id, name is a.name, balance is a.balance - amount, kind is a.kind)
+
+*is_asset(a as Account) returns bool
+    a.kind equals 1
+
+*is_liability(a as Account) returns bool
+    a.kind equals 2

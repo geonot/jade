@@ -1,0 +1,41 @@
+use models/task
+use dispatcher
+use queue
+
+*main
+    tasks is vec()
+    tasks.push(task.new(1, 5, 10, 3))
+    tasks.push(task.new(2, 3, 20, 5))
+    tasks.push(task.new(3, 7, 5, 1))
+    tasks.push(task.new(4, 2, 50, 8))
+
+    stats is dispatcher.new_stats()
+    t is 0
+    while t < 200
+        # Note: cost is consumed; reset by reactivation each period
+        # but since complete() leaves cost mutated, refresh on activate
+        i is 0
+        while i < tasks.len()
+            tk is tasks.get(i)
+            if tk.state equals 0 and t % tk.period equals 0
+                # restore cost to original by re-creating
+                base is task.new(tk.id, tk.priority, tk.period, 3)
+                if tk.id equals 2
+                    base is task.new(2, 3, 20, 5)
+                if tk.id equals 4
+                    base is task.new(4, 2, 50, 8)
+                if tk.id equals 3
+                    base is task.new(3, 7, 5, 1)
+                tasks.set(i, base)
+            i is i + 1
+        stats is dispatcher.tick(tasks, t, stats)
+        t is t + 1
+
+    log 'completed'
+    log stats.completed
+    log 'missed'
+    log stats.missed
+    log 'cpu_used'
+    log stats.cpu_used
+    log 'ready_remaining'
+    log queue.ready_count(tasks)

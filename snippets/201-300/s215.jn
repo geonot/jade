@@ -1,0 +1,18 @@
+# Implied vol via bisection on monotonic price function (toy).
+*price(vol as i64) returns i64
+    vol * vol / 100
+
+*iv(target as i64) returns i64
+    lo is 1
+    hi is 1000
+    while lo < hi
+        mid is (lo + hi) / 2
+        if price(mid) < target
+            lo is mid + 1
+        else
+            hi is mid
+    lo
+
+*main
+    log iv(900)
+    log iv(2500)

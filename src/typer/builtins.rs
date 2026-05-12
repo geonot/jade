@@ -36,9 +36,8 @@ impl Typer {
                     span,
                 }))
             }
-            "log" => Some(self.lower_simple_builtin(args, hir::BuiltinFn::Log, Type::Void, span)),
-            "print" => {
-                Some(self.lower_simple_builtin(args, hir::BuiltinFn::Print, Type::Void, span))
+            "log" | "print" => {
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::Log, Type::Void, span))
             }
             "to_string" => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::ToString, Type::String, span))
@@ -276,7 +275,7 @@ impl Typer {
             "__time_monotonic" if args.is_empty() && !self.fns.contains_key(name) => {
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::TimeMonotonic, vec![]),
-                    ty: Type::F64,
+                    ty: Type::I64,
                     span,
                 }))
             }

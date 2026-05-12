@@ -1,0 +1,5 @@
+# String split on space, count tokens.
+*main
+    s is "the quick brown fox jumps over the lazy dog"
+    parts is s.split(" ")
+    log parts.length

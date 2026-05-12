@@ -1,0 +1,23 @@
+# CRC32-style: reflected poly mock over byte stream.
+*crc(bytes as Vec of i64, n as i64) returns i64
+    c is 0xFFFFFFFF
+    i is 0
+    while i < n
+        c is c ^ bytes.get(i)
+        bit is 0
+        while bit < 8
+            if c % 2 equals 1
+                c is (c / 2) ^ 0xEDB88320
+            else
+                c is c / 2
+            bit is bit + 1
+        i is i + 1
+    c ^ 0xFFFFFFFF
+
+*main
+    b is vec()
+    b.push(0x31)
+    b.push(0x32)
+    b.push(0x33)
+    b.push(0x34)
+    log crc(b, 4)

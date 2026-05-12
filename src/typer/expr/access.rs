@@ -222,6 +222,23 @@ impl Typer {
                 }
                 let hobj = self.lower_expr(obj)?;
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
+                // Actor message send-with-no-args sugar: `t.show` where `t :
+                // ActorRef(Tally)` is desugared to a method call so the actor
+                // dispatch path runs (otherwise we attempt a struct field load
+                // on the actor handle, which has no such field).
+                if let Type::ActorRef(actor_name) = &resolved_ty {
+                    if let Some((_, _, handlers)) = self.actors.get(actor_name) {
+                        if handlers.iter().any(|(n, _, _)| n == field) {
+                            let call_expr = ast::Expr::Method(
+                                obj.clone(),
+                                field.clone(),
+                                Vec::new(),
+                                *span,
+                            );
+                            return self.lower_expr_expected(&call_expr, expected);
+                        }
+                    }
+                }
                 let struct_name = match &resolved_ty {
                     Type::Struct(name, _) => Some(name.clone()),
                     Type::Ptr(inner) => match inner.as_ref() {
@@ -268,11 +285,11 @@ impl Typer {
                 } else if matches!(resolved_ty, Type::String) && field == "length" {
                     (Type::I64, 0)
                 } else if matches!(&resolved_ty, Type::Vec(_))
-                    && (field == "length" || field == "len")
+                    && field == "length"
                 {
                     (Type::I64, 0)
                 } else if matches!(&resolved_ty, Type::Map(_, _))
-                    && (field == "length" || field == "len")
+                    && field == "length"
                 {
                     (Type::I64, 0)
                 } else if let Type::Tuple(ref tys) = resolved_ty {

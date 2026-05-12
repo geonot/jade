@@ -1,0 +1,13 @@
+# Sum digits.
+*digit_sum(n as i64) returns i64
+    if n < 0
+        n is 0 - n
+    s is 0
+    while n > 0
+        s is s + (n mod 10)
+        n is n / 10
+    s
+
+*main
+    log digit_sum(12345)
+    log digit_sum(99999)

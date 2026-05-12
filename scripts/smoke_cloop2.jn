@@ -1,0 +1,15 @@
+*main
+    log("count down:")
+    loop(5, $ > 0, $ - 1)
+        log($)
+
+    log("sum 1..10:")
+    s is 0
+    loop(1, $ <= 10, $ + 1)
+        s is s + $
+    log(s)
+
+    log("nested c-style:")
+    loop(0, $ < 3, $ + 1)
+        loop(0, $ < 3, $ + 1)
+            log($)

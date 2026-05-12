@@ -1,0 +1,35 @@
+use models/sample
+use sensors
+
+*ingest(samples as Vec of Sample, sensor as i64, t as i64) returns Vec of Sample
+    raw is sensors.read(sensor, t)
+    cal is sensors.calibrate(raw, sensor)
+    samples.push(sample.new(sensor, cal, t))
+    samples
+
+*window_avg(samples as Vec of Sample, sensor as i64, t_lo as i64, t_hi as i64) returns i64
+    s is 0
+    n is 0
+    i is 0
+    while i < samples.len()
+        x is samples.get(i)
+        if x.sensor equals sensor and x.ts >= t_lo and x.ts < t_hi
+            s is s + x.value
+            n is n + 1
+        i is i + 1
+    if n equals 0
+        return 0
+    s / n
+
+*max_in(samples as Vec of Sample, sensor as i64) returns i64
+    best is 0
+    found is 0
+    i is 0
+    while i < samples.len()
+        x is samples.get(i)
+        if x.sensor equals sensor
+            if found equals 0 or x.value > best
+                best is x.value
+                found is 1
+        i is i + 1
+    best

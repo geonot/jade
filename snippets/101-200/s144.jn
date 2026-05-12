@@ -1,0 +1,12 @@
+# Longest common prefix of two strings.
+*lcp(a as String, b as String) returns String
+    n is a.length
+    if b.length < n
+        n is b.length
+    i is 0
+    while i < n and a.char_at(i) equals b.char_at(i)
+        i is i + 1
+    a.slice(0, i)
+
+*main
+    log lcp("introduction", "internet")

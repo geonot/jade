@@ -1,0 +1,19 @@
+type Task
+    id as i64
+    priority as i64
+    period as i64
+    cost as i64
+    deadline as i64
+    state as i64
+
+*new(id as i64, priority as i64, period as i64, cost as i64) returns Task
+    Task(id is id, priority is priority, period is period, cost is cost, deadline is period, state is 0)
+
+*activate(t as Task, now as i64) returns Task
+    Task(id is t.id, priority is t.priority, period is t.period, cost is t.cost, deadline is now + t.period, state is 1)
+
+*complete(t as Task) returns Task
+    Task(id is t.id, priority is t.priority, period is t.period, cost is t.cost, deadline is t.deadline, state is 0)
+
+*missed(t as Task, now as i64) returns bool
+    t.state equals 1 and now > t.deadline

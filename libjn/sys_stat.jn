@@ -1,0 +1,112 @@
+# libjn.sys_stat — drop-in for POSIX <sys/stat.h>
+
+S_IFMT   is 0xF000
+S_IFSOCK is 0xC000
+S_IFLNK  is 0xA000
+S_IFREG  is 0x8000
+S_IFBLK  is 0x6000
+S_IFDIR  is 0x4000
+S_IFCHR  is 0x2000
+S_IFIFO  is 0x1000
+
+S_ISUID is 0x800
+S_ISGID is 0x400
+S_ISVTX is 0x200
+
+S_IRWXU is 0o700
+S_IRUSR is 0o400
+S_IWUSR is 0o200
+S_IXUSR is 0o100
+S_IRWXG is 0o070
+S_IRGRP is 0o040
+S_IWGRP is 0o020
+S_IXGRP is 0o010
+S_IRWXO is 0o007
+S_IROTH is 0o004
+S_IWOTH is 0o002
+S_IXOTH is 0o001
+
+type Stat
+    st_dev     as u64
+    st_ino     as u64
+    st_nlink   as u64
+    st_mode    as u32
+    st_uid     as u32
+    st_gid     as u32
+    st_rdev    as u64
+    st_size    as i64
+    st_blksize as i64
+    st_blocks  as i64
+    st_atime   as i64
+    st_mtime   as i64
+    st_ctime   as i64
+
+*stat(path as %i8, buf as %i8) returns i32
+    nop
+    -1
+
+*fstat(fd as i32, buf as %i8) returns i32
+    nop
+    -1
+
+*lstat(path as %i8, buf as %i8) returns i32
+    nop
+    -1
+
+*fstatat(dirfd as i32, path as %i8, buf as %i8, flags as i32) returns i32
+    nop
+    -1
+
+*chmod(path as %i8, mode as u32) returns i32
+    nop
+    -1
+
+*fchmod(fd as i32, mode as u32) returns i32
+    nop
+    -1
+
+*fchmodat(dirfd as i32, path as %i8, mode as u32, flags as i32) returns i32
+    nop
+    -1
+
+*mkdir(path as %i8, mode as u32) returns i32
+    nop
+    -1
+
+*mkdirat(dirfd as i32, path as %i8, mode as u32) returns i32
+    nop
+    -1
+
+*mkfifo(path as %i8, mode as u32) returns i32
+    nop
+    -1
+
+*mknod(path as %i8, mode as u32, dev as u64) returns i32
+    nop
+    -1
+
+*umask(mask as u32) returns u32
+    nop
+    0
+
+*S_ISDIR(mode as u32) returns bool
+    nop
+    false
+*S_ISREG(mode as u32) returns bool
+    nop
+    false
+*S_ISLNK(mode as u32) returns bool
+    nop
+    false
+*S_ISCHR(mode as u32) returns bool
+    nop
+    false
+*S_ISBLK(mode as u32) returns bool
+    nop
+    false
+*S_ISFIFO(mode as u32) returns bool
+    nop
+    false
+*S_ISSOCK(mode as u32) returns bool
+    nop
+    false

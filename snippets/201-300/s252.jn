@@ -1,0 +1,6 @@
+# GPS trilateration: return centroid of 3 anchor positions weighted by 1/distance.
+*tri_x(x1 as i64, x2 as i64, x3 as i64, d1 as i64, d2 as i64, d3 as i64) returns i64
+    (x1 * d2 * d3 + x2 * d1 * d3 + x3 * d1 * d2) / (d2 * d3 + d1 * d3 + d1 * d2)
+
+*main
+    log tri_x(0, 100, 200, 5, 10, 15)

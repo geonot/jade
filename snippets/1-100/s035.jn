@@ -1,0 +1,7 @@
+*main
+    n is 0
+    loop
+        n is n + 1
+        if n > 3
+            break
+    log n

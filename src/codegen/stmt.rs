@@ -49,6 +49,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::Ret(_, _, s) => *s,
             hir::Stmt::Break(_, s) => *s,
             hir::Stmt::Continue(s) => *s,
+            hir::Stmt::Nop(s) => *s,
             hir::Stmt::Match(m) => m.subject.span,
             hir::Stmt::Asm(a) => a.span,
             hir::Stmt::Drop(_, _, _, s) => *s,
@@ -211,6 +212,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 Ok(None)
             }
+            hir::Stmt::Nop(_) => Ok(None),
             hir::Stmt::Match(m) => self.compile_match(m),
             hir::Stmt::Asm(a) => self.compile_asm(a),
             hir::Stmt::Drop(def_id, name, ty, _span) => {

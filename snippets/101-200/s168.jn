@@ -1,0 +1,19 @@
+# Bubble sort.
+*bsort(v)
+    n is v.length
+    i is 0
+    while i < n
+        j is 0
+        while j < n - i - 1
+            if v.get(j) > v.get(j + 1)
+                t is v.get(j)
+                v.set(j, v.get(j + 1))
+                v.set(j + 1, t)
+            j is j + 1
+        i is i + 1
+
+*main
+    a is vec(64, 25, 12, 22, 11)
+    bsort(a)
+    for x in a
+        log x

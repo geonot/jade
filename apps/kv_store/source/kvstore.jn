@@ -1,0 +1,40 @@
+use models/entry
+
+# Simplified flat store; sharding kept as a hash helper.
+
+*new_store() returns Vec of Entry
+    vec()
+
+*put(s as Vec of Entry, key as i64, value as i64, now as i64, ttl as i64) returns Vec of Entry
+    expires is 0
+    if ttl > 0
+        expires is now + ttl
+    found is 0
+    i is 0
+    while i < s.len()
+        e is s.get(i)
+        if e.key equals key
+            s.set(i, entry.new(key, value, e.version + 1, expires))
+            found is 1
+        i is i + 1
+    if found equals 0
+        s.push(entry.new(key, value, 1, expires))
+    s
+
+*get(s as Vec of Entry, key as i64, now as i64) returns i64
+    i is 0
+    while i < s.len()
+        e is s.get(i)
+        if e.key equals key and entry.is_alive(e, now)
+            return e.value
+        i is i + 1
+    -1
+
+*size(s as Vec of Entry, now as i64) returns i64
+    c is 0
+    i is 0
+    while i < s.len()
+        if entry.is_alive(s.get(i), now)
+            c is c + 1
+        i is i + 1
+    c

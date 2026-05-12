@@ -17,7 +17,7 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(self.ctx.i8_type().const_int(0, false).into())
                     } else {
                         Err(format!(
-                            "mir_codegen: GlobalStore to undefined global `{name}`"
+                            "GlobalStore to undefined global `{name}`"
                         ))
                     }
                 }
@@ -27,7 +27,7 @@ impl<'ctx> Compiler<'ctx> {
                     let st = self
                         .module
                         .get_struct_type(&name.as_str())
-                        .ok_or_else(|| format!("mir_codegen: unknown struct `{name}`"))?;
+                        .ok_or_else(|| format!("unknown struct `{name}`"))?;
                     let field_defs: Vec<(String, Type)> =
                         self.structs.get(name).cloned().unwrap_or_default();
                     let defaults = self.struct_defaults.get(name).cloned();
@@ -44,7 +44,7 @@ impl<'ctx> Compiler<'ctx> {
                                 .iter()
                                 .position(|(n, _)| fname.with_str(|s| n == s))
                                 .ok_or_else(|| {
-                                    format!("mir_codegen: struct `{name}` has no field `{fname}`")
+                                    format!("struct `{name}` has no field `{fname}`")
                                 })? as u32;
                             provided.insert(pos);
                             pos
@@ -435,16 +435,33 @@ impl<'ctx> Compiler<'ctx> {
                             .build_struct_gep(header_ty, header_ptr, 1, "vis.lenp"));
                         let len =
                             b!(self.bld.build_load(i64t, len_gep, "vis.len")).into_int_value();
-                        self.emit_vec_bounds_check(idx_val.into_int_value(), len)?;
+                        // Wrap negative indices: `vec[-1]` → `vec[len-1]`.
+                        let raw_idx = idx_val.into_int_value();
+                        let zero_i = i64t.const_int(0, false);
+                        let is_neg = b!(self.bld.build_int_compare(
+                            inkwell::IntPredicate::SLT,
+                            raw_idx,
+                            zero_i,
+                            "vis.neg"
+                        ));
+                        let wrapped =
+                            b!(self.bld.build_int_nsw_add(raw_idx, len, "vis.wrap"));
+                        let final_idx =
+                            b!(self.bld.build_select(is_neg, wrapped, raw_idx, "vis.idx"))
+                                .into_int_value();
+                        self.emit_vec_bounds_check(final_idx, len)?;
                         let elem_gep = unsafe {
                             b!(self.bld.build_gep(
                                 elem_ty,
                                 data_ptr,
-                                &[idx_val.into_int_value()],
+                                &[final_idx],
                                 "vis.egep"
                             ))
                         };
                         b!(self.bld.build_store(elem_gep, v));
+                        // Forward the vec pointer as the SSA result so subsequent
+                        // uses (including Drop pairing in perceus) see the live value.
+                        return Ok(Some(base_val));
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
@@ -560,7 +577,7 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::Deref(val) => {
                     let v = self.val(*val);
                     if !v.is_pointer_value() {
-                        return Err(format!("mir_codegen: Deref on non-pointer value {:?}", val));
+                        return Err(format!("Deref on non-pointer value {:?}", val));
                     }
                     // RC deref: skip refcount field, load from field 1
                     let val_ty = self.value_types.get(val).cloned();

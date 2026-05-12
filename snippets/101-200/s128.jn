@@ -1,0 +1,12 @@
+# Polynomial evaluation (Horner).
+*horner(coeffs, x as f64) returns f64
+    r is 0.0
+    i is 0
+    while i < coeffs.length
+        r is r * x + coeffs.get(i)
+        i is i + 1
+    r
+
+*main
+    c is vec(1.0, 0.0, -2.0, 1.0)
+    log horner(c, 2.0)

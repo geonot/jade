@@ -1,0 +1,12 @@
+# Gossip dissemination: rounds to reach n nodes (log fanout).
+*rounds(n as i64, fanout as i64) returns i64
+    cur is 1
+    r is 0
+    while cur < n
+        cur is cur * (1 + fanout)
+        r is r + 1
+    r
+
+*main
+    log rounds(1000, 3)
+    log rounds(10000, 5)

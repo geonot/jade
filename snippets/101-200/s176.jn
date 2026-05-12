@@ -1,0 +1,31 @@
+# Dijkstra on dense graph (4 nodes).
+*main
+    INF is 1000000000
+    g is vec(vec(0, 4, 1, INF), vec(4, 0, 2, 5), vec(1, 2, 0, 8), vec(INF, 5, 8, 0))
+    n is 4
+    dist is vec(INF, INF, INF, INF)
+    visited is vec(false, false, false, false)
+    dist.set(0, 0)
+    i is 0
+    while i < n
+        u is 0 - 1
+        best is INF
+        j is 0
+        while j < n
+            if not visited.get(j) and dist.get(j) < best
+                best is dist.get(j)
+                u is j
+            j is j + 1
+        if u equals 0 - 1
+            i is n
+        else
+            visited.set(u, true)
+            v is 0
+            while v < n
+                cand is dist.get(u) + g.get(u).get(v)
+                if cand < dist.get(v)
+                    dist.set(v, cand)
+                v is v + 1
+            i is i + 1
+    for d in dist
+        log d

@@ -1,0 +1,11 @@
+# Compound interest after n years.
+*compound(p as f64, r as f64, n as i64) returns f64
+    out is p
+    i is 0
+    while i < n
+        out is out * (1.0 + r)
+        i is i + 1
+    out
+
+*main
+    log compound(1000.0, 0.05, 20)

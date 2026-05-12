@@ -1,0 +1,13 @@
+type Celsius
+    value as f64
+
+type Fahrenheit
+    value as f64
+
+*c_to_f(c as Celsius) returns Fahrenheit
+    Fahrenheit(value is c.value * 1.8 + 32.0)
+
+*main
+    c is Celsius(value is 100.0)
+    f is c_to_f(c)
+    log f.value

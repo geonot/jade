@@ -1,0 +1,29 @@
+# Sieve of Eratosthenes — count primes <= n.
+*count_primes(n as i64) returns i64
+    if n < 2
+        return 0
+    sieve is vec()
+    i is 0
+    while i <= n
+        sieve.push(true)
+        i is i + 1
+    sieve.set(0, false)
+    sieve.set(1, false)
+    p is 2
+    while p * p <= n
+        if sieve.get(p)
+            j is p * p
+            while j <= n
+                sieve.set(j, false)
+                j is j + p
+        p is p + 1
+    cnt is 0
+    k is 2
+    while k <= n
+        if sieve.get(k)
+            cnt is cnt + 1
+        k is k + 1
+    cnt
+
+*main
+    log count_primes(1000)

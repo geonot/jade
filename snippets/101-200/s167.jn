@@ -1,0 +1,23 @@
+# Compute mean & std-dev of a vec.
+*sqrt(x as f64) returns f64
+    if x <= 0.0
+        return 0.0
+    g is x
+    i is 0
+    while i < 30
+        g is (g + x / g) / 2.0
+        i is i + 1
+    g
+
+*main
+    a is vec(2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0)
+    s is 0.0
+    for x in a
+        s is s + x
+    mean is s / 8.0
+    log mean
+    v is 0.0
+    for x in a
+        d is x - mean
+        v is v + d * d
+    log sqrt(v / 8.0)

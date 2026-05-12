@@ -1,0 +1,17 @@
+# Compute median of a vec (insertion sort then mid).
+*sort(v)
+    n is v.length
+    i is 1
+    while i < n
+        key is v.get(i)
+        j is i - 1
+        while j >= 0 and v.get(j) > key
+            v.set(j + 1, v.get(j))
+            j is j - 1
+        v.set(j + 1, key)
+        i is i + 1
+
+*main
+    a is vec(7, 1, 9, 3, 11, 5, 8)
+    sort(a)
+    log a.get(a.length / 2)

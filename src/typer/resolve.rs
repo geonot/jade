@@ -84,6 +84,16 @@ impl Typer {
         } else {
             self.infer_ctx.fresh_var()
         };
+        // Generator functions return a Generator that yields the body's
+        // yield-type. We don't know the yield type here yet, so wrap the
+        // freshly-inferred return in Type::Generator(_) to keep the
+        // call-site receiver typed correctly. The inner type is unified
+        // later by the body lowering of `yield` expressions.
+        let ret = if f.is_generator && f.name != "main" {
+            Type::Generator(Box::new(ret))
+        } else {
+            ret
+        };
         let id = self.fresh_id();
         if self.debug_types {
             eprintln!(

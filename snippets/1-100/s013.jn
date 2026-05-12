@@ -1,0 +1,3 @@
+*main
+    x is 7
+    log 'x={x} squared={x * x}'

@@ -1,0 +1,13 @@
+enum Color
+    Red
+    Green
+    Blue
+
+*name c as Color
+    match c
+        Red ? 'red'
+        Green ? 'green'
+        Blue ? 'blue'
+
+*main
+    log name(Green)

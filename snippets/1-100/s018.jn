@@ -1,0 +1,3 @@
+*main
+    s is 'foo bar baz'
+    log s.replace('bar', 'XXX')

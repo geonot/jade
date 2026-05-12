@@ -1,0 +1,39 @@
+# libjn.setjmp — drop-in for C <setjmp.h>
+#
+# These functions are *the* substrate for C-style exceptions. See
+# libjn.md §"Exception Strategy" for the full plan: setjmp/longjmp give
+# us non-local control flow; on top, libjn builds a `try!` macro and an
+# `Exception` enum encoding errno-style codes.
+
+alias jmp_buf    = %i8     # opaque byte buffer (context save area)
+alias sigjmp_buf = %i8
+
+# Architectural sizing: x86_64 jmp_buf is 200 bytes (per glibc).
+# aarch64 jmp_buf is 392 bytes.  Allocations are thus made by the caller.
+
+*setjmp(env as %i8) returns i32
+    nop
+    0
+
+*longjmp(env as %i8, val as i32)
+    nop
+
+*sigsetjmp(env as %i8, savesigs as i32) returns i32
+    nop
+    0
+
+*siglongjmp(env as %i8, val as i32)
+    nop
+
+# ── libjn extension: scoped exception support ──
+# See libjn.md §Exceptions for the language-level design that wraps these.
+
+*__libjn_throw(code as i32, msg as %i8)
+    nop
+
+*__libjn_try_enter(env as %i8) returns i32
+    nop
+    0
+
+*__libjn_try_leave()
+    nop

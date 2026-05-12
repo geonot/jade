@@ -1,0 +1,60 @@
+# libjn.fenv — drop-in for C <fenv.h>
+
+FE_INVALID   is 1
+FE_DIVBYZERO is 4
+FE_OVERFLOW  is 8
+FE_UNDERFLOW is 16
+FE_INEXACT   is 32
+FE_ALL_EXCEPT is 61
+
+FE_TONEAREST  is 0
+FE_DOWNWARD   is 0x400
+FE_UPWARD     is 0x800
+FE_TOWARDZERO is 0xC00
+
+alias fenv_t    = %i8
+alias fexcept_t = u32
+
+*feclearexcept(excepts as i32) returns i32
+    nop
+    0
+
+*fegetexceptflag(flag as %i8, excepts as i32) returns i32
+    nop
+    0
+
+*feraiseexcept(excepts as i32) returns i32
+    nop
+    0
+
+*fesetexceptflag(flag as %i8, excepts as i32) returns i32
+    nop
+    0
+
+*fetestexcept(excepts as i32) returns i32
+    nop
+    0
+
+*fegetround() returns i32
+    nop
+    0
+
+*fesetround(mode as i32) returns i32
+    nop
+    0
+
+*fegetenv(env as %i8) returns i32
+    nop
+    0
+
+*fesetenv(env as %i8) returns i32
+    nop
+    0
+
+*feholdexcept(env as %i8) returns i32
+    nop
+    0
+
+*feupdateenv(env as %i8) returns i32
+    nop
+    0

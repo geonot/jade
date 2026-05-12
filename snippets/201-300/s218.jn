@@ -1,0 +1,35 @@
+# Luhn checksum for credit-card-like number.
+*luhn(digits as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        d is digits.get(n - 1 - i)
+        if i % 2 equals 1
+            d is d * 2
+            if d > 9
+                d is d - 9
+        s is s + d
+        i is i + 1
+    if s % 10 equals 0
+        return 1
+    0
+
+*main
+    d is vec()
+    d.push(4)
+    d.push(5)
+    d.push(3)
+    d.push(9)
+    d.push(6)
+    d.push(1)
+    d.push(0)
+    d.push(3)
+    d.push(0)
+    d.push(0)
+    d.push(2)
+    d.push(0)
+    d.push(0)
+    d.push(0)
+    d.push(1)
+    d.push(9)
+    log luhn(d, 16)

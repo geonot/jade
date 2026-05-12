@@ -1,0 +1,4 @@
+*main
+    v is vector[5, 2, 8, 1, 9, 3]
+    sorted is v.sort()
+    print(sorted)

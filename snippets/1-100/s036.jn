@@ -1,0 +1,5 @@
+*main
+    sum is 0
+    for i from 1 to 11
+        sum is sum + i
+    log sum

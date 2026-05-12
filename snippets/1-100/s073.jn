@@ -1,0 +1,9 @@
+type Counter
+    count as i64
+
+    *bump(self)
+        self.count + 1
+
+*main
+    c is Counter(count is 5)
+    log c.bump()

@@ -610,6 +610,19 @@ impl Typer {
                     span,
                 });
             }
+            // Default `obj.log()` for any struct type without a user-defined
+            // `log` method: desugar to the `log(self)` builtin which uses the
+            // default `Name @ 0xADDR { fields }` formatter at codegen time.
+            // This makes `log` a universal method (every type can be logged
+            // out of the box) while still allowing user override via a
+            // `*log` method on the type.
+            if method == "log" && args.is_empty() {
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::Log, vec![hobj]),
+                    ty: Type::Void,
+                    span,
+                });
+            }
         }
 
         if matches!(obj_ty, Type::TypeVar(_)) {

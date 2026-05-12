@@ -10,6 +10,27 @@ impl<'ctx> Compiler<'ctx> {
         val: BasicValueEnum<'ctx>,
         elem: &Type,
     ) -> Result<(), String> {
+        self.drop_vec_impl(val, elem, true)
+    }
+
+    /// Drop only the *elements* of a Vec — frees per-element heap if elements
+    /// are non-trivially-droppable, but **leaves the data buffer and header
+    /// allocations intact** so they can be recycled by Perceus reuse pairing.
+    /// The caller is responsible for stashing or freeing the header pointer.
+    pub(crate) fn drop_vec_elements_only(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        elem: &Type,
+    ) -> Result<(), String> {
+        self.drop_vec_impl(val, elem, false)
+    }
+
+    fn drop_vec_impl(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        elem: &Type,
+        free_storage: bool,
+    ) -> Result<(), String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
         let i64t = self.ctx.i64_type();
@@ -77,18 +98,22 @@ impl<'ctx> Compiler<'ctx> {
 
             self.bld.position_at_end(post_bb);
             // Free data buffer and header
-            let data_gep2 = b!(self
-                .bld
-                .build_struct_gep(header_ty, header_ptr, 0, "dvd.d2"));
-            let data_ptr2 = b!(self.bld.build_load(ptr_ty, data_gep2, "dvd.buf2"));
-            b!(self.bld.build_call(free, &[data_ptr2.into()], ""));
-            b!(self.bld.build_call(free, &[header_ptr.into()], ""));
+            if free_storage {
+                let data_gep2 = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 0, "dvd.d2"));
+                let data_ptr2 = b!(self.bld.build_load(ptr_ty, data_gep2, "dvd.buf2"));
+                b!(self.bld.build_call(free, &[data_ptr2.into()], ""));
+                b!(self.bld.build_call(free, &[header_ptr.into()], ""));
+            }
         } else {
             // POD elements: just free buffer and header
-            let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
-            let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf"));
-            b!(self.bld.build_call(free, &[data_ptr.into()], ""));
-            b!(self.bld.build_call(free, &[header_ptr.into()], ""));
+            if free_storage {
+                let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
+                let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf"));
+                b!(self.bld.build_call(free, &[data_ptr.into()], ""));
+                b!(self.bld.build_call(free, &[header_ptr.into()], ""));
+            }
         }
 
         b!(self.bld.build_unconditional_branch(done_bb));

@@ -1,0 +1,17 @@
+# Concrete Result enum.
+enum Res
+    Ok(i64)
+    Err
+
+*divide(a as i64, b as i64) returns Res
+    if b equals 0
+        return Err
+    Ok(a / b)
+
+*main
+    match divide(10, 2)
+        Ok(v) ? log v
+        Err   ? log 0 - 1
+    match divide(10, 0)
+        Ok(v) ? log v
+        Err   ? log 0 - 1

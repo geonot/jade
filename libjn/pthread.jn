@@ -1,0 +1,196 @@
+# libjn.pthread — drop-in for POSIX <pthread.h>
+
+PTHREAD_CREATE_JOINABLE is 0
+PTHREAD_CREATE_DETACHED is 1
+
+PTHREAD_MUTEX_NORMAL     is 0
+PTHREAD_MUTEX_RECURSIVE  is 1
+PTHREAD_MUTEX_ERRORCHECK is 2
+PTHREAD_MUTEX_DEFAULT    is 0
+
+PTHREAD_PROCESS_PRIVATE is 0
+PTHREAD_PROCESS_SHARED  is 1
+
+PTHREAD_CANCEL_ENABLE   is 0
+PTHREAD_CANCEL_DISABLE  is 1
+PTHREAD_CANCEL_DEFERRED     is 0
+PTHREAD_CANCEL_ASYNCHRONOUS is 1
+
+# ── Thread management ──
+*pthread_create(thr as %i8, attr as %i8, start as %i8, arg as %i8) returns i32
+    nop
+    0
+*pthread_join(thr as u64, retval as %i8) returns i32
+    nop
+    0
+*pthread_detach(thr as u64) returns i32
+    nop
+    0
+*pthread_exit(retval as %i8)
+    nop
+*pthread_cancel(thr as u64) returns i32
+    nop
+    0
+*pthread_self() returns u64
+    nop
+    0
+*pthread_equal(a as u64, b as u64) returns i32
+    nop
+    0
+*pthread_yield() returns i32
+    nop
+    0
+*pthread_setname_np(thr as u64, name as %i8) returns i32
+    nop
+    0
+*pthread_getname_np(thr as u64, name as %i8, len as u64) returns i32
+    nop
+    0
+
+# ── Attr ──
+*pthread_attr_init(attr as %i8) returns i32
+    nop
+    0
+*pthread_attr_destroy(attr as %i8) returns i32
+    nop
+    0
+*pthread_attr_setdetachstate(attr as %i8, state as i32) returns i32
+    nop
+    0
+*pthread_attr_getdetachstate(attr as %i8, state as %i8) returns i32
+    nop
+    0
+*pthread_attr_setstacksize(attr as %i8, size as u64) returns i32
+    nop
+    0
+*pthread_attr_getstacksize(attr as %i8, size as %i8) returns i32
+    nop
+    0
+
+# ── Mutex ──
+*pthread_mutex_init(m as %i8, attr as %i8) returns i32
+    nop
+    0
+*pthread_mutex_destroy(m as %i8) returns i32
+    nop
+    0
+*pthread_mutex_lock(m as %i8) returns i32
+    nop
+    0
+*pthread_mutex_trylock(m as %i8) returns i32
+    nop
+    0
+*pthread_mutex_timedlock(m as %i8, ts as %i8) returns i32
+    nop
+    0
+*pthread_mutex_unlock(m as %i8) returns i32
+    nop
+    0
+*pthread_mutexattr_init(a as %i8) returns i32
+    nop
+    0
+*pthread_mutexattr_destroy(a as %i8) returns i32
+    nop
+    0
+*pthread_mutexattr_settype(a as %i8, type as i32) returns i32
+    nop
+    0
+*pthread_mutexattr_setpshared(a as %i8, shared as i32) returns i32
+    nop
+    0
+
+# ── Condition variable ──
+*pthread_cond_init(c as %i8, attr as %i8) returns i32
+    nop
+    0
+*pthread_cond_destroy(c as %i8) returns i32
+    nop
+    0
+*pthread_cond_wait(c as %i8, m as %i8) returns i32
+    nop
+    0
+*pthread_cond_timedwait(c as %i8, m as %i8, ts as %i8) returns i32
+    nop
+    0
+*pthread_cond_signal(c as %i8) returns i32
+    nop
+    0
+*pthread_cond_broadcast(c as %i8) returns i32
+    nop
+    0
+*pthread_condattr_init(a as %i8) returns i32
+    nop
+    0
+*pthread_condattr_destroy(a as %i8) returns i32
+    nop
+    0
+
+# ── RW lock ──
+*pthread_rwlock_init(rw as %i8, attr as %i8) returns i32
+    nop
+    0
+*pthread_rwlock_destroy(rw as %i8) returns i32
+    nop
+    0
+*pthread_rwlock_rdlock(rw as %i8) returns i32
+    nop
+    0
+*pthread_rwlock_tryrdlock(rw as %i8) returns i32
+    nop
+    0
+*pthread_rwlock_wrlock(rw as %i8) returns i32
+    nop
+    0
+*pthread_rwlock_trywrlock(rw as %i8) returns i32
+    nop
+    0
+*pthread_rwlock_unlock(rw as %i8) returns i32
+    nop
+    0
+
+# ── Once ──
+*pthread_once(once as %i8, init as %i8) returns i32
+    nop
+    0
+
+# ── TLS ──
+*pthread_key_create(key as %i8, dtor as %i8) returns i32
+    nop
+    0
+*pthread_key_delete(key as u32) returns i32
+    nop
+    0
+*pthread_getspecific(key as u32) returns %i8
+    nop
+    0 as %i8
+*pthread_setspecific(key as u32, val as %i8) returns i32
+    nop
+    0
+
+# ── Barrier (POSIX 2008) ──
+*pthread_barrier_init(b as %i8, attr as %i8, count as u32) returns i32
+    nop
+    0
+*pthread_barrier_destroy(b as %i8) returns i32
+    nop
+    0
+*pthread_barrier_wait(b as %i8) returns i32
+    nop
+    0
+
+# ── Spinlock ──
+*pthread_spin_init(s as %i8, pshared as i32) returns i32
+    nop
+    0
+*pthread_spin_destroy(s as %i8) returns i32
+    nop
+    0
+*pthread_spin_lock(s as %i8) returns i32
+    nop
+    0
+*pthread_spin_trylock(s as %i8) returns i32
+    nop
+    0
+*pthread_spin_unlock(s as %i8) returns i32
+    nop
+    0

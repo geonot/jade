@@ -1,0 +1,42 @@
+# Merge sort on Vec of i64.
+*merge(left, right) returns Vec of i64
+    out is vec()
+    i is 0
+    j is 0
+    while i < left.length and j < right.length
+        a is left.get(i)
+        b is right.get(j)
+        if a <= b
+            out.push(a)
+            i is i + 1
+        else
+            out.push(b)
+            j is j + 1
+    while i < left.length
+        out.push(left.get(i))
+        i is i + 1
+    while j < right.length
+        out.push(right.get(j))
+        j is j + 1
+    out
+
+*msort(v) returns Vec of i64
+    if v.length <= 1
+        return v
+    mid is v.length / 2
+    left is vec()
+    right is vec()
+    i is 0
+    while i < v.length
+        if i < mid
+            left.push(v.get(i))
+        else
+            right.push(v.get(i))
+        i is i + 1
+    merge(msort(left), msort(right))
+
+*main
+    a is vec(5, 2, 8, 1, 9, 3, 7, 4, 6)
+    s is msort(a)
+    for x in s
+        log x

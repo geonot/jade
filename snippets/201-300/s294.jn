@@ -1,0 +1,36 @@
+# Bresenham line: count pixels touched.
+*bresenham(x0 as i64, y0 as i64, x1 as i64, y1 as i64) returns i64
+    dx is x1 - x0
+    if dx < 0
+        dx is -dx
+    dy is y1 - y0
+    if dy < 0
+        dy is -dy
+    sx is 1
+    if x0 > x1
+        sx is -1
+    sy is 1
+    if y0 > y1
+        sy is -1
+    e_acc is dx - dy
+    x is x0
+    y is y0
+    cnt is 0
+    done is 0
+    while done equals 0
+        cnt is cnt + 1
+        if x equals x1 and y equals y1
+            done is 1
+        else
+            e2 is 2 * e_acc
+            if e2 > -dy
+                e_acc is e_acc - dy
+                x is x + sx
+            if e2 < dx
+                e_acc is e_acc + dx
+                y is y + sy
+    cnt
+
+*main
+    log bresenham(0, 0, 10, 6)
+    log bresenham(0, 0, 5, 5)

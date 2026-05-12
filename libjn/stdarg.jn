@@ -1,0 +1,20 @@
+# libjn.stdarg — drop-in for C <stdarg.h>
+#
+# Variadic argument access. See libjn.md §"Variadic Functions" for the
+# full integration story — Jinn does not support variadic functions
+# natively, so libjn models them via an explicit `va_list` byte buffer.
+
+alias va_list = %i8
+
+*va_start(ap as %i8, last as %i8)
+    nop
+
+*va_arg(ap as %i8, _type as %i8) returns u64
+    nop
+    0
+
+*va_copy(dst as %i8, src as %i8)
+    nop
+
+*va_end(ap as %i8)
+    nop

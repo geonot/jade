@@ -1,0 +1,33 @@
+use models/tx
+use models/block
+
+*merkle(txs as Vec of Tx) returns i64
+    if txs.len() equals 0
+        return 0
+    acc is tx.hash(txs.get(0))
+    i is 1
+    while i < txs.len()
+        h is tx.hash(txs.get(i))
+        acc is (acc * 31) ^ h
+        if acc < 0
+            acc is -acc
+        i is i + 1
+    acc
+
+*mix(prev_hash as i64, merkle as i64, nonce as i64) returns i64
+    h is prev_hash ^ (merkle * 2654435761)
+    h is h ^ (nonce * 1099511628211)
+    h is h * 1315423911
+    if h < 0
+        h is -h
+    h % 1000000007
+
+*mine(prev_hash as i64, txs as Vec of Tx, height as i64, difficulty as i64) returns Block
+    m is merkle(txs)
+    nonce is 0
+    while nonce < 200000
+        h is mix(prev_hash, m, nonce)
+        if h % difficulty equals 0
+            return block.new(height, prev_hash, m, nonce, h, txs.len())
+        nonce is nonce + 1
+    block.new(height, prev_hash, m, -1, 0, txs.len())

@@ -1,0 +1,19 @@
+# OTA chunk reassembly: track received bitset.
+*all_received(received as Vec of i64, n as i64) returns i64
+    i is 0
+    while i < n
+        if received.get(i) equals 0
+            return 0
+        i is i + 1
+    1
+
+*main
+    r is vec()
+    r.push(1)
+    r.push(1)
+    r.push(1)
+    r.push(0)
+    r.push(1)
+    log all_received(r, 5)
+    r.set(3, 1)
+    log all_received(r, 5)

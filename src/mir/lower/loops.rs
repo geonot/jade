@@ -68,6 +68,10 @@ impl Lowerer {
                 let inc_bb = self.new_block("for.inc");
                 let exit_bb = self.new_block("for.exit");
 
+                if let Some(ref lab) = f.label {
+                    self.label_stack.push((lab.clone(), inc_bb, exit_bb));
+                }
+
                 if let Some(ref end_expr) = f.end {
                     // Range for: iter_val = start, end = end_expr
                     let end_val = self.lower_expr(end_expr);
@@ -277,6 +281,10 @@ impl Lowerer {
                 // Remove var_map entries for variables first defined inside the
                 // loop body — they don't dominate the exit block.
                 self.var_map.retain(|k, _| pre_loop_vars.contains(k));
+
+                if f.label.is_some() {
+                    self.label_stack.pop();
+                }
 
                 self.switch_to(exit_bb);
                 // The loop bound variable's SSA value is from the condition

@@ -1,0 +1,19 @@
+# Recursive fibonacci with memo via a vec.
+*fib(n as i64) returns i64
+    if n < 2
+        return n
+    memo is vec()
+    i is 0
+    while i <= n
+        memo.push(0)
+        i is i + 1
+    memo.set(0, 0)
+    memo.set(1, 1)
+    i is 2
+    while i <= n
+        memo.set(i, memo.get(i - 1) + memo.get(i - 2))
+        i is i + 1
+    memo.get(n)
+
+*main
+    log fib(30)

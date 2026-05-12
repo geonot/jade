@@ -1,0 +1,9 @@
+# Chain reorg: pick longer fork (return chosen length).
+*choose(a as i64, b as i64) returns i64
+    if a >= b
+        return a
+    b
+
+*main
+    log choose(120, 118)
+    log choose(118, 125)

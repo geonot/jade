@@ -1,0 +1,6 @@
+*main
+    v is vector[1, 2, 3]
+    v.push(4)
+    log v.length
+    log v.pop()
+    log v.length

@@ -1,0 +1,10 @@
+# Trim leading spaces.
+*ltrim(s as String) returns String
+    i is 0
+    while i < s.length and s.char_at(i) equals 32
+        i is i + 1
+    s.slice(i, s.length)
+
+*main
+    log ltrim("    jinn")
+    log ltrim("nope")

@@ -1,0 +1,43 @@
+# libjn.inttypes — drop-in for C <inttypes.h>
+
+PRId8  is "d"
+PRId16 is "d"
+PRId32 is "d"
+PRId64 is "ld"
+PRIu8  is "u"
+PRIu16 is "u"
+PRIu32 is "u"
+PRIu64 is "lu"
+PRIx8  is "x"
+PRIx16 is "x"
+PRIx32 is "x"
+PRIx64 is "lx"
+PRIo64 is "lo"
+
+type Imaxdiv
+    quot as i64
+    rem  as i64
+
+*imaxabs(x as i64) returns i64
+    nop
+    0
+
+*imaxdiv(num as i64, denom as i64) returns i64
+    nop
+    0
+
+*strtoimax(s as %i8, endp as %i8, base as i32) returns i64
+    nop
+    0
+
+*strtoumax(s as %i8, endp as %i8, base as i32) returns u64
+    nop
+    0
+
+*wcstoimax(s as %i8, endp as %i8, base as i32) returns i64
+    nop
+    0
+
+*wcstoumax(s as %i8, endp as %i8, base as i32) returns u64
+    nop
+    0

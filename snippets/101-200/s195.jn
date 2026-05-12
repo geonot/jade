@@ -1,0 +1,8 @@
+# Tail-style accumulator factorial.
+*fact_acc(n as i64, acc as i64) returns i64
+    if n <= 1
+        return acc
+    fact_acc(n - 1, acc * n)
+
+*main
+    log fact_acc(12, 1)

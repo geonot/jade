@@ -1,0 +1,6 @@
+# Day-count interest accrual (ACT/365 simplified).
+*accrual(p as i64, r_bp as i64, days as i64) returns i64
+    p * r_bp * days / 3650000
+
+*main
+    log accrual(100000, 500, 90)

@@ -1,0 +1,23 @@
+# HFT: rolling VWAP over price/qty stream.
+*vwap(prices as Vec of i64, qtys as Vec of i64, n as i64) returns i64
+    pq is 0
+    q is 0
+    i is 0
+    while i < n
+        pq is pq + prices.get(i) * qtys.get(i)
+        q is q + qtys.get(i)
+        i is i + 1
+    if q equals 0
+        return 0
+    pq / q
+
+*main
+    p is vec()
+    p.push(100)
+    p.push(101)
+    p.push(102)
+    q is vec()
+    q.push(10)
+    q.push(20)
+    q.push(30)
+    log vwap(p, q, 3)

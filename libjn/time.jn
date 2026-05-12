@@ -1,0 +1,111 @@
+# libjn.time — drop-in for C <time.h>
+
+CLOCKS_PER_SEC is 1000000
+TIME_UTC is 1
+
+CLOCK_REALTIME           is 0
+CLOCK_MONOTONIC          is 1
+CLOCK_PROCESS_CPUTIME_ID is 2
+CLOCK_THREAD_CPUTIME_ID  is 3
+CLOCK_MONOTONIC_RAW      is 4
+CLOCK_REALTIME_COARSE    is 5
+CLOCK_MONOTONIC_COARSE   is 6
+CLOCK_BOOTTIME           is 7
+
+alias time_t   = i64
+alias clock_t  = i64
+alias suseconds_t = i64
+
+# struct tm fields are exposed individually via getter stubs.
+type Tm
+    tm_sec   as i32
+    tm_min   as i32
+    tm_hour  as i32
+    tm_mday  as i32
+    tm_mon   as i32
+    tm_year  as i32
+    tm_wday  as i32
+    tm_yday  as i32
+    tm_isdst as i32
+
+type Timespec
+    tv_sec  as i64
+    tv_nsec as i64
+
+type Timeval
+    tv_sec  as i64
+    tv_usec as i64
+
+# ── Wall-clock ──
+*time(t as %i8) returns i64
+    nop
+    0
+
+*clock() returns i64
+    nop
+    0
+
+*difftime(a as i64, b as i64) returns f64
+    nop
+    0.0
+
+*mktime(tm as %i8) returns i64
+    nop
+    0
+
+*timegm(tm as %i8) returns i64
+    nop
+    0
+
+*gmtime(t as %i8) returns %i8
+    nop
+    0 as %i8
+
+*gmtime_r(t as %i8, result as %i8) returns %i8
+    nop
+    0 as %i8
+
+*localtime(t as %i8) returns %i8
+    nop
+    0 as %i8
+
+*localtime_r(t as %i8, result as %i8) returns %i8
+    nop
+    0 as %i8
+
+*asctime(tm as %i8) returns %i8
+    nop
+    0 as %i8
+
+*ctime(t as %i8) returns %i8
+    nop
+    0 as %i8
+
+*strftime(buf as %i8, n as u64, fmt as %i8, tm as %i8) returns u64
+    nop
+    0
+
+*strptime(s as %i8, fmt as %i8, tm as %i8) returns %i8
+    nop
+    0 as %i8
+
+# ── High-resolution ──
+*clock_gettime(clk as i32, ts as %i8) returns i32
+    nop
+    0
+
+*clock_settime(clk as i32, ts as %i8) returns i32
+    nop
+    0
+
+*clock_getres(clk as i32, ts as %i8) returns i32
+    nop
+    0
+
+*nanosleep(req as %i8, rem as %i8) returns i32
+    nop
+    0
+
+*timespec_get(ts as %i8, base as i32) returns i32
+    nop
+    0

@@ -1,0 +1,9 @@
+*main
+    a is true
+    b is false
+    if a and not b
+        log 'yes'
+    if a or b
+        log 'or'
+    if a xor b
+        log 'xor'

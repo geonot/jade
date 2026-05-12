@@ -1,0 +1,5 @@
+# Karatsuba-ish multiplication test (just a sanity check).
+*main
+    a is 12345678
+    b is 87654321
+    log a * b

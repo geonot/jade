@@ -1,0 +1,9 @@
+# libjn.tgmath — drop-in for C <tgmath.h>
+#
+# Type-generic math macros. Jinn dispatches on type natively via the
+# `dispatch` keyword and trait machinery; this file is provided for
+# C source-compat only.
+#
+# All entries delegate to libjn.math (double) since Jinn's f64 is the
+# canonical floating-point type. Use libjn.math.* directly in new code.
+nop

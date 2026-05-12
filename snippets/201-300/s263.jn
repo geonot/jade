@@ -1,0 +1,11 @@
+# 8-to-1 mux selected by 3 control bits.
+*mux8(d as Vec of i64, s as i64) returns i64
+    d.get(s)
+
+*main
+    d is vec()
+    i is 0
+    while i < 8
+        d.push(i * 11)
+        i is i + 1
+    log mux8(d, 5)

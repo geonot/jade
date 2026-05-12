@@ -1,0 +1,13 @@
+# Collatz step count.
+*collatz(n as i64) returns i64
+    c is 0
+    while n not equals 1
+        if n mod 2 equals 0
+            n is n / 2
+        else
+            n is 3 * n + 1
+        c is c + 1
+    c
+
+*main
+    log collatz(27)

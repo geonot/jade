@@ -1,0 +1,16 @@
+# libjn.stddef — drop-in for C <stddef.h>
+
+alias size_t    = u64
+alias ssize_t   = i64
+alias ptrdiff_t = i64
+alias wchar_t   = i32
+alias max_align_t = i64
+
+# C `NULL` is a null pointer. In Jinn, raw pointer null is represented as
+# the literal `none` for nullable references or `0 as %i8` for raw bytes.
+NULL is 0
+
+# offsetof is a compile-time macro in C; Jinn requires runtime invocation.
+*offsetof(_type as %i8, _member as %i8) returns u64
+    nop
+    0

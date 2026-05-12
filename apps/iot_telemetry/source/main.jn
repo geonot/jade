@@ -1,0 +1,32 @@
+use models/sample
+use sensors
+use pipeline
+use alerts
+
+*main
+    samples is vec()
+    n_sensors is 4
+    t is 0
+    while t < 500
+        sid is 0
+        while sid < n_sensors
+            samples is pipeline.ingest(samples, sid, t)
+            sid is sid + 1
+        t is t + 1
+
+    log 'samples'
+    log samples.len()
+    log 'avg_s0_first50'
+    log pipeline.window_avg(samples, 0, 0, 50)
+    log 'avg_s2_window'
+    log pipeline.window_avg(samples, 2, 100, 200)
+    log 'max_s0'
+    log pipeline.max_in(samples, 0)
+    log 'max_s3'
+    log pipeline.max_in(samples, 3)
+
+    al is alerts.scan(samples, 500)
+    log 'alerts'
+    log al.len()
+    log 'severe'
+    log alerts.severe_count(al)

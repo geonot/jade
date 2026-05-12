@@ -177,6 +177,7 @@ impl HirValidator {
                 }
             }
             hir::Stmt::Continue(_) => {}
+            hir::Stmt::Nop(_) => {}
             hir::Stmt::Match(m) => {
                 self.validate_expr(&m.subject);
                 for arm in &m.arms {
@@ -247,7 +248,13 @@ impl HirValidator {
                             (&lhs.ty, &rhs.ty),
                             (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_))
                         );
-                        if lhs.ty != rhs.ty && !is_ptr_arith {
+                        // Allow NDArray ⊕ scalar (and scalar ⊕ NDArray):
+                        // codegen broadcasts the scalar to every element.
+                        let is_nd_broadcast = matches!(
+                            (&lhs.ty, &rhs.ty),
+                            (Type::NDArray(_, _), _) | (_, Type::NDArray(_, _))
+                        );
+                        if lhs.ty != rhs.ty && !is_ptr_arith && !is_nd_broadcast {
                             self.errors.push(format!(
                                 "BinOp {:?} type mismatch at line {}: lhs {:?} vs rhs {:?}",
                                 op, expr.span.line, lhs.ty, rhs.ty
@@ -555,6 +562,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::Ret(_, _, s) => *s,
         hir::Stmt::Break(_, s) => *s,
         hir::Stmt::Continue(s) => *s,
+        hir::Stmt::Nop(s) => *s,
         hir::Stmt::Match(m) => m.span,
         hir::Stmt::Asm(a) => a.span,
         hir::Stmt::Drop(_, _, _, s) => *s,

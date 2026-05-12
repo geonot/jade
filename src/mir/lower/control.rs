@@ -627,11 +627,45 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, *span)
             }
             hir::Stmt::Break(val, span) => {
-                if let Some((_, exit)) = self.loop_stack.last().copied() {
-                    if let Some(v) = val {
-                        let _ = self.lower_expr(v);
+                // Recognize `break LABEL` / `continue LABEL` markers planted
+                // by the parser (`__break_label__<n>` / `__continue_label__<n>`).
+                let mut handled_label = false;
+                if let Some(v) = val {
+                    if let hir::ExprKind::Str(s) = &v.kind {
+                        if let Some(name) = s.strip_prefix("__break_label__") {
+                            let want = crate::intern::Symbol::intern(name);
+                            if let Some((_, _, exit)) = self
+                                .label_stack
+                                .iter()
+                                .rev()
+                                .find(|(l, _, _)| *l == want)
+                                .copied()
+                            {
+                                self.set_terminator(Terminator::Goto(exit));
+                                handled_label = true;
+                            }
+                        } else if let Some(name) = s.strip_prefix("__continue_label__") {
+                            let want = crate::intern::Symbol::intern(name);
+                            if let Some((_, cont, _)) = self
+                                .label_stack
+                                .iter()
+                                .rev()
+                                .find(|(l, _, _)| *l == want)
+                                .copied()
+                            {
+                                self.set_terminator(Terminator::Goto(cont));
+                                handled_label = true;
+                            }
+                        }
                     }
-                    self.set_terminator(Terminator::Goto(exit));
+                }
+                if !handled_label {
+                    if let Some((_, exit)) = self.loop_stack.last().copied() {
+                        if let Some(v) = val {
+                            let _ = self.lower_expr(v);
+                        }
+                        self.set_terminator(Terminator::Goto(exit));
+                    }
                 }
                 let dead = self.new_block("after.break");
                 self.switch_to(dead);

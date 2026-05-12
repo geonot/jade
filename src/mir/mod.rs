@@ -75,6 +75,13 @@ pub struct PerceusMeta {
     /// can be promoted to a move (delete the inc, the matching dec is also
     /// dropped by the elision pass).
     pub borrow_to_move: HashSet<ValueId>,
+    /// Slot ids that should use *Vec semantics* instead of the default Rc
+    /// semantics. For Vec slots, the Drop save path deep-drops elements but
+    /// preserves the {data, len, cap} header (and its data buffer); the
+    /// matching consume path resets `len = 0`, leaving the data buffer
+    /// available for the next push run, eliminating both header and buffer
+    /// mallocs across a loop iteration.
+    pub vec_slots: HashSet<u32>,
 }
 
 /// Aggregate statistics across all functions, surfaced via `--debug-perceus`.

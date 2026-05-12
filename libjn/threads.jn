@@ -1,0 +1,123 @@
+# libjn.threads — drop-in for C11 <threads.h>
+#
+# Thin wrapper over POSIX pthreads with C11 names. The Jinn-native
+# concurrency model (`actor`, `spawn`, `channel`) is preferred for
+# new code; this file exists for portability and porting C programs.
+
+thrd_success    is 0
+thrd_busy       is 1
+thrd_error      is 2
+thrd_nomem      is 3
+thrd_timedout   is 4
+
+mtx_plain     is 0
+mtx_recursive is 1
+mtx_timed     is 2
+
+alias thrd_t = i64
+alias mtx_t  = %i8
+alias cnd_t  = %i8
+alias once_flag = %i8
+alias tss_t  = i32
+
+type ThreadStartArg
+    func as %i8
+    arg  as %i8
+
+# ── Thread ops ──
+*thrd_create(thr as %i8, func as %i8, arg as %i8) returns i32
+    nop
+    0
+
+*thrd_equal(a as i64, b as i64) returns i32
+    nop
+    0
+
+*thrd_current() returns i64
+    nop
+    0
+
+*thrd_sleep(duration as %i8, remaining as %i8) returns i32
+    nop
+    0
+
+*thrd_yield()
+    nop
+
+*thrd_exit(res as i32)
+    nop
+
+*thrd_detach(thr as i64) returns i32
+    nop
+    0
+
+*thrd_join(thr as i64, res as %i8) returns i32
+    nop
+    0
+
+# ── Mutex ops ──
+*mtx_init(m as %i8, type as i32) returns i32
+    nop
+    0
+
+*mtx_lock(m as %i8) returns i32
+    nop
+    0
+
+*mtx_timedlock(m as %i8, ts as %i8) returns i32
+    nop
+    0
+
+*mtx_trylock(m as %i8) returns i32
+    nop
+    0
+
+*mtx_unlock(m as %i8) returns i32
+    nop
+    0
+
+*mtx_destroy(m as %i8)
+    nop
+
+# ── Condition variable ops ──
+*cnd_init(c as %i8) returns i32
+    nop
+    0
+
+*cnd_signal(c as %i8) returns i32
+    nop
+    0
+
+*cnd_broadcast(c as %i8) returns i32
+    nop
+    0
+
+*cnd_wait(c as %i8, m as %i8) returns i32
+    nop
+    0
+
+*cnd_timedwait(c as %i8, m as %i8, ts as %i8) returns i32
+    nop
+    0
+
+*cnd_destroy(c as %i8)
+    nop
+
+# ── Once / TSS ──
+*call_once(flag as %i8, func as %i8)
+    nop
+
+*tss_create(key as %i8, dtor as %i8) returns i32
+    nop
+    0
+
+*tss_get(key as i32) returns %i8
+    nop
+    0 as %i8
+
+*tss_set(key as i32, val as %i8) returns i32
+    nop
+    0
+
+*tss_delete(key as i32)
+    nop

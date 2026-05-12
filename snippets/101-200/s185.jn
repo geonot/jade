@@ -1,0 +1,12 @@
+# Frequency of each digit in n.
+*main
+    n is 1224488800
+    cnt is vec(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    while n > 0
+        d is n mod 10
+        cnt.set(d, cnt.get(d) + 1)
+        n is n / 10
+    i is 0
+    while i < 10
+        log cnt.get(i)
+        i is i + 1

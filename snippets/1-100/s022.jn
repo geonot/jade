@@ -1,0 +1,8 @@
+*main
+    x is 0
+    if x > 0
+        log 'pos'
+    elif x equals 0
+        log 'zero'
+    else
+        log 'neg'

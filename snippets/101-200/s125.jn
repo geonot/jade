@@ -1,0 +1,8 @@
+# Linked list as parallel arrays.
+*main
+    vals is vec(10, 20, 30)
+    nxt is vec(1, 2, -1)
+    i is 0
+    while i >= 0
+        log vals.get(i)
+        i is nxt.get(i)

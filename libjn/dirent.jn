@@ -1,0 +1,61 @@
+# libjn.dirent — drop-in for POSIX <dirent.h>
+
+DT_UNKNOWN is 0
+DT_FIFO    is 1
+DT_CHR     is 2
+DT_DIR     is 4
+DT_BLK     is 6
+DT_REG     is 8
+DT_LNK     is 10
+DT_SOCK    is 12
+
+alias DIR = %i8
+
+type Dirent
+    d_ino    as u64
+    d_off    as i64
+    d_reclen as u16
+    d_type   as u8
+    d_name   as %i8
+
+*opendir(path as %i8) returns %i8
+    nop
+    0 as %i8
+
+*fdopendir(fd as i32) returns %i8
+    nop
+    0 as %i8
+
+*closedir(d as %i8) returns i32
+    nop
+    -1
+
+*readdir(d as %i8) returns %i8
+    nop
+    0 as %i8
+
+*readdir_r(d as %i8, entry as %i8, result as %i8) returns i32
+    nop
+    0
+
+*rewinddir(d as %i8)
+    nop
+
+*seekdir(d as %i8, loc as i64)
+    nop
+
+*telldir(d as %i8) returns i64
+    nop
+    0
+
+*scandir(path as %i8, namelist as %i8, filter as %i8, cmp as %i8) returns i32
+    nop
+    -1
+
+*alphasort(a as %i8, b as %i8) returns i32
+    nop
+    0
+
+*dirfd(d as %i8) returns i32
+    nop
+    -1

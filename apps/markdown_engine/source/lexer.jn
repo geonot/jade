@@ -1,0 +1,42 @@
+use models/token
+
+# Lines are encoded as integer codes:
+#   code / 1000 = first-char class (1=#, 2=*, 3=`, 4=blank, 5=text)
+#   code % 1000 = payload word count
+*classify_line(code as i64) returns i64
+    code / 1000
+
+*payload_of(code as i64) returns i64
+    code % 1000
+
+*tokenize(lines as Vec of i64) returns Vec of Token
+    out is vec()
+    in_code is 0
+    i is 0
+    while i < lines.len()
+        ln is lines.get(i)
+        cls is classify_line(ln)
+        pl is payload_of(ln)
+        if in_code equals 1
+            if cls equals 3
+                in_code is 0
+                out.push(token.new(5, 0, 0))
+            else
+                out.push(token.new(2, 0, pl))
+        else
+            if cls equals 3
+                in_code is 1
+                out.push(token.new(5, 0, 0))
+            else
+                if cls equals 1
+                    out.push(token.new(1, 1 + (pl % 6), pl))
+                else
+                    if cls equals 2
+                        out.push(token.new(3, 0, pl))
+                    else
+                        if cls equals 4
+                            out.push(token.new(4, 0, 0))
+                        else
+                            out.push(token.new(2, 0, pl))
+        i is i + 1
+    out

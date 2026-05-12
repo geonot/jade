@@ -1,0 +1,236 @@
+# libjn.stdio — drop-in for C <stdio.h>
+#
+# File streams, formatted I/O, character I/O. Stubs preserve C signatures.
+
+# ── Constants ──
+EOF       is -1
+BUFSIZ    is 8192
+FOPEN_MAX is 16
+FILENAME_MAX is 4096
+L_tmpnam  is 20
+TMP_MAX   is 238328
+
+SEEK_SET is 0
+SEEK_CUR is 1
+SEEK_END is 2
+
+_IOFBF is 0
+_IOLBF is 1
+_IONBF is 2
+
+# ── Stream pointers (initialized at runtime) ──
+*stdin_ptr() returns %i8
+    nop
+    0 as %i8
+
+*stdout_ptr() returns %i8
+    nop
+    0 as %i8
+
+*stderr_ptr() returns %i8
+    nop
+    0 as %i8
+
+# ── File ops ──
+*fopen(path as %i8, mode as %i8) returns %i8
+    nop
+    0 as %i8
+
+*freopen(path as %i8, mode as %i8, stream as %i8) returns %i8
+    nop
+    0 as %i8
+
+*fclose(stream as %i8) returns i32
+    nop
+    0
+
+*fflush(stream as %i8) returns i32
+    nop
+    0
+
+*setbuf(stream as %i8, buf as %i8)
+    nop
+
+*setvbuf(stream as %i8, buf as %i8, mode as i32, size as u64) returns i32
+    nop
+    0
+
+*remove(path as %i8) returns i32
+    nop
+    0
+
+*rename(old as %i8, new as %i8) returns i32
+    nop
+    0
+
+*tmpfile() returns %i8
+    nop
+    0 as %i8
+
+*tmpnam(buf as %i8) returns %i8
+    nop
+    0 as %i8
+
+# ── Char / line I/O ──
+*fgetc(stream as %i8) returns i32
+    nop
+    -1
+
+*getc(stream as %i8) returns i32
+    nop
+    -1
+
+*getchar() returns i32
+    nop
+    -1
+
+*fputc(c as i32, stream as %i8) returns i32
+    nop
+    -1
+
+*putc(c as i32, stream as %i8) returns i32
+    nop
+    -1
+
+*putchar(c as i32) returns i32
+    nop
+    -1
+
+*fgets(buf as %i8, n as i32, stream as %i8) returns %i8
+    nop
+    0 as %i8
+
+*fputs(s as %i8, stream as %i8) returns i32
+    nop
+    0
+
+*puts(s as %i8) returns i32
+    nop
+    0
+
+*ungetc(c as i32, stream as %i8) returns i32
+    nop
+    -1
+
+# ── Block I/O ──
+*fread(buf as %i8, size as u64, count as u64, stream as %i8) returns u64
+    nop
+    0
+
+*fwrite(buf as %i8, size as u64, count as u64, stream as %i8) returns u64
+    nop
+    0
+
+# ── Positioning ──
+*fseek(stream as %i8, offset as i64, whence as i32) returns i32
+    nop
+    0
+
+*ftell(stream as %i8) returns i64
+    nop
+    0
+
+*rewind(stream as %i8)
+    nop
+
+*fgetpos(stream as %i8, pos as %i8) returns i32
+    nop
+    0
+
+*fsetpos(stream as %i8, pos as %i8) returns i32
+    nop
+    0
+
+# ── Status ──
+*feof(stream as %i8) returns i32
+    nop
+    0
+
+*ferror(stream as %i8) returns i32
+    nop
+    0
+
+*clearerr(stream as %i8)
+    nop
+
+*perror(s as %i8)
+    nop
+
+*fileno(stream as %i8) returns i32
+    nop
+    -1
+
+# ── Formatted I/O (variadic — see libjn.md §Limitations) ──
+# Variadic dispatch is modeled by passing a pre-built `va_list` pointer.
+*printf(fmt as %i8) returns i32
+    nop
+    0
+
+*fprintf(stream as %i8, fmt as %i8) returns i32
+    nop
+    0
+
+*sprintf(buf as %i8, fmt as %i8) returns i32
+    nop
+    0
+
+*snprintf(buf as %i8, n as u64, fmt as %i8) returns i32
+    nop
+    0
+
+*vprintf(fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+*vfprintf(stream as %i8, fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+*vsprintf(buf as %i8, fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+*vsnprintf(buf as %i8, n as u64, fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+*scanf(fmt as %i8) returns i32
+    nop
+    0
+
+*fscanf(stream as %i8, fmt as %i8) returns i32
+    nop
+    0
+
+*sscanf(s as %i8, fmt as %i8) returns i32
+    nop
+    0
+
+*vscanf(fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+*vfscanf(stream as %i8, fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+*vsscanf(s as %i8, fmt as %i8, ap as %i8) returns i32
+    nop
+    0
+
+# ── POSIX extensions ──
+*getline(lineptr as %i8, n as %i8, stream as %i8) returns i64
+    nop
+    -1
+
+*getdelim(lineptr as %i8, n as %i8, delim as i32, stream as %i8) returns i64
+    nop
+    -1
+
+*fmemopen(buf as %i8, size as u64, mode as %i8) returns %i8
+    nop
+    0 as %i8
+
+*open_memstream(bufp as %i8, sizep as %i8) returns %i8
+    nop
+    0 as %i8

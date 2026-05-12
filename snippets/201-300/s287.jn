@@ -1,0 +1,7 @@
+# PCI config: pack bus/device/function into id.
+*bdf(bus as i64, dev as i64, func as i64) returns i64
+    bus * 256 + dev * 8 + func
+
+*main
+    log bdf(3, 5, 2)
+    log bdf(0, 31, 7)

@@ -1,0 +1,16 @@
+# UART frame: start + 8 data + parity + stop.
+*frame_bits(data as i64, parity as i64) returns i64
+    sum is 0
+    bit is 0
+    while bit < 8
+        sum is sum + ((data / (1 << bit)) % 2)
+        bit is bit + 1
+    if parity equals 1 and sum % 2 equals 0
+        return 11
+    if parity equals 1 and sum % 2 equals 1
+        return 11
+    10
+
+*main
+    log frame_bits(0x55, 1)
+    log frame_bits(0x55, 0)

@@ -1,0 +1,5 @@
+# libjn.stdnoreturn — drop-in for C <stdnoreturn.h>
+#
+# Jinn marks divergent functions via `returns !` (bottom). The C `_Noreturn`
+# qualifier is a no-op here; provided for source compat only.
+nop

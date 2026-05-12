@@ -1,0 +1,19 @@
+# Binary search on a sorted vec.
+*bsearch(v, target as i64) returns i64
+    lo is 0
+    hi is v.length - 1
+    while lo <= hi
+        mid is (lo + hi) / 2
+        m is v.get(mid)
+        if m equals target
+            return mid
+        if m < target
+            lo is mid + 1
+        else
+            hi is mid - 1
+    -1
+
+*main
+    a is vec(1, 3, 5, 7, 9, 11, 13, 15, 17, 19)
+    log bsearch(a, 11)
+    log bsearch(a, 4)

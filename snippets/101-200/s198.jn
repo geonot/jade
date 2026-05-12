@@ -1,0 +1,11 @@
+# Compute checksum: sum of bytes mod 256.
+*checksum(s as String) returns i64
+    s2 is 0
+    i is 0
+    while i < s.length
+        s2 is (s2 + s.char_at(i)) mod 256
+        i is i + 1
+    s2
+
+*main
+    log checksum("hello world")

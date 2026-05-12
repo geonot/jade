@@ -1,0 +1,42 @@
+use models/task
+use queue
+
+type Stats
+    completed as i64
+    missed as i64
+    cpu_used as i64
+
+*new_stats() returns Stats
+    Stats(completed is 0, missed is 0, cpu_used is 0)
+
+*tick(tasks as Vec of Task, now as i64, stats as Stats) returns Stats
+    # Activate tasks at their period boundary
+    i is 0
+    while i < tasks.len()
+        t is tasks.get(i)
+        if t.state equals 0 and now % t.period equals 0
+            tasks.set(i, task.activate(t, now))
+        i is i + 1
+
+    # Count missed
+    missed_now is 0
+    j is 0
+    while j < tasks.len()
+        if task.missed(tasks.get(j), now)
+            missed_now is missed_now + 1
+            tasks.set(j, task.complete(tasks.get(j)))
+        j is j + 1
+
+    # Run highest-priority for one unit
+    idx is queue.pick_next(tasks)
+    used is 0
+    if idx >= 0
+        used is 1
+        cur is tasks.get(idx)
+        new_cost is cur.cost - 1
+        if new_cost <= 0
+            tasks.set(idx, task.complete(cur))
+            return Stats(completed is stats.completed + 1, missed is stats.missed + missed_now, cpu_used is stats.cpu_used + used)
+        else
+            tasks.set(idx, Task(id is cur.id, priority is cur.priority, period is cur.period, cost is new_cost, deadline is cur.deadline, state is 1))
+    Stats(completed is stats.completed, missed is stats.missed + missed_now, cpu_used is stats.cpu_used + used)

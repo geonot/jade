@@ -1,0 +1,22 @@
+# UART RX ring buffer: enqueue/dequeue counters.
+*ring_after(n_push as i64, n_pop as i64, cap as i64) returns i64
+    h is 0
+    t is 0
+    cnt is 0
+    i is 0
+    while i < n_push
+        if cnt < cap
+            t is (t + 1) % cap
+            cnt is cnt + 1
+        i is i + 1
+    j is 0
+    while j < n_pop
+        if cnt > 0
+            h is (h + 1) % cap
+            cnt is cnt - 1
+        j is j + 1
+    cnt
+
+*main
+    log ring_after(20, 5, 16)
+    log ring_after(5, 5, 16)

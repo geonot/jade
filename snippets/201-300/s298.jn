@@ -1,0 +1,22 @@
+# Lock-free style ring (single producer/consumer counter).
+actor Ring
+    cnt as i64
+    @push
+        cnt is cnt + 1
+    @pop
+        if cnt > 0
+            cnt is cnt - 1
+    @final
+        log cnt
+
+*main
+    r is spawn Ring
+    i is 0
+    while i < 100
+        r.push()
+        i is i + 1
+    j is 0
+    while j < 30
+        r.pop()
+        j is j + 1
+    r.final()

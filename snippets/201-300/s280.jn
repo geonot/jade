@@ -1,0 +1,19 @@
+# Bringup probe sequence: count successful initialisations.
+*bringup(probes as Vec of i64, n as i64) returns i64
+    ok is 0
+    i is 0
+    while i < n
+        if probes.get(i) equals 1
+            ok is ok + 1
+        i is i + 1
+    ok
+
+*main
+    p is vec()
+    p.push(1)
+    p.push(1)
+    p.push(0)
+    p.push(1)
+    p.push(1)
+    p.push(0)
+    log bringup(p, 6)

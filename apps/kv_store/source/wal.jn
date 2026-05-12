@@ -1,0 +1,21 @@
+use models/entry
+use sharding
+
+type Op
+    kind as i64
+    key as i64
+    value as i64
+    ts as i64
+
+*put_op(key as i64, value as i64, ts as i64) returns Op
+    Op(kind is 1, key is key, value is value, ts is ts)
+
+*del_op(key as i64, ts as i64) returns Op
+    Op(kind is 2, key is key, value is 0, ts is ts)
+
+*append(ops as Vec of Op, op as Op) returns Vec of Op
+    ops.push(op)
+    ops
+
+*replay_count(ops as Vec of Op) returns i64
+    ops.len()

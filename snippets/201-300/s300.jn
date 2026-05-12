@@ -1,0 +1,22 @@
+# Real-time periodic scheduler: count deadline misses.
+*misses(periods as Vec of i64, executions as Vec of i64, n as i64) returns i64
+    cnt is 0
+    i is 0
+    while i < n
+        if executions.get(i) > periods.get(i)
+            cnt is cnt + 1
+        i is i + 1
+    cnt
+
+*main
+    p is vec()
+    p.push(100)
+    p.push(50)
+    p.push(200)
+    p.push(80)
+    e is vec()
+    e.push(90)
+    e.push(60)
+    e.push(150)
+    e.push(85)
+    log misses(p, e, 4)

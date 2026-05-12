@@ -1,0 +1,6 @@
+*apply(f as (i64) returns i64, x as i64)
+    f(x)
+
+*main
+    double is |x as i64| x * 2
+    log apply(double, 21)

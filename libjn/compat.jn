@@ -1,0 +1,52 @@
+# libjn.compat — global-namespace shim, mirrors `std.compat`.
+#
+# After `use std.libjn.compat`, every libjn symbol is in scope without
+# the `<header>.` prefix, just like a C translation unit that has
+# `#include`d every header.
+#
+# Beware: this introduces the entire C namespace into the current scope.
+# Prefer the qualified form `stdio.printf(...)` in new code and reserve
+# `compat` for porting C source mechanically.
+#
+# Implementation: a flat re-export of every symbol via `pub use`.
+# (The `pub use` machinery is the Jinn equivalent of `using namespace`.)
+
+pub use std.libjn.assert.*
+pub use std.libjn.complex.*
+pub use std.libjn.ctype.*
+pub use std.libjn.errno.*
+pub use std.libjn.fenv.*
+pub use std.libjn.float.*
+pub use std.libjn.inttypes.*
+pub use std.libjn.limits.*
+pub use std.libjn.locale.*
+pub use std.libjn.math.*
+pub use std.libjn.setjmp.*
+pub use std.libjn.signal.*
+pub use std.libjn.stdalign.*
+pub use std.libjn.stdarg.*
+pub use std.libjn.stdatomic.*
+pub use std.libjn.stdbool.*
+pub use std.libjn.stddef.*
+pub use std.libjn.stdint.*
+pub use std.libjn.stdio.*
+pub use std.libjn.stdlib.*
+pub use std.libjn.string.*
+pub use std.libjn.threads.*
+pub use std.libjn.time.*
+pub use std.libjn.uchar.*
+pub use std.libjn.wchar.*
+pub use std.libjn.wctype.*
+
+pub use std.libjn.dirent.*
+pub use std.libjn.fcntl.*
+pub use std.libjn.pthread.*
+pub use std.libjn.semaphore.*
+pub use std.libjn.sys_mman.*
+pub use std.libjn.sys_socket.*
+pub use std.libjn.sys_stat.*
+pub use std.libjn.sys_types.*
+pub use std.libjn.sys_wait.*
+pub use std.libjn.unistd.*
+
+nop

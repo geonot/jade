@@ -147,6 +147,7 @@ pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
         }
         Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => rewrite_expr(e, renames),
         Stmt::Continue(_)
+        | Stmt::Nop(_)
         | Stmt::Asm(_)
         | Stmt::StoreSave(_, _)
         | Stmt::StoreDelete(_, _, _)

@@ -1,0 +1,4 @@
+*main
+    v is vector[1, 2, 3, 4]
+    total is v.fold(0, |acc, x| acc + x)
+    log total

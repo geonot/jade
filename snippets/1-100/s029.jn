@@ -1,0 +1,3 @@
+*main
+    if 'world' in 'hello world'
+        log 'substr'

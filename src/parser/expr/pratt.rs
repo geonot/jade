@@ -231,6 +231,65 @@ impl Parser {
                         self.advance();
                         let a = self.parse_args()?;
                         self.expect(Token::RParen)?;
+                        // Implicit lambda for method args containing `$` —
+                        // mirrors the pipeline (`~`) shorthand so things like
+                        // `xs.map($ * 2)` and `xs.filter($ > 0)` Just Work.
+                        // Restricted to a known set of higher-order method
+                        // names so that `$` retains its loop-variable meaning
+                        // when used inside `loop`/`for` blocks for ordinary
+                        // calls like `items.push(int_val($))`.
+                        let is_hof = f.with_str(|s| {
+                            matches!(
+                                s,
+                                "map"
+                                    | "filter"
+                                    | "fold"
+                                    | "reduce"
+                                    | "each"
+                                    | "for_each"
+                                    | "any"
+                                    | "all"
+                                    | "find"
+                                    | "count_by"
+                                    | "group_by"
+                                    | "sort_by"
+                                    | "min_by"
+                                    | "max_by"
+                                    | "take_while"
+                                    | "drop_while"
+                                    | "flat_map"
+                                    | "partition"
+                            )
+                        });
+                        let a: Vec<Expr> = a
+                            .into_iter()
+                            .map(|arg| {
+                                if is_hof
+                                    && super::placeholder::contains_lambda_placeholder(&arg)
+                                    && !matches!(arg, Expr::Placeholder(_))
+                                    && !matches!(arg, Expr::Lambda(..))
+                                {
+                                    let asp = arg.span();
+                                    let replaced = super::placeholder::replace_placeholder(
+                                        &arg, "__ph",
+                                    );
+                                    Expr::Lambda(
+                                        vec![Param {
+                                            name: "__ph".into(),
+                                            ty: None,
+                                            default: None,
+                                            literal: None,
+                                            span: asp,
+                                        }],
+                                        None,
+                                        vec![Stmt::Expr(replaced)],
+                                        asp,
+                                    )
+                                } else {
+                                    arg
+                                }
+                            })
+                            .collect();
                         e = Expr::Method(Box::new(e), f, a, sp);
                     } else {
                         e = Expr::Field(Box::new(e), f, sp);

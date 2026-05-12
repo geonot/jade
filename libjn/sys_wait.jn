@@ -1,0 +1,50 @@
+# libjn.sys_wait — drop-in for POSIX <sys/wait.h>
+
+WNOHANG    is 1
+WUNTRACED  is 2
+WSTOPPED   is 2
+WEXITED    is 4
+WCONTINUED is 8
+WNOWAIT    is 0x01000000
+
+P_ALL  is 0
+P_PID  is 1
+P_PGID is 2
+
+*wait(status as %i8) returns i32
+    nop
+    -1
+
+*waitpid(pid as i32, status as %i8, options as i32) returns i32
+    nop
+    -1
+
+*waitid(idtype as i32, id as u32, infop as %i8, options as i32) returns i32
+    nop
+    -1
+
+# Status macros — modeled as functions
+*WIFEXITED(status as i32) returns bool
+    nop
+    false
+*WEXITSTATUS(status as i32) returns i32
+    nop
+    0
+*WIFSIGNALED(status as i32) returns bool
+    nop
+    false
+*WTERMSIG(status as i32) returns i32
+    nop
+    0
+*WCOREDUMP(status as i32) returns bool
+    nop
+    false
+*WIFSTOPPED(status as i32) returns bool
+    nop
+    false
+*WSTOPSIG(status as i32) returns i32
+    nop
+    0
+*WIFCONTINUED(status as i32) returns bool
+    nop
+    false

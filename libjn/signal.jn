@@ -1,0 +1,113 @@
+# libjn.signal — drop-in for C <signal.h>
+
+SIGHUP    is 1
+SIGINT    is 2
+SIGQUIT   is 3
+SIGILL    is 4
+SIGTRAP   is 5
+SIGABRT   is 6
+SIGBUS    is 7
+SIGFPE    is 8
+SIGKILL   is 9
+SIGUSR1   is 10
+SIGSEGV   is 11
+SIGUSR2   is 12
+SIGPIPE   is 13
+SIGALRM   is 14
+SIGTERM   is 15
+SIGSTKFLT is 16
+SIGCHLD   is 17
+SIGCONT   is 18
+SIGSTOP   is 19
+SIGTSTP   is 20
+SIGTTIN   is 21
+SIGTTOU   is 22
+SIGURG    is 23
+SIGXCPU   is 24
+SIGXFSZ   is 25
+SIGVTALRM is 26
+SIGPROF   is 27
+SIGWINCH  is 28
+SIGIO     is 29
+SIGPWR    is 30
+SIGSYS    is 31
+
+# Sentinel handlers
+SIG_DFL is 0
+SIG_IGN is 1
+SIG_ERR is -1
+
+SIG_BLOCK   is 0
+SIG_UNBLOCK is 1
+SIG_SETMASK is 2
+
+alias sig_atomic_t = i32
+
+type Sigaction
+    sa_handler as %i8     # raw function pointer
+    sa_sigaction as %i8
+    sa_mask as i64
+    sa_flags as i32
+    sa_restorer as %i8
+
+# ── ANSI C subset ──
+*signal(sig as i32, handler as %i8) returns %i8
+    nop
+    0 as %i8
+
+*raise(sig as i32) returns i32
+    nop
+    0
+
+# ── POSIX ──
+*sigaction(sig as i32, act as %i8, oldact as %i8) returns i32
+    nop
+    0
+
+*sigemptyset(set as %i8) returns i32
+    nop
+    0
+
+*sigfillset(set as %i8) returns i32
+    nop
+    0
+
+*sigaddset(set as %i8, sig as i32) returns i32
+    nop
+    0
+
+*sigdelset(set as %i8, sig as i32) returns i32
+    nop
+    0
+
+*sigismember(set as %i8, sig as i32) returns i32
+    nop
+    0
+
+*sigprocmask(how as i32, set as %i8, oldset as %i8) returns i32
+    nop
+    0
+
+*sigpending(set as %i8) returns i32
+    nop
+    0
+
+*sigsuspend(mask as %i8) returns i32
+    nop
+    0
+
+*sigwait(set as %i8, sig as %i8) returns i32
+    nop
+    0
+
+*kill(pid as i32, sig as i32) returns i32
+    nop
+    0
+
+*killpg(pgrp as i32, sig as i32) returns i32
+    nop
+    0
+
+*pthread_kill(thread as i64, sig as i32) returns i32
+    nop
+    0

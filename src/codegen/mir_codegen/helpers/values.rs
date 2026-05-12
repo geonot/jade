@@ -83,7 +83,7 @@ impl<'ctx> Compiler<'ctx> {
                     let result = b!(self.bld.build_call(pow, &[lf.into(), rf.into()], "pow"));
                     return Ok(self.call_result(result));
                 }
-                _ => return Err(format!("mir_codegen: unsupported float binop {op:?}")),
+                _ => return Err(format!("unsupported float binop {op:?}")),
             };
             Ok(res.into())
         } else if l.is_pointer_value()
@@ -102,8 +102,31 @@ impl<'ctx> Compiler<'ctx> {
             let res = unsafe { b!(self.bld.build_gep(i8_ty, ptr, &[offset], "ptradd")) };
             Ok(res.into())
         } else {
-            let li = l.into_int_value();
-            let ri = r.into_int_value();
+            let mut li = l.into_int_value();
+            let mut ri = r.into_int_value();
+            // Auto-widen mismatched integer widths to the wider operand.
+            // Required because MIR currently lets `i32 << i64` reach codegen
+            // unaltered (e.g. `i * 2` where `i: i32` and `2: i64`); LLVM
+            // rejects this with "operands not of the same type".
+            let lw = li.get_type().get_bit_width();
+            let rw = ri.get_type().get_bit_width();
+            if lw != rw {
+                if lw < rw {
+                    let signed = result_ty.is_signed();
+                    li = if signed {
+                        b!(self.bld.build_int_s_extend(li, ri.get_type(), "sext"))
+                    } else {
+                        b!(self.bld.build_int_z_extend(li, ri.get_type(), "zext"))
+                    };
+                } else {
+                    let signed = result_ty.is_signed();
+                    ri = if signed {
+                        b!(self.bld.build_int_s_extend(ri, li.get_type(), "sext"))
+                    } else {
+                        b!(self.bld.build_int_z_extend(ri, li.get_type(), "zext"))
+                    };
+                }
+            }
             let res = match op {
                 mir::BinOp::Add => b!(self.bld.build_int_add(li, ri, "add")),
                 mir::BinOp::Sub => b!(self.bld.build_int_sub(li, ri, "sub")),
@@ -389,11 +412,11 @@ impl<'ctx> Compiler<'ctx> {
             self.val(obj)
         };
 
-        // String field access — handle "length"/"len" via SSO-aware string_len
+        // String field access — handle "length" via SSO-aware string_len
         let obj_ty = self.value_types.get(&obj).cloned();
         if matches!(&obj_ty, Some(Type::String)) {
             match field {
-                "length" | "len" => return self.string_len(obj_val),
+                "length" => return self.string_len(obj_val),
                 "data" => return self.string_data(obj_val),
                 _ => {}
             }
@@ -468,11 +491,11 @@ impl<'ctx> Compiler<'ctx> {
             }
             // Unknown struct type — cannot determine correct field index.
             Err(format!(
-                "mir_codegen: FieldGet on unknown struct type for field `{field}`"
+                "FieldGet on unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_pointer_value() {
             // Vec .length/.len: read len field from vec header.
-            if matches!(field, "length" | "len") {
+            if matches!(field, "length") {
                 if matches!(&obj_ty, Some(Type::Vec(_))) {
                     let header_ptr = obj_val.into_pointer_value();
                     let header_ty = self.vec_header_type();
@@ -530,7 +553,7 @@ impl<'ctx> Compiler<'ctx> {
             // No fallback — loading from an unknown struct pointer at offset 0
             // silently produces wrong values for any field other than the first.
             Err(format!(
-                "mir_codegen: FieldGet on pointer to unknown struct type for field `{field}`"
+                "FieldGet on pointer to unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_array_value() {
             // Tuple — represented as an LLVM array [N x T].
@@ -566,6 +589,67 @@ impl<'ctx> Compiler<'ctx> {
         let malloc = self.ensure_malloc();
 
         let header_size = i64t.const_int(24, false);
+
+        // Perceus Vec reuse: empty `vec()` literal may consume a slot saved
+        // by a preceding `Drop(Vec(T))` of the same element type. The slot
+        // holds a header pointer whose data buffer is intact and whose
+        // capacity is preserved; we only have to reset `len = 0`. On a
+        // runtime miss we fall through to a normal malloc.
+        if elems.is_empty() {
+            if let Some(reused) = self.try_consume_vec_slot() {
+                let is_null = b!(self.bld.build_is_null(reused, "vec.reuse.null"));
+                let fv = self.current_fn();
+                let malloc_bb = self.ctx.append_basic_block(fv, "vec.reuse.malloc");
+                let cont_bb = self.ctx.append_basic_block(fv, "vec.reuse.cont");
+                let entry_bb = self
+                    .bld
+                    .get_insert_block()
+                    .expect("builder has no insert block");
+                b!(self
+                    .bld
+                    .build_conditional_branch(is_null, malloc_bb, cont_bb));
+                self.bld.position_at_end(malloc_bb);
+                let m = b!(self
+                    .bld
+                    .build_call(malloc, &[header_size.into()], "vec.hdr"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: call returned void")
+                .into_pointer_value();
+                // Initialize fresh header to {NULL, 0, 0}.
+                let dgep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, m, 0, "vec.hdr.d0"));
+                b!(self.bld.build_store(dgep, ptr_ty.const_null()));
+                let lgep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, m, 1, "vec.hdr.l0"));
+                b!(self
+                    .bld
+                    .build_store(lgep, i64t.const_int(0, false)));
+                let cgep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, m, 2, "vec.hdr.c0"));
+                b!(self
+                    .bld
+                    .build_store(cgep, i64t.const_int(0, false)));
+                b!(self.bld.build_unconditional_branch(cont_bb));
+                self.bld.position_at_end(cont_bb);
+                let phi = b!(self.bld.build_phi(ptr_ty, "vec.hdr.phi"));
+                phi.add_incoming(&[(&m, malloc_bb), (&reused, entry_bb)]);
+                let header_ptr = phi.as_basic_value().into_pointer_value();
+                // Reset `len = 0` (data + cap preserved on hit; on miss they
+                // are already zero from the fresh init).
+                let len_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 1, "vec.len.reset"));
+                b!(self
+                    .bld
+                    .build_store(len_gep, i64t.const_int(0, false)));
+                return Ok(header_ptr.into());
+            }
+        }
+
         let header_ptr = b!(self
             .bld
             .build_call(malloc, &[header_size.into()], "vec.hdr"))

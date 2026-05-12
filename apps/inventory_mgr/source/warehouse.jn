@@ -1,0 +1,34 @@
+use models/item
+
+*find_idx(items as Vec of Item, sku as i64, wh as i64) returns i64
+    i is 0
+    while i < items.len()
+        it is items.get(i)
+        if it.sku equals sku and it.warehouse equals wh
+            return i
+        i is i + 1
+    -1
+
+*adjust(items as Vec of Item, sku as i64, wh as i64, delta as i64) returns Vec of Item
+    idx is find_idx(items, sku, wh)
+    if idx >= 0
+        items.set(idx, item.adjust(items.get(idx), delta))
+    else
+        items.push(item.new(sku, delta, wh))
+    items
+
+*total(items as Vec of Item, sku as i64) returns i64
+    s is 0
+    i is 0
+    while i < items.len()
+        it is items.get(i)
+        if it.sku equals sku
+            s is s + it.qty
+        i is i + 1
+    s
+
+*qty_at(items as Vec of Item, sku as i64, wh as i64) returns i64
+    idx is find_idx(items, sku, wh)
+    if idx < 0
+        return 0
+    items.get(idx).qty

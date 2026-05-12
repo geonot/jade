@@ -1,0 +1,8 @@
+# Sharded request router: hash mod shard count.
+*route(key as i64, shards as i64) returns i64
+    ((key * 2654435761) % 4294967296) % shards
+
+*main
+    log route(123, 8)
+    log route(99, 8)
+    log route(1000000, 16)

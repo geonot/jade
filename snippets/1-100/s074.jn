@@ -1,0 +1,12 @@
+enum Shape
+    Circle(f64)
+    Rect(f64, f64)
+
+*area s as Shape
+    match s
+        Circle(r) ? 3.14 * r * r
+        Rect(w, h) ? w * h
+
+*main
+    log area(Circle(2.0))
+    log area(Rect(3.0, 4.0))

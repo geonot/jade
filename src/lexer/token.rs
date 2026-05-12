@@ -86,6 +86,7 @@ pub enum Token {
     Build,
     Syscall,
     Global,
+    Nop,
     Plus,
     Minus,
     Star,
@@ -271,6 +272,7 @@ impl std::fmt::Display for Token {
             Self::Build => f.write_str("build"),
             Self::Syscall => f.write_str("syscall"),
             Self::Global => f.write_str("global"),
+            Self::Nop => f.write_str("nop"),
         }
     }
 }

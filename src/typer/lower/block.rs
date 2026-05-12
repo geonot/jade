@@ -84,6 +84,77 @@ impl Typer {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
 
+    /// Collect variable IDs that have been moved (consumed) by a statement-
+    /// level expression earlier in the same block. Currently we recognise
+    /// container "consume on push" methods: pushing/inserting a heap-typed
+    /// bare variable into a Vec/Set/Map/PQ moves the value into the container,
+    /// so it must not be dropped at scope exit (the container owns the
+    /// underlying storage now).
+    fn collect_block_consumed_ids(
+        stmts: &[hir::Stmt],
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        for s in stmts {
+            if let hir::Stmt::Expr(e) = s {
+                Self::collect_consumed_in_expr(e, out);
+            }
+        }
+    }
+
+    fn collect_consumed_in_expr(
+        expr: &hir::Expr,
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        match &expr.kind {
+            hir::ExprKind::VecMethod(_, meth, args)
+            | hir::ExprKind::SetMethod(_, meth, args)
+            | hir::ExprKind::MapMethod(_, meth, args)
+            | hir::ExprKind::PQMethod(_, meth, args) => {
+                let m_owned = meth.as_str();
+                let m: &str = m_owned.as_ref();
+                if matches!(
+                    m,
+                    "push"
+                        | "push_back"
+                        | "push_front"
+                        | "insert"
+                        | "append"
+                        | "add"
+                        | "put"
+                        | "set"
+                        | "enqueue"
+                        | "send"
+                ) {
+                    for a in args {
+                        if Self::expr_type_needs_drop(&a.ty)
+                            && matches!(a.kind, hir::ExprKind::Var(_, _))
+                        {
+                            if let hir::ExprKind::Var(id, _) = &a.kind {
+                                out.insert(*id);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn expr_type_needs_drop(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Vec(_)
+                | Type::Map(_, _)
+                | Type::Set(_)
+                | Type::PriorityQueue(_)
+                | Type::String
+                | Type::Rc(_)
+                | Type::NDArray(_, _)
+                | Type::Struct(_, _)
+                | Type::Enum(_)
+        )
+    }
+
     pub(in crate::typer) fn emit_scope_drops_excluding(
         &self,
         stmts: &mut Vec<hir::Stmt>,
@@ -93,6 +164,11 @@ impl Typer {
             Some(s) => s,
             None => return,
         };
+        // In addition to the caller-supplied exclusion set (e.g. tail-expr
+        // moves), also exclude any scope variable that was already moved into
+        // a container by a prior stmt-level call (e.g. `g.push(row)`).
+        let mut consumed: std::collections::HashSet<crate::hir::DefId> = exclude.clone();
+        Self::collect_block_consumed_ids(stmts, &mut consumed);
         let mut drops: Vec<_> = scope
             .iter()
             .filter(|(_, info)| {
@@ -101,7 +177,7 @@ impl Typer {
                         info.ownership,
                         crate::hir::Ownership::Borrowed | crate::hir::Ownership::BorrowMut
                     )
-                    && !exclude.contains(&info.def_id)
+                    && !consumed.contains(&info.def_id)
             })
             .collect();
         drops.sort_by_key(|(_, info)| std::cmp::Reverse(info.def_id.0));

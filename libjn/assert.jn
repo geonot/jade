@@ -1,0 +1,17 @@
+# libjn.assert — drop-in for C <assert.h>
+#
+# C semantics: `assert(cond)` aborts with diagnostic if !cond and NDEBUG undefined.
+# Jinn semantics: lowered to native `assert` keyword in idiomatic code.
+# These stubs preserve the C calling convention for libjn.compat.
+
+# ── Macros (modeled as functions; preprocessor not exposed) ───
+
+*assert(cond as bool)
+    nop
+
+*static_assert(cond as bool, msg as %i8)
+    nop
+
+# C99: __assert_fail glibc-style runtime back-end.
+*__assert_fail(expr as %i8, file as %i8, line as i32, func as %i8)
+    nop

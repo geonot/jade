@@ -1,0 +1,3 @@
+*main
+    name is 'world'
+    log 'hello {name}'

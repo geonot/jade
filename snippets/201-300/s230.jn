@@ -1,0 +1,15 @@
+# Patricia-trie-ish prefix match length over bit positions.
+*plen(a as i64, b as i64) returns i64
+    n is 0
+    bit is 31
+    while bit >= 0
+        if (a / (1 << bit)) % 2 equals (b / (1 << bit)) % 2
+            n is n + 1
+        else
+            bit is -1
+        bit is bit - 1
+    n
+
+*main
+    log plen(255, 254)
+    log plen(255, 127)

@@ -1,0 +1,41 @@
+# Levenshtein edit distance (flat dp).
+*lev(a as String, b as String) returns i64
+    m is a.length
+    n is b.length
+    w is n + 1
+    sz is (m + 1) * w
+    dp is vec()
+    k is 0
+    while k < sz
+        dp.push(0)
+        k is k + 1
+    i is 0
+    while i <= m
+        dp.set(i * w, i)
+        i is i + 1
+    j is 0
+    while j <= n
+        dp.set(j, j)
+        j is j + 1
+    i is 1
+    while i <= m
+        j is 1
+        while j <= n
+            cost is 1
+            if a.char_at(i - 1) equals b.char_at(j - 1)
+                cost is 0
+            d1 is dp.get((i - 1) * w + j) + 1
+            d2 is dp.get(i * w + (j - 1)) + 1
+            d3 is dp.get((i - 1) * w + (j - 1)) + cost
+            best is d1
+            if d2 < best
+                best is d2
+            if d3 < best
+                best is d3
+            dp.set(i * w + j, best)
+            j is j + 1
+        i is i + 1
+    dp.get(m * w + n)
+
+*main
+    log lev("kitten", "sitting")

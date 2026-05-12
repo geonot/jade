@@ -263,6 +263,34 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     out
 
 *__is_meta(c as i64) returns bool
-    c equals 92 or c equals 46 or c equals 42 or c equals 43 or c equals 63
-    or c equals 40 or c equals 41 or c equals 91 or c equals 93 or c equals 123
-    or c equals 125 or c equals 124 or c equals 94 or c equals 36 or c equals 47
+    if c equals 92
+        return true
+    if c equals 46
+        return true
+    if c equals 42
+        return true
+    if c equals 43
+        return true
+    if c equals 63
+        return true
+    if c equals 40
+        return true
+    if c equals 41
+        return true
+    if c equals 91
+        return true
+    if c equals 93
+        return true
+    if c equals 123
+        return true
+    if c equals 125
+        return true
+    if c equals 124
+        return true
+    if c equals 94
+        return true
+    if c equals 36
+        return true
+    if c equals 47
+        return true
+    false

@@ -1,0 +1,10 @@
+# Number of trailing zeros in n!.
+*trailing_zeros(n as i64) returns i64
+    z is 0
+    while n > 0
+        n is n / 5
+        z is z + n
+    z
+
+*main
+    log trailing_zeros(100)

@@ -1,0 +1,18 @@
+# Consistent hashing ring: nearest node id for key.
+*nearest(nodes as Vec of i64, n as i64, key as i64) returns i64
+    best is nodes.get(0)
+    i is 1
+    while i < n
+        if nodes.get(i) >= key and (best < key or nodes.get(i) < best)
+            best is nodes.get(i)
+        i is i + 1
+    best
+
+*main
+    nd is vec()
+    nd.push(10)
+    nd.push(40)
+    nd.push(75)
+    nd.push(120)
+    log nearest(nd, 4, 50)
+    log nearest(nd, 4, 80)

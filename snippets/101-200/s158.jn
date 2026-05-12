@@ -1,0 +1,21 @@
+# Sliding-window maximum sum of size k.
+*max_window(a, k as i64) returns i64
+    n is a.length
+    if n < k
+        return 0
+    s is 0
+    i is 0
+    while i < k
+        s is s + a.get(i)
+        i is i + 1
+    best is s
+    while i < n
+        s is s + a.get(i) - a.get(i - k)
+        if s > best
+            best is s
+        i is i + 1
+    best
+
+*main
+    a is vec(2, 1, 5, 1, 3, 2)
+    log max_window(a, 3)

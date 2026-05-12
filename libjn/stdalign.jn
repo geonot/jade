@@ -1,0 +1,11 @@
+# libjn.stdalign — drop-in for C <stdalign.h>
+
+*alignof(_type as %i8) returns u64
+    nop
+    0
+
+*alignas(_n as u64)
+    nop
+
+__alignas_is_defined is 1
+__alignof_is_defined is 1

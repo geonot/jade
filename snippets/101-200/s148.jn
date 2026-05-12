@@ -1,0 +1,14 @@
+# Catalan numbers via formula.
+*cat(n as i64) returns i64
+    if n equals 0
+        return 1
+    r is 1
+    i is 0
+    while i < n
+        r is r * 2 * (2 * i + 1) / (i + 2)
+        i is i + 1
+    r
+
+*main
+    log cat(5)
+    log cat(10)

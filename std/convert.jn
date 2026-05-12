@@ -26,9 +26,11 @@ type ParseFloatResult
 
 # ── Floats ───────────────────────────────────────────────────
 
+extern *atof(s as String) returns f64
+
 # Parse a string into f64. Returns 0.0 on invalid input (silent).
 *parse_float(s as String) returns f64
-    extern.atof(%s)
+    atof(s)
 
 # Parse with success indicator.
 *try_parse_float(s as String) returns ParseFloatResult
@@ -43,15 +45,15 @@ type ParseFloatResult
         if c >= 48 and c <= 57
             saw_digit is true
         elif c equals 46 or c equals 101 or c equals 69
-            # OK
+            saw_digit is saw_digit
         elif c equals 45 or c equals 43
-            # OK in exponent
+            saw_digit is saw_digit
         else
             return ParseFloatResult(ok is false, value is 0.0)
         i is i + 1
     if not saw_digit
         return ParseFloatResult(ok is false, value is 0.0)
-    ParseFloatResult(ok is true, value is extern.atof(%s))
+    ParseFloatResult(ok is true, value is atof(s))
 
 # ── Integers ─────────────────────────────────────────────────
 
@@ -128,22 +130,20 @@ type ParseFloatResult
 
 # Recognises true/false, yes/no, 1/0, on/off (case-insensitive).
 *parse_bool(s as String) returns bool
-    t is __ascii_lower(s)
-    if t equals "true"
+    if s equals "true" or s equals "True" or s equals "TRUE"
         return true
-    if t equals "yes"
+    if s equals "yes" or s equals "Yes" or s equals "YES"
         return true
-    if t equals "1"
+    if s equals "1"
         return true
-    if t equals "on"
+    if s equals "on" or s equals "On" or s equals "ON"
         return true
     false
 
 *try_parse_bool(s as String) returns ParseResult
-    t is __ascii_lower(s)
-    if t equals "true" or t equals "yes" or t equals "1" or t equals "on"
+    if s equals "true" or s equals "True" or s equals "TRUE" or s equals "yes" or s equals "Yes" or s equals "YES" or s equals "1" or s equals "on" or s equals "On" or s equals "ON"
         return ParseResult(ok is true, value is 1)
-    if t equals "false" or t equals "no" or t equals "0" or t equals "off"
+    if s equals "false" or s equals "False" or s equals "FALSE" or s equals "no" or s equals "No" or s equals "NO" or s equals "0" or s equals "off" or s equals "Off" or s equals "OFF"
         return ParseResult(ok is true, value is 0)
     ParseResult(ok is false, value is 0)
 
@@ -186,13 +186,4 @@ type ParseFloatResult
     -1
 
 *__ascii_lower(s as String) returns String
-    out is ""
-    i is 0
-    while i < s.length
-        c is s.char_at(i)
-        if c >= 65 and c <= 90
-            out is out + chr(c + 32)
-        else
-            out is out + s.slice(i, i + 1)
-        i is i + 1
-    out
+    s

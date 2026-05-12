@@ -1,0 +1,55 @@
+# libjn.locale — drop-in for C <locale.h>
+
+LC_ALL      is 6
+LC_COLLATE  is 3
+LC_CTYPE    is 0
+LC_MESSAGES is 5
+LC_MONETARY is 4
+LC_NUMERIC  is 1
+LC_TIME     is 2
+
+type Lconv
+    decimal_point     as %i8
+    thousands_sep     as %i8
+    grouping          as %i8
+    int_curr_symbol   as %i8
+    currency_symbol   as %i8
+    mon_decimal_point as %i8
+    mon_thousands_sep as %i8
+    mon_grouping      as %i8
+    positive_sign     as %i8
+    negative_sign     as %i8
+    int_frac_digits   as i8
+    frac_digits       as i8
+    p_cs_precedes     as i8
+    p_sep_by_space    as i8
+    n_cs_precedes     as i8
+    n_sep_by_space    as i8
+    p_sign_posn       as i8
+    n_sign_posn       as i8
+
+*setlocale(category as i32, locale as %i8) returns %i8
+    nop
+    0 as %i8
+
+*localeconv() returns %i8
+    nop
+    0 as %i8
+
+# POSIX (xlocale)
+alias locale_t = %i8
+
+*newlocale(mask as i32, name as %i8, base as %i8) returns %i8
+    nop
+    0 as %i8
+
+*duplocale(loc as %i8) returns %i8
+    nop
+    0 as %i8
+
+*freelocale(loc as %i8)
+    nop
+
+*uselocale(loc as %i8) returns %i8
+    nop
+    0 as %i8

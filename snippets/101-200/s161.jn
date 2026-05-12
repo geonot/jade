@@ -1,0 +1,7 @@
+# String concatenation via fold.
+*main
+    parts is vec("hello", " ", "from", " ", "jinn")
+    out is ""
+    for p in parts
+        out is out + p
+    log out

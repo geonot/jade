@@ -1,0 +1,4 @@
+*main
+    x is 5
+    sign is x > 0 ? 'pos' ! 'neg'
+    log sign

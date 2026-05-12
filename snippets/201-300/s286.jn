@@ -1,0 +1,20 @@
+# I2C address scan: count responding slaves.
+*scan(present as Vec of i64, n as i64) returns i64
+    c is 0
+    i is 0
+    while i < n
+        if present.get(i) equals 1
+            c is c + 1
+        i is i + 1
+    c
+
+*main
+    p is vec()
+    i is 0
+    while i < 128
+        if i % 17 equals 0
+            p.push(1)
+        else
+            p.push(0)
+        i is i + 1
+    log scan(p, 128)

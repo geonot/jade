@@ -1,0 +1,38 @@
+# libjn.stdint — drop-in for C <stdint.h>
+#
+# Fixed-width integer aliases. Jinn already names types `i8/i16/i32/i64`
+# and `u8/u16/u32/u64`; the libjn aliases preserve C source-compat names.
+
+# ── Type aliases ──
+alias int8_t   = i8
+alias int16_t  = i16
+alias int32_t  = i32
+alias int64_t  = i64
+alias uint8_t  = u8
+alias uint16_t = u16
+alias uint32_t = u32
+alias uint64_t = u64
+alias intptr_t = i64
+alias uintptr_t = u64
+alias intmax_t = i64
+alias uintmax_t = u64
+alias size_t   = u64
+alias ssize_t  = i64
+alias ptrdiff_t = i64
+alias off_t    = i64
+
+INT8_MIN  is -128
+INT8_MAX  is 127
+UINT8_MAX is 255
+INT16_MIN is -32768
+INT16_MAX is 32767
+UINT16_MAX is 65535
+INT32_MIN is -2147483648
+INT32_MAX is 2147483647
+UINT32_MAX is 4294967295
+INT64_MIN is -9223372036854775808
+INT64_MAX is 9223372036854775807
+UINT64_MAX is 18446744073709551615
+SIZE_MAX  is 18446744073709551615
+PTRDIFF_MIN is -9223372036854775808
+PTRDIFF_MAX is 9223372036854775807

@@ -1,0 +1,19 @@
+# Maximum subarray (Kadane).
+*max_subarray(v) returns i64
+    best is v.get(0)
+    cur is v.get(0)
+    i is 1
+    while i < v.length
+        x is v.get(i)
+        if cur + x > x
+            cur is cur + x
+        else
+            cur is x
+        if cur > best
+            best is cur
+        i is i + 1
+    best
+
+*main
+    a is vec(0 - 2, 1, 0 - 3, 4, 0 - 1, 2, 1, 0 - 5, 4)
+    log max_subarray(a)

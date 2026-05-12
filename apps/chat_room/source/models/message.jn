@@ -1,0 +1,7 @@
+type Message
+    user_id as i64
+    text_id as i64
+    ts as i64
+
+*new(user_id as i64, text_id as i64, ts as i64) returns Message
+    Message(user_id is user_id, text_id is text_id, ts is ts)

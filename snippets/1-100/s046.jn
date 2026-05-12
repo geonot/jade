@@ -1,0 +1,6 @@
+*fib(0) is 0
+*fib(1) is 1
+*fib n is fib(n - 1) + fib(n - 2)
+
+*main
+    log fib(10)

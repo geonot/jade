@@ -1,0 +1,5 @@
+*main
+    for i from 0 to 5
+        if i equals 2
+            continue
+        log i

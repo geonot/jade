@@ -1,0 +1,21 @@
+# DFS on small graph using parallel arrays.
+# Edges out of node i: heads[i] .. heads[i+1] in dest[].
+*main
+    heads is vec(0, 2, 3, 4, 4)
+    dest is vec(1, 2, 3, 3)
+    n is 4
+    visited is vec()
+    i is 0
+    while i < n
+        visited.push(false)
+        i is i + 1
+    stack is vec(0)
+    while stack.length > 0
+        u is stack.pop()
+        if not visited.get(u)
+            visited.set(u, true)
+            log u
+            e is heads.get(u + 1) - 1
+            while e >= heads.get(u)
+                stack.push(dest.get(e))
+                e is e - 1

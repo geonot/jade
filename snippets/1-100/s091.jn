@@ -1,0 +1,5 @@
+use math
+
+*main
+    log math.sin(0.0)
+    log math.sqrt(16.0)

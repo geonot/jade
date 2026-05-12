@@ -539,7 +539,7 @@ impl<'ctx> Compiler<'ctx> {
                     break;
                 }
             }
-            found.ok_or_else(|| format!("mir_codegen: unknown actor handler '{handler_name}'"))?
+            found.ok_or_else(|| format!("unknown actor handler '{handler_name}'"))?
         };
 
         let mb_name = format!("{actor_name}_mailbox");

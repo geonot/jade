@@ -1,0 +1,39 @@
+use models/order
+use models/trade
+use book
+use matcher
+
+*main
+    orders is vec()
+    trades is vec()
+
+    # Resting book
+    orders is matcher.match_one(orders, order.new(1, 1, 100, 10, 1), trades)
+    orders is matcher.match_one(orders, order.new(2, 1, 99, 20, 2), trades)
+    orders is matcher.match_one(orders, order.new(3, 2, 105, 15, 3), trades)
+    orders is matcher.match_one(orders, order.new(4, 2, 106, 25, 4), trades)
+
+    log 'best_bid'
+    log book.best_bid(orders)
+    log 'best_ask'
+    log book.best_ask(orders)
+
+    # Aggressive incoming buy
+    orders is matcher.match_one(orders, order.new(5, 1, 106, 30, 5), trades)
+    log 'trades_after_buy'
+    log trades.len()
+    log 'volume'
+    log matcher.total_volume(trades)
+
+    # Aggressive incoming sell
+    orders is matcher.match_one(orders, order.new(6, 2, 99, 25, 6), trades)
+    log 'trades_total'
+    log trades.len()
+    log 'best_bid_final'
+    log book.best_bid(orders)
+    log 'best_ask_final'
+    log book.best_ask(orders)
+    log 'depth_buy_99'
+    log book.depth_at(orders, 1, 99)
+    log 'depth_sell_106'
+    log book.depth_at(orders, 2, 106)

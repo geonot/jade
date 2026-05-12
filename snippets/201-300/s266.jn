@@ -1,0 +1,13 @@
+# PWM duty cycle: count high samples in 100-sample window.
+*pwm_duty(period as i64, duty_pct as i64, samples as i64) returns i64
+    high is 0
+    i is 0
+    while i < samples
+        if i % period < period * duty_pct / 100
+            high is high + 1
+        i is i + 1
+    high
+
+*main
+    log pwm_duty(10, 30, 100)
+    log pwm_duty(20, 75, 100)

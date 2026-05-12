@@ -1,0 +1,191 @@
+# libjn.stdlib — drop-in for C <stdlib.h>
+
+EXIT_SUCCESS is 0
+EXIT_FAILURE is 1
+RAND_MAX is 2147483647
+MB_CUR_MAX is 6
+
+# ── Numeric conversion ──
+*atof(s as %i8) returns f64
+    nop
+    0.0
+
+*atoi(s as %i8) returns i32
+    nop
+    0
+
+*atol(s as %i8) returns i64
+    nop
+    0
+
+*atoll(s as %i8) returns i64
+    nop
+    0
+
+*strtol(s as %i8, endp as %i8, base as i32) returns i64
+    nop
+    0
+
+*strtoll(s as %i8, endp as %i8, base as i32) returns i64
+    nop
+    0
+
+*strtoul(s as %i8, endp as %i8, base as i32) returns u64
+    nop
+    0
+
+*strtoull(s as %i8, endp as %i8, base as i32) returns u64
+    nop
+    0
+
+*strtof(s as %i8, endp as %i8) returns f32
+    nop
+    0.0
+
+*strtod(s as %i8, endp as %i8) returns f64
+    nop
+    0.0
+
+*strtold(s as %i8, endp as %i8) returns f64
+    nop
+    0.0
+
+# ── Pseudo-random ──
+*rand() returns i32
+    nop
+    0
+
+*srand(seed as u32)
+    nop
+
+# ── Memory ──
+*malloc(size as u64) returns %i8
+    nop
+    0 as %i8
+
+*calloc(n as u64, size as u64) returns %i8
+    nop
+    0 as %i8
+
+*realloc(p as %i8, size as u64) returns %i8
+    nop
+    0 as %i8
+
+*free(p as %i8)
+    nop
+
+*aligned_alloc(align as u64, size as u64) returns %i8
+    nop
+    0 as %i8
+
+*posix_memalign(p as %i8, align as u64, size as u64) returns i32
+    nop
+    0
+
+# ── Process control ──
+*abort()
+    nop
+
+*atexit(handler as %i8) returns i32
+    nop
+    0
+
+*at_quick_exit(handler as %i8) returns i32
+    nop
+    0
+
+*exit(status as i32)
+    nop
+
+*_Exit(status as i32)
+    nop
+
+*quick_exit(status as i32)
+    nop
+
+*getenv(name as %i8) returns %i8
+    nop
+    0 as %i8
+
+*setenv(name as %i8, value as %i8, overwrite as i32) returns i32
+    nop
+    0
+
+*unsetenv(name as %i8) returns i32
+    nop
+    0
+
+*putenv(s as %i8) returns i32
+    nop
+    0
+
+*system(cmd as %i8) returns i32
+    nop
+    0
+
+# ── Search & sort (callbacks via raw fn ptr) ──
+*bsearch(key as %i8, base as %i8, n as u64, sz as u64, cmp as %i8) returns %i8
+    nop
+    0 as %i8
+
+*qsort(base as %i8, n as u64, sz as u64, cmp as %i8)
+    nop
+
+# ── Integer arithmetic ──
+*abs(x as i32) returns i32
+    nop
+    0
+
+*labs(x as i64) returns i64
+    nop
+    0
+
+*llabs(x as i64) returns i64
+    nop
+    0
+
+*div(num as i32, denom as i32) returns i64
+    nop
+    0
+
+*ldiv(num as i64, denom as i64) returns i64
+    nop
+    0
+
+*lldiv(num as i64, denom as i64) returns i64
+    nop
+    0
+
+# ── Multibyte ──
+*mblen(s as %i8, n as u64) returns i32
+    nop
+    0
+
+*mbtowc(pwc as %i8, s as %i8, n as u64) returns i32
+    nop
+    0
+
+*wctomb(s as %i8, wc as i32) returns i32
+    nop
+    0
+
+*mbstowcs(dst as %i8, src as %i8, n as u64) returns u64
+    nop
+    0
+
+*wcstombs(dst as %i8, src as %i8, n as u64) returns u64
+    nop
+    0
+
+# ── POSIX extensions ──
+*mkstemp(template as %i8) returns i32
+    nop
+    -1
+
+*mkdtemp(template as %i8) returns %i8
+    nop
+    0 as %i8
+
+*realpath(path as %i8, resolved as %i8) returns %i8
+    nop
+    0 as %i8

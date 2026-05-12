@@ -1,0 +1,30 @@
+# Watchdog: simulate elapsed-since-kick events; count timeouts.
+*timeouts(events as Vec of i64, n as i64, limit as i64) returns i64
+    t is 0
+    cnt is 0
+    i is 0
+    while i < n
+        e is events.get(i)
+        if e equals 0
+            t is t + 1
+            if t > limit
+                cnt is cnt + 1
+                t is 0
+        else
+            t is 0
+        i is i + 1
+    cnt
+
+*main
+    e is vec()
+    e.push(0)
+    e.push(0)
+    e.push(0)
+    e.push(0)
+    e.push(1)
+    e.push(0)
+    e.push(0)
+    e.push(0)
+    e.push(0)
+    e.push(0)
+    log timeouts(e, 10, 3)

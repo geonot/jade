@@ -1,0 +1,22 @@
+# Find first run of digits in a string (manual, no regex).
+*find_digits(s as String) returns String
+    a is 0
+    while a < s.length
+        c is s.char_at(a)
+        if c >= 48 and c <= 57
+            break
+        a is a + 1
+    if a equals s.length
+        return ""
+    b is a
+    while b < s.length
+        c is s.char_at(b)
+        if c < 48 or c > 57
+            break
+        b is b + 1
+    s.slice(a, b)
+
+*main
+    log find_digits('hello42world')
+    log find_digits('abc123xyz')
+    log find_digits('nope')

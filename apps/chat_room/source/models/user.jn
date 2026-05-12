@@ -1,0 +1,10 @@
+type User
+    id as i64
+    karma as i64
+    sent as i64
+
+*new(id as i64) returns User
+    User(id is id, karma is 100, sent is 0)
+
+*award(u as User, n as i64) returns User
+    User(id is u.id, karma is u.karma + n, sent is u.sent + 1)

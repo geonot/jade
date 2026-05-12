@@ -1,0 +1,15 @@
+# Aggregate signature mock: xor of "signatures".
+*agg(sigs as Vec of i64, n as i64) returns i64
+    a is 0
+    i is 0
+    while i < n
+        a is a ^ sigs.get(i)
+        i is i + 1
+    a
+
+*main
+    s is vec()
+    s.push(0xAA)
+    s.push(0x55)
+    s.push(0xFF)
+    log agg(s, 3)

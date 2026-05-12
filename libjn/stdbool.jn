@@ -1,0 +1,10 @@
+# libjn.stdbool — drop-in for C <stdbool.h>
+#
+# Jinn already has `bool` / `true` / `false` as native primitives. The
+# libjn aliases preserve C source-compat spellings.
+
+alias _Bool = bool
+
+TRUE  is true
+FALSE is false
+__bool_true_false_are_defined is 1

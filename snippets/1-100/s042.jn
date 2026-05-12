@@ -1,0 +1,4 @@
+*square x is x * x
+
+*main
+    log square(7)

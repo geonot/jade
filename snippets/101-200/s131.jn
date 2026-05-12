@@ -1,0 +1,6 @@
+# Higher-order map via closures over Vec.
+*main
+    a is vec(1, 2, 3, 4, 5)
+    b is a.map(|x| x * x)
+    for x in b
+        log x

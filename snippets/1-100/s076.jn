@@ -1,0 +1,8 @@
+type Pair of A, B
+    first as A
+    second as B
+
+*main
+    p is Pair(first is 1, second is 'hi')
+    log p.first
+    log p.second

@@ -1,0 +1,7 @@
+# Quaternion multiply (scaled): just w-component for sanity.
+*qmul_w(a_w as i64, a_x as i64, a_y as i64, a_z as i64, b_w as i64, b_x as i64, b_y as i64, b_z as i64) returns i64
+    a_w * b_w - a_x * b_x - a_y * b_y - a_z * b_z
+
+*main
+    log qmul_w(1000, 0, 0, 0, 1000, 0, 0, 0)
+    log qmul_w(0, 1000, 0, 0, 0, 1000, 0, 0)

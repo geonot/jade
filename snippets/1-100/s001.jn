@@ -1,0 +1,3 @@
+*main
+    x is 42
+    log x

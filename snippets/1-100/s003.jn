@@ -1,0 +1,8 @@
+*main
+    a is 10
+    b is 3
+    log a + b
+    log a - b
+    log a * b
+    log a / b
+    log a % b

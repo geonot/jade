@@ -99,7 +99,11 @@ impl<'s> Lexer<'s> {
             .filter(|&&b| b != b'_')
             .map(|&b| b as char)
             .collect();
-        let val = i64::from_str_radix(&text, radix)
+        // Use u64::from_str_radix so values that bit-fit in i64 but exceed
+        // i64::MAX (e.g. 0x180ec6d33cfd0aba) lex successfully and are
+        // reinterpreted as the equivalent signed bit pattern.
+        let val = u64::from_str_radix(&text, radix)
+            .map(|u| u as i64)
             .map_err(|_| self.mkerr(&format!("bad base-{radix} literal")))?;
         Ok(Spanned {
             token: Token::Int(val),
@@ -157,6 +161,26 @@ impl<'s> Lexer<'s> {
                 return self.err("unterminated string");
             }
             if self.src[self.pos] == b'{' {
+                // Heuristic: a `{` immediately followed by `"`, `'`, `{`, `}`,
+                // a digit-other-than-an-identifier, or end-of-string is treated
+                // as a literal brace (e.g. embedding JSON in a string). This
+                // avoids accidentally entering interpolation for `'{"x":1}'`.
+                let next = self.src.get(self.pos + 1).copied();
+                let starts_interp = match next {
+                    None => false,
+                    Some(c) => {
+                        c.is_ascii_alphabetic()
+                            || c == b'_'
+                            || c == b'('
+                            || c == b'['
+                            || c.is_ascii_digit()
+                    }
+                };
+                if !starts_interp {
+                    val.push('{');
+                    self.advance();
+                    continue;
+                }
                 has_interp = true;
                 let sp = Span::new(start, self.pos, self.line, sc);
                 if !val.is_empty() || self.pending.is_empty() || !has_interp {

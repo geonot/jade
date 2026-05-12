@@ -1,0 +1,11 @@
+# Approximate e via 1/n! summation.
+*main
+    s is 0.0
+    f is 1.0
+    i is 0
+    while i < 20
+        if i > 0
+            f is f * (i as f64)
+        s is s + 1.0 / f
+        i is i + 1
+    log s

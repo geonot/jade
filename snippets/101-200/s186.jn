@@ -1,0 +1,9 @@
+# Multiplication table.
+*main
+    i is 1
+    while i <= 5
+        j is 1
+        while j <= 5
+            log i * j
+            j is j + 1
+        i is i + 1

@@ -1,0 +1,29 @@
+# Moving average crossover backtest (count buy signals).
+*sma(p as Vec of i64, i as i64, w as i64) returns i64
+    s is 0
+    j is 0
+    while j < w
+        s is s + p.get(i - j)
+        j is j + 1
+    s / w
+
+*signals(p as Vec of i64, n as i64, fast as i64, slow as i64) returns i64
+    c is 0
+    prev_diff is 0
+    i is slow
+    while i < n
+        d is sma(p, i, fast) - sma(p, i, slow)
+        if d > 0 and prev_diff <= 0
+            c is c + 1
+        prev_diff is d
+        i is i + 1
+    c
+
+*main
+    p is vec()
+    i is 0
+    while i < 50
+        v is 100 + (i * 7 % 13) - 6
+        p.push(v)
+        i is i + 1
+    log signals(p, 50, 3, 10)

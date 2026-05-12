@@ -38,6 +38,7 @@ fn main() {
         .file("runtime/util.c")
         .file("runtime/terminal.c")
         .file("runtime/event.c")
+        .file("runtime/random.c")
         .file(asm_file)
         .opt_level(2)
         .warnings(true)

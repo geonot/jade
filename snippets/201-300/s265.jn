@@ -1,0 +1,28 @@
+# JK flip-flop: simulate Q sequence.
+*jk(j_seq as Vec of i64, k_seq as Vec of i64, n as i64) returns i64
+    q is 0
+    i is 0
+    while i < n
+        j is j_seq.get(i)
+        k is k_seq.get(i)
+        if j equals 1 and k equals 0
+            q is 1
+        if j equals 0 and k equals 1
+            q is 0
+        if j equals 1 and k equals 1
+            q is 1 - q
+        i is i + 1
+    q
+
+*main
+    j is vec()
+    k is vec()
+    j.push(1)
+    k.push(0)
+    j.push(1)
+    k.push(1)
+    j.push(1)
+    k.push(1)
+    j.push(0)
+    k.push(0)
+    log jk(j, k, 4)

@@ -1,0 +1,7 @@
+type Edge
+    src as i64
+    dst as i64
+    cost as i64
+
+*new(src as i64, dst as i64, cost as i64) returns Edge
+    Edge(src is src, dst is dst, cost is cost)

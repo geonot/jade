@@ -1,0 +1,16 @@
+# Pythagorean triple < 1000.
+*main
+    found is false
+    a is 1
+    while a < 500 and not found
+        b is a + 1
+        while b < 500 and not found
+            c is 1000 - a - b
+            if c > b and a * a + b * b equals c * c
+                log a
+                log b
+                log c
+                log a * b * c
+                found is true
+            b is b + 1
+        a is a + 1

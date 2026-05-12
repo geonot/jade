@@ -1,5 +1,5 @@
 use super::super::expr::{
-    contains_index_placeholder_in_block, contains_placeholder_in_block,
+    contains_index_placeholder_in_block, contains_placeholder_in_block, replace_placeholder,
     replace_index_placeholder_in_block, replace_placeholder_in_block,
 };
 use super::super::{ParseError, Parser};
@@ -48,14 +48,30 @@ impl Parser {
                     self.expect(Token::Newline)?;
                     let then = self.parse_block()?;
                     let mut elifs = Vec::new();
-                    while self.check(Token::Elif) {
-                        self.advance();
-                        let c = self.parse_expr()?;
-                        self.expect(Token::Newline)?;
-                        elifs.push((c, self.parse_block()?));
+                    let mut consumed_else = false;
+                    loop {
+                        if self.check(Token::Elif) {
+                            self.advance();
+                            let c = self.parse_expr()?;
+                            self.expect(Token::Newline)?;
+                            elifs.push((c, self.parse_block()?));
+                            continue;
+                        }
+                        if self.check(Token::Else) {
+                            self.advance();
+                            if self.check(Token::If) {
+                                self.advance();
+                                let c = self.parse_expr()?;
+                                self.expect(Token::Newline)?;
+                                elifs.push((c, self.parse_block()?));
+                                continue;
+                            }
+                            consumed_else = true;
+                            break;
+                        }
+                        break;
                     }
-                    let els = if self.check(Token::Else) {
-                        self.advance();
+                    let els = if consumed_else {
                         self.expect(Token::Newline)?;
                         Some(self.parse_block()?)
                     } else {
@@ -145,60 +161,115 @@ impl Parser {
             Token::Loop => {
                 let sp = self.span();
                 self.advance();
-                // `loop items` → desugar to `for __ph_N in items` with $ → __ph_N, $$ → __ph_N_idx
-                if !self.check(Token::Newline) && !self.check(Token::Indent) && !self.eof() {
-                    let iter = self.parse_expr()?;
-                    // `loop start to end` → range loop with $ as value, $$ as index
-                    let (end, step) = if self.check(Token::To) {
-                        self.advance();
-                        self.suppress_by = true;
-                        let e = self.parse_expr()?;
-                        self.suppress_by = false;
-                        let s = if self.check(Token::By) {
-                            self.advance();
-                            Some(self.parse_expr()?)
-                        } else {
-                            None
-                        };
-                        (Some(e), s)
-                    } else {
-                        (None, None)
-                    };
+                // Bare `loop` → infinite loop
+                if self.check(Token::Newline) || self.check(Token::Indent) || self.eof() {
                     self.expect(Token::Newline)?;
-                    let body = self.parse_block()?;
-                    let ph_name = self.gensym("ph");
-                    let ph_idx_name = format!("{ph_name}_idx");
-                    // Replace any $ in the body with the unique placeholder
-                    let body = if contains_placeholder_in_block(&body) {
-                        replace_placeholder_in_block(&body, &ph_name)
-                    } else {
-                        body
-                    };
-                    // Replace any $$ in the body with the unique index placeholder
-                    let has_idx = contains_index_placeholder_in_block(&body);
-                    let body = if has_idx {
-                        replace_index_placeholder_in_block(&body, &ph_idx_name)
-                    } else {
-                        body
-                    };
-                    return Ok(Stmt::For(For {
-                        label: None,
-                        bind: ph_name.into(),
-                        bind2: if has_idx {
-                            Some(ph_idx_name.into())
-                        } else {
-                            None
-                        },
-                        iter,
-                        end,
-                        step,
-                        body,
+                    return Ok(Stmt::Loop(Loop {
+                        body: self.parse_block()?,
                         span: sp,
                     }));
                 }
+                // Parens around the loop header are optional. Accept all of:
+                //   loop(init, cond, step) BODY      — C-style with parens
+                //   loop init, cond, step    BODY    — C-style, paren-less
+                //   loop iterable            BODY    — iterate (`$` value, `$$` index)
+                //   loop start to end [by s] BODY    — range loop
+                //   loop(iterable)           BODY    — iterate (parens around expr)
+                let has_paren = self.check(Token::LParen);
+                if has_paren {
+                    self.advance();
+                }
+                let first = self.parse_expr()?;
+                // C-style: three comma-separated expressions form the header.
+                if self.check(Token::Comma) {
+                    self.advance();
+                    let cond = self.parse_expr()?;
+                    self.expect(Token::Comma)?;
+                    let step = self.parse_expr()?;
+                    if has_paren {
+                        self.expect(Token::RParen)?;
+                    }
+                    self.expect(Token::Newline)?;
+                    let body = self.parse_block()?;
+                    // Desugar (in the enclosing block) to:
+                    //     __cph_N is init
+                    //     while cond[$ := __cph_N]
+                    //         body[$ := __cph_N]
+                    //         __cph_N is step[$ := __cph_N]
+                    let ph_name = self.gensym("cph");
+                    let ph_sym: Symbol = ph_name.as_str().into();
+                    let cond_r = replace_placeholder(&cond, &ph_name);
+                    let step_r = replace_placeholder(&step, &ph_name);
+                    let mut body_r = replace_placeholder_in_block(&body, &ph_name);
+                    let step_sp = step_r.span();
+                    body_r.push(Stmt::Assign(
+                        Expr::Ident(ph_sym.clone(), step_sp),
+                        step_r,
+                        step_sp,
+                    ));
+                    self.pending_pre_stmts.push(Stmt::Bind(Bind {
+                        name: ph_sym,
+                        value: first,
+                        ty: None,
+                        atomic: false,
+                        span: sp,
+                    }));
+                    return Ok(Stmt::While(While {
+                        cond: cond_r,
+                        body: body_r,
+                        span: sp,
+                    }));
+                }
+                if has_paren {
+                    self.expect(Token::RParen)?;
+                }
+                // Single-expression header → iterate / range.
+                // `loop start to end [by step]` is a range loop; otherwise iterate `first`.
+                let iter = first;
+                let (end, step) = if self.check(Token::To) {
+                    self.advance();
+                    self.suppress_by = true;
+                    let e = self.parse_expr()?;
+                    self.suppress_by = false;
+                    let s = if self.check(Token::By) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    (Some(e), s)
+                } else {
+                    (None, None)
+                };
                 self.expect(Token::Newline)?;
-                Ok(Stmt::Loop(Loop {
-                    body: self.parse_block()?,
+                let body = self.parse_block()?;
+                let ph_name = self.gensym("ph");
+                let ph_idx_name = format!("{ph_name}_idx");
+                // Replace any $ in the body with the unique placeholder
+                let body = if contains_placeholder_in_block(&body) {
+                    replace_placeholder_in_block(&body, &ph_name)
+                } else {
+                    body
+                };
+                // Replace any $$ in the body with the unique index placeholder
+                let has_idx = contains_index_placeholder_in_block(&body);
+                let body = if has_idx {
+                    replace_index_placeholder_in_block(&body, &ph_idx_name)
+                } else {
+                    body
+                };
+                Ok(Stmt::For(For {
+                    label: None,
+                    bind: ph_name.into(),
+                    bind2: if has_idx {
+                        Some(ph_idx_name.into())
+                    } else {
+                        None
+                    },
+                    iter,
+                    end,
+                    step,
+                    body,
                     span: sp,
                 }))
             }
@@ -216,6 +287,17 @@ impl Parser {
             Token::Break => {
                 let sp = self.span();
                 self.advance();
+                // `break LABEL` — when the next token is an identifier that
+                // matches an active loop label, swallow it and represent the
+                // labeled jump as a magic string literal that MIR lowering
+                // recognizes (`__break_label__<name>`).
+                if let Token::Ident(sym) = self.peek().clone() {
+                    if self.label_stack.iter().any(|l| *l == sym) {
+                        self.advance();
+                        let marker = format!("__break_label__{}", sym.as_str());
+                        return Ok(Stmt::Break(Some(Expr::Str(marker, sp)), sp));
+                    }
+                }
                 let v = if !self.check(Token::Newline)
                     && !self.check(Token::If)
                     && !self.check(Token::Dedent)
@@ -230,7 +312,22 @@ impl Parser {
             Token::Continue => {
                 let sp = self.span();
                 self.advance();
+                if let Token::Ident(sym) = self.peek().clone() {
+                    if self.label_stack.iter().any(|l| *l == sym) {
+                        self.advance();
+                        // Emit as Break with a continue marker (we add a tag
+                        // so MIR lowering can distinguish; reusing Break
+                        // avoids touching every Continue site).
+                        let marker = format!("__continue_label__{}", sym.as_str());
+                        return Ok(Stmt::Break(Some(Expr::Str(marker, sp)), sp));
+                    }
+                }
                 Ok(Stmt::Continue(sp))
+            }
+            Token::Nop => {
+                let sp = self.span();
+                self.advance();
+                Ok(Stmt::Nop(sp))
             }
             Token::Match => self.parse_match(),
             Token::Asm => self.parse_asm_stmt(),
@@ -347,22 +444,41 @@ impl Parser {
     }
 
     pub(in crate::parser) fn is_bind(&self) -> bool {
-        matches!(self.peek(), Token::Ident(_))
-            && self.pos + 1 < self.tok.len()
-            && matches!(
-                self.tok[self.pos + 1].token,
-                Token::Is
-                    | Token::PlusEq
-                    | Token::MinusEq
-                    | Token::StarEq
-                    | Token::SlashEq
-                    | Token::AmpEq
-                    | Token::PipeEq
-                    | Token::CaretEq
-                    | Token::ShlEq
-                    | Token::ShrEq
-                    | Token::UshrEq
-            )
+        if !matches!(self.peek(), Token::Ident(_)) {
+            return false;
+        }
+        if self.pos + 1 >= self.tok.len() {
+            return false;
+        }
+        if matches!(
+            self.tok[self.pos + 1].token,
+            Token::Is
+                | Token::PlusEq
+                | Token::MinusEq
+                | Token::StarEq
+                | Token::SlashEq
+                | Token::AmpEq
+                | Token::PipeEq
+                | Token::CaretEq
+                | Token::ShlEq
+                | Token::ShrEq
+                | Token::UshrEq
+        ) {
+            return true;
+        }
+        // `name as Type is RHS` typed bind: scan forward past the type to
+        // find an `Is` before any newline / dedent / semicolon.
+        if matches!(self.tok[self.pos + 1].token, Token::As) {
+            let mut i = self.pos + 2;
+            while i < self.tok.len() {
+                match self.tok[i].token {
+                    Token::Is => return true,
+                    Token::Newline | Token::Dedent | Token::Indent => return false,
+                    _ => i += 1,
+                }
+            }
+        }
+        false
     }
 
     pub(in crate::parser) fn is_tuple_bind(&self) -> bool {

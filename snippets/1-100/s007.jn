@@ -1,0 +1,7 @@
+*main
+    x is 0xF0
+    log x & 0x0F
+    log x | 0x0F
+    log x ^ 0xFF
+    log x << 2
+    log x >> 4

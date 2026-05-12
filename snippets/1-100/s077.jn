@@ -1,0 +1,13 @@
+# Pattern match on a built-in Option-like wrapper.
+enum Maybe
+    Just(i64)
+    Nothing
+
+*unwrap_or(o as Maybe, d as i64) returns i64
+    match o
+        Just(v) ? v
+        Nothing ? d
+
+*main
+    log unwrap_or(Just(42), 0)
+    log unwrap_or(Nothing, -1)

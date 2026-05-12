@@ -1,0 +1,36 @@
+# libjn.semaphore — drop-in for POSIX <semaphore.h>
+
+SEM_FAILED is 0
+
+alias sem_t = %i8
+
+*sem_init(s as %i8, pshared as i32, value as u32) returns i32
+    nop
+    0
+*sem_destroy(s as %i8) returns i32
+    nop
+    0
+*sem_open(name as %i8, oflag as i32) returns %i8
+    nop
+    0 as %i8
+*sem_close(s as %i8) returns i32
+    nop
+    0
+*sem_unlink(name as %i8) returns i32
+    nop
+    0
+*sem_wait(s as %i8) returns i32
+    nop
+    0
+*sem_trywait(s as %i8) returns i32
+    nop
+    0
+*sem_timedwait(s as %i8, ts as %i8) returns i32
+    nop
+    0
+*sem_post(s as %i8) returns i32
+    nop
+    0
+*sem_getvalue(s as %i8, val as %i8) returns i32
+    nop
+    0

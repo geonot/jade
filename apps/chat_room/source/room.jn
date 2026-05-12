@@ -1,0 +1,26 @@
+use models/message
+use models/user
+use moderation
+
+actor Room
+    history_count as i64
+    spam_count as i64
+    question_count as i64
+    total_karma as i64
+    *post m as Message
+        history_count is history_count + 1
+        k is moderation.classify(m.text_id)
+        if k equals 2
+            spam_count is spam_count + 1
+        if k equals 3
+            question_count is question_count + 1
+        total_karma is total_karma + moderation.reward_for(m.text_id)
+    *snapshot
+        log 'history'
+        log history_count
+        log 'spam'
+        log spam_count
+        log 'questions'
+        log question_count
+        log 'karma'
+        log total_karma

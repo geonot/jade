@@ -21,10 +21,15 @@ impl Parser {
                 span: sp,
             }));
         }
+        // Optional type annotation: `a as Type is RHS`.
+        let mut declared_ty: Option<crate::types::Type> = None;
+        if self.check(Token::As) {
+            self.advance();
+            declared_ty = Some(self.parse_type()?);
+        }
         self.expect(Token::Is)?;
         // Labeled loop: `outer is for i in items`
-        if self.check(Token::For) {
-            self.advance();
+        if self.check(Token::For) {            self.advance();
             let bind = self.ident()?;
             let bind2 = if self.check(Token::Comma) {
                 self.advance();
@@ -51,6 +56,9 @@ impl Parser {
                 None
             };
             self.expect(Token::Newline)?;
+            self.label_stack.push(name.clone().into());
+            let body = self.parse_block()?;
+            self.label_stack.pop();
             return Ok(Stmt::For(For {
                 label: Some(name),
                 bind,
@@ -58,7 +66,7 @@ impl Parser {
                 iter,
                 end,
                 step,
-                body: self.parse_block()?,
+                body,
                 span: sp,
             }));
         }
@@ -344,7 +352,7 @@ impl Parser {
         Ok(Stmt::Bind(Bind {
             name,
             value,
-            ty: None,
+            ty: declared_ty,
             atomic: false,
             span: sp,
         }))

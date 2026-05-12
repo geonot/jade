@@ -156,7 +156,12 @@ impl Parser {
                 self.skip_ws();
                 if self.check(Token::RBracket) {
                     self.advance();
-                    return Ok(Expr::Array(Vec::new(), sp));
+                    // Empty `[]` desugars to `vector()`.
+                    return Ok(Expr::Call(
+                        Box::new(Expr::Ident("vector".into(), sp)),
+                        Vec::new(),
+                        sp,
+                    ));
                 }
                 let first = self.parse_expr()?;
                 if self.check(Token::For) {
@@ -197,7 +202,14 @@ impl Parser {
                 }
                 self.skip_ws();
                 self.expect(Token::RBracket)?;
-                Ok(Expr::Array(v, sp))
+                // `[a, b, c]` desugars to a vector literal so vec methods
+                // (map/filter/fold/etc.) and `in` membership Just Work.
+                // Use `array[a, b, c]` for a stack-allocated fixed-size array.
+                Ok(Expr::Call(
+                    Box::new(Expr::Ident("vector".into(), sp)),
+                    v,
+                    sp,
+                ))
             }
             Token::Log => {
                 self.advance();
@@ -293,6 +305,35 @@ impl Parser {
             Token::Ident(name) => {
                 let name = name.clone();
                 self.advance();
+                // `vector[a, b, c]` / `vec[a, b, c]` — bracket literal sugar
+                // for the `vector(...)` / `vec(...)` constructor. Desugars to
+                // a normal call so the typer's existing builtin handling for
+                // "vec" / "vector" produces a `VecNew`.
+                if (name.with_str(|s| s == "vector" || s == "vec"))
+                    && self.check(Token::LBracket)
+                {
+                    self.advance();
+                    self.skip_ws();
+                    let mut elems = Vec::new();
+                    if !self.check(Token::RBracket) {
+                        elems.push(self.parse_expr()?);
+                        while self.check(Token::Comma) {
+                            self.advance();
+                            self.skip_ws();
+                            if self.check(Token::RBracket) {
+                                break;
+                            }
+                            elems.push(self.parse_expr()?);
+                        }
+                        self.skip_ws();
+                    }
+                    self.expect(Token::RBracket)?;
+                    return Ok(Expr::Call(
+                        Box::new(Expr::Ident(name, sp)),
+                        elems,
+                        sp,
+                    ));
+                }
                 if name == "SIMD" && self.check(Token::Of) {
                     self.advance();
                     let elem_ty = self.parse_type()?;

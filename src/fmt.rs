@@ -315,6 +315,10 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str("continue\n");
         }
+        Stmt::Nop(_) => {
+            indent(out, level);
+            out.push_str("nop\n");
+        }
         Stmt::Match(m) => {
             indent(out, level);
             out.push_str("match ");

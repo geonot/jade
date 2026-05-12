@@ -91,7 +91,36 @@ impl<'ctx> Compiler<'ctx> {
                             let csv = b!(self.bld.build_call(fv, &md, "call"));
                             Ok(self.call_result(csv))
                         } else {
-                            Err(format!("mir_codegen: unknown function `{name}`"))
+                            // libm fallback: declare and call directly.
+                            const LIBM_UNARY_F64: &[&str] = &[
+                                "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin",
+                                "cos", "tan", "asin", "acos", "atan", "log", "log10", "log2",
+                                "exp", "exp2",
+                            ];
+                            const LIBM_BINARY_F64: &[&str] = &["pow", "atan2", "fmod", "copysign"];
+                            let name_str = name.as_str();
+                            let f64t = self.ctx.f64_type();
+                            if LIBM_UNARY_F64.contains(&&*name_str) && arg_vals.len() == 1 {
+                                let sig = f64t.fn_type(&[f64t.into()], false);
+                                let fv = self.module.add_function(&name_str, sig, None);
+                                let csv = b!(self.bld.build_call(
+                                    fv,
+                                    &[arg_vals[0].into()],
+                                    "libm"
+                                ));
+                                return Ok(Some(self.call_result(csv)));
+                            }
+                            if LIBM_BINARY_F64.contains(&&*name_str) && arg_vals.len() == 2 {
+                                let sig = f64t.fn_type(&[f64t.into(), f64t.into()], false);
+                                let fv = self.module.add_function(&name_str, sig, None);
+                                let csv = b!(self.bld.build_call(
+                                    fv,
+                                    &[arg_vals[0].into(), arg_vals[1].into()],
+                                    "libm"
+                                ));
+                                return Ok(Some(self.call_result(csv)));
+                            }
+                            Err(format!("unknown function `{name}`"))
                         }
                     }
                 }
@@ -261,6 +290,196 @@ impl<'ctx> Compiler<'ctx> {
                                 return Err("remove() requires an index".into());
                             }
                             "clear" => return Ok(Some((self.vec_clear(header_ptr))?)),
+                            "map" | "filter" => {
+                                if args.is_empty() {
+                                    return Err(format!(
+                                        "{}() requires a callback",
+                                        method.as_str()
+                                    ));
+                                }
+                                let closure_val = self.val(args[0]);
+                                let closure_ty = self
+                                    .value_types
+                                    .get(&args[0])
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "missing closure type for `{}` callback",
+                                            method.as_str()
+                                        )
+                                    })?;
+                                let result = if &*method.as_str() == "map" {
+                                    self.vec_map_dynamic(
+                                        header_ptr,
+                                        &elem_ty,
+                                        closure_val,
+                                        &closure_ty,
+                                    )?
+                                } else {
+                                    self.vec_filter_dynamic(
+                                        header_ptr,
+                                        &elem_ty,
+                                        closure_val,
+                                        &closure_ty,
+                                    )?
+                                };
+                                return Ok(Some(result));
+                            }
+                            "fold" | "reduce" => {
+                                if args.len() < 2 {
+                                    return Err(
+                                        "fold() requires (initial, callback)".into()
+                                    );
+                                }
+                                let init_val = self.val(args[0]);
+                                let closure_val = self.val(args[1]);
+                                let closure_ty = self
+                                    .value_types
+                                    .get(&args[1])
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        "missing closure type for fold callback"
+                                            .to_string()
+                                    })?;
+                                return Ok(Some(self.vec_fold_dynamic(
+                                    header_ptr,
+                                    &elem_ty,
+                                    init_val,
+                                    closure_val,
+                                    &closure_ty,
+                                )?));
+                            }
+                            "find" => {
+                                if args.is_empty() {
+                                    return Err("find() requires a callback".into());
+                                }
+                                let closure_val = self.val(args[0]);
+                                let closure_ty = self
+                                    .value_types
+                                    .get(&args[0])
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        "missing closure type for find callback".to_string()
+                                    })?;
+                                return Ok(Some(self.vec_find_dynamic(
+                                    header_ptr,
+                                    &elem_ty,
+                                    closure_val,
+                                    &closure_ty,
+                                )?));
+                            }
+                            "any" | "all" => {
+                                if args.is_empty() {
+                                    return Err(format!(
+                                        "{}() requires a callback",
+                                        method.as_str()
+                                    ));
+                                }
+                                let closure_val = self.val(args[0]);
+                                let closure_ty = self
+                                    .value_types
+                                    .get(&args[0])
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "missing closure type for `{}` callback",
+                                            method.as_str()
+                                        )
+                                    })?;
+                                let is_any = &*method.as_str() == "any";
+                                return Ok(Some(self.vec_any_all_dynamic(
+                                    header_ptr,
+                                    &elem_ty,
+                                    closure_val,
+                                    &closure_ty,
+                                    is_any,
+                                )?));
+                            }
+                            "sum" => return Ok(Some(self.vec_sum(header_ptr, &elem_ty)?)),
+                            "sort" => {
+                                return Ok(Some(self.vec_sort(header_ptr, &elem_ty)?));
+                            }
+                            "reverse" => {
+                                return Ok(Some(self.vec_reverse(header_ptr, &elem_ty)?));
+                            }
+                            "contains" => {
+                                if args.is_empty() {
+                                    return Err(
+                                        "contains() requires a needle".into()
+                                    );
+                                }
+                                let needle = self.val(args[0]);
+                                return Ok(Some(self.vec_contains_v(
+                                    header_ptr, &elem_ty, needle,
+                                )?));
+                            }
+                            "join" => {
+                                if args.is_empty() {
+                                    return Err(
+                                        "join() requires a separator".into()
+                                    );
+                                }
+                                let sep = self.val(args[0]);
+                                return Ok(Some(self.vec_join_v(header_ptr, sep)?));
+                            }
+                            "take" | "skip" | "drop" => {
+                                if args.is_empty() {
+                                    return Err(format!(
+                                        "{}() requires a count",
+                                        method.as_str()
+                                    ));
+                                }
+                                let n = self.val(args[0]).into_int_value();
+                                let is_take = &*method.as_str() == "take";
+                                return Ok(Some(self.vec_take_skip_v(
+                                    header_ptr, &elem_ty, n, is_take,
+                                )?));
+                            }
+                            "slice" => {
+                                if args.len() < 2 {
+                                    return Err(
+                                        "slice() requires (start, end)".into()
+                                    );
+                                }
+                                let s = self.val(args[0]).into_int_value();
+                                let e = self.val(args[1]).into_int_value();
+                                return Ok(Some(self.vec_slice_v(
+                                    header_ptr, &elem_ty, s, e,
+                                )?));
+                            }
+                            "zip" => {
+                                if args.is_empty() {
+                                    return Err(
+                                        "zip() requires another vector".into()
+                                    );
+                                }
+                                let other_val = self.val(args[0]);
+                                let other_ptr = if other_val.is_pointer_value() {
+                                    other_val.into_pointer_value()
+                                } else {
+                                    let pt = self.ctx.ptr_type(AddressSpace::default());
+                                    b!(self.bld.build_int_to_ptr(
+                                        other_val.into_int_value(),
+                                        pt,
+                                        "zip.optr"
+                                    ))
+                                };
+                                let other_elem_ty = match self
+                                    .value_types
+                                    .get(&args[0])
+                                    .cloned()
+                                {
+                                    Some(Type::Vec(et)) => *et,
+                                    Some(Type::Array(et, _)) => *et,
+                                    _ => Type::I64,
+                                };
+                                return Ok(Some(self.vec_zip_v(
+                                    header_ptr,
+                                    &elem_ty,
+                                    other_ptr,
+                                    &other_elem_ty,
+                                )?));
+                            }
                             _ => {} // fall through to function lookup
                         }
                     }
@@ -390,7 +609,7 @@ impl<'ctx> Compiler<'ctx> {
                         }
                         Ok(self.call_result(csv))
                     } else {
-                        Err(format!("mir_codegen: unknown method `{method}`"))
+                        Err(format!("unknown method `{method}`"))
                     }
                 }
                 mir::InstKind::IndirectCall(callee, args) => {
@@ -440,7 +659,7 @@ impl<'ctx> Compiler<'ctx> {
                             .const_null();
                         self.make_closure(wrapper, null_env)
                     } else {
-                        Err(format!("mir_codegen: undefined function `{name}` in FnRef"))
+                        Err(format!("undefined function `{name}` in FnRef"))
                     }
                 }
                 mir::InstKind::Load(name) => {
@@ -463,7 +682,7 @@ impl<'ctx> Compiler<'ctx> {
                             }
                             Ok(val)
                         } else {
-                            Err(format!("mir_codegen: Load of undefined variable `{name}`"))
+                            Err(format!("Load of undefined variable `{name}`"))
                         }
                     }
                 }
@@ -501,7 +720,7 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(val)
                     } else {
                         Err(format!(
-                            "mir_codegen: GlobalLoad of undefined global `{name}`"
+                            "GlobalLoad of undefined global `{name}`"
                         ))
                     }
                 }

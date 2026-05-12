@@ -1,0 +1,15 @@
+# Final cap: an actor that counts ticks.
+actor Counter
+    n as i64
+    @tick
+        n is n + 1
+    @final
+        log n
+
+*main
+    c is spawn Counter
+    i is 0
+    while i < 5
+        c.tick()
+        i is i + 1
+    c.final()

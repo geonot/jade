@@ -255,6 +255,8 @@ pub enum Stmt {
     Ret(Option<Expr>, Type, Span),
     Break(Option<Expr>, Span),
     Continue(Span),
+    /// `nop` — no-op statement (Python-style `pass`). Compiles to nothing.
+    Nop(Span),
     Match(Match),
     Asm(AsmBlock),
     Drop(DefId, Symbol, Type, Span),
@@ -578,6 +580,7 @@ pub struct For {
     pub end: Option<Expr>,
     pub step: Option<Expr>,
     pub body: Block,
+    pub label: Option<Symbol>,
     pub span: Span,
 }
 

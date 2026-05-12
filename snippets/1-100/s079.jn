@@ -1,0 +1,8 @@
+enum Permission
+    Read is 1
+    Write is 2
+    Execute is 4
+
+*main
+    log Read as i64
+    log Write as i64

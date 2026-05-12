@@ -1,0 +1,9 @@
+# Paxos accept counts: chosen if 2f+1 nodes accept same value.
+*accepted(count as i64, n as i64) returns i64
+    if count > n / 2
+        return 1
+    0
+
+*main
+    log accepted(3, 5)
+    log accepted(2, 5)

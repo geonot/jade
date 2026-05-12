@@ -1,0 +1,16 @@
+# Manhattan distance from base point (avoid reserved `by`).
+*main
+    xs is vec(0, 3, 7)
+    ys is vec(0, 4, 1)
+    bx is xs.get(0)
+    base_y is ys.get(0)
+    i is 1
+    while i < xs.length
+        dx is xs.get(i) - bx
+        dy is ys.get(i) - base_y
+        if dx < 0
+            dx is 0 - dx
+        if dy < 0
+            dy is 0 - dy
+        log dx + dy
+        i is i + 1

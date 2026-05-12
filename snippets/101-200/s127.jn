@@ -1,0 +1,11 @@
+# Queue via two stacks.
+*main
+    inq is vec()
+    outq is vec()
+    inq.push(1)
+    inq.push(2)
+    inq.push(3)
+    while inq.length > 0
+        outq.push(inq.pop())
+    while outq.length > 0
+        log outq.pop()

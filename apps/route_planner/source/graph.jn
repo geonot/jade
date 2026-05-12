@@ -1,0 +1,31 @@
+use models/edge
+
+*new_graph() returns Vec of Edge
+    vec()
+
+*add_undirected(g as Vec of Edge, a as i64, b as i64, c as i64) returns Vec of Edge
+    g.push(edge.new(a, b, c))
+    g.push(edge.new(b, a, c))
+    g
+
+*neighbors_of(g as Vec of Edge, node as i64, out as Vec of i64) returns Vec of i64
+    i is 0
+    while i < g.len()
+        e is g.get(i)
+        if e.src equals node
+            out.push(e.dst)
+            out.push(e.cost)
+        i is i + 1
+    out
+
+*node_count(g as Vec of Edge) returns i64
+    max_id is 0
+    i is 0
+    while i < g.len()
+        e is g.get(i)
+        if e.src > max_id
+            max_id is e.src
+        if e.dst > max_id
+            max_id is e.dst
+        i is i + 1
+    max_id + 1

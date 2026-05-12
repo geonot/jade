@@ -1,0 +1,16 @@
+# DMA descriptor chain: total bytes scheduled.
+*total(lens as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        s is s + lens.get(i)
+        i is i + 1
+    s
+
+*main
+    l is vec()
+    l.push(1024)
+    l.push(2048)
+    l.push(512)
+    l.push(4096)
+    log total(l, 4)

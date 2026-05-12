@@ -310,6 +310,9 @@ impl PrettyPrinter {
             Stmt::Continue(_) => {
                 self.line("continue");
             }
+            Stmt::Nop(_) => {
+                self.line("nop");
+            }
             Stmt::Match(m) => {
                 self.line(&format!("match {} : {}:", self.expr_str(&m.subject), m.ty));
                 self.push();

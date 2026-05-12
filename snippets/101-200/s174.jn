@@ -1,0 +1,25 @@
+# BFS on graph via CSR.
+*main
+    heads is vec(0, 2, 3, 5, 6, 7, 7)
+    dest is vec(1, 2, 3, 3, 4, 5, 5)
+    n is 6
+    dist is vec()
+    i is 0
+    while i < n
+        dist.push(0 - 1)
+        i is i + 1
+    dist.set(0, 0)
+    queue is vec(0)
+    head is 0
+    while head < queue.length
+        u is queue.get(head)
+        head is head + 1
+        e is heads.get(u)
+        while e < heads.get(u + 1)
+            v is dest.get(e)
+            if dist.get(v) equals 0 - 1
+                dist.set(v, dist.get(u) + 1)
+                queue.push(v)
+            e is e + 1
+    for d in dist
+        log d

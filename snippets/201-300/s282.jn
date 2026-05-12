@@ -1,0 +1,9 @@
+# Secure boot: signature equality mock.
+*verify(expected as i64, actual as i64) returns i64
+    if expected equals actual
+        return 1
+    0
+
+*main
+    log verify(0xCAFE, 0xCAFE)
+    log verify(0xCAFE, 0xBEEF)

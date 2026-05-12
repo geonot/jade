@@ -21,6 +21,7 @@ use crate::resolve::prefix_module;
 use crate::typer::Typer;
 
 use super::cli::*;
+use super::cli::strip_codegen_prefix;
 use super::project::*;
 use super::sources::{
     EntityIndex, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules,
@@ -174,7 +175,7 @@ pub(super) fn compile_and_link(
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::run(&mut mir_prog);
         if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
-            die(&format!("mir-codegen: {e}"));
+            die(&strip_codegen_prefix(&e.to_string()));
         }
     }
 

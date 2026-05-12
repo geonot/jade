@@ -1,0 +1,17 @@
+# Insertion sort on a vec of i64.
+*sort(v)
+    i is 1
+    while i < v.length
+        key is v.get(i)
+        j is i - 1
+        while j >= 0 and v.get(j) > key
+            v.set(j + 1, v.get(j))
+            j is j - 1
+        v.set(j + 1, key)
+        i is i + 1
+
+*main
+    a is vec(5, 2, 9, 1, 7, 3, 8, 4, 6)
+    sort(a)
+    for x in a
+        log x

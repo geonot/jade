@@ -1,0 +1,14 @@
+# Block validation pipeline: header+body+sig as gating function.
+*validate(header_ok as i64, body_ok as i64, sig_ok as i64) returns i64
+    if header_ok equals 0
+        return 1
+    if body_ok equals 0
+        return 2
+    if sig_ok equals 0
+        return 3
+    0
+
+*main
+    log validate(1, 1, 1)
+    log validate(1, 0, 1)
+    log validate(0, 1, 1)

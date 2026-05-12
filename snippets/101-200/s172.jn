@@ -1,0 +1,14 @@
+# Matrix transpose 3x3.
+*main
+    m is vec(vec(1, 2, 3), vec(4, 5, 6), vec(7, 8, 9))
+    t is vec(vec(0, 0, 0), vec(0, 0, 0), vec(0, 0, 0))
+    i is 0
+    while i < 3
+        j is 0
+        while j < 3
+            t.get(i).set(j, m.get(j).get(i))
+            j is j + 1
+        i is i + 1
+    for row in t
+        for x in row
+            log x

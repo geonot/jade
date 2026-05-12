@@ -1,0 +1,4 @@
+*main
+    v is vector[1, 2, 3, 4, 5]
+    doubled is v.map($ * 2)
+    print(doubled)

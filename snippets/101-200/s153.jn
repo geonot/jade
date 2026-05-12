@@ -1,0 +1,29 @@
+# Knapsack 0/1 (DP) — flat dp.
+*knap(weights, values, cap as i64) returns i64
+    n is weights.length
+    sz is (n + 1) * (cap + 1)
+    dp is vec()
+    i is 0
+    while i < sz
+        dp.push(0)
+        i is i + 1
+    i is 1
+    while i <= n
+        w is weights.get(i - 1)
+        v is values.get(i - 1)
+        c is 0
+        while c <= cap
+            best is dp.get((i - 1) * (cap + 1) + c)
+            if w <= c
+                cand is dp.get((i - 1) * (cap + 1) + (c - w)) + v
+                if cand > best
+                    best is cand
+            dp.set(i * (cap + 1) + c, best)
+            c is c + 1
+        i is i + 1
+    dp.get(n * (cap + 1) + cap)
+
+*main
+    w is vec(2, 3, 4, 5)
+    v is vec(3, 4, 5, 6)
+    log knap(w, v, 5)

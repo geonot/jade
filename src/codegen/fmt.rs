@@ -150,7 +150,6 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn compile_time_monotonic(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
-        let f64t = self.ctx.f64_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
         let clock_gettime = self
@@ -183,11 +182,9 @@ impl<'ctx> Compiler<'ctx> {
             "nsec"
         ))
         .into_int_value();
-        let sec_f = b!(self.bld.build_signed_int_to_float(sec, f64t, "secf"));
-        let nsec_f = b!(self.bld.build_signed_int_to_float(nsec, f64t, "nsecf"));
-        let billion = f64t.const_float(1_000_000_000.0);
-        let ns_part = b!(self.bld.build_float_div(nsec_f, billion, "ns"));
-        Ok(b!(self.bld.build_float_add(sec_f, ns_part, "mono")).into())
+        let billion = i64t.const_int(1_000_000_000, false);
+        let sec_ns = b!(self.bld.build_int_nsw_mul(sec, billion, "sec_ns"));
+        Ok(b!(self.bld.build_int_nsw_add(sec_ns, nsec, "mono")).into())
     }
 
     pub(crate) fn compile_sleep_ms(

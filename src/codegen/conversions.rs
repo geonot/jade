@@ -1,5 +1,6 @@
 //! Codegen for primitive type conversions (int/float/bool/string).
 
+use inkwell::IntPredicate;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 
 use crate::hir;
@@ -40,6 +41,39 @@ impl<'ctx> Compiler<'ctx> {
         val: BasicValueEnum<'ctx>,
         ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        if let Type::Vec(elem_ty) = ty {
+            self.emit_vec_format(val, elem_ty, true)?;
+            return Ok(val);
+        }
+        // Struct types: dispatch to user-defined `<Name>_log` method if present,
+        // otherwise emit the default `Name @ 0xADDR { field: value, ... }`
+        // formatter. This is the "default log" semantics: every type prints
+        // something useful out of the box; users may override by writing their
+        // own `log` method on the type.
+        if let Type::Struct(name, _) = ty {
+            let log_method_name = format!("{name}_log");
+            if let Some((fv, _, _)) = self.fns.get(&log_method_name).cloned() {
+                let first_param_is_ptr = fv
+                    .get_type()
+                    .get_param_types()
+                    .first()
+                    .map(|t| t.is_pointer_type())
+                    .unwrap_or(false);
+                let arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !val.is_pointer_value() {
+                    let lty = self.llvm_ty(ty);
+                    let tmp = self.entry_alloca(lty, "log.user.self");
+                    b!(self.bld.build_store(tmp, val));
+                    tmp.into()
+                } else {
+                    val
+                };
+                b!(self.bld.build_call(fv, &[arg.into()], "log.user"));
+                return Ok(val);
+            }
+            let name_str = name.as_str();
+            self.emit_struct_format(&name_str, val, ty, true)?;
+            return Ok(val);
+        }
         let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let fmt = self.fmt_for_ty(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt"));
@@ -82,6 +116,21 @@ impl<'ctx> Compiler<'ctx> {
         val: BasicValueEnum<'ctx>,
         ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        if let Type::Vec(elem_ty) = ty {
+            self.emit_vec_format(val, elem_ty, false)?;
+            return Ok(val);
+        }
+        // Structs: nest the same default formatter (no trailing newline).
+        // We do NOT dispatch to a user `<Name>_log` method here because
+        // print is the lower-level building block and may be invoked from
+        // contexts (e.g. vec element printing) where the user's log format
+        // would inject newlines or be otherwise undesirable. The user
+        // override applies at the top-level log() call.
+        if let Type::Struct(name, _) = ty {
+            let name_str = name.as_str();
+            self.emit_struct_format(&name_str, val, ty, false)?;
+            return Ok(val);
+        }
         let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let fmt = self.fmt_for_ty_no_newline(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt.print"));
@@ -117,6 +166,176 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(printf, &[fs.as_pointer_value().into(), print_val], "print"));
         }
         Ok(val)
+    }
+
+    /// Print a vector value as `[a, b, c]` (optionally trailing newline).
+    /// Recurses through `emit_print` for elements so primitives, strings,
+    /// and nested collections all format sensibly.
+    pub(crate) fn emit_vec_format(
+        &mut self,
+        header_val: BasicValueEnum<'ctx>,
+        elem_ty: &Type,
+        newline: bool,
+    ) -> Result<(), String> {
+        let printf = crate::codegen::fn_or_die(&self.module, "printf");
+        let header_ptr = header_val.into_pointer_value();
+        let i64t = self.ctx.i64_type();
+
+        // print "["
+        let open_fmt = b!(self.bld.build_global_string_ptr("[", "vfmt.open"));
+        b!(self
+            .bld
+            .build_call(printf, &[open_fmt.as_pointer_value().into()], "vfmt.opc"));
+
+        let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
+        let lty = self.llvm_ty(elem_ty);
+        let fv = self.current_fn();
+
+        let idx_ptr = self.entry_alloca(i64t.into(), "vfmt.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_zero()));
+
+        let loop_bb = self.ctx.append_basic_block(fv, "vfmt.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "vfmt.body");
+        let sep_bb = self.ctx.append_basic_block(fv, "vfmt.sep");
+        let print_bb = self.ctx.append_basic_block(fv, "vfmt.print");
+        let done_bb = self.ctx.append_basic_block(fv, "vfmt.done");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "vfmt.i")).into_int_value();
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "vfmt.cmp"));
+        b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let is_pos = b!(self.bld.build_int_compare(
+            IntPredicate::SGT,
+            idx,
+            i64t.const_zero(),
+            "vfmt.pos"
+        ));
+        b!(self
+            .bld
+            .build_conditional_branch(is_pos, sep_bb, print_bb));
+
+        self.bld.position_at_end(sep_bb);
+        let sep_fmt = b!(self.bld.build_global_string_ptr(", ", "vfmt.sep"));
+        b!(self
+            .bld
+            .build_call(printf, &[sep_fmt.as_pointer_value().into()], "vfmt.sepc"));
+        b!(self.bld.build_unconditional_branch(print_bb));
+
+        self.bld.position_at_end(print_bb);
+        let elem_gep = unsafe {
+            b!(self
+                .bld
+                .build_gep(lty, data_ptr, &[idx], "vfmt.gep"))
+        };
+        let elem = b!(self.bld.build_load(lty, elem_gep, "vfmt.elem"));
+        self.emit_print(elem, elem_ty)?;
+        let next = b!(self.bld.build_int_nsw_add(
+            idx,
+            i64t.const_int(1, false),
+            "vfmt.next"
+        ));
+        b!(self.bld.build_store(idx_ptr, next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        let close_str = if newline { "]\n" } else { "]" };
+        let close_fmt = b!(self.bld.build_global_string_ptr(close_str, "vfmt.close"));
+        b!(self
+            .bld
+            .build_call(printf, &[close_fmt.as_pointer_value().into()], "vfmt.clc"));
+        Ok(())
+    }
+
+    /// Default struct formatter: `Name @ 0xADDR { f1: v1, f2: v2 }` with an
+    /// optional trailing newline. Recurses through `emit_print` for fields,
+    /// so nested structs print inline (without their own newline) and
+    /// primitives use their normal formatting.
+    ///
+    /// Address semantics: if `val` is already a pointer (typical for methods
+    /// invoked via `obj.log()` where `self` is by-ptr) we use it directly;
+    /// otherwise we spill the value to a stack alloca and print that
+    /// address. For value-typed receivers this address is the temporary's
+    /// stack slot, which is the only well-defined "address" such a value
+    /// has at this program point.
+    pub(crate) fn emit_struct_format(
+        &mut self,
+        name: &str,
+        val: BasicValueEnum<'ctx>,
+        ty: &Type,
+        newline: bool,
+    ) -> Result<(), String> {
+        let printf = crate::codegen::fn_or_die(&self.module, "printf");
+        let fields = self
+            .structs
+            .get(&crate::intern::Symbol::intern(name))
+            .cloned()
+            .unwrap_or_default();
+
+        // Compute address and the loadable struct value.
+        let lty = self.llvm_ty(ty);
+        let (addr, struct_val): (BasicValueEnum<'ctx>, BasicValueEnum<'ctx>) =
+            if val.is_pointer_value() {
+                let loaded = b!(self.bld.build_load(lty, val.into_pointer_value(), "log.load"));
+                (val, loaded)
+            } else {
+                let tmp = self.entry_alloca(lty, "log.tmp");
+                b!(self.bld.build_store(tmp, val));
+                (tmp.into(), val)
+            };
+
+        // Header: "Name @ %p { " (or "Name @ %p {}\n" if no fields)
+        if fields.is_empty() {
+            let hdr = if newline {
+                format!("{name} @ %p {{}}\n\0")
+            } else {
+                format!("{name} @ %p {{}}\0")
+            };
+            let hf = b!(self.bld.build_global_string_ptr(&hdr, "log.hdr"));
+            b!(self.bld.build_call(
+                printf,
+                &[hf.as_pointer_value().into(), addr.into()],
+                "log.hdrc"
+            ));
+            return Ok(());
+        }
+        let hdr = format!("{name} @ %p {{ \0");
+        let hf = b!(self.bld.build_global_string_ptr(&hdr, "log.hdr"));
+        b!(self.bld.build_call(
+            printf,
+            &[hf.as_pointer_value().into(), addr.into()],
+            "log.hdrc"
+        ));
+
+        let sv = struct_val.into_struct_value();
+        for (i, (fname, fty)) in fields.iter().enumerate() {
+            let label = if i == 0 {
+                format!("{fname}: \0")
+            } else {
+                format!(", {fname}: \0")
+            };
+            let lf = b!(self.bld.build_global_string_ptr(&label, "log.lbl"));
+            b!(self.bld.build_call(
+                printf,
+                &[lf.as_pointer_value().into()],
+                "log.lblc"
+            ));
+            let field_val = b!(self
+                .bld
+                .build_extract_value(sv, i as u32, "log.fld"));
+            self.emit_print(field_val, fty)?;
+        }
+        let close_str = if newline { " }\n\0" } else { " }\0" };
+        let cf = b!(self.bld.build_global_string_ptr(close_str, "log.close"));
+        b!(self
+            .bld
+            .build_call(printf, &[cf.as_pointer_value().into()], "log.clc"));
+        Ok(())
     }
 
     pub(crate) fn fmt_for_ty(&self, ty: &Type) -> &'static str {

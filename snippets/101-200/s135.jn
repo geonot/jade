@@ -1,0 +1,21 @@
+# Word frequency via parallel vecs (no map module needed).
+*main
+    words is vec("a", "b", "a", "c", "a", "b")
+    keys is vec()
+    cnts is vec()
+    for w in words
+        i is 0
+        found is false
+        while i < keys.length and not found
+            if keys.get(i) equals w
+                cnts.set(i, cnts.get(i) + 1)
+                found is true
+            i is i + 1
+        if not found
+            keys.push(w)
+            cnts.push(1)
+    i is 0
+    while i < keys.length
+        log keys.get(i)
+        log cnts.get(i)
+        i is i + 1

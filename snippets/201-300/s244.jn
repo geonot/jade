@@ -1,0 +1,30 @@
+# HyperLogLog-ish: leading-zero count cardinality estimate (toy).
+*lz(x as i64) returns i64
+    n is 0
+    bit is 31
+    while bit >= 0
+        if (x / (1 << bit)) % 2 equals 0
+            n is n + 1
+        else
+            bit is -1
+        bit is bit - 1
+    n
+
+*max_lz(xs as Vec of i64, n as i64) returns i64
+    m is 0
+    i is 0
+    while i < n
+        v is lz(xs.get(i))
+        if v > m
+            m is v
+        i is i + 1
+    1 << m
+
+*main
+    xs is vec()
+    xs.push(1)
+    xs.push(7)
+    xs.push(64)
+    xs.push(1024)
+    xs.push(15)
+    log max_lz(xs, 5)

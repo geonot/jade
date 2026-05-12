@@ -1,0 +1,14 @@
+# Lazy-ish counter: build a vec then sum.
+*counts(limit as i64) returns Vec of i64
+    v is vec()
+    n is 0
+    while n < limit
+        v.push(n)
+        n is n + 1
+    v
+
+*main
+    sum is 0
+    for x in counts(5)
+        sum is sum + x
+    log sum

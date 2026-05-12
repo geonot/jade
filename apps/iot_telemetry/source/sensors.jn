@@ -1,0 +1,13 @@
+use models/sample
+
+# Sensor sim: combination of slow drift + spike pattern.
+*read(sensor as i64, t as i64) returns i64
+    base is 200 + sensor * 30
+    drift is (t / 10) % 50
+    spike is 0
+    if t % 47 equals 0
+        spike is 800
+    base + drift + spike
+
+*calibrate(raw as i64, sensor as i64) returns i64
+    raw - sensor * 5

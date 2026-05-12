@@ -1,0 +1,7 @@
+# Kelly criterion (integer): f* = (bp - q) / b, scaled.
+*kelly(b as i64, p as i64, q as i64) returns i64
+    (b * p - q * 100) / b
+
+*main
+    log kelly(2, 60, 40)
+    log kelly(3, 50, 50)

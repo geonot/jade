@@ -88,6 +88,35 @@ impl Lowerer {
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::WeakUpgrade(v), ty, span)
                     }
+                    BuiltinFn::FloatMethod(method) => {
+                        // Map x.abs()/floor()/ceil()/sqrt()/etc. to libm calls.
+                        let m = method.as_str();
+                        let libm_name: &str = match &*m {
+                            "abs" => "fabs",
+                            "sqrt" => "sqrt",
+                            "floor" => "floor",
+                            "ceil" => "ceil",
+                            "round" => "round",
+                            "trunc" => "trunc",
+                            "sin" => "sin",
+                            "cos" => "cos",
+                            "tan" => "tan",
+                            "asin" => "asin",
+                            "acos" => "acos",
+                            "atan" => "atan",
+                            "log" | "ln" => "log",
+                            "log10" => "log10",
+                            "log2" => "log2",
+                            "exp" => "exp",
+                            "exp2" => "exp2",
+                            other => other, // assume libm name matches
+                        };
+                        self.emit(
+                            InstKind::Call(Symbol::intern(libm_name), vals),
+                            ty,
+                            span,
+                        )
+                    }
                     _ => {
                         let name = Symbol::intern(&format!("__builtin_{builtin:?}"));
                         self.emit(InstKind::Call(name, vals), ty, span)

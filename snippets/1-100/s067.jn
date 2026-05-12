@@ -1,0 +1,4 @@
+*main
+    v is vector[1, 2, 3]
+    rev is v.reverse()
+    print(rev)

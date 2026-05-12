@@ -1,0 +1,59 @@
+# libjn.wctype — drop-in for C <wctype.h>
+
+alias wctype_t = u64
+alias wctrans_t = u64
+
+*iswalnum(c as i32) returns i32
+    nop
+    0
+*iswalpha(c as i32) returns i32
+    nop
+    0
+*iswblank(c as i32) returns i32
+    nop
+    0
+*iswcntrl(c as i32) returns i32
+    nop
+    0
+*iswdigit(c as i32) returns i32
+    nop
+    0
+*iswgraph(c as i32) returns i32
+    nop
+    0
+*iswlower(c as i32) returns i32
+    nop
+    0
+*iswprint(c as i32) returns i32
+    nop
+    0
+*iswpunct(c as i32) returns i32
+    nop
+    0
+*iswspace(c as i32) returns i32
+    nop
+    0
+*iswupper(c as i32) returns i32
+    nop
+    0
+*iswxdigit(c as i32) returns i32
+    nop
+    0
+*iswctype(c as i32, type as u64) returns i32
+    nop
+    0
+*wctype(prop as %i8) returns u64
+    nop
+    0
+*towlower(c as i32) returns i32
+    nop
+    0
+*towupper(c as i32) returns i32
+    nop
+    0
+*towctrans(c as i32, t as u64) returns i32
+    nop
+    0
+*wctrans(prop as %i8) returns u64
+    nop
+    0

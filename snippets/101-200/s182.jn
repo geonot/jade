@@ -1,0 +1,16 @@
+# Parse a small base-10 integer from a string.
+*parse(s as String) returns i64
+    n is 0
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c < 48 or c > 57
+            return 0
+        n is n * 10 + (c - 48)
+        i is i + 1
+    n
+
+*main
+    log parse("12345")
+    log parse("0")
+    log parse("99999")

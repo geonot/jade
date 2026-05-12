@@ -1,0 +1,6 @@
+*gcd(a, 0) is a
+*gcd a, b
+    gcd(b, a % b)
+
+*main
+    log gcd(48, 18)

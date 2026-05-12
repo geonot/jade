@@ -1,0 +1,16 @@
+# Compute GCD of a vec via reduce-style fold.
+*gcd(a as i64, b as i64) returns i64
+    while b not equals 0
+        t is b
+        b is a mod b
+        a is t
+    a
+
+*main
+    a is vec(48, 36, 60, 24)
+    g is a.get(0)
+    i is 1
+    while i < a.length
+        g is gcd(g, a.get(i))
+        i is i + 1
+    log g

@@ -297,7 +297,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Stmt::Ret(Some(e), _) | Stmt::ErrReturn(e, _) | Stmt::Break(Some(e), _) => {
                 walk_expr(e, refs, defs)
             }
-            Stmt::Ret(None, _) | Stmt::Break(None, _) | Stmt::Continue(_) => {}
+            Stmt::Ret(None, _) | Stmt::Break(None, _) | Stmt::Continue(_) | Stmt::Nop(_) => {}
             Stmt::If(if_s) => {
                 walk_expr(&if_s.cond, refs, defs);
                 walk_block(&if_s.then, refs, defs);

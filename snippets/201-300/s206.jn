@@ -1,0 +1,24 @@
+# Bond YTM via Newton-like bisection on price function (integer approx).
+*price_at(rate as i64, coupon as i64, face as i64, n as i64) returns i64
+    p is 0
+    factor is 1000
+    i is 1
+    while i <= n
+        factor is factor * 1000 / (1000 + rate)
+        p is p + coupon * factor / 1000
+        i is i + 1
+    p + face * factor / 1000
+
+*ytm(coupon as i64, face as i64, n as i64, target as i64) returns i64
+    lo is 1
+    hi is 200
+    while lo < hi
+        mid is (lo + hi) / 2
+        if price_at(mid, coupon, face, n) > target
+            lo is mid + 1
+        else
+            hi is mid
+    lo
+
+*main
+    log ytm(50, 1000, 10, 900)

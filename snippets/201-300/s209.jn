@@ -1,0 +1,33 @@
+# Sharpe-like ratio: mean / stddev of returns (scaled).
+*sharpe(rs as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        s is s + rs.get(i)
+        i is i + 1
+    m is s / n
+    v is 0
+    j is 0
+    while j < n
+        d is rs.get(j) - m
+        v is v + d * d
+        j is j + 1
+    v is v / n
+    sd is 1
+    k is 0
+    while k < 30
+        sd is (sd + v / sd) / 2
+        k is k + 1
+    if sd equals 0
+        return 0
+    m * 1000 / sd
+
+*main
+    r is vec()
+    r.push(5)
+    r.push(7)
+    r.push(-2)
+    r.push(8)
+    r.push(3)
+    r.push(6)
+    log sharpe(r, 6)

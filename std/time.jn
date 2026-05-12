@@ -148,10 +148,10 @@ type Instant
 # Old API: returns raw monotonic seconds (f64). Kept so existing
 # benchmarks compile; new code should use `instant()` / `since()`.
 *monotonic returns f64
-    __time_monotonic()
+    (__time_monotonic() as f64) / 1000000000.0
 
 *elapsed(start as f64) returns f64
-    __time_monotonic() - start
+    ((__time_monotonic() as f64) / 1000000000.0) - start
 
 *elapsed_ms(start as f64) returns i64
-    ((__time_monotonic() - start) * 1000.0) as i64
+    ((((__time_monotonic() as f64) / 1000000000.0) - start) * 1000.0) as i64

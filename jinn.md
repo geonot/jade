@@ -377,6 +377,12 @@ loop
     if done
         break
 
+# C-style counted loop — `$` is the iteration value.
+#   loop(init, cond, step)
+# Desugars to: bind $ to init, then while cond { body; $ is step }.
+loop(0, $ < 100, $ + 1)
+    log $
+
 # Labeled loops — binding name IS the label
 outer is for i from 0 to 10
     for j from 0 to 10

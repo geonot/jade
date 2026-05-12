@@ -1,0 +1,19 @@
+# Prime test (trial division).
+*is_prime(n as i64) returns bool
+    if n < 2
+        return false
+    if n < 4
+        return true
+    if n mod 2 equals 0
+        return false
+    i is 3
+    while i * i <= n
+        if n mod i equals 0
+            return false
+        i is i + 2
+    true
+
+*main
+    log is_prime(2)
+    log is_prime(15)
+    log is_prime(97)

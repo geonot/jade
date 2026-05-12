@@ -4,6 +4,8 @@
 #   data is json.parse('\{"name": "jinn"\}')
 #   text is json.stringify(data)
 
+use convert
+
 # ── Types ────────────────────────────────────────────────────
 
 type JsonArray
@@ -161,7 +163,7 @@ type JsonParser
                     else
                         break
         num_str is self.src.slice(start, self.pos)
-        Num(parse_float(num_str))
+        Num(convert.parse_float(num_str))
 
     *parse_object returns JsonValue
         self.expect_byte(LBRACE)

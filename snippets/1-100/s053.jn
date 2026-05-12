@@ -1,0 +1,4 @@
+*main
+    v is [1, 2, 3, 4, 5]
+    log v[2]
+    log v.length

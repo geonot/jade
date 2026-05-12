@@ -1,0 +1,32 @@
+use models/tx
+
+*add(pool as Vec of Tx, t as Tx) returns Vec of Tx
+    pool.push(t)
+    pool
+
+*pick_top(pool as Vec of Tx, n as i64) returns Vec of Tx
+    out is vec()
+    take is n
+    if take > pool.len()
+        take is pool.len()
+    i is 0
+    while i < take
+        out.push(pool.get(i))
+        i is i + 1
+    out
+
+*remove_first(pool as Vec of Tx, n as i64) returns Vec of Tx
+    out is vec()
+    i is n
+    while i < pool.len()
+        out.push(pool.get(i))
+        i is i + 1
+    out
+
+*total_amount(pool as Vec of Tx) returns i64
+    s is 0
+    i is 0
+    while i < pool.len()
+        s is s + pool.get(i).amount
+        i is i + 1
+    s

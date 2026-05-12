@@ -1,0 +1,17 @@
+# libjn.uchar — drop-in for C11 <uchar.h>
+
+alias char16_t = u16
+alias char32_t = u32
+
+*mbrtoc16(pc as %i8, s as %i8, n as u64, ps as %i8) returns u64
+    nop
+    0
+*c16rtomb(s as %i8, c as u16, ps as %i8) returns u64
+    nop
+    0
+*mbrtoc32(pc as %i8, s as %i8, n as u64, ps as %i8) returns u64
+    nop
+    0
+*c32rtomb(s as %i8, c as u32, ps as %i8) returns u64
+    nop
+    0

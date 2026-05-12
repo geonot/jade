@@ -1,0 +1,6 @@
+*main
+    outer is for i from 0 to 5
+        for j from 0 to 5
+            if i * j > 6
+                break outer
+            log i * 10 + j

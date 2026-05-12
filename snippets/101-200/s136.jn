@@ -1,0 +1,23 @@
+# Multiple return via type-record.
+type MinMax
+    lo as i64
+    hi as i64
+
+*find_min_max(v) returns MinMax
+    lo is v.get(0)
+    hi is v.get(0)
+    i is 1
+    while i < v.length
+        x is v.get(i)
+        if x < lo
+            lo is x
+        if x > hi
+            hi is x
+        i is i + 1
+    MinMax(lo is lo, hi is hi)
+
+*main
+    a is vec(3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5)
+    r is find_min_max(a)
+    log r.lo
+    log r.hi

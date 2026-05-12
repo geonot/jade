@@ -1,0 +1,14 @@
+err Outcome
+    Ok(i64)
+    Bad
+
+*compute(x as i64) returns Outcome
+    if x equals 0
+        ! Bad
+    Ok(x + 1)
+
+*main
+    r is compute(5)
+    match r
+        Ok(v) ? log v
+        Bad ? log -1

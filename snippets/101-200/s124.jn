@@ -1,0 +1,18 @@
+# Rotate vec by k positions.
+*rotate(v, k as i64) returns Vec of i64
+    n is v.length
+    if n equals 0
+        return v
+    k is k mod n
+    out is vec()
+    i is 0
+    while i < n
+        out.push(v.get((i + n - k) mod n))
+        i is i + 1
+    out
+
+*main
+    a is vec(1, 2, 3, 4, 5)
+    r is rotate(a, 2)
+    for x in r
+        log x

@@ -1,0 +1,3 @@
+*main
+    MAX_SIZE is 1024
+    log MAX_SIZE

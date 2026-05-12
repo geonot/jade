@@ -1,0 +1,15 @@
+# PoW: find nonce where mix(seed+nonce) % 2^k == 0.
+*mix(x as i64) returns i64
+    y is (x * 2654435761) % 4294967296
+    (y * 1664525 + 1013904223) % 4294967296
+
+*mine(seed as i64, mask as i64, max_iter as i64) returns i64
+    nonce is 0
+    while nonce < max_iter
+        if mix(seed + nonce) % mask equals 0
+            return nonce
+        nonce is nonce + 1
+    -1
+
+*main
+    log mine(42, 64, 100000)

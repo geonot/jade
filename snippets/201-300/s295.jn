@@ -1,0 +1,7 @@
+# Q16.16 fixed-point multiply.
+*q_mul(a as i64, b as i64) returns i64
+    a * b / 65536
+
+*main
+    log q_mul(3 * 65536, 7 * 65536 / 2)
+    log q_mul(65536, 65536)

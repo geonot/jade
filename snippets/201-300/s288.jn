@@ -1,0 +1,12 @@
+# Interrupt vector handler_at: pick handler index by vector.
+*handler_at(handlers as Vec of i64, vec_id as i64) returns i64
+    handlers.get(vec_id)
+
+*main
+    h is vec()
+    i is 0
+    while i < 32
+        h.push(i * 100)
+        i is i + 1
+    log handler_at(h, 7)
+    log handler_at(h, 31)

@@ -1,0 +1,12 @@
+type Entry
+    txid as i64
+    debit_id as i64
+    credit_id as i64
+    amount as i64
+    memo as i64
+
+*new(txid as i64, debit_id as i64, credit_id as i64, amount as i64, memo as i64) returns Entry
+    Entry(txid is txid, debit_id is debit_id, credit_id is credit_id, amount is amount, memo is memo)
+
+*is_balanced(e as Entry) returns bool
+    e.amount > 0

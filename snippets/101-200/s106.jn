@@ -1,0 +1,28 @@
+# Quicksort (Lomuto partition).
+*partition(v as Vec of i64, lo as i64, hi as i64) returns i64
+    pivot is v.get(hi)
+    i is lo - 1
+    j is lo
+    while j < hi
+        if v.get(j) <= pivot
+            i is i + 1
+            t is v.get(i)
+            v.set(i, v.get(j))
+            v.set(j, t)
+        j is j + 1
+    t is v.get(i + 1)
+    v.set(i + 1, v.get(hi))
+    v.set(hi, t)
+    i + 1
+
+*qsort(v as Vec of i64, lo as i64, hi as i64)
+    if lo < hi
+        p is partition(v, lo, hi)
+        qsort(v, lo, p - 1)
+        qsort(v, p + 1, hi)
+
+*main
+    a is vec(8, 3, 1, 7, 0, 10, 2, 5, 4, 9, 6)
+    qsort(a, 0, a.length - 1)
+    for x in a
+        log x

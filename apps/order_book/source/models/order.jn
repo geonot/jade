@@ -1,0 +1,18 @@
+type Order
+    id as i64
+    side as i64
+    price as i64
+    qty as i64
+    ts as i64
+
+*new(id as i64, side as i64, price as i64, qty as i64, ts as i64) returns Order
+    Order(id is id, side is side, price is price, qty is qty, ts is ts)
+
+*is_buy(o as Order) returns bool
+    o.side equals 1
+
+*is_sell(o as Order) returns bool
+    o.side equals 2
+
+*with_qty(o as Order, q as i64) returns Order
+    Order(id is o.id, side is o.side, price is o.price, qty is q, ts is o.ts)

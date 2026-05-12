@@ -1,0 +1,152 @@
+# libjn.sys_socket — drop-in for POSIX <sys/socket.h>
+
+# ── Address families ──
+AF_UNSPEC    is 0
+AF_UNIX      is 1
+AF_LOCAL     is 1
+AF_INET      is 2
+AF_INET6     is 10
+AF_NETLINK   is 16
+AF_PACKET    is 17
+
+PF_UNSPEC is 0
+PF_UNIX   is 1
+PF_INET   is 2
+PF_INET6  is 10
+
+# ── Socket types ──
+SOCK_STREAM    is 1
+SOCK_DGRAM     is 2
+SOCK_RAW       is 3
+SOCK_RDM       is 4
+SOCK_SEQPACKET is 5
+SOCK_DCCP      is 6
+SOCK_PACKET    is 10
+SOCK_NONBLOCK  is 0x800
+SOCK_CLOEXEC   is 0x80000
+
+# ── Protocols ──
+IPPROTO_IP   is 0
+IPPROTO_TCP  is 6
+IPPROTO_UDP  is 17
+IPPROTO_IPV6 is 41
+
+# ── Levels ──
+SOL_SOCKET is 1
+SOL_TCP    is 6
+
+# ── Options ──
+SO_DEBUG     is 1
+SO_REUSEADDR is 2
+SO_TYPE      is 3
+SO_ERROR     is 4
+SO_BROADCAST is 6
+SO_SNDBUF    is 7
+SO_RCVBUF    is 8
+SO_KEEPALIVE is 9
+SO_OOBINLINE is 10
+SO_LINGER    is 13
+SO_REUSEPORT is 15
+SO_RCVTIMEO  is 20
+SO_SNDTIMEO  is 21
+
+TCP_NODELAY  is 1
+TCP_KEEPIDLE is 4
+
+# ── Message flags ──
+MSG_OOB       is 0x01
+MSG_PEEK      is 0x02
+MSG_DONTROUTE is 0x04
+MSG_TRUNC     is 0x20
+MSG_DONTWAIT  is 0x40
+MSG_NOSIGNAL  is 0x4000
+
+# ── Shutdown ──
+SHUT_RD   is 0
+SHUT_WR   is 1
+SHUT_RDWR is 2
+
+alias socklen_t = u32
+alias sa_family_t = u16
+
+type SockAddr
+    sa_family as u16
+    sa_data   as %i8
+
+type SockAddrIn
+    sin_family as u16
+    sin_port   as u16
+    sin_addr   as u32
+    sin_zero   as %i8
+
+type SockAddrIn6
+    sin6_family   as u16
+    sin6_port     as u16
+    sin6_flowinfo as u32
+    sin6_addr     as %i8
+    sin6_scope_id as u32
+
+type Msghdr
+    msg_name       as %i8
+    msg_namelen    as u32
+    msg_iov        as %i8
+    msg_iovlen     as u64
+    msg_control    as %i8
+    msg_controllen as u64
+    msg_flags      as i32
+
+# ── Operations ──
+*socket(domain as i32, type as i32, protocol as i32) returns i32
+    nop
+    -1
+*socketpair(domain as i32, type as i32, protocol as i32, fds as %i8) returns i32
+    nop
+    -1
+*bind(fd as i32, addr as %i8, len as u32) returns i32
+    nop
+    -1
+*listen(fd as i32, backlog as i32) returns i32
+    nop
+    -1
+*accept(fd as i32, addr as %i8, addrlen as %i8) returns i32
+    nop
+    -1
+*accept4(fd as i32, addr as %i8, addrlen as %i8, flags as i32) returns i32
+    nop
+    -1
+*connect(fd as i32, addr as %i8, len as u32) returns i32
+    nop
+    -1
+*send(fd as i32, buf as %i8, n as u64, flags as i32) returns i64
+    nop
+    -1
+*recv(fd as i32, buf as %i8, n as u64, flags as i32) returns i64
+    nop
+    -1
+*sendto(fd as i32, buf as %i8, n as u64, flags as i32, addr as %i8, addrlen as u32) returns i64
+    nop
+    -1
+*recvfrom(fd as i32, buf as %i8, n as u64, flags as i32, addr as %i8, addrlen as %i8) returns i64
+    nop
+    -1
+*sendmsg(fd as i32, msg as %i8, flags as i32) returns i64
+    nop
+    -1
+*recvmsg(fd as i32, msg as %i8, flags as i32) returns i64
+    nop
+    -1
+*shutdown(fd as i32, how as i32) returns i32
+    nop
+    -1
+*getsockopt(fd as i32, level as i32, opt as i32, val as %i8, len as %i8) returns i32
+    nop
+    -1
+*setsockopt(fd as i32, level as i32, opt as i32, val as %i8, len as u32) returns i32
+    nop
+    -1
+*getsockname(fd as i32, addr as %i8, len as %i8) returns i32
+    nop
+    -1
+*getpeername(fd as i32, addr as %i8, len as %i8) returns i32
+    nop
+    -1

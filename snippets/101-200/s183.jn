@@ -1,0 +1,22 @@
+# Coin change minimum coins (DP).
+*coin_change(coins, amt as i64) returns i64
+    INF is 1000000
+    dp is vec()
+    i is 0
+    while i <= amt
+        dp.push(INF)
+        i is i + 1
+    dp.set(0, 0)
+    a is 1
+    while a <= amt
+        for c in coins
+            if c <= a and dp.get(a - c) + 1 < dp.get(a)
+                dp.set(a, dp.get(a - c) + 1)
+        a is a + 1
+    if dp.get(amt) equals INF
+        return 0 - 1
+    dp.get(amt)
+
+*main
+    coins is vec(1, 5, 10, 25)
+    log coin_change(coins, 47)

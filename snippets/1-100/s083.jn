@@ -1,0 +1,4 @@
+*main
+    items is [1, 2, 3, 4]
+    doubled is items ~ |x| x * 2
+    print(doubled)

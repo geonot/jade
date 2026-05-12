@@ -27,6 +27,43 @@ pub(in crate::parser) fn contains_placeholder(expr: &Expr) -> bool {
     }
 }
 
+/// Check if an AST expression contains `$` (Placeholder) anywhere.
+/// Does NOT match `$$` (IndexPlaceholder), which is the implicit loop index.
+pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
+    match expr {
+        Expr::Placeholder(_) => true,
+        Expr::IndexPlaceholder(_) => false,
+        Expr::BinOp(l, _, r, _) => {
+            contains_lambda_placeholder(l) || contains_lambda_placeholder(r)
+        }
+        Expr::UnaryOp(_, e, _) => contains_lambda_placeholder(e),
+        Expr::Call(f, args, _) => {
+            contains_lambda_placeholder(f) || args.iter().any(contains_lambda_placeholder)
+        }
+        Expr::Method(obj, _, args, _) => {
+            contains_lambda_placeholder(obj) || args.iter().any(contains_lambda_placeholder)
+        }
+        Expr::Field(e, _, _) => contains_lambda_placeholder(e),
+        Expr::Index(a, b, _) => {
+            contains_lambda_placeholder(a) || contains_lambda_placeholder(b)
+        }
+        Expr::Ternary(a, b, c, _) => {
+            contains_lambda_placeholder(a)
+                || contains_lambda_placeholder(b)
+                || contains_lambda_placeholder(c)
+        }
+        Expr::As(e, _, _) => contains_lambda_placeholder(e),
+        Expr::Ref(e, _) => contains_lambda_placeholder(e),
+        Expr::Deref(e, _) => contains_lambda_placeholder(e),
+        Expr::Array(elems, _) => elems.iter().any(contains_lambda_placeholder),
+        Expr::Tuple(elems, _) => elems.iter().any(contains_lambda_placeholder),
+        Expr::Pipe(l, r, _, _) => {
+            contains_lambda_placeholder(l) || contains_lambda_placeholder(r)
+        }
+        _ => false,
+    }
+}
+
 /// Replace all `$` (Placeholder) in an expression with `Ident(name)`.
 /// Does NOT replace `$$` (IndexPlaceholder).
 pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {

@@ -1,0 +1,16 @@
+# 8-bit ALU: op 0 add, 1 sub, 2 and, 3 or, 4 xor.
+*alu(op as i64, a as i64, b as i64) returns i64
+    if op equals 0
+        return (a + b) % 256
+    if op equals 1
+        return (a - b + 256) % 256
+    if op equals 2
+        return a & b
+    if op equals 3
+        return a | b
+    a ^ b
+
+*main
+    log alu(0, 100, 50)
+    log alu(2, 0xF0, 0x0F)
+    log alu(4, 0xAA, 0x55)

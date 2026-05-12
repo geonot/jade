@@ -1,0 +1,21 @@
+use models/item
+use models/transfer
+use warehouse
+
+*apply(items as Vec of Item, t as Transfer) returns Vec of Item
+    avail is warehouse.qty_at(items, t.sku, t.src_warehouse)
+    if avail < t.qty
+        return items
+    items is warehouse.adjust(items, t.sku, t.src_warehouse, 0 - t.qty)
+    items is warehouse.adjust(items, t.sku, t.dst_warehouse, t.qty)
+    items
+
+*replay(items as Vec of Item, ts as Vec of Transfer) returns Vec of Item
+    i is 0
+    while i < ts.len()
+        items is apply(items, ts.get(i))
+        i is i + 1
+    items
+
+*audit_count(ts as Vec of Transfer) returns i64
+    ts.len()

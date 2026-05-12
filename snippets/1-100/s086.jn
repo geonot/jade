@@ -1,0 +1,8 @@
+*lookup k as String
+    if k equals 'missing'
+        ! -1
+    42
+
+*main
+    log lookup('missing')
+    log lookup('found')

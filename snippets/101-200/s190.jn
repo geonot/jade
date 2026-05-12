@@ -1,0 +1,12 @@
+# Approximate pi via Leibniz series.
+*main
+    n is 10000
+    s is 0.0
+    i is 0
+    while i < n
+        sign is 1.0
+        if i mod 2 equals 1
+            sign is -1.0
+        s is s + sign / (2.0 * (i as f64) + 1.0)
+        i is i + 1
+    log 4.0 * s

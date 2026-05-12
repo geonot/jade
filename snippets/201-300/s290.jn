@@ -1,0 +1,20 @@
+# RTOS ready-queue priority pick (highest prio = lowest number).
+*pick(prios as Vec of i64, n as i64) returns i64
+    idx is 0
+    best is prios.get(0)
+    i is 1
+    while i < n
+        if prios.get(i) < best
+            best is prios.get(i)
+            idx is i
+        i is i + 1
+    idx
+
+*main
+    p is vec()
+    p.push(5)
+    p.push(2)
+    p.push(7)
+    p.push(1)
+    p.push(3)
+    log pick(p, 5)

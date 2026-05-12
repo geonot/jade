@@ -144,10 +144,94 @@ pub fn branch_threading(func: &mut Function) -> bool {
                 for (pred_id, val) in incoming {
                     if let Some(&b) = consts.get(val) {
                         let target = if b { *then_bb } else { *else_bb };
+                        if target == *bb_id {
+                            // Redirecting to self would be a no-op or worse.
+                            continue;
+                        }
+                        // Capture, for every phi at bb_id, the value that
+                        // pred_id was providing — so we can forward those
+                        // bindings to `target`'s phis below.
+                        let forwarded: Vec<(ValueId, ValueId)> = func
+                            .block(*bb_id)
+                            .phis
+                            .iter()
+                            .filter_map(|phi| {
+                                phi.incoming
+                                    .iter()
+                                    .find(|(p, _)| p == pred_id)
+                                    .map(|(_, v)| (phi.dest, *v))
+                            })
+                            .collect();
+
                         // Redirect predecessor's terminator from bb_id to target
                         func.block_mut(*pred_id)
                             .terminator
                             .replace_successor(*bb_id, target);
+
+                        // Phi maintenance:
+                        //  (a) Remove pred_id's incoming entry from each phi at
+                        //      bb_id — pred_id no longer flows in here.
+                        //  (b) For each phi at `target`, add an incoming entry
+                        //      for pred_id. The value is whatever bb_id's phi
+                        //      with the same dest was carrying (when target's
+                        //      phi references a phi defined at bb_id), otherwise
+                        //      reuse the value bb_id was already supplying for
+                        //      its incoming edge to target.
+                        {
+                            let bb = func.block_mut(*bb_id);
+                            let pred_still_referenced = match &bb.terminator {
+                                Terminator::Branch(_, t, e) => {
+                                    *t == *bb_id || *e == *bb_id
+                                }
+                                _ => false,
+                            };
+                            // pred_still_referenced is unused here; left for clarity.
+                            let _ = pred_still_referenced;
+                            for phi in &mut bb.phis {
+                                phi.incoming.retain(|(p, _)| p != pred_id);
+                            }
+                        }
+
+                        // Determine what each phi at `target` should receive
+                        // from pred_id. The natural choice is the value that
+                        // `bb_id` itself contributes to `target` for that phi,
+                        // unless that value is one of bb_id's own phis — in
+                        // which case forward the value pred_id was supplying
+                        // to that phi.
+                        let target_phi_updates: Vec<(ValueId, ValueId)> = func
+                            .block(target)
+                            .phis
+                            .iter()
+                            .filter_map(|phi| {
+                                let v = phi
+                                    .incoming
+                                    .iter()
+                                    .find(|(p, _)| *p == *bb_id)
+                                    .map(|(_, v)| *v)?;
+                                let chosen = if let Some((_, fwd)) =
+                                    forwarded.iter().find(|(d, _)| *d == v)
+                                {
+                                    *fwd
+                                } else {
+                                    v
+                                };
+                                Some((phi.dest, chosen))
+                            })
+                            .collect();
+
+                        let target_block = func.block_mut(target);
+                        for phi in &mut target_block.phis {
+                            // Avoid duplicate entries.
+                            if phi.incoming.iter().any(|(p, _)| p == pred_id) {
+                                continue;
+                            }
+                            if let Some((_, v)) =
+                                target_phi_updates.iter().find(|(d, _)| *d == phi.dest)
+                            {
+                                phi.incoming.push((*pred_id, *v));
+                            }
+                        }
+
                         changed = true;
                     }
                 }

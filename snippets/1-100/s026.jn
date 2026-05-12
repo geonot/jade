@@ -1,0 +1,7 @@
+*main
+    a is 5
+    b is 5
+    if a equals b
+        log 'eq'
+    if a neq 6
+        log 'neq6'

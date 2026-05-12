@@ -592,17 +592,22 @@ impl Typer {
         } else {
             "method tail expression"
         };
-        let ret = if m.ret.is_none() {
+        if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
                 let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, reason);
                 self.collect_unify_error(r);
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
-            self.infer_ctx.resolve(&ret)
-        } else {
-            ret
-        };
+            // Do NOT resolve here. Methods on different types are lowered in
+            // source order, but their return-type variables may be unified
+            // through cross-method calls (e.g. type A's method tail-calls type
+            // B's method whose body has not yet been lowered). Resolving now
+            // would default A's ret-var to i64 before B's body unifies B's
+            // ret-var with its true type. The global `resolve_fn` pass at the
+            // end of `lower_program` runs after all bodies, so it sees the
+            // fully-constrained type.
+        }
 
         Ok(hir::Fn {
             def_id: id,

@@ -1,0 +1,4 @@
+*main
+    defer
+        log 'cleanup'
+    log 'work'

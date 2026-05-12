@@ -1,0 +1,5 @@
+*main
+    x is -3.5
+    log x.abs()
+    log x.floor()
+    log x.ceil()

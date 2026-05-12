@@ -1,0 +1,23 @@
+# Dollar-weighted return: sum(cf*time) / sum(cf).
+*dwr(cf as Vec of i64, t as Vec of i64, n as i64) returns i64
+    num is 0
+    den is 0
+    i is 0
+    while i < n
+        num is num + cf.get(i) * t.get(i)
+        den is den + cf.get(i)
+        i is i + 1
+    if den equals 0
+        return 0
+    num / den
+
+*main
+    c is vec()
+    c.push(100)
+    c.push(200)
+    c.push(50)
+    t is vec()
+    t.push(1)
+    t.push(5)
+    t.push(10)
+    log dwr(c, t, 3)

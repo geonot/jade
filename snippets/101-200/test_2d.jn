@@ -1,0 +1,13 @@
+*main
+    g is vec()
+    i is 0
+    while i < 3
+        row is vec()
+        j is 0
+        while j < 3
+            row.push(i * 3 + j)
+            j is j + 1
+        g.push(row)
+        i is i + 1
+    log g.get(0).get(2)
+    log g.get(2).get(2)

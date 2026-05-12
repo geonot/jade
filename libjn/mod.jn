@@ -1,0 +1,56 @@
+# libjn — Jinn drop-in replacement for the C standard library.
+#
+# Aggregator module. Re-exports every libjn header under the
+# `std.libjn.<header>` namespace.
+#
+# Usage:
+#     use std.libjn.stdio
+#     stdio.printf("hello\n")
+#
+# For C-style global namespace (every symbol unqualified), see
+# `std.libjn.compat` and the libjn.md document.
+
+# ── ISO C standard headers ──
+use std.libjn.assert
+use std.libjn.complex
+use std.libjn.ctype
+use std.libjn.errno
+use std.libjn.fenv
+use std.libjn.float
+use std.libjn.inttypes
+use std.libjn.iso646
+use std.libjn.limits
+use std.libjn.locale
+use std.libjn.math
+use std.libjn.setjmp
+use std.libjn.signal
+use std.libjn.stdalign
+use std.libjn.stdarg
+use std.libjn.stdatomic
+use std.libjn.stdbool
+use std.libjn.stddef
+use std.libjn.stdint
+use std.libjn.stdio
+use std.libjn.stdlib
+use std.libjn.stdnoreturn
+use std.libjn.string
+use std.libjn.tgmath
+use std.libjn.threads
+use std.libjn.time
+use std.libjn.uchar
+use std.libjn.wchar
+use std.libjn.wctype
+
+# ── POSIX subset ──
+use std.libjn.dirent
+use std.libjn.fcntl
+use std.libjn.pthread
+use std.libjn.semaphore
+use std.libjn.sys_mman
+use std.libjn.sys_socket
+use std.libjn.sys_stat
+use std.libjn.sys_types
+use std.libjn.sys_wait
+use std.libjn.unistd
+
+nop

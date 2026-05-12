@@ -1,0 +1,25 @@
+# FIR filter: convolve with 4-tap kernel.
+*fir(x as Vec of i64, h as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 3
+    while i < n
+        a is x.get(i) * h.get(0)
+        b is x.get(i - 1) * h.get(1)
+        c is x.get(i - 2) * h.get(2)
+        d is x.get(i - 3) * h.get(3)
+        s is s + a + b + c + d
+        i is i + 1
+    s
+
+*main
+    x is vec()
+    i is 0
+    while i < 16
+        x.push(i)
+        i is i + 1
+    h is vec()
+    h.push(1)
+    h.push(2)
+    h.push(3)
+    h.push(4)
+    log fir(x, h, 16)

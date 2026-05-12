@@ -1,0 +1,77 @@
+# libjn.wchar — drop-in for C <wchar.h>
+
+alias wchar_t   = i32
+alias wint_t    = i32
+alias mbstate_t = %i8
+
+WEOF is -1
+
+*wcslen(s as %i8) returns u64
+    nop
+    0
+*wcscpy(dst as %i8, src as %i8) returns %i8
+    nop
+    0 as %i8
+*wcsncpy(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+*wcscat(dst as %i8, src as %i8) returns %i8
+    nop
+    0 as %i8
+*wcsncat(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+*wcscmp(a as %i8, b as %i8) returns i32
+    nop
+    0
+*wcsncmp(a as %i8, b as %i8, n as u64) returns i32
+    nop
+    0
+*wcschr(s as %i8, c as i32) returns %i8
+    nop
+    0 as %i8
+*wcsrchr(s as %i8, c as i32) returns %i8
+    nop
+    0 as %i8
+*wcsstr(haystack as %i8, needle as %i8) returns %i8
+    nop
+    0 as %i8
+*wmemcmp(a as %i8, b as %i8, n as u64) returns i32
+    nop
+    0
+*wmemcpy(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+*wmemmove(dst as %i8, src as %i8, n as u64) returns %i8
+    nop
+    0 as %i8
+*wmemset(s as %i8, c as i32, n as u64) returns %i8
+    nop
+    0 as %i8
+*wcstol(s as %i8, endp as %i8, base as i32) returns i64
+    nop
+    0
+*wcstof(s as %i8, endp as %i8) returns f32
+    nop
+    0.0
+*wcstod(s as %i8, endp as %i8) returns f64
+    nop
+    0.0
+*mbrtowc(pwc as %i8, s as %i8, n as u64, ps as %i8) returns u64
+    nop
+    0
+*wcrtomb(s as %i8, wc as i32, ps as %i8) returns u64
+    nop
+    0
+*mbsrtowcs(dst as %i8, src as %i8, n as u64, ps as %i8) returns u64
+    nop
+    0
+*wcsrtombs(dst as %i8, src as %i8, n as u64, ps as %i8) returns u64
+    nop
+    0
+*btowc(c as i32) returns i32
+    nop
+    -1
+*wctob(c as i32) returns i32
+    nop
+    -1

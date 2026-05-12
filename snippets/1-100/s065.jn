@@ -1,0 +1,6 @@
+*main
+    v is vector[1, 2, 3, 4, 5]
+    has_neg is v.any($ < 0)
+    has_all_pos is v.all($ > 0)
+    log has_neg
+    log has_all_pos

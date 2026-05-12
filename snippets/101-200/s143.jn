@@ -1,0 +1,12 @@
+# Run-length encoding via count of repeats.
+*main
+    s is "aaabbcdddde"
+    i is 0
+    while i < s.length
+        j is i + 1
+        c is s.char_at(i)
+        while j < s.length and s.char_at(j) equals c
+            j is j + 1
+        log s.slice(i, i + 1)
+        log j - i
+        i is j

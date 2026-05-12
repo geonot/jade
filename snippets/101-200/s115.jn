@@ -1,0 +1,14 @@
+# Palindrome int check.
+*is_palindrome(n as i64) returns bool
+    if n < 0
+        return false
+    orig is n
+    r is 0
+    while n > 0
+        r is r * 10 + n mod 10
+        n is n / 10
+    r equals orig
+
+*main
+    log is_palindrome(12321)
+    log is_palindrome(12345)

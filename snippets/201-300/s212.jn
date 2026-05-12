@@ -1,0 +1,6 @@
+# Tick-to-trade latency simulator: subtract pipeline stages.
+*latency(parse as i64, risk as i64, route as i64, ack as i64) returns i64
+    parse + risk + route + ack
+
+*main
+    log latency(120, 80, 200, 60)

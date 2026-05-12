@@ -1,0 +1,60 @@
+# libjn.ctype — drop-in for C <ctype.h>
+#
+# Single-byte (locale-default) character classification and case mapping.
+# Wide-character variants live in libjn.wctype.
+
+*isalnum(c as i32) returns i32
+    nop
+    0
+
+*isalpha(c as i32) returns i32
+    nop
+    0
+
+*isblank(c as i32) returns i32
+    nop
+    0
+
+*iscntrl(c as i32) returns i32
+    nop
+    0
+
+*isdigit(c as i32) returns i32
+    nop
+    0
+
+*isgraph(c as i32) returns i32
+    nop
+    0
+
+*islower(c as i32) returns i32
+    nop
+    0
+
+*isprint(c as i32) returns i32
+    nop
+    0
+
+*ispunct(c as i32) returns i32
+    nop
+    0
+
+*isspace(c as i32) returns i32
+    nop
+    0
+
+*isupper(c as i32) returns i32
+    nop
+    0
+
+*isxdigit(c as i32) returns i32
+    nop
+    0
+
+*tolower(c as i32) returns i32
+    nop
+    0
+
+*toupper(c as i32) returns i32
+    nop
+    0

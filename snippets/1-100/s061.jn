@@ -1,0 +1,6 @@
+*main
+    m is map()
+    m.set('a', 1)
+    m.set('b', 2)
+    log m.get('a')
+    log m.has('b')

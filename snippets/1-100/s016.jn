@@ -1,0 +1,5 @@
+*main
+    s is 'hello'
+    log s.contains('ell')
+    log s.starts_with('he')
+    log s.ends_with('lo')

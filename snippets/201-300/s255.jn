@@ -1,0 +1,8 @@
+# Missile lead intercept angle approx (geometry-only).
+*lead(target_v as i64, range as i64, our_v as i64) returns i64
+    if our_v equals 0
+        return 0
+    target_v * range / our_v
+
+*main
+    log lead(50, 1000, 200)

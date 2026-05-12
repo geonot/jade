@@ -1,0 +1,18 @@
+# Loan amortization: total interest over n periods.
+*interest_total(p as i64, r_bp as i64, n as i64) returns i64
+    bal is p
+    pay is p / n + p * r_bp / 10000
+    paid_int is 0
+    i is 0
+    while i < n
+        intp is bal * r_bp / 10000
+        prin is pay - intp
+        paid_int is paid_int + intp
+        bal is bal - prin
+        if bal < 0
+            bal is 0
+        i is i + 1
+    paid_int
+
+*main
+    log interest_total(10000, 600, 12)

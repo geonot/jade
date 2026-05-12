@@ -1,0 +1,7 @@
+type Sample
+    sensor as i64
+    value as i64
+    ts as i64
+
+*new(sensor as i64, value as i64, ts as i64) returns Sample
+    Sample(sensor is sensor, value is value, ts is ts)

@@ -1,0 +1,8 @@
+# Recursive sum of digits.
+*ds(n as i64) returns i64
+    if n < 10
+        return n
+    n mod 10 + ds(n / 10)
+
+*main
+    log ds(123456)

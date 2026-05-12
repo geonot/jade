@@ -1,0 +1,53 @@
+use models/edge
+use graph
+
+# Naive O(V^2) Dijkstra over an edge list.
+*shortest(g as Vec of Edge, src as i64, dst as i64) returns i64
+    n is graph.node_count(g)
+    big is 1000000000
+    dist is vec()
+    visited is vec()
+    i is 0
+    while i < n
+        dist.push(big)
+        visited.push(0)
+        i is i + 1
+    dist.set(src, 0)
+
+    step is 0
+    while step < n
+        # find min-dist unvisited
+        u is -1
+        best is big
+        k is 0
+        while k < n
+            if visited.get(k) equals 0 and dist.get(k) < best
+                best is dist.get(k)
+                u is k
+            k is k + 1
+        if u < 0
+            step is n
+        else
+            visited.set(u, 1)
+            # relax
+            ei is 0
+            while ei < g.len()
+                e is g.get(ei)
+                if e.src equals u
+                    nd is dist.get(u) + e.cost
+                    if nd < dist.get(e.dst)
+                        dist.set(e.dst, nd)
+                ei is ei + 1
+        step is step + 1
+    dist.get(dst)
+
+*reachable_count(g as Vec of Edge, src as i64) returns i64
+    n is graph.node_count(g)
+    big is 1000000000
+    c is 0
+    j is 0
+    while j < n
+        if shortest(g, src, j) < big
+            c is c + 1
+        j is j + 1
+    c

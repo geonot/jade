@@ -29,6 +29,11 @@ pub struct Parser {
     pending_post_stmts: Vec<Stmt>,
     gensym_counter: u32,
     depth: u32,
+    /// Active loop labels in scope; used so `break LABEL` / `continue LABEL`
+    /// in `parse_break`/`parse_continue` can recognize the label and emit a
+    /// magic placeholder expression instead of a bare identifier (which
+    /// would otherwise be looked up as a variable).
+    label_stack: Vec<crate::intern::Symbol>,
 }
 
 macro_rules! binop {
@@ -60,6 +65,7 @@ impl Parser {
             pending_post_stmts: Vec::new(),
             gensym_counter: 0,
             depth: 0,
+            label_stack: Vec::new(),
         }
     }
 
@@ -88,12 +94,25 @@ impl Parser {
             }
         }
         if !self.errors.is_empty() {
+            // Render only the first error's location; collapse remaining
+            // errors into the message body so we don't print a useless
+            // `line 0:0:` wrapper above the real diagnostic.
             let msgs: Vec<String> = self.errors.iter().map(|e| e.to_string()).collect();
-            return Err(ParseError::Error {
-                line: 0,
-                col: 0,
-                msg: format!("{} parse error(s):\n{}", msgs.len(), msgs.join("\n")),
-            });
+            let (line, col) = match &self.errors[0] {
+                ParseError::Error { line, col, .. } => (*line, *col),
+            };
+            let body = if msgs.len() == 1 {
+                msgs.into_iter().next().unwrap()
+            } else {
+                msgs.join("\n")
+            };
+            // Strip the redundant `line N:M:` prefix from the head message
+            // since the outer ParseError already carries it.
+            let body = body
+                .strip_prefix(&format!("line {line}:{col}: "))
+                .map(|s| s.to_string())
+                .unwrap_or(body);
+            return Err(ParseError::Error { line, col, msg: body });
         }
         let mut prog = Program { decls };
         // If there are top-level statements and no explicit *main, wrap them into an implicit *main
@@ -296,6 +315,15 @@ impl Parser {
                 Token::Insert => {
                     self.advance();
                     return Ok("insert".into());
+                }
+                // `log` is a builtin call keyword but is also a perfectly
+                // valid method/field name on user types (e.g. `obj.log()`,
+                // which the typer dispatches to a user `log` method or to
+                // the default `log(self)` formatter). Accept it here so
+                // method-position parsing succeeds.
+                Token::Log => {
+                    self.advance();
+                    return Ok("log".into());
                 }
                 _ => {}
             }

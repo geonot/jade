@@ -1,0 +1,27 @@
+# Waypoint shortest path: sum of L1 distances along ordered waypoints.
+*path_len(xs as Vec of i64, ys as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 1
+    while i < n
+        dx is xs.get(i) - xs.get(i - 1)
+        dy is ys.get(i) - ys.get(i - 1)
+        if dx < 0
+            dx is -dx
+        if dy < 0
+            dy is -dy
+        s is s + dx + dy
+        i is i + 1
+    s
+
+*main
+    xs is vec()
+    xs.push(0)
+    xs.push(3)
+    xs.push(7)
+    xs.push(2)
+    ys is vec()
+    ys.push(0)
+    ys.push(4)
+    ys.push(1)
+    ys.push(8)
+    log path_len(xs, ys, 4)

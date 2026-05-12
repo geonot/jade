@@ -1,0 +1,25 @@
+# Count vowels in a string.
+*is_vowel(c as i64) returns bool
+    if c equals 97
+        return true
+    if c equals 101
+        return true
+    if c equals 105
+        return true
+    if c equals 111
+        return true
+    if c equals 117
+        return true
+    false
+
+*count_vowels(s as String) returns i64
+    n is 0
+    i is 0
+    while i < s.length
+        if is_vowel(s.char_at(i))
+            n is n + 1
+        i is i + 1
+    n
+
+*main
+    log count_vowels("the quick brown fox")

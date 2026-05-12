@@ -1,0 +1,17 @@
+type Tx
+    sender as i64
+    receiver as i64
+    amount as i64
+    nonce as i64
+
+*new(sender as i64, receiver as i64, amount as i64, nonce as i64) returns Tx
+    Tx(sender is sender, receiver is receiver, amount is amount, nonce is nonce)
+
+*hash(t as Tx) returns i64
+    h is t.sender * 1315423911
+    h is h ^ (t.receiver * 2654435761)
+    h is h ^ (t.amount * 40503)
+    h is h ^ (t.nonce * 374761393)
+    if h < 0
+        h is -h
+    h

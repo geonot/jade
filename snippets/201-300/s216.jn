@@ -1,0 +1,23 @@
+# Banking: double-entry ledger sum of debits = credits sanity.
+*bal(amounts as Vec of i64, sides as Vec of i64, n as i64) returns i64
+    d is 0
+    c is 0
+    i is 0
+    while i < n
+        if sides.get(i) equals 1
+            d is d + amounts.get(i)
+        else
+            c is c + amounts.get(i)
+        i is i + 1
+    d - c
+
+*main
+    a is vec()
+    a.push(100)
+    a.push(50)
+    a.push(150)
+    s is vec()
+    s.push(1)
+    s.push(0)
+    s.push(0)
+    log bal(a, s, 3)

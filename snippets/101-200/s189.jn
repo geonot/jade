@@ -1,0 +1,7 @@
+# Generate first n triangular numbers.
+*main
+    n is 10
+    i is 1
+    while i <= n
+        log i * (i + 1) / 2
+        i is i + 1

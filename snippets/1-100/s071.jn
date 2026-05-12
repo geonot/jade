@@ -1,0 +1,8 @@
+type Point
+    x as i64
+    y as i64
+
+*main
+    p is Point(x is 3, y is 4)
+    log p.x
+    log p.y

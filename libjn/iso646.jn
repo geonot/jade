@@ -1,0 +1,7 @@
+# libjn.iso646 — drop-in for C <iso646.h>
+#
+# Spelled-out operator macros. Jinn already maps `and`/`or`/`not`/`xor`
+# at the lexer level; these are surface-syntax shims for C source-compat.
+#
+# (No symbols to bind in Jinn; this file documents the mapping.)
+nop

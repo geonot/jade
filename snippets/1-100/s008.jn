@@ -1,0 +1,5 @@
+*main
+    a as i32 is 100
+    b as f64 is 1.5
+    log a
+    log b

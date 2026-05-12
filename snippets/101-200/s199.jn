@@ -1,0 +1,21 @@
+# Naive substring search (returns -1 if not found).
+*find_sub(h as String, n as String) returns i64
+    if n.length equals 0
+        return 0
+    i is 0
+    last is h.length - n.length
+    while i <= last
+        j is 0
+        ok is true
+        while j < n.length and ok
+            if h.char_at(i + j) not equals n.char_at(j)
+                ok is false
+            j is j + 1
+        if ok
+            return i
+        i is i + 1
+    0 - 1
+
+*main
+    log find_sub("the quick brown fox", "brown")
+    log find_sub("hello", "world")

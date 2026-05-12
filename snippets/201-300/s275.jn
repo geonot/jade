@@ -1,0 +1,17 @@
+# CAN bus arbitration: lowest ID wins.
+*winner(ids as Vec of i64, n as i64) returns i64
+    w is ids.get(0)
+    i is 1
+    while i < n
+        if ids.get(i) < w
+            w is ids.get(i)
+        i is i + 1
+    w
+
+*main
+    ids is vec()
+    ids.push(0x300)
+    ids.push(0x101)
+    ids.push(0x200)
+    ids.push(0x080)
+    log winner(ids, 4)

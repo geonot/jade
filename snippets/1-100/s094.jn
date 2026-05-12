@@ -1,0 +1,6 @@
+use random
+
+*main
+    r is random.seed(42)
+    n is r.range(0, 100)
+    log n >= 0

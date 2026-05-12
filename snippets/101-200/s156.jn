@@ -1,0 +1,14 @@
+# Fibonacci modulo m using fast doubling-ish iterative.
+*fib_mod(n as i64, m as i64) returns i64
+    a is 0
+    b is 1
+    i is 0
+    while i < n
+        t is (a + b) mod m
+        a is b
+        b is t
+        i is i + 1
+    a
+
+*main
+    log fib_mod(100, 1000000007)

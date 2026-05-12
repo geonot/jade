@@ -1,0 +1,6 @@
+*connect(host as String, port as i64 is 8080)
+    log '{host}:{port}'
+
+*main
+    connect('localhost')
+    connect('example.com', 443)

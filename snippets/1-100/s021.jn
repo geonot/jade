@@ -1,0 +1,6 @@
+*main
+    x is 10
+    if x > 5
+        log 'big'
+    else
+        log 'small'

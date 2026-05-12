@@ -1,0 +1,41 @@
+use models/order
+use models/trade
+use book
+
+# Try to match `incoming` against opposite-side resting `book`.
+# Returns updated book and produced trades.
+*match_one(orders as Vec of Order, incoming as Order, trades as Vec of Trade) returns Vec of Order
+    rem is incoming.qty
+    i is 0
+    while i < orders.len() and rem > 0
+        o is orders.get(i)
+        cross is 0
+        if order.is_buy(incoming) and order.is_sell(o) and incoming.price >= o.price
+            cross is 1
+        if order.is_sell(incoming) and order.is_buy(o) and incoming.price <= o.price
+            cross is 1
+        if cross equals 1 and o.qty > 0
+            fill is rem
+            if o.qty < fill
+                fill is o.qty
+            rem is rem - fill
+            new_q is o.qty - fill
+            orders.set(i, order.with_qty(o, new_q))
+            buy_id is incoming.id
+            sell_id is o.id
+            if order.is_sell(incoming)
+                buy_id is o.id
+                sell_id is incoming.id
+            trades.push(trade.new(buy_id, sell_id, o.price, fill))
+        i is i + 1
+    if rem > 0
+        orders.push(order.with_qty(incoming, rem))
+    orders
+
+*total_volume(trades as Vec of Trade) returns i64
+    s is 0
+    i is 0
+    while i < trades.len()
+        s is s + trade.notional(trades.get(i))
+        i is i + 1
+    s

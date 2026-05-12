@@ -1,0 +1,10 @@
+# Shuffle is hard without rng — instead, log a deterministic permutation.
+*main
+    n is 8
+    perm is vec()
+    i is 0
+    while i < n
+        perm.push((i * 5 + 3) mod n)
+        i is i + 1
+    for x in perm
+        log x

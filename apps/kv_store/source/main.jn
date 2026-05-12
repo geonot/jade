@@ -1,0 +1,38 @@
+use models/entry
+use sharding
+use wal
+use kvstore
+
+*main
+    s is kvstore.new_store()
+    log_ops is vec()
+
+    n is 0
+    while n < 100
+        s is kvstore.put(s, n, n * 7, 0, 0)
+        log_ops is wal.append(log_ops, wal.put_op(n, n * 7, n))
+        n is n + 1
+
+    s is kvstore.put(s, 1000, 42, 10, 5)
+    s is kvstore.put(s, 1001, 43, 10, 100)
+    log_ops is wal.append(log_ops, wal.put_op(1000, 42, 10))
+    log_ops is wal.append(log_ops, wal.put_op(1001, 43, 10))
+
+    log 'size_now_10'
+    log kvstore.size(s, 10)
+    log 'size_now_50'
+    log kvstore.size(s, 50)
+    log 'get_5'
+    log kvstore.get(s, 5, 10)
+    log 'get_99'
+    log kvstore.get(s, 99, 10)
+    log 'get_missing'
+    log kvstore.get(s, 12345, 10)
+    log 'get_expired_at_50'
+    log kvstore.get(s, 1000, 50)
+    log 'get_alive_at_50'
+    log kvstore.get(s, 1001, 50)
+    log 'wal_entries'
+    log wal.replay_count(log_ops)
+    log 'bucket_for_42'
+    log sharding.bucket_of(42)

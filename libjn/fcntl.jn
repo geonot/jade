@@ -1,0 +1,67 @@
+# libjn.fcntl — drop-in for POSIX <fcntl.h>
+
+# ── Open flags ──
+O_RDONLY    is 0
+O_WRONLY    is 1
+O_RDWR      is 2
+O_CREAT     is 0x40
+O_EXCL      is 0x80
+O_NOCTTY    is 0x100
+O_TRUNC     is 0x200
+O_APPEND    is 0x400
+O_NONBLOCK  is 0x800
+O_DSYNC     is 0x1000
+O_SYNC      is 0x101000
+O_RSYNC     is 0x101000
+O_DIRECTORY is 0x10000
+O_NOFOLLOW  is 0x20000
+O_CLOEXEC   is 0x80000
+O_PATH      is 0x200000
+O_TMPFILE   is 0x410000
+
+# ── fcntl commands ──
+F_DUPFD         is 0
+F_GETFD         is 1
+F_SETFD         is 2
+F_GETFL         is 3
+F_SETFL         is 4
+F_GETLK         is 5
+F_SETLK         is 6
+F_SETLKW        is 7
+F_DUPFD_CLOEXEC is 1030
+
+FD_CLOEXEC is 1
+
+F_RDLCK is 0
+F_WRLCK is 1
+F_UNLCK is 2
+
+AT_FDCWD            is -100
+AT_SYMLINK_NOFOLLOW is 0x100
+AT_REMOVEDIR        is 0x200
+AT_SYMLINK_FOLLOW   is 0x400
+AT_EACCESS          is 0x200
+
+*open(path as %i8, flags as i32) returns i32
+    nop
+    -1
+
+*openat(dirfd as i32, path as %i8, flags as i32) returns i32
+    nop
+    -1
+
+*creat(path as %i8, mode as u32) returns i32
+    nop
+    -1
+
+*fcntl(fd as i32, cmd as i32) returns i32
+    nop
+    -1
+
+*posix_fadvise(fd as i32, off as i64, len as i64, advice as i32) returns i32
+    nop
+    0
+
+*posix_fallocate(fd as i32, off as i64, len as i64) returns i32
+    nop
+    0

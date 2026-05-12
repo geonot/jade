@@ -41,7 +41,7 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::SpawnActor(name, args) => {
                     if !args.is_empty() {
                         return Err(format!(
-                            "mir_codegen: SpawnActor '{name}' has {} constructor args but actor spawn does not yet support arguments",
+                            "SpawnActor '{name}' has {} constructor args but actor spawn does not yet support arguments",
                             args.len()
                         ));
                     }

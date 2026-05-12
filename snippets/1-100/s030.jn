@@ -1,0 +1,4 @@
+*main
+    x is -5
+    abs_x is x >= 0 ? x ! 0 - x
+    log abs_x

@@ -1,0 +1,13 @@
+# Power via repeated squaring.
+*ipow(base as i64, exp as i64) returns i64
+    r is 1
+    while exp > 0
+        if exp & 1 equals 1
+            r is r * base
+        base is base * base
+        exp is exp >> 1
+    r
+
+*main
+    log ipow(2, 10)
+    log ipow(3, 7)

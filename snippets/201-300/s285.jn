@@ -1,0 +1,12 @@
+# SPI master tx/rx loop: count bytes processed.
+*xfer(n as i64) returns i64
+    sent is 0
+    i is 0
+    while i < n
+        sent is sent + 1
+        i is i + 1
+    sent
+
+*main
+    log xfer(64)
+    log xfer(0)

@@ -1,0 +1,13 @@
+# Bit-reversal permutation index for FFT.
+*bitrev(x as i64, bits as i64) returns i64
+    r is 0
+    i is 0
+    while i < bits
+        r is r * 2 + ((x / (1 << i)) % 2)
+        i is i + 1
+    r
+
+*main
+    log bitrev(1, 4)
+    log bitrev(7, 4)
+    log bitrev(13, 4)

@@ -1,0 +1,13 @@
+# Generate all subsets of {0,1,2,3} using bitmask.
+*main
+    n is 4
+    mask is 0
+    limit is 1 << n
+    while mask < limit
+        i is 0
+        log mask
+        while i < n
+            if (mask >> i) & 1 equals 1
+                log i
+            i is i + 1
+        mask is mask + 1

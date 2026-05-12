@@ -1,0 +1,34 @@
+# Validate balanced parentheses (no chained or).
+*is_close(c as i64) returns bool
+    if c equals 41
+        return true
+    if c equals 93
+        return true
+    if c equals 125
+        return true
+    false
+
+*balanced(s as String) returns bool
+    stack is vec()
+    i is 0
+    while i < s.length
+        c is s.char_at(i)
+        if c equals 40
+            stack.push(41)
+        if c equals 91
+            stack.push(93)
+        if c equals 123
+            stack.push(125)
+        if is_close(c)
+            if stack.length equals 0
+                return false
+            top is stack.pop()
+            if top not equals c
+                return false
+        i is i + 1
+    stack.length equals 0
+
+*main
+    log balanced("(()[])")
+    log balanced("(]")
+    log balanced("{[()]}")

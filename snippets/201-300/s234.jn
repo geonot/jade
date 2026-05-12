@@ -1,0 +1,18 @@
+# Mempool fee priority: count tx with fee >= threshold.
+*priority_count(fees as Vec of i64, n as i64, t as i64) returns i64
+    c is 0
+    i is 0
+    while i < n
+        if fees.get(i) >= t
+            c is c + 1
+        i is i + 1
+    c
+
+*main
+    f is vec()
+    f.push(10)
+    f.push(50)
+    f.push(5)
+    f.push(100)
+    f.push(30)
+    log priority_count(f, 5, 25)

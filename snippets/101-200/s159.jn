@@ -1,0 +1,17 @@
+# Two-pointer pair sum on sorted vec.
+*main
+    a is vec(1, 2, 4, 7, 11, 15)
+    target is 13
+    i is 0
+    j is a.length - 1
+    while i < j
+        s is a.get(i) + a.get(j)
+        if s equals target
+            log a.get(i)
+            log a.get(j)
+            return
+        if s < target
+            i is i + 1
+        else
+            j is j - 1
+    log 0 - 1

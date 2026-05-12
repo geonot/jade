@@ -1,0 +1,20 @@
+use models/message
+use models/user
+
+*classify(text_id as i64) returns i64
+    # 1=normal, 2=spam, 3=question
+    if text_id % 13 equals 0
+        2
+    else
+        if text_id % 7 equals 0
+            3
+        else
+            1
+
+*reward_for(text_id as i64) returns i64
+    k is classify(text_id)
+    if k equals 3
+        return 5
+    if k equals 2
+        return -10
+    1

@@ -1,0 +1,5 @@
+*main
+    s is 'hello world'
+    log s.length
+    log s.to_upper()
+    log s.to_lower()

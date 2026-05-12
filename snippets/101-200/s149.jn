@@ -1,0 +1,17 @@
+# Triangle area via Heron's formula.
+*sqrt(x as f64) returns f64
+    if x <= 0.0
+        return 0.0
+    g is x
+    i is 0
+    while i < 30
+        g is (g + x / g) / 2.0
+        i is i + 1
+    g
+
+*area(a as f64, b as f64, c as f64) returns f64
+    s is (a + b + c) / 2.0
+    sqrt(s * (s - a) * (s - b) * (s - c))
+
+*main
+    log area(3.0, 4.0, 5.0)

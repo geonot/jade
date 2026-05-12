@@ -1,0 +1,9 @@
+type Transfer
+    sku as i64
+    qty as i64
+    src_warehouse as i64
+    dst_warehouse as i64
+    ts as i64
+
+*new(sku as i64, qty as i64, src as i64, dst as i64, ts as i64) returns Transfer
+    Transfer(sku is sku, qty is qty, src_warehouse is src, dst_warehouse is dst, ts is ts)

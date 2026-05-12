@@ -1,0 +1,22 @@
+# Selection sort.
+*ssort(v)
+    n is v.length
+    i is 0
+    while i < n
+        m is i
+        j is i + 1
+        while j < n
+            if v.get(j) < v.get(m)
+                m is j
+            j is j + 1
+        if m not equals i
+            t is v.get(i)
+            v.set(i, v.get(m))
+            v.set(m, t)
+        i is i + 1
+
+*main
+    a is vec(5, 1, 4, 2, 8, 3)
+    ssort(a)
+    for x in a
+        log x

@@ -1,0 +1,7 @@
+# Closure as predicate.
+*main
+    a is vec(3, 1, 4, 1, 5, 9, 2, 6)
+    threshold is 4
+    big is a.filter(|x| x > threshold)
+    for x in big
+        log x

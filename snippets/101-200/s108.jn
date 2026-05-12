@@ -1,0 +1,12 @@
+# GCD via Euclid.
+*gcd(a as i64, b as i64) returns i64
+    while b not equals 0
+        t is b
+        b is a mod b
+        a is t
+    a
+
+*main
+    log gcd(48, 18)
+    log gcd(1071, 462)
+    log gcd(1000000, 999983)

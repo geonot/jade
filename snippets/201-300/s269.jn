@@ -1,0 +1,16 @@
+# ADC running average over rolling window.
+*roll_avg(s as Vec of i64, n as i64, w as i64) returns i64
+    sum is 0
+    i is n - w
+    while i < n
+        sum is sum + s.get(i)
+        i is i + 1
+    sum / w
+
+*main
+    s is vec()
+    i is 0
+    while i < 20
+        s.push(500 + (i * 13) % 50)
+        i is i + 1
+    log roll_avg(s, 20, 5)

@@ -1,0 +1,21 @@
+# Bootloader stage transitions: rom -> sbl -> aboot -> kernel.
+*next(stage as i64, ok as i64) returns i64
+    if ok equals 0
+        return -1
+    stage + 1
+
+*boot(seq as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n and s >= 0
+        s is next(s, seq.get(i))
+        i is i + 1
+    s
+
+*main
+    s is vec()
+    s.push(1)
+    s.push(1)
+    s.push(1)
+    s.push(1)
+    log boot(s, 4)

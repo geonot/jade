@@ -1,0 +1,14 @@
+# Modular exponentiation.
+*modpow(base as i64, exp as i64, m as i64) returns i64
+    r is 1
+    base is base mod m
+    while exp > 0
+        if exp & 1 equals 1
+            r is (r * base) mod m
+        base is (base * base) mod m
+        exp is exp >> 1
+    r
+
+*main
+    log modpow(7, 100, 13)
+    log modpow(2, 1000, 1000000007)

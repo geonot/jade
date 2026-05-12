@@ -1,0 +1,25 @@
+# Topological sort via Kahn's algorithm.
+*main
+    n is 6
+    adj is vec(vec(1, 2), vec(3), vec(3), vec(4, 5), vec(), vec())
+    indeg is vec(0, 0, 0, 0, 0, 0)
+    i is 0
+    while i < n
+        for v in adj.get(i)
+            indeg.set(v, indeg.get(v) + 1)
+        i is i + 1
+    queue is vec()
+    i is 0
+    while i < n
+        if indeg.get(i) equals 0
+            queue.push(i)
+        i is i + 1
+    head is 0
+    while head < queue.length
+        u is queue.get(head)
+        head is head + 1
+        log u
+        for v in adj.get(u)
+            indeg.set(v, indeg.get(v) - 1)
+            if indeg.get(v) equals 0
+                queue.push(v)

@@ -1,0 +1,5 @@
+*main
+    popcount_x is popcount(0xFF)
+    clz_x is clz(1)
+    log popcount_x
+    log clz_x

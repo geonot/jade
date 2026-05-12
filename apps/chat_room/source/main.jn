@@ -1,0 +1,21 @@
+use std/time
+use models/message
+use models/user
+use moderation
+use room
+
+extern *usleep(us as i32) returns i32
+
+*main
+    r is spawn Room
+    i is 0
+    while i < 200
+        r.post(message.new(i % 5, i, i))
+        i is i + 1
+    extern.usleep(120000)
+    r.snapshot()
+    extern.usleep(40000)
+    stop r
+    extern.usleep(20000)
+    log 'sent'
+    log 200

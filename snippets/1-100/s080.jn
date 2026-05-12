@@ -1,0 +1,8 @@
+type Box
+    val as i64
+    LABEL is 99
+
+*main
+    b is Box(val is 5)
+    log b.val
+    log b.LABEL

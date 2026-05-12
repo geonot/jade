@@ -1,0 +1,15 @@
+# CRDT G-counter: sum of per-node counters.
+*total(c as Vec of i64, n as i64) returns i64
+    s is 0
+    i is 0
+    while i < n
+        s is s + c.get(i)
+        i is i + 1
+    s
+
+*main
+    c is vec()
+    c.push(7)
+    c.push(11)
+    c.push(3)
+    log total(c, 3)

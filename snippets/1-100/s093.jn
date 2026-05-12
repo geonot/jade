@@ -1,0 +1,21 @@
+# Simple JSON-like value extractor.
+*find_value(s as String, key as String) returns String
+    needle is '"' + key + '":'
+    pos is s.find(needle)
+    if pos < 0
+        return ""
+    a is pos + needle.length
+    while a < s.length and s.char_at(a) equals 32
+        a is a + 1
+    b is a
+    while b < s.length
+        c is s.char_at(b)
+        if c equals 44 or c equals 125
+            break
+        b is b + 1
+    s.slice(a, b)
+
+*main
+    s is '{"x": 1, "y": 2}'
+    log find_value(s, "x")
+    log find_value(s, "y")
