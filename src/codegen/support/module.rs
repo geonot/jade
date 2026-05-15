@@ -350,6 +350,11 @@ impl<'ctx> Compiler<'ctx> {
                         let thunk_fn = self.module.add_function(&thunk_name, thunk_fn_ty, None);
                         let entry = self.ctx.append_basic_block(thunk_fn, "entry");
                         self.bld.position_at_end(entry);
+                        // Set cur_fn so entry_alloca-style helpers (used when
+                        // spilling struct args to match the callee's ptr ABI)
+                        // can locate the thunk's entry block.
+                        let prev_fn = self.cur_fn;
+                        self.cur_fn = Some(thunk_fn);
                         let self_ptr = ice!(
                             thunk_fn.get_first_param(),
                             "vtable thunk missing self param"
@@ -369,10 +374,28 @@ impl<'ctx> Compiler<'ctx> {
                         let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                             vec![first_arg.into()];
                         for i in 1..thunk_fn.count_params() {
-                            call_args.push(
-                                ice!(thunk_fn.get_nth_param(i), "vtable thunk missing param")
-                                    .into(),
-                            );
+                            let raw =
+                                ice!(thunk_fn.get_nth_param(i), "vtable thunk missing param");
+                            // Match the callee's ABI: if it expects a pointer
+                            // for this slot but we received a struct value via
+                            // the thunk's signature, spill to an alloca and
+                            // pass the pointer.
+                            let param_ty_idx = i as usize;
+                            let callee_param_is_ptr = fv
+                                .get_type()
+                                .get_param_types()
+                                .get(param_ty_idx)
+                                .map(|t| t.is_pointer_type())
+                                .unwrap_or(false);
+                            let arg_val: inkwell::values::BasicValueEnum<'ctx> =
+                                if callee_param_is_ptr && !raw.is_pointer_value() {
+                                    let tmp = self.entry_alloca(raw.get_type(), "thunk.arg");
+                                    let _ = self.bld.build_store(tmp, raw);
+                                    tmp.into()
+                                } else {
+                                    raw
+                                };
+                            call_args.push(arg_val.into());
                         }
                         let result = b!(self.bld.build_call(fv, &call_args, "thunk.call"));
                         if let Some(rv) = result.try_as_basic_value().basic() {
@@ -380,6 +403,7 @@ impl<'ctx> Compiler<'ctx> {
                         } else {
                             b!(self.bld.build_return(None));
                         }
+                        self.cur_fn = prev_fn;
                         fn_ptrs.push(thunk_fn.as_global_value().as_pointer_value());
                     } else {
                         fn_ptrs.push(ptr.const_null());

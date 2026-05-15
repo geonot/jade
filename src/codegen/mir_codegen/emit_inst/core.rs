@@ -562,11 +562,22 @@ impl<'ctx> Compiler<'ctx> {
                             } else {
                                 recv_val
                             };
+                        // Coerce remaining args: structs by-value → ptr when the
+                        // callee param expects ptr (consistent with declare_mir_fn).
+                        let arg_vals: Vec<BasicValueEnum<'ctx>> =
+                            args.iter().map(|a| self.val(*a)).collect();
+                        let ptypes_full = fv.get_type().get_param_types();
+                        let ptypes_rest: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                            ptypes_full
+                                .iter()
+                                .skip(1)
+                                .map(|t| (*t).into())
+                                .collect();
+                        let coerced =
+                            self.coerce_call_args(&arg_vals, args, &ptypes_rest);
                         let mut all_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                             vec![self_arg.into()];
-                        for a in args {
-                            all_args.push(self.val(*a).into());
-                        }
+                        all_args.extend(coerced);
                         let csv = b!(self.bld.build_call(fv, &all_args, "mcall"));
                         // After a method call that may have mutated self through the alloca pointer,
                         // update the value map to point to the alloca pointer.
@@ -674,12 +685,29 @@ impl<'ctx> Compiler<'ctx> {
                     // original. Without this, the local alloca + store
                     // would silently shadow the source and break call-site
                     // mutation visibility.
-                    if matches!(inst.ty, Type::Struct(_, _) | Type::Tuple(_))
+                    // Peel Type::Ptr(Struct/Tuple/Enum) to its inner type:
+                    // trait/by-ptr methods produce demote-to-mem Stores with
+                    // the param's declared Ptr(Struct) type. The aliasing
+                    // semantics are identical to Struct.
+                    let effective_ty = match &inst.ty {
+                        Type::Ptr(inner)
+                            if matches!(
+                                inner.as_ref(),
+                                Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
+                            ) =>
+                        {
+                            (**inner).clone()
+                        }
+                        _ => inst.ty.clone(),
+                    };
+                    if matches!(
+                        effective_ty,
+                        Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
+                    ) && !self.var_allocs.contains_key(name)
                         && let Some(src_ptr) = self.self_allocs.get(val).copied()
                     {
-                        let ty = inst.ty.clone();
-                        self.var_allocs.insert(*name, (src_ptr, ty.clone()));
-                        self.set_var(&name.as_str(), src_ptr, ty);
+                        self.var_allocs.insert(*name, (src_ptr, effective_ty.clone()));
+                        self.set_var(&name.as_str(), src_ptr, effective_ty);
                         return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
                     }
                     let v = self.val(*val);

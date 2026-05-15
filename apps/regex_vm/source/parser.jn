@@ -42,6 +42,9 @@ type State
     if peek(s) equals 42       # '*'
         s.pos is s.pos + 1
         return push_node(s, Node(tag is 4, ch is 0, left is a, right is 0))
+    if peek(s) equals 43       # '+'
+        s.pos is s.pos + 1
+        return push_node(s, Node(tag is 5, ch is 0, left is a, right is 0))
     a
 
 *is_term(c as i64) returns bool

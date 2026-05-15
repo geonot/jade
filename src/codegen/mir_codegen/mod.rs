@@ -395,7 +395,7 @@ impl<'ctx> Compiler<'ctx> {
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> = ptys
             .iter()
             .map(|t| match t {
-                Type::Struct(_, _) | Type::Tuple(_) => ptr_ty.into(),
+                Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_) => ptr_ty.into(),
                 _ => self.llvm_ty(t).into(),
             })
             .collect();
@@ -547,13 +547,35 @@ impl<'ctx> Compiler<'ctx> {
             // them in self_allocs so FieldGet/FieldSet take the GEP path
             // (mutating in place, visible to caller). val() will reload the
             // struct value lazily for non-field uses.
-            if matches!(param.ty, Type::Struct(_, _) | Type::Tuple(_))
-                && llvm_val.is_pointer_value()
+            // Peel a single Type::Ptr wrapper: trait/by-ptr methods declare
+            // self as Type::Ptr(Struct(_)) at the typer level, but the LLVM
+            // ABI is identical to Type::Struct(_) (always passed as ptr).
+            // Treat both forms uniformly so FieldGet/FieldSet take the
+            // in-place GEP path.
+            let effective_ty = match &param.ty {
+                Type::Ptr(inner)
+                    if matches!(
+                        inner.as_ref(),
+                        Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
+                    ) =>
+                {
+                    (**inner).clone()
+                }
+                _ => param.ty.clone(),
+            };
+            if matches!(
+                effective_ty,
+                Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
+            ) && llvm_val.is_pointer_value()
             {
                 let ptr = llvm_val.into_pointer_value();
-                let lt = self.llvm_ty(&param.ty);
+                let lt = self.llvm_ty(&effective_ty);
                 self.self_allocs.insert(param.value, ptr);
                 self.self_alloc_types.insert(param.value, lt);
+                // Override value_types so downstream lookups see the inner
+                // struct/tuple/enum type (needed by val()'s reload logic
+                // and by emit_field_get's struct_name detection).
+                self.value_types.insert(param.value, effective_ty);
             }
         }
 

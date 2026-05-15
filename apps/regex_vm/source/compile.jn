@@ -53,6 +53,15 @@ type Prog
         l3 is pc(p)
         patch(p, l1, 1, l2)
         patch(p, l1, 2, l3)
+    if n.tag equals 5
+        # Plus: L1: child ; SPLIT L1 L2 ; L2:
+        l1 is pc(p)
+        compile_node(p, nodes, n.left)
+        split_ip is pc(p)
+        emit(p, 4, 0, 0)
+        l2 is pc(p)
+        patch(p, split_ip, 1, l1)
+        patch(p, split_ip, 2, l2)
 
 *lower(nodes as Vec of Node) returns Prog
     p is Prog(code is vec())

@@ -94,26 +94,15 @@ impl<'ctx> Compiler<'ctx> {
             if let Type::Struct(name, _) = ety {
                 let fn_name = format!("{name}_equal");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let first_param_is_ptr = fv
-                        .get_type()
-                        .get_param_types()
-                        .first()
-                        .map(|t| t.is_pointer_type())
-                        .unwrap_or(false);
-                    let self_arg: BasicValueEnum = if first_param_is_ptr {
-                        let tmp = self.entry_alloca(self.llvm_ty(ety), "eq.self");
-                        b!(self.bld.build_store(tmp, lhs));
-                        tmp.into()
-                    } else {
-                        lhs
-                    };
-                    let result =
-                        b!(self
-                            .bld
-                            .build_call(fv, &[self_arg.into(), rhs.into()], "eq.call"))
-                        .try_as_basic_value()
-                        .basic()
-                        .expect("ICE: call returned void");
+                    let ptypes = fv.get_type().get_param_types();
+                    let self_arg = self.coerce_op_arg(lhs, ptypes.first(), "eq.self");
+                    let rhs_arg = self.coerce_op_arg(rhs, ptypes.get(1), "eq.rhs");
+                    let result = b!(self
+                        .bld
+                        .build_call(fv, &[self_arg.into(), rhs_arg.into()], "eq.call"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void");
                     return if matches!(op, BinOp::Ne) {
                         Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
                     } else {
@@ -137,22 +126,12 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(method) = trait_name {
                 let fn_name = format!("{name}_{method}");
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let first_param_is_ptr = fv
-                        .get_type()
-                        .get_param_types()
-                        .first()
-                        .map(|t| t.is_pointer_type())
-                        .unwrap_or(false);
-                    let self_arg: BasicValueEnum = if first_param_is_ptr {
-                        let tmp = self.entry_alloca(self.llvm_ty(ety), "op.self");
-                        b!(self.bld.build_store(tmp, lhs));
-                        tmp.into()
-                    } else {
-                        lhs
-                    };
+                    let ptypes = fv.get_type().get_param_types();
+                    let self_arg = self.coerce_op_arg(lhs, ptypes.first(), "op.self");
+                    let rhs_arg = self.coerce_op_arg(rhs, ptypes.get(1), "op.rhs");
                     let result = b!(self.bld.build_call(
                         fv,
-                        &[self_arg.into(), rhs.into()],
+                        &[self_arg.into(), rhs_arg.into()],
                         &format!("{method}.call")
                     ))
                     .try_as_basic_value()
@@ -548,5 +527,27 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(end_bb);
         Ok(result_ptr.into())
+    }
+
+    /// Coerce a value to match an operator-overload callee's parameter type.
+    /// If the callee expects a pointer but we have a struct value, spill it
+    /// to an alloca and pass the pointer (matches the struct-by-ref ABI in
+    /// `declare_mir_fn`).
+    fn coerce_op_arg(
+        &self,
+        v: BasicValueEnum<'ctx>,
+        param_ty: Option<&inkwell::types::BasicMetadataTypeEnum<'ctx>>,
+        name: &str,
+    ) -> BasicValueEnum<'ctx> {
+        let Some(pt) = param_ty else { return v };
+        if !pt.is_pointer_type() {
+            return v;
+        }
+        if v.is_pointer_value() {
+            return v;
+        }
+        let tmp = self.entry_alloca(v.get_type(), name);
+        let _ = self.bld.build_store(tmp, v);
+        tmp.into()
     }
 }

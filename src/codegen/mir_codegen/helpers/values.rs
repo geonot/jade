@@ -31,23 +31,12 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
-                    let first_param_is_ptr = fv
-                        .get_type()
-                        .get_param_types()
-                        .first()
-                        .map(|t| t.is_pointer_type())
-                        .unwrap_or(false);
-                    let self_arg: BasicValueEnum<'ctx> =
-                        if first_param_is_ptr && !l.is_pointer_value() {
-                            let tmp = self.entry_alloca(l.get_type(), "op.self");
-                            b!(self.bld.build_store(tmp, l));
-                            tmp.into()
-                        } else {
-                            l
-                        };
+                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                        fv.get_type().get_param_types().into_iter().map(|t| t.into()).collect();
+                    let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
                     let csv = b!(self.bld.build_call(
                         fv,
-                        &[self_arg.into(), r.into()],
+                        &coerced,
                         &format!("{method_name}.call")
                     ));
                     return Ok(self.call_result(csv));
@@ -224,23 +213,10 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
-                    let first_param_is_ptr = fv
-                        .get_type()
-                        .get_param_types()
-                        .first()
-                        .map(|t| t.is_pointer_type())
-                        .unwrap_or(false);
-                    let self_arg: BasicValueEnum<'ctx> =
-                        if first_param_is_ptr && !l.is_pointer_value() {
-                            let tmp = self.entry_alloca(l.get_type(), "cmp.self");
-                            b!(self.bld.build_store(tmp, l));
-                            tmp.into()
-                        } else {
-                            l
-                        };
-                    let csv = b!(self
-                        .bld
-                        .build_call(fv, &[self_arg.into(), r.into()], "cmp.call"));
+                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                        fv.get_type().get_param_types().into_iter().map(|t| t.into()).collect();
+                    let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
+                    let csv = b!(self.bld.build_call(fv, &coerced, "cmp.call"));
                     let result = self.call_result(csv);
                     return if matches!(op, mir::CmpOp::Ne) {
                         Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
@@ -536,15 +512,70 @@ impl<'ctx> Compiler<'ctx> {
                     // Search value_types for the MIR ValueId's type (covers function parameters).
                     self.value_types.get(&obj).and_then(|ty| match ty {
                         Type::Ptr(inner) => match inner.as_ref() {
-                            Type::Struct(name, _) => Some(name.clone()),
+                            Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
                             _ => None,
                         },
-                        Type::Struct(name, _) => Some(name.clone()),
+                        Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
                         _ => None,
                     })
                 });
             if let Some(name) = &struct_name {
                 if let Some(st) = self.module.get_struct_type(&name.as_str()) {
+                    // Enum-typed pointer: handle __tag and payload fields (_0, _1, ...)
+                    // with the same layout the struct-value branch uses (tag at index 0
+                    // as i32 → i64-zext, payload as byte buffer at index 1 with offsets
+                    // from compute_enum_payload_offset).
+                    if self.enums.contains_key(name) {
+                        if field == "__tag" {
+                            let tag_gep =
+                                b!(self.bld.build_struct_gep(st, ptr, 0, "tag"));
+                            let i32t = self.ctx.i32_type();
+                            let i64t = self.ctx.i64_type();
+                            let tag_i32 = b!(self.bld.build_load(i32t, tag_gep, "tag"));
+                            let val = b!(self.bld.build_int_z_extend(
+                                tag_i32.into_int_value(),
+                                i64t,
+                                "tag.ext"
+                            ));
+                            return Ok(val.into());
+                        }
+                        if let Some(idx_str) = field.strip_prefix('_') {
+                            if let Ok(idx) = idx_str.parse::<usize>() {
+                                let payload_gep =
+                                    b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
+                                let byte_offset =
+                                    self.compute_enum_payload_offset(&name.as_str(), idx);
+                                let field_ptr = if byte_offset == 0 {
+                                    payload_gep
+                                } else {
+                                    let offset_val =
+                                        self.ctx.i64_type().const_int(byte_offset, false);
+                                    unsafe {
+                                        b!(self.bld.build_gep(
+                                            self.ctx.i8_type(),
+                                            payload_gep,
+                                            &[offset_val],
+                                            "payload.field"
+                                        ))
+                                    }
+                                };
+                                let is_rec = Compiler::is_recursive_field(result_ty, &name.as_str());
+                                if is_rec {
+                                    let ptr_ty =
+                                        self.ctx.ptr_type(inkwell::AddressSpace::default());
+                                    let heap_ptr = b!(self
+                                        .bld
+                                        .build_load(ptr_ty, field_ptr, "box.ptr"))
+                                    .into_pointer_value();
+                                    let val =
+                                        b!(self.bld.build_load(res_llvm, heap_ptr, field));
+                                    return Ok(val);
+                                }
+                                let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
+                                return Ok(val);
+                            }
+                        }
+                    }
                     let field_idx = self.field_index(&name.as_str(), field);
                     let gep = b!(self.bld.build_struct_gep(st, ptr, field_idx, field));
                     return Ok(b!(self.bld.build_load(res_llvm, gep, field)));
