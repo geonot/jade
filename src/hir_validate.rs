@@ -426,7 +426,7 @@ impl HirValidator {
             | hir::ExprKind::FnRef(_, _)
             | hir::ExprKind::VariantRef(_, _, _)
             | hir::ExprKind::MapNew
-            | hir::ExprKind::Spawn(_)
+            | hir::ExprKind::Spawn(_, _)
             | hir::ExprKind::GlobalLoad(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_)

@@ -3,9 +3,8 @@ use models/entry
 
 *post(accounts as Vec of Account, e as Entry) returns Vec of Account
     out is vec()
-    i is 0
-    while i < accounts.len()
-        a is accounts.get(i)
+    loop(0, $ < accounts.len(), $ + 1)
+        a is accounts.get($)
         if a.id equals e.debit_id
             out.push(account.credit(a, e.amount))
         else
@@ -13,34 +12,27 @@ use models/entry
                 out.push(account.debit(a, e.amount))
             else
                 out.push(a)
-        i is i + 1
     out
 
 *total_assets(accounts as Vec of Account) returns i64
     s is 0
-    i is 0
-    while i < accounts.len()
-        a is accounts.get(i)
+    loop(0, $ < accounts.len(), $ + 1)
+        a is accounts.get($)
         if account.is_asset(a)
             s is s + a.balance
-        i is i + 1
     s
 
 *total_liabilities(accounts as Vec of Account) returns i64
     s is 0
-    i is 0
-    while i < accounts.len()
-        a is accounts.get(i)
+    loop(0, $ < accounts.len(), $ + 1)
+        a is accounts.get($)
         if account.is_liability(a)
             s is s + a.balance
-        i is i + 1
     s
 
 *find(accounts as Vec of Account, id as i64) returns Account
-    i is 0
-    while i < accounts.len()
-        a is accounts.get(i)
+    loop(0, $ < accounts.len(), $ + 1)
+        a is accounts.get($)
         if a.id equals id
             return a
-        i is i + 1
     accounts.get(0)

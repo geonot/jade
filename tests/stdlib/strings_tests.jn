@@ -1,0 +1,55 @@
+use std/strings
+
+test 'trim'
+    assert strings.trim('  hi  ') equals 'hi'
+    assert strings.trim('') equals ''
+    assert strings.trim('   ') equals ''
+    assert strings.trim('x') equals 'x'
+
+test 'trim_left / trim_right'
+    assert strings.trim_left('  hi  ') equals 'hi  '
+    assert strings.trim_right('  hi  ') equals '  hi'
+
+test 'is_blank'
+    assert strings.is_blank('')
+    assert strings.is_blank('   \t\n')
+    assert not strings.is_blank(' x ')
+
+test 'contains'
+    assert strings.contains('hello world', 'world')
+    assert not strings.contains('hello', 'xyz')
+
+test 'replace'
+    assert strings.replace('foo bar', 'bar', 'baz') equals 'foo baz'
+    assert strings.replace('aaa', 'a', 'bb') equals 'bbbbbb'
+    assert strings.replace('xxx', 'y', 'z') equals 'xxx'
+
+test 'replace_first'
+    assert strings.replace_first('aaa', 'a', 'b') equals 'baa'
+
+test 'to_lower / to_upper'
+    assert strings.to_lower('ABCxyz') equals 'abcxyz'
+    assert strings.to_upper('AbC') equals 'ABC'
+
+test 'capitalize'
+    assert strings.capitalize('hello') equals 'Hello'
+    assert strings.capitalize('') equals ''
+
+test 'snake_to_camel'
+    assert strings.snake_to_camel('my_var_name') equals 'myVarName'
+
+test 'camel_to_snake'
+    assert strings.camel_to_snake('myVarName') equals 'my_var_name'
+
+test 'builder accumulates'
+    sb is strings.builder()
+    sb.write('hello')
+    sb.write(', ')
+    sb.write('world')
+    assert sb.to_string() equals 'hello, world'
+
+test 'split_lines'
+    parts is strings.split_lines('a\nb\nc')
+    assert parts.length equals 3
+    assert parts.get(0) equals 'a'
+    assert parts.get(2) equals 'c'

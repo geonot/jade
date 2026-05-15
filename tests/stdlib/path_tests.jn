@@ -1,0 +1,34 @@
+use std/path
+
+test 'join basic'
+    assert path.join('foo', 'bar') equals 'foo/bar'
+    assert path.join('foo/', 'bar') equals 'foo/bar'
+    assert path.join('', 'bar') equals 'bar'
+    assert path.join('foo', '') equals 'foo'
+
+test 'join3'
+    assert path.join3('a', 'b', 'c') equals 'a/b/c'
+
+test 'dir'
+    assert path.dir('/foo/bar/baz') equals '/foo/bar'
+    assert path.dir('file.txt') equals ''
+
+test 'base'
+    assert path.base('/foo/bar.txt') equals 'bar.txt'
+    assert path.base('hello') equals 'hello'
+
+test 'ext'
+    assert path.ext('/foo/bar.txt') equals '.txt'
+    assert path.ext('noext') equals ''
+
+test 'stem'
+    assert path.stem('/a/b/file.txt') equals 'file'
+    assert path.stem('plain') equals 'plain'
+
+test 'with_ext'
+    assert path.with_ext('a.txt', '.md') equals 'a.md'
+
+test 'is_absolute / is_relative'
+    assert path.is_absolute('/etc/hosts')
+    assert path.is_relative('etc/hosts')
+    assert not path.is_absolute('foo')

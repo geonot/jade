@@ -146,14 +146,14 @@ impl InferCtx {
                         match constraint {
                             TypeConstraint::None => {
                                 self.default_warnings.push(format!(
-                                    "line {}:{}: unsolved type variable defaulted to i64 ({}). Consider adding `: i64` or the appropriate type annotation.",
-                                    origin.span.line, origin.span.col, origin.reason
+                                    "{}: unsolved type variable defaulted to i64 ({}). Consider adding `: i64` or the appropriate type annotation.",
+                                    origin.span.loc(), origin.reason
                                 ));
                             }
                             TypeConstraint::Numeric => {
                                 self.default_warnings.push(format!(
-                                    "line {}:{}: numeric type defaults to i64 ({}). Add `: i64` for integer or `: f64` for float.",
-                                    origin.span.line, origin.span.col, origin.reason
+                                    "{}: numeric type defaults to i64 ({}). Add `: i64` for integer or `: f64` for float.",
+                                    origin.span.loc(), origin.reason
                                 ));
                             }
                             _ => {}
@@ -163,12 +163,12 @@ impl InferCtx {
                     // Collect usage site notes for enhanced diagnostics
                     let usage_notes = {
                         let sites = &self.usage_sites[root as usize];
-                        if sites.len() > 1 {
+                        if !sites.is_empty() {
                             let mut notes = String::new();
                             for (site_span, site_reason) in sites.iter().take(5) {
                                 notes.push_str(&format!(
-                                    "\n  note: used at line {}:{} ({})",
-                                    site_span.line, site_span.col, site_reason
+                                    "\n  note: used at {} ({})",
+                                    site_span.loc(), site_reason
                                 ));
                             }
                             if sites.len() > 5 {
@@ -186,8 +186,8 @@ impl InferCtx {
                         TypeConstraint::None => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`{}",
-                                    origin.span.line, origin.span.col, origin.reason, usage_notes
+                                    "{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`{}",
+                                    origin.span.loc(), origin.reason, usage_notes
                                 )
                             } else {
                                 format!(
@@ -199,8 +199,8 @@ impl InferCtx {
                         TypeConstraint::Numeric => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: numeric type defaults to i64 ({})\n  help: add `: i64` for integer or `: f64` for float",
-                                    origin.span.line, origin.span.col, origin.reason
+                                    "{}: numeric type defaults to i64 ({})\n  help: add `: i64` for integer or `: f64` for float",
+                                    origin.span.loc(), origin.reason
                                 )
                             } else {
                                 format!(
@@ -213,9 +213,8 @@ impl InferCtx {
                             let traits_str = traits.join(", ");
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}) ({})\n  help: add a type annotation for a type that implements {}{}",
-                                    origin.span.line,
-                                    origin.span.col,
+                                    "{}: ambiguous type: cannot infer concrete type for trait-constrained variable (requires: {}) ({})\n  help: add a type annotation for a type that implements {}{}",
+                                    origin.span.loc(),
                                     traits_str,
                                     origin.reason,
                                     traits_str,
@@ -231,8 +230,8 @@ impl InferCtx {
                         TypeConstraint::Integer if self.pedantic => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `: i64` or `: i32`",
-                                    origin.span.line, origin.span.col, origin.reason
+                                    "{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `: i64` or `: i32`",
+                                    origin.span.loc(), origin.reason
                                 )
                             } else {
                                 format!(
@@ -244,8 +243,8 @@ impl InferCtx {
                         TypeConstraint::Float if self.pedantic => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "line {}:{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `: f64` or `: f32`",
-                                    origin.span.line, origin.span.col, origin.reason
+                                    "{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `: f64` or `: f32`",
+                                    origin.span.loc(), origin.reason
                                 )
                             } else {
                                 format!(

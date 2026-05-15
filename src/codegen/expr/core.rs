@@ -96,7 +96,9 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_list_comp(body, bind, iter, end.as_deref(), cond.as_deref())
             }
             hir::ExprKind::Syscall(args) => self.compile_syscall(args),
-            hir::ExprKind::Spawn(actor_name) => self.compile_spawn(&actor_name.as_str()),
+            hir::ExprKind::Spawn(actor_name, inits) => {
+                self.compile_spawn_with_inits(&actor_name.as_str(), inits)
+            }
             hir::ExprKind::Send(target, actor_name, handler_name, tag, args) => self.compile_send(
                 target,
                 &actor_name.as_str(),

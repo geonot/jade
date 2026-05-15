@@ -11,6 +11,11 @@ pub struct Span {
     pub end: usize,
     pub line: u32,
     pub col: u32,
+    /// Optional source-file marker (interned). `None` means "unknown" or
+    /// "synthesized". When `Some`, diagnostics print `file:line:col`
+    /// instead of just `line L:C`, which is essential for multi-file
+    /// projects where the same line/col can refer to different sources.
+    pub file: Option<Symbol>,
 }
 
 impl Span {
@@ -20,6 +25,7 @@ impl Span {
             end,
             line,
             col,
+            file: None,
         }
     }
     pub fn dummy() -> Self {
@@ -28,6 +34,25 @@ impl Span {
             end: 0,
             line: 0,
             col: 0,
+            file: None,
+        }
+    }
+
+    /// Builder: attach a filename to this span. Used by the lexer/parser
+    /// pipeline after tokens are produced for a given source file.
+    pub fn with_file(mut self, file: Symbol) -> Self {
+        self.file = Some(file);
+        self
+    }
+
+    /// Render as `"path/to/file.jn:LINE:COL"` when a file is known,
+    /// otherwise as `"line LINE:COL"`. Use this in diagnostic messages
+    /// to keep prior output format when no filename, while making
+    /// multi-file projects unambiguous when a filename is set.
+    pub fn loc(&self) -> String {
+        match self.file {
+            Some(f) => format!("{}:{}:{}", f.as_str(), self.line, self.col),
+            None => format!("line {}:{}", self.line, self.col),
         }
     }
 }
@@ -228,7 +253,7 @@ pub enum Expr {
     StoreFirst(Symbol, Box<StoreFilter>, Span),
     StoreExists(Symbol, Box<StoreFilter>, Span),
     StoreDistinct(Symbol, Symbol, Span),
-    Spawn(Symbol, Span),
+    Spawn(Symbol, Vec<(Symbol, Expr)>, Span),
     Send(Box<Expr>, Symbol, Vec<Expr>, Span),
     Receive(Vec<ReceiveArm>, Span),
     Yield(Box<Expr>, Span),
@@ -292,7 +317,7 @@ impl Expr {
             | Self::StoreFirst(_, _, s)
             | Self::StoreExists(_, _, s)
             | Self::StoreDistinct(_, _, s)
-            | Self::Spawn(_, s)
+            | Self::Spawn(_, _, s)
             | Self::Send(_, _, _, s)
             | Self::Receive(_, s)
             | Self::Yield(_, s)

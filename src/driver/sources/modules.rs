@@ -150,7 +150,9 @@ pub(in crate::driver) fn resolve_modules(
 
         let src = fs::read_to_string(&candidate)
             .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", candidate.display())));
+        let file_sym = Symbol::intern(&candidate.display().to_string());
         let tokens = Lexer::new(&src)
+            .with_file(file_sym)
             .tokenize()
             .unwrap_or_else(|e| die(&format!("{}: {e}", candidate.display())));
         let mut mod_prog = Parser::new(tokens)
@@ -269,7 +271,8 @@ pub(in crate::driver) fn merge_source_files(
                 continue;
             }
         };
-        let tokens = match Lexer::new(&src).tokenize() {
+        let file_sym = Symbol::intern(&file.display().to_string());
+        let tokens = match Lexer::new(&src).with_file(file_sym).tokenize() {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("warning: {}: {e}", file.display());

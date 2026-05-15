@@ -1,0 +1,35 @@
+use std/hex
+
+test 'format'
+    assert hex.format(255) equals 'ff'
+    assert hex.format(0) equals '0'
+    assert hex.format(16) equals '10'
+    assert hex.format(4096) equals '1000'
+
+test 'format_upper'
+    assert hex.format_upper(255) equals 'FF'
+    assert hex.format_upper(2748) equals 'ABC'
+
+test 'format_prefixed'
+    assert hex.format_prefixed(255) equals '0xff'
+
+test 'format_padded'
+    assert hex.format_padded(15, 4) equals '000f'
+    assert hex.format_padded(0, 2) equals '00'
+
+test 'parse'
+    assert hex.parse('ff') equals 255
+    assert hex.parse('FF') equals 255
+    assert hex.parse('10') equals 16
+    assert hex.parse('0xff') equals 255
+
+test 'is_valid'
+    assert hex.is_valid('deadbeef')
+    assert hex.is_valid('0xCAFE')
+    assert not hex.is_valid('xyz')
+    assert not hex.is_valid('')
+
+test 'encode / decode round-trip'
+    enc is hex.encode('hi')
+    dec is hex.decode(enc)
+    assert dec equals 'hi'

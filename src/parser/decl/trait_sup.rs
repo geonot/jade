@@ -90,6 +90,8 @@ impl Parser {
             None
         };
 
+        Self::ensure_implicit_self(&mut params, sp);
+
         Ok(TraitMethod {
             name,
             params,
@@ -97,6 +99,26 @@ impl Parser {
             default_body,
             span: sp,
         })
+    }
+
+    /// Auto-inject an untyped `self` parameter at index 0 if the user did not
+    /// write one. Type/impl/trait methods always have an implicit receiver;
+    /// this lets users write `*foo bar as i64` instead of being forced to
+    /// type out `*foo self, bar as i64`. The typer's method-signature
+    /// declaration prepends the receiver type and binds it to this slot.
+    pub(in crate::parser) fn ensure_implicit_self(params: &mut Vec<Param>, span: Span) {
+        if params.first().map_or(true, |p| p.name.as_str() != "self") {
+            params.insert(
+                0,
+                Param {
+                    name: Symbol::intern("self"),
+                    ty: None,
+                    default: None,
+                    literal: None,
+                    span,
+                },
+            );
+        }
     }
 
     pub(in crate::parser) fn parse_impl_block(&mut self) -> Result<ImplBlock, ParseError> {
@@ -135,7 +157,10 @@ impl Parser {
             for item in items {
                 match item {
                     Either::Field(binding) => assoc_type_bindings.push(binding),
-                    Either::Method(m) => methods.push(m),
+                    Either::Method(mut m) => {
+                        Self::ensure_implicit_self(&mut m.params, m.span);
+                        methods.push(m);
+                    }
                 }
             }
         }

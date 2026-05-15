@@ -509,6 +509,16 @@ impl<'ctx> Compiler<'ctx> {
         self.compile_spawn(actor_name)
     }
 
+    /// Spawn an actor with field-init overrides — the MIR equivalent of
+    /// `compile_spawn_with_init_vals` on the HIR side.
+    pub(super) fn emit_spawn_actor_with_inits(
+        &mut self,
+        actor_name: &str,
+        inits: &[(crate::intern::Symbol, BasicValueEnum<'ctx>)],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.compile_spawn_with_init_vals(actor_name, inits)
+    }
+
     /// Send a message to an actor. The MIR lowering emits:
     ///   Call("__send_{handler}", [target, arg0, arg1, ...])
     /// We need to find the actor name and tag from the handler name.

@@ -1,0 +1,12 @@
+# Carter-Wegman one-time MAC over the Mersenne prime  P = 2^61 - 1.
+# tag(k1, k2, msg) = ( poly_eval(msg, k1) + k2 )   mod P
+# Strong assuming k1, k2 are uniform per (key, nonce) pair.
+
+*P returns i64
+    2305843009213693951                    # 2^61 - 1
+
+*tag(k1 as i64, k2 as i64, msg as Vec of i64) returns i64
+    acc is 0
+    loop(0, $ < msg.len(), $ + 1)
+        acc is ((acc + msg.get($)) mod P() * k1) mod P()
+    (acc + k2) mod P()

@@ -1,0 +1,27 @@
+use parser
+use compile
+use vm
+
+*checkmatch(pattern as String, input as String, want as bool)
+    a is parser.parse(pattern)
+    p is compile.lower(a)
+    got is vm.run(p, input)
+    if got equals want
+        log 'PASS'
+    else
+        log 'FAIL'
+    log pattern
+    log input
+    log got
+
+*main
+    checkmatch('abc', 'abc', true)
+    checkmatch('abc', 'abd', false)
+    checkmatch('a|b', 'a', true)
+    checkmatch('a|b', 'b', true)
+    checkmatch('a|b', 'c', false)
+    checkmatch('a*', '', true)
+    checkmatch('a*', 'aaaa', true)
+    checkmatch('a+', '', false)
+    checkmatch('a+', 'aaaa', true)
+    checkmatch('ab*c', 'ac', true)

@@ -1,0 +1,59 @@
+*main
+    log('--- 1. C-style with parens ---')
+    loop(0, $ < 3, $ + 1)
+        log($)
+
+    log('--- 2. C-style paren-less ---')
+    loop 0, $ < 3, $ + 1
+        log($)
+
+    log('--- 3. count down paren-less ---')
+    loop 3, $ > 0, $ - 1
+        log($)
+
+    log('--- 4. step by 2 paren-less ---')
+    loop 0, $ < 10, $ + 2
+        log($)
+
+    log('--- 5. sum 1..=5 with mutable accumulator ---')
+    s is 0
+    loop 1, $ <= 5, $ + 1
+        s is s + $
+    log(s)
+
+    log('--- 6. nested c-style (independent placeholders) ---')
+    loop 0, $ < 2, $ + 1
+        loop 0, $ < 2, $ + 1
+            log($)
+
+    log('--- 7. infinite loop with break ---')
+    n is 0
+    loop
+        if n equals 3
+            break
+        log(n)
+        n is n + 1
+
+    log('--- 8. iterate array: $ value, $$ index ---')
+    arr is ['a', 'b', 'c']
+    loop arr
+        log('{$$}: {$}')
+
+    log('--- 9. range loop with `to` ---')
+    loop 0 to 3
+        log($)
+
+    log('--- 10. range loop with `to ... by` ---')
+    loop 0 to 10 by 3
+        log($)
+
+    log('--- 11. iterate just $ (no $$) ---')
+    loop ['x', 'y']
+        log($)
+
+    log('--- 12. c-style nested in iter ---')
+    loop ['a', 'b']
+        loop 0, $ < 2, $ + 1
+            log('{$}')
+
+    log('done')

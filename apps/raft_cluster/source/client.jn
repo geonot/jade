@@ -1,0 +1,13 @@
+# Client actor: fires commands at the (purported) leader and tracks
+# the count of acknowledgements.
+
+actor Client
+    submitted as i64
+
+    *submit leader as Node, bs as Bus, cmd as i64
+        submitted is submitted + 1
+        leader.append(cmd, bs)
+
+    *report
+        log 'client.submitted'
+        log submitted

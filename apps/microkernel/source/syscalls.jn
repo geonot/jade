@@ -1,0 +1,46 @@
+# Kernel actor that owns the syscall numbers and tallies traffic.
+# This is "ring 0": only the kernel actor mutates these counters.
+#
+# Syscall numbers (mirrored as named constants in shell/process):
+#   1  WRITE      (pid, vaddr, value)
+#   2  READ       (pid, vaddr)         -> echoed via log
+#   3  ALLOC      (pid, n_pages)
+#   4  FREE       (pid, frame)
+#   5  YIELD      (pid)
+#   6  EXIT       (pid, code)
+#   7  FORK       (pid)
+
+actor Kernel
+    n_write as i64
+    n_read  as i64
+    n_alloc as i64
+    n_free  as i64
+    n_yield as i64
+    n_exit  as i64
+    n_fork  as i64
+
+    *trap num as i64, pid as i64
+        if num equals 1
+            n_write is n_write + 1
+        if num equals 2
+            n_read is n_read + 1
+        if num equals 3
+            n_alloc is n_alloc + 1
+        if num equals 4
+            n_free is n_free + 1
+        if num equals 5
+            n_yield is n_yield + 1
+        if num equals 6
+            n_exit is n_exit + 1
+        if num equals 7
+            n_fork is n_fork + 1
+
+    *report
+        log 'kernel.syscalls'
+        log n_write
+        log n_read
+        log n_alloc
+        log n_free
+        log n_yield
+        log n_exit
+        log n_fork

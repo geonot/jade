@@ -1,0 +1,21 @@
+use std/random
+
+test 'seeded reproducible'
+    r1 is random.seed(42)
+    r2 is random.seed(42)
+    assert r1.next_i64() equals r2.next_i64()
+    assert r1.next_i64() equals r2.next_i64()
+
+test 'range bounds'
+    r is random.seed(1)
+    loop(0, $ < 100, $ + 1)
+        v is r.range(10, 20)
+        assert v >= 10
+        assert v < 20
+
+test 'next_f64 unit interval'
+    r is random.seed(7)
+    loop(0, $ < 100, $ + 1)
+        v is r.next_f64()
+        assert v >= 0.0
+        assert v < 1.0

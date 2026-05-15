@@ -368,7 +368,7 @@ pub enum ExprKind {
         Option<Box<Expr>>,
     ),
     Syscall(Vec<Expr>),
-    Spawn(Symbol),
+    Spawn(Symbol, Vec<(Symbol, Expr)>),
     Send(Box<Expr>, Symbol, Symbol, u32, Vec<Expr>),
     CoroutineCreate(Symbol, Vec<Stmt>),
     CoroutineNext(Box<Expr>),
@@ -550,6 +550,13 @@ pub enum CoercionKind {
         signed: bool,
     },
     BoolToInt,
+    /// Coerce a stack `[N x T]` array value to a heap `Vec(T)`. Codegen
+    /// allocates a vec header + buffer of size N, copies the array into the
+    /// buffer, and yields the header pointer.
+    ArrayToVec {
+        elem_ty: Type,
+        len: u64,
+    },
 }
 
 #[derive(Debug, Clone)]

@@ -8,10 +8,8 @@ extern *usleep(us as i32) returns i32
 
 *main
     r is spawn Room
-    i is 0
-    while i < 200
-        r.post(message.new(i % 5, i, i))
-        i is i + 1
+    loop(0, $ < 200, $ + 1)
+        r.post(message.new($ % 5, $, $))
     extern.usleep(120000)
     r.snapshot()
     extern.usleep(40000)

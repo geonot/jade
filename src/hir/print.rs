@@ -648,7 +648,7 @@ impl PrettyPrinter {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
                 format!("syscall({})", a.join(", "))
             }
-            ExprKind::Spawn(name) => format!("spawn {name}"),
+            ExprKind::Spawn(name, _) => format!("spawn {name}"),
             ExprKind::Send(recv, handler, actor, tag, args) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
                 format!(

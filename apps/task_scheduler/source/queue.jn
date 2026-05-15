@@ -4,21 +4,17 @@ use models/task
 *pick_next(tasks as Vec of Task) returns i64
     best is -1
     best_p is -1
-    i is 0
-    while i < tasks.len()
-        t is tasks.get(i)
+    loop(0, $ < tasks.len(), $ + 1)
+        t is tasks.get($)
         if t.state equals 1
             if t.priority > best_p
                 best_p is t.priority
-                best is i
-        i is i + 1
+                best is $
     best
 
 *ready_count(tasks as Vec of Task) returns i64
     c is 0
-    i is 0
-    while i < tasks.len()
-        if tasks.get(i).state equals 1
+    loop(0, $ < tasks.len(), $ + 1)
+        if tasks.get($).state equals 1
             c is c + 1
-        i is i + 1
     c

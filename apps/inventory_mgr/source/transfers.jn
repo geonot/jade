@@ -11,10 +11,8 @@ use warehouse
     items
 
 *replay(items as Vec of Item, ts as Vec of Transfer) returns Vec of Item
-    i is 0
-    while i < ts.len()
-        items is apply(items, ts.get(i))
-        i is i + 1
+    loop(0, $ < ts.len(), $ + 1)
+        items is apply(items, ts.get($))
     items
 
 *audit_count(ts as Vec of Transfer) returns i64

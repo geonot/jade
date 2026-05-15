@@ -1,0 +1,91 @@
+# 2-2-1 MLP:  2 inputs -> 2 hidden (tanh) -> 1 output (tanh)
+# Parameters: w1[4], b1[2], w2[2], b2[1]   = 9 scalars
+
+use fix
+use tape
+
+type Mlp
+    w1_00 as i64
+    w1_01 as i64
+    w1_10 as i64
+    w1_11 as i64
+    b1_0  as i64
+    b1_1  as i64
+    w2_0  as i64
+    w2_1  as i64
+    b2    as i64
+
+*new returns Mlp
+    Mlp(
+        w1_00 is fix.from_milli(700),
+        w1_01 is fix.from_milli(-300),
+        w1_10 is fix.from_milli(-500),
+        w1_11 is fix.from_milli(800),
+        b1_0  is fix.from_milli(100),
+        b1_1  is fix.from_milli(-200),
+        w2_0  is fix.from_milli(900),
+        w2_1  is fix.from_milli(-700),
+        b2    is fix.from_milli(50)
+    )
+
+*forward(m as Mlp, x0 as i64, x1 as i64) returns i64
+    h0 is fix.tanh(fix.mul(m.w1_00, x0) + fix.mul(m.w1_01, x1) + m.b1_0)
+    h1 is fix.tanh(fix.mul(m.w1_10, x0) + fix.mul(m.w1_11, x1) + m.b1_1)
+    fix.tanh(fix.mul(m.w2_0, h0) + fix.mul(m.w2_1, h1) + m.b2)
+
+# Build a tape that computes (forward(x) - y)^2 and return (tape, loss_node, param_indices_struct).
+type ParamIx
+    w1_00 as i64
+    w1_01 as i64
+    w1_10 as i64
+    w1_11 as i64
+    b1_0  as i64
+    b1_1  as i64
+    w2_0  as i64
+    w2_1  as i64
+    b2    as i64
+
+type Built
+    t       as Tape
+    loss_ix as i64
+    px      as ParamIx
+
+*build_loss(m as Mlp, x0 as i64, x1 as i64, y as i64) returns Built
+    t is tape.new()
+    px is ParamIx(
+        w1_00 is tape.leaf(t, m.w1_00),
+        w1_01 is tape.leaf(t, m.w1_01),
+        w1_10 is tape.leaf(t, m.w1_10),
+        w1_11 is tape.leaf(t, m.w1_11),
+        b1_0  is tape.leaf(t, m.b1_0),
+        b1_1  is tape.leaf(t, m.b1_1),
+        w2_0  is tape.leaf(t, m.w2_0),
+        w2_1  is tape.leaf(t, m.w2_1),
+        b2    is tape.leaf(t, m.b2)
+    )
+    ix0 is tape.leaf(t, x0)
+    ix1 is tape.leaf(t, x1)
+    iy  is tape.leaf(t, y)
+
+    a00 is tape.mul(t, px.w1_00, ix0)
+    a01 is tape.mul(t, px.w1_01, ix1)
+    s0  is tape.add(t, tape.add(t, a00, a01), px.b1_0)
+    h0  is tape.tanh(t, s0)
+
+    a10 is tape.mul(t, px.w1_10, ix0)
+    a11 is tape.mul(t, px.w1_11, ix1)
+    s1  is tape.add(t, tape.add(t, a10, a11), px.b1_1)
+    h1  is tape.tanh(t, s1)
+
+    o0  is tape.mul(t, px.w2_0, h0)
+    o1  is tape.mul(t, px.w2_1, h1)
+    sout is tape.add(t, tape.add(t, o0, o1), px.b2)
+    out  is tape.tanh(t, sout)
+
+    diff is tape.sub(t, out, iy)
+    loss is tape.sq(t, diff)
+
+    Built(t is t, loss_ix is loss, px is px)
+
+*loss_value(b as Built) returns i64
+    b.t.nodes.get(b.loss_ix).val

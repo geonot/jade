@@ -30,6 +30,7 @@ pub struct Lexer<'s> {
     pending: Vec<Spanned>,
     sol: bool,
     nl: bool,
+    file: Option<crate::intern::Symbol>,
 }
 
 static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
@@ -75,7 +76,6 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("from", Token::From),
         ("to", Token::To),
         ("by", Token::By),
-        ("array", Token::Array),
         ("asm", Token::Asm),
         ("extern", Token::Extern),
         ("do", Token::Do),
@@ -144,7 +144,16 @@ impl<'s> Lexer<'s> {
             pending: Vec::new(),
             sol: true,
             nl: false,
+            file: None,
         }
+    }
+
+    /// Tag every span this lexer produces with `file`. Use this when the
+    /// source comes from a known on-disk file so diagnostics include the
+    /// filename — essential for multi-file projects.
+    pub fn with_file(mut self, file: crate::intern::Symbol) -> Self {
+        self.file = Some(file);
+        self
     }
 
     pub fn tokenize(&mut self) -> Result<Vec<Spanned>, LexError> {
@@ -226,6 +235,11 @@ impl<'s> Lexer<'s> {
             token: Token::Eof,
             span: self.here(),
         });
+        if let Some(file) = self.file {
+            for sp in &mut out {
+                sp.span.file = Some(file);
+            }
+        }
         Ok(out)
     }
 
@@ -241,6 +255,11 @@ impl<'s> Lexer<'s> {
                 break;
             }
             out.push(self.lex_token()?);
+        }
+        if let Some(file) = self.file {
+            for sp in &mut out {
+                sp.span.file = Some(file);
+            }
         }
         Ok(out)
     }

@@ -167,13 +167,13 @@ impl Typer {
                         });
                     }
                     return Err(format!(
-                        "line {}:{}: '{}' has no variant '{}'",
-                        span.line, span.col, type_name, variant_name
+                        "{}: '{}' has no variant '{}'",
+                        span.loc(), type_name, variant_name
                     ));
                 }
                 Err(format!(
-                    "line {}:{}: '{}' is not an error or enum type",
-                    span.line, span.col, type_name
+                    "{}: '{}' is not an error or enum type",
+                    span.loc(), type_name
                 ))
             }
             _ => unreachable!(),

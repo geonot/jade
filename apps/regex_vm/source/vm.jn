@@ -1,0 +1,48 @@
+use compile
+
+*op_at(p as Prog, ip as i64) returns i64
+    p.code.get(ip * 3)
+
+*arg0(p as Prog, ip as i64) returns i64
+    p.code.get(ip * 3 + 1)
+
+*arg1(p as Prog, ip as i64) returns i64
+    p.code.get(ip * 3 + 2)
+
+*has(threads as Vec of i64, ip as i64) returns bool
+    loop(0, $ < threads.len(), $ + 1)
+        if threads.get($) equals ip
+            return true
+    false
+
+*add_thread(p as Prog, threads as Vec of i64, ip as i64)
+    if has(threads, ip)
+        return
+    op is op_at(p, ip)
+    if op equals 4
+        add_thread(p, threads, arg0(p, ip))
+        add_thread(p, threads, arg1(p, ip))
+        return
+    if op equals 3
+        add_thread(p, threads, arg0(p, ip))
+        return
+    threads.push(ip)
+
+*run(p as Prog, input as String) returns bool
+    cur is vec()
+    add_thread(p, cur, 0)
+    pos is 0
+    while pos < input.length
+        ch is input.char_at(pos)
+        nxt is vec()
+        loop(0, $ < cur.len(), $ + 1)
+            ip is cur.get($)
+            op is op_at(p, ip)
+            if op equals 1 and arg0(p, ip) equals ch
+                add_thread(p, nxt, ip + 1)
+        cur is nxt
+        pos is pos + 1
+    loop(0, $ < cur.len(), $ + 1)
+        if op_at(p, cur.get($)) equals 2
+            return true
+    false

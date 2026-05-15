@@ -45,7 +45,9 @@ pub(super) fn compile_and_link(
 ) {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
+    let file_sym = Symbol::intern(&input.display().to_string());
     let tokens = Lexer::new(&src)
+        .with_file(file_sym)
         .tokenize()
         .unwrap_or_else(|e| die(&format!("{e}")));
     let mut prog = Parser::new(tokens)

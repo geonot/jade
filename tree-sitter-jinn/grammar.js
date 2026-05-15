@@ -391,6 +391,17 @@ module.exports = grammar({
           $._newline,
           field("body", $.block),
         ),
+        // C-style for, paren-less: loop init, cond, step BODY
+        seq(
+          "loop",
+          field("init", $._expression),
+          ",",
+          field("cond", $._expression),
+          ",",
+          field("step", $._expression),
+          $._newline,
+          field("body", $.block),
+        ),
         // Bare infinite loop
         seq("loop", $._newline, field("body", $.block)),
       ),

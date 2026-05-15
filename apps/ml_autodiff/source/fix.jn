@@ -1,0 +1,44 @@
+# Q24.40 fixed-point arithmetic.  All values are stored as i64.
+
+*SHIFT returns i64
+    40
+
+*ONE returns i64
+    1 << 40                          # 1.0
+
+*from_int(x as i64) returns i64
+    x << SHIFT()
+
+*from_milli(x as i64) returns i64
+    (x << SHIFT()) / 1000
+
+*to_milli(x as i64) returns i64
+    (x * 1000) >> SHIFT()
+
+*mul(a as i64, b as i64) returns i64
+    (a >> 20) * (b >> 20)
+
+*div(a as i64, b as i64) returns i64
+    if b equals 0
+        return 0
+    (a << 20) / (b >> 20)
+
+*neg(a as i64) returns i64
+    -a
+
+# tanh approximation — odd polynomial:  x - x^3/3 + 2x^5/15
+# Saturates to ±1 outside |x| > 1.5
+*tanh(x as i64) returns i64
+    if x > from_milli(1500)
+        return ONE() - from_milli(10)
+    if x < neg(from_milli(1500))
+        return neg(ONE() - from_milli(10))
+    x2 is mul(x, x)
+    x3 is mul(x2, x)
+    x5 is mul(x3, x2)
+    t  is x - div(x3, from_int(3)) + mul(from_milli(133), x5)
+    t
+
+# Derivative of tanh:  1 - tanh(x)^2
+*tanh_deriv(activated as i64) returns i64
+    ONE() - mul(activated, activated)

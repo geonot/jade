@@ -13,8 +13,24 @@ impl Lowerer {
                     assigned.insert(b.name.clone());
                 }
                 hir::Stmt::Assign(target, _, _) => {
-                    if let ExprKind::Var(_, name) = &target.kind {
-                        assigned.insert(name.clone());
+                    // Find the root variable being mutated. For both
+                    // `x = ...` and `x.f.g = ...`, x is rebound in
+                    // var_map by the lowerer (see lower_field_assign in
+                    // ctx.rs). All such roots must be promoted to memory
+                    // so SSA values from one branch don't leak across the
+                    // merge point.
+                    let mut cur = target;
+                    loop {
+                        match &cur.kind {
+                            ExprKind::Var(_, name) => {
+                                assigned.insert(name.clone());
+                                break;
+                            }
+                            ExprKind::Field(parent, _, _) => {
+                                cur = parent;
+                            }
+                            _ => break,
+                        }
                     }
                 }
                 hir::Stmt::If(i) => {

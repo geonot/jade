@@ -268,15 +268,15 @@ impl Typer {
                             {
                                 let store = raw.trim_start_matches("__store_");
                                 return Err(format!(
-                                    "line {}:{}: type '{}' has no field '{}' — \
+                                    "{}: type '{}' has no field '{}' — \
                                  for the number of matching records use \
                                  `count {} where …`",
-                                    span.line, span.col, display, field, store
+                                    span.loc(), display, field, store
                                 ));
                             }
                             return Err(format!(
-                                "line {}:{}: type '{}' has no field '{}'",
-                                span.line, span.col, display, field
+                                "{}: type '{}' has no field '{}'",
+                                span.loc(), display, field
                             ));
                         }
                     } else {
@@ -298,9 +298,8 @@ impl Typer {
                             (tys[idx].clone(), idx)
                         } else {
                             return Err(format!(
-                                "line {}:{}: tuple index {} out of range (tuple has {} elements)",
-                                span.line,
-                                span.col,
+                                "{}: tuple index {} out of range (tuple has {} elements)",
+                                span.loc(),
                                 idx,
                                 tys.len()
                             ));

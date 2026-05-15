@@ -1,0 +1,74 @@
+# Recursive-descent parser:
+#   regex   = alt
+#   alt     = concat ('|' concat)*
+#   concat  = repeat repeat*
+#   repeat  = atom '*'?
+#   atom    = CHAR | '(' alt ')'
+#
+# Output: Vec of Node with the root being the last entry.
+
+use ast
+
+type State
+    src as String
+    pos as i64
+    nodes as Vec of Node
+
+*new_state(src as String) returns State
+    State(src is src, pos is 0, nodes is vec())
+
+*peek(s as State) returns i64
+    if s.pos >= s.src.length
+        return -1
+    s.src.char_at(s.pos)
+
+*push_node(s as State, n as Node) returns i64
+    s.nodes.push(n)
+    s.nodes.len() - 1
+
+*parse_atom(s as State) returns i64
+    c is peek(s)
+    if c equals 40             # '('
+        s.pos is s.pos + 1
+        ix is parse_alt(s)
+        if peek(s) equals 41    # ')'
+            s.pos is s.pos + 1
+        return ix
+    s.pos is s.pos + 1
+    push_node(s, Node(tag is 1, ch is c, left is 0, right is 0))
+
+*parse_repeat(s as State) returns i64
+    a is parse_atom(s)
+    if peek(s) equals 42       # '*'
+        s.pos is s.pos + 1
+        return push_node(s, Node(tag is 4, ch is 0, left is a, right is 0))
+    a
+
+*is_term(c as i64) returns bool
+    if c equals -1
+        return true
+    if c equals 124            # '|'
+        return true
+    if c equals 41             # ')'
+        return true
+    false
+
+*parse_concat(s as State) returns i64
+    left is parse_repeat(s)
+    while not is_term(peek(s))
+        right is parse_repeat(s)
+        left is push_node(s, Node(tag is 2, ch is 0, left is left, right is right))
+    left
+
+*parse_alt(s as State) returns i64
+    left is parse_concat(s)
+    while peek(s) equals 124   # '|'
+        s.pos is s.pos + 1
+        right is parse_concat(s)
+        left is push_node(s, Node(tag is 3, ch is 0, left is left, right is right))
+    left
+
+*parse(src as String) returns Vec of Node
+    s is new_state(src)
+    parse_alt(s)
+    s.nodes

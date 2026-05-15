@@ -37,7 +37,10 @@ impl ProjectConfig {
         use crate::ast::{Expr, Stmt};
         let src =
             fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        let tokens = Lexer::new(&src).tokenize().map_err(|e| format!("{e}"))?;
+        let tokens = Lexer::new(&src)
+            .with_file(crate::intern::Symbol::intern(&path.display().to_string()))
+            .tokenize()
+            .map_err(|e| format!("{e}"))?;
         let prog = Parser::new(tokens)
             .parse_program()
             .map_err(|e| format!("{e}"))?;

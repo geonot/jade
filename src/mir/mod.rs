@@ -260,7 +260,7 @@ pub enum InstKind {
     WeakUpgrade(ValueId),
 
     // ── Actors/channels (needed for actor optimization pass) ──
-    SpawnActor(Symbol, Vec<ValueId>),
+    SpawnActor(Symbol, Vec<(Symbol, ValueId)>),
     ChanCreate(Type, Option<ValueId>),
     ChanSend(ValueId, ValueId),
     ChanRecv(ValueId),

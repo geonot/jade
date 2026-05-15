@@ -1,0 +1,15 @@
+# Tagged-AST for regex.  Tags:
+#   1 Char(c)
+#   2 Concat(left_ix, right_ix)
+#   3 Alt(left_ix, right_ix)
+#   4 Star(child_ix)
+#   5 Plus(child_ix)
+#
+# Nodes live in a flat vector; children reference earlier indices so
+# the tree is naturally serialised post-order.
+
+type Node
+    tag    as i64
+    ch     as i64
+    left   as i64
+    right  as i64

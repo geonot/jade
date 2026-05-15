@@ -493,7 +493,22 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
             }
-            _ => return Err("invalid assignment target".into()),
+            hir::ExprKind::Var(_, name) => {
+                let val = self.compile_expr(value)?;
+                let (ptr, var_ty) = self
+                    .find_var(&name.as_str())
+                    .map(|(p, t)| (*p, t.clone()))
+                    .ok_or_else(|| format!("undefined: {name}"))?;
+                let lty = self.llvm_ty(&var_ty);
+                let val = self.coerce_val(val, lty);
+                b!(self.bld.build_store(ptr, val));
+            }
+            _ => {
+                return Err(format!(
+                    "invalid assignment target: {:?} (ty={:?})",
+                    target.kind, target.ty
+                ))
+            }
         }
         Ok(())
     }

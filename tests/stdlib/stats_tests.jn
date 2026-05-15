@@ -1,0 +1,33 @@
+use std/stats
+
+test 'sum'
+    a is vec(1, 2, 3, 4)
+    s is stats.sum(a)
+    assert s > 9.99
+    assert s < 10.01
+
+test 'mean'
+    a is vec(2, 4, 6, 8)
+    m is stats.mean(a)
+    assert m > 4.99
+    assert m < 5.01
+
+test 'min_val / max_val'
+    a is vec(7, 2, 9, 1, 5)
+    assert stats.min_val(a) equals 1
+    assert stats.max_val(a) equals 9
+
+test 'median odd'
+    a is vec(1, 3, 5, 7, 9)
+    assert stats.median(a) equals 5
+
+test 'data_range'
+    a is vec(3, 1, 9, 4)
+    assert stats.data_range(a) equals 8
+
+test 'variance / stdev nonneg'
+    a is vec(1, 2, 3, 4, 5)
+    v is stats.variance(a)
+    assert v >= 0.0
+    s is stats.stdev(a)
+    assert s >= 0.0

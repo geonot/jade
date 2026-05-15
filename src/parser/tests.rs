@@ -146,6 +146,47 @@ fn c_style_loop_desugars_to_bind_then_while() {
 }
 
 #[test]
+fn c_style_loop_paren_less_desugars() {
+    // Same desugar as the paren'd form but without the parens.
+    let p = parse("*main()\n    loop 0, $ < 3, $ + 1\n        log($)\n");
+    if let Decl::Fn(f) = &p.decls[0] {
+        assert_eq!(f.body.len(), 2, "expected bind + while");
+        let ph = if let Stmt::Bind(b) = &f.body[0] {
+            assert!(matches!(b.value, Expr::Int(0, _)));
+            b.name.as_str().to_string()
+        } else {
+            panic!("expected bind");
+        };
+        if let Stmt::While(w) = &f.body[1] {
+            if let Expr::BinOp(l, _, _, _) = &w.cond {
+                if let Expr::Ident(n, _) = l.as_ref() {
+                    assert_eq!(n.as_str(), ph);
+                }
+            }
+            assert_eq!(w.body.len(), 2);
+            assert!(matches!(w.body[1], Stmt::Assign(..)));
+        } else {
+            panic!("expected while");
+        }
+    } else {
+        panic!("expected fn decl");
+    }
+}
+
+#[test]
+fn loop_iter_with_index_placeholder() {
+    // `loop arr` with `$$` in body should produce For with bind2 set.
+    let p = parse("*main()\n    arr is [1, 2]\n    loop arr\n        log($$)\n");
+    if let Decl::Fn(f) = &p.decls[0] {
+        if let Stmt::For(fo) = &f.body[1] {
+            assert!(fo.bind2.is_some(), "expected index bind");
+        } else {
+            panic!("expected for, got {:?}", f.body[1]);
+        }
+    }
+}
+
+#[test]
 fn loop_break() {
     let p = parse("*main()\n    loop\n        break\n");
     if let Decl::Fn(f) = &p.decls[0] {
@@ -249,21 +290,6 @@ fn array_literal() {
                 }
             }
             panic!("expected vector(...) call, got {:?}", b.value);
-        }
-    }
-}
-
-#[test]
-fn array_literal_fixed() {
-    // Use `array[…]` to opt back into a fixed-size array literal.
-    let p = parse("*main()\n    x is array[1, 2, 3]\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
-            if let Expr::Array(elems, _) = &b.value {
-                assert_eq!(elems.len(), 3);
-            } else {
-                panic!("expected array");
-            }
         }
     }
 }

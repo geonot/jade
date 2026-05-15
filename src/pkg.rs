@@ -1,6 +1,7 @@
 //! Package management: dependency resolution and module discovery.
 
 use crate::ast::{Decl, Expr, Stmt};
+use crate::intern::Symbol;
 use crate::lexer::{Lexer, Token};
 use crate::parser::Parser;
 use std::path::Path;
@@ -135,6 +136,7 @@ impl Package {
         let input = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let tokens = Lexer::new(&input)
+            .with_file(Symbol::intern(&path.display().to_string()))
             .tokenize()
             .map_err(|e| format!("{}: {e}", path.display()))?;
         let prog = Parser::new(tokens)

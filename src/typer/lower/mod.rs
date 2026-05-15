@@ -212,6 +212,53 @@ impl Typer {
         // Sync trait_impls to InferCtx for constraint enforcement during unification
         self.infer_ctx.set_trait_impls(self.trait_impls.clone());
 
+        // Late normalisation: any `Type::Struct(name, [])` where `name` is a
+        // registered actor must be reinterpreted as `Type::ActorRef(name)`.
+        // The parser cannot make this distinction at parse time because actor
+        // declarations may appear after the function that names them, and use
+        // sites span module boundaries. Without this pass, parameters declared
+        // as `sys as Kernel` (where `Kernel` is an actor) leave the typer
+        // unable to resolve `sys.handler(...)` to a Send and the return type
+        // collapses to a fresh, ambiguous type variable.
+        let actor_names: std::collections::HashSet<Symbol> =
+            self.actors.keys().cloned().collect();
+        if !actor_names.is_empty() {
+            let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
+            for k in fn_keys {
+                if let Some((id, ptys, ret)) = self.fns.remove(&k) {
+                    let ptys: Vec<Type> = ptys
+                        .into_iter()
+                        .map(|t| Self::normalize_actor_refs(t, &actor_names))
+                        .collect();
+                    let ret = Self::normalize_actor_refs(ret, &actor_names);
+                    self.fns.insert(k, (id, ptys, ret));
+                }
+            }
+            // Actor handler parameter types may also reference other actors.
+            let actor_keys: Vec<Symbol> = self.actors.keys().cloned().collect();
+            for k in actor_keys {
+                if let Some((id, fields, handlers)) = self.actors.remove(&k) {
+                    let handlers = handlers
+                        .into_iter()
+                        .map(|(hn, ptys, tag)| {
+                            let ptys = ptys
+                                .into_iter()
+                                .map(|t| Self::normalize_actor_refs(t, &actor_names))
+                                .collect();
+                            (hn, ptys, tag)
+                        })
+                        .collect();
+                    let fields = fields
+                        .into_iter()
+                        .map(|(fn_name, ft)| {
+                            (fn_name, Self::normalize_actor_refs(ft, &actor_names))
+                        })
+                        .collect();
+                    self.actors.insert(k, (id, fields, handlers));
+                }
+            }
+        }
+
         if self.debug_types {
             eprintln!("[type:pipeline] running bidirectional parameter inference");
         }
@@ -473,8 +520,8 @@ impl Typer {
                     let constraint = self.infer_ctx.constraint(root);
                     if matches!(constraint, super::unify::TypeConstraint::None) {
                         struct_field_errors.push(format!(
-                            "line {}:{}: struct `{}` field `{}` has no type annotation and was never constrained",
-                            span.line, span.col, struct_name, field_name
+                            "{}: struct `{}` field `{}` has no type annotation and was never constrained",
+                            span.loc(), struct_name, field_name
                         ));
                     }
                 }

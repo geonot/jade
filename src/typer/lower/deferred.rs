@@ -219,8 +219,8 @@ impl Typer {
                             let names: Vec<String> =
                                 candidates.iter().map(|(n, _, _)| n.as_str()).collect();
                             self.type_errors.push(format!(
-                                "line {}:{}: ambiguous method `{}`: multiple types have this method: {}",
-                                dm.span.line, dm.span.col, dm.method, names.join(", ")
+                                "{}: ambiguous method `{}`: multiple types have this method: {}",
+                                dm.span.loc(), dm.method, names.join(", ")
                             ));
                         } else if candidates.len() == 1 {
                             let (type_name, param_tys, ret) = &candidates[0];
@@ -325,9 +325,8 @@ impl Typer {
                 let field_names: Vec<String> =
                     fields.iter().map(|f| f.field_name.as_str()).collect();
                 self.type_errors.push(format!(
-                    "line {}:{}: ambiguous field access ({}): multiple types have these fields: {}",
-                    fields[0].span.line,
-                    fields[0].span.col,
+                    "{}: ambiguous field access ({}): multiple types have these fields: {}",
+                    fields[0].span.loc(),
                     field_names.join(", "),
                     Symbol::join_vec(&candidates, ", ")
                 ));

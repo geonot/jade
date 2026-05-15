@@ -174,7 +174,13 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::WeakUpgrade(v) => format!("weak_upgrade {v}"),
 
         // Actors/channels
-        InstKind::SpawnActor(name, args) => format!("spawn_actor {name}({})", fmt_args(args)),
+        InstKind::SpawnActor(name, args) => format!(
+            "spawn_actor {name}({})",
+            args.iter()
+                .map(|(n, v)| format!("{n} is %{v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         InstKind::ChanCreate(ty, _cap) => format!("chan_create {ty:?}"),
         InstKind::ChanSend(ch, val) => format!("chan_send {ch} {val}"),
         InstKind::ChanRecv(ch) => format!("chan_recv {ch}"),

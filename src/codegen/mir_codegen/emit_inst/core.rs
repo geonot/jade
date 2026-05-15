@@ -50,44 +50,14 @@ impl<'ctx> Compiler<'ctx> {
                         args.iter().map(|a| self.val(*a)).collect();
                     if let Some((fv, _, _)) = self.fns.get(name).cloned() {
                         let ptypes = fv.get_type().get_param_types();
-                        let st = self.string_type();
-                        let md: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = arg_vals
-                            .iter()
-                            .enumerate()
-                            .map(|(i, v)| {
-                                if let Some(pt) = ptypes.get(i) {
-                                    if v.get_type() == st.into() && pt.is_pointer_type() {
-                                        self.string_data(*v).unwrap_or(*v).into()
-                                    } else {
-                                        (*v).into()
-                                    }
-                                } else {
-                                    (*v).into()
-                                }
-                            })
-                            .collect();
+                        let md = self.coerce_call_args(&arg_vals, args, &ptypes);
                         let csv = b!(self.bld.build_call(fv, &md, "call"));
                         Ok(self.call_result(csv))
                     } else {
                         // Try looking up as a module-level function.
                         if let Some(fv) = self.module.get_function(&name.as_str()) {
                             let ptypes = fv.get_type().get_param_types();
-                            let st = self.string_type();
-                            let md: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = arg_vals
-                                .iter()
-                                .enumerate()
-                                .map(|(i, v)| {
-                                    if let Some(pt) = ptypes.get(i) {
-                                        if v.get_type() == st.into() && pt.is_pointer_type() {
-                                            self.string_data(*v).unwrap_or(*v).into()
-                                        } else {
-                                            (*v).into()
-                                        }
-                                    } else {
-                                        (*v).into()
-                                    }
-                                })
-                                .collect();
+                            let md = self.coerce_call_args(&arg_vals, args, &ptypes);
                             let csv = b!(self.bld.build_call(fv, &md, "call"));
                             Ok(self.call_result(csv))
                         } else {
@@ -666,9 +636,18 @@ impl<'ctx> Compiler<'ctx> {
                     if let Some((ptr, ty)) = self.var_allocs.get(name).cloned() {
                         let lt = self.llvm_ty(&ty);
                         let val = b!(self.bld.build_load(lt, ptr, &name.as_str()));
-                        if let Some(inst) = val.as_instruction_value() {
+                        if let Some(inst_v) = val.as_instruction_value() {
                             let tbaa_name = Compiler::tbaa_type_name(&ty);
-                            self.set_tbaa(inst, tbaa_name);
+                            self.set_tbaa(inst_v, tbaa_name);
+                        }
+                        // For Struct/Tuple loads, remember the source alloca so
+                        // a subsequent Call can pass the pointer (preserving
+                        // mutation visibility through reference semantics).
+                        if matches!(ty, Type::Struct(_, _) | Type::Tuple(_)) {
+                            if let Some(dest) = inst.dest {
+                                self.self_allocs.insert(dest, ptr);
+                                self.self_alloc_types.insert(dest, lt);
+                            }
                         }
                         Ok(val)
                     } else {
@@ -687,6 +666,22 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
                 mir::InstKind::Store(name, val) => {
+                    // Reference-semantics for struct/tuple locals: when the
+                    // source value is a struct/tuple already backed by an
+                    // alloca (function param, struct_init, or a previous
+                    // Load), alias the local `name` to the same alloca so
+                    // that subsequent FieldStores via `name` mutate the
+                    // original. Without this, the local alloca + store
+                    // would silently shadow the source and break call-site
+                    // mutation visibility.
+                    if matches!(inst.ty, Type::Struct(_, _) | Type::Tuple(_))
+                        && let Some(src_ptr) = self.self_allocs.get(val).copied()
+                    {
+                        let ty = inst.ty.clone();
+                        self.var_allocs.insert(*name, (src_ptr, ty.clone()));
+                        self.set_var(&name.as_str(), src_ptr, ty);
+                        return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+                    }
                     let v = self.val(*val);
                     if let Some((ptr, ty)) = self.var_allocs.get(name).cloned() {
                         let store_inst = b!(self.bld.build_store(ptr, v));
@@ -727,5 +722,64 @@ impl<'ctx> Compiler<'ctx> {
                 _ => return Ok(None),
             })?,
         ))
+    }
+
+    /// Coerce MIR call arguments to the LLVM parameter types expected by the
+    /// callee. Currently handles two coercions:
+    ///
+    /// 1. String → ptr: pass the underlying char buffer when the callee
+    ///    expects a pointer.
+    /// 2. Struct/Tuple value → ptr: when the callee expects a pointer (which
+    ///    is now the standard ABI for struct/tuple parameters — see
+    ///    `declare_mir_fn`), pass the alloca pointer of the source local if
+    ///    we know it (so callee mutations are visible to caller). Otherwise
+    ///    spill the value to a fresh alloca and pass the pointer.
+    pub(in crate::codegen) fn coerce_call_args(
+        &mut self,
+        arg_vals: &[BasicValueEnum<'ctx>],
+        args: &[mir::ValueId],
+        ptypes: &[inkwell::types::BasicMetadataTypeEnum<'ctx>],
+    ) -> Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> {
+        let st = self.string_type();
+        arg_vals
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let Some(pt) = ptypes.get(i) else {
+                    return (*v).into();
+                };
+                if !pt.is_pointer_type() {
+                    return (*v).into();
+                }
+                // String → char*
+                if v.get_type() == st.into() {
+                    return self.string_data(*v).unwrap_or(*v).into();
+                }
+                // Struct/Tuple value → ptr (reference semantics)
+                if v.is_struct_value() {
+                    if let Some(arg_id) = args.get(i) {
+                        if let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
+                            return src_ptr.into();
+                        }
+                    }
+                    // Spill to a fresh alloca.
+                    let alloca = self.entry_alloca(v.get_type(), "struct.arg");
+                    let _ = self.bld.build_store(alloca, *v);
+                    return alloca.into();
+                }
+                // Already a pointer (e.g. struct_init dest, or struct param):
+                // pass through. The self_allocs path may have routed val() to
+                // the pointer when the underlying type is a struct/tuple.
+                if v.is_pointer_value() {
+                    if let Some(arg_id) = args.get(i) {
+                        if let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
+                            return src_ptr.into();
+                        }
+                    }
+                    return (*v).into();
+                }
+                (*v).into()
+            })
+            .collect()
     }
 }

@@ -1,0 +1,41 @@
+# ml_autodiff — reverse-mode autodiff over a fixed-point tape.
+#
+# We don't have floats-on-actors yet so values live as i64 in the
+# Q24.40 fixed-point format (40 fractional bits).  Modules:
+#
+#   fix.jn   — Q24.40 arithmetic helpers
+#   tape.jn  — value graph + topological backward pass
+#   mlp.jn   — 2-2-1 MLP with tanh hidden activation
+#   train.jn — XOR dataset, momentum SGD
+#
+# `main` trains the network for 200 epochs and reports loss curve
+# end points + final predictions.
+
+use fix
+use tape
+use mlp
+use train
+
+*main
+    log 'autodiff.boot'
+
+    net is mlp.new()
+    initial_loss is train.epoch_loss(net)
+    log 'loss.initial'
+    log fix.to_milli(initial_loss)
+
+    loop(0, $ < 200, $ + 1)
+        train.step(net)
+
+    final_loss is train.epoch_loss(net)
+    log 'loss.final'
+    log fix.to_milli(final_loss)
+
+    log 'predict.0_0'
+    log fix.to_milli(mlp.forward(net, fix.from_int(0), fix.from_int(0)))
+    log 'predict.0_1'
+    log fix.to_milli(mlp.forward(net, fix.from_int(0), fix.from_int(1)))
+    log 'predict.1_0'
+    log fix.to_milli(mlp.forward(net, fix.from_int(1), fix.from_int(0)))
+    log 'predict.1_1'
+    log fix.to_milli(mlp.forward(net, fix.from_int(1), fix.from_int(1)))

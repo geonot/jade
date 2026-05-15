@@ -94,12 +94,31 @@ pub fn run() {
                     }
                     None => find_project_entry(),
                 };
-                // Use content hash for caching compiled binaries
+                // Cache compiled binaries by a hash of the source bytes
+                // PLUS a fingerprint of the compiler itself, so that rebuilding
+                // jinnc invalidates all cached binaries (otherwise stale
+                // binaries silently mask compiler fixes — see CONTRIBUTING).
                 let src_bytes = fs::read(&entry).unwrap_or_default();
+                let compiler_fp: (u64, u64) = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| fs::metadata(&p).ok())
+                    .map(|m| {
+                        let size = m.len();
+                        let mtime = m
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        (size, mtime)
+                    })
+                    .unwrap_or((0, 0));
                 let hash = {
                     use std::hash::{Hash, Hasher};
                     let mut h = std::collections::hash_map::DefaultHasher::new();
                     src_bytes.hash(&mut h);
+                    env!("CARGO_PKG_VERSION").hash(&mut h);
+                    compiler_fp.hash(&mut h);
                     h.finish()
                 };
                 let cache_dir = dirs_cache();
@@ -160,6 +179,7 @@ pub fn run() {
                 let src = fs::read_to_string(&entry)
                     .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", entry.display())));
                 let tokens = Lexer::new(&src)
+                    .with_file(Symbol::intern(&entry.display().to_string()))
                     .tokenize()
                     .unwrap_or_else(|e| die(&format!("{e}")));
                 let mut prog = Parser::new(tokens)
@@ -239,6 +259,7 @@ pub fn run() {
     let src = fs::read_to_string(&input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
+        .with_file(Symbol::intern(&input.display().to_string()))
         .tokenize()
         .unwrap_or_else(|e| die(&format!("{e}")));
 
@@ -479,17 +500,15 @@ pub fn run() {
             || mir_hints.stats.drops_fused > 0
             || mir_hints.stats.last_use_tracked > 0
         {
-            if std::env::var("JINNC_VERBOSE").is_ok() {
-                eprintln!(
-                    "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs, {} borrows promoted ({} bindings)",
-                    mir_hints.stats.drops_elided,
-                    mir_hints.stats.last_use_tracked,
-                    mir_hints.stats.drops_fused,
-                    mir_hints.stats.reuse_sites,
-                    mir_hints.stats.borrows_promoted,
-                    mir_hints.stats.total_bindings_analyzed,
-                );
-            }
+            eprintln!(
+                "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs, {} borrows promoted ({} bindings)",
+                mir_hints.stats.drops_elided,
+                mir_hints.stats.last_use_tracked,
+                mir_hints.stats.drops_fused,
+                mir_hints.stats.reuse_sites,
+                mir_hints.stats.borrows_promoted,
+                mir_hints.stats.total_bindings_analyzed,
+            );
         }
         if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&strip_codegen_prefix(&e.to_string()));

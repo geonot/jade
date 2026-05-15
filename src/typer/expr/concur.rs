@@ -18,12 +18,34 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         let _ = expected;
         match expr {
-            ast::Expr::Spawn(name, span) => {
-                if !self.actors.contains_key(name) {
-                    return Err(format!("spawn: unknown actor '{name}'"));
+            ast::Expr::Spawn(name, inits, span) => {
+                let (_, fields, _) = self
+                    .actors
+                    .get(name)
+                    .ok_or_else(|| format!("spawn: unknown actor '{name}'"))?
+                    .clone();
+                let mut hir_inits: Vec<(Symbol, hir::Expr)> = Vec::with_capacity(inits.len());
+                for (fname, fexpr) in inits {
+                    let field_ty = fields
+                        .iter()
+                        .find(|(fn_, _)| fn_ == fname)
+                        .map(|(_, t)| t.clone())
+                        .ok_or_else(|| {
+                            format!(
+                                "spawn '{name}': unknown field '{fname}' in init list"
+                            )
+                        })?;
+                    let hv = self.lower_expr_expected(fexpr, Some(&field_ty))?;
+                    let _ = self.infer_ctx.unify_at(
+                        &field_ty,
+                        &hv.ty,
+                        *span,
+                        "spawn init field",
+                    );
+                    hir_inits.push((fname.clone(), hv));
                 }
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::Spawn(name.clone()),
+                    kind: hir::ExprKind::Spawn(name.clone(), hir_inits),
                     ty: Type::ActorRef(name.clone()),
                     span: *span,
                 })
@@ -51,8 +73,8 @@ impl Typer {
                     .collect::<Vec<_>>()
                     .join(", ");
                 Err(format!(
-                    "line {}:{}: actor send syntax 'send target, @{}(...)' is not supported; use method-call syntax instead: target.{}({})",
-                    span.line, span.col, handler, handler, arg_placeholders
+                    "{}: actor send syntax 'send target, @{}(...)' is not supported; use method-call syntax instead: target.{}({})",
+                    span.loc(), handler, handler, arg_placeholders
                 ))
             }
             _ => unreachable!(),

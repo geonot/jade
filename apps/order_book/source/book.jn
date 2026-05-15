@@ -3,50 +3,42 @@ use models/order
 # best_bid: highest buy price; best_ask: lowest sell price
 *best_bid(orders as Vec of Order) returns i64
     best is -1
-    i is 0
-    while i < orders.len()
-        o is orders.get(i)
+    loop(0, $ < orders.len(), $ + 1)
+        o is orders.get($)
         if order.is_buy(o) and o.qty > 0
             if o.price > best
                 best is o.price
-        i is i + 1
     best
 
 *best_ask(orders as Vec of Order) returns i64
     best is 0
     found is 0
-    i is 0
-    while i < orders.len()
-        o is orders.get(i)
+    loop(0, $ < orders.len(), $ + 1)
+        o is orders.get($)
         if order.is_sell(o) and o.qty > 0
             if found equals 0 or o.price < best
                 best is o.price
                 found is 1
-        i is i + 1
     if found equals 0
         return -1
     best
 
 *depth_at(orders as Vec of Order, side as i64, price as i64) returns i64
     s is 0
-    i is 0
-    while i < orders.len()
-        o is orders.get(i)
+    loop(0, $ < orders.len(), $ + 1)
+        o is orders.get($)
         if o.side equals side and o.price equals price and o.qty > 0
             s is s + o.qty
-        i is i + 1
     s
 
 *find_index(orders as Vec of Order, side as i64) returns i64
     # earliest live order on side, returns -1 if none
     best_ts is 0
     found is -1
-    i is 0
-    while i < orders.len()
-        o is orders.get(i)
+    loop(0, $ < orders.len(), $ + 1)
+        o is orders.get($)
         if o.side equals side and o.qty > 0
             if found equals -1 or o.ts < best_ts
                 best_ts is o.ts
-                found is i
-        i is i + 1
+                found is $
     found

@@ -10,7 +10,13 @@ impl Lowerer {
         let span = expr.span;
         let ty = expr.ty.clone();
         match &expr.kind {
-            ExprKind::Spawn(name) => self.emit(InstKind::SpawnActor(*name, vec![]), ty, span),
+            ExprKind::Spawn(name, inits) => {
+                let lowered: Vec<(Symbol, ValueId)> = inits
+                    .iter()
+                    .map(|(fname, e)| (*fname, self.lower_expr(e)))
+                    .collect();
+                self.emit(InstKind::SpawnActor(*name, lowered), ty, span)
+            }
             ExprKind::Send(target, _type_name, handler, _tag, args) => {
                 let mut all = vec![self.lower_expr(target)];
                 all.extend(args.iter().map(|a| self.lower_expr(a)));

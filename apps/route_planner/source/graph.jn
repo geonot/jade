@@ -9,23 +9,19 @@ use models/edge
     g
 
 *neighbors_of(g as Vec of Edge, node as i64, out as Vec of i64) returns Vec of i64
-    i is 0
-    while i < g.len()
-        e is g.get(i)
+    loop(0, $ < g.len(), $ + 1)
+        e is g.get($)
         if e.src equals node
             out.push(e.dst)
             out.push(e.cost)
-        i is i + 1
     out
 
 *node_count(g as Vec of Edge) returns i64
     max_id is 0
-    i is 0
-    while i < g.len()
-        e is g.get(i)
+    loop(0, $ < g.len(), $ + 1)
+        e is g.get($)
         if e.src > max_id
             max_id is e.src
         if e.dst > max_id
             max_id is e.dst
-        i is i + 1
     max_id + 1

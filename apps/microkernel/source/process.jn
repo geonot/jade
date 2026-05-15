@@ -1,0 +1,20 @@
+# A userspace process.  We model the bookkeeping (pages, syscall traps,
+# pid registration) directly; spawning an actor per task isn't needed
+# for the simulation and would inflate the runtime cost considerably.
+
+use memory
+use syscalls
+
+*spawn_task(label as String, pid as i64, sys as Kernel, mmu as PageTable) returns i64
+    # On boot every task allocates two pages and emits a fork trap so
+    # the kernel ledger reflects creation.
+    f1 is memory.alloc(mmu, pid)
+    f2 is memory.alloc(mmu, pid)
+    sys.trap(7, pid)
+    if f1 equals -1
+        log 'oom on task spawn'
+    if f2 equals -1
+        log 'oom on task spawn'
+    # name_id is implicit in pid; return pid for the scheduler.
+    pid + (label.length * 0)
+

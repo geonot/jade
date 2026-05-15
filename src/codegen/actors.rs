@@ -339,6 +339,51 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         actor_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.compile_spawn_with_inits(actor_name, &[])
+    }
+
+    /// Synthesize the initial value for an actor state field. Honors the
+    /// declared default if any; otherwise returns an empty container for
+    /// collection types (Vec/Map/Set/PriorityQueue/Deque) so they aren't
+    /// left as null pointers from the mailbox memset. Scalars and other
+    /// types return None — they remain zero-initialized.
+    pub(crate) fn synthesize_field_init(
+        &mut self,
+        field: &crate::hir::Field,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        if let Some(ref default_expr) = field.default {
+            return Ok(Some(self.compile_expr(default_expr)?));
+        }
+        match &field.ty {
+            Type::Vec(_) => Ok(Some(self.compile_vec_new(&[])?)),
+            Type::Map(_, _) => Ok(Some(self.compile_map_new()?)),
+            Type::Set(_) => Ok(Some(self.compile_set_new()?)),
+            Type::PriorityQueue(_) => Ok(Some(self.compile_pq_new()?)),
+            Type::Deque(_) => Ok(Some(self.compile_deque_new()?)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Spawn an actor and apply user-provided field-init overrides
+    /// (`spawn Foo(field is val, ...)`). Defaults from the actor declaration
+    /// are written first; any user inits then override them.
+    pub(crate) fn compile_spawn_with_inits(
+        &mut self,
+        actor_name: &str,
+        inits: &[(crate::intern::Symbol, crate::hir::Expr)],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let lowered: Vec<(crate::intern::Symbol, BasicValueEnum<'ctx>)> = inits
+            .iter()
+            .map(|(name, e)| Ok::<_, String>((*name, self.compile_expr(e)?)))
+            .collect::<Result<_, _>>()?;
+        self.compile_spawn_with_init_vals(actor_name, &lowered)
+    }
+
+    pub(crate) fn compile_spawn_with_init_vals(
+        &mut self,
+        actor_name: &str,
+        inits: &[(crate::intern::Symbol, BasicValueEnum<'ctx>)],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let mb_name = format!("{actor_name}_mailbox");
         let msg_name = format!("{actor_name}_msg");
         let loop_name = format!("{actor_name}_loop");
@@ -409,16 +454,33 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
                 for (fi, field) in ad.fields.iter().enumerate() {
-                    if let Some(ref default_expr) = field.default {
-                        let val = self.compile_expr(default_expr)?;
-                        let field_ptr = b!(self.bld.build_struct_gep(
-                            state_st,
-                            state_ptr,
-                            fi as u32,
-                            &format!("state_init_{}", field.name)
-                        ));
-                        b!(self.bld.build_store(field_ptr, val));
+                    let field_ptr = b!(self.bld.build_struct_gep(
+                        state_st,
+                        state_ptr,
+                        fi as u32,
+                        &format!("state_init_{}", field.name)
+                    ));
+                    let val = self.synthesize_field_init(field)?;
+                    if let Some(v) = val {
+                        b!(self.bld.build_store(field_ptr, v));
                     }
+                }
+                // Apply user-provided spawn-init overrides
+                for (uname, uval) in inits {
+                    let fi = ad
+                        .fields
+                        .iter()
+                        .position(|f| f.name == *uname)
+                        .ok_or_else(|| {
+                            format!("spawn '{actor_name}': unknown field '{uname}'")
+                        })?;
+                    let field_ptr = b!(self.bld.build_struct_gep(
+                        state_st,
+                        state_ptr,
+                        fi as u32,
+                        &format!("state_user_{}", uname)
+                    ));
+                    b!(self.bld.build_store(field_ptr, *uval));
                 }
             }
         }
@@ -541,15 +603,15 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
                 for (fi, field) in ad.fields.iter().enumerate() {
-                    if let Some(ref default_expr) = field.default {
-                        let val = self.compile_expr(default_expr)?;
-                        let field_ptr = b!(self.bld.build_struct_gep(
-                            state_st,
-                            state_ptr,
-                            fi as u32,
-                            &format!("state_init_{}", field.name)
-                        ));
-                        b!(self.bld.build_store(field_ptr, val));
+                    let field_ptr = b!(self.bld.build_struct_gep(
+                        state_st,
+                        state_ptr,
+                        fi as u32,
+                        &format!("state_init_{}", field.name)
+                    ));
+                    let val = self.synthesize_field_init(field)?;
+                    if let Some(v) = val {
+                        b!(self.bld.build_store(field_ptr, v));
                     }
                 }
             }

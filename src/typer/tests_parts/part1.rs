@@ -8,8 +8,7 @@ fn test_strict_types_numeric_defaults_with_warning() {
         start: 0,
         end: 0,
         line: 10,
-        col: 1,
-    };
+        col: 1, file: None };
     let v = ctx.fresh_numeric_var();
     let v2 = ctx.fresh_var();
     let _ = ctx.unify_at(&v, &v2, span, "numeric op");
@@ -84,14 +83,12 @@ fn test_error_message_type_mismatch_has_provenance() {
         start: 0,
         end: 0,
         line: 3,
-        col: 5,
-    };
+        col: 5, file: None };
     let span2 = crate::ast::Span {
         start: 0,
         end: 0,
         line: 7,
-        col: 10,
-    };
+        col: 10, file: None };
     ctx.unify_at(&v, &Type::String, span1, "bind annotation")
         .unwrap();
     let err = ctx
@@ -114,8 +111,7 @@ fn test_error_message_suggests_cast_for_int_float() {
         start: 0,
         end: 0,
         line: 5,
-        col: 1,
-    };
+        col: 1, file: None };
     let err = ctx
         .unify_at(&Type::I64, &Type::F64, span, "binary operands")
         .unwrap_err();
@@ -129,8 +125,7 @@ fn test_error_message_suggests_to_string() {
         start: 0,
         end: 0,
         line: 5,
-        col: 1,
-    };
+        col: 1, file: None };
     let err = ctx
         .unify_at(&Type::String, &Type::I64, span, "function argument")
         .unwrap_err();
@@ -147,8 +142,7 @@ fn test_error_message_binary_operand_help() {
         start: 0,
         end: 0,
         line: 3,
-        col: 1,
-    };
+        col: 1, file: None };
     let err = ctx
         .unify_at(&Type::String, &Type::Bool, span, "binary operands")
         .unwrap_err();
@@ -163,8 +157,7 @@ fn test_constrain_typevar_to_numeric() {
         start: 0,
         end: 0,
         line: 1,
-        col: 1,
-    };
+        col: 1, file: None };
     ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic")
         .unwrap();
     let err = ctx.unify(&v, &Type::String);
@@ -187,8 +180,7 @@ fn test_constrain_typevar_to_integer() {
         start: 0,
         end: 0,
         line: 1,
-        col: 1,
-    };
+        col: 1, file: None };
     ctx.constrain(&v, unify::TypeConstraint::Integer, span, "bitwise")
         .unwrap();
     assert!(ctx.unify(&v, &Type::F64).is_err());
@@ -207,8 +199,7 @@ fn test_constrain_already_solved_validates() {
         start: 0,
         end: 0,
         line: 1,
-        col: 1,
-    };
+        col: 1, file: None };
     ctx.unify(&v, &Type::String).unwrap();
     let err = ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic");
     assert!(err.is_err(), "should reject String for Numeric constraint");

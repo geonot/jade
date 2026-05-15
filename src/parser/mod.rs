@@ -325,6 +325,27 @@ impl Parser {
                     self.advance();
                     return Ok("log".into());
                 }
+                // Logical/bitwise keyword operators are also valid as
+                // function/method/field names (e.g. `*xor(...)`,
+                // `obj.xor(...)`, `stream.and(...)`). At an
+                // identifier-expected position there is no ambiguity with
+                // the operator form.
+                Token::Xor => {
+                    self.advance();
+                    return Ok("xor".into());
+                }
+                Token::And => {
+                    self.advance();
+                    return Ok("and".into());
+                }
+                Token::Or => {
+                    self.advance();
+                    return Ok("or".into());
+                }
+                Token::Not => {
+                    self.advance();
+                    return Ok("not".into());
+                }
                 _ => {}
             }
         }
@@ -432,9 +453,8 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
     for (i, c) in clauses.iter().enumerate().skip(1) {
         if c.params.len() != param_count {
             panic!(
-                "line {}:{}: multi-clause function `{}` clause {} has {} parameters, but first clause has {}",
-                c.span.line,
-                c.span.col,
+                "{}: multi-clause function `{}` clause {} has {} parameters, but first clause has {}",
+                c.span.loc(),
                 first.name,
                 i + 1,
                 c.params.len(),

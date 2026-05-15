@@ -139,6 +139,35 @@ impl<'ctx> Compiler<'ctx> {
                 let idx = self.compile_expr(&args[0])?.into_int_value();
                 self.vec_remove_val(header_ptr, &elem_ty, idx)
             }
+            "shift" => {
+                let idx = self.ctx.i64_type().const_zero();
+                self.vec_remove_val(header_ptr, &elem_ty, idx)
+            }
+            "first" => {
+                let idx = self.ctx.i64_type().const_zero();
+                self.vec_get_idx(header_ptr, &elem_ty, idx)
+            }
+            "last" => {
+                let len_val = self.vec_len(header_ptr)?.into_int_value();
+                let one = self.ctx.i64_type().const_int(1, false);
+                let idx = b!(self.bld.build_int_nsw_sub(len_val, one, "vl.lasti"));
+                self.vec_get_idx(header_ptr, &elem_ty, idx)
+            }
+            "is_empty" => {
+                let len_val = self.vec_len(header_ptr)?.into_int_value();
+                let zero = self.ctx.i64_type().const_zero();
+                let cmp = b!(self.bld.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    len_val,
+                    zero,
+                    "vl.empty"
+                ));
+                let i8t = self.ctx.i8_type();
+                Ok(b!(self
+                    .bld
+                    .build_int_z_extend(cmp, i8t, "vl.emptyi"))
+                .into())
+            }
             "clear" => self.vec_clear(header_ptr),
             "map" => self.vec_map(header_ptr, &elem_ty, args),
             "filter" => self.vec_filter(header_ptr, &elem_ty, args),

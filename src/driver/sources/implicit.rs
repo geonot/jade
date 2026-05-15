@@ -79,7 +79,10 @@ pub(in crate::driver) fn resolve_implicit_imports(
             Ok(s) => s,
             Err(_) => continue,
         };
-        let tokens = match Lexer::new(&src).tokenize() {
+        let tokens = match Lexer::new(&src)
+            .with_file(Symbol::intern(&file_path.display().to_string()))
+            .tokenize()
+        {
             Ok(t) => t,
             Err(_) => continue,
         };
@@ -331,9 +334,12 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             | Expr::IndexPlaceholder(_)
             | Expr::QualifiedIdent(_, _, _)
             | Expr::Embed(_, _) => {}
-            Expr::Spawn(name, _) => {
+            Expr::Spawn(name, inits, _) => {
                 if !defs.contains(name) {
                     modules.insert(name.clone());
+                }
+                for (_, v) in inits {
+                    walk_expr(v, modules, defs);
                 }
             }
         }

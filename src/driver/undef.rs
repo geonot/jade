@@ -156,8 +156,11 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Expr::Ref(e, _) | Expr::Deref(e, _) | Expr::Yield(e, _) | Expr::Grad(e, _) => {
                 walk_expr(e, refs, defs)
             }
-            Expr::Spawn(name, _) => {
+            Expr::Spawn(name, inits, _) => {
                 refs.insert(name.clone());
+                for (_, v) in inits {
+                    walk_expr(v, refs, defs);
+                }
             }
             Expr::Ternary(c, t, f, _) => {
                 walk_expr(c, refs, defs);

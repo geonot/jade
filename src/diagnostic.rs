@@ -140,7 +140,13 @@ impl Diagnostic {
             None => out.push_str(&format!("{sev}: {}\n", self.message)),
         }
         if let Some(sp) = self.span {
-            out.push_str(&format!(" --> {filename}:{}:{}\n", sp.line, sp.col));
+            // Prefer the span's own filename when present (multi-file projects):
+            // the caller's `filename` argument is just a fallback display name.
+            let file_disp: String = match sp.file {
+                Some(f) => f.as_str().to_string(),
+                None => filename.to_string(),
+            };
+            out.push_str(&format!(" --> {file_disp}:{}:{}\n", sp.line, sp.col));
             if let Some(line_text) = source.lines().nth(sp.line.saturating_sub(1) as usize) {
                 let line_num = sp.line;
                 let pad = format!("{line_num}").len();

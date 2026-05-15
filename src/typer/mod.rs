@@ -391,8 +391,9 @@ impl Typer {
     pub(crate) fn vec_method_ret_ty(method: &str, elem_ty: &Type) -> Option<Type> {
         match method {
             "push" | "clear" | "set" => Some(Type::Void),
-            "pop" | "get" | "remove" => Some(elem_ty.clone()),
+            "pop" | "get" | "remove" | "shift" | "first" | "last" => Some(elem_ty.clone()),
             "len" | "count" => Some(Type::I64),
+            "is_empty" => Some(Type::Bool),
             "take" | "skip" | "flatten" | "collect" | "reverse" | "sort" => {
                 Some(Type::Vec(Box::new(elem_ty.clone())))
             }

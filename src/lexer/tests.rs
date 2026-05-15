@@ -145,7 +145,7 @@ fn raw_string() {
 #[test]
 fn all_keywords() {
     let t = lex(
-        "if elif else while for in loop break continue return match when type enum err pub use as from to by array extern do end log",
+        "if elif else while for in loop break continue return match when type enum err pub use as from to by extern do end log",
     );
     let expected = [
         Token::If,
@@ -169,7 +169,6 @@ fn all_keywords() {
         Token::From,
         Token::To,
         Token::By,
-        Token::Array,
         Token::Extern,
         Token::Do,
         Token::End,

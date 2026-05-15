@@ -38,14 +38,13 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 // ── Actors / Channels ──
-                mir::InstKind::SpawnActor(name, args) => {
-                    if !args.is_empty() {
-                        return Err(format!(
-                            "SpawnActor '{name}' has {} constructor args but actor spawn does not yet support arguments",
-                            args.len()
-                        ));
-                    }
-                    self.emit_spawn_actor(&name.as_str())
+                mir::InstKind::SpawnActor(name, inits) => {
+                    let init_vals: Vec<(crate::intern::Symbol, inkwell::values::BasicValueEnum)> =
+                        inits
+                            .iter()
+                            .map(|(fname, vid)| (*fname, self.val(*vid)))
+                            .collect();
+                    self.emit_spawn_actor_with_inits(&name.as_str(), &init_vals)
                 }
                 mir::InstKind::ChanCreate(elem_ty, cap) => {
                     self.emit_chan_create(elem_ty, cap.as_ref())

@@ -6,10 +6,8 @@ use chain
 
 *main
     pool is vec()
-    n is 0
-    while n < 30
-        pool is mempool.add(pool, tx.new(n % 5, (n + 1) % 5, 100 + n, n))
-        n is n + 1
+    loop(0, $ < 30, $ + 1)
+        pool is mempool.add(pool, tx.new($ % 5, ($ + 1) % 5, 100 + $, $))
 
     log 'mempool_size'
     log pool.len()
@@ -18,14 +16,12 @@ use chain
 
     chn is vec()
     prev is 0
-    h is 0
-    while h < 4
+    loop(0, $ < 4, $ + 1)
         batch is mempool.pick_top(pool, 5)
-        b is miner.mine(prev, batch, h, 8)
+        b is miner.mine(prev, batch, $, 8)
         chn.push(b)
         prev is b.hash
         pool is mempool.remove_first(pool, 5)
-        h is h + 1
 
     log 'chain_height'
     log chain.total_height(chn)

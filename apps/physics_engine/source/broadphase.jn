@@ -1,0 +1,20 @@
+# Sweep-and-prune broadphase on the x axis.
+# Returns a vector packed as [a, b, a, b, ...] indices into `world`.
+
+*sap(world as Vec of Body) returns Vec of i64
+    pairs is vec()
+    n is world.len()
+    loop(0, $ < n, $ + 1)
+        i is $
+        bi is world.get(i)
+        loop(i + 1, $ < n, $ + 1)
+            j is $
+            bj is world.get(j)
+            dx_min is bi.x - bi.radius
+            dx_max is bi.x + bi.radius
+            jx_min is bj.x - bj.radius
+            jx_max is bj.x + bj.radius
+            if dx_max >= jx_min and jx_max >= dx_min
+                pairs.push(i)
+                pairs.push(j)
+    pairs

@@ -28,7 +28,10 @@ impl Parser {
             for item in items {
                 match item {
                     Either::Field(f) => fields.push(f),
-                    Either::Method(m) => methods.push(m),
+                    Either::Method(mut m) => {
+                        Self::ensure_implicit_self(&mut m.params, m.span);
+                        methods.push(m);
+                    }
                 }
             }
         }

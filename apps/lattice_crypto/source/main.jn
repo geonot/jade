@@ -1,0 +1,66 @@
+# lattice_crypto — a *toy* post-quantum-flavoured cryptosystem.
+#
+# This is a teaching implementation, NOT for production.  It composes:
+#   prng.jn       — xoshiro256** PRNG seeded by a 64-bit key
+#   ring.jn       — polynomial ring  Z_q[x] / (x^n + 1)   small q, n
+#   lwe.jn        — ring-LWE-style KEX:  pk = a*s + e
+#   stream.jn     — ARX stream cipher (chacha-flavoured 8-round core)
+#   poly_mac.jn   — Carter-Wegman MAC over GF(2^61 - 1)
+#   aead.jn       — encrypt-then-MAC framing
+#
+# The `main` flow runs Alice and Bob through a key exchange, derives a
+# shared key, AEAD-encrypts a 96-byte message, decrypts it, and asserts
+# round-trip equality.
+#
+# Numbers are kept tiny so `i64` arithmetic never overflows.
+
+use prng
+use ring
+use lwe
+use stream
+use poly_mac
+use aead
+
+*main
+    log 'lattice-crypto demo'
+
+    # ── 1. Public parameter `a` (sampled from a known seed) ─────────
+    pub_seed is 0x5a17C0DE
+    a is ring.sample_uniform(pub_seed)
+
+    # ── 2. Alice + Bob keypairs ────────────────────────────────────
+    sk_a is lwe.keygen(0x11111111, a)
+    sk_b is lwe.keygen(0x22222222, a)
+
+    pk_a is sk_a.pk
+    pk_b is sk_b.pk
+
+    # ── 3. Each side reconstructs the shared secret ────────────────
+    ss_a is lwe.shared(sk_a, pk_b)
+    ss_b is lwe.shared(sk_b, pk_a)
+
+    log 'shared.delta'
+    log ring.l_inf_distance(ss_a, ss_b)   # small (rounding noise)
+
+    # ── 4. Reconcile to a 256-bit key ──────────────────────────────
+    key_a is lwe.reconcile(ss_a)
+    key_b is lwe.reconcile(ss_b)
+    log 'key.match'
+    log key_a equals key_b
+
+    # ── 5. AEAD round-trip ─────────────────────────────────────────
+    msg is vec()
+    loop(0, $ < 96, $ + 1)
+        msg.push($ & 0xFF)
+
+    nonce is 0xC0FFEE12_34567890
+    ad    is vec()                       # empty associated data
+    ct    is aead.seal(key_a, nonce, ad, msg)
+    pt    is aead.open(key_b, nonce, ad, ct)
+
+    log 'roundtrip.len'
+    log pt.bytes.len()
+    log 'roundtrip.ok'
+    log aead.bytes_equal(msg, pt.bytes)
+    log 'mac.ok'
+    log pt.authentic

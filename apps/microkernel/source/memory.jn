@@ -1,0 +1,38 @@
+# Page-frame allocator + a tiny MMU that translates 64-bit virtual
+# addresses into (frame, offset) pairs.  PAGE_SIZE is 4096 bytes.
+
+type PageTable
+    frames as Vec of i64        # frame i -> owning pid (-1 = free)
+    capacity as i64
+
+*boot(n_frames as i64) returns PageTable
+    frames is vec()
+    loop(0, $ < n_frames, $ + 1)
+        frames.push(-1)
+    PageTable(frames is frames, capacity is n_frames)
+
+*alloc(pt as PageTable, owner as i64) returns i64
+    # Returns the frame number, or -1 on out-of-memory.
+    loop(0, $ < pt.capacity, $ + 1)
+        if pt.frames.get($) equals -1
+            pt.frames.set($, owner)
+            return $
+    -1
+
+*free(pt as PageTable, frame as i64)
+    if frame >= 0 and frame < pt.capacity
+        pt.frames.set(frame, -1)
+
+*used(pt as PageTable) returns i64
+    n is 0
+    loop(0, $ < pt.capacity, $ + 1)
+        if pt.frames.get($) neq -1
+            n is n + 1
+    n
+
+# 12-bit page offset, top bits select the frame.
+*translate(vaddr as i64) returns i64
+    vaddr >> 12
+
+*offset(vaddr as i64) returns i64
+    vaddr & 0xFFF

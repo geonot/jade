@@ -9,9 +9,8 @@ type Alert
 
 *scan(samples as Vec of Sample, threshold as i64) returns Vec of Alert
     out is vec()
-    i is 0
-    while i < samples.len()
-        x is samples.get(i)
+    loop(0, $ < samples.len(), $ + 1)
+        x is samples.get($)
         if x.value > threshold
             sev is 1
             if x.value > threshold * 2
@@ -19,14 +18,11 @@ type Alert
             if x.value > threshold * 4
                 sev is 3
             out.push(Alert(sensor is x.sensor, value is x.value, ts is x.ts, severity is sev))
-        i is i + 1
     out
 
 *severe_count(alerts as Vec of Alert) returns i64
     c is 0
-    i is 0
-    while i < alerts.len()
-        if alerts.get(i).severity >= 3
+    loop(0, $ < alerts.len(), $ + 1)
+        if alerts.get($).severity >= 3
             c is c + 1
-        i is i + 1
     c

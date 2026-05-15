@@ -418,7 +418,7 @@ impl OwnershipVerifier {
                 }
             }
 
-            ExprKind::Spawn(_) => {}
+            ExprKind::Spawn(_, _) => {}
 
             ExprKind::Send(target, _, _, _, args) => {
                 self.verify_expr(target);

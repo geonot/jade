@@ -1,0 +1,15 @@
+# Rigid body record.  We use integer coords (scaled by 100) so we
+# stay in i64 arithmetic everywhere.
+
+type Body
+    id as i64
+    x  as i64
+    y  as i64
+    vx as i64
+    vy as i64
+    radius as i64
+    inv_mass as i64
+
+*new(id as i64, x as i64, y as i64, vx as i64, vy as i64, r as i64, m as i64) returns Body
+    inv is m equals 0 ? 0 ! 1
+    Body(id is id, x is x, y is y, vx is vx, vy is vy, radius is r, inv_mass is inv)

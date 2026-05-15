@@ -2,16 +2,14 @@ use models/block
 use miner
 
 *validate_chain(chain as Vec of Block, difficulty as i64) returns i64
-    i is 1
     bad is 0
-    while i < chain.len()
-        prev is chain.get(i - 1)
-        cur is chain.get(i)
+    loop(1, $ < chain.len(), $ + 1)
+        prev is chain.get($ - 1)
+        cur is chain.get($)
         if not (cur.prev_hash equals prev.hash)
             bad is bad + 1
         if not (cur.hash % difficulty equals 0)
             bad is bad + 1
-        i is i + 1
     bad
 
 *total_height(chain as Vec of Block) returns i64

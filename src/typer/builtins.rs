@@ -293,7 +293,10 @@ impl Typer {
                 let elem_ty = hargs
                     .first()
                     .map(|a| a.ty.clone())
-                    .unwrap_or_else(|| self.infer_ctx.fresh_var());
+                    .unwrap_or_else(|| {
+                        self.infer_ctx
+                            .fresh_var_at(span, "empty `vec()` literal — element type is unknown")
+                    });
                 for a in hargs.iter().skip(1) {
                     let _ = self
                         .infer_ctx
@@ -315,12 +318,18 @@ impl Typer {
             })),
             "set" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
                 kind: hir::ExprKind::SetNew,
-                ty: Type::Set(Box::new(self.infer_ctx.fresh_var())),
+                ty: Type::Set(Box::new(self.infer_ctx.fresh_var_at(
+                    span,
+                    "empty `set()` literal — element type is unknown",
+                ))),
                 span,
             })),
             "priority_queue" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
                 kind: hir::ExprKind::PQNew,
-                ty: Type::PriorityQueue(Box::new(self.infer_ctx.fresh_var())),
+                ty: Type::PriorityQueue(Box::new(self.infer_ctx.fresh_var_at(
+                    span,
+                    "empty `priority_queue()` literal — element type is unknown",
+                ))),
                 span,
             })),
             "vec_with_alloc" if args.len() == 1 && !self.fns.contains_key(name) => {
@@ -330,7 +339,10 @@ impl Typer {
                 };
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::VecWithAlloc, vec![halloc]),
-                    ty: Type::Vec(Box::new(self.infer_ctx.fresh_var())),
+                    ty: Type::Vec(Box::new(self.infer_ctx.fresh_var_at(
+                        span,
+                        "empty `vec_with_alloc()` literal — element type is unknown",
+                    ))),
                     span,
                 }))
             }

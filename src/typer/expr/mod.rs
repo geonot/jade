@@ -230,8 +230,8 @@ impl Typer {
                     }
                     other => {
                         return Err(format!(
-                            "line {}:{}: cannot dereference type `{}`",
-                            span.line, span.col, other
+                            "{}: cannot dereference type `{}`",
+                            span.loc(), other
                         ));
                     }
                 };
@@ -280,9 +280,9 @@ impl Typer {
             ast::Expr::Spawn(..) => self.lower_expr_spawn(expr, expected),
             ast::Expr::Send(..) => self.lower_expr_send(expr, expected),
             ast::Expr::Receive(_, span) => Err(format!(
-                "line {}:{}: 'receive' is not supported outside actor handlers; \
+                "{}: 'receive' is not supported outside actor handlers; \
                  use channels directly with 'receive ch'",
-                span.line, span.col,
+                span.loc(),
             )),
 
             ast::Expr::Yield(..) => self.lower_expr_yield(expr, expected),
@@ -392,6 +392,21 @@ impl Typer {
         }
         if expr.ty == Type::Bool && target.is_int() {
             return Self::make_coerce(expr, CoercionKind::BoolToInt, target.clone());
+        }
+        // Stack `[N x T]` array → heap `Vec(T)`. Inserted at any boundary site
+        // where a fixed-size array value flows into a Vec slot (function arg,
+        // return, struct field, vec method receiver). Codegen materializes a
+        // vec header + buffer and copies the array contents.
+        if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&expr.ty, target) {
+            if **arr_elem == **vec_elem {
+                let elem_ty = (**arr_elem).clone();
+                let len = *len as u64;
+                return Self::make_coerce(
+                    expr,
+                    CoercionKind::ArrayToVec { elem_ty, len },
+                    target.clone(),
+                );
+            }
         }
         if let Type::DynTrait(trait_name) = &target {
             if let Type::Struct(type_name, _) = &expr.ty {

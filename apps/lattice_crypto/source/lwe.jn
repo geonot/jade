@@ -1,0 +1,27 @@
+# Ring-LWE keypair:    pk = a*s + e   with small s, e
+# Shared secret:       ss = pk_other * s_self
+# Reconcile:           reduce coefficients to one bit each, pack 32 bits
+#                      into a 64-bit "key" (toy fingerprint of 256-bit key)
+
+use ring
+
+type Sk
+    s  as Poly
+    pk as Poly
+
+*keygen(seed as i64, a as Poly) returns Sk
+    s is ring.sample_small(seed ^ 0xA1A1A1A1)
+    e is ring.sample_small(seed ^ 0xE2E2E2E2)
+    pk is ring.add(ring.mul(a, s), e)
+    Sk(s is s, pk is pk)
+
+*shared(self_sk as Sk, other_pk as Poly) returns Poly
+    ring.mul(other_pk, self_sk.s)
+
+*reconcile(p as Poly) returns i64
+    # Take the high bit of each of the first 64 coefficients.
+    out is 0
+    loop(0, $ < 64, $ + 1)
+        bit is (p.coef.get($) >> 12) & 1
+        out is out | (bit << $)
+    out

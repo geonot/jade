@@ -1,0 +1,71 @@
+# Lightweight reverse-mode tape.
+#
+# Each Value records its forward value and a list of (parent_index,
+# local_partial) pairs.  `backward(root)` walks the tape in reverse
+# accumulating gradients.
+
+type Value
+    val   as i64
+    p1    as i64       # parent indices, -1 = none
+    p2    as i64
+    g1    as i64       # local partials d(self)/d(parent)
+    g2    as i64
+
+type Tape
+    nodes as Vec of Value
+    grads as Vec of i64
+
+use fix
+
+*new returns Tape
+    Tape(nodes is vec(), grads is vec())
+
+*leaf(t as Tape, v as i64) returns i64
+    t.nodes.push(Value(val is v, p1 is -1, p2 is -1, g1 is 0, g2 is 0))
+    t.grads.push(0)
+    t.nodes.len() - 1
+
+*add(t as Tape, a as i64, b as i64) returns i64
+    va is t.nodes.get(a).val + t.nodes.get(b).val
+    t.nodes.push(Value(val is va, p1 is a, p2 is b, g1 is fix.ONE(), g2 is fix.ONE()))
+    t.grads.push(0)
+    t.nodes.len() - 1
+
+*mul(t as Tape, a as i64, b as i64) returns i64
+    av is t.nodes.get(a).val
+    bv is t.nodes.get(b).val
+    t.nodes.push(Value(val is fix.mul(av, bv), p1 is a, p2 is b, g1 is bv, g2 is av))
+    t.grads.push(0)
+    t.nodes.len() - 1
+
+*tanh(t as Tape, a as i64) returns i64
+    av is t.nodes.get(a).val
+    o  is fix.tanh(av)
+    d  is fix.tanh_deriv(o)
+    t.nodes.push(Value(val is o, p1 is a, p2 is -1, g1 is d, g2 is 0))
+    t.grads.push(0)
+    t.nodes.len() - 1
+
+*sub(t as Tape, a as i64, b as i64) returns i64
+    va is t.nodes.get(a).val - t.nodes.get(b).val
+    t.nodes.push(Value(val is va, p1 is a, p2 is b, g1 is fix.ONE(), g2 is fix.neg(fix.ONE())))
+    t.grads.push(0)
+    t.nodes.len() - 1
+
+*sq(t as Tape, a as i64) returns i64
+    av is t.nodes.get(a).val
+    t.nodes.push(Value(val is fix.mul(av, av), p1 is a, p2 is -1, g1 is fix.mul(fix.from_int(2), av), g2 is 0))
+    t.grads.push(0)
+    t.nodes.len() - 1
+
+*backward(t as Tape, root as i64)
+    t.grads.set(root, fix.ONE())
+    i is t.nodes.len() - 1
+    while i >= 0
+        n is t.nodes.get(i)
+        g is t.grads.get(i)
+        if n.p1 neq -1
+            t.grads.set(n.p1, t.grads.get(n.p1) + fix.mul(g, n.g1))
+        if n.p2 neq -1
+            t.grads.set(n.p2, t.grads.get(n.p2) + fix.mul(g, n.g2))
+        i is i - 1

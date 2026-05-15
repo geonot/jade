@@ -1,0 +1,7 @@
+# Semi-implicit Euler.  Gravity = 10 (along +y), damping = 1/256.
+*step(b as Body, dt as i64)
+    b.vy is b.vy + (10 * dt / 100)
+    b.vx is b.vx - (b.vx >> 8)
+    b.vy is b.vy - (b.vy >> 8)
+    b.x  is b.x + (b.vx * dt / 100)
+    b.y  is b.y + (b.vy * dt / 100)

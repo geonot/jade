@@ -6,13 +6,10 @@ use alerts
 *main
     samples is vec()
     n_sensors is 4
-    t is 0
-    while t < 500
-        sid is 0
-        while sid < n_sensors
-            samples is pipeline.ingest(samples, sid, t)
-            sid is sid + 1
-        t is t + 1
+    loop(0, $ < 500, $ + 1)
+        t is $
+        loop(0, $ < n_sensors, $ + 1)
+            samples is pipeline.ingest(samples, $, t)
 
     log 'samples'
     log samples.len()

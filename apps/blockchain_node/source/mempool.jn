@@ -9,24 +9,18 @@ use models/tx
     take is n
     if take > pool.len()
         take is pool.len()
-    i is 0
-    while i < take
-        out.push(pool.get(i))
-        i is i + 1
+    loop(0, $ < take, $ + 1)
+        out.push(pool.get($))
     out
 
 *remove_first(pool as Vec of Tx, n as i64) returns Vec of Tx
     out is vec()
-    i is n
-    while i < pool.len()
-        out.push(pool.get(i))
-        i is i + 1
+    loop(n, $ < pool.len(), $ + 1)
+        out.push(pool.get($))
     out
 
 *total_amount(pool as Vec of Tx) returns i64
     s is 0
-    i is 0
-    while i < pool.len()
-        s is s + pool.get(i).amount
-        i is i + 1
+    loop(0, $ < pool.len(), $ + 1)
+        s is s + pool.get($).amount
     s

@@ -438,6 +438,83 @@ impl<'ctx> Compiler<'ctx> {
                 "boolext"
             ))
             .into()),
+            hir::CoercionKind::ArrayToVec { elem_ty, len } => {
+                // Promote a stack `[N x T]` array value into a heap-allocated
+                // Vec by malloc'ing a header + buffer, copying the elements,
+                // and returning the header pointer.
+                let i64t = self.ctx.i64_type();
+                let header_ty = self.vec_header_type();
+                let lty = self.llvm_ty(elem_ty);
+                let n = *len;
+                let cap = if n == 0 { 0u64 } else { n.next_power_of_two() };
+                let elem_size = self.type_store_size(lty);
+                let malloc = self.ensure_malloc();
+
+                let header_ptr =
+                    b!(self
+                        .bld
+                        .build_call(malloc, &[i64t.const_int(24, false).into()], "a2v.hdr"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void")
+                    .into_pointer_value();
+
+                let buf_ptr = if n > 0 {
+                    let buf_size = i64t.const_int(cap * elem_size, false);
+                    let p = b!(self
+                        .bld
+                        .build_call(malloc, &[buf_size.into()], "a2v.buf"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void")
+                    .into_pointer_value();
+
+                    // The array value is an LLVM aggregate `[N x T]`. Spill it
+                    // to a temporary alloca so we can GEP element-by-element
+                    // and copy into the heap buffer.
+                    let arr_llty = lty.array_type(n as u32);
+                    let tmp = self.entry_alloca(arr_llty.into(), "a2v.tmp");
+                    b!(self.bld.build_store(tmp, val));
+                    let zero = i64t.const_int(0, false);
+                    for i in 0..n {
+                        let src = unsafe {
+                            b!(self.bld.build_gep(
+                                arr_llty,
+                                tmp,
+                                &[zero, i64t.const_int(i, false)],
+                                "a2v.src"
+                            ))
+                        };
+                        let v = b!(self.bld.build_load(lty, src, "a2v.v"));
+                        let dst = unsafe {
+                            b!(self.bld.build_gep(
+                                lty,
+                                p,
+                                &[i64t.const_int(i, false)],
+                                "a2v.dst"
+                            ))
+                        };
+                        b!(self.bld.build_store(dst, v));
+                    }
+                    p
+                } else {
+                    self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null()
+                };
+
+                let ptr_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 0, "a2v.ptrp"));
+                b!(self.bld.build_store(ptr_gep, buf_ptr));
+                let len_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 1, "a2v.lenp"));
+                b!(self.bld.build_store(len_gep, i64t.const_int(n, false)));
+                let cap_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 2, "a2v.capp"));
+                b!(self.bld.build_store(cap_gep, i64t.const_int(cap, false)));
+                Ok(header_ptr.into())
+            }
         }
     }
 

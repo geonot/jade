@@ -10,31 +10,25 @@ use models/entry
     if ttl > 0
         expires is now + ttl
     found is 0
-    i is 0
-    while i < s.len()
-        e is s.get(i)
+    loop(0, $ < s.len(), $ + 1)
+        e is s.get($)
         if e.key equals key
-            s.set(i, entry.new(key, value, e.version + 1, expires))
+            s.set($, entry.new(key, value, e.version + 1, expires))
             found is 1
-        i is i + 1
     if found equals 0
         s.push(entry.new(key, value, 1, expires))
     s
 
 *get(s as Vec of Entry, key as i64, now as i64) returns i64
-    i is 0
-    while i < s.len()
-        e is s.get(i)
+    loop(0, $ < s.len(), $ + 1)
+        e is s.get($)
         if e.key equals key and entry.is_alive(e, now)
             return e.value
-        i is i + 1
     -1
 
 *size(s as Vec of Entry, now as i64) returns i64
     c is 0
-    i is 0
-    while i < s.len()
-        if entry.is_alive(s.get(i), now)
+    loop(0, $ < s.len(), $ + 1)
+        if entry.is_alive(s.get($), now)
             c is c + 1
-        i is i + 1
     c

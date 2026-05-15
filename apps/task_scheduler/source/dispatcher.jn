@@ -11,21 +11,17 @@ type Stats
 
 *tick(tasks as Vec of Task, now as i64, stats as Stats) returns Stats
     # Activate tasks at their period boundary
-    i is 0
-    while i < tasks.len()
-        t is tasks.get(i)
+    loop(0, $ < tasks.len(), $ + 1)
+        t is tasks.get($)
         if t.state equals 0 and now % t.period equals 0
-            tasks.set(i, task.activate(t, now))
-        i is i + 1
+            tasks.set($, task.activate(t, now))
 
     # Count missed
     missed_now is 0
-    j is 0
-    while j < tasks.len()
-        if task.missed(tasks.get(j), now)
+    loop(0, $ < tasks.len(), $ + 1)
+        if task.missed(tasks.get($), now)
             missed_now is missed_now + 1
-            tasks.set(j, task.complete(tasks.get(j)))
-        j is j + 1
+            tasks.set($, task.complete(tasks.get($)))
 
     # Run highest-priority for one unit
     idx is queue.pick_next(tasks)

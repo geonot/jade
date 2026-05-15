@@ -5,13 +5,11 @@ use models/block
     if txs.len() equals 0
         return 0
     acc is tx.hash(txs.get(0))
-    i is 1
-    while i < txs.len()
-        h is tx.hash(txs.get(i))
+    loop(1, $ < txs.len(), $ + 1)
+        h is tx.hash(txs.get($))
         acc is (acc * 31) ^ h
         if acc < 0
             acc is -acc
-        i is i + 1
     acc
 
 *mix(prev_hash as i64, merkle as i64, nonce as i64) returns i64

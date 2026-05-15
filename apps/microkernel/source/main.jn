@@ -1,0 +1,56 @@
+# microkernel — a first-pass operating system simulation in Jinn.
+#
+# Layers, bottom up:
+#   memory.jn   — page allocator + virtual address translation (MMU)
+#   syscalls.jn — kernel syscall dispatch table
+#   scheduler.jn — round-robin / priority scheduler
+#   process.jn  — a userspace task as an actor
+#   shell.jn    — a tiny line-oriented shell that issues syscalls
+#
+# `main` boots the kernel: allocates pages, spawns init, forks workers,
+# routes syscalls, drains output, halts.
+
+use memory
+use syscalls
+use scheduler
+use process
+use shell
+
+*main
+    log 'jinn-microkernel boot'
+
+    mmu  is memory.boot(64)        # 64 frames x 4 KiB
+    sys  is spawn Kernel
+    sch  is spawn Scheduler
+
+    # Spawn init then 4 worker tasks at descending priorities.
+    init is process.spawn_task('init', 0, sys, mmu)
+    sch.admit(init, 0)
+
+    loop(1, $ <= 4, $ + 1)
+        pid  is $
+        prio is 5 - $
+        name is 'worker_{pid}'
+        t    is process.spawn_task(name, pid, sys, mmu)
+        sch.admit(t, prio)
+
+    # Run a few quanta then drive the shell.
+    sch.tick(20)
+
+    sh is spawn Shell
+    sh.exec('alloc 8')
+    sh.exec('alloc 16')
+    sh.exec('write 0x100 42')
+    sh.exec('read  0x100')
+    sh.exec('fork  worker')
+    sh.exec('ps')
+    sh.exec('halt')
+
+    sch.tick(8)
+    sch.report()
+    sys.report()
+
+    stop sh
+    stop sch
+    stop sys
+    log 'jinn-microkernel halt'

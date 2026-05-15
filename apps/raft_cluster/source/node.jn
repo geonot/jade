@@ -1,0 +1,62 @@
+# Raft node state machine.  `role` is encoded:
+#   0 = Follower    1 = Candidate    2 = Leader
+
+actor Node
+    id as i64
+    peer_count as i64
+    role as i64
+    term as i64
+    voted_for as i64
+    leader as i64
+    log_size as i64
+    commit_index as i64
+    last_applied as i64
+    votes as i64
+
+    *start_election bs as Bus
+        # Bump term, vote for self, broadcast RequestVote.
+        term is term + 1
+        role is 1
+        voted_for is id
+        votes is 1
+        bs.send_vote_req(id, term)
+        # Simulate immediate quorum (other 4 nodes grant the vote).
+        bs.send_vote_grant(2, term)
+        bs.send_vote_grant(3, term)
+        bs.send_vote_grant(4, term)
+        bs.send_vote_grant(5, term)
+        votes is votes + 4
+        if votes * 2 > peer_count
+            role is 2
+            leader is id
+
+    *receive_vote_grant bs as Bus, from as i64, t as i64
+        if t equals term and role equals 1
+            votes is votes + 1
+            if votes * 2 > peer_count
+                role is 2
+                leader is id
+                # Send initial empty heartbeat.
+                bs.send_append(id, term, 0)
+
+    *append cmd as i64, bs as Bus
+        if role neq 2
+            return
+        log_size is log_size + 1
+        # Replicate to peers and pretend they all ack.
+        loop(2, $ <= peer_count, $ + 1)
+            bs.send_append(id, term, cmd)
+            bs.send_append_ack($, term)
+        # Quorum reached -> commit.
+        commit_index is log_size
+        last_applied is commit_index
+
+    *report
+        log 'node.id'
+        log id
+        log 'node.role'
+        log role
+        log 'node.term'
+        log term
+        log 'node.commit'
+        log commit_index

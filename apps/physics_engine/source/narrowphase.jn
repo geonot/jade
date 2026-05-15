@@ -1,0 +1,36 @@
+# Narrowphase: confirm circle-circle overlap and emit a Contact.
+
+type Contact
+    a as i64
+    b as i64
+    nx as i64
+    ny as i64
+    depth as i64
+
+*isqrt(x as i64) returns i64
+    if x <= 0
+        return 0
+    r is x
+    loop(0, $ < 16, $ + 1)
+        r is (r + x / r) / 2
+    r
+
+*resolve_pairs(world as Vec of Body, pairs as Vec of i64) returns Vec of Contact
+    out is vec()
+    i is 0
+    while i < pairs.len()
+        a is pairs.get(i)
+        b is pairs.get(i + 1)
+        ba is world.get(a)
+        bb is world.get(b)
+        dx is bb.x - ba.x
+        dy is bb.y - ba.y
+        d2 is dx * dx + dy * dy
+        rsum is ba.radius + bb.radius
+        if d2 < rsum * rsum
+            d is isqrt(d2)
+            if d equals 0
+                d is 1
+            out.push(Contact(a is a, b is b, nx is dx * 100 / d, ny is dy * 100 / d, depth is rsum - d))
+        i is i + 2
+    out

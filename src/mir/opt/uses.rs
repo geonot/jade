@@ -122,10 +122,13 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::RcNew(v, _) => {
             s.insert(*v);
         }
-        InstKind::ClosureCreate(_, captures)
-        | InstKind::SpawnActor(_, captures)
-        | InstKind::SelectArm(captures, _) => {
+        InstKind::ClosureCreate(_, captures) | InstKind::SelectArm(captures, _) => {
             for a in captures {
+                s.insert(*a);
+            }
+        }
+        InstKind::SpawnActor(_, inits) => {
+            for (_, a) in inits {
                 s.insert(*a);
             }
         }

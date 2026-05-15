@@ -116,10 +116,13 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
             sub!(v);
         }
         // Closures
-        InstKind::ClosureCreate(_, captures)
-        | InstKind::SpawnActor(_, captures)
-        | InstKind::SelectArm(captures, _) => {
+        InstKind::ClosureCreate(_, captures) | InstKind::SelectArm(captures, _) => {
             for a in captures {
+                sub!(a);
+            }
+        }
+        InstKind::SpawnActor(_, inits) => {
+            for (_, a) in inits {
                 sub!(a);
             }
         }

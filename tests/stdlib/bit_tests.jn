@@ -1,0 +1,52 @@
+use std/bit
+
+test 'popcount'
+    assert bit.popcount(0) equals 0
+    assert bit.popcount(7) equals 3
+    assert bit.popcount(255) equals 8
+
+test 'leading_zeros'
+    assert bit.leading_zeros(1) equals 63
+    assert bit.leading_zeros(0) equals 64
+
+test 'trailing_zeros'
+    assert bit.trailing_zeros(8) equals 3
+    assert bit.trailing_zeros(0) equals 64
+
+test 'rotate_left / rotate_right'
+    assert bit.rotate_left(1, 1) equals 2
+    assert bit.rotate_right(2, 1) equals 1
+
+test 'set / clear / toggle / test'
+    v is bit.set(0, 3)
+    assert v equals 8
+    assert bit.test(v, 3)
+    v is bit.toggle(v, 3)
+    assert not bit.test(v, 3)
+    v is bit.set(v, 5)
+    v is bit.clear(v, 5)
+    assert not bit.test(v, 5)
+
+test 'extract / insert'
+    f is bit.extract(0xABCD, 4, 8)
+    assert f equals 0xBC
+    v is bit.insert(0, 4, 8, 0xBC)
+    assert bit.extract(v, 4, 8) equals 0xBC
+
+test 'is_power_of_two'
+    assert bit.is_power_of_two(1)
+    assert bit.is_power_of_two(64)
+    assert not bit.is_power_of_two(0)
+    assert not bit.is_power_of_two(6)
+
+test 'next_power_of_two'
+    assert bit.next_power_of_two(1) equals 1
+    assert bit.next_power_of_two(5) equals 8
+    assert bit.next_power_of_two(33) equals 64
+
+test 'mask'
+    assert bit.mask(8) equals 255
+    assert bit.mask(0) equals 0
+
+test 'byte_swap_32'
+    assert bit.byte_swap_32(0x12345678) equals 0x78563412

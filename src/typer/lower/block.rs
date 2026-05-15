@@ -95,8 +95,29 @@ impl Typer {
         out: &mut std::collections::HashSet<crate::hir::DefId>,
     ) {
         for s in stmts {
-            if let hir::Stmt::Expr(e) = s {
-                Self::collect_consumed_in_expr(e, out);
+            match s {
+                hir::Stmt::Expr(e) => Self::collect_consumed_in_expr(e, out),
+                // `x is y` (Assign) and `let x = y` (Bind) where `y` is a
+                // bare variable of heap-managed type *moves* y into x. The
+                // sole owner becomes x; y must not be dropped at scope exit.
+                // Without this, both x and y get dropped and the underlying
+                // buffer is freed twice (or x is left dangling if y's drop
+                // runs first inside a loop body).
+                hir::Stmt::Assign(_target, value, _) => {
+                    if Self::expr_type_needs_drop(&value.ty) {
+                        if let hir::ExprKind::Var(id, _) = &value.kind {
+                            out.insert(*id);
+                        }
+                    }
+                }
+                hir::Stmt::Bind(b) => {
+                    if Self::expr_type_needs_drop(&b.value.ty) {
+                        if let hir::ExprKind::Var(id, _) = &b.value.kind {
+                            out.insert(*id);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }

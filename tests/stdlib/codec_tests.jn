@@ -1,0 +1,26 @@
+use std/codec
+
+test 'to_hex / from_hex round-trip'
+    h is codec.to_hex('Jinn')
+    assert codec.from_hex(h) equals 'Jinn'
+
+test 'to_hex_upper'
+    assert codec.to_hex_upper('A') equals '41'
+
+test 'base64 round-trip'
+    enc is codec.to_base64('hello world')
+    assert codec.from_base64(enc) equals 'hello world'
+
+test 'base64 known vector'
+    assert codec.to_base64('Man') equals 'TWFu'
+    assert codec.to_base64('Ma') equals 'TWE='
+    assert codec.to_base64('M') equals 'TQ=='
+
+test 'base64 url-safe round-trip'
+    enc is codec.to_base64_url('subjects?')
+    dec is codec.from_base64_url(enc)
+    assert dec equals 'subjects?'
+
+test 'base32 round-trip'
+    enc is codec.to_base32('foobar')
+    assert codec.from_base32(enc) equals 'foobar'

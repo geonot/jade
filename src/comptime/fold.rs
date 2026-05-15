@@ -397,7 +397,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
         | ExprKind::PQNew
         | ExprKind::NDArrayNew(_)
         | ExprKind::SIMDNew(_)
-        | ExprKind::Spawn(_)
+        | ExprKind::Spawn(_, _)
         | ExprKind::GlobalLoad(_)
         | ExprKind::StoreQuery(_, _)
         | ExprKind::StoreCount(_)

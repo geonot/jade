@@ -1,0 +1,37 @@
+use std/fmt
+
+test 'hex / oct / bin'
+    assert fmt.hex(255) equals 'ff'
+    assert fmt.oct(8) equals '10'
+    assert fmt.bin(10) equals '1010'
+
+test 'hex_with_prefix'
+    assert fmt.hex_with_prefix(15) equals '0xf'
+
+test 'pad_left'
+    assert fmt.pad_left('hi', 5, ' ') equals '   hi'
+    assert fmt.pad_left('hello', 3, 'x') equals 'hello'
+
+test 'pad_right'
+    assert fmt.pad_right('hi', 5, '.') equals 'hi...'
+
+test 'center'
+    assert fmt.center('hi', 6, '-') equals '--hi--'
+
+test 'repeat'
+    assert fmt.repeat('ab', 3) equals 'ababab'
+    assert fmt.repeat('x', 0) equals ''
+
+test 'join'
+    v is vec('a', 'b', 'c')
+    assert fmt.join(v, ', ') equals 'a, b, c'
+
+test 'commas'
+    assert fmt.commas(1000) equals '1,000'
+    assert fmt.commas(1234567) equals '1,234,567'
+    assert fmt.commas(0) equals '0'
+    assert fmt.commas(-1234) equals '-1,234'
+
+test 'truncate'
+    assert fmt.truncate('hello world', 5, '...') equals 'he...'
+    assert fmt.truncate('hi', 10, '...') equals 'hi'

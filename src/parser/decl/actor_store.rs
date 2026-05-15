@@ -64,7 +64,12 @@ impl Parser {
                 loop_sleep_ms = Some(self.parse_expr()?);
             }
         } else {
-            while !self.check(Token::Newline) && !self.check(Token::Is) && !self.eof() {
+            // Allow `*name returns T` with no params (no parens, no params before `returns`).
+            while !self.check(Token::Newline)
+                && !self.check(Token::Is)
+                && !self.check(Token::Returns)
+                && !self.eof()
+            {
                 params.push(self.parse_param(true)?);
                 if self.check(Token::Comma) {
                     self.advance();

@@ -1,0 +1,54 @@
+# Priority + round-robin scheduler.  Each priority class is a FIFO;
+# higher class number == higher priority.  On `tick(n)` we run n
+# quanta, dispatching the highest-priority non-empty queue.
+
+actor Scheduler
+    q0 as Vec of i64          # pids at priority 0
+    q1 as Vec of i64
+    q2 as Vec of i64
+    q3 as Vec of i64
+    q4 as Vec of i64
+    q5 as Vec of i64
+    quanta as i64
+    dispatched as i64
+
+    *admit pid as i64, prio as i64
+        if prio equals 0
+            q0.push(pid)
+        if prio equals 1
+            q1.push(pid)
+        if prio equals 2
+            q2.push(pid)
+        if prio equals 3
+            q3.push(pid)
+        if prio equals 4
+            q4.push(pid)
+        if prio equals 5
+            q5.push(pid)
+        quanta is quanta + 1
+
+    *tick n as i64
+        loop(0, $ < n, $ + 1)
+            pid is -1
+            if q5.len() > 0
+                pid is q5.shift()
+            if pid equals -1 and q4.len() > 0
+                pid is q4.shift()
+            if pid equals -1 and q3.len() > 0
+                pid is q3.shift()
+            if pid equals -1 and q2.len() > 0
+                pid is q2.shift()
+            if pid equals -1 and q1.len() > 0
+                pid is q1.shift()
+            if pid equals -1 and q0.len() > 0
+                pid is q0.shift()
+            if pid neq -1
+                dispatched is dispatched + 1
+                # Re-admit at base priority so it stays runnable.
+                q1.push(pid)
+
+    *report
+        log 'scheduler.dispatched'
+        log dispatched
+        log 'scheduler.admits'
+        log quanta

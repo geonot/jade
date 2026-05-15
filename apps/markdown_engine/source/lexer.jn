@@ -12,9 +12,8 @@ use models/token
 *tokenize(lines as Vec of i64) returns Vec of Token
     out is vec()
     in_code is 0
-    i is 0
-    while i < lines.len()
-        ln is lines.get(i)
+    loop(0, $ < lines.len(), $ + 1)
+        ln is lines.get($)
         cls is classify_line(ln)
         pl is payload_of(ln)
         if in_code equals 1
@@ -38,5 +37,4 @@ use models/token
                             out.push(token.new(4, 0, 0))
                         else
                             out.push(token.new(2, 0, pl))
-        i is i + 1
     out

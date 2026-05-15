@@ -226,7 +226,27 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
                 rewrite_expr(e, renames);
             }
         }
-        Expr::Struct(_, fields, _) => {
+        Expr::Struct(name, fields, span) => {
+            // The parser routes any `Uppercase(args)` to Expr::Struct via the
+            // uppercase-prefix heuristic. If the name resolves to a renamed
+            // top-level (function) declaration, it's actually a function call
+            // disguised as a struct literal. Rewrite to a Call so the typer
+            // and codegen treat it consistently as a function invocation.
+            if let Some(new) = renames.get(name) {
+                let renamed = Symbol::intern(new);
+                let mut args: Vec<Expr> = Vec::with_capacity(fields.len());
+                for fi in fields.drain(..) {
+                    let mut v = fi.value;
+                    rewrite_expr(&mut v, renames);
+                    args.push(v);
+                }
+                *expr = Expr::Call(
+                    Box::new(Expr::Ident(renamed, *span)),
+                    args,
+                    *span,
+                );
+                return;
+            }
             for f in fields {
                 rewrite_expr(&mut f.value, renames);
             }
@@ -313,7 +333,7 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
         | Expr::IndexPlaceholder(_)
         | Expr::Embed(_, _)
         | Expr::Unreachable(_)
-        | Expr::Spawn(_, _)
+        | Expr::Spawn(_, _, _)
         | Expr::StoreQuery(_, _, _)
         | Expr::StoreCount(_, _, _)
         | Expr::StoreAll(_, _)

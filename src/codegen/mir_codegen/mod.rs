@@ -386,9 +386,19 @@ impl<'ctx> Compiler<'ctx> {
         let ptys: Vec<Type> = func.params.iter().map(|p| p.ty.clone()).collect();
         let ret = func.ret_ty.clone();
 
-        // Build LLVM parameter types.
-        let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
-            ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
+        // Build LLVM parameter types. Struct/Tuple parameters are passed as
+        // pointers (reference semantics) so that callee mutations to fields
+        // are visible to the caller. This matches user expectations for
+        // non-trivial aggregate types (consistent with Vec/Map/etc., which
+        // are already pointer-typed).
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let lp: Vec<BasicMetadataTypeEnum<'ctx>> = ptys
+            .iter()
+            .map(|t| match t {
+                Type::Struct(_, _) | Type::Tuple(_) => ptr_ty.into(),
+                _ => self.llvm_ty(t).into(),
+            })
+            .collect();
 
         let is_main = func.name == "main";
         if is_main && !self.lib_mode {
@@ -533,6 +543,18 @@ impl<'ctx> Compiler<'ctx> {
             let llvm_val = fv.get_nth_param(i as u32).unwrap();
             self.value_map.insert(param.value, llvm_val);
             self.value_types.insert(param.value, param.ty.clone());
+            // Struct/Tuple params are pointers (see declare_mir_fn). Register
+            // them in self_allocs so FieldGet/FieldSet take the GEP path
+            // (mutating in place, visible to caller). val() will reload the
+            // struct value lazily for non-field uses.
+            if matches!(param.ty, Type::Struct(_, _) | Type::Tuple(_))
+                && llvm_val.is_pointer_value()
+            {
+                let ptr = llvm_val.into_pointer_value();
+                let lt = self.llvm_ty(&param.ty);
+                self.self_allocs.insert(param.value, ptr);
+                self.self_alloc_types.insert(param.value, lt);
+            }
         }
 
         // 3. Emit each basic block.

@@ -1,12 +1,10 @@
 use models/item
 
 *find_idx(items as Vec of Item, sku as i64, wh as i64) returns i64
-    i is 0
-    while i < items.len()
-        it is items.get(i)
+    loop(0, $ < items.len(), $ + 1)
+        it is items.get($)
         if it.sku equals sku and it.warehouse equals wh
-            return i
-        i is i + 1
+            return $
     -1
 
 *adjust(items as Vec of Item, sku as i64, wh as i64, delta as i64) returns Vec of Item
@@ -19,12 +17,10 @@ use models/item
 
 *total(items as Vec of Item, sku as i64) returns i64
     s is 0
-    i is 0
-    while i < items.len()
-        it is items.get(i)
+    loop(0, $ < items.len(), $ + 1)
+        it is items.get($)
         if it.sku equals sku
             s is s + it.qty
-        i is i + 1
     s
 
 *qty_at(items as Vec of Item, sku as i64, wh as i64) returns i64

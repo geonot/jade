@@ -167,8 +167,7 @@ fn test_constraint_provenance() {
         start: 0,
         end: 5,
         line: 1,
-        col: 1,
-    };
+        col: 1, file: None };
     let _ = ctx.unify_at(&v, &Type::String, span, "test constraint");
     let origin = ctx.origin_of(&v);
     assert!(origin.is_some(), "expected constraint origin");
@@ -571,8 +570,7 @@ fn test_strict_types_errors_on_unconstrained_typevar() {
         start: 0,
         end: 0,
         line: 5,
-        col: 3,
-    };
+        col: 3, file: None };
     let v = ctx.fresh_var();
     let v2 = ctx.fresh_var();
     let _ = ctx.unify_at(&v, &v2, span, "test binding");

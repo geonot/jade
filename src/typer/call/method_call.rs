@@ -109,7 +109,9 @@ impl Typer {
                     if args.len() != 1 {
                         return Err("map() requires exactly 1 argument".into());
                     }
-                    let ret_elem = self.infer_ctx.fresh_var();
+                    let ret_elem = self
+                        .infer_ctx
+                        .fresh_var_at(span, "map() return-element type");
                     let fn_ty =
                         Type::Fn(vec![elem_ty.as_ref().clone()], Box::new(ret_elem.clone()));
                     let harg = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
@@ -722,7 +724,9 @@ impl Typer {
             .iter()
             .map(|e| self.lower_expr(e))
             .collect::<Result<_, _>>()?;
-        let ret_ty = self.infer_ctx.fresh_var();
+        let ret_ty = self
+            .infer_ctx
+            .fresh_var_at(span, "unresolved method-call return type");
         if matches!(obj_ty, Type::TypeVar(_)) {
             let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
 

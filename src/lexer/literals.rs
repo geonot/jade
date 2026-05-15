@@ -173,6 +173,7 @@ impl<'s> Lexer<'s> {
                             || c == b'_'
                             || c == b'('
                             || c == b'['
+                            || c == b'$'
                             || c.is_ascii_digit()
                     }
                 };

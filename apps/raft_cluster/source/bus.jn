@@ -1,0 +1,50 @@
+# Bus actor: message routing fabric.  In a real system this would be
+# the network; here it tallies traffic so tests can assert behaviour.
+#
+# Message kinds:
+#   1 RequestVote(from, term)
+#   2 VoteGranted(from, term)
+#   3 AppendEntries(from, term, cmd)
+#   4 AppendAck(from, term)
+
+actor Bus
+    n_msgs as i64
+    n_votes_req as i64
+    n_votes_grant as i64
+    n_append as i64
+    n_append_ack as i64
+
+    *register pid as i64, n as Node
+        n_msgs is n_msgs + 0       # acknowledgement counter
+
+    *send_vote_req from as i64, term as i64
+        n_msgs is n_msgs + 1
+        n_votes_req is n_votes_req + 1
+
+    *send_vote_grant from as i64, term as i64
+        n_msgs is n_msgs + 1
+        n_votes_grant is n_votes_grant + 1
+
+    *send_append from as i64, term as i64, cmd as i64
+        n_msgs is n_msgs + 1
+        n_append is n_append + 1
+
+    *send_append_ack from as i64, term as i64
+        n_msgs is n_msgs + 1
+        n_append_ack is n_append_ack + 1
+
+    *flush
+        # Placeholder: real bus would drain queues to nodes.
+        n_msgs is n_msgs + 0
+
+    *report
+        log 'bus.msgs'
+        log n_msgs
+        log 'bus.vote_req'
+        log n_votes_req
+        log 'bus.vote_grant'
+        log n_votes_grant
+        log 'bus.append'
+        log n_append
+        log 'bus.append_ack'
+        log n_append_ack

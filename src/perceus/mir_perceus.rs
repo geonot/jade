@@ -155,9 +155,15 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
             match &inst.kind {
                 InstKind::Call(_, args)
                 | InstKind::IndirectCall(_, args)
-                | InstKind::ClosureCall(_, args)
-                | InstKind::SpawnActor(_, args) => {
+                | InstKind::ClosureCall(_, args) => {
                     for a in args {
+                        if let Some(info) = uses.get_mut(a) {
+                            info.escapes = true;
+                        }
+                    }
+                }
+                InstKind::SpawnActor(_, inits) => {
+                    for (_, a) in inits {
                         if let Some(info) = uses.get_mut(a) {
                             info.escapes = true;
                         }
@@ -331,7 +337,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::RcNew(val, _) => vec![*val],
         InstKind::RcClone(v) | InstKind::WeakUpgrade(v) => vec![*v],
 
-        InstKind::SpawnActor(_, args) => args.clone(),
+        InstKind::SpawnActor(_, inits) => inits.iter().map(|(_, v)| *v).collect(),
         InstKind::ChanCreate(..) => vec![],
         InstKind::ChanSend(ch, val) => vec![*ch, *val],
         InstKind::ChanRecv(ch) => vec![*ch],

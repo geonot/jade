@@ -1,0 +1,69 @@
+# raft_cluster — a 5-node Raft consensus implementation across actors.
+#
+# Modules:
+#   log_entry.jn  — replicated log record
+#   bus.jn        — message bus actor that fans messages to nodes
+#   node.jn       — Raft state machine (Follower/Candidate/Leader)
+#   client.jn     — submits user commands; tracks commit acks
+#
+# We don't have real time, so the test harness drives elections and
+# replication explicitly: every "round", main asks each node to tick
+# the bus, simulating one network sweep + heartbeat tick.
+
+extern *usleep(us as i32) returns i32
+
+use log_entry
+use bus
+use node
+use client
+
+*main
+    log 'raft.boot 5 nodes'
+
+    bs is spawn bus.Bus
+
+    # Spawn 5 nodes, ids 1..5, all start as Followers.
+    n1 is spawn node.Node(id is 1, peer_count is 5, role is 0, term is 0, voted_for is 0, leader is 0, log_size is 0, commit_index is 0, last_applied is 0, votes is 0)
+    n2 is spawn node.Node(id is 2, peer_count is 5, role is 0, term is 0, voted_for is 0, leader is 0, log_size is 0, commit_index is 0, last_applied is 0, votes is 0)
+    n3 is spawn node.Node(id is 3, peer_count is 5, role is 0, term is 0, voted_for is 0, leader is 0, log_size is 0, commit_index is 0, last_applied is 0, votes is 0)
+    n4 is spawn node.Node(id is 4, peer_count is 5, role is 0, term is 0, voted_for is 0, leader is 0, log_size is 0, commit_index is 0, last_applied is 0, votes is 0)
+    n5 is spawn node.Node(id is 5, peer_count is 5, role is 0, term is 0, voted_for is 0, leader is 0, log_size is 0, commit_index is 0, last_applied is 0, votes is 0)
+
+    bs.register(1, n1)
+    bs.register(2, n2)
+    bs.register(3, n3)
+    bs.register(4, n4)
+    bs.register(5, n5)
+
+    # ── Election: node 1 times out first and runs for office. ──────
+    n1.start_election(bs)
+    extern.usleep(20000)
+    bs.flush()
+    extern.usleep(20000)
+
+    # ── Three commands proposed to leader (node 1). ────────────────
+    cl is spawn client.Client
+    cl.submit(n1, bs, 101)
+    cl.submit(n1, bs, 102)
+    cl.submit(n1, bs, 103)
+    extern.usleep(40000)
+    bs.flush()
+    extern.usleep(20000)
+
+    # ── Snapshot. ──────────────────────────────────────────────────
+    n1.report()
+    n2.report()
+    n3.report()
+    n4.report()
+    n5.report()
+    bs.report()
+    cl.report()
+
+    stop cl
+    stop n1
+    stop n2
+    stop n3
+    stop n4
+    stop n5
+    stop bs
+    log 'raft.halt'

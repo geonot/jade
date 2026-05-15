@@ -7,11 +7,9 @@ use kvstore
     s is kvstore.new_store()
     log_ops is vec()
 
-    n is 0
-    while n < 100
-        s is kvstore.put(s, n, n * 7, 0, 0)
-        log_ops is wal.append(log_ops, wal.put_op(n, n * 7, n))
-        n is n + 1
+    loop(0, $ < 100, $ + 1)
+        s is kvstore.put(s, $, $ * 7, 0, 0)
+        log_ops is wal.append(log_ops, wal.put_op($, $ * 7, $))
 
     s is kvstore.put(s, 1000, 42, 10, 5)
     s is kvstore.put(s, 1001, 43, 10, 100)

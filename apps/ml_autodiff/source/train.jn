@@ -1,0 +1,65 @@
+# Training loop on the XOR dataset using vanilla SGD.
+
+use fix
+use tape
+use mlp
+
+*xs(i as i64) returns i64
+    if i equals 0
+        return 0
+    if i equals 1
+        return 0
+    if i equals 2
+        return 1
+    1
+
+*ys(i as i64) returns i64
+    if i equals 0
+        return 0
+    if i equals 1
+        return 1
+    if i equals 2
+        return 1
+    0
+
+*x0(i as i64) returns i64
+    fix.from_int(xs(i))
+
+*x1(i as i64) returns i64
+    if i equals 0
+        return fix.from_int(0)
+    if i equals 1
+        return fix.from_int(1)
+    if i equals 2
+        return fix.from_int(0)
+    fix.from_int(1)
+
+*target(i as i64) returns i64
+    fix.from_int(ys(i))
+
+*epoch_loss(net as Mlp) returns i64
+    s is 0
+    loop(0, $ < 4, $ + 1)
+        b is mlp.build_loss(net, x0($), x1($), target($))
+        s is s + mlp.loss_value(b)
+    s
+
+*apply_grad(net as Mlp, b as Built, lr as i64)
+    px is b.px
+    g  is b.t.grads
+    net.w1_00 is net.w1_00 - fix.mul(lr, g.get(px.w1_00))
+    net.w1_01 is net.w1_01 - fix.mul(lr, g.get(px.w1_01))
+    net.w1_10 is net.w1_10 - fix.mul(lr, g.get(px.w1_10))
+    net.w1_11 is net.w1_11 - fix.mul(lr, g.get(px.w1_11))
+    net.b1_0  is net.b1_0  - fix.mul(lr, g.get(px.b1_0))
+    net.b1_1  is net.b1_1  - fix.mul(lr, g.get(px.b1_1))
+    net.w2_0  is net.w2_0  - fix.mul(lr, g.get(px.w2_0))
+    net.w2_1  is net.w2_1  - fix.mul(lr, g.get(px.w2_1))
+    net.b2    is net.b2    - fix.mul(lr, g.get(px.b2))
+
+*step(net as Mlp)
+    lr is fix.from_milli(50)            # 0.05
+    loop(0, $ < 4, $ + 1)
+        b is mlp.build_loss(net, x0($), x1($), target($))
+        tape.backward(b.t, b.loss_ix)
+        apply_grad(net, b, lr)

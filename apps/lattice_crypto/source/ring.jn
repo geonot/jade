@@ -1,0 +1,86 @@
+# Polynomial ring  R_q  =  Z_q[x] / (x^N + 1).
+# N=64, q=12289.  Coefficients live in 0..q-1.
+
+use prng
+
+type Poly
+    coef as Vec of i64
+
+*N returns i64
+    64
+
+*Q returns i64
+    12289
+
+*zero returns Poly
+    c is vec()
+    loop(0, $ < N(), $ + 1)
+        c.push(0)
+    Poly(coef is c)
+
+*sample_uniform(seed as i64) returns Poly
+    p is prng.seed(seed)
+    c is vec()
+    loop(0, $ < N(), $ + 1)
+        p is prng.next(p)
+        v is prng.output(p)
+        if v < 0
+            v is -v
+        c.push(v mod Q())
+    Poly(coef is c)
+
+*sample_small(seed as i64) returns Poly
+    # Centred binomial: each coefficient in {-2..2}.
+    p is prng.seed(seed)
+    c is vec()
+    loop(0, $ < N(), $ + 1)
+        p is prng.next(p)
+        v is prng.output(p)
+        if v < 0
+            v is -v
+        a is (v       ) & 3
+        b is (v >> 2 ) & 3
+        d is a - b
+        c.push(((d mod Q()) + Q()) mod Q())
+    Poly(coef is c)
+
+*add(x as Poly, y as Poly) returns Poly
+    r is vec()
+    loop(0, $ < N(), $ + 1)
+        r.push((x.coef.get($) + y.coef.get($)) mod Q())
+    Poly(coef is r)
+
+*sub(x as Poly, y as Poly) returns Poly
+    r is vec()
+    loop(0, $ < N(), $ + 1)
+        v is x.coef.get($) - y.coef.get($)
+        r.push(((v mod Q()) + Q()) mod Q())
+    Poly(coef is r)
+
+*mul(x as Poly, y as Poly) returns Poly
+    # School-book multiplication mod x^N + 1.
+    r is vec()
+    loop(0, $ < N(), $ + 1)
+        r.push(0)
+    loop(0, $ < N(), $ + 1)
+        i is $
+        loop(0, $ < N(), $ + 1)
+            j is $
+            v is x.coef.get(i) * y.coef.get(j)
+            k is i + j
+            if k < N()
+                r.set(k, (r.get(k) + v) mod Q())
+            else
+                kk is k - N()
+                r.set(kk, ((r.get(kk) - v) mod Q() + Q()) mod Q())
+    Poly(coef is r)
+
+*l_inf_distance(x as Poly, y as Poly) returns i64
+    m is 0
+    loop(0, $ < N(), $ + 1)
+        d is x.coef.get($) - y.coef.get($)
+        if d < 0
+            d is -d
+        if d > m
+            m is d
+    m

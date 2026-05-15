@@ -98,59 +98,6 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 Ok(e)
             }
-            Token::Array => {
-                // array[...] syntax — same as [...] but signals fixed-size intent
-                self.advance();
-                if !self.check(Token::LBracket) {
-                    return Ok(Expr::Ident("array".into(), sp));
-                }
-                self.advance();
-                self.skip_ws();
-                if self.check(Token::RBracket) {
-                    self.advance();
-                    return Ok(Expr::Array(Vec::new(), sp));
-                }
-                let first = self.parse_expr()?;
-                if self.check(Token::For) {
-                    self.advance();
-                    let bind = self.ident()?;
-                    self.expect(Token::In)?;
-                    let iter_start = self.parse_expr()?;
-                    let iter_end = if self.check(Token::To) {
-                        self.advance();
-                        Some(Box::new(self.parse_expr()?))
-                    } else {
-                        None
-                    };
-                    let cond = if self.check(Token::If) {
-                        self.advance();
-                        Some(Box::new(self.parse_expr()?))
-                    } else {
-                        None
-                    };
-                    self.expect(Token::RBracket)?;
-                    return Ok(Expr::ListComp(
-                        Box::new(first),
-                        bind.as_str(),
-                        Box::new(iter_start),
-                        iter_end,
-                        cond,
-                        sp,
-                    ));
-                }
-                let mut v = vec![first];
-                while self.check(Token::Comma) {
-                    self.advance();
-                    self.skip_ws();
-                    if self.check(Token::RBracket) {
-                        break;
-                    }
-                    v.push(self.parse_expr()?);
-                }
-                self.skip_ws();
-                self.expect(Token::RBracket)?;
-                Ok(Expr::Array(v, sp))
-            }
             Token::LBracket => {
                 self.advance();
                 self.skip_ws();
@@ -202,9 +149,9 @@ impl Parser {
                 }
                 self.skip_ws();
                 self.expect(Token::RBracket)?;
-                // `[a, b, c]` desugars to a vector literal so vec methods
-                // (map/filter/fold/etc.) and `in` membership Just Work.
-                // Use `array[a, b, c]` for a stack-allocated fixed-size array.
+                // `[a, b, c]` desugars to a vector literal — the unified
+                // collection literal. The compiler may later choose stack
+                // representation when it can prove it is safe.
                 Ok(Expr::Call(
                     Box::new(Expr::Ident("vector".into(), sp)),
                     v,
@@ -535,8 +482,36 @@ impl Parser {
             }
             Token::Spawn => {
                 self.advance();
-                let name = self.ident()?;
-                Ok(Expr::Spawn(name, sp))
+                let mut name = self.ident()?;
+                // Allow qualified `spawn module.Actor` — strip the module
+                // prefix; actors are looked up by their unqualified name.
+                while self.check(Token::Dot) {
+                    self.advance();
+                    name = self.ident()?;
+                }
+                // Optional struct-literal-style init: `spawn Foo(field is val, ...)`.
+                let mut inits: Vec<(crate::intern::Symbol, Expr)> = Vec::new();
+                if self.check(Token::LParen) {
+                    self.advance();
+                    while !self.check(Token::RParen) && !self.eof() {
+                        let fname = self.ident()?;
+                        if !self.check(Token::Is) {
+                            return Err(self.error(
+                                "spawn init args must be `field is value` (struct-literal style)",
+                            ));
+                        }
+                        self.advance(); // consume `is`
+                        let val = self.parse_expr()?;
+                        inits.push((fname, val));
+                        if self.check(Token::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                }
+                Ok(Expr::Spawn(name, inits, sp))
             }
             Token::Channel => {
                 self.advance();

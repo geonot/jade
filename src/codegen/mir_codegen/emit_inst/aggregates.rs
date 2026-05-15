@@ -82,6 +82,18 @@ impl<'ctx> Compiler<'ctx> {
                         .into_struct_value()
                         .into();
                     }
+                    // Materialize the aggregate into a stack alloca so that
+                    // subsequent FieldSets and Call arguments share a single
+                    // mutable backing store. value_map[dest] holds the pointer;
+                    // val() will reload the current struct value lazily for
+                    // any consumer that needs the value (e.g. Return).
+                    if let Some(dest) = inst.dest {
+                        let alloca = self.entry_alloca(st.into(), &name.as_str());
+                        let _ = self.bld.build_store(alloca, agg);
+                        self.self_allocs.insert(dest, alloca);
+                        self.self_alloc_types.insert(dest, st.into());
+                        return Ok(Some(alloca.into()));
+                    }
                     Ok(agg)
                 }
                 mir::InstKind::VariantInit(enum_name, variant, tag, payload) => {

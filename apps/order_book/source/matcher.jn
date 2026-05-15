@@ -34,8 +34,6 @@ use book
 
 *total_volume(trades as Vec of Trade) returns i64
     s is 0
-    i is 0
-    while i < trades.len()
-        s is s + trade.notional(trades.get(i))
-        i is i + 1
+    loop(0, $ < trades.len(), $ + 1)
+        s is s + trade.notional(trades.get($))
     s

@@ -1,0 +1,64 @@
+# Bytecode lowering.  Instruction layout (3 i64 lanes):
+#   op   arg0   arg1
+# Ops:
+#   1 CHAR  c   --
+#   2 MATCH --  --
+#   3 JMP   tgt --
+#   4 SPLIT tgt1 tgt2
+
+use ast
+
+type Prog
+    code as Vec of i64           # flat 3-lane stream
+
+*emit(p as Prog, op as i64, a as i64, b as i64)
+    p.code.push(op)
+    p.code.push(a)
+    p.code.push(b)
+
+*pc(p as Prog) returns i64
+    p.code.len() / 3
+
+*patch(p as Prog, ip as i64, slot as i64, val as i64)
+    p.code.set(ip * 3 + slot, val)
+
+*compile_node(p as Prog, nodes as Vec of Node, ix as i64)
+    n is nodes.get(ix)
+    if n.tag equals 1
+        emit(p, 1, n.ch, 0)
+    if n.tag equals 2
+        compile_node(p, nodes, n.left)
+        compile_node(p, nodes, n.right)
+    if n.tag equals 3
+        # SPLIT L1 L2 ; L1: left ; JMP END ; L2: right ; END:
+        split_ip is pc(p)
+        emit(p, 4, 0, 0)
+        l1 is pc(p)
+        compile_node(p, nodes, n.left)
+        jmp_ip is pc(p)
+        emit(p, 3, 0, 0)
+        l2 is pc(p)
+        compile_node(p, nodes, n.right)
+        end_ip is pc(p)
+        patch(p, split_ip, 1, l1)
+        patch(p, split_ip, 2, l2)
+        patch(p, jmp_ip,   1, end_ip)
+    if n.tag equals 4
+        # L1: SPLIT L2 L3 ; L2: child ; JMP L1 ; L3:
+        l1 is pc(p)
+        emit(p, 4, 0, 0)
+        l2 is pc(p)
+        compile_node(p, nodes, n.left)
+        emit(p, 3, l1, 0)
+        l3 is pc(p)
+        patch(p, l1, 1, l2)
+        patch(p, l1, 2, l3)
+
+*lower(nodes as Vec of Node) returns Prog
+    p is Prog(code is vec())
+    if nodes.len() equals 0
+        emit(p, 2, 0, 0)
+        return p
+    compile_node(p, nodes, nodes.len() - 1)
+    emit(p, 2, 0, 0)
+    p

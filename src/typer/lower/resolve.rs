@@ -42,6 +42,79 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
 }
 
 impl Typer {
+    /// Walks a type and rewrites any `Type::Struct(name, [])` whose name
+    /// is a known actor into `Type::ActorRef(name)`. Recursively descends
+    /// into composites.
+    pub(in crate::typer) fn normalize_actor_refs(
+        ty: Type,
+        actors: &std::collections::HashSet<Symbol>,
+    ) -> Type {
+        match ty {
+            Type::Struct(name, args) if args.is_empty() && actors.contains(&name) => {
+                Type::ActorRef(name)
+            }
+            Type::Struct(name, args) => {
+                let args = args
+                    .into_iter()
+                    .map(|a| Self::normalize_actor_refs(a, actors))
+                    .collect();
+                Type::Struct(name, args)
+            }
+            Type::Vec(inner) => Type::Vec(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::Array(inner, n) => {
+                Type::Array(Box::new(Self::normalize_actor_refs(*inner, actors)), n)
+            }
+            Type::Map(k, v) => Type::Map(
+                Box::new(Self::normalize_actor_refs(*k, actors)),
+                Box::new(Self::normalize_actor_refs(*v, actors)),
+            ),
+            Type::Set(inner) => Type::Set(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::PriorityQueue(inner) => {
+                Type::PriorityQueue(Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            Type::Deque(inner) => Type::Deque(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::Cow(inner) => Type::Cow(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::Channel(inner) => {
+                Type::Channel(Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            Type::Coroutine(inner) => {
+                Type::Coroutine(Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            Type::Generator(inner) => {
+                Type::Generator(Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .into_iter()
+                    .map(|e| Self::normalize_actor_refs(e, actors))
+                    .collect(),
+            ),
+            Type::Fn(params, ret) => Type::Fn(
+                params
+                    .into_iter()
+                    .map(|p| Self::normalize_actor_refs(p, actors))
+                    .collect(),
+                Box::new(Self::normalize_actor_refs(*ret, actors)),
+            ),
+            Type::Ptr(inner) => Type::Ptr(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::Rc(inner) => Type::Rc(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::Weak(inner) => Type::Weak(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::NDArray(inner, dims) => {
+                Type::NDArray(Box::new(Self::normalize_actor_refs(*inner, actors)), dims)
+            }
+            Type::SIMD(inner, n) => {
+                Type::SIMD(Box::new(Self::normalize_actor_refs(*inner, actors)), n)
+            }
+            Type::Alias(name, inner) => {
+                Type::Alias(name, Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            Type::Newtype(name, inner) => {
+                Type::Newtype(name, Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            other => other,
+        }
+    }
+
     pub(in crate::typer) fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
         let (recv_ty, method) = match &expr.kind {
             hir::ExprKind::DeferredMethod(recv, m, _) => (recv.ty.clone(), m.clone()),
@@ -611,7 +684,7 @@ impl Typer {
                     self.resolve_expr(a);
                 }
             }
-            hir::ExprKind::Spawn(_) => {}
+            hir::ExprKind::Spawn(_, _) => {}
             hir::ExprKind::Send(recv, _, _, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {

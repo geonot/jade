@@ -1,0 +1,4 @@
+# A single replicated log entry: (term, command_id).
+type LogEntry
+    term as i64
+    cmd  as i64

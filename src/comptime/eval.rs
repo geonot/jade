@@ -42,8 +42,7 @@ pub(super) fn try_eval_pure_call(
                     start: 0,
                     end: 0,
                     line: 0,
-                    col: 0,
-                },
+                    col: 0, file: None },
                 |a| a.span,
             ),
         )

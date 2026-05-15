@@ -1,0 +1,3 @@
+name is 'microkernel'
+version is '0.1.0'
+entry is 'source/main.jn'

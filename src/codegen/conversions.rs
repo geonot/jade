@@ -51,28 +51,37 @@ impl<'ctx> Compiler<'ctx> {
         // something useful out of the box; users may override by writing their
         // own `log` method on the type.
         if let Type::Struct(name, _) = ty {
-            let log_method_name = format!("{name}_log");
-            if let Some((fv, _, _)) = self.fns.get(&log_method_name).cloned() {
-                let first_param_is_ptr = fv
-                    .get_type()
-                    .get_param_types()
-                    .first()
-                    .map(|t| t.is_pointer_type())
-                    .unwrap_or(false);
-                let arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !val.is_pointer_value() {
-                    let lty = self.llvm_ty(ty);
-                    let tmp = self.entry_alloca(lty, "log.user.self");
-                    b!(self.bld.build_store(tmp, val));
-                    tmp.into()
-                } else {
-                    val
-                };
-                b!(self.bld.build_call(fv, &[arg.into()], "log.user"));
+            // Defensive: the typer can occasionally infer a struct type for an
+            // expression whose codegen actually yields a primitive (e.g. an
+            // overloaded operator whose user method returns `i64`). Only take
+            // the struct-formatter path when the runtime value really is a
+            // struct or a pointer (to one); otherwise fall through to the
+            // primitive printer below using the *value's* LLVM type.
+            let value_is_struct_like = val.is_struct_value() || val.is_pointer_value();
+            if value_is_struct_like {
+                let log_method_name = format!("{name}_log");
+                if let Some((fv, _, _)) = self.fns.get(&log_method_name).cloned() {
+                    let first_param_is_ptr = fv
+                        .get_type()
+                        .get_param_types()
+                        .first()
+                        .map(|t| t.is_pointer_type())
+                        .unwrap_or(false);
+                    let arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !val.is_pointer_value() {
+                        let lty = self.llvm_ty(ty);
+                        let tmp = self.entry_alloca(lty, "log.user.self");
+                        b!(self.bld.build_store(tmp, val));
+                        tmp.into()
+                    } else {
+                        val
+                    };
+                    b!(self.bld.build_call(fv, &[arg.into()], "log.user"));
+                    return Ok(val);
+                }
+                let name_str = name.as_str();
+                self.emit_struct_format(&name_str, val, ty, true)?;
                 return Ok(val);
             }
-            let name_str = name.as_str();
-            self.emit_struct_format(&name_str, val, ty, true)?;
-            return Ok(val);
         }
         let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let fmt = self.fmt_for_ty(ty);

@@ -144,6 +144,17 @@ impl InferCtx {
         self.fresh_var_with(TypeConstraint::None)
     }
 
+    /// Mint a fresh type variable and immediately tag it with an origin
+    /// (so unresolved-ambiguity diagnostics can point at the source site
+    /// where the variable was introduced — e.g. an empty `vec()` literal).
+    pub(crate) fn fresh_var_at(&mut self, span: Span, reason: &'static str) -> Type {
+        let v = self.fresh_var_with(TypeConstraint::None);
+        if let Type::TypeVar(id) = v {
+            self.origins[id as usize] = Some(ConstraintOrigin { span, reason });
+        }
+        v
+    }
+
     #[allow(dead_code)]
     pub(crate) fn fresh_numeric_var(&mut self) -> Type {
         self.fresh_var_with(TypeConstraint::Numeric)
@@ -243,8 +254,8 @@ impl InferCtx {
                 let merged = Self::merge_constraints(&self.constraints[root as usize], &constraint)
                     .map_err(|e| {
                         format!(
-                            "line {}:{}: conflicting constraints for {}: {e}",
-                            span.line, span.col, reason
+                            "{}: conflicting constraints for {}: {e}",
+                            span.loc(), reason
                         )
                     })?;
                 self.constraints[root as usize] = merged;
@@ -255,16 +266,16 @@ impl InferCtx {
             }
             ref concrete => match constraint {
                 TypeConstraint::Integer if !concrete.is_int() => Err(format!(
-                    "line {}:{}: expected integer type for {}, found `{concrete}`",
-                    span.line, span.col, reason
+                    "{}: expected integer type for {}, found `{concrete}`",
+                    span.loc(), reason
                 )),
                 TypeConstraint::Float if !concrete.is_float() => Err(format!(
-                    "line {}:{}: expected float type for {}, found `{concrete}`",
-                    span.line, span.col, reason
+                    "{}: expected float type for {}, found `{concrete}`",
+                    span.loc(), reason
                 )),
                 TypeConstraint::Numeric if !concrete.is_num() => Err(format!(
-                    "line {}:{}: expected numeric type for {}, found `{concrete}`",
-                    span.line, span.col, reason
+                    "{}: expected numeric type for {}, found `{concrete}`",
+                    span.loc(), reason
                 )),
                 _ => Ok(()),
             },
@@ -319,7 +330,7 @@ impl InferCtx {
             let a_origin = self.origin_of(a);
             let b_origin = self.origin_of(b);
 
-            let mut msg = format!("line {}:{}: {} ({})", span.line, span.col, e, reason);
+            let mut msg = format!("{}: {} ({})", span.loc(), e, reason);
 
             if let Some(origin) = &a_origin {
                 if origin.span.line != span.line {

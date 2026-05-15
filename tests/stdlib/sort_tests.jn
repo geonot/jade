@@ -1,0 +1,54 @@
+use std/sort
+
+test 'sort small i64'
+    a is vec(5, 1, 4, 2, 3)
+    sort.sort(a)
+    assert a.get(0) equals 1
+    assert a.get(1) equals 2
+    assert a.get(2) equals 3
+    assert a.get(3) equals 4
+    assert a.get(4) equals 5
+
+test 'sort empty'
+    a is vec()
+    sort.sort(a)
+    assert a.length equals 0
+
+test 'sort already sorted'
+    a is vec(1, 2, 3, 4)
+    sort.sort(a)
+    assert sort.is_sorted(a)
+
+test 'is_sorted detects unsorted'
+    a is vec(3, 1, 2)
+    assert not sort.is_sorted(a)
+
+test 'reverse'
+    a is vec(1, 2, 3)
+    sort.reverse(a)
+    assert a.get(0) equals 3
+    assert a.get(2) equals 1
+
+test 'binary_search hit'
+    a is vec(1, 3, 5, 7, 9)
+    assert sort.binary_search(a, 5) equals 2
+    assert sort.binary_search(a, 1) equals 0
+    assert sort.binary_search(a, 9) equals 4
+
+test 'binary_search miss'
+    a is vec(1, 3, 5, 7, 9)
+    assert sort.binary_search(a, 4) equals -1
+    assert sort.binary_search(a, 100) equals -1
+
+test 'sort with duplicates'
+    a is vec(3, 1, 3, 2, 1, 2)
+    sort.sort(a)
+    assert sort.is_sorted(a)
+    assert a.length equals 6
+
+test 'sort_strings'
+    a is vec('cherry', 'apple', 'banana')
+    sort.sort_strings(a)
+    assert a.get(0) equals 'apple'
+    assert a.get(1) equals 'banana'
+    assert a.get(2) equals 'cherry'

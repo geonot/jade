@@ -1,0 +1,62 @@
+# AEAD: encrypt-then-MAC over (associated_data || ciphertext || lengths).
+
+use stream
+use poly_mac
+
+type Sealed
+    ct  as Vec of i64
+    tag as i64
+
+type Opened
+    bytes as Vec of i64
+    authentic as bool
+
+*derive_mac_keys(key as i64, nonce as i64) returns Vec of i64
+    blk is stream.block(key, nonce, 0)
+    out is vec()
+    out.push(blk.get(0) | (blk.get(1) << 32))
+    out.push(blk.get(2) | (blk.get(3) << 32))
+    out
+
+*concat3(a as Vec of i64, b as Vec of i64, c as Vec of i64) returns Vec of i64
+    out is vec()
+    loop(0, $ < a.len(), $ + 1)
+        out.push(a.get($))
+    loop(0, $ < b.len(), $ + 1)
+        out.push(b.get($))
+    loop(0, $ < c.len(), $ + 1)
+        out.push(c.get($))
+    out
+
+*length_block(ad_len as i64, ct_len as i64) returns Vec of i64
+    v is vec()
+    loop(0, $ < 8, $ + 1)
+        v.push((ad_len >> ($ * 8)) & 0xFF)
+    loop(0, $ < 8, $ + 1)
+        v.push((ct_len >> ($ * 8)) & 0xFF)
+    v
+
+*seal(key as i64, nonce as i64, ad as Vec of i64, msg as Vec of i64) returns Sealed
+    # Block 0 is reserved for MAC keys; encrypt with counter=1+.
+    ct is stream.xor(key, nonce ^ 0x1, msg)
+    mk is derive_mac_keys(key, nonce)
+    auth is concat3(ad, ct, length_block(ad.len(), ct.len()))
+    t is poly_mac.tag(mk.get(0), mk.get(1), auth)
+    Sealed(ct is ct, tag is t)
+
+*open(key as i64, nonce as i64, ad as Vec of i64, sealed as Sealed) returns Opened
+    mk is derive_mac_keys(key, nonce)
+    auth is concat3(ad, sealed.ct, length_block(ad.len(), sealed.ct.len()))
+    expect is poly_mac.tag(mk.get(0), mk.get(1), auth)
+    if expect neq sealed.tag
+        return Opened(bytes is vec(), authentic is false)
+    pt is stream.xor(key, nonce ^ 0x1, sealed.ct)
+    Opened(bytes is pt, authentic is true)
+
+*bytes_equal(a as Vec of i64, b as Vec of i64) returns bool
+    if a.len() neq b.len()
+        return false
+    loop(0, $ < a.len(), $ + 1)
+        if a.get($) neq b.get($)
+            return false
+    true

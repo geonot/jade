@@ -67,18 +67,24 @@ impl Typer {
             let declared_ptys = &handler_info[i].1;
             if h.is_loop && !h.params.is_empty() {
                 return Err(format!(
-                    "line {}:{}: *loop handler cannot declare parameters",
-                    h.span.line, h.span.col
+                    "{}: *loop handler cannot declare parameters",
+                    h.span.loc()
                 ));
             }
             for (pi, p) in h.params.iter().enumerate() {
                 let pid = self.fresh_id();
-                let ty = p.ty.clone().unwrap_or_else(|| {
-                    declared_ptys
-                        .get(pi)
-                        .map(|t| self.infer_ctx.resolve(t))
-                        .unwrap_or(Type::I64)
-                });
+                let actor_names: std::collections::HashSet<Symbol> =
+                    self.actors.keys().cloned().collect();
+                let ty = p
+                    .ty
+                    .clone()
+                    .map(|t| Self::normalize_actor_refs(t, &actor_names))
+                    .unwrap_or_else(|| {
+                        declared_ptys
+                            .get(pi)
+                            .map(|t| self.infer_ctx.resolve(t))
+                            .unwrap_or(Type::I64)
+                    });
                 let ownership = Self::ownership_for_type(&ty);
                 self.define_var(
                     &p.name.as_str(),
