@@ -17,11 +17,14 @@ impl Lowerer {
                     .collect();
                 self.emit(InstKind::SpawnActor(*name, lowered), ty, span)
             }
-            ExprKind::Send(target, _type_name, handler, _tag, args) => {
+            ExprKind::Send(target, type_name, handler, _tag, args) => {
                 let mut all = vec![self.lower_expr(target)];
                 all.extend(args.iter().map(|a| self.lower_expr(a)));
                 self.emit(
-                    InstKind::Call(Symbol::intern(&format!("__send_{handler}")), all),
+                    InstKind::Call(
+                        Symbol::intern(&format!("__send_{type_name}.{handler}")),
+                        all,
+                    ),
                     ty,
                     span,
                 )

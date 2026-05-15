@@ -10,6 +10,7 @@
 #include <sched.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdio.h>
 
 /* Debug: set to 1 to enable channel tracing */
 #ifndef CHAN_DEBUG

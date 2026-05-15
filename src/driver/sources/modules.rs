@@ -65,7 +65,18 @@ pub(in crate::driver) fn resolve_modules(
         let name = path.last().unwrap();
         let mut candidates = Vec::new();
 
-        // 1. Standard library (bundled with compiler)
+        // 1. Project source directory FIRST: a local module shadows stdlib.
+        //    (`use foo` → source/foo.jn or base_dir/foo.jn)
+        candidates.push(base_dir.join(format!("{file_path}.jn")));
+        if let Some(project_root) = base_dir.parent() {
+            candidates.push(
+                project_root
+                    .join("source")
+                    .join(format!("{file_path}.jn")),
+            );
+        }
+
+        // 2. Standard library (bundled with compiler)
         if let Ok(exe) = std::env::current_exe() {
             if let Some(exe_dir) = exe.parent() {
                 candidates.push(exe_dir.join("std").join(format!("{name}.jn")));
@@ -86,17 +97,6 @@ pub(in crate::driver) fn resolve_modules(
             );
         }
         candidates.push(base_dir.join("std").join(format!("{name}.jn")));
-
-        // 2. Project source directory (use foo → source/foo.jn, use foo/bar → source/foo/bar.jn)
-        candidates.push(base_dir.join(format!("{file_path}.jn")));
-        // Also check parent of base_dir in case base_dir is source/ itself
-        if let Some(project_root) = base_dir.parent() {
-            candidates.push(
-                project_root
-                    .join("source")
-                    .join(format!("{file_path}.jn")),
-            );
-        }
 
         // 3. Packages from project.jn / lock
         if let Some(pkg_path) = packages.get(&path[0]) {

@@ -101,8 +101,8 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
         // ── Actor send ──
-        if let Some(handler_name) = name.strip_prefix("__send_") {
-            return self.emit_actor_send(handler_name, args).map(Some);
+        if let Some(rest) = name.strip_prefix("__send_") {
+            return self.emit_actor_send(rest, args).map(Some);
         }
         // ── Store operations ──
         if let Some(store_name) = name.strip_prefix("__store_insert_") {
@@ -520,21 +520,33 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Send a message to an actor. The MIR lowering emits:
-    ///   Call("__send_{handler}", [target, arg0, arg1, ...])
-    /// We need to find the actor name and tag from the handler name.
+    ///   Call("__send_{actor}.{handler}", [target, arg0, arg1, ...])
+    /// We need to find the actor name and tag from the encoded name.
     pub(super) fn emit_actor_send(
         &mut self,
-        handler_name: &str,
+        encoded: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
 
+        // Parse "{actor}.{handler}" — fall back to legacy name-only lookup
+        // if the separator is missing (defensive).
+        let (actor_hint, handler_name) = match encoded.split_once('.') {
+            Some((a, h)) => (Some(a), h),
+            None => (None, encoded),
+        };
+
         // Find which actor owns this handler
         let (actor_name, tag, handler_params) = {
             let mut found = None;
             for (aname, ad) in &self.actor_defs {
+                if let Some(hint) = actor_hint {
+                    if aname.as_str() != hint {
+                        continue;
+                    }
+                }
                 for h in &ad.handlers {
                     if h.is_loop {
                         continue;
@@ -549,7 +561,7 @@ impl<'ctx> Compiler<'ctx> {
                     break;
                 }
             }
-            found.ok_or_else(|| format!("unknown actor handler '{handler_name}'"))?
+            found.ok_or_else(|| format!("unknown actor handler '{encoded}'"))?
         };
 
         let mb_name = format!("{actor_name}_mailbox");

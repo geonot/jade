@@ -299,7 +299,7 @@ void jinn_sched_enqueue(jinn_coro_t *c) {
 
 void jinn_sched_run(void) {
     /* Block until all coroutines are done */
-    if (!atomic_load(&g_sched.started)) return;
+    if (!atomic_load(&g_sched.started)) { return; }
     pthread_mutex_lock(&g_sched.done_lock);
     while (atomic_load(&g_sched.active_coros) > 0) {
         pthread_cond_wait(&g_sched.done_cond, &g_sched.done_lock);

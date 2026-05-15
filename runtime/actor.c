@@ -8,6 +8,7 @@
  */
 #include "jinn_rt.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 /*
  * jinn_actor_park: park the current coroutine (legacy, unused by channel path).
