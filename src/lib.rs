@@ -7,6 +7,7 @@ pub mod codegen;
 pub mod comptime;
 pub mod diagnostic;
 pub mod driver;
+pub mod escape;
 pub mod fmt;
 pub mod hir;
 pub mod hir_validate;
