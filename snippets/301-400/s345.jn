@@ -1,0 +1,35 @@
+# Bounding box over a list of (x,y).
+*main
+    pts is vec()
+    p1 is vec()
+    p1.push(2)
+    p1.push(3)
+    pts.push(p1)
+    p2 is vec()
+    p2.push(-1)
+    p2.push(7)
+    pts.push(p2)
+    p3 is vec()
+    p3.push(5)
+    p3.push(-4)
+    pts.push(p3)
+    minx is pts.get(0).get(0)
+    maxx is minx
+    miny is pts.get(0).get(1)
+    maxy is miny
+    i is 1
+    while i < pts.length
+        p is pts.get(i)
+        if p.get(0) < minx
+            minx is p.get(0)
+        if p.get(0) > maxx
+            maxx is p.get(0)
+        if p.get(1) < miny
+            miny is p.get(1)
+        if p.get(1) > maxy
+            maxy is p.get(1)
+        i is i + 1
+    log minx
+    log maxx
+    log miny
+    log maxy

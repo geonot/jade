@@ -68,6 +68,7 @@ impl Typer {
                 ty,
                 ownership,
                 default: None,
+                access_mod: None,
                 span: p.span,
             });
         }

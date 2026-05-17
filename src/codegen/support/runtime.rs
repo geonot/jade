@@ -138,9 +138,14 @@ impl<'ctx> Compiler<'ctx> {
                 // Borrowed values don't escape
                 fv.add_attribute(loc, self.attr("nocapture"));
             }
-            // Rc/Weak are shared-ownership — aliased by design
-            // Raw is user-managed — we make no assumptions
-            hir::Ownership::Rc | hir::Ownership::Weak | hir::Ownership::Raw => {}
+            // Rc/RcMut/Arc/ArcMut/Weak are shared-ownership — aliased by design.
+            // Raw is user-managed — we make no assumptions.
+            hir::Ownership::Rc
+            | hir::Ownership::RcMut
+            | hir::Ownership::Arc
+            | hir::Ownership::ArcMut
+            | hir::Ownership::Weak
+            | hir::Ownership::Raw => {}
         }
         // Add dereferenceable(N) for known struct sizes
         if let Some(size) = self.dereferenceable_bytes(ty) {

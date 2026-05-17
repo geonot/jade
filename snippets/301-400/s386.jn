@@ -1,0 +1,20 @@
+# L1 norm and squared L2 norm.
+*main
+    a is vec()
+    a.push(3)
+    a.push(-4)
+    a.push(5)
+    a.push(-12)
+    l1 is 0
+    l2sq is 0
+    i is 0
+    while i < a.length
+        v is a.get(i)
+        if v < 0
+            l1 is l1 - v
+        else
+            l1 is l1 + v
+        l2sq is l2sq + v * v
+        i is i + 1
+    log l1
+    log l2sq

@@ -1,0 +1,21 @@
+# Sliding-window sum of width k over a Vec.
+*main
+    a is vec()
+    a.push(1)
+    a.push(3)
+    a.push(2)
+    a.push(5)
+    a.push(7)
+    a.push(4)
+    k is 3
+    n is a.length
+    s is 0
+    i is 0
+    while i < k
+        s is s + a.get(i)
+        i is i + 1
+    log s
+    while i < n
+        s is s + a.get(i) - a.get(i - k)
+        log s
+        i is i + 1

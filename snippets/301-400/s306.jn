@@ -1,0 +1,17 @@
+# Two-arg lambda used as accumulator.
+*reduce(xs as Vec of i64, init as i64, f as (i64, i64) returns i64) returns i64
+    acc is init
+    i is 0
+    while i < xs.length
+        acc is f(acc, xs.get(i))
+        i is i + 1
+    acc
+
+*main
+    xs is vec()
+    xs.push(1)
+    xs.push(2)
+    xs.push(3)
+    xs.push(4)
+    log reduce(xs, 0, |a, b| a + b)
+    log reduce(xs, 1, |a, b| a * b)

@@ -1,0 +1,6 @@
+# String length used in arithmetic.
+*main
+    s is 'compiler'
+    n is s.length
+    log n
+    log n + 1

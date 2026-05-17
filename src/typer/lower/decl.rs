@@ -43,6 +43,7 @@ impl Typer {
                     name: f.name.clone(),
                     ty,
                     default,
+                    access_mod: f.access_mod,
                     span: f.span,
                 }
             })
@@ -85,7 +86,9 @@ impl Typer {
                             .map(|t| self.infer_ctx.resolve(t))
                             .unwrap_or(Type::I64)
                     });
-                let ownership = Self::ownership_for_type(&ty);
+                let ownership = self
+                    .ownership_with_mod(&ty, p.access_mod)
+                    .unwrap_or_else(|_| Self::ownership_for_type(&ty));
                 self.define_var(
                     &p.name.as_str(),
                     VarInfo {
@@ -101,6 +104,7 @@ impl Typer {
                     ty,
                     ownership,
                     default: None,
+                    access_mod: p.access_mod,
                     span: p.span,
                 });
             }
@@ -277,7 +281,9 @@ impl Typer {
         for (i, p) in f.params.iter().enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i].clone();
-            let ownership = Self::ownership_for_type(&ty);
+            let ownership = self
+                .ownership_with_mod(&ty, p.access_mod)
+                .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),
                 VarInfo {
@@ -298,6 +304,7 @@ impl Typer {
                 ty,
                 ownership,
                 default: hir_default,
+                access_mod: p.access_mod,
                 span: p.span,
             });
         }
@@ -482,6 +489,7 @@ impl Typer {
                     name: f.name.clone(),
                     ty,
                     default,
+                    access_mod: f.access_mod,
                     span: f.span,
                 }
             })
@@ -558,6 +566,7 @@ impl Typer {
             ty: self_ty,
             ownership: Ownership::BorrowMut,
             default: None,
+            access_mod: None,
             span: m.span,
         });
 
@@ -569,7 +578,9 @@ impl Typer {
         for (i, p) in param_iter.enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i + 1].clone();
-            let ownership = Self::ownership_for_type(&ty);
+            let ownership = self
+                .ownership_with_mod(&ty, p.access_mod)
+                .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),
                 VarInfo {
@@ -585,6 +596,7 @@ impl Typer {
                 ty,
                 ownership,
                 default: None,
+                access_mod: p.access_mod,
                 span: p.span,
             });
         }

@@ -1,0 +1,6 @@
+# String interpolation with multiple variables.
+*main
+    name is 'jinn'
+    ver  is 1
+    rev  is 0
+    log 'lang={name} v{ver}.{rev}'

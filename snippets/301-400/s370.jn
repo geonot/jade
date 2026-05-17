@@ -1,0 +1,16 @@
+# exists: predicate via lambda.
+*exists(xs as Vec of i64, p as (i64) returns bool) returns bool
+    i is 0
+    while i < xs.length
+        if p(xs.get(i))
+            return true
+        i is i + 1
+    false
+
+*main
+    xs is vec()
+    xs.push(2)
+    xs.push(4)
+    xs.push(6)
+    log exists(xs, |n as i64| n equals 4)
+    log exists(xs, |n as i64| n > 100)

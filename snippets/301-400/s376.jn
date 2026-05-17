@@ -1,0 +1,10 @@
+# Recursive gcd.
+*gcd(a as i64, b as i64) returns i64
+    if b equals 0
+        return a
+    gcd(b, a mod b)
+
+*main
+    log gcd(48, 18)
+    log gcd(100, 75)
+    log gcd(1071, 462)

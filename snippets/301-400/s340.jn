@@ -1,0 +1,10 @@
+# Echo a Vec of strings.
+*main
+    xs is vec()
+    xs.push('alpha')
+    xs.push('beta')
+    xs.push('gamma')
+    i is 0
+    while i < xs.length
+        log '[{i}] {xs.get(i)}'
+        i is i + 1

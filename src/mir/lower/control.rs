@@ -607,7 +607,10 @@ impl Lowerer {
             }
             hir::Stmt::Ret(val, _ret_ty, span) => {
                 if let Some(v) = val {
-                    let rv = self.lower_expr(v);
+                    // Return value escapes the current frame; auto-clone
+                    // heap-typed field/index reads so the caller receives
+                    // an owned, independent value.
+                    let rv = self.lower_expr_owned(v);
                     self.lower_deferred_in_reverse();
                     self.set_terminator(Terminator::Return(Some(rv)));
                 } else {
@@ -619,7 +622,7 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, *span)
             }
             hir::Stmt::ErrReturn(expr, _ty, span) => {
-                let v = self.lower_expr(expr);
+                let v = self.lower_expr_owned(expr);
                 self.lower_deferred_in_reverse();
                 self.set_terminator(Terminator::Return(Some(v)));
                 let dead = self.new_block("after.err_return");

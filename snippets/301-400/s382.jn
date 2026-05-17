@@ -1,0 +1,23 @@
+# Filter primes (1..100), then sum them.
+*is_prime(n as i64) returns bool
+    if n < 2
+        return false
+    if n equals 2
+        return true
+    if n mod 2 equals 0
+        return false
+    d is 3
+    while d * d <= n
+        if n mod d equals 0
+            return false
+        d is d + 2
+    true
+
+*main
+    s is 0
+    i is 2
+    while i <= 100
+        if is_prime(i)
+            s is s + i
+        i is i + 1
+    log s

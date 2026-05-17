@@ -1,0 +1,13 @@
+# Parity (XOR fold over bits).
+*parity(n as i64) returns i64
+    p is 0
+    while n > 0
+        p is p ^ (n mod 2)
+        n is n / 2
+    p
+
+*main
+    log parity(0)
+    log parity(7)
+    log parity(8)
+    log parity(15)

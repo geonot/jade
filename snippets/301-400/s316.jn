@@ -1,0 +1,20 @@
+# Count via fold: how many elements equal a target.
+*count_eq(xs as Vec of i64, target as i64) returns i64
+    n is 0
+    i is 0
+    while i < xs.length
+        if xs.get(i) equals target
+            n is n + 1
+        i is i + 1
+    n
+
+*main
+    xs is vec()
+    xs.push(1)
+    xs.push(2)
+    xs.push(2)
+    xs.push(3)
+    xs.push(2)
+    xs.push(4)
+    log count_eq(xs, 2)
+    log count_eq(xs, 9)

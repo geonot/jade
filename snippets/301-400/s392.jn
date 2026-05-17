@@ -1,0 +1,23 @@
+# Queue via two stacks (push to A, pop from B; refill from A on demand).
+*main
+    a is vec()
+    b is vec()
+    # enqueue 1,2,3
+    a.push(1)
+    a.push(2)
+    a.push(3)
+    # dequeue twice
+    out1 is 0
+    if b.length equals 0
+        while a.length > 0
+            b.push(a.get(a.length - 1))
+            a.pop()
+    out1 is b.get(b.length - 1)
+    b.pop()
+    log out1
+    # enqueue 4
+    a.push(4)
+    # dequeue
+    out2 is b.get(b.length - 1)
+    b.pop()
+    log out2

@@ -1,0 +1,19 @@
+# Tagged record: first slot = tag, rest = payload.
+*mk_msg(tag as i64, a as i64, b as i64) returns Vec of i64
+    m is vec()
+    m.push(tag)
+    m.push(a)
+    m.push(b)
+    m
+
+*handle(m as Vec of i64) returns i64
+    if m.get(0) equals 0
+        return m.get(1) + m.get(2)
+    if m.get(0) equals 1
+        return m.get(1) - m.get(2)
+    m.get(1) * m.get(2)
+
+*main
+    log handle(mk_msg(0, 3, 4))
+    log handle(mk_msg(1, 10, 6))
+    log handle(mk_msg(2, 7, 8))

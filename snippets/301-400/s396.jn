@@ -1,0 +1,24 @@
+# Set membership via sorted Vec + binary search.
+*bsearch(xs as Vec of i64, t as i64) returns i64
+    lo is 0
+    hi is xs.length - 1
+    while lo <= hi
+        m is (lo + hi) / 2
+        v is xs.get(m)
+        if v equals t
+            return m
+        if v < t
+            lo is m + 1
+        else
+            hi is m - 1
+    -1
+
+*main
+    s is vec()
+    s.push(3)
+    s.push(7)
+    s.push(11)
+    s.push(15)
+    s.push(19)
+    log bsearch(s, 11)
+    log bsearch(s, 12)

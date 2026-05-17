@@ -1,0 +1,26 @@
+# Histogram of digits (0..9) over a vec of integers.
+*main
+    xs is vec()
+    xs.push(112)
+    xs.push(330)
+    xs.push(454)
+    xs.push(606)
+    h is vec()
+    i is 0
+    while i < 10
+        h.push(0)
+        i is i + 1
+    j is 0
+    while j < xs.length
+        n is xs.get(j)
+        if n equals 0
+            h.set(0, h.get(0) + 1)
+        while n > 0
+            d is n mod 10
+            h.set(d, h.get(d) + 1)
+            n is n / 10
+        j is j + 1
+    k is 0
+    while k < 10
+        log h.get(k)
+        k is k + 1

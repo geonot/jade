@@ -1,0 +1,18 @@
+# Predicate lambda passed to a counting HOF.
+*count_if(xs as Vec of i64, pred as (i64) returns bool) returns i64
+    n is 0
+    i is 0
+    while i < xs.length
+        if pred(xs.get(i))
+            n is n + 1
+        i is i + 1
+    n
+
+*main
+    xs is vec()
+    i is 0
+    while i < 20
+        xs.push(i)
+        i is i + 1
+    log count_if(xs, |n as i64| n mod 2 equals 0)
+    log count_if(xs, |n as i64| n > 14)

@@ -1,0 +1,14 @@
+# lcm built on top of gcd.
+*gcd(a as i64, b as i64) returns i64
+    while b neq 0
+        t is b
+        b is a mod b
+        a is t
+    a
+
+*lcm(a as i64, b as i64) returns i64
+    a / gcd(a, b) * b
+
+*main
+    log lcm(4, 6)
+    log lcm(12, 18)

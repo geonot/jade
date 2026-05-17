@@ -18,6 +18,7 @@ impl Parser {
                 value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
                 ty: None,
                 atomic: false,
+                access_mod: None,
                 span: sp,
             }));
         }
@@ -28,6 +29,16 @@ impl Parser {
             declared_ty = Some(self.parse_type()?);
         }
         self.expect(Token::Is)?;
+        // Optional access modifier immediately after `is`:
+        //   `x is copy RHS` — deep clone
+        //   `x is ref  RHS` — shared alias
+        //   `x is mut  RHS` — exclusive mutable alias
+        //   `x is take RHS` — move out / remove
+        // These are contextual keywords (the lexer emits them as Ident).
+        // We disambiguate `copy(…)` etc. (a call expression whose callee
+        // happens to be named `copy`) by requiring the keyword to NOT be
+        // followed immediately by `(`.
+        let access_mod = self.try_parse_access_mod_after_is();
         // Labeled loop: `outer is for i in items`
         if self.check(Token::For) {            self.advance();
             let bind = self.ident()?;
@@ -67,6 +78,7 @@ impl Parser {
                 end,
                 step,
                 body,
+                access_mod,
                 span: sp,
             }));
         }
@@ -122,6 +134,7 @@ impl Parser {
                 value,
                 ty: None,
                 atomic: false,
+                access_mod: None,
                 span: sp,
             }));
             // Build arms: same three-way logic as finish_bare_handler_chain but the
@@ -206,6 +219,7 @@ impl Parser {
                 value,
                 ty: None,
                 atomic: false,
+                access_mod: None,
                 span: sp,
             }));
             let ok_arm = Arm {
@@ -230,6 +244,7 @@ impl Parser {
                 value: Expr::Ident(tmp_name, sp),
                 ty: None,
                 atomic: false,
+                access_mod: None,
                 span: sp,
             }));
         }
@@ -284,6 +299,7 @@ impl Parser {
                             value,
                             ty: None,
                             atomic: false,
+                            access_mod: None,
                             span: sp,
                         });
                         let propagate_arm = Arm {
@@ -312,6 +328,7 @@ impl Parser {
                             value: Expr::Ident(tmp_name, sp),
                             ty: None,
                             atomic: false,
+                            access_mod: None,
                             span: sp,
                         }));
                     }
@@ -354,6 +371,7 @@ impl Parser {
             value,
             ty: declared_ty,
             atomic: false,
+            access_mod,
             span: sp,
         }))
     }
@@ -419,6 +437,7 @@ impl Parser {
             value: head,
             ty: None,
             atomic: false,
+            access_mod: None,
             span: sp,
         }));
         let ok_arm = Arm {
@@ -487,6 +506,7 @@ impl Parser {
             value: call,
             ty: None,
             atomic: false,
+            access_mod: None,
             span: sp,
         }));
         // Build arms.

@@ -1,0 +1,17 @@
+# index_of in vec; -1 if absent.
+*index_of(xs as Vec of i64, t as i64) returns i64
+    i is 0
+    while i < xs.length
+        if xs.get(i) equals t
+            return i
+        i is i + 1
+    -1
+
+*main
+    xs is vec()
+    xs.push(5)
+    xs.push(7)
+    xs.push(7)
+    xs.push(9)
+    log index_of(xs, 7)
+    log index_of(xs, 1)

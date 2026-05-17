@@ -413,7 +413,23 @@ impl<'ctx> Compiler<'ctx> {
         self.emit_vec_bounds_check(idx, len)?;
 
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vg.egep")) };
-        Ok(b!(self.bld.build_load(lty, elem_gep, "vg.v")))
+        let raw = b!(self.bld.build_load(lty, elem_gep, "vg.v"));
+
+        // For heap-managed element types we MUST return an independently-owned
+        // copy. The raw load returns a value that aliases storage owned by the
+        // Vec; if the caller later drops it (or the Vec drops), we get a
+        // double-free. clone_value emits the right deep-copy / RC-bump for
+        // each supported type. Trivially-droppable types short-circuit to
+        // identity inside clone_value (no overhead).
+        if Self::is_value_clonable(elem_ty) {
+            self.clone_value(raw, elem_ty)
+        } else {
+            // Type system should have prevented this binding from being
+            // marked Owned; the typer leaves it Borrowed (no scope drop)
+            // and rejects consuming uses. Returning the raw alias is safe
+            // as long as the binding is treated as a borrow.
+            Ok(raw)
+        }
     }
 
     pub(crate) fn vec_set_val(

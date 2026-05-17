@@ -1,0 +1,20 @@
+# Max via single pass; lambda chooses extremum direction.
+*extremum(xs as Vec of i64, better as (i64, i64) returns bool) returns i64
+    best is xs.get(0)
+    i is 1
+    while i < xs.length
+        v is xs.get(i)
+        if better(v, best)
+            best is v
+        i is i + 1
+    best
+
+*main
+    xs is vec()
+    xs.push(7)
+    xs.push(3)
+    xs.push(11)
+    xs.push(2)
+    xs.push(9)
+    log extremum(xs, |a, b| a > b)
+    log extremum(xs, |a, b| a < b)

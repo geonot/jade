@@ -42,6 +42,8 @@ impl Typer {
                         *span,
                         "spawn init field",
                     );
+                    // P3: cross-thread @resource safety check.
+                    self.enforce_cross_thread_safe(&hv.ty, *span, "actor spawn init")?;
                     hir_inits.push((fname.clone(), hv));
                 }
                 Ok(hir::Expr {
@@ -203,6 +205,10 @@ impl Typer {
                     .infer_ctx
                     .unify_at(&elem_ty, &hval.ty, *span, "channel send");
                 let hval = self.maybe_coerce_to(hval, &elem_ty);
+                // P3: cross-thread @resource safety check.
+                // Must run AFTER unification so type vars resolve to concrete types.
+                let resolved_elem = self.infer_ctx.shallow_resolve(&elem_ty);
+                self.enforce_cross_thread_safe(&resolved_elem, *span, "channel send")?;
                 Ok(hir::Expr {
                     kind: hir::ExprKind::ChannelSend(Box::new(hch), Box::new(hval)),
                     ty: Type::Void,

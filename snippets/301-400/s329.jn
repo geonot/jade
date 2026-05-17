@@ -1,0 +1,28 @@
+# Transpose a 3x2 matrix into a 2x3.
+*main
+    m is vec()
+    r is 0
+    while r < 3
+        row is vec()
+        c is 0
+        while c < 2
+            row.push(r * 2 + c)
+            c is c + 1
+        m.push(row)
+        r is r + 1
+    t is vec()
+    c is 0
+    while c < 2
+        row is vec()
+        r is 0
+        while r < 3
+            inner is m.get(r)
+            row.push(inner.get(c))
+            r is r + 1
+        t.push(row)
+        c is c + 1
+    log t.length
+    inner0 is t.get(0)
+    log inner0.length
+    log inner0.get(0)
+    log inner0.get(2)

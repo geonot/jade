@@ -1,0 +1,32 @@
+# Sorted-set difference (a - b).
+*main
+    a is vec()
+    a.push(1)
+    a.push(2)
+    a.push(3)
+    a.push(4)
+    a.push(5)
+    b is vec()
+    b.push(2)
+    b.push(4)
+    out is vec()
+    i is 0
+    j is 0
+    while i < a.length and j < b.length
+        x is a.get(i)
+        y is b.get(j)
+        if x equals y
+            i is i + 1
+            j is j + 1
+        else
+            if x < y
+                out.push(x)
+                i is i + 1
+            else
+                j is j + 1
+    while i < a.length
+        out.push(a.get(i))
+        i is i + 1
+    log out.length
+    log out.get(0)
+    log out.get(out.length - 1)

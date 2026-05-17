@@ -1,0 +1,16 @@
+# Linear search returns index or -1.
+*find(xs as Vec of i64, target as i64) returns i64
+    i is 0
+    while i < xs.length
+        if xs.get(i) equals target
+            return i
+        i is i + 1
+    -1
+
+*main
+    xs is vec()
+    xs.push(10)
+    xs.push(20)
+    xs.push(30)
+    log find(xs, 20)
+    log find(xs, 99)

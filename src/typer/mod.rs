@@ -44,6 +44,11 @@ pub struct Typer {
     pub(crate) scopes: Vec<HashMap<Symbol, VarInfo>>,
     pub(crate) fns: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     pub(crate) structs: IndexMap<Symbol, Vec<(Symbol, Type)>>,
+    /// Per-struct layout/annotation attributes (`@packed`, `@strict`,
+    /// `@align`, `@resource`, `@atomic`, `@weakable`). Populated when the
+    /// declaration is registered; consulted by access-mode inference
+    /// (§3 of `docs/access-semantics.md`) and codegen.
+    pub(crate) struct_attrs: IndexMap<Symbol, crate::ast::LayoutAttrs>,
     pub(crate) enums: IndexMap<Symbol, Vec<(Symbol, Vec<Type>)>>,
     /// Names of enums declared with the `err` keyword. Used to classify
     /// `! Variant` returns and infer per-function error unions.
@@ -121,6 +126,7 @@ impl Typer {
             scopes: Vec::new(),
             fns: IndexMap::new(),
             structs: IndexMap::new(),
+            struct_attrs: IndexMap::new(),
             enums: IndexMap::new(),
             err_enum_names: std::collections::HashSet::new(),
             variant_tags: IndexMap::new(),
@@ -301,6 +307,126 @@ impl Typer {
             Type::Ptr(_) => Ownership::Raw,
             _ => Ownership::Owned,
         }
+    }
+
+    /// Compute the HIR `Ownership` tier for a binding/param/field, honoring
+    /// any explicit access modifier (`copy`/`ref`/`mut`/`take`) and any
+    /// type-level annotations (`@atomic` promotes to Arc tier;
+    /// `@resource` rejects `copy`).
+    ///
+    /// Returns `Err` only when a hard semantic rule is violated (e.g. `copy`
+    /// of a `@resource`). When no modifier is present, falls back to the
+    /// structural default produced by `ownership_for_type` then promoted
+    /// to Arc if the underlying struct is `@atomic`.
+    pub(crate) fn ownership_with_mod(
+        &self,
+        ty: &Type,
+        access_mod: Option<crate::ast::AccessMod>,
+    ) -> Result<Ownership, String> {
+        use crate::ast::AccessMod::*;
+        let atomic = self.type_has_atomic_annotation(ty);
+        let resource = self.type_has_resource_annotation(ty);
+        let promote_owned = || -> Ownership {
+            if atomic {
+                Ownership::Arc
+            } else if matches!(ty, Type::Rc(_)) {
+                Ownership::Rc
+            } else if matches!(ty, Type::Ptr(_)) {
+                Ownership::Raw
+            } else {
+                Ownership::Owned
+            }
+        };
+        let ow = match access_mod {
+            Some(Copy) => {
+                if resource {
+                    return Err(format!(
+                        "cannot `copy` a @resource type ({ty}): use `take` (move), `ref` (alias) or `mut` (mutable alias) instead"
+                    ));
+                }
+                promote_owned()
+            }
+            Some(Take) => promote_owned(),
+            Some(Ref) => Ownership::Borrowed,
+            Some(Mut) => Ownership::BorrowMut,
+            None => promote_owned(),
+        };
+        Ok(ow)
+    }
+
+    /// True iff `ty` is (or wraps) a user-defined struct annotated with
+    /// `@resource`. See `docs/access-semantics.md` §3.
+    ///
+    /// Walks through `Rc<T>`, `Vec<T>`, `Cow<T>`, `Newtype`, `Alias`, etc.
+    /// to find the underlying struct \u2014 a `Vec(Socket)` is still a vector
+    /// *of* resources, so the linear discipline propagates.
+    ///
+    /// Built-in linear types (`Coroutine`, `Generator`) are also resources.
+    pub(crate) fn type_has_resource_annotation(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name, _) => self
+                .struct_attrs
+                .get(name)
+                .map(|a| a.resource)
+                .unwrap_or(false),
+            // Built-in linear resource types (close-once / single-run).
+            Type::Coroutine(_) | Type::Generator(_) => true,
+            Type::Newtype(_, inner)
+            | Type::Alias(_, inner)
+            | Type::Rc(inner)
+            | Type::Weak(inner)
+            | Type::Cow(inner) => self.type_has_resource_annotation(inner),
+            _ => false,
+        }
+    }
+
+    /// True iff `ty` is a struct annotated with `@atomic`, requiring
+    /// tier-3 (Arc / Arc<Mutex>) lowering for shared bindings.
+    /// See `docs/access-semantics.md` \u00a73.
+    ///
+    /// Built-in cross-thread types (`Channel`, `ActorRef`) are atomic by
+    /// construction \u2014 they already carry an atomic refcount header.
+    pub(crate) fn type_has_atomic_annotation(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name, _) => self
+                .struct_attrs
+                .get(name)
+                .map(|a| a.atomic)
+                .unwrap_or(false),
+            // Built-in cross-thread atomic types.
+            Type::Channel(_) | Type::ActorRef(_) => true,
+            Type::Newtype(_, inner) | Type::Alias(_, inner) => {
+                self.type_has_atomic_annotation(inner)
+            }
+            _ => false,
+        }
+    }
+
+    /// Enforce the `@resource` cross-thread safety rule
+    /// (`docs/access-semantics.md` \u00a74.1 final bullet).
+    ///
+    /// A `@resource` type may cross a thread boundary only when it is also
+    /// annotated `@atomic`. The boundary is any value sent on a channel,
+    /// passed to an actor handler, or supplied as an actor-spawn init.
+    ///
+    /// `context` is a short label inserted into the diagnostic
+    /// (e.g. `"channel send"`, `"actor handler argument"`,
+    /// `"actor spawn init"`).
+    pub(crate) fn enforce_cross_thread_safe(
+        &self,
+        ty: &Type,
+        span: crate::ast::Span,
+        context: &str,
+    ) -> Result<(), String> {
+        if self.type_has_resource_annotation(ty) && !self.type_has_atomic_annotation(ty) {
+            return Err(format!(
+                "{}: resource type `{}` is not `@atomic`; cannot send across threads ({})",
+                span.loc(),
+                ty,
+                context
+            ));
+        }
+        Ok(())
     }
 
     fn free_type_vars_in_env(&mut self) -> std::collections::HashSet<u32> {

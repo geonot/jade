@@ -121,6 +121,7 @@ impl Typer {
                         name: *fname,
                         ty: fty.clone(),
                         default: None,
+                        access_mod: None,
                         span,
                     })
                     .collect();
@@ -326,6 +327,7 @@ impl Typer {
                             name: *fname,
                             ty: fty.clone(),
                             default: None,
+                            access_mod: None,
                             span,
                         })
                         .collect();

@@ -181,6 +181,7 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
             value: replace_placeholder(&b.value, name),
             ty: b.ty.clone(),
             atomic: b.atomic,
+            access_mod: None,
             span: b.span,
         }),
         Stmt::Assign(lhs, rhs, sp) => Stmt::Assign(
@@ -220,6 +221,7 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
             end: f.end.as_ref().map(|e| replace_placeholder(e, name)),
             step: f.step.as_ref().map(|e| replace_placeholder(e, name)),
             body: replace_placeholder_in_block(&f.body, name),
+            access_mod: None,
             span: f.span,
         }),
         Stmt::Loop(l) => Stmt::Loop(Loop {
@@ -418,6 +420,7 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
             value: replace_index_placeholder(&b.value, name),
             ty: b.ty.clone(),
             atomic: b.atomic,
+            access_mod: None,
             span: b.span,
         }),
         Stmt::Assign(lhs, rhs, sp) => Stmt::Assign(
@@ -457,6 +460,7 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
             end: f.end.as_ref().map(|e| replace_index_placeholder(e, name)),
             step: f.step.as_ref().map(|e| replace_index_placeholder(e, name)),
             body: replace_index_placeholder_in_block(&f.body, name),
+            access_mod: None,
             span: f.span,
         }),
         Stmt::Loop(l) => Stmt::Loop(Loop {

@@ -1,0 +1,15 @@
+# 3D vector dot product (positional fields).
+*mk3(x as i64, y as i64, z as i64) returns Vec of i64
+    v is vec()
+    v.push(x)
+    v.push(y)
+    v.push(z)
+    v
+
+*dot3(a as Vec of i64, b as Vec of i64) returns i64
+    a.get(0) * b.get(0) + a.get(1) * b.get(1) + a.get(2) * b.get(2)
+
+*main
+    a is mk3(1, 2, 3)
+    b is mk3(4, 5, 6)
+    log dot3(a, b)

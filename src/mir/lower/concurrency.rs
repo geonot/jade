@@ -11,15 +11,16 @@ impl Lowerer {
         let ty = expr.ty.clone();
         match &expr.kind {
             ExprKind::Spawn(name, inits) => {
+                // Spawned-actor init values cross thread boundary; clone.
                 let lowered: Vec<(Symbol, ValueId)> = inits
                     .iter()
-                    .map(|(fname, e)| (*fname, self.lower_expr(e)))
+                    .map(|(fname, e)| (*fname, self.lower_expr_owned(e)))
                     .collect();
                 self.emit(InstKind::SpawnActor(*name, lowered), ty, span)
             }
             ExprKind::Send(target, type_name, handler, _tag, args) => {
                 let mut all = vec![self.lower_expr(target)];
-                all.extend(args.iter().map(|a| self.lower_expr(a)));
+                all.extend(args.iter().map(|a| self.lower_expr_owned(a)));
                 self.emit(
                     InstKind::Call(
                         Symbol::intern(&format!("__send_{type_name}.{handler}")),
@@ -39,7 +40,7 @@ impl Lowerer {
             }
             ExprKind::ChannelSend(chan, val) => {
                 let ch = self.lower_expr(chan);
-                let v = self.lower_expr(val);
+                let v = self.lower_expr_owned(val);
                 self.emit(InstKind::ChanSend(ch, v), ty, span)
             }
             ExprKind::ChannelRecv(chan) => {

@@ -1,6 +1,6 @@
 use super::super::*;
 use super::Lowerer;
-use crate::ast::Span;
+use crate::ast::{AccessMod, Span};
 use crate::hir::{self, ExprKind};
 use crate::types::Type;
 
@@ -8,7 +8,18 @@ impl Lowerer {
     pub(super) fn lower_stmt_core(&mut self, stmt: &hir::Stmt) -> ValueId {
         match stmt {
             hir::Stmt::Bind(b) => {
-                let val = self.lower_expr(&b.value);
+                // P4 auto-copy: at the binding boundary, when the RHS would
+                // otherwise alias storage owned by a parent aggregate
+                // (heap-typed field/index read), insert an implicit deep
+                // `Clone` so the new binding owns its value independently.
+                // `ref`/`mut`/`take` modifiers opt out and keep the raw
+                // load (borrow / move semantics).
+                let val = match b.access_mod {
+                    Some(AccessMod::Ref) | Some(AccessMod::Mut) | Some(AccessMod::Take) => {
+                        self.lower_expr(&b.value)
+                    }
+                    _ => self.lower_expr_owned(&b.value),
+                };
                 // Store the DefId on the instruction that produced this value,
                 // so MIR Perceus can track binding → value relationships.
                 if let Some(inst) = self
@@ -40,7 +51,9 @@ impl Lowerer {
                 val
             }
             hir::Stmt::Assign(target, value, _span) => {
-                let val = self.lower_expr(value);
+                // Same boundary as Bind: RHS is moved into the new home,
+                // so auto-clone heap-typed field/index reads.
+                let val = self.lower_expr_owned(value);
                 match &target.kind {
                     ExprKind::Var(_, name) => {
                         if self.mem_vars.contains(name) {

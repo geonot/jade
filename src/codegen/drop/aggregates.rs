@@ -35,18 +35,55 @@ impl<'ctx> Compiler<'ctx> {
         val: BasicValueEnum<'ctx>,
         name: &str,
     ) -> Result<(), String> {
+        // Auto-invoke user-defined `*drop` for `@resource` types
+        // (docs/access-semantics.md §3, §4.1). The method is mangled as
+        // `<TypeName>_drop` (see src/typer/lower/decl.rs) and takes `self`
+        // by pointer. It runs BEFORE field cleanup so the method body can
+        // still read fields like `self.fd`.
+        let user_drop_fn = {
+            let sym = crate::intern::Symbol::intern(name);
+            let is_resource = self
+                .struct_layouts
+                .get(&sym)
+                .map(|l| l.resource)
+                .unwrap_or(false);
+            if is_resource {
+                self.module.get_function(&format!("{name}_drop"))
+            } else {
+                None
+            }
+        };
+
         let fields = match self.structs.get(name) {
             Some(f) => f.clone(),
             None => return Ok(()), // unknown struct — can't drop fields
         };
         let any_needs_drop = fields.iter().any(|(_, ty)| !ty.is_trivially_droppable());
-        if !any_needs_drop {
+        if user_drop_fn.is_none() && !any_needs_drop {
             return Ok(());
         }
         let st = match self.module.get_struct_type(name) {
             Some(s) => s,
             None => return Ok(()),
         };
+
+        // If this is a @resource with a user *drop, fire it first then
+        // continue with normal field cleanup. The struct is spilled to a
+        // stack slot so we can pass `self` by pointer (matches the method
+        // ABI emitted by typer/lower/decl.rs).
+        if let Some(udf) = user_drop_fn {
+            let ptr = self.entry_alloca(st.into(), "ds.udrop.tmp");
+            b!(self.bld.build_store(ptr, val));
+            b!(self.bld.build_call(udf, &[ptr.into()], ""));
+            if !any_needs_drop {
+                return Ok(());
+            }
+            // Re-load `val` from the slot — the user method may have mutated
+            // fields (e.g. zeroed `fd` after close). Subsequent field-drop
+            // logic uses the original `val`, which is fine: POD fields don't
+            // care, and heap fields the user already owned should have been
+            // dropped or moved out by the user method.
+        }
 
         // Check if a recursive struct type needs an out-of-line drop function.
         let drop_fn_name = format!("__drop_{}", name);

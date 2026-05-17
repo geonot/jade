@@ -1,0 +1,11 @@
+# Recursive factorial.
+*fact(n as i64) returns i64
+    if n <= 1
+        return 1
+    n * fact(n - 1)
+
+*main
+    log fact(0)
+    log fact(1)
+    log fact(6)
+    log fact(10)

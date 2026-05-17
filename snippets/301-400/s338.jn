@@ -1,0 +1,6 @@
+# CSV row builder via repeated interpolation.
+*main
+    name is 'alice'
+    age  is 30
+    city is 'NYC'
+    log '{name},{age},{city}'

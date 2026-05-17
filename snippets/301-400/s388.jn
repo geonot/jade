@@ -1,0 +1,19 @@
+# Running max emitted at each step.
+*main
+    a is vec()
+    a.push(3)
+    a.push(1)
+    a.push(4)
+    a.push(1)
+    a.push(5)
+    a.push(9)
+    a.push(2)
+    m is a.get(0)
+    log m
+    i is 1
+    while i < a.length
+        v is a.get(i)
+        if v > m
+            m is v
+        log m
+        i is i + 1

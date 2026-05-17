@@ -1,0 +1,8 @@
+# Lambda capturing two locals.
+*main
+    a is 7
+    b is 5
+    line is |x as i64| a * x + b      # y = ax + b
+    log line(0)
+    log line(1)
+    log line(10)

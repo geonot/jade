@@ -64,19 +64,28 @@ impl Lowerer {
                 self.emit(InstKind::UnaryOp(mir_op, v), ty, span)
             }
             ExprKind::Call(_, name, args) => {
-                let arg_vals: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a)).collect();
+                // Args are moved into the callee (Jinn parameters are owned),
+                // so a field-/index-read passed as an argument must be
+                // auto-cloned to avoid aliasing the caller's storage.
+                let arg_vals: Vec<ValueId> =
+                    args.iter().map(|a| self.lower_expr_owned(a)).collect();
                 self.emit(InstKind::Call(name.clone(), arg_vals), ty, span)
             }
             ExprKind::IndirectCall(callee, args) => {
                 let f = self.lower_expr(callee);
-                let arg_vals: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a)).collect();
+                let arg_vals: Vec<ValueId> =
+                    args.iter().map(|a| self.lower_expr_owned(a)).collect();
                 self.emit(InstKind::IndirectCall(f, arg_vals), ty, span)
             }
 
             // Method(obj, mangled_name, plain_method_name, args)
             ExprKind::Method(obj, mangled_name, _method_name, args) => {
+                // Receiver is borrowed by the method dispatch (no clone);
+                // additional method args are moved-in and must be cloned
+                // if they alias parent storage.
                 let obj_val = self.lower_expr(obj);
-                let arg_vals: Vec<ValueId> = args.iter().map(|a| self.lower_expr(a)).collect();
+                let arg_vals: Vec<ValueId> =
+                    args.iter().map(|a| self.lower_expr_owned(a)).collect();
                 self.emit(
                     InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals),
                     ty,
@@ -93,18 +102,23 @@ impl Lowerer {
                 self.emit(InstKind::Index(a, i), ty, span)
             }
             ExprKind::Struct(name, inits) => {
+                // Each field value is moved into the new struct; auto-clone
+                // heap-typed field/index reads so the new struct owns its
+                // fields independently of the source aggregate.
                 let fields: Vec<(Symbol, ValueId)> = inits
                     .iter()
                     .map(|fi| {
-                        let v = self.lower_expr(&fi.value);
+                        let v = self.lower_expr_owned(&fi.value);
                         (fi.name.unwrap_or(Symbol::intern("")), v)
                     })
                     .collect();
                 self.emit(InstKind::StructInit(*name, fields), ty, span)
             }
             ExprKind::VariantCtor(enum_name, variant_name, tag, inits) => {
-                let arg_vals: Vec<ValueId> =
-                    inits.iter().map(|fi| self.lower_expr(&fi.value)).collect();
+                let arg_vals: Vec<ValueId> = inits
+                    .iter()
+                    .map(|fi| self.lower_expr_owned(&fi.value))
+                    .collect();
                 self.emit(
                     InstKind::VariantInit(*enum_name, *variant_name, *tag, arg_vals),
                     ty,
@@ -119,8 +133,8 @@ impl Lowerer {
             ExprKind::Coerce(inner, _) => self.lower_expr(inner),
 
             ExprKind::Pipe(inner, _def_id, name, extra_args) => {
-                let mut args = vec![self.lower_expr(inner)];
-                args.extend(extra_args.iter().map(|a| self.lower_expr(a)));
+                let mut args = vec![self.lower_expr_owned(inner)];
+                args.extend(extra_args.iter().map(|a| self.lower_expr_owned(a)));
                 self.emit(InstKind::Call(*name, args), ty, span)
             }
 
@@ -142,7 +156,10 @@ impl Lowerer {
                 self.emit(InstKind::Deref(v), ty, span)
             }
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
-                let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr(e)).collect();
+                // Array/tuple literal elements are moved-in; auto-clone
+                // heap-typed field/index reads.
+                let vals: Vec<ValueId> =
+                    elems.iter().map(|e| self.lower_expr_owned(e)).collect();
                 self.emit(InstKind::ArrayInit(vals), ty, span)
             }
             ExprKind::Slice(arr, start, end) => {
@@ -153,10 +170,10 @@ impl Lowerer {
             }
             ExprKind::FnRef(_, name) => self.emit(InstKind::FnRef(*name), ty, span),
             ExprKind::Builder(name, fields) => {
-                // Desugar builder into StructInit + field sets
+                // Desugar builder into StructInit + field sets.
                 let inits: Vec<(Symbol, ValueId)> = fields
                     .iter()
-                    .map(|(n, e)| (*n, self.lower_expr(e)))
+                    .map(|(n, e)| (*n, self.lower_expr_owned(e)))
                     .collect();
                 self.emit(InstKind::StructInit(*name, inits), ty, span)
             }

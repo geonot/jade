@@ -1,0 +1,14 @@
+# Count items where x mod 3 == 0.
+*main
+    xs is vec()
+    i is 1
+    while i <= 30
+        xs.push(i)
+        i is i + 1
+    n is 0
+    j is 0
+    while j < xs.length
+        if xs.get(j) mod 3 equals 0
+            n is n + 1
+        j is j + 1
+    log n

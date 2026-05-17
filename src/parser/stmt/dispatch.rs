@@ -147,6 +147,7 @@ impl Parser {
                             end,
                             step,
                             body: self.parse_block()?,
+                            access_mod: None,
                             span: sp,
                         },
                         sp,
@@ -212,6 +213,7 @@ impl Parser {
                         value: first,
                         ty: None,
                         atomic: false,
+                        access_mod: None,
                         span: sp,
                     }));
                     return Ok(Stmt::While(While {
@@ -270,6 +272,7 @@ impl Parser {
                     end,
                     step,
                     body,
+                    access_mod: None,
                     span: sp,
                 }))
             }
@@ -388,6 +391,7 @@ impl Parser {
                         value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
                         ty: None,
                         atomic: true,
+                        access_mod: None,
                         span: sp,
                     }));
                 }
@@ -398,6 +402,7 @@ impl Parser {
                     value,
                     ty: None,
                     atomic: true,
+                    access_mod: None,
                     span: sp,
                 }))
             }

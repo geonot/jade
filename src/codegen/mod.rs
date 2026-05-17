@@ -8,6 +8,7 @@ mod arith;
 mod builtins;
 mod call;
 mod channels;
+mod clone;
 mod conversions;
 mod coroutines;
 mod decl;

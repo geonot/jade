@@ -1,0 +1,28 @@
+# Find the n-th prime (1-indexed).
+*is_prime(n as i64) returns bool
+    if n < 2
+        return false
+    if n equals 2
+        return true
+    if n mod 2 equals 0
+        return false
+    d is 3
+    while d * d <= n
+        if n mod d equals 0
+            return false
+        d is d + 2
+    true
+
+*nth_prime(k as i64) returns i64
+    seen is 0
+    n is 1
+    while seen < k
+        n is n + 1
+        if is_prime(n)
+            seen is seen + 1
+    n
+
+*main
+    log nth_prime(1)
+    log nth_prime(10)
+    log nth_prime(25)

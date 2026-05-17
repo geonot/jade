@@ -321,6 +321,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::DropMany(items) => items.iter().map(|(v, _)| *v).collect(),
         InstKind::RcInc(v) | InstKind::RcDec(v) => vec![*v],
         InstKind::Copy(v) => vec![*v],
+        InstKind::Clone(v, _) => vec![*v],
         InstKind::Slice(a, b, c) => vec![*a, *b, *c],
 
         InstKind::VecNew(elems) => elems.clone(),

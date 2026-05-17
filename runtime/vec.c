@@ -104,6 +104,80 @@ jinn_sso_t __jinn_str_slice(jinn_sso_t str, int64_t start, int64_t end) {
 }
 
 /*
+ * __jinn_str_clone(out, src)
+ *
+ * Deep-clone an SSO string per the *Jinn* SSO convention (which differs from
+ * the C helpers above used by __jinn_str_slice — Jinn sets bit 7 of byte 23
+ * for INLINE strings and clears it for HEAP strings, with the inline length
+ * stored in bits 0-6 of byte 23).
+ *
+ * Both arguments are pointers to 24-byte SSO structs. The pointer-based ABI
+ * matches Jinn's LLVM call convention exactly and side-steps the System V
+ * AMD64 by-value aggregate ABI mismatch that arises when calling a clang-
+ * compiled function with a 24-byte struct passed via LLVM registers.
+ *
+ * - Inline (bit 7 of byte 23 set): the 24-byte struct is self-contained;
+ *   a plain byte-copy is the clone.
+ * - Heap   (bit 7 of byte 23 clear): {ptr@0, len@8, cap@16}. Allocate a
+ *   fresh `cap`-sized buffer, memcpy `len` bytes from the source, and
+ *   return a new struct pointing at it. `cap` is preserved.
+ */
+void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src) {
+    unsigned char tag = (unsigned char)src->bytes[23];
+    if (tag & 0x80) {
+        memcpy(out, src, sizeof(*out));
+        return;
+    }
+    char *src_ptr;
+    int64_t len;
+    int64_t cap;
+    memcpy(&src_ptr, src->bytes, 8);
+    memcpy(&len, src->bytes + 8, 8);
+    memcpy(&cap, src->bytes + 16, 8);
+    memset(out, 0, 24);
+    if (cap <= 0 || src_ptr == NULL) {
+        out->bytes[23] = (char)0x80; /* inline, len=0 */
+        return;
+    }
+    char *dst = (char *)malloc((size_t)cap);
+    if (len > 0) {
+        memcpy(dst, src_ptr, (size_t)len);
+    }
+    memcpy(out->bytes, &dst, 8);
+    memcpy(out->bytes + 8, &len, 8);
+    memcpy(out->bytes + 16, &cap, 8);
+}
+
+/*
+ * __jinn_vec_clone_pod(header_ptr, elem_size) -> new header_ptr
+ *
+ * Shallow-clone a Vec whose element type is trivially droppable (no inner
+ * heap allocations). Allocates a fresh header + buffer and memcpys the
+ * element bytes. Cheap (one malloc + memcpy + 24-byte header alloc).
+ *
+ * For Vecs whose elements need their own deep-clone (e.g. Vec<Vec<i64>>,
+ * Vec<String>, Vec<Struct>), codegen emits a per-monomorphization clone
+ * loop that calls clone_value on each element.
+ */
+void *__jinn_vec_clone_pod(void *hdr, int64_t elem_size) {
+    if (!hdr) return NULL;
+    jinn_vec_header_t *src = (jinn_vec_header_t *)hdr;
+    jinn_vec_header_t *dst = (jinn_vec_header_t *)malloc(sizeof(jinn_vec_header_t));
+    dst->len = src->len;
+    dst->cap = src->cap;
+    if (src->cap > 0 && src->ptr) {
+        int64_t bytes = src->cap * elem_size;
+        dst->ptr = malloc((size_t)bytes);
+        if (src->len > 0) {
+            memcpy(dst->ptr, src->ptr, (size_t)(src->len * elem_size));
+        }
+    } else {
+        dst->ptr = NULL;
+    }
+    return dst;
+}
+
+/*
  * User-facing Deque (ring buffer of i64-sized slots).
  * Layout: { int64_t *buf, int64_t head, int64_t tail, int64_t cap }
  */

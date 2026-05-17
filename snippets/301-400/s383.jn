@@ -1,0 +1,32 @@
+# Top-3 maxima via three-pass scan.
+*main
+    xs is vec()
+    xs.push(3)
+    xs.push(1)
+    xs.push(9)
+    xs.push(7)
+    xs.push(5)
+    xs.push(8)
+    xs.push(2)
+    n is xs.length
+    a is -1000000
+    b is -1000000
+    c is -1000000
+    i is 0
+    while i < n
+        v is xs.get(i)
+        if v > a
+            c is b
+            b is a
+            a is v
+        else
+            if v > b
+                c is b
+                b is v
+            else
+                if v > c
+                    c is v
+        i is i + 1
+    log a
+    log b
+    log c

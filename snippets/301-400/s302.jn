@@ -1,0 +1,6 @@
+# Lambda capturing an outer variable by value.
+*main
+    k is 10
+    add_k is |x as i64| x + k
+    log add_k(5)
+    log add_k(32)

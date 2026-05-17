@@ -89,6 +89,7 @@ impl Typer {
                         name: "__self".into(),
                         ty: self_ty.clone(),
                         ownership: hir::Ownership::Owned,
+                        access_mod: None,
                         default: None,
                         span,
                     }],

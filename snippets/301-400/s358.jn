@@ -1,0 +1,14 @@
+# Pop-count via shift loop.
+*popcount(n as i64) returns i64
+    c is 0
+    while n > 0
+        if n mod 2 equals 1
+            c is c + 1
+        n is n / 2
+    c
+
+*main
+    log popcount(0)
+    log popcount(7)
+    log popcount(255)
+    log popcount(1024)

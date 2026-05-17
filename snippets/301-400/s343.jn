@@ -1,0 +1,19 @@
+# Rect (x,y,w,h) area + perimeter.
+*mkrect(x as i64, y as i64, w as i64, h as i64) returns Vec of i64
+    r is vec()
+    r.push(x)
+    r.push(y)
+    r.push(w)
+    r.push(h)
+    r
+
+*area(r as Vec of i64) returns i64
+    r.get(2) * r.get(3)
+
+*perim(r as Vec of i64) returns i64
+    2 * (r.get(2) + r.get(3))
+
+*main
+    r is mkrect(0, 0, 5, 7)
+    log area(r)
+    log perim(r)

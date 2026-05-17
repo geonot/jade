@@ -1,0 +1,23 @@
+# Zip-with: combine two vecs of equal length via a binary op.
+*zip_with(xs as Vec of i64, ys as Vec of i64, f as (i64, i64) returns i64) returns Vec of i64
+    out is vec()
+    n is xs.length
+    if ys.length < n
+        n is ys.length
+    i is 0
+    while i < n
+        out.push(f(xs.get(i), ys.get(i)))
+        i is i + 1
+    out
+
+*main
+    a is vec()
+    b is vec()
+    i is 0
+    while i < 5
+        a.push(i)
+        b.push(10 - i)
+        i is i + 1
+    s is zip_with(a, b, |x, y| x + y)
+    log s.get(0)
+    log s.get(4)

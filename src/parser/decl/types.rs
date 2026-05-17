@@ -51,10 +51,15 @@ impl Parser {
         let mut layout = crate::ast::LayoutAttrs::default();
         while self.check(Token::At) {
             self.advance();
-            // Handle keywords that are also layout attribute names
+            // Handle keywords that are also layout attribute names.
             if self.check(Token::Strict) {
                 self.advance();
                 layout.strict = true;
+                continue;
+            }
+            if self.check(Token::Atomic) {
+                self.advance();
+                layout.atomic = true;
                 continue;
             }
             let attr = self.ident()?;
@@ -75,9 +80,27 @@ impl Parser {
                     return Err(self.error("alignment must be a power of 2"));
                 }
                 layout.align = Some(n);
+            } else if attr == "resource" {
+                // `@resource` — linear type: never copies, auto-`*drop` at scope exit.
+                // See `docs/access-semantics.md` §3.
+                layout.resource = true;
+            } else if attr == "weakable" {
+                // `@weakable` — may be referenced via `weak ref`. Requires `@atomic`.
+                layout.weakable = true;
             } else {
                 return Err(self.error(&format!("unknown layout attribute: @{attr}")));
             }
+        }
+        // Validate combinations.
+        if layout.weakable && !layout.atomic {
+            return Err(self.error(
+                "@weakable requires @atomic (weak references are only valid against atomic-shared types)",
+            ));
+        }
+        if layout.resource && layout.atomic {
+            return Err(self.error(
+                "@resource and @atomic are mutually exclusive: a linear type cannot be cross-thread shared",
+            ));
         }
         Ok(layout)
     }
@@ -85,11 +108,12 @@ impl Parser {
     pub(in crate::parser) fn parse_field(&mut self) -> Result<Field, ParseError> {
         let sp = self.span();
         let name = self.ident()?;
-        let ty = if self.check(Token::As) {
+        let (ty, access_mod) = if self.check(Token::As) {
             self.advance();
-            Some(self.parse_type()?)
+            let am = self.try_parse_access_mod_at_type_pos();
+            (Some(self.parse_type()?), am)
         } else {
-            None
+            (None, None)
         };
         let default = if self.check(Token::Is) {
             self.advance();
@@ -101,6 +125,7 @@ impl Parser {
             name,
             ty,
             default,
+            access_mod,
             span: sp,
         })
     }

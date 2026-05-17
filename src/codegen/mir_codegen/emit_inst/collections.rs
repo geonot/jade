@@ -92,6 +92,16 @@ impl<'ctx> Compiler<'ctx> {
                 // ── Copy ──
                 mir::InstKind::Copy(val) => Ok(self.val(*val)),
 
+                // ── Clone (deep heap clone for auto-copy / explicit copy modifier) ──
+                mir::InstKind::Clone(val, ty) => {
+                    let v = self.val(*val);
+                    if !Self::is_value_clonable(ty) || ty.is_trivially_droppable() {
+                        Ok(v)
+                    } else {
+                        self.clone_value(v, ty).map(|c| c)
+                    }
+                }
+
                 // ── Slice ──
                 mir::InstKind::Slice(base, lo, hi) => self.emit_slice(*base, *lo, *hi, &inst.ty),
 

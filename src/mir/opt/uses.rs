@@ -36,7 +36,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         | InstKind::Alloc(v) => {
             s.insert(*v);
         }
-        InstKind::Drop(v, _) => {
+        InstKind::Drop(v, _) | InstKind::Clone(v, _) => {
             s.insert(*v);
         }
         InstKind::DropMany(items) => {

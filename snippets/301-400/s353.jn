@@ -1,0 +1,20 @@
+# Prime check by trial division up to sqrt-ish.
+*is_prime(n as i64) returns bool
+    if n < 2
+        return false
+    if n equals 2
+        return true
+    if n mod 2 equals 0
+        return false
+    d is 3
+    while d * d <= n
+        if n mod d equals 0
+            return false
+        d is d + 2
+    true
+
+*main
+    log is_prime(2)
+    log is_prime(15)
+    log is_prime(101)
+    log is_prime(1000003)

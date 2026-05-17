@@ -1,0 +1,57 @@
+# Open-addressing hash table (linear probe), modest size.
+*main
+    cap is 17
+    keys is vec()
+    used is vec()
+    i is 0
+    while i < cap
+        keys.push(0)
+        used.push(0)
+        i is i + 1
+    # insert keys
+    insertk is vec()
+    insertk.push(5)
+    insertk.push(22)
+    insertk.push(39)
+    insertk.push(7)
+    j is 0
+    while j < insertk.length
+        k is insertk.get(j)
+        h is k mod cap
+        while used.get(h) equals 1 and keys.get(h) neq k
+            h is (h + 1) mod cap
+        keys.set(h, k)
+        used.set(h, 1)
+        j is j + 1
+    # lookup 22 and 99
+    target is 22
+    h is target mod cap
+    found is 0
+    tries is 0
+    while tries < cap
+        if used.get(h) equals 0
+            tries is cap
+        else
+            if keys.get(h) equals target
+                found is 1
+                tries is cap
+            else
+                h is (h + 1) mod cap
+                tries is tries + 1
+    log found
+
+    target2 is 99
+    h2 is target2 mod cap
+    found2 is 0
+    tries2 is 0
+    while tries2 < cap
+        if used.get(h2) equals 0
+            tries2 is cap
+        else
+            if keys.get(h2) equals target2
+                found2 is 1
+                tries2 is cap
+            else
+                h2 is (h2 + 1) mod cap
+                tries2 is tries2 + 1
+    log found2

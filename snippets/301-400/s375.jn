@@ -1,0 +1,10 @@
+# Recursive digit sum.
+*dsum(n as i64) returns i64
+    if n < 10
+        return n
+    n mod 10 + dsum(n / 10)
+
+*main
+    log dsum(7)
+    log dsum(123)
+    log dsum(99999)

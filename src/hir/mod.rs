@@ -13,17 +13,61 @@ impl DefId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ownership {
+    /// Sole owner; responsible for drop at scope exit.
     Owned,
+    /// T1 shared borrow — raw pointer alias, no refcount, no drop.
     Borrowed,
+    /// T1 exclusive mutable borrow — raw mut pointer, no refcount, no drop.
     BorrowMut,
+    /// T2 single-threaded shared refcount.
     Rc,
+    /// T2 single-threaded mutable refcount cell (`Rc<Cell<T>>`-equivalent).
+    /// Currently lowered as Rc; cell semantics enforced by the typer.
+    RcMut,
+    /// T3 cross-thread atomic shared refcount.
+    Arc,
+    /// T3 cross-thread atomic refcount + mutex (`Arc<Mutex<T>>`-equivalent).
+    ArcMut,
+    /// Weak reference — may dangle; must be upgraded before use.
     Weak,
+    /// Raw user-managed pointer.
     Raw,
 }
 
 impl Default for Ownership {
     fn default() -> Self {
         Ownership::Owned
+    }
+}
+
+impl Ownership {
+    /// True if this ownership variant means the binding is an *alias* of
+    /// storage owned elsewhere — i.e. drop glue must NOT release the
+    /// underlying memory at scope exit. Covers T1 borrows only; Rc/Arc/Weak
+    /// own their own refcount slot and have their own drop semantics.
+    pub fn is_borrow(self) -> bool {
+        matches!(self, Ownership::Borrowed | Ownership::BorrowMut)
+    }
+
+    /// True for any refcounted variant (Rc, RcMut, Arc, ArcMut, Weak).
+    pub fn is_refcounted(self) -> bool {
+        matches!(
+            self,
+            Ownership::Rc | Ownership::RcMut | Ownership::Arc | Ownership::ArcMut | Ownership::Weak
+        )
+    }
+
+    /// True for the cross-thread (T3) variants.
+    pub fn is_atomic(self) -> bool {
+        matches!(self, Ownership::Arc | Ownership::ArcMut)
+    }
+
+    /// True for the mutable-alias variants (T1 BorrowMut, T2 RcMut, T3 ArcMut).
+    pub fn is_mutable_alias(self) -> bool {
+        matches!(
+            self,
+            Ownership::BorrowMut | Ownership::RcMut | Ownership::ArcMut
+        )
     }
 }
 
@@ -34,6 +78,9 @@ impl std::fmt::Display for Ownership {
             Ownership::Borrowed => f.write_str("&"),
             Ownership::BorrowMut => f.write_str("&mut"),
             Ownership::Rc => f.write_str("rc"),
+            Ownership::RcMut => f.write_str("rc<mut>"),
+            Ownership::Arc => f.write_str("arc"),
+            Ownership::ArcMut => f.write_str("arc<mut>"),
             Ownership::Weak => f.write_str("weak"),
             Ownership::Raw => f.write_str("*raw"),
         }
@@ -96,6 +143,10 @@ pub struct Param {
     pub name: Symbol,
     pub ty: Type,
     pub ownership: Ownership,
+    /// User-written access modifier from the parameter type position.
+    /// `None` means default inference. Carried through to codegen so
+    /// callers can pick the right ABI (value vs pointer vs Arc bump).
+    pub access_mod: Option<crate::ast::AccessMod>,
     pub default: Option<Expr>,
     pub span: Span,
 }
@@ -115,6 +166,9 @@ pub struct Field {
     pub name: Symbol,
     pub ty: Type,
     pub default: Option<Expr>,
+    /// Access modifier written on the field declaration
+    /// (e.g. `f as ref Foo`, `bytes as mut Vec(u8)`).
+    pub access_mod: Option<crate::ast::AccessMod>,
     pub span: Span,
 }
 
@@ -299,6 +353,9 @@ pub struct Bind {
     pub ty: Type,
     pub ownership: Ownership,
     pub atomic: bool,
+    /// User-written access modifier (`copy`/`ref`/`mut`/`take`).
+    /// Drives ownership tier selection during escape analysis.
+    pub access_mod: Option<crate::ast::AccessMod>,
     pub span: Span,
 }
 
@@ -588,6 +645,8 @@ pub struct For {
     pub step: Option<Expr>,
     pub body: Block,
     pub label: Option<Symbol>,
+    /// Access modifier on the loop binder (`for ref/copy/mut/take x in xs`).
+    pub access_mod: Option<crate::ast::AccessMod>,
     pub span: Span,
 }
 

@@ -1,0 +1,25 @@
+# any/all expressed via a predicate scan.
+*any(xs as Vec of i64, p as (i64) returns bool) returns bool
+    i is 0
+    while i < xs.length
+        if p(xs.get(i))
+            return true
+        i is i + 1
+    false
+
+*all(xs as Vec of i64, p as (i64) returns bool) returns bool
+    i is 0
+    while i < xs.length
+        if not p(xs.get(i))
+            return false
+        i is i + 1
+    true
+
+*main
+    xs is vec()
+    xs.push(2)
+    xs.push(4)
+    xs.push(6)
+    xs.push(8)
+    log any(xs, |n as i64| n mod 5 equals 0)
+    log all(xs, |n as i64| n mod 2 equals 0)

@@ -1,0 +1,16 @@
+# Equality of two records (positional).
+*eq2(a as Vec of i64, b as Vec of i64) returns bool
+    a.get(0) equals b.get(0) and a.get(1) equals b.get(1)
+
+*main
+    a is vec()
+    a.push(3)
+    a.push(4)
+    b is vec()
+    b.push(3)
+    b.push(4)
+    c is vec()
+    c.push(3)
+    c.push(5)
+    log eq2(a, b)
+    log eq2(a, c)

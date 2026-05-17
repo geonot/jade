@@ -1,0 +1,24 @@
+# Selection sort, in-place style on a fresh vec.
+*main
+    a is vec()
+    a.push(5)
+    a.push(1)
+    a.push(4)
+    a.push(2)
+    a.push(8)
+    n is a.length
+    i is 0
+    while i < n - 1
+        mi is i
+        j is i + 1
+        while j < n
+            if a.get(j) < a.get(mi)
+                mi is j
+            j is j + 1
+        if mi neq i
+            tmp is a.get(i)
+            a.set(i, a.get(mi))
+            a.set(mi, tmp)
+        i is i + 1
+    log a.get(0)
+    log a.get(4)

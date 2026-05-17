@@ -29,7 +29,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         | InstKind::Alloc(v) => {
             sub!(v);
         }
-        InstKind::Drop(v, _) => {
+        InstKind::Drop(v, _) | InstKind::Clone(v, _) => {
             sub!(v);
         }
         InstKind::DropMany(items) => {

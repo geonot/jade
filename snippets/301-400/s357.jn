@@ -1,0 +1,15 @@
+# Integer log2 (floor).
+*ilog2(n as i64) returns i64
+    if n <= 0
+        return -1
+    r is 0
+    while n > 1
+        n is n / 2
+        r is r + 1
+    r
+
+*main
+    log ilog2(1)
+    log ilog2(8)
+    log ilog2(1023)
+    log ilog2(1024)

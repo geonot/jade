@@ -1,0 +1,10 @@
+# Pre-grow Vec via a single push loop (warms allocator).
+*main
+    xs is vec()
+    i is 0
+    while i < 1000
+        xs.push(i)
+        i is i + 1
+    log xs.length
+    log xs.get(0)
+    log xs.get(999)

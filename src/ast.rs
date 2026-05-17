@@ -375,20 +375,61 @@ pub struct FnAttrs {
     pub hot: bool,
 }
 
+/// User-written access-mode modifier on a binding, parameter, field, or
+/// for-loop binder. See `docs/access-semantics.md` for the full model.
+///
+/// - `Copy` — deep clone at the boundary; consumer owns an independent value.
+/// - `Ref`  — shared read-only alias; compiler picks T1 borrow / T2 Rc / T3 Arc.
+/// - `Mut`  — exclusive mutable alias; compiler picks T1 &mut / T2 Rc<Cell> / T3 Arc<Mutex>.
+/// - `Take` — move out (or remove from container slot).
+///
+/// `Ref` and `Mut` are mutually exclusive; `Copy`/`Take` are exclusive with both.
+/// When `None`, default-inference from §4.3 of the design doc applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessMod {
+    Copy,
+    Ref,
+    Mut,
+    Take,
+}
+
+impl std::fmt::Display for AccessMod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AccessMod::Copy => f.write_str("copy"),
+            AccessMod::Ref => f.write_str("ref"),
+            AccessMod::Mut => f.write_str("mut"),
+            AccessMod::Take => f.write_str("take"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Param {
     pub name: Symbol,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
     pub literal: Option<Expr>,
+    pub access_mod: Option<AccessMod>,
     pub span: Span,
 }
 
+/// Type-decl attributes parsed from `@`-prefixed annotations:
+/// `@packed`, `@strict`, `@align(N)` (layout), plus the access-semantics
+/// annotations `@resource`, `@atomic`, `@weakable`. Lives on `TypeDef`,
+/// `StoreDef`, `ActorDef`, etc. as a single bundle so each call site
+/// can ask the same struct for any annotation.
 #[derive(Debug, Clone, Default)]
 pub struct LayoutAttrs {
     pub packed: bool,
     pub strict: bool,
     pub align: Option<u32>,
+    /// `@resource` — linear type: never copies, auto-`*drop` at scope end.
+    pub resource: bool,
+    /// `@atomic` — sharing always uses Arc; mutations use Arc<Mutex>.
+    pub atomic: bool,
+    /// `@weakable` — may be referenced via `weak ref`. Requires `@atomic`.
+    pub weakable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -406,6 +447,7 @@ pub struct Field {
     pub name: Symbol,
     pub ty: Option<Type>,
     pub default: Option<Expr>,
+    pub access_mod: Option<AccessMod>,
     pub span: Span,
 }
 
@@ -437,6 +479,9 @@ pub struct Bind {
     pub value: Expr,
     pub ty: Option<Type>,
     pub atomic: bool,
+    /// User-written access modifier: `x is copy/ref/mut/take RHS`.
+    /// `None` means "use default inference from §4.3".
+    pub access_mod: Option<AccessMod>,
     pub span: Span,
 }
 
@@ -465,6 +510,9 @@ pub struct For {
     pub end: Option<Expr>,
     pub step: Option<Expr>,
     pub body: Block,
+    /// `for copy/ref/mut/take x in xs` — access modifier on the binder.
+    /// `None` means "use default inference".
+    pub access_mod: Option<AccessMod>,
     pub span: Span,
 }
 

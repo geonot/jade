@@ -1,0 +1,20 @@
+# Insertion sort: classic O(n^2), good for small n.
+*main
+    a is vec()
+    a.push(4)
+    a.push(2)
+    a.push(7)
+    a.push(1)
+    a.push(5)
+    n is a.length
+    i is 1
+    while i < n
+        key is a.get(i)
+        j is i - 1
+        while j >= 0 and a.get(j) > key
+            a.set(j + 1, a.get(j))
+            j is j - 1
+        a.set(j + 1, key)
+        i is i + 1
+    log a.get(0)
+    log a.get(4)

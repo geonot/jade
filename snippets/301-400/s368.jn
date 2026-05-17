@@ -1,0 +1,16 @@
+# contains: true/false membership.
+*contains(xs as Vec of i64, t as i64) returns bool
+    i is 0
+    while i < xs.length
+        if xs.get(i) equals t
+            return true
+        i is i + 1
+    false
+
+*main
+    xs is vec()
+    xs.push(11)
+    xs.push(13)
+    xs.push(17)
+    log contains(xs, 13)
+    log contains(xs, 14)

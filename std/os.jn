@@ -108,7 +108,7 @@ MS_ASYNC is 1
 O_RDONLY is 0
 O_RDWR   is 2
 
-type MmapRegion
+type MmapRegion @resource
     addr as %i8
     length as i64
     fd as i32

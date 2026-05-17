@@ -1,0 +1,20 @@
+# Max - Min in one pass.
+*main
+    a is vec()
+    a.push(7)
+    a.push(2)
+    a.push(15)
+    a.push(9)
+    a.push(-1)
+    a.push(11)
+    mn is a.get(0)
+    mx is mn
+    i is 1
+    while i < a.length
+        v is a.get(i)
+        if v < mn
+            mn is v
+        if v > mx
+            mx is v
+        i is i + 1
+    log mx - mn

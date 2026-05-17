@@ -7537,3 +7537,168 @@ fn b_decimal_round_truncate() {
         "3.0000",
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// Access semantics (P1–P3): copy / ref / mut / take + @resource / @atomic
+// See docs/access-semantics.md.
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn access_mod_copy_on_bind_runs() {
+    expect(
+        "*main()\n    x is 5\n    y is copy x\n    log(y)\n",
+        "5",
+    );
+}
+
+#[test]
+fn access_mod_ref_on_bind_runs() {
+    expect(
+        "*main()\n    v is [10, 20, 30]\n    a is ref v\n    log(a.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn access_mod_mut_on_bind_runs() {
+    expect(
+        "*main()\n    v is [10, 20, 30]\n    a is mut v\n    log(a.len())\n",
+        "3",
+    );
+}
+
+#[test]
+fn access_mod_take_on_bind_runs() {
+    expect(
+        "*main()\n    s is \"hi\"\n    t is take s\n    log(t)\n",
+        "hi",
+    );
+}
+
+#[test]
+fn access_mod_ref_in_for_loop_parses() {
+    // The `ref` modifier in a for-binder marks the iteration variable as
+    // a borrow; codegen should not double-free elements of the vec.
+    expect(
+        "*main()\n    v is [1, 2, 3]\n    sum is 0\n    for ref x in v\n        sum is sum + x\n    log(sum)\n",
+        "6",
+    );
+}
+
+#[test]
+fn access_mod_ref_on_field_parses() {
+    // A field declared `as ref T` should parse cleanly. Behavior of the
+    // borrow is exercised separately; here we just want surface acceptance.
+    expect(
+        "type Holder\n    items as ref Vec of i64\n\n*main()\n    log(1)\n",
+        "1",
+    );
+}
+
+#[test]
+fn resource_annotation_rejects_copy() {
+    // `copy` on a @resource type is a hard error (P3 enforcement).
+    let err = expect_compile_fail(
+        "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 42)\n    h2 is copy h\n    log(h2.fd)\n",
+    );
+    assert!(
+        err.contains("@resource") || err.contains("resource"),
+        "expected @resource diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn resource_annotation_allows_take() {
+    // `take` on a @resource is fine (it's a move, not a copy).
+    expect(
+        "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 7)\n    h2 is take h\n    log(h2.fd)\n",
+        "7",
+    );
+}
+
+#[test]
+fn resource_annotation_allows_ref() {
+    // `ref` aliasing is also fine; resource semantics only forbid copy.
+    expect(
+        "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 9)\n    r is ref h\n    log(r.fd)\n",
+        "9",
+    );
+}
+
+#[test]
+fn atomic_annotation_parses() {
+    // @atomic struct just needs to type-check; semantic Arc promotion is
+    // an internal ownership-tier choice and not directly observable here.
+    expect(
+        "type Counter @atomic\n    n as i64\n\n*main()\n    c is Counter(n is 41)\n    log(c.n + 1)\n",
+        "42",
+    );
+}
+
+#[test]
+fn atomic_and_resource_mutually_exclusive() {
+    let err = expect_compile_fail(
+        "type Bad @atomic @resource\n    x as i64\n\n*main()\n    log(1)\n",
+    );
+    assert!(
+        err.contains("mutually exclusive") || err.contains("@resource") || err.contains("@atomic"),
+        "expected mutual-exclusion diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn weakable_requires_atomic() {
+    let err = expect_compile_fail(
+        "type Bad @weakable\n    x as i64\n\n*main()\n    log(1)\n",
+    );
+    assert!(
+        err.contains("@weakable") || err.contains("@atomic") || err.contains("weak"),
+        "expected weakable-requires-atomic diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn resource_drop_runs_at_scope_exit() {
+    // A `*drop` method defined on a `@resource` type must be auto-invoked
+    // when the owning binding's scope ends. The "dropped" log proves the
+    // codegen path in drop_struct_fields fires the user-supplied cleanup.
+    expect(
+        "type Logger @resource\n    n as i64\n\n    *drop\n        log(\"dropped\")\n\n*main()\n    l is Logger(n is 1)\n    log(\"before\")\n",
+        "before\ndropped",
+    );
+}
+
+#[test]
+fn non_resource_drop_method_not_auto_called() {
+    // Negative control: the *exact* same type without `@resource` must NOT
+    // have its `*drop` auto-invoked. Only `before` should appear.
+    expect(
+        "type Logger\n    n as i64\n\n    *drop\n        log(\"dropped\")\n\n*main()\n    l is Logger(n is 1)\n    log(\"before\")\n",
+        "before",
+    );
+}
+
+#[test]
+fn resource_cross_thread_channel_rejected() {
+    // Sending a @resource value (that is NOT @atomic) on a channel must be
+    // a compile error per access-semantics.md §4.1.
+    let err = expect_compile_fail(
+        "type Handle @resource\n    fd as i64\n\n*main()\n    ch is channel(1)\n    h is Handle(fd is 3)\n    send ch, h\n",
+    );
+    assert!(
+        err.contains("resource") && err.contains("@atomic"),
+        "expected resource cross-thread diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn resource_cross_thread_actor_rejected() {
+    // Sending a @resource value to an actor handler must error too.
+    let err = expect_compile_fail(
+        "type Handle @resource\n    fd as i64\n\nactor Sink\n    n as i64\n    @take h as Handle\n        n is h.fd\n\n*main()\n    s is spawn Sink\n    h is Handle(fd is 7)\n    s.take(h)\n",
+    );
+    assert!(
+        err.contains("resource") && err.contains("@atomic"),
+        "expected resource actor-send diagnostic, got: {err}"
+    );
+}

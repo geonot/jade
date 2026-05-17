@@ -1,0 +1,9 @@
+# Numeric formatter: pad with leading zeros via branches.
+*pad2(n as i64) returns String
+    if n < 10
+        return '0{n}'
+    '{n}'
+
+*main
+    log pad2(3)
+    log pad2(42)

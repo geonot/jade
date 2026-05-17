@@ -1,0 +1,16 @@
+# Point as a 2-element Vec; distance squared.
+*dist2(a as Vec of i64, b as Vec of i64) returns i64
+    dx is a.get(0) - b.get(0)
+    dy is a.get(1) - b.get(1)
+    dx * dx + dy * dy
+
+*mkpt(x as i64, y as i64) returns Vec of i64
+    p is vec()
+    p.push(x)
+    p.push(y)
+    p
+
+*main
+    a is mkpt(0, 0)
+    b is mkpt(3, 4)
+    log dist2(a, b)

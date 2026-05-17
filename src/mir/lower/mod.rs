@@ -275,6 +275,39 @@ impl Lowerer {
         }
     }
 
+    /// Lower an expression at a *consuming* / escape boundary. When the
+    /// expression is a heap-typed field or index read — i.e. the codegen
+    /// would otherwise hand us a pointer-share into a parent's storage —
+    /// emit an implicit deep `Clone` so the consumer gets an independent
+    /// owned value. This is the P4 auto-copy at all binding /
+    /// struct-init / call-arg / return / send / spawn-init sites.
+    ///
+    /// For everything else (function calls that already produce a fresh
+    /// owned value, struct literals, primitive ops, etc.) this falls
+    /// through to plain `lower_expr`.
+    pub(super) fn lower_expr_owned(&mut self, expr: &hir::Expr) -> ValueId {
+        let v = self.lower_expr(expr);
+        if Self::needs_auto_clone(expr) {
+            self.emit(
+                InstKind::Clone(v, expr.ty.clone()),
+                expr.ty.clone(),
+                expr.span,
+            )
+        } else {
+            v
+        }
+    }
+
+    /// True iff the expression is a field- or index-read whose result is
+    /// a heap-owning value that would otherwise alias the parent's
+    /// storage. Callers use this from consuming positions.
+    fn needs_auto_clone(expr: &hir::Expr) -> bool {
+        if expr.ty.is_trivially_droppable() || !expr.ty.is_value_clonable() {
+            return false;
+        }
+        matches!(expr.kind, ExprKind::Field(..) | ExprKind::Index(..))
+    }
+
     pub(super) fn lower_stmt(&mut self, stmt: &hir::Stmt) -> ValueId {
         match stmt {
             hir::Stmt::Bind(..)

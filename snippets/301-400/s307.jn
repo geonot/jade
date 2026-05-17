@@ -1,0 +1,9 @@
+# Curried-style: function returning a lambda.
+*adder(k as i64) returns (i64) returns i64
+    |x as i64| x + k
+
+*main
+    add3 is adder(3)
+    add9 is adder(9)
+    log add3(10)
+    log add9(10)

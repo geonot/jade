@@ -37,7 +37,7 @@ SEEK_END is 2
 
 # ── File handle ──────────────────────────────────────────────
 
-type File
+type File @resource
     handle as %i8
     path as String
     mode as String

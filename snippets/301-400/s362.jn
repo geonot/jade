@@ -1,0 +1,17 @@
+# Newton's method for integer square root.
+*isqrt(n as i64) returns i64
+    if n < 2
+        return n
+    x is n
+    y is (x + 1) / 2
+    while y < x
+        x is y
+        y is (x + n / x) / 2
+    x
+
+*main
+    log isqrt(0)
+    log isqrt(1)
+    log isqrt(16)
+    log isqrt(100)
+    log isqrt(10000)

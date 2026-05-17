@@ -1,0 +1,21 @@
+# First odd in vec, else -1.
+*first_odd(xs as Vec of i64) returns i64
+    i is 0
+    while i < xs.length
+        v is xs.get(i)
+        if v mod 2 equals 1
+            return v
+        i is i + 1
+    -1
+
+*main
+    a is vec()
+    a.push(2)
+    a.push(4)
+    a.push(7)
+    a.push(8)
+    log first_odd(a)
+    b is vec()
+    b.push(2)
+    b.push(4)
+    log first_odd(b)

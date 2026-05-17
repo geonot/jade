@@ -1,0 +1,13 @@
+# Ackermann (small inputs only).
+*ack(m as i64, n as i64) returns i64
+    if m equals 0
+        return n + 1
+    if n equals 0
+        return ack(m - 1, 1)
+    ack(m - 1, ack(m, n - 1))
+
+*main
+    log ack(0, 0)
+    log ack(1, 1)
+    log ack(2, 3)
+    log ack(3, 3)

@@ -1,0 +1,18 @@
+# map: square every element via a re-usable helper.
+*map_i64(xs as Vec of i64, f as (i64) returns i64) returns Vec of i64
+    out is vec()
+    i is 0
+    while i < xs.length
+        out.push(f(xs.get(i)))
+        i is i + 1
+    out
+
+*main
+    xs is vec()
+    xs.push(1)
+    xs.push(2)
+    xs.push(3)
+    ys is map_i64(xs, |n as i64| n * n)
+    log ys.get(0)
+    log ys.get(1)
+    log ys.get(2)

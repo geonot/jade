@@ -1,0 +1,23 @@
+# Matrix scalar-add and total sum.
+*main
+    m is vec()
+    r is 0
+    while r < 2
+        row is vec()
+        c is 0
+        while c < 3
+            row.push(r + c)
+            c is c + 1
+        m.push(row)
+        r is r + 1
+    k is 5
+    total is 0
+    i is 0
+    while i < m.length
+        row is m.get(i)
+        j is 0
+        while j < row.length
+            total is total + row.get(j) + k
+            j is j + 1
+        i is i + 1
+    log total

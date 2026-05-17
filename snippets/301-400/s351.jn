@@ -1,0 +1,12 @@
+# gcd via Euclid (iterative).
+*gcd(a as i64, b as i64) returns i64
+    while b neq 0
+        t is b
+        b is a mod b
+        a is t
+    a
+
+*main
+    log gcd(48, 18)
+    log gcd(100, 75)
+    log gcd(17, 13)

@@ -1,0 +1,15 @@
+# Dot product over two equal-length Vecs.
+*main
+    a is vec()
+    b is vec()
+    i is 1
+    while i <= 5
+        a.push(i)
+        b.push(2 * i)
+        i is i + 1
+    s is 0
+    j is 0
+    while j < a.length
+        s is s + a.get(j) * b.get(j)
+        j is j + 1
+    log s

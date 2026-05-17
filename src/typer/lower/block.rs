@@ -59,20 +59,20 @@ impl Typer {
             Self::collect_hir_var_ids_stmt(&jump, &mut jump_refs);
             self.emit_scope_drops_excluding(&mut stmts, &jump_refs);
             stmts.push(jump);
-        } else if let Some(hir::Stmt::Expr(tail_expr)) = stmts.last() {
-            // Implicit return: exclude variables that are *moved* into the
-            // tail expression (struct constructors, tuple literals, bare vars).
-            // Method calls, field accesses, etc. borrow — not move — so don't
-            // exclude their operands.
-            let mut tail_refs = std::collections::HashSet::new();
-            Self::collect_moved_var_ids(tail_expr, &mut tail_refs);
-            if tail_refs.is_empty() {
-                self.emit_scope_drops(&mut stmts);
-            } else {
-                let tail = stmts.pop().unwrap();
-                self.emit_scope_drops_excluding(&mut stmts, &tail_refs);
-                stmts.push(tail);
+        } else if let Some(hir::Stmt::Expr(_)) = stmts.last() {
+            // Implicit return: emit drops AFTER the tail evaluates, excluding
+            // any var that was *moved* into the tail (struct ctor / tuple /
+            // bare var). Vars merely referenced (via field access, method
+            // call, etc.) still need to be dropped, but the drop must happen
+            // AFTER the tail has read them. Emitting before-tail would free
+            // storage the tail still needs.
+            let tail = stmts.pop().unwrap();
+            let mut tail_moves = std::collections::HashSet::new();
+            if let hir::Stmt::Expr(te) = &tail {
+                Self::collect_moved_var_ids(te, &mut tail_moves);
             }
+            stmts.push(tail);
+            self.emit_scope_drops_excluding(&mut stmts, &tail_moves);
         } else {
             self.emit_scope_drops(&mut stmts);
         }
@@ -80,7 +80,7 @@ impl Typer {
         Ok(stmts)
     }
 
-    pub(in crate::typer) fn emit_scope_drops(&self, stmts: &mut Vec<hir::Stmt>) {
+    pub(in crate::typer) fn emit_scope_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
 
@@ -91,27 +91,32 @@ impl Typer {
     /// so it must not be dropped at scope exit (the container owns the
     /// underlying storage now).
     fn collect_block_consumed_ids(
+        &mut self,
         stmts: &[hir::Stmt],
         out: &mut std::collections::HashSet<crate::hir::DefId>,
     ) {
         for s in stmts {
             match s {
-                hir::Stmt::Expr(e) => Self::collect_consumed_in_expr(e, out),
+                hir::Stmt::Expr(e) => self.collect_consumed_in_expr(e, out),
                 // `x is y` (Assign) and `let x = y` (Bind) where `y` is a
                 // bare variable of heap-managed type *moves* y into x. The
                 // sole owner becomes x; y must not be dropped at scope exit.
                 // Without this, both x and y get dropped and the underlying
                 // buffer is freed twice (or x is left dangling if y's drop
-                // runs first inside a loop body).
+                // runs first inside a loop body). Resolve any inference
+                // variables before checking — the RHS type at this point may
+                // still be a TypeVar that resolves to a heap type.
                 hir::Stmt::Assign(_target, value, _) => {
-                    if Self::expr_type_needs_drop(&value.ty) {
+                    let resolved = self.infer_ctx.resolve(&value.ty);
+                    if Self::expr_type_needs_drop(&resolved) {
                         if let hir::ExprKind::Var(id, _) = &value.kind {
                             out.insert(*id);
                         }
                     }
                 }
                 hir::Stmt::Bind(b) => {
-                    if Self::expr_type_needs_drop(&b.value.ty) {
+                    let resolved = self.infer_ctx.resolve(&b.value.ty);
+                    if Self::expr_type_needs_drop(&resolved) {
                         if let hir::ExprKind::Var(id, _) = &b.value.kind {
                             out.insert(*id);
                         }
@@ -123,6 +128,7 @@ impl Typer {
     }
 
     fn collect_consumed_in_expr(
+        &mut self,
         expr: &hir::Expr,
         out: &mut std::collections::HashSet<crate::hir::DefId>,
     ) {
@@ -147,7 +153,8 @@ impl Typer {
                         | "send"
                 ) {
                     for a in args {
-                        if Self::expr_type_needs_drop(&a.ty)
+                        let resolved = self.infer_ctx.resolve(&a.ty);
+                        if Self::expr_type_needs_drop(&resolved)
                             && matches!(a.kind, hir::ExprKind::Var(_, _))
                         {
                             if let hir::ExprKind::Var(id, _) = &a.kind {
@@ -177,23 +184,36 @@ impl Typer {
     }
 
     pub(in crate::typer) fn emit_scope_drops_excluding(
-        &self,
+        &mut self,
         stmts: &mut Vec<hir::Stmt>,
         exclude: &std::collections::HashSet<crate::hir::DefId>,
     ) {
-        let scope = match self.scopes.last() {
-            Some(s) => s,
-            None => return,
-        };
+        // Snapshot scope entries up-front so we can take &mut self for resolve.
+        let scope_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo)> =
+            match self.scopes.last() {
+                Some(s) => s.iter().map(|(n, v)| (n.clone(), v.clone())).collect(),
+                None => return,
+            };
         // In addition to the caller-supplied exclusion set (e.g. tail-expr
         // moves), also exclude any scope variable that was already moved into
         // a container by a prior stmt-level call (e.g. `g.push(row)`).
         let mut consumed: std::collections::HashSet<crate::hir::DefId> = exclude.clone();
-        Self::collect_block_consumed_ids(stmts, &mut consumed);
-        let mut drops: Vec<_> = scope
-            .iter()
-            .filter(|(_, info)| {
-                Self::needs_drop(&info.ty)
+        self.collect_block_consumed_ids(stmts, &mut consumed);
+        // Resolve any inference variables so that needs_drop sees the concrete
+        // type (e.g. Vec(_) rather than TypeVar). Without this, owned heap
+        // locals whose Bind site introduced a fresh TyVar would be skipped by
+        // needs_drop and silently leak. Pre-resolve all entries up-front to
+        // satisfy the borrow checker (resolve needs &mut self.infer_ctx).
+        let mut resolved_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo, Type)> =
+            Vec::with_capacity(scope_entries.len());
+        for (name, info) in scope_entries {
+            let resolved = self.infer_ctx.resolve(&info.ty);
+            resolved_entries.push((name, info, resolved));
+        }
+        let mut drops: Vec<_> = resolved_entries
+            .into_iter()
+            .filter(|(_, info, resolved)| {
+                self.needs_drop(resolved)
                     && !matches!(
                         info.ownership,
                         crate::hir::Ownership::Borrowed | crate::hir::Ownership::BorrowMut
@@ -201,12 +221,12 @@ impl Typer {
                     && !consumed.contains(&info.def_id)
             })
             .collect();
-        drops.sort_by_key(|(_, info)| std::cmp::Reverse(info.def_id.0));
-        for (name, info) in drops {
+        drops.sort_by_key(|(_, info, _)| std::cmp::Reverse(info.def_id.0));
+        for (name, info, resolved) in drops {
             stmts.push(hir::Stmt::Drop(
                 info.def_id,
                 name.clone(),
-                info.ty.clone(),
+                resolved,
                 crate::ast::Span::dummy(),
             ));
         }
@@ -362,15 +382,70 @@ impl Typer {
         }
     }
 
-    pub(in crate::typer) fn needs_drop(ty: &Type) -> bool {
-        matches!(
+    pub(in crate::typer) fn needs_drop(&self, ty: &Type) -> bool {
+        let mut visiting: std::collections::HashSet<crate::intern::Symbol> =
+            std::collections::HashSet::new();
+        self.needs_drop_inner(ty, &mut visiting)
+    }
+
+    /// Recursive implementation of `needs_drop` with cycle protection.
+    /// A `visiting` set carries the names of struct/enum types currently on
+    /// the inspection stack — a self- or mutually-referential type is treated
+    /// as not needing a drop *at the cycle point* (the heap edge is usually
+    /// an `Rc`/`Weak`/box which is itself in the base-case heap-owning set).
+    fn needs_drop_inner(
+        &self,
+        ty: &Type,
+        visiting: &mut std::collections::HashSet<crate::intern::Symbol>,
+    ) -> bool {
+        // Base-case heap-owning types: their owned bindings always require
+        // scope-exit drop.
+        if matches!(
             ty,
             Type::String
                 | Type::Vec(_)
                 | Type::Map(_, _)
+                | Type::Set(_)
+                | Type::PriorityQueue(_)
+                | Type::Deque(_)
                 | Type::Rc(_)
                 | Type::Weak(_)
                 | Type::Coroutine(_)
-        )
+                | Type::Generator(_)
+                | Type::NDArray(_, _)
+                | Type::Channel(_)
+                | Type::Cow(_)
+        ) {
+            return true;
+        }
+        match ty {
+            // A user-defined struct needs drop only when annotated
+            // `@resource` (so the auto `*drop` fires at scope exit).
+            //
+            // NOTE: we deliberately do NOT recurse into struct fields here.
+            // Doing so would correctly model "this aggregate owns heap
+            // storage", but the matching move-tracking infrastructure is
+            // not yet in place: plain function calls (`r is modulo(x, y)`)
+            // do not mark bare-Var args as consumed, and function-parameter
+            // ownership for compound heap types is not modelled as a borrow
+            // either. Until that work lands, recursive needs_drop on
+            // aggregates causes double-frees (caller's slot AND callee's
+            // parameter both drop the same shared backing buffer).
+            // Compound structs may therefore leak their heap fields at
+            // scope exit; this matches the pre-P4 behaviour and is a known
+            // gap to be closed by a dedicated call-arg / parameter
+            // ownership sprint. See `docs/access-semantics-sprint.md` §5.
+            Type::Struct(name, _) => self
+                .struct_attrs
+                .get(name)
+                .map(|attrs| attrs.resource)
+                .unwrap_or(false),
+            // Alias/Newtype are transparent wrappers — preserve the
+            // underlying type's drop classification.
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+                self.needs_drop_inner(inner, visiting)
+            }
+            _ => false,
+        }
     }
 }

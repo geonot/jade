@@ -1,0 +1,22 @@
+# Longest run of equal consecutive elements.
+*main
+    a is vec()
+    a.push(1)
+    a.push(1)
+    a.push(2)
+    a.push(2)
+    a.push(2)
+    a.push(3)
+    a.push(2)
+    best is 1
+    cur is 1
+    i is 1
+    while i < a.length
+        if a.get(i) equals a.get(i - 1)
+            cur is cur + 1
+        else
+            cur is 1
+        if cur > best
+            best is cur
+        i is i + 1
+    log best

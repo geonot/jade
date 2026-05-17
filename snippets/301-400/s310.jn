@@ -1,0 +1,15 @@
+# Build a tiny dispatcher of named ops via lambdas.
+*apply2(op as i64, a as i64, b as i64) returns i64
+    add is |x as i64, y as i64| x + y
+    sub is |x as i64, y as i64| x - y
+    mul is |x as i64, y as i64| x * y
+    if op equals 0
+        return add(a, b)
+    if op equals 1
+        return sub(a, b)
+    mul(a, b)
+
+*main
+    log apply2(0, 3, 4)
+    log apply2(1, 10, 6)
+    log apply2(2, 7, 8)

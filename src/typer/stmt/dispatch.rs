@@ -8,6 +8,40 @@ use crate::types::{Scheme, Type};
 use super::super::{Typer, VarInfo};
 
 impl Typer {
+    /// Returns true when `expr` reads a heap-managed element out of a container
+    /// without taking ownership (e.g. `vec.get(i)`, `map.get(k)`, `deque.get(i)`,
+    /// `pq.peek()`). In those cases the returned value aliases storage owned by
+    /// the container, so any local that binds it must NOT be dropped at scope
+    /// exit — doing so would double-free when the container itself is dropped.
+    pub(in crate::typer) fn is_aliased_read_of_heap(expr: &hir::Expr) -> bool {
+        let needs_drop = matches!(
+            expr.ty,
+            Type::Vec(_)
+                | Type::Map(_, _)
+                | Type::Set(_)
+                | Type::PriorityQueue(_)
+                | Type::Deque(_)
+                | Type::String
+                | Type::Rc(_)
+                | Type::NDArray(_, _)
+                | Type::Struct(_, _)
+                | Type::Enum(_)
+        );
+        if !needs_drop {
+            return false;
+        }
+        match &expr.kind {
+            hir::ExprKind::VecMethod(_, name, _)
+            | hir::ExprKind::MapMethod(_, name, _)
+            | hir::ExprKind::SetMethod(_, name, _)
+            | hir::ExprKind::DequeMethod(_, name, _)
+            | hir::ExprKind::PQMethod(_, name, _) => {
+                matches!(name.as_str().as_ref(), "get" | "peek" | "front" | "back" | "first" | "last")
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn lower_stmt(
         &mut self,
         stmt: &ast::Stmt,
@@ -65,7 +99,38 @@ impl Typer {
                 } else {
                     value.ty.clone()
                 };
-                let ownership = Self::ownership_for_type(&ty);
+                let mut ownership = Self::ownership_for_type(&ty);
+                // P3: a `@resource` binding may never be the result of an
+                // implicit clone. Bare bindings of resources from container
+                // reads (`x is vec.get(0)` for `Vec<@resource T>`) require
+                // an explicit access modifier (`ref`, `mut`, or `take`).
+                let is_resource = self.type_has_resource_annotation(&ty);
+                if is_resource
+                    && b.access_mod.is_none()
+                    && Self::is_aliased_read_of_heap(&value)
+                {
+                    return Err(format!(
+                        "{}: cannot bind `@resource` value `{}` from a container read without an access modifier; use `take`, `ref`, or `mut`",
+                        b.span.loc(),
+                        ty
+                    ));
+                }
+                // If the RHS is `container.get(idx)` (or analogous read) and
+                // the codegen does NOT yet deep-clone the returned value, the
+                // binding aliases storage owned by the container; it must NOT
+                // be dropped at scope exit or it will double-free. For types
+                // codegen knows how to clone (see Type::is_value_clonable),
+                // the .get() codegen returns a fresh owned copy, so we keep
+                // the default Owned ownership.
+                if Self::is_aliased_read_of_heap(&value) && !ty.is_value_clonable() {
+                    ownership = Ownership::Borrowed;
+                }
+                // P2: explicit access modifier overrides the default heuristic.
+                // P3: also handles `@atomic` (promotes to Arc) and rejects
+                //     `copy` on `@resource` types. See `docs/access-semantics.md`.
+                if b.access_mod.is_some() || self.type_has_atomic_annotation(&ty) {
+                    ownership = self.ownership_with_mod(&ty, b.access_mod)?;
+                }
                 let id = self.fresh_id();
                 if let Some(existing) = self.find_var(&b.name.as_str()) {
                     let id = existing.def_id;
@@ -87,6 +152,7 @@ impl Typer {
                         ty: existing_ty,
                         ownership,
                         atomic: b.atomic,
+                        access_mod: b.access_mod,
                         span: b.span,
                     }))
                 } else {
@@ -122,6 +188,7 @@ impl Typer {
                         ty,
                         ownership,
                         atomic: b.atomic,
+                        access_mod: b.access_mod,
                         span: b.span,
                     }))
                 }
@@ -393,6 +460,7 @@ impl Typer {
                     step,
                     body,
                     label: f.label.clone(),
+                    access_mod: f.access_mod,
                     span: f.span,
                 }))
             }
@@ -740,6 +808,7 @@ impl Typer {
                         step,
                         body,
                         label: f.label.clone(),
+                        access_mod: None,
                         span: f.span,
                     },
                     *span,

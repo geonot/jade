@@ -151,6 +151,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::RcInc(v) => format!("rc_inc {v}"),
         InstKind::RcDec(v) => format!("rc_dec {v}"),
         InstKind::Copy(v) => format!("copy {v}"),
+        InstKind::Clone(v, ty) => format!("clone {v} {ty:?}"),
         InstKind::Slice(a, s, e) => format!("slice {a}[{s}..{e}]"),
 
         // Collections

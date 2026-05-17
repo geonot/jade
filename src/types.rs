@@ -133,6 +133,25 @@ impl Type {
         }
     }
 
+    /// True iff codegen knows how to produce an independently-owned deep
+    /// copy of a value of this type at a `.get()` site. Mirrors
+    /// `Compiler::is_value_clonable`. Trivially-droppable types are clonable
+    /// trivially (the value is its own copy).
+    pub fn is_value_clonable(&self) -> bool {
+        if self.is_trivially_droppable() {
+            return true;
+        }
+        match self {
+            Self::String => true,
+            Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
+            Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
+            Self::Struct(_, _) => true,
+            Self::Rc(_) | Self::Cow(_) | Self::Weak(_) => true,
+            Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.is_value_clonable(),
+            _ => false,
+        }
+    }
+
     pub fn default_ownership(&self) -> crate::hir::Ownership {
         match self {
             Self::Rc(_) => crate::hir::Ownership::Rc,

@@ -1,0 +1,16 @@
+# Recursive power-of-two test.
+*is_pow2(n as i64) returns bool
+    if n <= 0
+        return false
+    if n equals 1
+        return true
+    if n mod 2 equals 1
+        return false
+    is_pow2(n / 2)
+
+*main
+    log is_pow2(1)
+    log is_pow2(2)
+    log is_pow2(3)
+    log is_pow2(64)
+    log is_pow2(96)

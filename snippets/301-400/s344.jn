@@ -1,0 +1,23 @@
+# Nested record: list of points represented as Vec-of-Vec.
+*mkpt(x as i64, y as i64) returns Vec of i64
+    p is vec()
+    p.push(x)
+    p.push(y)
+    p
+
+*centroid_x(pts as Vec of Vec of i64) returns i64
+    s is 0
+    i is 0
+    while i < pts.length
+        p is pts.get(i)
+        s is s + p.get(0)
+        i is i + 1
+    s / pts.length
+
+*main
+    pts is vec()
+    pts.push(mkpt(0, 0))
+    pts.push(mkpt(2, 0))
+    pts.push(mkpt(4, 0))
+    pts.push(mkpt(6, 0))
+    log centroid_x(pts)

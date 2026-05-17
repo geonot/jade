@@ -1,0 +1,17 @@
+# Clone a Vec by copying elements one-by-one.
+*clone_vec(xs as Vec of i64) returns Vec of i64
+    out is vec()
+    i is 0
+    while i < xs.length
+        out.push(xs.get(i))
+        i is i + 1
+    out
+
+*main
+    xs is vec()
+    xs.push(1)
+    xs.push(2)
+    xs.push(3)
+    ys is clone_vec(xs)
+    log ys.length
+    log ys.get(2)

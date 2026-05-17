@@ -1,0 +1,22 @@
+# 2D vec via Vec-of-Vec; row sums.
+*main
+    g is vec()
+    r is 0
+    while r < 3
+        row is vec()
+        c is 0
+        while c < 4
+            row.push(r * 10 + c)
+            c is c + 1
+        g.push(row)
+        r is r + 1
+    i is 0
+    while i < g.length
+        row is g.get(i)
+        s is 0
+        j is 0
+        while j < row.length
+            s is s + row.get(j)
+            j is j + 1
+        log s
+        i is i + 1

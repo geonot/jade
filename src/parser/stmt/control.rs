@@ -75,6 +75,8 @@ impl Parser {
     pub(in crate::parser) fn parse_for(&mut self) -> Result<Stmt, ParseError> {
         let sp = self.span();
         self.expect(Token::For)?;
+        // Optional access modifier on the loop binder: `for copy/ref/mut/take x in xs`.
+        let access_mod = self.try_parse_access_mod_at_binder_pos();
         let bind = self.ident()?;
         let bind2 = if self.check(Token::Comma) {
             self.advance();
@@ -112,6 +114,7 @@ impl Parser {
             end,
             step,
             body: self.parse_block()?,
+            access_mod,
             span: sp,
         }))
     }

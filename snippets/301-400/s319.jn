@@ -1,0 +1,13 @@
+# Enumerate via while: emit (index, value) products.
+*main
+    xs is vec()
+    xs.push(10)
+    xs.push(20)
+    xs.push(30)
+    xs.push(40)
+    total is 0
+    i is 0
+    while i < xs.length
+        total is total + i * xs.get(i)
+        i is i + 1
+    log total

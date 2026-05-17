@@ -96,7 +96,7 @@ type Row
 
 # ── Database handle ──────────────────────────────────────────
 
-type Db
+type Db @resource
     handle as %i8
 
     # Execute SQL with no result rows (DDL, INSERT, UPDATE, DELETE).

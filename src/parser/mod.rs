@@ -390,6 +390,110 @@ impl Parser {
             msg: msg.into(),
         }
     }
+
+    // ── Access-modifier parsing helpers ────────────────────────────────
+    //
+    // The four access modifiers (`copy`, `ref`, `mut`, `take`) are
+    // contextual keywords: the lexer emits them as plain `Ident` tokens
+    // and the parser disambiguates them by position. They appear in
+    // three grammatical slots:
+    //
+    //   1. After `is` in a bind:    `x is ref users.get(0)`
+    //   2. After `as` in a typed
+    //      parameter/field position: `f(items as ref Vec(Row))`
+    //   3. Immediately after `for`
+    //      before the binder:        `for ref user in users`
+    //
+    // To avoid breaking expressions whose head happens to be an
+    // identifier named `copy`/`ref`/`mut`/`take`, the lookahead requires
+    // the modifier to be followed by something that *cannot* be the
+    // start of a call/index/method chain on the modifier itself.
+    //
+    // See `docs/access-semantics.md` \u00a72 for the full rationale.
+
+    /// True if `name` is one of the four access-modifier keywords.
+    fn is_access_mod_keyword(name: &str) -> bool {
+        matches!(name, "copy" | "ref" | "mut" | "take")
+    }
+
+    fn ident_to_access_mod(name: &str) -> Option<crate::ast::AccessMod> {
+        match name {
+            "copy" => Some(crate::ast::AccessMod::Copy),
+            "ref" => Some(crate::ast::AccessMod::Ref),
+            "mut" => Some(crate::ast::AccessMod::Mut),
+            "take" => Some(crate::ast::AccessMod::Take),
+            _ => None,
+        }
+    }
+
+    /// Try to consume an access modifier appearing immediately after `is`
+    /// in a bind. The lookahead requires the next-next token to be a
+    /// plausible expression-start that does NOT chain off the modifier
+    /// itself (i.e. NOT `(`, `.`, `[`, etc.).
+    pub(in crate::parser) fn try_parse_access_mod_after_is(
+        &mut self,
+    ) -> Option<crate::ast::AccessMod> {
+        let name = match self.peek() {
+            Token::Ident(n) if Self::is_access_mod_keyword(&n.as_str()) => n.as_str().to_string(),
+            _ => return None,
+        };
+        // Disambiguate `x is copy(foo)` (call) from `x is copy foo` (modifier).
+        match self.peek_at(1) {
+            Token::LParen
+            | Token::Dot
+            | Token::LBracket
+            | Token::DotDotDot
+            | Token::Tilde
+            | Token::Newline
+            | Token::Eof => return None,
+            _ => {}
+        }
+        let am = Self::ident_to_access_mod(&name)?;
+        self.advance();
+        Some(am)
+    }
+
+    /// Try to consume an access modifier appearing at a type-annotation
+    /// position (after `as`, before a Type). Slightly different
+    /// disambiguation: a Type must follow, so `ref(...)` is NOT a Type
+    /// and we accept the modifier whenever the next-next token can start
+    /// a Type identifier or a builtin type keyword.
+    pub(in crate::parser) fn try_parse_access_mod_at_type_pos(
+        &mut self,
+    ) -> Option<crate::ast::AccessMod> {
+        let name = match self.peek() {
+            Token::Ident(n) if Self::is_access_mod_keyword(&n.as_str()) => n.as_str().to_string(),
+            _ => return None,
+        };
+        // Next must look like the start of a Type.
+        match self.peek_at(1) {
+            Token::Ident(_) => {}
+            // Builtin/keyword types that may follow.
+            _ => return None,
+        }
+        let am = Self::ident_to_access_mod(&name)?;
+        self.advance();
+        Some(am)
+    }
+
+    /// Try to consume an access modifier at the for-loop binder slot:
+    /// `for copy/ref/mut/take BINDER in EXPR`. The next-next token must
+    /// be the binder name (an Ident).
+    pub(in crate::parser) fn try_parse_access_mod_at_binder_pos(
+        &mut self,
+    ) -> Option<crate::ast::AccessMod> {
+        let name = match self.peek() {
+            Token::Ident(n) if Self::is_access_mod_keyword(&n.as_str()) => n.as_str().to_string(),
+            _ => return None,
+        };
+        match self.peek_at(1) {
+            Token::Ident(_) => {}
+            _ => return None,
+        }
+        let am = Self::ident_to_access_mod(&name)?;
+        self.advance();
+        Some(am)
+    }
 }
 
 fn desugar_multi_clause_fns(prog: &mut Program) {
@@ -487,6 +591,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
             ty,
             default: None,
             literal: None,
+            access_mod: None,
             span: sp,
         });
     }
@@ -529,6 +634,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
                     value: Expr::Ident(unified_params[pi].name.clone(), sp),
                     ty: None,
                     atomic: false,
+                    access_mod: None,
                     span: sp,
                 }));
             }

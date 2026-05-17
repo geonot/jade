@@ -1,0 +1,24 @@
+# Bubble sort with early exit via "swapped" flag.
+*main
+    a is vec()
+    a.push(9)
+    a.push(7)
+    a.push(5)
+    a.push(3)
+    a.push(1)
+    n is a.length
+    pass is 0
+    swapped is true
+    while swapped
+        swapped is false
+        i is 0
+        while i < n - 1 - pass
+            if a.get(i) > a.get(i + 1)
+                tmp is a.get(i)
+                a.set(i, a.get(i + 1))
+                a.set(i + 1, tmp)
+                swapped is true
+            i is i + 1
+        pass is pass + 1
+    log a.get(0)
+    log a.get(4)

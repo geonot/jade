@@ -1,0 +1,7 @@
+# Concatenate strings via interpolation.
+*main
+    a is 'foo'
+    b is 'bar'
+    c is '{a}{b}'
+    log c
+    log c.length

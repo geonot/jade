@@ -88,6 +88,7 @@ impl Typer {
                         ty: None,
                         default: None,
                         literal: None,
+                        access_mod: None,
                         span: *span,
                     };
                     let new_args: Vec<ast::Expr> = args

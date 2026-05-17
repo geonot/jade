@@ -1,0 +1,15 @@
+# Builder: configure via successive pushes.
+*config_default() returns Vec of i64
+    c is vec()
+    c.push(80)        # port
+    c.push(4)         # workers
+    c.push(0)         # tls (0/1)
+    c
+
+*main
+    c is config_default()
+    c.set(0, 8080)
+    c.set(2, 1)
+    log c.get(0)
+    log c.get(1)
+    log c.get(2)

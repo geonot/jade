@@ -1,0 +1,15 @@
+# Lambda mapped manually over a Vec.
+*main
+    xs is vec()
+    i is 1
+    while i <= 5
+        xs.push(i)
+        i is i + 1
+    cube is |n as i64| n * n * n
+    out is vec()
+    j is 0
+    while j < xs.length
+        out.push(cube(xs.get(j)))
+        j is j + 1
+    log out.get(0)
+    log out.get(4)

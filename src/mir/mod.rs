@@ -236,6 +236,14 @@ pub enum InstKind {
     /// Copy/move — eliminated by copy propagation.
     Copy(ValueId),
 
+    /// Deep clone of a heap-owned value. Inserted by the typer / MIR
+    /// lowering at field-access escape boundaries (auto-copy) and at
+    /// explicit `copy` modifier sites. Produces a fresh-owned value
+    /// of the given type; codegen lowers via `Compiler::clone_value`.
+    /// Unlike `Copy`, this is *not* an SSA-only renaming — it has
+    /// runtime effect (allocation, refcount bumps, deep traversal).
+    Clone(ValueId, Type),
+
     /// Reference to a named top-level function, used as a first-class value.
     FnRef(Symbol),
 

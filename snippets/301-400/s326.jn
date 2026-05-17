@@ -1,0 +1,20 @@
+# Dedupe a sorted Vec into a fresh one.
+*main
+    a is vec()
+    a.push(1)
+    a.push(1)
+    a.push(2)
+    a.push(3)
+    a.push(3)
+    a.push(3)
+    a.push(4)
+    out is vec()
+    i is 0
+    while i < a.length
+        v is a.get(i)
+        if out.length equals 0 or out.get(out.length - 1) neq v
+            out.push(v)
+        i is i + 1
+    log out.length
+    log out.get(0)
+    log out.get(3)

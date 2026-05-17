@@ -1,0 +1,13 @@
+# Iterative integer power (fast doubling).
+*ipow(a as i64, e as i64) returns i64
+    r is 1
+    while e > 0
+        if e mod 2 equals 1
+            r is r * a
+        a is a * a
+        e is e / 2
+    r
+
+*main
+    log ipow(2, 10)
+    log ipow(3, 7)

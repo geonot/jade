@@ -1,0 +1,25 @@
+# Tribonacci.
+*trib(n as i64) returns i64
+    if n equals 0
+        return 0
+    if n equals 1
+        return 0
+    if n equals 2
+        return 1
+    a is 0
+    b is 0
+    c is 1
+    i is 3
+    while i <= n
+        d is a + b + c
+        a is b
+        b is c
+        c is d
+        i is i + 1
+    c
+
+*main
+    log trib(0)
+    log trib(2)
+    log trib(10)
+    log trib(20)

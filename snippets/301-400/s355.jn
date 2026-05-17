@@ -1,0 +1,13 @@
+# Iterative factorial.
+*fact(n as i64) returns i64
+    r is 1
+    i is 2
+    while i <= n
+        r is r * i
+        i is i + 1
+    r
+
+*main
+    log fact(0)
+    log fact(5)
+    log fact(10)

@@ -423,7 +423,9 @@ int jinn_terminal_disable_raw(int fd);
 int jinn_terminal_size(int32_t *out_cols, int32_t *out_rows);
 /* runtime/vec.c */
 void *__jinn_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size);
+void *__jinn_vec_clone_pod(void *hdr, int64_t elem_size);
 jinn_sso_t __jinn_str_slice(jinn_sso_t str, int64_t start, int64_t end);
+void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src);
 void *__jinn_deque_new(void);
 void __jinn_deque_push_back(void *handle, int64_t val);
 void __jinn_deque_push_front(void *handle, int64_t val);

@@ -1,0 +1,7 @@
+# Higher-order function: pass a lambda as parameter.
+*twice(f as (i64) returns i64, x as i64) returns i64
+    f(f(x))
+
+*main
+    inc is |n as i64| n + 1
+    log twice(inc, 41)

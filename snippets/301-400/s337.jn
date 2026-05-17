@@ -1,0 +1,12 @@
+# Format a HH:MM:SS time string.
+*pad2(n as i64) returns String
+    if n < 10
+        return '0{n}'
+    '{n}'
+
+*fmt_time(h as i64, m as i64, s as i64) returns String
+    '{pad2(h)}:{pad2(m)}:{pad2(s)}'
+
+*main
+    log fmt_time(9, 5, 7)
+    log fmt_time(23, 59, 59)

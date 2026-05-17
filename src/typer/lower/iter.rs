@@ -79,6 +79,7 @@ impl Typer {
             ty: iter_expr.ty.clone(),
             ownership: Ownership::Owned,
             atomic: false,
+            access_mod: None,
             span,
         });
 
@@ -192,6 +193,7 @@ impl Typer {
             ty: map_ty.clone(),
             ownership: Ownership::Owned,
             atomic: false,
+            access_mod: None,
             span,
         });
 
@@ -228,6 +230,7 @@ impl Typer {
             ty: keys_ty.clone(),
             ownership: Ownership::Owned,
             atomic: false,
+            access_mod: None,
             span,
         });
 
@@ -280,6 +283,7 @@ impl Typer {
             ty: key_ty.clone(),
             ownership: Ownership::Owned,
             atomic: false,
+            access_mod: None,
             span,
         });
 
@@ -318,6 +322,7 @@ impl Typer {
             ty: val_ty,
             ownership: Ownership::Owned,
             atomic: false,
+            access_mod: None,
             span,
         });
 
@@ -358,6 +363,7 @@ impl Typer {
             step: None,
             body: for_body,
             label: None,
+            access_mod: None,
             span,
         });
 

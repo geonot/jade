@@ -1,0 +1,16 @@
+# Sum a field across a list of records (Vec of Vec).
+*main
+    rows is vec()
+    i is 1
+    while i <= 5
+        r is vec()
+        r.push(i)
+        r.push(i * i)
+        rows.push(r)
+        i is i + 1
+    s is 0
+    j is 0
+    while j < rows.length
+        s is s + rows.get(j).get(1)
+        j is j + 1
+    log s

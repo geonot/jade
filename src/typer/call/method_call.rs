@@ -67,6 +67,8 @@ impl Typer {
                     span,
                     "actor method argument",
                 );
+                // P3: cross-thread @resource safety check.
+                self.enforce_cross_thread_safe(&harg.ty, span, "actor handler argument")?;
                 hargs.push(harg);
             }
 

@@ -1,0 +1,11 @@
+# Pass-by behavior: function gets the same Vec; modifications are visible.
+*push_one(v as Vec of i64)
+    v.push(99)
+
+*main
+    v is vec()
+    v.push(1)
+    v.push(2)
+    push_one(v)
+    log v.length
+    log v.get(2)

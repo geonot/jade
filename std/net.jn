@@ -40,7 +40,7 @@ SHUT_RDWR is 2
 
 # ── TCP types ────────────────────────────────────────────────
 
-type TcpListener
+type TcpListener @resource
     fd as i32
     port as i64
 
@@ -53,7 +53,7 @@ type TcpListener
     *shut
         extern.jinn_close(self.fd)
 
-type TcpStream
+type TcpStream @resource
     fd as i32
 
     *read(max_bytes)
@@ -83,7 +83,7 @@ type TcpStream
 
 # ── UDP type ─────────────────────────────────────────────────
 
-type UdpSocket
+type UdpSocket @resource
     fd as i32
 
     *send_to(data as String, host as String, port as i64)

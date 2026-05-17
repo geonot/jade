@@ -1,0 +1,7 @@
+# Banner: header + body lines printed individually.
+*main
+    title is 'REPORT'
+    log '== {title} =='
+    log 'line 1'
+    log 'line 2'
+    log '=========='

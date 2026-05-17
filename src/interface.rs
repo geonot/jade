@@ -378,6 +378,7 @@ impl InterfaceFile {
                         name: Symbol::intern(&f.name),
                         ty: Some((&f.ty).into()),
                         default: None,
+                        access_mod: None,
                         span: dummy,
                     })
                     .collect(),
@@ -430,6 +431,7 @@ impl InterfaceFile {
                                 ty: Some((&p.ty).into()),
                                 default: None,
                                 literal: None,
+                                access_mod: None,
                                 span: dummy,
                             })
                             .collect(),

@@ -188,6 +188,7 @@ impl Parser {
                     ty: None,
                     default: None,
                     literal: Some(lit_expr),
+                    access_mod: None,
                     span: lit_sp,
                 })
             }
@@ -199,6 +200,7 @@ impl Parser {
                     ty: None,
                     default: None,
                     literal: Some(lit_expr),
+                    access_mod: None,
                     span: lit_sp,
                 })
             }
@@ -209,11 +211,12 @@ impl Parser {
     pub(in crate::parser) fn parse_param(&mut self, typed: bool) -> Result<Param, ParseError> {
         let sp = self.span();
         let name = self.ident()?;
-        let ty = if typed && self.check(Token::As) {
+        let (ty, access_mod) = if typed && self.check(Token::As) {
             self.advance();
-            Some(self.parse_type()?)
+            let am = self.try_parse_access_mod_at_type_pos();
+            (Some(self.parse_type()?), am)
         } else {
-            None
+            (None, None)
         };
         let default = if typed && self.check(Token::Is) {
             self.advance();
@@ -226,6 +229,7 @@ impl Parser {
             ty,
             default,
             literal: None,
+            access_mod,
             span: sp,
         })
     }
@@ -260,6 +264,7 @@ impl Parser {
                     ty,
                     default: None,
                     literal: None,
+                    access_mod: None,
                     span: sp,
                 })
             }

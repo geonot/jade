@@ -1,0 +1,19 @@
+# Deque via Vec; push_front via shift-right.
+*push_front(v as Vec of i64, x as i64)
+    n is v.length
+    v.push(0)
+    i is n
+    while i > 0
+        v.set(i, v.get(i - 1))
+        i is i - 1
+    v.set(0, x)
+
+*main
+    d is vec()
+    d.push(2)
+    d.push(3)
+    push_front(d, 1)
+    push_front(d, 0)
+    log d.length
+    log d.get(0)
+    log d.get(3)

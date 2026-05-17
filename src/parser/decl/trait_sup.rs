@@ -115,6 +115,7 @@ impl Parser {
                     ty: None,
                     default: None,
                     literal: None,
+                    access_mod: None,
                     span,
                 },
             );
