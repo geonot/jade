@@ -1,0 +1,27 @@
+# R1.3 placeholder for access-semantics §4.6 / §5.1.
+#
+# A field-access whose result escapes (here: bound to `s`, returned from
+# `get_name`, then `b.name` is read AGAIN by the caller) must NOT move
+# the field out of the parent struct. Today this works because every
+# value-binding copies (Jinn's pre-tier semantics). After R3.3 lands the
+# T1 raw-pointer borrow codegen, the typer/escape analysis must prove a
+# copy is required at this boundary (escape -> heap clone) and insert
+# the clone explicitly; an IR-inspection check can then be added here.
+#
+# Until R3.3 this test only validates BEHAVIOR (no double-free, both
+# reads succeed). The "no-op until R3.3" note in
+# docs/access-semantics-remediation.md R1.3 refers to the missing IR
+# check, not to the program itself.
+
+type Box
+    name as String
+    count as i64
+
+*get_name(b as Box)
+    s is b.name
+    s
+
+*main
+    b is Box(name is "alice", count is 1)
+    log get_name(b)
+    log b.name

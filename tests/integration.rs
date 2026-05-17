@@ -4607,3 +4607,27 @@ fn asm_block_nop_compiles_and_runs() {
     let out = compile_and_run_in_dir("*main\n    asm\n        nop\n    log(0)\n");
     assert_eq!(out.trim(), "0");
 }
+
+// ── Access-semantics R1.3 placeholders ──────────────────────────────────
+//
+// These verify BEHAVIOR (correct output, no double-free, no leak) for
+// field-access patterns covered by spec §4.6 and §5.1. They are
+// "placeholder" only in the sense that the IR-inspection check
+// (asserting "no clone in the hot path" for short-lived borrows, and
+// "exactly one clone" for escaping field reads) lands with R3.3 — at
+// which point these tests gain an llvm-ir grep assertion.
+
+#[test]
+fn access_field_auto_copy_escape() {
+    // §4.6 / §5.1: `s is b.name` followed by returning `s` and then
+    // re-reading `b.name` in the caller. Must NOT move the field out
+    // of `b` — both reads must succeed.
+    expect_file("tests/programs/field_auto_copy.jn", "alice\nalice");
+}
+
+#[test]
+fn access_field_short_lived_borrow() {
+    // §4.6 / §5.1: `b.field` read inside an `if` condition is a
+    // short-lived borrow; `b.field` must remain readable afterward.
+    expect_file("tests/programs/field_short_lived_borrow.jn", "zero\n0\nhi");
+}

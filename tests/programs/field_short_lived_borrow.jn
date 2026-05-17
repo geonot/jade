@@ -1,0 +1,22 @@
+# R1.3 placeholder for access-semantics §4.6 / §5.1.
+#
+# A field-access used in a short-lived position (here: read inside an
+# `if` condition, never stored or returned) must lower to a raw load —
+# NO clone, NO refcount bump on a heap field. Today the value-default
+# semantics still copy primitives, but for heap fields (str/Vec/...) a
+# future R3.3 escape-aware codegen must elide the clone entirely.
+#
+# Until R3.3 this test only validates BEHAVIOR (the conditional fires
+# and the field remains readable afterward). The IR-inspection check
+# that asserts "no clone in the hot path" comes with R3.3.
+
+type Box
+    name as String
+    count as i64
+
+*main
+    b is Box(name is "hi", count is 0)
+    if b.count equals 0
+        log "zero"
+    log b.count
+    log b.name

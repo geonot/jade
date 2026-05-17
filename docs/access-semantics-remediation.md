@@ -89,9 +89,18 @@ Baseline now: **919/919 bulk tests.**
 
 Baseline now: **920/920 bulk tests.**
 
-**R1.3 — P4 placeholder tests**
-- [ ] Add `field_auto_copy.jn` and `field_short_lived_borrow.jn` (currently
-      no-ops; will verify automatic borrow once R3.3 lands).
+**R1.3 — P4 placeholder tests** ✅
+- [x] Added `tests/programs/field_auto_copy.jn` (struct field whose value
+      escapes via function return; both reads succeed, no move) and
+      wired `access_field_auto_copy_escape` in `tests/integration.rs`.
+- [x] Added `tests/programs/field_short_lived_borrow.jn` (struct field
+      read inside an `if` condition; field remains readable after) and
+      wired `access_field_short_lived_borrow` in `tests/integration.rs`.
+- [ ] **Deferred (R3.3)** — IR-inspection assertions: "exactly one
+      clone" for the escape path, "zero clones / raw load" for the
+      short-lived path. Both tests currently pin behavior; the
+      optimization assertion lands with the T1 raw-pointer borrow
+      codegen.
 
 ### R2 — `@weakable` lowering (self-contained)
 
