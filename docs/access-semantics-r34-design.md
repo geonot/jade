@@ -120,33 +120,45 @@ Touch list (additive only — no behavior change yet):
 
 5. **Gate**: bulk 921/921 unchanged.
 
-### Commit R3.4.b — runtime layout & C helpers
+### Commit R3.4.b — runtime layout & atomic-RC codegen
 
-New runtime files:
+**Revised after R3.4.a audit**: existing `Rc<T>` is *fully inlined* by
+`src/codegen/rc.rs` (no `__jinn_rc_*` C functions). Mirror that
+strategy for the new variants — no new `.c` files needed.
 
-- `runtime/cell.c` — `__jinn_cell_alloc(size, align)`,
-  `__jinn_cell_load(ptr, dst_size)`, `__jinn_cell_store(ptr, src,
-  size)`. Layout: `{header; T payload;}` where the header is the
-  existing `RcHeader` (refcount + drop fn ptr).
-  *Single-threaded — no atomics needed; rely on Jinn's actor
-  isolation invariant.*
+- **`RcCell<T>` = layout-equivalent alias for `Rc<T>`.** Jinn's
+  `Rc<T>` already permits mutation through the payload pointer
+  (no Rust-style `&` aliasing rule), so the `Cell` wrapper is
+  *purely a typer-level marker* for the T2-mut promotion. Codegen
+  reuses `rc_layout_ty` / `rc_clone` / `rc_drop` verbatim. No new
+  LLVM emitters.
 
-- `runtime/atomic_rc.c` — `__jinn_arc_alloc(size, drop_fn)`,
-  `__jinn_arc_clone(ptr)`, `__jinn_arc_drop(ptr)`. Reuse the
-  atomic-RC paths already in `runtime/channel.c` / `runtime/actor.c`.
-  Factor out the common header. **Audit**: confirm those modules can
-  link against the new shared helpers without ABI break.
+- **`Arc<T>` — new `arc_layout_ty` + atomic ops in `rc.rs`.**
+  Same `{strong, weak, payload}` shape but `strong`/`weak` are
+  `_Atomic(i64)`. New helpers:
+  - `arc_layout_ty(inner)` — identical struct shape to
+    `rc_layout_ty`; the *operations* differ (atomic vs. plain).
+  - `arc_alloc(ty, init_strong=1)` — mirrors rc_alloc.
+  - `arc_clone(ptr)` — `atomicrmw add` on strong slot, monotonic
+    ordering (acquire-release on drop).
+  - `arc_drop(ptr)` — `atomicrmw sub` on strong slot, release
+    ordering; on zero, acquire-fence + free.
 
-- `runtime/sync.c` — `__jinn_mutex_init(ptr)`,
-  `__jinn_mutex_lock(ptr)`, `__jinn_mutex_unlock(ptr)`,
-  `__jinn_mutex_destroy(ptr)`. Wrap pthread mutex (already linked
-  by `runtime/pthread_glue.c`).
+- **`Mutex<T>` — new `arc_mutex_layout_ty(inner)`** for the
+  `Arc<Mutex<T>>` composite. Layout:
+  `{ _Atomic(i64) strong; _Atomic(i64) weak; pthread_mutex_t lock; T payload; }`.
+  New helpers:
+  - `arc_mutex_alloc(ty)` — `arc_alloc` + emit
+    `pthread_mutex_init(&lock, NULL)` call.
+  - `mutex_lock(arc_ptr)` / `mutex_unlock(arc_ptr)` — emit
+    `pthread_mutex_lock` / `pthread_mutex_unlock` calls. `pthread`
+    symbols already linked (see `runtime/pthread_glue.c` and the
+    existing scheduler mutex usage).
+  - `arc_mutex_drop(ptr)` — specialized arc_drop that calls
+    `pthread_mutex_destroy(&lock)` before freeing.
 
-- `build.rs`: add new `.c` files to the compile list. Confirm with
-  `cargo build --release` clean.
-
-- **Gate**: bulk 921/921 still 921/921 (these helpers aren't called
-  yet).
+- **Gate**: bulk 921/921 still 921/921 (these helpers aren't
+  invoked yet — no binding has Type::Arc/Mutex/RcCell until R3.4.d).
 
 ### Commit R3.4.c — codegen for new Type variants
 
