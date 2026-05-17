@@ -65,7 +65,21 @@ impl Lowerer {
                             .into_iter()
                             .next()
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
-                        self.emit(InstKind::RcNew(v, ty.clone()), ty, span)
+                        // `ty` is the wrapper (Rc<T> / RcCell<T> / Arc<T>);
+                        // RcNew's second field is the INNER payload type so
+                        // codegen can build the correct `{strong, weak, T}`
+                        // layout. Passing the wrapper here builds a layout
+                        // sized for `Rc<Wrapper>` (one-ptr payload) and then
+                        // stores a full T into it — heap corruption for any
+                        // T larger than a pointer (Rc<String>, Rc<Vec<_>>,
+                        // Rc<Struct>, ...).
+                        let inner = match &ty {
+                            Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
+                                (**inner).clone()
+                            }
+                            other => other.clone(),
+                        };
+                        self.emit(InstKind::RcNew(v, inner), ty, span)
                     }
                     BuiltinFn::RcRetain => {
                         let v = vals

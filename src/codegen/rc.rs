@@ -216,11 +216,27 @@ impl<'ctx> Compiler<'ctx> {
         let val_gep = b!(self
             .bld
             .build_struct_gep(layout, ptr.into_pointer_value(), 2, "rc.val"));
-        Ok(b!(self.bld.build_load(
+        let loaded = b!(self.bld.build_load(
             self.llvm_ty(inner),
             val_gep,
             "rc.load"
-        )))
+        ));
+        // If the inner type owns heap (String, Vec<T>, ...), a raw load is a
+        // bitwise alias of the Rc's interior: dropping both the caller's
+        // value and the Rc's deep-drop path would double-free. Hand the
+        // caller an independently-owned clone instead. POD inners
+        // (i64, ptrs, ...) take the identity fast path inside clone_value.
+        // Auto-deref (R3.4.d.1) will refine this to a true borrow.
+        if inner.is_trivially_droppable() {
+            Ok(loaded)
+        } else if Self::is_value_clonable(inner) {
+            self.clone_value(loaded, inner)
+        } else {
+            Err(format!(
+                "rc_deref: inner type {inner:?} is neither trivially droppable nor clonable; \
+                 `@` on Rc<{inner:?}> would alias and double-free"
+            ))
+        }
     }
 
     // weak_layout_ty defined above as alias of rc_layout_ty.

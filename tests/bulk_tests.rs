@@ -1355,6 +1355,17 @@ fn b_rc_retain_rel() {
 fn b_rc_deref_arith() {
     expect("*main()\n    x is rc(21)\n    log(@x * 2)\n", "42");
 }
+#[test]
+fn b_rc_string_drop() {
+    // Regression: `rc_release_deep` used struct index 1 (weak count) instead
+    // of index 2 (payload) when dropping the inner value. For `Rc<String>` or
+    // any `Rc<T>` with a non-trivial drop, this loaded the weak count as a
+    // garbage pointer and corrupted the heap on the final release.
+    expect(
+        "*main()\n    x is rc(\"hello world this is a long heap-allocated string\")\n    log(@x)\n",
+        "hello world this is a long heap-allocated string",
+    );
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH 26: Pointers

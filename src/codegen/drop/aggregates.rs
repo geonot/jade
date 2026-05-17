@@ -326,11 +326,16 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(is_zero, free_bb, cont_bb));
 
         self.bld.position_at_end(free_bb);
-        // Drop the inner value before freeing the Rc allocation
+        // Drop the inner value before freeing the Rc allocation. Payload is
+        // at struct index 2 in the {strong (0), weak (1), payload (2)}
+        // layout produced by rc_layout_ty (see src/codegen/rc.rs:12-26).
+        // Previously this used index 1, which loaded the weak count as
+        // garbage payload — corrupted free() for Rc<String> / Rc<Vec<_>>
+        // / Rc<Struct-with-drop>.
         if !inner.is_trivially_droppable() {
             let val_gep = b!(self
                 .bld
-                .build_struct_gep(layout, heap_ptr, 1, "rc.val.drop"));
+                .build_struct_gep(layout, heap_ptr, 2, "rc.val.drop"));
             let inner_val = b!(self
                 .bld
                 .build_load(self.llvm_ty(inner), val_gep, "rc.inner"));

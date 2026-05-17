@@ -134,11 +134,22 @@ void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src) {
     memcpy(&src_ptr, src->bytes, 8);
     memcpy(&len, src->bytes + 8, 8);
     memcpy(&cap, src->bytes + 16, 8);
-    memset(out, 0, 24);
-    if (cap <= 0 || src_ptr == NULL) {
+    if (cap <= 0) {
+        /* Unowned buffer (string literal pointing into rodata, or empty).
+         * The (ptr, len, cap=0) tuple is safe to share by value — nobody
+         * will ever free a cap=0 buffer (drop_string skips free when
+         * cap == 0). Memcpy preserves the alias without UB. Previously
+         * this collapsed to an empty inline string, which silently
+         * dropped the literal's contents on `clone_value`. */
+        memcpy(out, src, sizeof(*out));
+        return;
+    }
+    if (src_ptr == NULL) {
+        memset(out, 0, 24);
         out->bytes[23] = (char)0x80; /* inline, len=0 */
         return;
     }
+    memset(out, 0, 24);
     char *dst = (char *)malloc((size_t)cap);
     if (len > 0) {
         memcpy(dst, src_ptr, (size_t)len);
