@@ -131,6 +131,12 @@ pub struct Typer {
     /// any. When non-empty, `! Variant` is validated to belong to one of
     /// these enums; when empty, the union is inferred.
     pub(crate) current_fn_declared_errors: Vec<Symbol>,
+    /// Escape-analysis tier (T1/T2/T3) per binding `DefId`, populated by a
+    /// post-pass after each `lower_fn` succeeds. Consumed in R3.3 by codegen
+    /// to decide whether a binding can use a raw-pointer borrow (T1) vs. an
+    /// owned/cloned value (T2+). Bindings with tier `Auto`/missing are
+    /// treated conservatively as T2 (see `escape::EscapeInfo::tier`).
+    pub(crate) escape_tiers: std::collections::HashMap<DefId, crate::escape::Tier>,
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +204,7 @@ impl Typer {
             current_fn_ret_ty: None,
             current_fn_error_types: std::collections::BTreeSet::new(),
             current_fn_declared_errors: Vec::new(),
+            escape_tiers: std::collections::HashMap::new(),
         }
     }
 

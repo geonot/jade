@@ -266,6 +266,14 @@ impl Typer {
                 hfn.ret = self.infer_ctx.resolve(&hfn.ret);
             }
         }
+        // R3.2: escape-analysis post-pass.  Records the inferred tier for
+        // every binding `DefId` defined in this function so later passes
+        // (R3.3 codegen) can decide between T1 raw-borrow and T2+ owned
+        // codegen without re-deriving the heuristic per binding.
+        let einfo = crate::escape::analyze_fn(&hfn);
+        for (id, t) in einfo.iter() {
+            self.escape_tiers.insert(*id, *t);
+        }
         Ok(hfn)
     }
 
