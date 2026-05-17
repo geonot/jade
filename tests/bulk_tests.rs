@@ -1366,6 +1366,40 @@ fn b_rc_string_drop() {
         "hello world this is a long heap-allocated string",
     );
 }
+#[test]
+fn b_rc_string_auto_deref_len() {
+    // R3.4.d.1: `.field` access on `Rc<String>` auto-derefs the wrapper
+    // — `r.length` peer-throughs Rc into the String's `length` field.
+    expect(
+        "*main()\n    r is rc(\"hello world\")\n    log(r.length)\n",
+        "11",
+    );
+}
+#[test]
+fn b_rc_string_auto_deref_index() {
+    // R3.4.d.1: index access on `Rc<String>` auto-derefs.
+    expect(
+        "*main()\n    r is rc(\"hello\")\n    log(r[0])\n    log(r[4])\n",
+        "104\n111",
+    );
+}
+#[test]
+fn b_rc_struct_auto_deref_field() {
+    // R3.4.d.1: `.field` on `Rc<Struct>` auto-derefs through the wrapper.
+    expect(
+        "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 3, y is 4)\n    r is rc(p)\n    log(r.x)\n    log(r.y)\n    0\n",
+        "3\n4",
+    );
+}
+#[test]
+fn b_rc_struct_auto_deref_method() {
+    // R3.4.d.1: `.method()` on `Rc<Struct>` dispatches to the inner
+    // struct's method (the receiver is auto-deref'd).
+    expect(
+        "type Counter\n    val as i64\n\n    *get() returns i64\n        self.val\n\n*main() returns i32\n    c is Counter(val is 42)\n    r is rc(c)\n    log(r.get())\n    0\n",
+        "42",
+    );
+}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH 26: Pointers

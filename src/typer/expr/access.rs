@@ -263,7 +263,21 @@ impl Typer {
                         }
                     }
                 }
-                let struct_name = match &resolved_ty {
+                // R3.4.d.1 auto-deref: peer through one layer of
+                // Rc/RcCell/Arc (and Arc<Mutex<_>>) so field access on a
+                // shared-ownership wrapper resolves to the wrapped struct's
+                // field. Codegen mirrors this by GEPing into the Rc payload
+                // before reading the field — no clone of the wrapped value.
+                let peeled_ty = match &resolved_ty {
+                    Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
+                        match inner.as_ref() {
+                            Type::Mutex(m_inner) => self.infer_ctx.shallow_resolve(m_inner),
+                            _ => self.infer_ctx.shallow_resolve(inner),
+                        }
+                    }
+                    _ => resolved_ty.clone(),
+                };
+                let struct_name = match &peeled_ty {
                     Type::Struct(name, _) => Some(name.clone()),
                     // P5 §6: `Row<store>` is a write-through handle whose
                     // inner record layout is the store's auto-generated
@@ -313,17 +327,17 @@ impl Typer {
                     } else {
                         (Type::I64, 0)
                     }
-                } else if matches!(resolved_ty, Type::String) && field == "length" {
+                } else if matches!(peeled_ty, Type::String) && field == "length" {
                     (Type::I64, 0)
-                } else if matches!(&resolved_ty, Type::Vec(_))
+                } else if matches!(&peeled_ty, Type::Vec(_))
                     && field == "length"
                 {
                     (Type::I64, 0)
-                } else if matches!(&resolved_ty, Type::Map(_, _))
+                } else if matches!(&peeled_ty, Type::Map(_, _))
                     && field == "length"
                 {
                     (Type::I64, 0)
-                } else if let Type::Tuple(ref tys) = resolved_ty {
+                } else if let Type::Tuple(ref tys) = peeled_ty {
                     if let Ok(idx) = field.as_str().parse::<usize>() {
                         if idx < tys.len() {
                             (tys[idx].clone(), idx)
@@ -437,7 +451,20 @@ impl Typer {
             ast::Expr::Index(arr, idx, span) => {
                 let harr = self.lower_expr(arr)?;
                 let hidx = self.lower_expr(idx)?;
-                let elem_ty = match &harr.ty {
+                // R3.4.d.1 auto-deref: peer through one layer of
+                // Rc/RcCell/Arc (and Arc<Mutex<_>>) so indexing a
+                // shared-ownership wrapper resolves to the wrapped
+                // container's element type.
+                let peeled_ty = match &harr.ty {
+                    Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
+                        match inner.as_ref() {
+                            Type::Mutex(m_inner) => (**m_inner).clone(),
+                            _ => (**inner).clone(),
+                        }
+                    }
+                    other => other.clone(),
+                };
+                let elem_ty = match &peeled_ty {
                     Type::Array(et, _) => *et.clone(),
                     Type::Vec(et) => *et.clone(),
                     Type::Ptr(et) => *et.clone(),

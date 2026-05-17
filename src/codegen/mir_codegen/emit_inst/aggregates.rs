@@ -305,10 +305,39 @@ impl<'ctx> Compiler<'ctx> {
 
                 // ── Indexing ──
                 mir::InstKind::Index(base, idx) | mir::InstKind::IndexUnchecked(base, idx) => {
-                    let base_val = self.val(*base);
+                    let mut base_val = self.val(*base);
                     let idx_val = self.val(*idx);
-                    let base_ty = self.value_types.get(base);
+                    let mut base_ty = self.value_types.get(base).cloned();
                     let unchecked = matches!(&inst.kind, mir::InstKind::IndexUnchecked(_, _));
+
+                    // R3.4.d.1 auto-deref through Rc/RcCell/Arc (and
+                    // Arc<Mutex<_>>). Indexing a shared-ownership wrapper
+                    // resolves to indexing the wrapped value: GEP into the
+                    // payload slot, then LOAD the wrapped value into a
+                    // regular SSA so the existing per-shape branches
+                    // (String / Vec / Array / Tuple) see what they expect.
+                    if let Some(outer) = base_ty.clone() {
+                        if let Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) = outer {
+                            let (payload_inner, payload_idx, layout) = match inner.as_ref() {
+                                Type::Mutex(m_inner) => (
+                                    (**m_inner).clone(),
+                                    3u32,
+                                    self.arc_mutex_layout_ty(m_inner),
+                                ),
+                                _ => ((*inner).clone(), 2u32, self.rc_layout_ty(&inner)),
+                            };
+                            let rc_ptr = base_val.into_pointer_value();
+                            let payload_gep = b!(self.bld.build_struct_gep(
+                                layout, rc_ptr, payload_idx, "rc.payload"
+                            ));
+                            let inner_llvm = self.llvm_ty(&payload_inner);
+                            base_val = b!(self.bld.build_load(
+                                inner_llvm, payload_gep, "rc.payload.ld"
+                            ));
+                            base_ty = Some(payload_inner);
+                        }
+                    }
+                    let base_ty = base_ty.as_ref();
 
                     // String indexing: get char at index (returns byte as i64)
                     if matches!(base_ty, Some(Type::String)) {

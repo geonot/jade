@@ -382,14 +382,53 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         // If the object has a self_allocs entry, use the alloca pointer directly
         // for GEP-based field access (avoids SSA domination issues).
-        let obj_val = if let Some(alloca_ptr) = self.self_allocs.get(&obj).copied() {
+        let mut obj_val = if let Some(alloca_ptr) = self.self_allocs.get(&obj).copied() {
             alloca_ptr.into()
         } else {
             self.val(obj)
         };
 
+        // R3.4.d.1 auto-deref through Rc/RcCell/Arc (and Arc<Mutex<_>>).
+        // Field access on a shared-ownership wrapper resolves to a field of
+        // the wrapped value. We GEP into the Rc heap layout's payload slot
+        // to obtain a *pointer* to the wrapped value — no clone, no retain.
+        // The wrapped value's lifetime is owned by the Rc, so the pointer
+        // is valid as long as the Rc is alive (caller still holds it).
+        //
+        // For struct-shaped inners (Struct/Enum) we keep payload_gep as a
+        // pointer so subsequent field GEPs work. For inners whose LLVM
+        // representation is itself a value (String, Vec, ...) we load the
+        // value through the gep so the matching String/Vec branches below
+        // see what they expect.
+        let mut obj_ty = self.value_types.get(&obj).cloned();
+        if let Some(outer) = obj_ty.clone() {
+            if let Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) = outer {
+                let (payload_inner, payload_idx, layout) = match inner.as_ref() {
+                    Type::Mutex(m_inner) => (
+                        (**m_inner).clone(),
+                        3u32,
+                        self.arc_mutex_layout_ty(m_inner),
+                    ),
+                    _ => ((*inner).clone(), 2u32, self.rc_layout_ty(&inner)),
+                };
+                let rc_ptr = obj_val.into_pointer_value();
+                let payload_gep =
+                    b!(self.bld.build_struct_gep(layout, rc_ptr, payload_idx, "rc.payload"));
+                let keep_as_ptr = matches!(
+                    &payload_inner,
+                    Type::Struct(_, _) | Type::Enum(_) | Type::Row(_)
+                );
+                obj_val = if keep_as_ptr {
+                    payload_gep.into()
+                } else {
+                    let inner_llvm = self.llvm_ty(&payload_inner);
+                    b!(self.bld.build_load(inner_llvm, payload_gep, "rc.payload.ld"))
+                };
+                obj_ty = Some(payload_inner);
+            }
+        }
+
         // String field access — handle "length" via SSO-aware string_len
-        let obj_ty = self.value_types.get(&obj).cloned();
         if matches!(&obj_ty, Some(Type::String)) {
             match field {
                 "length" => return self.string_len(obj_val),
@@ -510,14 +549,20 @@ impl<'ctx> Compiler<'ctx> {
                 })
                 .or_else(|| {
                     // Search value_types for the MIR ValueId's type (covers function parameters).
-                    self.value_types.get(&obj).and_then(|ty| match ty {
-                        Type::Ptr(inner) => match inner.as_ref() {
+                    // Prefer the locally-rebound `obj_ty` so R3.4.d.1 auto-deref
+                    // (which replaced the original Rc<Struct> with the inner
+                    // Struct) is honored here too.
+                    obj_ty
+                        .as_ref()
+                        .or_else(|| self.value_types.get(&obj))
+                        .and_then(|ty| match ty {
+                            Type::Ptr(inner) => match inner.as_ref() {
+                                Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
+                                _ => None,
+                            },
                             Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
                             _ => None,
-                        },
-                        Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
-                        _ => None,
-                    })
+                        })
                 });
             if let Some(name) = &struct_name {
                 if let Some(st) = self.module.get_struct_type(&name.as_str()) {

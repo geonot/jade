@@ -614,7 +614,46 @@ impl Typer {
                     None
                 }
             }
+            // R3.4.d.1 auto-deref: peer through Rc/RcCell/Arc (and
+            // Arc<Mutex<_>>) so `r.method()` on `Rc<Struct>` dispatches
+            // to the inner struct's method. The receiver expression is
+            // wrapped in `Deref` below so codegen produces a value of
+            // the inner struct type to pass as `self`.
+            Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
+                let peeled = match inner.as_ref() {
+                    Type::Mutex(m_inner) => m_inner.as_ref(),
+                    other => other,
+                };
+                match peeled {
+                    Type::Struct(name, _) => Some(name.clone()),
+                    _ => None,
+                }
+            }
             _ => None,
+        };
+
+        // If the receiver was a shared-ownership wrapper, materialize a
+        // dereferenced value so the dispatched method sees `self: T`.
+        let hobj = if matches!(
+            &obj_ty,
+            Type::Rc(_) | Type::RcCell(_) | Type::Arc(_)
+        ) && struct_type_name.is_some()
+        {
+            // Compute the deref'd type for the wrapped expression.
+            let inner_ty = match &obj_ty {
+                Type::Rc(i) | Type::RcCell(i) | Type::Arc(i) => match i.as_ref() {
+                    Type::Mutex(m) => (**m).clone(),
+                    other => other.clone(),
+                },
+                _ => unreachable!(),
+            };
+            hir::Expr {
+                kind: hir::ExprKind::Deref(Box::new(hobj)),
+                ty: inner_ty,
+                span,
+            }
+        } else {
+            hobj
         };
 
         if let Some(ref type_name) = struct_type_name {
