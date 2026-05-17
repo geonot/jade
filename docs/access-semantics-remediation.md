@@ -208,8 +208,11 @@ Deferred — write a follow-up sprint or fold into R3.4:
       `apply_demotions_skips_when_vec_get_value_escapes`.
 - [x] Bulk gate: **921/921** still green; **escape: 9/9** unit tests
       (plus 1 lexer test in the same binary).
-- [ ] **Deferred** — `for x in xs` per-iteration borrow load. Separate
-      binder shape, same plumbing pattern.
+- [x] **For-loop binder** — `for x in xs` collection-for binder is now
+      recorded as `Ownership::Borrowed` at the typer (range counters
+      stay `Owned`). This makes explicit the long-standing latent
+      invariant that MIR already lowers as a raw `IndexUnchecked` load
+      (no clone) and the typer never emitted a Drop for the binder.
 - [ ] **Deferred** — IR-snapshot regression tests on
       `tests/programs/field_short_lived_borrow.jn` and
       `tests/programs/field_auto_copy.jn`.

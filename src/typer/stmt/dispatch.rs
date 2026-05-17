@@ -546,12 +546,27 @@ impl Typer {
                 };
                 let bind_id = self.fresh_id();
                 self.push_scope();
+                // R3.3: for a *collection* for-loop the binder aliases
+                // storage owned by the collection — MIR lowers the
+                // element load as a raw `IndexUnchecked` (no clone) and
+                // the typer does not emit a scope-exit Drop for the
+                // binder (the outer for-scope is popped without
+                // `emit_scope_drops`). Recording it as `Borrowed` makes
+                // that latent invariant explicit. *Range* for-loops
+                // (`for i in start..end` / `for i in N`) bind a fresh
+                // integer counter — that one stays `Owned`.
+                let is_collection_for = !(end.is_some() || iter_is_int);
+                let binder_ownership = if is_collection_for {
+                    Ownership::Borrowed
+                } else {
+                    Ownership::Owned
+                };
                 self.define_var(
                     &f.bind.as_str(),
                     VarInfo {
                         def_id: bind_id,
                         ty: bind_ty.clone(),
-                        ownership: Ownership::Owned,
+                        ownership: binder_ownership,
                         scheme: None,
                     },
                 );
