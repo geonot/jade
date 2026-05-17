@@ -157,6 +157,9 @@ impl PerceusPass {
             // conservatively as the sid + 0. Reuse pairing does not
             // apply to Row<T> (it's @resource).
             Type::Row(_) => 8,
+            // R3.4: heap-RC promoted types are pointer-sized on the
+            // binding slot (the header + payload live behind the pointer).
+            Type::RcCell(_) | Type::Arc(_) | Type::Mutex(_) => 8,
         }
     }
 

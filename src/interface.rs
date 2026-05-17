@@ -171,6 +171,14 @@ impl From<&crate::types::Type> for IType {
             // Row<T> is opaque at the interface boundary; expose as i64
             // (cross-module Row values are not yet supported).
             Type::Row(_) => IType::I64,
+            // R3.4.a: promoted types (Rc<Cell<T>> / Arc<T> / Arc<Mutex<T>>)
+            // are not yet exposed across module boundaries. Until R3.4.d
+            // wires the promotion pass, no Type::RcCell/Arc/Mutex is ever
+            // produced for an exported signature. Degenerate to the inner
+            // type's interface representation as a defensive fallback;
+            // cross-module promoted bindings will get dedicated IType
+            // variants when the design promotes that to a real concern.
+            Type::RcCell(inner) | Type::Arc(inner) | Type::Mutex(inner) => inner.as_ref().into(),
         }
     }
 }

@@ -60,6 +60,14 @@ impl<'ctx> Compiler<'ctx> {
             | Type::ActorRef(_)
             | Type::Coroutine(_)
             | Type::Channel(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            // R3.4: Rc<Cell<T>> / Arc<T> / Mutex<T> are all heap-allocated
+            // header + payload — ptr-represented at the ABI level. The
+            // header layout differs by variant (see runtime/cell.c /
+            // atomic_rc.c / sync.c, landing in R3.4.b) but the LLVM type
+            // is uniformly `ptr`.
+            Type::RcCell(_) | Type::Arc(_) | Type::Mutex(_) => {
+                self.ctx.ptr_type(AddressSpace::default()).into()
+            }
             Type::DynTrait(_) => {
                 let ptr = self.ctx.ptr_type(AddressSpace::default());
                 self.ctx
