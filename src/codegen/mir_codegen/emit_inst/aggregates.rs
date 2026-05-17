@@ -275,6 +275,33 @@ impl<'ctx> Compiler<'ctx> {
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
+                mir::InstKind::FieldTombstone(var_name, field) => {
+                    // P4 §5.2 partial-move tombstone: zero the field slot in
+                    // the parent's alloca so a later drop sees null/zero and
+                    // skips the (already-moved) heap allocation. All Jinn
+                    // heap drops are null/zero-safe.
+                    if let Some((alloca, ty)) = self.var_allocs.get(var_name).cloned() {
+                        let struct_name = self.struct_name_from_type(&ty);
+                        if let Some(name) = &struct_name {
+                            if let Some(st) = self.module.get_struct_type(name) {
+                                let field_idx = self.field_index(name, &field.as_str());
+                                let field_ty = st.get_field_type_at_index(field_idx)
+                                    .ok_or_else(|| format!(
+                                        "ICE: field {} not found in struct {}",
+                                        field.as_str(), name
+                                    ))?;
+                                let gep = b!(self.bld.build_struct_gep(
+                                    st,
+                                    alloca,
+                                    field_idx,
+                                    &field.as_str()
+                                ));
+                                let zero = field_ty.const_zero();
+                                b!(self.bld.build_store(gep, zero));                            }
+                        }
+                    }
+                    Ok(self.ctx.i8_type().const_int(0, false).into())
+                }
 
                 // ── Indexing ──
                 mir::InstKind::Index(base, idx) | mir::InstKind::IndexUnchecked(base, idx) => {

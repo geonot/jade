@@ -32,6 +32,31 @@ impl Typer {
         let hobj = self.lower_expr(obj)?;
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
+        // P5 §6.3: `.snapshot()` on `Row<store>` produces an owned copy
+        // of the underlying record (its `__store_{store}` struct). At
+        // this stage Row<T> and the inner struct share the same runtime
+        // representation, so `.snapshot()` is a pure type-rewrap; no
+        // MIR/codegen node is required.
+        if let Type::Row(store) = &obj_ty {
+            if method == "snapshot" {
+                if !args.is_empty() {
+                    return Err(format!(
+                        "{}: `.snapshot()` takes no arguments",
+                        span.loc()
+                    ));
+                }
+                let struct_ty = Type::Struct(
+                    Symbol::intern(&format!("__store_{store}")),
+                    vec![],
+                );
+                return Ok(hir::Expr {
+                    kind: hobj.kind,
+                    ty: struct_ty,
+                    span,
+                });
+            }
+        }
+
         if let Type::ActorRef(actor_name) = &obj_ty {
             let (_, _, handlers) = self
                 .actors

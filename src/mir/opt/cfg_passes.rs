@@ -16,7 +16,9 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
         for inst in &bb.insts {
             // Invalidate cached FieldGet/Index entries on mutation.
             match &inst.kind {
-                InstKind::FieldSet(_, _, _) | InstKind::FieldStore(_, _, _) => {
+                InstKind::FieldSet(_, _, _)
+                | InstKind::FieldStore(_, _, _)
+                | InstKind::FieldTombstone(_, _) => {
                     expr_map.retain(|k, _| !k.starts_with("fg:"));
                 }
                 InstKind::IndexSet(_, _, _) | InstKind::IndexStore(_, _, _) => {

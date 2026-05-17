@@ -20,6 +20,7 @@ fn compile_and_run(src: &str) -> String {
         .expect("jinnc failed to start");
     assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -7613,6 +7614,187 @@ fn resource_annotation_allows_take() {
     expect(
         "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 7)\n    h2 is take h\n    log(h2.fd)\n",
         "7",
+    );
+}
+
+#[test]
+fn field_take_persistent_parent_runs() {
+    // P4 §5.2 partial-move: `take p.a` moves the field out, but the parent
+    // `p` is still live and dropped at scope exit. Without the field
+    // tombstone, the parent's drop would double-free the moved Vec. With
+    // FieldTombstone zeroing the slot, the per-field drop is a no-op for
+    // moved fields and the still-owned field `p.b` drops normally.
+    expect(
+        "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    log taken.len()\n    log p.b.len()\n",
+        "3\n3",
+    );
+}
+
+#[test]
+fn field_take_string_persistent_parent_runs() {
+    // Same as above but with a heap String field, which exercises the
+    // SSO / large-string branch of drop_string null-safety.
+    expect(
+        "type Box\n    name as String\n    n as i64\n\n*main\n    b is Box(name is 'this-is-a-fairly-long-string-to-force-heap-allocation', n is 42)\n    s is take b.name\n    log s.len()\n    log b.n\n",
+        "53\n42",
+    );
+}
+
+#[test]
+fn field_take_use_after_move_errors() {
+    // P4 §5.2 Option 2: typer-level use-after-partial-move tracking.
+    // Reading `p.a` after `take p.a` must be a compile error.
+    let err = expect_compile_fail(
+        "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    log p.a.len()\n",
+    );
+    assert!(
+        err.contains("moved") && err.contains("`a`"),
+        "expected use-after-partial-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn field_take_reassign_then_read_ok() {
+    // After `take p.a` the field is poisoned, but reassigning `p.a is …`
+    // clears the poison and a subsequent read is legal.
+    expect(
+        "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    p.a is [9, 9]\n    log p.a.len()\n",
+        "2",
+    );
+}
+
+#[test]
+fn field_take_both_branches_then_read_errors() {
+    // If both arms of an `if` take `p.a`, the join state has `p.a` moved
+    // and the post-if read must be rejected.
+    let err = expect_compile_fail(
+        "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    if p.b.len() > 0\n        t1 is take p.a\n    else\n        t2 is take p.a\n    log p.a.len()\n",
+    );
+    assert!(
+        err.contains("moved") && err.contains("`a`"),
+        "expected merged-branch use-after-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn field_take_one_branch_only_errors() {
+    // Conservative union: if only one branch takes `p.a`, the post-if
+    // state must still consider it moved (we can't prove the branch
+    // wasn't taken).
+    let err = expect_compile_fail(
+        "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    if p.b.len() > 0\n        t1 is take p.a\n    log p.a.len()\n",
+    );
+    assert!(
+        err.contains("moved") && err.contains("`a`"),
+        "expected conservative-branch use-after-move diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn field_take_loop_no_leak_post_loop_read_ok() {
+    // In-body partial-moves must not leak past the loop: snapshot before,
+    // restore after. The body re-establishes the field every iteration
+    // via reassignment, so the post-loop read is legal.
+    expect(
+        "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    i is 0\n    while i < 2\n        t is take p.a\n        p.a is [7, 7, 7, 7]\n        i is i + 1\n    log p.a.len()\n",
+        "4",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P5 — Row<T> acceptance tests (access-semantics-sprint.md §6).
+// `store where ...`, `store.first`, and `store.get` now return `Row<store>`,
+// a write-through handle whose underlying record layout is the store's
+// auto-generated `__store_{name}` struct. Field reads on the row are
+// transparent. `.snapshot()` converts a row to an owned copy of the record.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn store_row_field_read_works() {
+    // P5.b: bare field-read on a Row<store> looks up via the store's
+    // schema and yields the field's declared type.
+    expect(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    r is data where key equals 2\n    log(r.val)\n",
+        "200",
+    );
+}
+
+#[test]
+fn store_row_snapshot_yields_struct() {
+    // P5.b: `.snapshot()` rewraps the Row<store> as an owned record
+    // whose fields can be read just like any other struct.
+    expect(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 7, 777\n    r is data where key equals 7\n    s is r.snapshot()\n    log(s.val)\n",
+        "777",
+    );
+}
+
+#[test]
+fn store_first_returns_row() {
+    // P5.b: `store.first(filter)` also returns Row<store>; the field
+    // access path on the row works identically to `where`.
+    expect(
+        "store nums\n    id as i64\n    score as i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is first nums where score > 40\n    log(r.id)\n",
+        "1",
+    );
+}
+
+#[test]
+fn store_row_snapshot_no_args() {
+    // P5.b: `.snapshot()` takes zero arguments; passing any is an error.
+    let err = expect_compile_fail(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 10\n    r is data where key equals 1\n    s is r.snapshot(42)\n    log(s.val)\n",
+    );
+    assert!(
+        err.contains("snapshot") && err.contains("no arguments"),
+        "expected snapshot-arity diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn store_snapshot_is_copy() {
+    // P5.e (spec §6.3): `s is r.snapshot()` materializes an owned `T`.
+    // Mutating `s.field` is a struct-local write — it MUST NOT touch
+    // the underlying store. Re-querying must observe the original
+    // persisted value.
+    expect(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    r is data where key equals 1\n    s is r.snapshot()\n    s.val is 999\n    t is data where key equals 1\n    log(t.val)\n",
+        "100",
+    );
+}
+
+#[test]
+fn store_row_copy_rejected() {
+    // P5.d: `Row<T>` is `@resource`; binding with `copy` is a hard
+    // semantic error (per docs/access-semantics-sprint.md §6.1).
+    let err = expect_compile_fail(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    r is data where key equals 1\n    s is copy r\n    log(s.val)\n",
+    );
+    assert!(
+        err.contains("@resource") || err.contains("resource"),
+        "expected @resource copy-rejection diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn store_row_write_through_via_field() {
+    // P5.c: `row.field = value` is sugar for a write-through update.
+    // After mutating through the row handle, re-querying the store must
+    // observe the new value (snapshots do not — but field reads on the
+    // row see the persisted value via the underlying record).
+    expect(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    r is data where key equals 2\n    r.val is 999\n    s is data where key equals 2\n    log(s.val)\n",
+        "999",
+    );
+}
+
+#[test]
+fn store_row_write_through_preserves_others() {
+    // P5.c: write-through only affects the targeted row's field; other
+    // rows and other fields remain untouched.
+    expect(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    r.val is 42\n    a is data where key equals 1\n    b is data where key equals 3\n    log(a.val + b.val)\n",
+        "400",
     );
 }
 

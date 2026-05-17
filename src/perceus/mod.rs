@@ -152,6 +152,11 @@ impl PerceusPass {
             Type::Cow(inner) => Self::type_layout_size_pub(inner),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size_pub(inner),
             Type::Generator(_) => 8,
+            // Row<T> = { i64 sid, struct value }; struct size is opaque
+            // at this layer (same as Type::Struct → 0), so Row is sized
+            // conservatively as the sid + 0. Reuse pairing does not
+            // apply to Row<T> (it's @resource).
+            Type::Row(_) => 8,
         }
     }
 

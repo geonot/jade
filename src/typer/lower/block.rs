@@ -45,6 +45,17 @@ impl Typer {
     ) -> Result<hir::Block, String> {
         self.push_scope();
         let mut stmts = self.lower_block_no_scope(block, ret_ty)?;
+        self.finalize_block_drops(&mut stmts);
+        self.pop_scope();
+        Ok(stmts)
+    }
+
+    /// Finalize the scope-exit drop emission for a block whose statements
+    /// have already been lowered with `lower_block_no_scope`. Encapsulates
+    /// the tail-expression / jump handling that `lower_block` does so it
+    /// can be reused by `lower_fn_deferred` (and other sites where params
+    /// must live in the body's scope to receive proper drop emission).
+    pub(in crate::typer) fn finalize_block_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
         let ends_with_jump = stmts.last().map_or(false, |s| {
             matches!(
                 s,
@@ -57,7 +68,7 @@ impl Typer {
             // don't drop them before they're consumed by the return/break.
             let mut jump_refs = std::collections::HashSet::new();
             Self::collect_hir_var_ids_stmt(&jump, &mut jump_refs);
-            self.emit_scope_drops_excluding(&mut stmts, &jump_refs);
+            self.emit_scope_drops_excluding(stmts, &jump_refs);
             stmts.push(jump);
         } else if let Some(hir::Stmt::Expr(_)) = stmts.last() {
             // Implicit return: emit drops AFTER the tail evaluates, excluding
@@ -72,12 +83,10 @@ impl Typer {
                 Self::collect_moved_var_ids(te, &mut tail_moves);
             }
             stmts.push(tail);
-            self.emit_scope_drops_excluding(&mut stmts, &tail_moves);
+            self.emit_scope_drops_excluding(stmts, &tail_moves);
         } else {
-            self.emit_scope_drops(&mut stmts);
+            self.emit_scope_drops(stmts);
         }
-        self.pop_scope();
-        Ok(stmts)
     }
 
     pub(in crate::typer) fn emit_scope_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
@@ -162,6 +171,63 @@ impl Typer {
                             }
                         }
                     }
+                }
+            }
+            // Stage B: callee-sig aware consume tracking. For each call
+            // argument whose corresponding callee parameter is `take`,
+            // mark the bare-Var argument as consumed so the caller's
+            // scope-exit drop is suppressed. This implements the move
+            // semantics required by `docs/access-semantics.md` §4.3 / §4.6
+            // for explicit-`take` parameters, without breaking the (still
+            // borrow-by-default) behavior for unannotated heap params.
+            hir::ExprKind::Call(_, name, args) => {
+                let access = self.fn_param_access.get(name).cloned();
+                if let Some(access) = access {
+                    for (i, a) in args.iter().enumerate() {
+                        if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
+                            && let hir::ExprKind::Var(id, _) = &a.kind
+                        {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            if Self::expr_type_needs_drop(&resolved) {
+                                out.insert(*id);
+                            }
+                        }
+                    }
+                }
+                // Walk into nested call args (e.g. f(g(x))). For a nested
+                // call's bare-Var arg, `g(x)` already handles `x` via its
+                // own callee-sig check; the outer call sees `g(x)` as the
+                // arg expression (not a Var), so no double-handling.
+                for a in args {
+                    self.collect_consumed_in_expr(a, out);
+                }
+            }
+            // Method dispatch on a struct/trait method: look up the
+            // mangled `Type_method` signature in `fns` (which is the same
+            // form `declare_method_sig_impl` registers under).
+            hir::ExprKind::Method(recv, ty_name, m_name, args) => {
+                let mangled: crate::intern::Symbol =
+                    format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
+                let access = self.fn_param_access.get(&mangled).cloned();
+                if let Some(access) = access {
+                    // access[0] corresponds to the synthetic `self` param.
+                    // User-supplied args start at index 1.
+                    for (i, a) in args.iter().enumerate() {
+                        if matches!(
+                            access.get(i + 1),
+                            Some(Some(crate::ast::AccessMod::Take))
+                        ) && let hir::ExprKind::Var(id, _) = &a.kind
+                        {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            if Self::expr_type_needs_drop(&resolved) {
+                                out.insert(*id);
+                            }
+                        }
+                    }
+                }
+                self.collect_consumed_in_expr(recv, out);
+                for a in args {
+                    self.collect_consumed_in_expr(a, out);
                 }
             }
             _ => {}
@@ -419,33 +485,133 @@ impl Typer {
             return true;
         }
         match ty {
-            // A user-defined struct needs drop only when annotated
-            // `@resource` (so the auto `*drop` fires at scope exit).
+            // A user-defined struct needs drop when:
+            //   * it is `@resource` (auto `*drop` fires at scope exit), OR
+            //   * any of its fields recursively needs drop (so the heap
+            //     storage carried by those fields is reclaimed).
             //
-            // NOTE: we deliberately do NOT recurse into struct fields here.
-            // Doing so would correctly model "this aggregate owns heap
-            // storage", but the matching move-tracking infrastructure is
-            // not yet in place: plain function calls (`r is modulo(x, y)`)
-            // do not mark bare-Var args as consumed, and function-parameter
-            // ownership for compound heap types is not modelled as a borrow
-            // either. Until that work lands, recursive needs_drop on
-            // aggregates causes double-frees (caller's slot AND callee's
-            // parameter both drop the same shared backing buffer).
-            // Compound structs may therefore leak their heap fields at
-            // scope exit; this matches the pre-P4 behaviour and is a known
-            // gap to be closed by a dedicated call-arg / parameter
-            // ownership sprint. See `docs/access-semantics-sprint.md` §5.
-            Type::Struct(name, _) => self
-                .struct_attrs
-                .get(name)
-                .map(|attrs| attrs.resource)
-                .unwrap_or(false),
+            // This is the canonical Stage-C recursion: combined with
+            // Stage-A's borrow-by-default for unannotated heap params and
+            // Stage-B's `take`-aware call-arg consume tracking, the caller
+            // becomes the sole drop site for the aggregate's heap edges,
+            // so recursing here no longer double-frees.
+            //
+            // Cycle protection: a self- or mutually-referential struct is
+            // treated as not-needing-drop *at the cycle point*. Real heap
+            // edges in such graphs go through `Rc`/`Weak`/`Box`, which are
+            // base-case heap types handled above.
+            Type::Struct(name, args) => {
+                if self
+                    .struct_attrs
+                    .get(name)
+                    .map(|a| a.resource)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                // Look up the struct's field types. Substitute generic
+                // type args if any. `structs` stores the canonical field
+                // shape; if a generic instantiation, also try a mangled
+                // mono name.
+                let result = self.struct_field_types(name, args).into_iter().any(|fty| {
+                    self.needs_drop_inner(&fty, visiting)
+                });
+                visiting.remove(name);
+                result
+            }
+            Type::Enum(name) => {
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let result = if let Some(variants) = self.enums.get(name) {
+                    variants
+                        .iter()
+                        .any(|(_vname, ftys)| ftys.iter().any(|t| self.needs_drop_inner(t, visiting)))
+                } else {
+                    false
+                };
+                visiting.remove(name);
+                result
+            }
+            Type::Tuple(elts) => elts.iter().any(|t| self.needs_drop_inner(t, visiting)),
+            Type::Array(elem, _) => self.needs_drop_inner(elem, visiting),
             // Alias/Newtype are transparent wrappers — preserve the
             // underlying type's drop classification.
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.needs_drop_inner(inner, visiting)
             }
             _ => false,
+        }
+    }
+
+    /// Resolve a struct name (+ optional type args) to its field types,
+    /// substituting the type args into any generic field. Returns an
+    /// empty Vec for unknown structs (safe under-approximation: caller
+    /// treats no fields as no drop edges).
+    fn struct_field_types(&self, name: &crate::intern::Symbol, args: &[Type]) -> Vec<Type> {
+        if let Some(fields) = self.structs.get(name) {
+            // If the stored shape has no generic params, return as-is.
+            if args.is_empty() {
+                return fields.iter().map(|(_, ty)| ty.clone()).collect();
+            }
+            // Otherwise, substitute generic type params using the stored
+            // generic def's param order.
+            if let Some(generic_def) = self.generic_types.get(name) {
+                let params = &generic_def.type_params;
+                if params.len() == args.len() {
+                    let subs: std::collections::HashMap<crate::intern::Symbol, Type> = params
+                        .iter()
+                        .zip(args.iter())
+                        .map(|(p, t)| (p.clone(), t.clone()))
+                        .collect();
+                    return fields
+                        .iter()
+                        .map(|(_, ty)| Self::subst_type(ty, &subs))
+                        .collect();
+                }
+            }
+            return fields.iter().map(|(_, ty)| ty.clone()).collect();
+        }
+        Vec::new()
+    }
+
+    /// Substitute generic type parameters in `ty` using `subs`.
+    fn subst_type(
+        ty: &Type,
+        subs: &std::collections::HashMap<crate::intern::Symbol, Type>,
+    ) -> Type {
+        match ty {
+            Type::Param(name) => subs.get(name).cloned().unwrap_or_else(|| ty.clone()),
+            Type::Vec(inner) => Type::Vec(Box::new(Self::subst_type(inner, subs))),
+            Type::Set(inner) => Type::Set(Box::new(Self::subst_type(inner, subs))),
+            Type::PriorityQueue(inner) => {
+                Type::PriorityQueue(Box::new(Self::subst_type(inner, subs)))
+            }
+            Type::Deque(inner) => Type::Deque(Box::new(Self::subst_type(inner, subs))),
+            Type::Rc(inner) => Type::Rc(Box::new(Self::subst_type(inner, subs))),
+            Type::Weak(inner) => Type::Weak(Box::new(Self::subst_type(inner, subs))),
+            Type::Cow(inner) => Type::Cow(Box::new(Self::subst_type(inner, subs))),
+            Type::Coroutine(inner) => Type::Coroutine(Box::new(Self::subst_type(inner, subs))),
+            Type::Generator(inner) => Type::Generator(Box::new(Self::subst_type(inner, subs))),
+            Type::Channel(inner) => Type::Channel(Box::new(Self::subst_type(inner, subs))),
+            Type::Map(k, v) => {
+                Type::Map(Box::new(Self::subst_type(k, subs)), Box::new(Self::subst_type(v, subs)))
+            }
+            Type::Tuple(elts) => Type::Tuple(elts.iter().map(|t| Self::subst_type(t, subs)).collect()),
+            Type::Array(elem, n) => Type::Array(Box::new(Self::subst_type(elem, subs)), *n),
+            Type::Struct(name, ts) => {
+                Type::Struct(name.clone(), ts.iter().map(|t| Self::subst_type(t, subs)).collect())
+            }
+            Type::Alias(name, inner) => {
+                Type::Alias(name.clone(), Box::new(Self::subst_type(inner, subs)))
+            }
+            Type::Newtype(name, inner) => {
+                Type::Newtype(name.clone(), Box::new(Self::subst_type(inner, subs)))
+            }
+            _ => ty.clone(),
         }
     }
 }

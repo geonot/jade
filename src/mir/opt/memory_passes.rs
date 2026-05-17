@@ -46,6 +46,9 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                     // Mutating a field of a variable invalidates its cached Load.
                     known.remove(var_name);
                 }
+                InstKind::FieldTombstone(var_name, _) => {
+                    known.remove(var_name);
+                }
                 InstKind::IndexStore(var_name, _, _) => {
                     known.remove(var_name);
                 }

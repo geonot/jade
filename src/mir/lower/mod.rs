@@ -94,10 +94,41 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
         lowerer.var_map.insert(p.name.clone(), val);
     }
 
-    // Lower body
+    // Lower body. We pre-identify the index of the *implicit-return*
+    // statement — the last non-Drop, non-jump stmt that produces the
+    // function's return value. If that statement is a bare `Stmt::Expr(e)`
+    // (i.e. a tail expression, not an explicit `return`), we lower its
+    // expression via `lower_expr_owned` so that a heap-typed field/index
+    // read at the tail position is auto-cloned. Without this, the SSA
+    // return value aliases storage owned by a local that is about to be
+    // scope-exit dropped, producing a use-after-free in the caller.
+    let tail_idx: Option<usize> = f
+        .body
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, s)| {
+            !matches!(
+                s,
+                hir::Stmt::Drop(..)
+                    | hir::Stmt::Ret(..)
+                    | hir::Stmt::Break(..)
+                    | hir::Stmt::Continue(..)
+                    | hir::Stmt::ErrReturn(..)
+            )
+        })
+        .map(|(i, _)| i);
     let mut last = lowerer.emit(InstKind::Void, Type::Void, f.span);
-    for stmt in &f.body {
-        let v = lowerer.lower_stmt(stmt);
+    for (idx, stmt) in f.body.iter().enumerate() {
+        let v = if Some(idx) == tail_idx {
+            if let hir::Stmt::Expr(e) = stmt {
+                lowerer.lower_expr_owned(e)
+            } else {
+                lowerer.lower_stmt(stmt)
+            }
+        } else {
+            lowerer.lower_stmt(stmt)
+        };
         // Don't let Drop/void statements clobber the result value
         // for non-void functions (drops are inserted by perceus after
         // the last-expression that should be returned).

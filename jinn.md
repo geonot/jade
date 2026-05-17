@@ -20,8 +20,8 @@ This compiles to the same LLVM IR as equivalent C. Same speed. Zero overhead.
 
 1. **Values are their types.** An `i64` is a register. A class is contiguous memory at known offsets. No universal wrapper. No indirection unless requested.
 2. **Ownership is default.** One owner per value. Compiler inserts drops statically. No GC, no cycle detector.
-3. **Borrowing is free.** Read access borrows a reference — zero runtime cost. No retain, no release.
-4. **Sharing is inferred.** The compiler determines when values need shared ownership and inserts reference counting automatically. No manual `rc` or `weak` annotations.
+3. **Borrowing is free.** Read access borrows a reference — zero runtime cost. No retain, no release. Container reads (`vec.get(i)`, `map.get(k)`, `for x in xs`) default to borrows when the element type is heap-managed; use the `copy` modifier (`x is copy v.get(0)`) for an owned clone, or `take` to move out.
+4. **Sharing is inferred.** The compiler determines when values need shared ownership and inserts reference counting automatically. No manual `rc` or `weak` annotations. Types annotated `@atomic` use atomic refcounts; `@weakable @atomic` types may have weak references via `weak ref T`. Types annotated `@resource` (file handles, sockets, store rows) reject `copy` and must be explicitly shared via `ref`.
 5. **Inference does the work.** HM + bidirectional + ownership inference. You don't write types unless you want to.
 6. **Performance is non-negotiable.** Every design evaluated against: *does this prevent generating the same code C would?* If yes, the design is wrong.
 

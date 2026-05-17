@@ -168,6 +168,9 @@ impl From<&crate::types::Type> for IType {
             Type::Alias(_, inner) => inner.as_ref().into(),
             Type::Newtype(_, inner) => inner.as_ref().into(),
             Type::Generator(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
+            // Row<T> is opaque at the interface boundary; expose as i64
+            // (cross-module Row values are not yet supported).
+            Type::Row(_) => IType::I64,
         }
     }
 }

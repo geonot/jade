@@ -547,6 +547,15 @@ impl InferCtx {
             (Type::Weak(a), Type::Weak(b)) => self.unify(a, b),
             (Type::Channel(a), Type::Channel(b)) => self.unify(a, b),
             (Type::Coroutine(a), Type::Coroutine(b)) => self.unify(a, b),
+            (Type::Row(sa), Type::Row(sb)) => {
+                if sa == sb {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "row type mismatch: expected `Row<{sa}>`, found `Row<{sb}>`"
+                    ))
+                }
+            }
             _ => Err(format!("type mismatch: expected `{a}`, found `{b}`")),
         }
     }

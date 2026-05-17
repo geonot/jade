@@ -93,6 +93,28 @@ pub struct Typer {
     pub(crate) type_errors: Vec<String>,
     pub(crate) fn_param_names: IndexMap<Symbol, Vec<String>>,
     pub(crate) fn_defaults: IndexMap<Symbol, Vec<Option<ast::Expr>>>,
+    /// Per-function parameter access modifiers (Some(Take) / Some(Ref) /
+    /// Some(Mut) / Some(Copy) / None), aligned by index with the param
+    /// types stored in `fns`. Used by `collect_consumed_in_expr` to mark
+    /// call-site bare-Var args whose corresponding callee param is `take`
+    /// as consumed, so the caller's scope-exit drop is suppressed and the
+    /// move semantics required by `docs/access-semantics.md` §4.3 / §4.6
+    /// hold without double-free.
+    pub(crate) fn_param_access: IndexMap<Symbol, Vec<Option<ast::AccessMod>>>,
+    /// P4 §5.2 partial-move tracking. After `x is take y.f`, the field
+    /// `y.f` is poisoned: reading or borrowing it is a compile error until
+    /// the slot is reassigned (`y.f is <expr>`). Keyed by the parent var's
+    /// `DefId`; value is the set of field names currently moved out of that
+    /// var. Cleared per-field on field assignment, and cleared entirely for
+    /// a `DefId` when the whole var is rebound. Branches merge
+    /// conservatively (a field moved on any branch is treated as moved
+    /// after the join). Loops snapshot+restore — moves inside a loop body
+    /// do not leak past the loop in this first cut.
+    pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
+    /// When > 0, `lower_expr_field` skips the use-after-partial-move
+    /// check. Used to lower the LHS of an assignment, where reading the
+    /// place is a write, not a read.
+    pub(crate) suppress_moved_field_check: u32,
     pub(crate) current_method_type: Option<String>,
     pub(crate) modules: std::collections::HashSet<Symbol>,
     /// Extern functions tracked separately from Jinn functions.
@@ -167,6 +189,9 @@ impl Typer {
             type_errors: Vec::new(),
             fn_param_names: IndexMap::new(),
             fn_defaults: IndexMap::new(),
+            fn_param_access: IndexMap::new(),
+            moved_fields: std::collections::HashMap::new(),
+            suppress_moved_field_check: 0,
             current_method_type: None,
             modules: std::collections::HashSet::new(),
             externs: IndexMap::new(),
@@ -301,6 +326,65 @@ impl Typer {
         }
     }
 
+    // ---- P4 §5.2 partial-move tracking helpers ----------------------------
+
+    /// Record `parent.field` as moved out by a `take`.
+    pub(crate) fn mark_field_moved(&mut self, parent: DefId, field: Symbol) {
+        self.moved_fields
+            .entry(parent)
+            .or_default()
+            .insert(field);
+    }
+
+    /// Clear the moved bit for `parent.field` (called on reassignment).
+    pub(crate) fn clear_field_moved(&mut self, parent: DefId, field: &Symbol) {
+        if let Some(set) = self.moved_fields.get_mut(&parent) {
+            set.remove(field);
+            if set.is_empty() {
+                self.moved_fields.remove(&parent);
+            }
+        }
+    }
+
+    /// Clear *all* moved fields for `parent` (e.g. on whole-var rebinding).
+    pub(crate) fn clear_all_moved_for(&mut self, parent: DefId) {
+        self.moved_fields.remove(&parent);
+    }
+
+    /// Snapshot the current moved-fields map so a branch can mutate freely
+    /// and the caller can restore or merge afterward.
+    pub(crate) fn snapshot_moved_fields(
+        &self,
+    ) -> std::collections::HashMap<DefId, std::collections::HashSet<Symbol>> {
+        self.moved_fields.clone()
+    }
+
+    /// Restore a previously-taken snapshot (used after loop bodies, where
+    /// in-body moves do not leak past the loop in this first cut).
+    pub(crate) fn restore_moved_fields(
+        &mut self,
+        snap: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
+    ) {
+        self.moved_fields = snap;
+    }
+
+    /// Merge a set of branch-end snapshots into `self.moved_fields` using
+    /// union semantics: a field is treated as moved after a join if it was
+    /// moved on ANY branch (conservative — guarantees soundness without
+    /// flow analysis).
+    pub(crate) fn merge_moved_fields_union(
+        &mut self,
+        branches: &[std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>],
+    ) {
+        let mut out = self.moved_fields.clone();
+        for br in branches {
+            for (id, fields) in br {
+                out.entry(*id).or_default().extend(fields.iter().cloned());
+            }
+        }
+        self.moved_fields = out;
+    }
+
     fn ownership_for_type(ty: &Type) -> Ownership {
         match ty {
             Type::Rc(_) => Ownership::Rc,
@@ -354,6 +438,81 @@ impl Typer {
         Ok(ow)
     }
 
+    /// Parameter-flavored ownership selection.
+    ///
+    /// Identical to `ownership_with_mod` except for the no-modifier default:
+    /// per `docs/access-semantics.md` §4.3, function parameters of heap-
+    /// managed types default to a **borrow** (alias) rather than an owned
+    /// move. This is a pragmatic interim choice — the design doc specifies
+    /// move-by-default but that requires call-site escape analysis (P2,
+    /// not yet implemented) to mark caller bindings as consumed. Until then
+    /// the borrow default preserves the existing "params don't drop, callers
+    /// can reuse" behavior while making the ownership tier explicit at the
+    /// typer level (so `emit_scope_drops_excluding` correctly skips
+    /// parameter slots once parameter scopes get drop emission).
+    ///
+    /// POD-shaped types continue to be Owned (a bit-copy is free). Explicit
+    /// modifiers (`copy`/`ref`/`mut`/`take`) are honored exactly as in
+    /// `ownership_with_mod` — explicit `take` is the canonical way to
+    /// declare a true move-consume parameter.
+    pub(crate) fn param_ownership_with_mod(
+        &self,
+        ty: &Type,
+        access_mod: Option<crate::ast::AccessMod>,
+    ) -> Result<Ownership, String> {
+        if access_mod.is_none() {
+            // Default-to-borrow only when the type has heap drop semantics.
+            // POD parameters stay Owned (no observable difference, but
+            // semantically correct: a bit-copy *is* an owned independent
+            // value).
+            if self.type_param_default_borrows(ty) {
+                return Ok(Ownership::Borrowed);
+            }
+        }
+        self.ownership_with_mod(ty, access_mod)
+    }
+
+    /// Does an unannotated function parameter of this type default to a
+    /// borrow? True for compound heap-managed types whose drop semantics
+    /// would otherwise consume the caller's storage. False for POD,
+    /// pointers, Rc handles (already shared), and `@atomic` types (which
+    /// have their own Arc lowering path).
+    fn type_param_default_borrows(&self, ty: &Type) -> bool {
+        // Atomic types route through Arc, not raw borrow — keep them on
+        // the existing promotion path inside `ownership_with_mod`.
+        if self.type_has_atomic_annotation(ty) {
+            return false;
+        }
+        match ty {
+            // Heap-leaf container/value types: bare-Var pass-through aliases
+            // the caller's storage; default to borrow.
+            Type::String
+            | Type::Vec(_)
+            | Type::Map(_, _)
+            | Type::Set(_)
+            | Type::PriorityQueue(_)
+            | Type::Deque(_)
+            | Type::Coroutine(_)
+            | Type::Generator(_)
+            | Type::NDArray(_, _)
+            | Type::Cow(_) => true,
+            // User-defined structs/enums whose shape carries heap fields
+            // (or are `@resource`). We delegate to the same predicate used
+            // for scope-exit drop selection.
+            Type::Struct(_, _) | Type::Enum(_) | Type::Tuple(_) | Type::Array(_, _) => {
+                self.needs_drop(ty)
+            }
+            // Transparent wrappers: follow the wrapped type.
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+                self.type_param_default_borrows(inner)
+            }
+            // Rc handles are already share-by-default (clone bumps refcount);
+            // Channel/ActorRef are atomic (handled above). Pointers and POD
+            // are bit-copyable.
+            _ => false,
+        }
+    }
+
     /// True iff `ty` is (or wraps) a user-defined struct annotated with
     /// `@resource`. See `docs/access-semantics.md` §3.
     ///
@@ -371,6 +530,12 @@ impl Typer {
                 .unwrap_or(false),
             // Built-in linear resource types (close-once / single-run).
             Type::Coroutine(_) | Type::Generator(_) => true,
+            // P5 §6.1: `Row<T>` is a write-through handle into a store; it
+            // is linear so that snapshot vs. write-through stay
+            // distinguishable. Copy is rejected, `take`/`ref`/`mut`/`copy`
+            // modifiers route through the same machinery as user
+            // `@resource` types.
+            Type::Row(_) => true,
             Type::Newtype(_, inner)
             | Type::Alias(_, inner)
             | Type::Rc(inner)

@@ -13,6 +13,14 @@ impl Typer {
     /// `pq.peek()`). In those cases the returned value aliases storage owned by
     /// the container, so any local that binds it must NOT be dropped at scope
     /// exit — doing so would double-free when the container itself is dropped.
+    ///
+    /// TODO(access-semantics P6.1): the access-semantics sprint
+    /// (`docs/access-semantics-sprint.md` §3) plans a proper escape-analysis
+    /// module (`src/escape/mod.rs`) with T1/T2/T3 tiering that would subsume
+    /// this heuristic. That module has not yet been implemented; until it
+    /// lands, this predicate is the only safety net preventing double-free of
+    /// non-clonable container reads (Map/Set/PQ/Deque/Enum payloads, etc.).
+    /// Do not delete without a replacement.
     pub(in crate::typer) fn is_aliased_read_of_heap(expr: &hir::Expr) -> bool {
         let needs_drop = matches!(
             expr.ty,
@@ -131,11 +139,28 @@ impl Typer {
                 if b.access_mod.is_some() || self.type_has_atomic_annotation(&ty) {
                     ownership = self.ownership_with_mod(&ty, b.access_mod)?;
                 }
+                // P4 §5.2: detect `x is take y.field` so we can poison
+                // `y.field` against subsequent reads in this scope until
+                // it is reassigned. The MIR-level FieldTombstone makes
+                // the memory safe; this typer check makes the language
+                // safe (no silent zero-reads from a moved slot).
+                let partial_move: Option<(DefId, Symbol)> =
+                    if matches!(b.access_mod, Some(ast::AccessMod::Take))
+                        && let hir::ExprKind::Field(parent, field, _) = &value.kind
+                        && let hir::ExprKind::Var(parent_id, _) = &parent.kind
+                    {
+                        Some((*parent_id, field.clone()))
+                    } else {
+                        None
+                    };
                 let id = self.fresh_id();
                 if let Some(existing) = self.find_var(&b.name.as_str()) {
                     let id = existing.def_id;
                     let existing_ty = existing.ty.clone();
                     let value = self.maybe_coerce_to(value, &existing_ty);
+                    // Rebinding the whole variable clears any prior
+                    // partial-move state on it: the new value is whole.
+                    self.clear_all_moved_for(id);
                     self.update_var(
                         &b.name.as_str(),
                         VarInfo {
@@ -145,6 +170,9 @@ impl Typer {
                             scheme: None,
                         },
                     );
+                    if let Some((pid, fname)) = partial_move {
+                        self.mark_field_moved(pid, fname);
+                    }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
                         name: b.name.clone(),
@@ -181,6 +209,9 @@ impl Typer {
                             scheme: Some(scheme),
                         },
                     );
+                    if let Some((pid, fname)) = partial_move {
+                        self.mark_field_moved(pid, fname);
+                    }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
                         name: b.name.clone(),
@@ -228,11 +259,97 @@ impl Typer {
             }
 
             ast::Stmt::Assign(target, value, span) => {
+                // P5 §6.1: `row.field = value` is sugar for the store
+                // write-through update. Detect this case BEFORE we lower
+                // the LHS as an ordinary place — we want a `StoreSet`
+                // statement keyed on the row's `sid`, not a struct-field
+                // store (which would mutate a snapshot in-place and lose
+                // the write). Restrict to `<ident>.<field> = ...` so we
+                // can synthesize `row.sid` cheaply without re-running
+                // the underlying query.
+                if let ast::Expr::Field(obj, field, fspan) = target {
+                    if let ast::Expr::Ident(row_name, _) = obj.as_ref() {
+                        // Probe the LHS receiver's type without lowering the
+                        // whole field expr (which would error on the inner
+                        // `.field` lookup path for some receivers).
+                        let probe = self.lower_expr(obj.as_ref())?;
+                        let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
+                        if let Type::Row(store) = &probe_ty {
+                            let store = store.clone();
+                            let schema = self
+                                .store_schemas
+                                .get(&store)
+                                .ok_or_else(|| format!("unknown store '{store}'"))?
+                                .clone();
+                            let (_, fty) = schema
+                                .iter()
+                                .find(|(n, _)| n == field)
+                                .ok_or_else(|| {
+                                    format!(
+                                        "{}: store '{}' has no field '{}'",
+                                        fspan.loc(),
+                                        store,
+                                        field,
+                                    )
+                                })?
+                                .clone();
+                            let hv = self.lower_expr_expected(value, Some(&fty))?;
+                            let r = self.infer_ctx.unify_at(
+                                &fty,
+                                &hv.ty,
+                                *span,
+                                "row field assignment",
+                            );
+                            self.collect_unify_error(r);
+                            let hv = self.maybe_coerce_to(hv, &fty);
+                            // Synthesize the sid filter: `sid equals row.sid`.
+                            // `probe` is the bound row var; `probe.sid` is a
+                            // plain struct-field read on the underlying
+                            // `__store_{store}` layout (sid is field 0).
+                            let sid_sym = Symbol::intern("sid");
+                            let sid_expr = hir::Expr {
+                                kind: hir::ExprKind::Field(
+                                    Box::new(probe),
+                                    sid_sym,
+                                    0, // sid is field 0 of __store_{store}
+                                ),
+                                ty: Type::I64,
+                                span: *fspan,
+                            };
+                            let hfilter = hir::StoreFilter {
+                                field: sid_sym,
+                                op: ast::BinOp::Eq,
+                                value: sid_expr,
+                                span: *span,
+                                extra: Vec::new(),
+                            };
+                            let _ = row_name; // reserved for diagnostics
+                            return Ok(hir::Stmt::StoreSet(
+                                store,
+                                vec![(*field, hv)],
+                                Box::new(hfilter),
+                                *span,
+                            ));
+                        }
+                    }
+                }
+                // P4 §5.2: lowering an assignment LHS is a write to the
+                // place — do not flag a use-after-partial-move when
+                // reassigning a previously-moved field.
+                self.suppress_moved_field_check += 1;
                 let ht = self.lower_expr(target)?;
+                self.suppress_moved_field_check -= 1;
                 let hv = self.lower_expr_expected(value, Some(&ht.ty))?;
                 let r = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
                 self.collect_unify_error(r);
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
+                // P4 §5.2: assigning to `p.f` clears any prior moved-out
+                // state on that field (the slot is whole again).
+                if let hir::ExprKind::Field(parent, field, _) = &ht.kind {
+                    if let hir::ExprKind::Var(parent_id, _) = &parent.kind {
+                        self.clear_field_moved(*parent_id, field);
+                    }
+                }
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
 
@@ -356,7 +473,15 @@ impl Typer {
 
             ast::Stmt::While(w) => {
                 let cond = self.lower_expr_expected(&w.cond, Some(&Type::Bool))?;
+                // P4 §5.2: snapshot before loop body and restore after.
+                // Conservative: in-body partial moves do not leak past the
+                // loop. Within the body, linear analysis catches
+                // use-after-move within a single iteration. Multi-iteration
+                // use-after-move is an accepted gap (would need a fixed-
+                // point or 2-pass analysis we don't have yet).
+                let pre = self.snapshot_moved_fields();
                 let body = self.lower_block(&w.body, ret_ty)?;
+                self.restore_moved_fields(pre);
                 Ok(hir::Stmt::While(hir::While {
                     cond,
                     body,
@@ -446,8 +571,12 @@ impl Typer {
                 } else {
                     (None, None, None)
                 };
+                // P4 §5.2: snapshot before loop body so in-body partial
+                // moves do not leak past the loop (see lower While).
+                let pre_loop = self.snapshot_moved_fields();
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();
+                self.restore_moved_fields(pre_loop);
                 Ok(hir::Stmt::For(hir::For {
                     bind_id,
                     bind: f.bind.clone(),
@@ -463,10 +592,10 @@ impl Typer {
                     access_mod: f.access_mod,
                     span: f.span,
                 }))
-            }
-
-            ast::Stmt::Loop(l) => {
+            }            ast::Stmt::Loop(l) => {
+                let pre = self.snapshot_moved_fields();
                 let body = self.lower_block(&l.body, ret_ty)?;
+                self.restore_moved_fields(pre);
                 Ok(hir::Stmt::Loop(hir::Loop { body, span: l.span }))
             }
 
@@ -793,8 +922,11 @@ impl Typer {
                         scheme: None,
                     },
                 );
+                // P4 §5.2: snapshot before loop body (see lower While).
+                let pre_loop = self.snapshot_moved_fields();
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();
+                self.restore_moved_fields(pre_loop);
                 Ok(hir::Stmt::SimFor(
                     hir::For {
                         bind_id,

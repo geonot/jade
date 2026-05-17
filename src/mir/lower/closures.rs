@@ -59,9 +59,40 @@ impl Lowerer {
             lambda_lowerer.var_map.insert(p.name, val);
         }
 
+        // Same tail-expression auto-clone treatment as top-level fn body
+        // lowering: identify the implicit-return position and use
+        // `lower_expr_owned` so a heap-typed field/index read at the tail
+        // produces an independently-owned value rather than aliasing
+        // storage about to be scope-exit dropped.
+        let tail_idx: Option<usize> = body
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, s)| {
+                !matches!(
+                    s,
+                    hir::Stmt::Drop(..)
+                        | hir::Stmt::Ret(..)
+                        | hir::Stmt::Break(..)
+                        | hir::Stmt::Continue(..)
+                        | hir::Stmt::ErrReturn(..)
+                )
+            })
+            .map(|(i, _)| i);
         let mut last = lambda_lowerer.emit(InstKind::Void, Type::Void, span);
-        for stmt in body {
-            last = lambda_lowerer.lower_stmt(stmt);
+        for (idx, stmt) in body.iter().enumerate() {
+            let v = if Some(idx) == tail_idx {
+                if let hir::Stmt::Expr(e) = stmt {
+                    lambda_lowerer.lower_expr_owned(e)
+                } else {
+                    lambda_lowerer.lower_stmt(stmt)
+                }
+            } else {
+                lambda_lowerer.lower_stmt(stmt)
+            };
+            if !matches!(stmt, hir::Stmt::Drop(..)) {
+                last = v;
+            }
         }
         if !lambda_lowerer.current_block_has_terminator() {
             lambda_lowerer.set_terminator(Terminator::Return(Some(last)));

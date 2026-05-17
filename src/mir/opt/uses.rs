@@ -73,6 +73,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::FieldStore(_, _, v) => {
             s.insert(*v);
         }
+        InstKind::FieldTombstone(_, _) => {}
         InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
             s.insert(*a);
             s.insert(*i);

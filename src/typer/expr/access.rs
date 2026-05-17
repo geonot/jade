@@ -222,6 +222,29 @@ impl Typer {
                     }
                 }
                 let hobj = self.lower_expr(obj)?;
+                // P4 §5.2 use-after-partial-move check. If `obj` is a bare
+                // var whose field `field` was previously moved out via
+                // `take` in this scope (and not reassigned), reading or
+                // borrowing the field is a compile error. Without this
+                // check the user would silently observe a zero/null value
+                // from the tombstone slot instead of an error.
+                if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind {
+                    if self.suppress_moved_field_check == 0 {
+                        if let Some(moved) = self.moved_fields.get(parent_id) {
+                            if moved.contains(field) {
+                                return Err(format!(
+                                    "{}: field `{}` of `{}` was moved out by an earlier `take`; \
+                                     reassign `{}.{}` before reading it",
+                                    span.loc(),
+                                    field,
+                                    parent_name,
+                                    parent_name,
+                                    field,
+                                ));
+                            }
+                        }
+                    }
+                }
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
                 // Actor message send-with-no-args sugar: `t.show` where `t :
                 // ActorRef(Tally)` is desugared to a method call so the actor
@@ -242,6 +265,13 @@ impl Typer {
                 }
                 let struct_name = match &resolved_ty {
                     Type::Struct(name, _) => Some(name.clone()),
+                    // P5 §6: `Row<store>` is a write-through handle whose
+                    // inner record layout is the store's auto-generated
+                    // `__store_{store}` struct. Field reads on the row
+                    // see the underlying struct's fields transparently.
+                    Type::Row(store) => {
+                        Some(Symbol::intern(&format!("__store_{store}")))
+                    }
                     Type::Ptr(inner) => match inner.as_ref() {
                         Type::Struct(name, _) => Some(name.clone()),
                         _ => None,

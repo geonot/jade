@@ -116,6 +116,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::FieldGet(obj, field) => format!("field_get {obj}.{field}"),
         InstKind::FieldSet(obj, field, val) => format!("field_set {obj}.{field} = {val}"),
         InstKind::FieldStore(var, field, val) => format!("field_store ${var}.{field} = {val}"),
+        InstKind::FieldTombstone(var, field) => format!("field_tombstone ${var}.{field}"),
 
         InstKind::Index(arr, idx) => format!("index {arr}[{idx}]"),
         InstKind::IndexUnchecked(arr, idx) => format!("index_unchecked {arr}[{idx}]"),

@@ -66,6 +66,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         InstKind::FieldStore(_, _, v) => {
             sub!(v);
         }
+        InstKind::FieldTombstone(_, _) => {}
         InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
             sub!(a);
             sub!(i);

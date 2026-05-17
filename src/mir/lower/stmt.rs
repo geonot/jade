@@ -20,6 +20,43 @@ impl Lowerer {
                     }
                     _ => self.lower_expr_owned(&b.value),
                 };
+
+                // P4 §5.2 Perceus partial-move: `x is take y.field` MUST
+                // move the field out and prevent a later double-drop when
+                // the parent `y` is dropped (or consumed). Implementation:
+                // demote `y` to a mem_var and tombstone the field slot with
+                // its LLVM zero-init. All Jinn heap types' drop is
+                // null/zero-safe, so the parent's eventual drop becomes a
+                // no-op for the moved field.
+                if matches!(b.access_mod, Some(AccessMod::Take)) {
+                    if let ExprKind::Field(obj, field, _) = &b.value.kind {
+                        if let ExprKind::Var(_, parent_name) = &obj.kind {
+                            // Only meaningful for non-trivially-droppable fields;
+                            // POD fields have no drop, so the tombstone is moot.
+                            if !b.value.ty.is_trivially_droppable() {
+                                // Demote the parent to memory if it isn't
+                                // already, so we can tombstone in place.
+                                if !self.mem_vars.contains(parent_name) {
+                                    let mut set = std::collections::HashSet::new();
+                                    set.insert(parent_name.clone());
+                                    self.demote_vars_to_memory(&set, b.span);
+                                }
+                                self.func.block_mut(self.current_block).insts.push(
+                                    Instruction {
+                                        dest: None,
+                                        kind: InstKind::FieldTombstone(
+                                            parent_name.clone(),
+                                            field.clone(),
+                                        ),
+                                        ty: Type::Void,
+                                        span: b.span,
+                                        def_id: None,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
                 // Store the DefId on the instruction that produced this value,
                 // so MIR Perceus can track binding → value relationships.
                 if let Some(inst) = self

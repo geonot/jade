@@ -115,6 +115,10 @@ impl Typer {
             f.name.clone(),
             f.params.iter().map(|p| p.default.clone()).collect(),
         );
+        self.fn_param_access.insert(
+            f.name.clone(),
+            f.params.iter().map(|p| p.access_mod).collect(),
+        );
     }
 
     #[allow(dead_code)]
@@ -142,7 +146,19 @@ impl Typer {
         }
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
         let id = self.fresh_id();
-        self.fns.insert(method_name, (id, ptys, ret));
+        self.fns.insert(method_name.clone(), (id, ptys, ret));
+        // Record access modifiers aligned with `ptys`. The synthetic
+        // self parameter is BorrowMut for both by-value and by-ptr methods
+        // (the receiver is not user-annotated), so we record None for it
+        // and the user's access_mod for the remaining params.
+        let mut accs: Vec<Option<ast::AccessMod>> = vec![None];
+        for p in &m.params {
+            if by_ptr && p.name == "self" {
+                continue;
+            }
+            accs.push(p.access_mod);
+        }
+        self.fn_param_access.insert(method_name, accs);
     }
 
     pub(crate) fn declare_type_def(&mut self, td: &ast::TypeDef) {

@@ -77,6 +77,18 @@ impl<'ctx> Compiler<'ctx> {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),
+            // Row<T> v1: represented identically to the underlying
+            // store row struct `__store_{name}`. The implicit `sid`
+            // used by `.update`/field-write sugar is tracked at the
+            // typer/MIR layer, not in the LLVM value. See
+            // docs/access-semantics-sprint.md §6.
+            Type::Row(name) => {
+                let sname = format!("__store_{}", name.as_str());
+                self.module
+                    .get_struct_type(&sname)
+                    .map(|s| s.into())
+                    .unwrap_or_else(|| self.ctx.i64_type().into())
+            }
         }
     }
 

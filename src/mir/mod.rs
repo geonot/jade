@@ -206,6 +206,12 @@ pub enum InstKind {
     FieldSet(ValueId, Symbol, ValueId),
     /// Direct field store into a named variable's alloca (for mem_vars).
     FieldStore(Symbol, Symbol, ValueId),
+    /// Tombstone a struct field in a mem_var: store the LLVM zero-init for
+    /// the field's type at its slot. Emitted by P4 §5.2 Perceus partial-move
+    /// (`x is take y.field` semantics) so the parent's scope-exit drop loads
+    /// a null/zero field and skips the (already-moved) heap allocation.
+    /// Null-safety of the field's drop is required (all jinn heap types).
+    FieldTombstone(Symbol, Symbol),
 
     Index(ValueId, ValueId),
     /// Bounds-proven indexing (e.g., compiler-generated foreach loops).

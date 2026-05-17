@@ -87,7 +87,7 @@ impl Typer {
                             .unwrap_or(Type::I64)
                     });
                 let ownership = self
-                    .ownership_with_mod(&ty, p.access_mod)
+                    .param_ownership_with_mod(&ty, p.access_mod)
                     .unwrap_or_else(|_| Self::ownership_for_type(&ty));
                 self.define_var(
                     &p.name.as_str(),
@@ -276,13 +276,21 @@ impl Typer {
             .ok_or_else(|| format!("undeclared function: {}", f.name))?
             .clone();
 
+        // Push the function body scope and define parameters *inside* it
+        // (rather than in a separate outer scope). This is the Stage-A
+        // refactor that lets `emit_scope_drops_excluding` see parameters
+        // and emit per-param drops at function body end for params whose
+        // ownership is `Owned` (notably explicit-`take` params). Borrowed
+        // params (the new default for heap-managed types) are skipped by
+        // the drop filter, preserving the long-standing "caller still owns
+        // the value across the call" semantics for unannotated parameters.
         self.push_scope();
         let mut params = Vec::new();
         for (i, p) in f.params.iter().enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i].clone();
             let ownership = self
-                .ownership_with_mod(&ty, p.access_mod)
+                .param_ownership_with_mod(&ty, p.access_mod)
                 .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),
@@ -340,7 +348,11 @@ impl Typer {
             }
         }
         self.current_fn_declared_errors = declared_err_names.clone();
-        let body = self.lower_block(&f.body, &ret)?;
+        // Inline the body of `lower_block` so parameters (defined in the
+        // current scope above) are seen by `finalize_block_drops` and get
+        // per-param drop emission alongside body locals.
+        let mut body = self.lower_block_no_scope(&f.body, &ret)?;
+        self.finalize_block_drops(&mut body);
         // Final error union: union of declared + inferred.
         let mut error_types: Vec<Type> = Vec::new();
         let mut seen: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
@@ -579,7 +591,7 @@ impl Typer {
             let pid = self.fresh_id();
             let ty = ptys[i + 1].clone();
             let ownership = self
-                .ownership_with_mod(&ty, p.access_mod)
+                .param_ownership_with_mod(&ty, p.access_mod)
                 .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),

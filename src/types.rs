@@ -43,6 +43,11 @@ pub enum Type {
     Alias(Symbol, Box<Type>),
     Newtype(Symbol, Box<Type>),
     Generator(Box<Type>),
+    /// A write-through handle to a row in a store. The `Symbol` is the
+    /// store name; the underlying record type is the store's row struct
+    /// `Struct("__store_{name}", [])`. `Row<T>` is `@resource` (P4 §5):
+    /// it must not be implicitly copied. See `docs/access-semantics-sprint.md §6`.
+    Row(Symbol),
 }
 
 impl Type {
@@ -265,6 +270,7 @@ impl std::fmt::Display for Type {
             Self::Alias(name, inner) => write!(f, "alias {name} is {inner}"),
             Self::Newtype(name, inner) => write!(f, "newtype {name} is {inner}"),
             Self::Generator(inner) => write!(f, "Generator of {inner}"),
+            Self::Row(name) => write!(f, "Row<{name}>"),
         }
     }
 }

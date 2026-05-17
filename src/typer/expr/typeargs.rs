@@ -105,7 +105,6 @@ impl Typer {
                 match &*outer_name {
                     "Vec" => Some(Type::Vec(Box::new(inner_ty))),
                     "Ptr" => Some(Type::Ptr(Box::new(inner_ty))),
-                    "Rc" => Some(Type::Rc(Box::new(inner_ty))),
                     other => Some(Type::Struct(Symbol::intern(other), vec![inner_ty])),
                 }
             }
