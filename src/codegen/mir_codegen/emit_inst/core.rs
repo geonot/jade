@@ -94,7 +94,8 @@ impl<'ctx> Compiler<'ctx> {
                         }
                     }
                 }
-                mir::InstKind::MethodCall(recv, method, args) => {
+                mir::InstKind::MethodCall(recv, method, args, borrow) => {
+                    let borrow = *borrow;
                     // Try vec/array methods first (these are inline, not compiled functions)
                     let recv_ty = self.value_types.get(recv).cloned();
 
@@ -234,7 +235,9 @@ impl<'ctx> Compiler<'ctx> {
                                 if !args.is_empty() {
                                     let idx = self.val(args[0]).into_int_value();
                                     return Ok(Some(
-                                        (self.vec_get_idx(header_ptr, &elem_ty, idx))?,
+                                        (self.vec_get_idx_borrow(
+                                            header_ptr, &elem_ty, idx, borrow,
+                                        ))?,
                                     ));
                                 }
                                 return Err("get() requires an index".into());

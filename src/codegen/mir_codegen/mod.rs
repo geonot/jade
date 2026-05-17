@@ -183,7 +183,7 @@ impl<'ctx> Compiler<'ctx> {
                     | mir::InstKind::Slice(..) => true,
                     // Vec/array methods may emit calls to runtime helpers
                     // (jinn_sort_i64, __jinn_vec_slice, etc.).
-                    mir::InstKind::MethodCall(_, method, _) => matches!(
+                    mir::InstKind::MethodCall(_, method, _, _) => matches!(
                         &*method.as_str(),
                         "sort"
                             | "reverse"

@@ -87,7 +87,7 @@ impl Lowerer {
                 let arg_vals: Vec<ValueId> =
                     args.iter().map(|a| self.lower_expr_owned(a)).collect();
                 self.emit(
-                    InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals),
+                    InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals, false),
                     ty,
                     span,
                 )

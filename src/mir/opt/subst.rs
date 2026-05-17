@@ -44,7 +44,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
                 sub!(a);
             }
         }
-        InstKind::MethodCall(obj, _, args) => {
+        InstKind::MethodCall(obj, _, args, _) => {
             sub!(obj);
             for a in args {
                 sub!(a);

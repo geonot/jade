@@ -102,8 +102,9 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::Cmp(op, l, r, _) => format!("{op} {l} {r}"),
 
         InstKind::Call(name, args) => format!("call {name}({})", fmt_args(args)),
-        InstKind::MethodCall(obj, name, args) => {
-            format!("method_call {obj}.{name}({})", fmt_args(args))
+        InstKind::MethodCall(obj, name, args, borrow) => {
+            let suffix = if *borrow { " [borrow]" } else { "" };
+            format!("method_call {obj}.{name}({}){suffix}", fmt_args(args))
         }
         InstKind::IndirectCall(f, args) => format!("indirect_call {f}({})", fmt_args(args)),
 

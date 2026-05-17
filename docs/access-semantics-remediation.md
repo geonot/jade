@@ -175,16 +175,25 @@ Deferred — write a follow-up sprint or fold into R3.4:
       get an automatic clone path. Until then the heuristic remains the
       safety net for that case.
 
-**R3.3 — T1 raw-pointer borrow codegen** ✅ (partial — Field/Index path)
+**R3.3 — T1 raw-pointer borrow codegen** ✅
 - [x] HIR post-pass `escape::apply_demotions`: walks each fn's body,
-      demotes every `Owned` Bind whose RHS is a `Field`/`Index` read of
-      a clonable heap type AND whose escape tier is T1 to
-      `Ownership::Borrowed`, **and** removes the matching
-      `Stmt::Drop(def_id, …)` from the enclosing block.
+      demotes every `Owned` Bind whose RHS is a `Field`/`Index` read OR
+      a container-read method (`vec.get`/`first`/`last`, `map.get`,
+      `set.peek*`, `pq.peek*`/`top`, `deque.front`/`back`) of a clonable
+      heap type AND whose escape tier is T1 to `Ownership::Borrowed`,
+      **and** removes the matching `Stmt::Drop(def_id, …)` from the
+      enclosing block.
 - [x] MIR `Bind` lowering (`src/mir/lower/stmt.rs`) pairs the demotion
       by skipping the auto-clone (`lower_expr_owned`) whenever it sees
-      a `Borrowed` binding with a `Field`/`Index` RHS — net effect on
-      the hot path is: no alloc, no copy, no free.
+      a `Borrowed` binding with a `Field`/`Index` RHS, and for container
+      reads it additionally calls `mark_method_call_borrow` to flip
+      the new `InstKind::MethodCall(..., borrow: bool)` flag.
+- [x] Codegen (`src/codegen/vec/core.rs`): `vec_get_idx_borrow(…, borrow)`
+      skips the deep `clone_value` of the returned heap-typed element
+      when `borrow` is true. The MIR `vec.get` dispatch threads the flag
+      through; `map_get_val`/set/pq/deque already returned raw without
+      cloning (the demotion-driven Drop-removal alone fixes their
+      latent double-free for T1 clonable reads).
 - [x] Per-block-local walk handles `If`, `While`, `For`, `SimFor`,
       `Loop`, `Match`, `Defer`, `Transaction`, `SimBlock` nested
       blocks. Does NOT descend into expression-embedded blocks
@@ -194,22 +203,20 @@ Deferred — write a follow-up sprint or fold into R3.4:
 - [x] Unit tests in `src/escape/mod.rs`:
       `apply_demotions_demotes_t1_field_read_and_removes_drop`,
       `apply_demotions_skips_when_value_escapes`,
-      `apply_demotions_respects_explicit_access_mod`.
-- [x] Bulk gate: **921/921** still green; **escape: 7/7** unit tests.
-- [ ] **Deferred** — container readers (`vec.get`, `map.get`, `set.peek`,
-      `deque.front`, `pq.peek_min`/`max`) skipping `clone_value` when
-      caller binding is T1. Requires plumbing the caller binding's
-      def_id into the container-read codegen sites; postponed pending a
-      design for the def_id→inst link in MIR-codegen.
-- [ ] **Deferred** — `for x in xs` per-iteration borrow load. Same
-      plumbing dependency.
+      `apply_demotions_respects_explicit_access_mod`,
+      `apply_demotions_demotes_t1_vec_get_and_removes_drop`,
+      `apply_demotions_skips_when_vec_get_value_escapes`.
+- [x] Bulk gate: **921/921** still green; **escape: 9/9** unit tests
+      (plus 1 lexer test in the same binary).
+- [ ] **Deferred** — `for x in xs` per-iteration borrow load. Separate
+      binder shape, same plumbing pattern.
 - [ ] **Deferred** — IR-snapshot regression tests on
       `tests/programs/field_short_lived_borrow.jn` and
       `tests/programs/field_auto_copy.jn`.
 - [ ] **Deferred** — published benchmark gate (struct_ops, spectral_norm,
       sim_for, tight_loop, store_perf, vec_grow). The current benchmark
-      suite has limited coverage of heap-typed field reads so a
-      measurable delta requires either new benchmarks or program
+      suite has limited coverage of heap-typed field/container reads so
+      a measurable delta requires either new benchmarks or program
       restructuring; tracked separately.
 
 **R3.4 — T2 / T3 codegen**

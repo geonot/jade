@@ -51,7 +51,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
                 s.insert(*a);
             }
         }
-        InstKind::MethodCall(obj, _, args) => {
+        InstKind::MethodCall(obj, _, args, _) => {
             s.insert(*obj);
             for a in args {
                 s.insert(*a);

@@ -169,7 +169,7 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
                         }
                     }
                 }
-                InstKind::MethodCall(recv, _, args) => {
+                InstKind::MethodCall(recv, _, args, _) => {
                     if let Some(info) = uses.get_mut(recv) {
                         info.escapes = true;
                     }
@@ -290,7 +290,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::UnaryOp(_, a) => vec![*a],
 
         InstKind::Call(_, args) => args.clone(),
-        InstKind::MethodCall(recv, _, args) => {
+        InstKind::MethodCall(recv, _, args, _) => {
             let mut v = vec![*recv];
             v.extend(args);
             v
@@ -532,7 +532,7 @@ fn reuse_pairing(
                 }
                 InstKind::Call(_, _)
                 | InstKind::IndirectCall(_, _)
-                | InstKind::MethodCall(_, _, _)
+                | InstKind::MethodCall(_, _, _, _)
                 | InstKind::ClosureCall(_, _)
                 | InstKind::ChanSend(_, _)
                 | InstKind::SpawnActor(_, _) => {
@@ -638,7 +638,7 @@ fn cross_block_loop_reuse(
                     inst.kind,
                     InstKind::Call(_, _)
                         | InstKind::IndirectCall(_, _)
-                        | InstKind::MethodCall(_, _, _)
+                        | InstKind::MethodCall(_, _, _, _)
                         | InstKind::ClosureCall(_, _)
                         | InstKind::ChanSend(_, _)
                         | InstKind::SpawnActor(_, _)
@@ -881,7 +881,7 @@ fn vec_reuse_pairing(
                 }
                 InstKind::Call(_, _)
                 | InstKind::IndirectCall(_, _)
-                | InstKind::MethodCall(_, _, _)
+                | InstKind::MethodCall(_, _, _, _)
                 | InstKind::ClosureCall(_, _)
                 | InstKind::ChanSend(_, _)
                 | InstKind::SpawnActor(_, _) => {
@@ -968,7 +968,7 @@ fn vec_reuse_pairing(
                     inst.kind,
                     InstKind::Call(_, _)
                         | InstKind::IndirectCall(_, _)
-                        | InstKind::MethodCall(_, _, _)
+                        | InstKind::MethodCall(_, _, _, _)
                         | InstKind::ClosureCall(_, _)
                         | InstKind::ChanSend(_, _)
                         | InstKind::SpawnActor(_, _)

@@ -18,7 +18,7 @@ impl Lowerer {
             | ExprKind::DequeMethod(obj, name, args) => {
                 let obj_val = self.lower_expr(obj);
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::MethodCall(obj_val, *name, vals), ty, span)
+                self.emit(InstKind::MethodCall(obj_val, *name, vals, false), ty, span)
             }
             ExprKind::VecNew(elems) | ExprKind::NDArrayNew(elems) | ExprKind::SIMDNew(elems) => {
                 let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr(e)).collect();
@@ -114,6 +114,7 @@ impl Lowerer {
                             v,
                             Symbol::intern(&format!("{type_name}_{method_name}")),
                             vec![],
+                            false,
                         ),
                         ty,
                         span,

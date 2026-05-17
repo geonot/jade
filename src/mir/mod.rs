@@ -196,7 +196,15 @@ pub enum InstKind {
     Cmp(CmpOp, ValueId, ValueId, Type),
 
     Call(Symbol, Vec<ValueId>),
-    MethodCall(ValueId, Symbol, Vec<ValueId>),
+    /// Method-call dispatch. The trailing `bool` is the "borrow" flag: when
+    /// `true`, codegen for known short-lived-read methods (`vec.get`,
+    /// `vec.first`, `vec.last`) skips the otherwise-mandatory deep clone of
+    /// the returned heap value. Set only by `lower_stmt(Bind)` when the
+    /// destination binding was demoted to `Ownership::Borrowed` by
+    /// `escape::apply_demotions` (T1 reads of clonable types). For methods
+    /// whose codegen does not clone anyway (`map.get`, `set` ops, `pq`/`deque`
+    /// peek), the flag is a no-op but harmless.
+    MethodCall(ValueId, Symbol, Vec<ValueId>, bool),
     IndirectCall(ValueId, Vec<ValueId>),
 
     Load(Symbol),

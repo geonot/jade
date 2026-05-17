@@ -178,10 +178,12 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
     let mut demoted: std::collections::HashSet<DefId> = std::collections::HashSet::new();
     for stmt in block.iter_mut() {
         if let Stmt::Bind(b) = stmt {
+            let value_shape_ok = matches!(b.value.kind, ExprKind::Field(..) | ExprKind::Index(..))
+                || is_container_read_method(&b.value);
             let qualifies = b.access_mod.is_none()
                 && b.ownership == hir::Ownership::Owned
                 && info.tier(b.def_id) == Tier::T1
-                && matches!(b.value.kind, ExprKind::Field(..) | ExprKind::Index(..))
+                && value_shape_ok
                 && !b.value.ty.is_trivially_droppable()
                 && b.value.ty.is_value_clonable();
             if qualifies {
@@ -198,6 +200,24 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
             _ => true,
         });
     }
+}
+
+/// Mirror of `mir::lower::stmt::is_container_read_method` for the HIR-level
+/// demotion pass. Recognises the same set of element-borrow-shape container
+/// reads (Vec.get/first/last, Map.get, Set.peek*, PQ.peek*, Deque.front/back).
+fn is_container_read_method(expr: &hir::Expr) -> bool {
+    let name = match &expr.kind {
+        ExprKind::VecMethod(_, n, _)
+        | ExprKind::MapMethod(_, n, _)
+        | ExprKind::SetMethod(_, n, _)
+        | ExprKind::PQMethod(_, n, _)
+        | ExprKind::DequeMethod(_, n, _) => n.as_str(),
+        _ => return false,
+    };
+    matches!(
+        &*name,
+        "get" | "first" | "last" | "front" | "back" | "peek" | "peek_min" | "peek_max" | "top"
+    )
 }
 
 fn recurse_demote_stmt(stmt: &mut Stmt, info: &EscapeInfo, count: &mut usize) {
@@ -1142,6 +1162,108 @@ mod tests {
         let info = analyze_fn(&hfn);
         let n = apply_demotions(&mut hfn, &info);
         assert_eq!(n, 0, "explicit access_mod must opt out of demotion");
+        match &hfn.body[0] {
+            Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Owned),
+            _ => panic!("expected Bind in slot 0"),
+        }
+    }
+
+    /// R3.3 (container reads): a Bind whose RHS is `v.get(i)` on a
+    /// `Vec<String>` and whose use stays local should be demoted
+    /// Owned → Borrowed and its matching scope-exit Drop removed —
+    /// mirroring the Field/Index case.
+    #[test]
+    fn apply_demotions_demotes_t1_vec_get_and_removes_drop() {
+        let vec_ty = Type::Vec(Box::new(Type::String));
+        let recv = Expr {
+            kind: ExprKind::Var(DefId(200), Symbol::intern("v")),
+            ty: vec_ty,
+            span: sp(),
+        };
+        let idx = Expr {
+            kind: ExprKind::Int(0),
+            ty: Type::I64,
+            span: sp(),
+        };
+        let read = Expr {
+            kind: ExprKind::VecMethod(Box::new(recv), Symbol::intern("get"), vec![idx]),
+            ty: Type::String,
+            span: sp(),
+        };
+        let mut hfn = make_fn(
+            vec![
+                Stmt::Bind(Bind {
+                    def_id: DefId(70),
+                    name: Symbol::intern("x"),
+                    value: read,
+                    ty: Type::String,
+                    ownership: Ownership::Owned,
+                    atomic: false,
+                    access_mod: None,
+                    span: sp(),
+                }),
+                Stmt::Expr(var(70, Type::String)),
+                Stmt::Drop(DefId(70), Symbol::intern("x"), Type::String, sp()),
+            ],
+            Type::Void,
+        );
+        let info = analyze_fn(&hfn);
+        assert_eq!(info.tier(DefId(70)), Tier::T1);
+        let n = apply_demotions(&mut hfn, &info);
+        assert_eq!(n, 1, "expected exactly one container-read demotion");
+        match &hfn.body[0] {
+            Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Borrowed),
+            _ => panic!("expected Bind in slot 0"),
+        }
+        assert!(
+            !hfn.body
+                .iter()
+                .any(|s| matches!(s, Stmt::Drop(id, _, _, _) if *id == DefId(70))),
+            "Drop(DefId(70)) was not removed: {:?}",
+            hfn.body
+        );
+    }
+
+    /// R3.3 (container reads, inverse): a Bind whose `v.get(i)` value
+    /// escapes via Ret must NOT be demoted, and its Drop must remain.
+    #[test]
+    fn apply_demotions_skips_when_vec_get_value_escapes() {
+        let vec_ty = Type::Vec(Box::new(Type::String));
+        let recv = Expr {
+            kind: ExprKind::Var(DefId(201), Symbol::intern("v")),
+            ty: vec_ty,
+            span: sp(),
+        };
+        let idx = Expr {
+            kind: ExprKind::Int(0),
+            ty: Type::I64,
+            span: sp(),
+        };
+        let read = Expr {
+            kind: ExprKind::VecMethod(Box::new(recv), Symbol::intern("get"), vec![idx]),
+            ty: Type::String,
+            span: sp(),
+        };
+        let mut hfn = make_fn(
+            vec![
+                Stmt::Bind(Bind {
+                    def_id: DefId(80),
+                    name: Symbol::intern("x"),
+                    value: read,
+                    ty: Type::String,
+                    ownership: Ownership::Owned,
+                    atomic: false,
+                    access_mod: None,
+                    span: sp(),
+                }),
+                Stmt::Ret(Some(var(80, Type::String)), Type::String, sp()),
+            ],
+            Type::String,
+        );
+        let info = analyze_fn(&hfn);
+        assert_eq!(info.tier(DefId(80)), Tier::T2);
+        let n = apply_demotions(&mut hfn, &info);
+        assert_eq!(n, 0, "escaping container read must not be demoted");
         match &hfn.body[0] {
             Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Owned),
             _ => panic!("expected Bind in slot 0"),

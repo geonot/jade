@@ -35,6 +35,17 @@ impl Lowerer {
                             )
                         {
                             self.lower_expr(&b.value)
+                        } else if matches!(b.ownership, hir::Ownership::Borrowed)
+                            && is_container_read_method(&b.value)
+                        {
+                            // R3.3 (container reads): same rationale as
+                            // Field/Index above. We also flip the just-
+                            // emitted MethodCall's `borrow` flag so
+                            // codegen can skip the deep clone inside
+                            // `vec_get_idx` (and equivalent paths).
+                            let v = self.lower_expr(&b.value);
+                            self.mark_method_call_borrow(v);
+                            v
                         } else {
                             self.lower_expr_owned(&b.value)
                         }
@@ -227,4 +238,45 @@ impl Lowerer {
             self.lower_stmt(stmt);
         }
     }
+
+    /// R3.3 (container reads): after emitting a container read at a
+    /// `Borrowed`-demoted binding, walk back through the current block to
+    /// find the just-emitted instruction whose `dest == v` and, if it is a
+    /// `MethodCall`, set its `borrow` flag. Codegen uses this flag to skip
+    /// the deep clone that would otherwise be required for the heap-typed
+    /// returned element.
+    ///
+    /// Safe no-op if the producing instruction isn't a `MethodCall` (e.g. it
+    /// was constant-folded, substituted, or the value already lives in
+    /// `var_map`).
+    pub(super) fn mark_method_call_borrow(&mut self, v: ValueId) {
+        let blk = self.func.block_mut(self.current_block);
+        for inst in blk.insts.iter_mut().rev() {
+            if inst.dest == Some(v) {
+                if let InstKind::MethodCall(_, _, _, borrow) = &mut inst.kind {
+                    *borrow = true;
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// Returns true when `expr` is a container method-call shape that returns an
+/// element aliased to internal storage (Vec.get/first/last, Map.get,
+/// Set.peek, PQ.peek*, Deque.front/back). Used by R3.3 demotion at both the
+/// typer (escape::apply_demotions) and MIR (lower_stmt(Bind)) boundaries.
+pub(crate) fn is_container_read_method(expr: &hir::Expr) -> bool {
+    let name = match &expr.kind {
+        ExprKind::VecMethod(_, n, _)
+        | ExprKind::MapMethod(_, n, _)
+        | ExprKind::SetMethod(_, n, _)
+        | ExprKind::PQMethod(_, n, _)
+        | ExprKind::DequeMethod(_, n, _) => n.as_str(),
+        _ => return false,
+    };
+    matches!(
+        &*name,
+        "get" | "first" | "last" | "front" | "back" | "peek" | "peek_min" | "peek_max" | "top"
+    )
 }

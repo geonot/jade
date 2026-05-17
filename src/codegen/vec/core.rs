@@ -392,6 +392,20 @@ impl<'ctx> Compiler<'ctx> {
         elem_ty: &Type,
         idx: inkwell::values::IntValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.vec_get_idx_borrow(header_ptr, elem_ty, idx, false)
+    }
+
+    /// As `vec_get_idx`, but when `borrow` is true returns the raw aliased
+    /// element without deep-copying. Only sound when the caller binds the
+    /// result with `Ownership::Borrowed` (so no scope-exit drop is emitted)
+    /// and the binding does not outlive the underlying Vec storage.
+    pub(crate) fn vec_get_idx_borrow(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        elem_ty: &Type,
+        idx: inkwell::values::IntValue<'ctx>,
+        borrow: bool,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
         let lty = self.llvm_ty(elem_ty);
@@ -421,7 +435,7 @@ impl<'ctx> Compiler<'ctx> {
         // double-free. clone_value emits the right deep-copy / RC-bump for
         // each supported type. Trivially-droppable types short-circuit to
         // identity inside clone_value (no overhead).
-        if Self::is_value_clonable(elem_ty) {
+        if !borrow && Self::is_value_clonable(elem_ty) {
             self.clone_value(raw, elem_ty)
         } else {
             // Type system should have prevented this binding from being
