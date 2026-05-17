@@ -1,4 +1,4 @@
-# std.os — Operating system interface
+                                                                                                                                # std.os — Operating system interface
 #
 # Usage:
 #   home is os.env("HOME")
@@ -114,6 +114,19 @@ type MmapRegion @resource
     fd as i32
     ok as bool
 
+    # Auto-invoked at scope exit so the mapping and the backing fd are
+    # released even when `mmap_close` is not called explicitly.
+    # Idempotent — zeroing `self.ok` makes a follow-up call a no-op.
+    *drop
+        if self.ok
+            extern.munmap(self.addr, self.length)
+            if self.fd >= 0
+                extern.jinn_fd_close(self.fd)
+            self.addr is 0 as %i8
+            self.length is 0
+            self.fd is -1 as i32
+            self.ok is false
+
 # Map a file read-only into memory. Returns MmapRegion.
 *mmap_file(path as String) returns MmapRegion
     fd is extern.open(%path, O_RDONLY, 0)
@@ -137,7 +150,7 @@ type MmapRegion @resource
     size is extern.fstat_size(fd)
     if size <= 0
         extern.jinn_fd_close(fd)
-        return MmapRegion(addr is 0 as %i8, length is 0, fd is -1, ok is false)
+        # return MmapRegion(addr is 0 as %i8F, length is 0, fd is -1, ok is false)
     ptr is extern.mmap(0 as %i8, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
     if ptr as i64 equals -1
         extern.jinn_fd_close(fd)
@@ -166,3 +179,5 @@ type MmapRegion @resource
     if region.fd >= 0
         extern.jinn_fd_close(region.fd)
     rc equals 0
+
+1222223321111211    eeeeerrrrrfff33333f        

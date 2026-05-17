@@ -18,13 +18,30 @@ impl<'ctx> Compiler<'ctx> {
             let v = self.compile_expr(obj)?;
             return self.vec_len(v.into_pointer_value());
         }
-        let (ty_name, is_ptr) = match obj_ty {
-            Type::Struct(n, _) => (*n, false),
+        // P5 §6: Row<T> shares its LLVM layout with `__store_{T}`, so field
+        // access on a row resolves through the auto-generated record struct.
+        let row_struct = match obj_ty {
+            Type::Row(name) => Some(crate::intern::Symbol::intern(&format!(
+                "__store_{}",
+                name.as_str()
+            ))),
             Type::Ptr(inner) => match inner.as_ref() {
+                Type::Row(name) => Some(crate::intern::Symbol::intern(&format!(
+                    "__store_{}",
+                    name.as_str()
+                ))),
+                _ => None,
+            },
+            _ => None,
+        };
+        let (ty_name, is_ptr) = match (obj_ty, row_struct) {
+            (_, Some(name)) => (name, matches!(obj_ty, Type::Ptr(_))),
+            (Type::Struct(n, _), _) => (*n, false),
+            (Type::Ptr(inner), _) => match inner.as_ref() {
                 Type::Struct(n, _) => (*n, true),
                 other => return Err(format!("field access on non-struct: {other}")),
             },
-            other => return Err(format!("field access on non-struct: {other}")),
+            (other, _) => return Err(format!("field access on non-struct: {other}")),
         };
         let fields = self
             .structs
@@ -86,10 +103,26 @@ impl<'ctx> Compiler<'ctx> {
                 .ok_or_else(|| format!("undefined: {name}")),
             hir::ExprKind::Field(obj, field, _idx) => {
                 let obj_ty = &obj.ty;
-                let (ty_name, is_ptr) = match obj_ty {
-                    Type::Struct(n, _) => (n.as_str(), false),
+                // P5 §6: Row<T> lvalue access uses the `__store_{T}` layout.
+                let row_struct = match obj_ty {
+                    Type::Row(name) => Some(crate::intern::Symbol::intern(&format!(
+                        "__store_{}",
+                        name.as_str()
+                    ))),
                     Type::Ptr(inner) => match inner.as_ref() {
-                        Type::Struct(n, _) => (n.as_str(), true),
+                        Type::Row(name) => Some(crate::intern::Symbol::intern(&format!(
+                            "__store_{}",
+                            name.as_str()
+                        ))),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let (ty_name, is_ptr) = match (obj_ty, row_struct) {
+                    (_, Some(name)) => (name, matches!(obj_ty, Type::Ptr(_))),
+                    (Type::Struct(n, _), _) => (*n, false),
+                    (Type::Ptr(inner), _) => match inner.as_ref() {
+                        Type::Struct(n, _) => (*n, true),
                         _ => return Err("field lvalue on non-struct".into()),
                     },
                     _ => return Err("field lvalue on non-struct".into()),

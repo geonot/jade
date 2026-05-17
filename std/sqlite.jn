@@ -207,9 +207,16 @@ type Db @resource
     *rollback returns bool
         extern.jinn_sqlite_rollback(self.handle) equals 0
 
-    # Close the database.
+    # Close the database. Idempotent.
     *close
-        extern.jinn_sqlite_close(self.handle)
+        if self.handle as i64 neq 0
+            extern.jinn_sqlite_close(self.handle)
+            self.handle is 0 as %i8
+
+    # Auto-invoked at scope exit so the SQLite connection is released
+    # even when `.close()` is omitted.
+    *drop
+        self.close()
 
 # ── Module-level functions ───────────────────────────────────
 

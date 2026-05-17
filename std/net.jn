@@ -51,7 +51,14 @@ type TcpListener @resource
         TcpStream(fd is client_fd)
 
     *shut
-        extern.jinn_close(self.fd)
+        if self.fd >= 0
+            extern.jinn_close(self.fd)
+            self.fd is -1 as i32
+
+    # Auto-invoked at scope exit: release the listener fd if the user
+    # did not call `.shut()` explicitly. Idempotent.
+    *drop
+        self.shut()
 
 type TcpStream @resource
     fd as i32
@@ -78,8 +85,14 @@ type TcpStream @resource
         true
 
     *shut
-        extern.shutdown(self.fd, SHUT_RDWR)
-        extern.jinn_close(self.fd)
+        if self.fd >= 0
+            extern.shutdown(self.fd, SHUT_RDWR)
+            extern.jinn_close(self.fd)
+            self.fd is -1 as i32
+
+    # Auto-invoked at scope exit: close the stream socket cleanly.
+    *drop
+        self.shut()
 
 # ── UDP type ─────────────────────────────────────────────────
 
@@ -100,7 +113,13 @@ type UdpSocket @resource
         __string_from_raw(buf, n, max_bytes + 1)
 
     *shut
-        extern.jinn_close(self.fd)
+        if self.fd >= 0
+            extern.jinn_close(self.fd)
+            self.fd is -1 as i32
+
+    # Auto-invoked at scope exit: release the UDP socket fd.
+    *drop
+        self.shut()
 
 # ── Helpers ──────────────────────────────────────────────────
 

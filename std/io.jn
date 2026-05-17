@@ -29,6 +29,7 @@ extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
 extern *strlen(s as %i8) returns i64
 extern *write(fd as i32, buf as %i8, count as i64) returns i64
 extern *read(fd as i32, buf as %i8, count as i64) returns i64
+extern *access(path as %i8, mode as i32) returns i32
 
 # Whence values for `seek`.
 SEEK_SET is 0
@@ -82,7 +83,16 @@ type File @resource
         extern.ftell(self.handle)
 
     *shut
-        extern.fclose(self.handle)
+        if self.handle as i64 neq 0
+            extern.fclose(self.handle)
+            self.handle is 0 as %i8
+
+    # Auto-invoked at scope exit for this `@resource` type so an
+    # unclosed file does not leak its OS handle. Idempotent: a prior
+    # explicit `self.shut()` zeroed `self.handle` and this becomes
+    # a no-op.
+    *drop
+        self.shut()
 
     *eof returns bool
         extern.feof(self.handle) neq 0
@@ -211,7 +221,10 @@ type File @resource
     extern.remove(%path) equals 0
 
 *file_exists(path as String) returns bool
-    __file_exists(path)
+    # F_OK (0) checks for path existence. POSIX access(2): returns 0 on
+    # success. We bypass the `__file_exists` builtin because its MIR
+    # lowering currently emits an unresolved `__builtin_FileExists` call.
+    extern.access(%path, 0 as i32) equals 0
 
 # ── Standard streams ─────────────────────────────────────────
 

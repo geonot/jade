@@ -7884,3 +7884,39 @@ fn resource_cross_thread_actor_rejected() {
         "expected resource actor-send diagnostic, got: {err}"
     );
 }
+
+#[test]
+fn file_drop_auto_flushes_writes() {
+    // R1.1: `File` is `@resource` and has a `*drop` that calls `*shut`
+    // (which fcloses the FILE* and flushes libc buffers). Without the
+    // auto-drop, the buffered write below would not reach disk before
+    // the subsequent read, and `read_file` would observe an empty string.
+    expect(
+        "use std/io\n\n*write_then_drop()\n    f is io.open(\"drop_test.txt\", \"w\")\n    f.write(\"hello-from-drop\")\n\n*main()\n    write_then_drop()\n    log io.read_file(\"drop_test.txt\")\n",
+        "hello-from-drop",
+    );
+}
+
+#[test]
+fn file_drop_idempotent_after_explicit_shut() {
+    // R1.1: a `@resource` whose `*shut` was called explicitly must not
+    // crash when `*drop` runs at scope exit. The idempotency guard
+    // (handle null-check + zero-out) is what makes this safe.
+    expect(
+        "use std/io\n\n*open_shut_then_drop()\n    f is io.open(\"idem_test.txt\", \"w\")\n    f.write(\"x\")\n    f.shut()\n    # f goes out of scope here; *drop must be a no-op since f.handle was zeroed.\n\n*main()\n    open_shut_then_drop()\n    log \"ok\"\n",
+        "ok",
+    );
+}
+
+#[test]
+fn store_row_field_access_in_coroutine_body() {
+    // R1.2: Row<T> field access in HIR-direct codegen (coroutine bodies).
+    // Coroutines don't capture outer scope yet, but a Row produced inside
+    // the coroutine body must still support `.field` reads and writes.
+    // Regression test for the missing Type::Row arm in
+    // src/codegen/expr/access.rs `compile_field` / `compile_lvalue_ptr`.
+    expect(
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    foo is dispatch reader\n        r is data where key equals 2\n        r.val is 777\n        yield 0\n    reader.next()\n    s is data where key equals 2\n    log(s.val)\n",
+        "777",
+    );
+}

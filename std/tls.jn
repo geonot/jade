@@ -103,6 +103,11 @@ type TlsStream @resource
     *shut
         if self.handle as i64 neq 0
             extern.jinn_tls_close(self.handle)
+            self.handle is 0 as %i8
+
+    # Auto-invoked at scope exit: close the TLS connection.
+    *drop
+        self.shut()
 
 type TlsListener @resource
     handle as %i8
@@ -117,6 +122,11 @@ type TlsListener @resource
     *shut
         if self.handle as i64 neq 0
             extern.jinn_tls_listener_close(self.handle)
+            self.handle is 0 as %i8
+
+    # Auto-invoked at scope exit: shut down the TLS listener.
+    *drop
+        self.shut()
 
 # Open a TLS client connection.
 *connect(host as String, port as i64) returns TlsStream
