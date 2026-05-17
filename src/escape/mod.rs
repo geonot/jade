@@ -139,6 +139,94 @@ pub fn analyze_fn(f: &hir::Fn) -> EscapeInfo {
     info
 }
 
+/// R3.3 post-pass: mutate a function's HIR body to demote each `Owned`
+/// binding the escape analysis classified as `T1` AND whose value is a
+/// `Field`/`Index` read of a clonable, heap-managed type to
+/// `Ownership::Borrowed`.
+///
+/// For each demoted `Bind`, the matching `Stmt::Drop(def_id, …)` in the
+/// enclosing block is removed (Drops were inserted by the typer at scope
+/// exit based on the original `Owned` ownership). The MIR lowerer pairs
+/// the demotion by skipping the auto-clone in
+/// [`crate::mir::lower::stmt`]'s `Stmt::Bind` handler whenever it sees a
+/// `Borrowed` binding with a `Field`/`Index` RHS.
+///
+/// Together these two changes eliminate the allocate-and-immediately-free
+/// pair for short-lived field/index borrows (the canonical "T1" pattern
+/// from `docs/access-semantics-sprint.md` §3.3).
+///
+/// **Soundness**: only bindings the escape analysis proved do NOT escape
+/// (the value is never returned, stored in a container or struct,
+/// captured by a closure, sent on a channel, etc.) are demoted, so the
+/// parent aggregate cannot be dropped before the alias goes out of scope.
+///
+/// **Scope**: the walk is per-`Stmt`-block local; it does NOT descend
+/// into expression-embedded blocks (lambda bodies, comprehensions,
+/// coroutines, generators, select arms). Bindings inside those constructs
+/// retain their conservative owned-plus-clone behavior — a future
+/// extension can handle them once the escape analysis distinguishes
+/// captures.
+///
+/// Returns the number of bindings demoted (for telemetry).
+pub fn apply_demotions(f: &mut hir::Fn, info: &EscapeInfo) -> usize {
+    let mut count = 0usize;
+    demote_block(&mut f.body, info, &mut count);
+    count
+}
+
+fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
+    let mut demoted: std::collections::HashSet<DefId> = std::collections::HashSet::new();
+    for stmt in block.iter_mut() {
+        if let Stmt::Bind(b) = stmt {
+            let qualifies = b.access_mod.is_none()
+                && b.ownership == hir::Ownership::Owned
+                && info.tier(b.def_id) == Tier::T1
+                && matches!(b.value.kind, ExprKind::Field(..) | ExprKind::Index(..))
+                && !b.value.ty.is_trivially_droppable()
+                && b.value.ty.is_value_clonable();
+            if qualifies {
+                b.ownership = hir::Ownership::Borrowed;
+                demoted.insert(b.def_id);
+                *count += 1;
+            }
+        }
+        recurse_demote_stmt(stmt, info, count);
+    }
+    if !demoted.is_empty() {
+        block.retain(|s| match s {
+            Stmt::Drop(id, _, _, _) => !demoted.contains(id),
+            _ => true,
+        });
+    }
+}
+
+fn recurse_demote_stmt(stmt: &mut Stmt, info: &EscapeInfo, count: &mut usize) {
+    match stmt {
+        Stmt::If(i) => {
+            demote_block(&mut i.then, info, count);
+            for (_, b) in &mut i.elifs {
+                demote_block(b, info, count);
+            }
+            if let Some(b) = &mut i.els {
+                demote_block(b, info, count);
+            }
+        }
+        Stmt::While(w) => demote_block(&mut w.body, info, count),
+        Stmt::For(f) => demote_block(&mut f.body, info, count),
+        Stmt::SimFor(f, _) => demote_block(&mut f.body, info, count),
+        Stmt::Loop(l) => demote_block(&mut l.body, info, count),
+        Stmt::Match(m) => {
+            for arm in &mut m.arms {
+                demote_block(&mut arm.body, info, count);
+            }
+        }
+        Stmt::Defer(b, _) | Stmt::Transaction(b, _) | Stmt::SimBlock(b, _) => {
+            demote_block(b, info, count);
+        }
+        _ => {}
+    }
+}
+
 fn seed_binds_in_block(block: &hir::Block, info: &mut EscapeInfo) {
     for s in block {
         seed_binds_in_stmt(s, info);
@@ -921,5 +1009,142 @@ mod tests {
         ];
         let info = analyze_fn(&make_fn(body, Type::Void));
         assert_eq!(info.tier(DefId(30)), Tier::T3);
+    }
+
+    /// R3.3: a Bind whose RHS is a Field/Index read of a clonable heap
+    /// type AND whose use stays local should be demoted Owned → Borrowed
+    /// AND its matching `Stmt::Drop` should be removed.
+    #[test]
+    fn apply_demotions_demotes_t1_field_read_and_removes_drop() {
+        // Build:
+        //   x is owner.payload    // String field read, T1 (local read only)
+        //   <log x>               // local use → stays T1
+        //   drop(x)               // typer-emitted scope-exit drop
+        //
+        // Expect: x.ownership becomes Borrowed, the Drop is removed.
+        let owner = Expr {
+            kind: ExprKind::Var(DefId(100), Symbol::intern("owner")),
+            ty: Type::Struct(Symbol::intern("Box"), vec![]),
+            span: sp(),
+        };
+        let field_read = Expr {
+            kind: ExprKind::Field(Box::new(owner), Symbol::intern("payload"), 0),
+            ty: Type::String,
+            span: sp(),
+        };
+        let mut hfn = make_fn(
+            vec![
+                Stmt::Bind(Bind {
+                    def_id: DefId(40),
+                    name: Symbol::intern("x"),
+                    value: field_read,
+                    ty: Type::String,
+                    ownership: Ownership::Owned,
+                    atomic: false,
+                    access_mod: None,
+                    span: sp(),
+                }),
+                Stmt::Expr(var(40, Type::String)),
+                Stmt::Drop(DefId(40), Symbol::intern("x"), Type::String, sp()),
+            ],
+            Type::Void,
+        );
+        let info = analyze_fn(&hfn);
+        assert_eq!(info.tier(DefId(40)), Tier::T1);
+        let n = apply_demotions(&mut hfn, &info);
+        assert_eq!(n, 1, "expected exactly one demotion");
+        // The Bind's ownership flipped to Borrowed.
+        match &hfn.body[0] {
+            Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Borrowed),
+            _ => panic!("expected Bind in slot 0"),
+        }
+        // The matching Drop was removed.
+        assert!(
+            !hfn.body
+                .iter()
+                .any(|s| matches!(s, Stmt::Drop(id, _, _, _) if *id == DefId(40))),
+            "Drop(DefId(40)) was not removed: {:?}",
+            hfn.body
+        );
+    }
+
+    /// R3.3 inverse: a Bind whose value escapes (e.g. via `return x`) must
+    /// NOT be demoted. Drop must remain in place.
+    #[test]
+    fn apply_demotions_skips_when_value_escapes() {
+        let owner = Expr {
+            kind: ExprKind::Var(DefId(100), Symbol::intern("owner")),
+            ty: Type::Struct(Symbol::intern("Box"), vec![]),
+            span: sp(),
+        };
+        let field_read = Expr {
+            kind: ExprKind::Field(Box::new(owner), Symbol::intern("payload"), 0),
+            ty: Type::String,
+            span: sp(),
+        };
+        let mut hfn = make_fn(
+            vec![
+                Stmt::Bind(Bind {
+                    def_id: DefId(50),
+                    name: Symbol::intern("x"),
+                    value: field_read,
+                    ty: Type::String,
+                    ownership: Ownership::Owned,
+                    atomic: false,
+                    access_mod: None,
+                    span: sp(),
+                }),
+                Stmt::Ret(Some(var(50, Type::String)), Type::String, sp()),
+            ],
+            Type::String,
+        );
+        let info = analyze_fn(&hfn);
+        assert_eq!(info.tier(DefId(50)), Tier::T2);
+        let n = apply_demotions(&mut hfn, &info);
+        assert_eq!(n, 0, "escaping binding must not be demoted");
+        match &hfn.body[0] {
+            Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Owned),
+            _ => panic!("expected Bind in slot 0"),
+        }
+    }
+
+    /// An explicit `access_mod` on the binding (e.g. `x is take y.field`)
+    /// must opt out of demotion regardless of escape tier.
+    #[test]
+    fn apply_demotions_respects_explicit_access_mod() {
+        let owner = Expr {
+            kind: ExprKind::Var(DefId(100), Symbol::intern("owner")),
+            ty: Type::Struct(Symbol::intern("Box"), vec![]),
+            span: sp(),
+        };
+        let field_read = Expr {
+            kind: ExprKind::Field(Box::new(owner), Symbol::intern("payload"), 0),
+            ty: Type::String,
+            span: sp(),
+        };
+        let mut hfn = make_fn(
+            vec![
+                Stmt::Bind(Bind {
+                    def_id: DefId(60),
+                    name: Symbol::intern("x"),
+                    value: field_read,
+                    ty: Type::String,
+                    ownership: Ownership::Owned,
+                    atomic: false,
+                    access_mod: Some(crate::ast::AccessMod::Take),
+                    span: sp(),
+                }),
+                Stmt::Expr(var(60, Type::String)),
+                Stmt::Drop(DefId(60), Symbol::intern("x"), Type::String, sp()),
+            ],
+            Type::Void,
+        );
+        let info = analyze_fn(&hfn);
+        let n = apply_demotions(&mut hfn, &info);
+        assert_eq!(n, 0, "explicit access_mod must opt out of demotion");
+        match &hfn.body[0] {
+            Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Owned),
+            _ => panic!("expected Bind in slot 0"),
+        }
     }
 }

@@ -274,6 +274,14 @@ impl Typer {
         for (id, t) in einfo.iter() {
             self.escape_tiers.insert(*id, *t);
         }
+        // R3.3: mutate the freshly-lowered HIR in place to demote `Owned`
+        // bindings of `Field`/`Index` reads whose escape tier is `T1`
+        // (short-lived borrows of a clonable heap value).  The matching
+        // `Stmt::Drop` is removed in the same pass; the MIR lowerer pairs
+        // this by skipping the auto-clone for `Borrowed` Field/Index
+        // bindings (see `src/mir/lower/stmt.rs`).  Net effect: no alloc,
+        // no copy, no free on the hot field-access path.
+        let _demoted = crate::escape::apply_demotions(&mut hfn, &einfo);
         Ok(hfn)
     }
 

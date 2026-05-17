@@ -164,19 +164,53 @@ Deferred — write a follow-up sprint or fold into R3.4:
       `returned_binding_escalates_to_t2`, `channel_send_escalates_to_t3`.
 - [ ] Not yet consumed by the typer — see R3.2.
 
-**R3.2 — Wire EscapeInfo into typer**
-- [ ] Replace `is_aliased_read_of_heap` with `EscapeInfo` lookup.
-- [ ] `ownership_with_mod` consults EscapeInfo when modifier is absent.
-- [ ] Soundness gate: existing 917+ tests must still pass.
+**R3.2 — Wire EscapeInfo into typer** ✅ (commit 1e7586c — infra only)
+- [x] `Typer.escape_tiers: HashMap<DefId, Tier>` side table populated by
+      a post-pass after `lower_fn_deferred` returns the lowered HIR fn.
+- [x] Soundness gate: 921/921 bulk tests green; no behavior change yet
+      (just a populated side table, no codegen consumer until R3.3).
+- [ ] **Replaces** `is_aliased_read_of_heap` — deferred to R4. Removing
+      the heuristic requires R3.4's first-class Rc/RcCell types so that
+      non-clonable container reads (Map/Set/PQ/Deque value types) also
+      get an automatic clone path. Until then the heuristic remains the
+      safety net for that case.
 
-**R3.3 — T1 raw-pointer borrow codegen**
-- [ ] `Ownership::Borrowed` slot = raw pointer (no clone).
-- [ ] Container readers (`vec.get`, `map.get`, `set.peek`, `deque.front`,
-      `pq.peek_min`/`max`) skip `clone_value` when caller binding is T1.
-- [ ] `for x in xs` per-iteration borrow load.
-- [ ] IR-snapshot tests: no `clone_value` for canonical short-lived borrow.
-- [ ] Benchmark regression gate: struct_ops, spectral_norm, sim_for,
-      tight_loop, store_perf, vec_grow.
+**R3.3 — T1 raw-pointer borrow codegen** ✅ (partial — Field/Index path)
+- [x] HIR post-pass `escape::apply_demotions`: walks each fn's body,
+      demotes every `Owned` Bind whose RHS is a `Field`/`Index` read of
+      a clonable heap type AND whose escape tier is T1 to
+      `Ownership::Borrowed`, **and** removes the matching
+      `Stmt::Drop(def_id, …)` from the enclosing block.
+- [x] MIR `Bind` lowering (`src/mir/lower/stmt.rs`) pairs the demotion
+      by skipping the auto-clone (`lower_expr_owned`) whenever it sees
+      a `Borrowed` binding with a `Field`/`Index` RHS — net effect on
+      the hot path is: no alloc, no copy, no free.
+- [x] Per-block-local walk handles `If`, `While`, `For`, `SimFor`,
+      `Loop`, `Match`, `Defer`, `Transaction`, `SimBlock` nested
+      blocks. Does NOT descend into expression-embedded blocks
+      (lambdas, comprehensions, coroutines, generators, select arms) —
+      those keep conservative owned+clone behavior pending a future
+      extension.
+- [x] Unit tests in `src/escape/mod.rs`:
+      `apply_demotions_demotes_t1_field_read_and_removes_drop`,
+      `apply_demotions_skips_when_value_escapes`,
+      `apply_demotions_respects_explicit_access_mod`.
+- [x] Bulk gate: **921/921** still green; **escape: 7/7** unit tests.
+- [ ] **Deferred** — container readers (`vec.get`, `map.get`, `set.peek`,
+      `deque.front`, `pq.peek_min`/`max`) skipping `clone_value` when
+      caller binding is T1. Requires plumbing the caller binding's
+      def_id into the container-read codegen sites; postponed pending a
+      design for the def_id→inst link in MIR-codegen.
+- [ ] **Deferred** — `for x in xs` per-iteration borrow load. Same
+      plumbing dependency.
+- [ ] **Deferred** — IR-snapshot regression tests on
+      `tests/programs/field_short_lived_borrow.jn` and
+      `tests/programs/field_auto_copy.jn`.
+- [ ] **Deferred** — published benchmark gate (struct_ops, spectral_norm,
+      sim_for, tight_loop, store_perf, vec_grow). The current benchmark
+      suite has limited coverage of heap-typed field reads so a
+      measurable delta requires either new benchmarks or program
+      restructuring; tracked separately.
 
 **R3.4 — T2 / T3 codegen**
 - [ ] New HIR `Type::RcCell(inner)`, `Type::Arc(inner)`, `Type::Mutex(inner)`.
@@ -188,8 +222,11 @@ Deferred — write a follow-up sprint or fold into R3.4:
 
 ### R4 — P6 finalization
 
-- [ ] Delete `is_aliased_read_of_heap` and all call sites.
-- [ ] Remove the P6.1 TODO from `src/typer/stmt/dispatch.rs`.
+- [ ] Delete `is_aliased_read_of_heap` and all call sites. **Blocked on
+      R3.4**: until container element types can be uniformly promoted to
+      Rc, the heuristic is the only thing preventing double-free of
+      non-clonable container reads.
+- [ ] Remove the P6.1 TODO from `src/typer/stmt/dispatch.rs`. Same block.
 - [ ] Update `jinn.md`, `JINN.md`, `docs/access-semantics.md` to reflect the
       final landed surface.
 - [ ] Run full bulk + all benchmark suites, record numbers.

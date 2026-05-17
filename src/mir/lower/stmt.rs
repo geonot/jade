@@ -18,7 +18,27 @@ impl Lowerer {
                     Some(AccessMod::Ref) | Some(AccessMod::Mut) | Some(AccessMod::Take) => {
                         self.lower_expr(&b.value)
                     }
-                    _ => self.lower_expr_owned(&b.value),
+                    _ => {
+                        // R3.3: a binding the typer demoted to `Borrowed`
+                        // for a Field/Index read of a clonable type must
+                        // NOT be auto-cloned at the MIR boundary — the
+                        // typer already suppressed the corresponding
+                        // scope-exit Drop, so emitting a Clone here would
+                        // leak the fresh allocation.  For all other
+                        // owned bindings the auto-clone in
+                        // `lower_expr_owned` is what gives the new
+                        // binding an independent value.
+                        if matches!(b.ownership, hir::Ownership::Borrowed)
+                            && matches!(
+                                b.value.kind,
+                                ExprKind::Field(..) | ExprKind::Index(..)
+                            )
+                        {
+                            self.lower_expr(&b.value)
+                        } else {
+                            self.lower_expr_owned(&b.value)
+                        }
+                    }
                 };
 
                 // P4 §5.2 Perceus partial-move: `x is take y.field` MUST
