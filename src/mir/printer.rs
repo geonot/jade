@@ -174,6 +174,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::RcNew(v, ty) => format!("rc_new {v} {ty:?}"),
         InstKind::RcClone(v) => format!("rc_clone {v}"),
         InstKind::WeakUpgrade(v) => format!("weak_upgrade {v}"),
+        InstKind::WeakDowngrade(v) => format!("weak_downgrade {v}"),
 
         // Actors/channels
         InstKind::SpawnActor(name, args) => format!(

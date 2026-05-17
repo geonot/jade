@@ -272,6 +272,7 @@ pub enum InstKind {
     RcNew(ValueId, Type),
     RcClone(ValueId),
     WeakUpgrade(ValueId),
+    WeakDowngrade(ValueId),
 
     // ── Actors/channels (needed for actor optimization pass) ──
     SpawnActor(Symbol, Vec<(Symbol, ValueId)>),

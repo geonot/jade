@@ -88,6 +88,14 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(v)
                     }
                 }
+                mir::InstKind::WeakDowngrade(val) => {
+                    let v = self.val(*val);
+                    if let Type::Weak(inner) = &inst.ty {
+                        self.weak_downgrade(v, inner)
+                    } else {
+                        Ok(v)
+                    }
+                }
 
                 // ── Copy ──
                 mir::InstKind::Copy(val) => Ok(self.val(*val)),

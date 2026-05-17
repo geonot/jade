@@ -88,6 +88,13 @@ impl Lowerer {
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
                         self.emit(InstKind::WeakUpgrade(v), ty, span)
                     }
+                    BuiltinFn::WeakDowngrade => {
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+                        self.emit(InstKind::WeakDowngrade(v), ty, span)
+                    }
                     BuiltinFn::FloatMethod(method) => {
                         // Map x.abs()/floor()/ceil()/sqrt()/etc. to libm calls.
                         let m = method.as_str();

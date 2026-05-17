@@ -102,13 +102,50 @@ Baseline now: **920/920 bulk tests.**
       optimization assertion lands with the T1 raw-pointer borrow
       codegen.
 
-### R2 — `@weakable` lowering (self-contained)
+### R2 — `@weakable` lowering (self-contained) ✅ (with deferred items)
 
-- [ ] Weak-count slot when type carries `@weakable @atomic`.
-- [ ] Parser: `weak ref T` → `Type::Weak(T)`.
-- [ ] `weak_upgrade()` builtin returns Option<&T>.
-- [ ] Reject `@weakable` on non-`@atomic` types (already done at parse).
-- [ ] Test: `weak_upgrade_after_drop_returns_none`.
+Status: weak roundtrip works end-to-end. Two underlying bugs fixed; `@weakable`
+attribute enforcement and Option-typed `weak_upgrade` deferred.
+
+- [x] Weak-count slot in the Rc heap layout. Unified `rc_layout_ty` to
+      `{i64 strong, i64 weak, T}` so every Rc carries an inline weak counter
+      (8 bytes overhead per allocation). This eliminates the latent layout
+      mismatch between `rc_layout_ty = {strong, T}` and
+      `weak_layout_ty = {strong, weak, T}`, which previously caused
+      `weak_downgrade` to atomically increment the *value* field (offset 8)
+      thinking it was the weak counter — corrupting `Rc<i64>` payloads on
+      every `weak()` call.
+- [x] `WeakDowngrade` MIR plumbing. Added `InstKind::WeakDowngrade(ValueId)`
+      with parallel arms in `src/mir/lower/intrinsics.rs`,
+      `src/codegen/mir_codegen/emit_inst/collections.rs`,
+      `src/perceus/mir_perceus.rs`, `src/mir/opt/{subst,uses}.rs`, and
+      `src/mir/printer.rs`. Previously `BuiltinFn::WeakDowngrade` fell into
+      the intrinsics catch-all and emitted a `Call("__builtin_WeakDowngrade")`
+      that referenced a nonexistent runtime symbol.
+- [x] `rc_release` now only frees the heap allocation when both the strong
+      *and* weak refcounts have reached zero. Outstanding weak refs keep the
+      allocation alive (with `strong=0`) so a later `weak_upgrade` can
+      observe the dead state instead of dereferencing freed memory.
+- [x] Test: `weak_roundtrip_recovers_value` —
+      `x is rc(42); w is weak(x); s is weak_upgrade(w); log(@s)` prints `42`.
+- [x] Reject `@weakable` on non-`@atomic` types (already enforced at parse;
+      `src/parser/decl/types.rs:95`).
+
+Deferred — write a follow-up sprint or fold into R3.4:
+
+- [ ] Parser surface `weak ref T` → `Type::Weak(T)`. Today only the builtin
+      `weak(rc_val)` produces a `Type::Weak`; declarative use in type
+      positions (e.g. struct fields) is not surfaced.
+- [ ] `weak_upgrade()` returning `Option<&T>`. Jinn has no first-class
+      `Option<T>` yet — `weak_upgrade` currently returns `Rc<T>` whose
+      pointer is null when the strong count was zero, which will segfault on
+      `@` deref. Surfacing this safely requires either an `Option<T>`
+      lowering or an interim `weak_alive(w) -> bool` predicate.
+- [ ] Typer enforcement that `weak()` is only callable on `Rc<T>` whose `T`
+      carries `@weakable`. The layout unification removes the correctness
+      bottleneck, but the attribute should still be checked for discipline.
+- [ ] Acceptance test `weak_upgrade_after_drop_returns_none` — gated on the
+      Option<T> work above.
 
 ### R3 — Escape analysis + tiered codegen (the big one)
 

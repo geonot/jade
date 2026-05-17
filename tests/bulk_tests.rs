@@ -7920,3 +7920,26 @@ fn store_row_field_access_in_coroutine_body() {
         "777",
     );
 }
+
+#[test]
+fn weak_roundtrip_recovers_value() {
+    // R2: `weak()` must atomically downgrade an Rc, and `weak_upgrade()` must
+    // recover the original heap pointer (when strong refs are still live) so
+    // dereferencing returns the original value.
+    //
+    // Regression test for two related bugs:
+    //   1. `BuiltinFn::WeakDowngrade` was not lowered into MIR — it fell through
+    //      to a `Call("__builtin_WeakDowngrade")` for which no runtime function
+    //      exists. Programs aborted at link/runtime with an unknown-symbol error.
+    //   2. The Rc and Weak heap layouts disagreed: rc_layout was {strong, T} but
+    //      weak_layout was {strong, weak, T}, so `weak_downgrade` incremented the
+    //      T value field (offset 8) thinking it was the weak counter. After the
+    //      roundtrip the payload had been silently mutated.
+    //
+    // Both layouts are now unified to {strong, weak, T} and `WeakDowngrade`
+    // has a dedicated MIR `InstKind` lowered by the codegen.
+    expect(
+        "*main\n    x is rc(42)\n    w is weak(x)\n    s is weak_upgrade(w)\n    log(@s)\n",
+        "42",
+    );
+}

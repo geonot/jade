@@ -117,6 +117,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         | InstKind::ChanRecv(v)
         | InstKind::RcClone(v)
         | InstKind::WeakUpgrade(v)
+        | InstKind::WeakDowngrade(v)
         | InstKind::Log(v) => {
             s.insert(*v);
         }

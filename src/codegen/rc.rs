@@ -13,9 +13,21 @@ impl<'ctx> Compiler<'ctx> {
         let name = format!("Rc_{inner}");
         self.module.get_struct_type(&name).unwrap_or_else(|| {
             let st = self.ctx.opaque_struct_type(&name);
-            st.set_body(&[self.ctx.i64_type().into(), self.llvm_ty(inner)], false);
+            st.set_body(
+                &[
+                    self.ctx.i64_type().into(),
+                    self.ctx.i64_type().into(),
+                    self.llvm_ty(inner),
+                ],
+                false,
+            );
             st
         })
+    }
+
+    /// Weak refs share the Rc heap layout; this is a back-compat alias.
+    pub(crate) fn weak_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
+        self.rc_layout_ty(inner)
     }
 
     pub(crate) fn rc_alloc(
@@ -67,7 +79,9 @@ impl<'ctx> Compiler<'ctx> {
         };
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
         b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
-        let val_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.val"));
+        let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.weak"));
+        b!(self.bld.build_store(weak_gep, i64t.const_int(0, false)));
+        let val_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 2, "rc.val"));
         b!(self.bld.build_store(val_gep, val));
         Ok(heap_ptr.into())
     }
@@ -130,9 +144,21 @@ impl<'ctx> Compiler<'ctx> {
             i64t.const_int(1, false),
             "rc.dead"
         ));
-        let free_bb = self.ctx.append_basic_block(fv, "rc.free");
+        let dead_bb = self.ctx.append_basic_block(fv, "rc.dead");
         let cont_bb = self.ctx.append_basic_block(fv, "rc.cont");
-        b!(self.bld.build_conditional_branch(is_zero, free_bb, cont_bb));
+        b!(self.bld.build_conditional_branch(is_zero, dead_bb, cont_bb));
+        self.bld.position_at_end(dead_bb);
+        // Strong refcount hit zero. Free only if no weak refs remain.
+        let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.weak"));
+        let weak = b!(self.bld.build_load(i64t, weak_gep, "rc.weak.ld")).into_int_value();
+        let no_weak = b!(self.bld.build_int_compare(
+            IntPredicate::EQ,
+            weak,
+            i64t.const_int(0, false),
+            "rc.noweak"
+        ));
+        let free_bb = self.ctx.append_basic_block(fv, "rc.free");
+        b!(self.bld.build_conditional_branch(no_weak, free_bb, cont_bb));
         self.bld.position_at_end(free_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
@@ -149,7 +175,7 @@ impl<'ctx> Compiler<'ctx> {
         let layout = self.rc_layout_ty(inner);
         let val_gep = b!(self
             .bld
-            .build_struct_gep(layout, ptr.into_pointer_value(), 1, "rc.val"));
+            .build_struct_gep(layout, ptr.into_pointer_value(), 2, "rc.val"));
         Ok(b!(self.bld.build_load(
             self.llvm_ty(inner),
             val_gep,
@@ -157,21 +183,7 @@ impl<'ctx> Compiler<'ctx> {
         )))
     }
 
-    pub(crate) fn weak_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
-        let name = format!("Weak_{inner}");
-        self.module.get_struct_type(&name).unwrap_or_else(|| {
-            let st = self.ctx.opaque_struct_type(&name);
-            st.set_body(
-                &[
-                    self.ctx.i64_type().into(),
-                    self.ctx.i64_type().into(),
-                    self.llvm_ty(inner),
-                ],
-                false,
-            );
-            st
-        })
-    }
+    // weak_layout_ty defined above as alias of rc_layout_ty.
 
     pub(crate) fn weak_downgrade(
         &mut self,
