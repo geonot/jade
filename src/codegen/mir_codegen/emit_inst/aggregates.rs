@@ -618,9 +618,16 @@ impl<'ctx> Compiler<'ctx> {
                     if !v.is_pointer_value() {
                         return Err(format!("Deref on non-pointer value {:?}", val));
                     }
-                    // RC deref: skip refcount field, load from field 1
+                    // R3.4.c: RC-family deref skips refcount header, reads
+                    // payload via rc_deref. Rc, RcCell and Arc share the
+                    // {strong, weak, payload} layout; only Arc<Mutex<T>>
+                    // differs (extra mutex slot) and that case must go
+                    // through mutex_lock/unlock, not raw Deref.
                     let val_ty = self.value_types.get(val).cloned();
-                    if let Some(Type::Rc(ref inner)) = val_ty {
+                    if let Some(
+                        Type::Rc(ref inner) | Type::RcCell(ref inner) | Type::Arc(ref inner),
+                    ) = val_ty
+                    {
                         return Ok(Some((self.rc_deref(v, inner))?));
                     }
                     let inner_ty = self.llvm_ty(&inst.ty);

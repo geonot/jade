@@ -182,7 +182,12 @@ impl<'ctx> Compiler<'ctx> {
             Type::Struct(_, _) => "struct",
             Type::Enum(_) => "enum",
             Type::Fn(_, _) => "closure",
-            Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => "pointer",
+            Type::Ptr(_)
+            | Type::Rc(_)
+            | Type::RcCell(_)
+            | Type::Arc(_)
+            | Type::Mutex(_)
+            | Type::Weak(_) => "pointer",
             _ => "any",
         }
     }

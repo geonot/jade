@@ -166,9 +166,12 @@ impl<'ctx> Compiler<'ctx> {
             }
             Type::Set(inner) => Self::type_references_struct(inner, name),
             Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
-            Type::Rc(inner) | Type::Weak(inner) | Type::Cow(inner) => {
-                Self::type_references_struct(inner, name)
-            }
+            Type::Rc(inner)
+            | Type::RcCell(inner)
+            | Type::Arc(inner)
+            | Type::Mutex(inner)
+            | Type::Weak(inner)
+            | Type::Cow(inner) => Self::type_references_struct(inner, name),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 Self::type_references_struct(inner, name)
             }
@@ -331,6 +334,60 @@ impl<'ctx> Compiler<'ctx> {
             let inner_val = b!(self
                 .bld
                 .build_load(self.llvm_ty(inner), val_gep, "rc.inner"));
+            self.drop_value(inner_val, inner)?;
+        }
+        let free_fn = self.ensure_free();
+        b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
+        b!(self.bld.build_unconditional_branch(cont_bb));
+
+        self.bld.position_at_end(cont_bb);
+        Ok(())
+    }
+
+    /// R3.4.c — Arc<T> release with recursive inner value drop. Mirrors
+    /// `rc_release_deep` but unconditionally uses an atomic decrement
+    /// (Arc is always atomic regardless of payload). For
+    /// `Arc<Mutex<T>>` the inner drop will recurse into the Mutex arm
+    /// of `drop_value`, which currently errors — R3.4.c.2 will add a
+    /// dedicated `arc_mutex_release_deep` that destroys the lock and
+    /// drops the payload directly without round-tripping the Mutex arm.
+    #[allow(dead_code)]
+    pub(crate) fn arc_release_deep(
+        &mut self,
+        ptr: BasicValueEnum<'ctx>,
+        inner: &Type,
+    ) -> Result<(), String> {
+        let fv = self.current_fn();
+        let layout = self.rc_layout_ty(inner);
+        let i64t = self.ctx.i64_type();
+        let heap_ptr = ptr.into_pointer_value();
+        let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "arc.cnt"));
+        let old = b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Sub,
+            rc_gep,
+            i64t.const_int(1, false),
+            inkwell::AtomicOrdering::AcquireRelease,
+        ));
+        let is_zero = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            old,
+            i64t.const_int(1, false),
+            "arc.dead"
+        ));
+        let free_bb = self.ctx.append_basic_block(fv, "arc.free");
+        let cont_bb = self.ctx.append_basic_block(fv, "arc.cont");
+        b!(self.bld.build_conditional_branch(is_zero, free_bb, cont_bb));
+
+        self.bld.position_at_end(free_bb);
+        // Drop the inner value before freeing the Arc allocation. Use the
+        // payload index (2) per the {strong, weak, payload} layout.
+        if !inner.is_trivially_droppable() {
+            let val_gep = b!(self
+                .bld
+                .build_struct_gep(layout, heap_ptr, 2, "arc.val.drop"));
+            let inner_val = b!(self
+                .bld
+                .build_load(self.llvm_ty(inner), val_gep, "arc.inner"));
             self.drop_value(inner_val, inner)?;
         }
         let free_fn = self.ensure_free();

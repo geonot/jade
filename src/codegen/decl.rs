@@ -105,7 +105,13 @@ impl<'ctx> Compiler<'ctx> {
                 let field_ty = &variants[pi].1[0];
                 let is_ptr_like = matches!(
                     field_ty,
-                    Type::String | Type::Rc(_) | Type::Weak(_) | Type::Fn(_, _)
+                    Type::String
+                        | Type::Rc(_)
+                        | Type::RcCell(_)
+                        | Type::Arc(_)
+                        | Type::Mutex(_)
+                        | Type::Weak(_)
+                        | Type::Fn(_, _)
                 ) || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))
                     && !Self::is_recursive_field(field_ty, name);
                 if is_ptr_like {

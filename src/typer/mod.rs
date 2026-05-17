@@ -546,6 +546,9 @@ impl Typer {
             Type::Newtype(_, inner)
             | Type::Alias(_, inner)
             | Type::Rc(inner)
+            | Type::RcCell(inner)
+            | Type::Arc(inner)
+            | Type::Mutex(inner)
             | Type::Weak(inner)
             | Type::Cow(inner) => self.type_has_resource_annotation(inner),
             _ => false,

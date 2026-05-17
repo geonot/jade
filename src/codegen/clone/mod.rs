@@ -52,6 +52,21 @@ impl<'ctx> Compiler<'ctx> {
             Type::Tuple(tys) => self.clone_tuple(val, tys),
             Type::Struct(name, _) => self.clone_struct(val, &name.as_str()),
             Type::Rc(_) | Type::Cow(_) | Type::Weak(_) => self.bump_ptr_rc(val),
+            // R3.4.c: RcCell<T> shares Rc's non-atomic refcount layout
+            // (single-threaded interior-mut alias). Clone = same bump.
+            Type::RcCell(_) => self.bump_ptr_rc(val),
+            // R3.4.c: Arc<T> uses an atomic refcount bump. Layout-
+            // identical to Rc, but the operation must be atomic so
+            // cross-thread aliases observe a consistent count.
+            Type::Arc(_) => self.bump_ptr_arc(val),
+            // Mutex<T> standalone is meaningful only inside Arc<Mutex<T>>;
+            // the outer Arc carries the clone. Reaching this arm means a
+            // bare Mutex value is being cloned, which the promotion pass
+            // never emits.
+            Type::Mutex(_) => Err(
+                "clone_value: bare Mutex<T> is not clonable; must be wrapped in Arc<Mutex<T>>"
+                    .to_string(),
+            ),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.clone_value(val, inner),
             other => Err(format!(
                 "clone_value: unsupported type {:?} (caller should have checked is_value_clonable)",
@@ -438,6 +453,9 @@ impl<'ctx> Compiler<'ctx> {
             | Type::Deque(inner)
             | Type::PriorityQueue(inner)
             | Type::Rc(inner)
+            | Type::RcCell(inner)
+            | Type::Arc(inner)
+            | Type::Mutex(inner)
             | Type::Weak(inner)
             | Type::Cow(inner)
             | Type::Array(inner, _)
@@ -481,6 +499,37 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_nuw_add(rc, i64t.const_int(1, false), "rc.inc"));
         b!(self.bld.build_store(ptr, inc));
+        b!(self.bld.build_unconditional_branch(done_bb));
+        self.bld.position_at_end(done_bb);
+        Ok(val)
+    }
+
+    /// R3.4.c — atomic-bump variant for `Arc<T>` clone. Layout-identical
+    /// to `bump_ptr_rc` but uses `atomicrmw add` with AcquireRelease
+    /// ordering so that other threads observing the pointer see a
+    /// consistent refcount.
+    fn bump_ptr_arc(&mut self, val: BasicValueEnum<'ctx>) -> Result<BasicValueEnum<'ctx>, String> {
+        let ptr = val.into_pointer_value();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let i64t = self.ctx.i64_type();
+        let null = ptr_ty.const_null();
+        let is_null = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            ptr,
+            null,
+            "arc.null"
+        ));
+        let fv = self.current_fn();
+        let bump_bb = self.ctx.append_basic_block(fv, "arc.bump");
+        let done_bb = self.ctx.append_basic_block(fv, "arc.done");
+        b!(self.bld.build_conditional_branch(is_null, done_bb, bump_bb));
+        self.bld.position_at_end(bump_bb);
+        b!(self.bld.build_atomicrmw(
+            inkwell::AtomicRMWBinOp::Add,
+            ptr,
+            i64t.const_int(1, false),
+            inkwell::AtomicOrdering::AcquireRelease,
+        ));
         b!(self.bld.build_unconditional_branch(done_bb));
         self.bld.position_at_end(done_bb);
         Ok(val)
