@@ -149,12 +149,20 @@ Deferred — write a follow-up sprint or fold into R3.4:
 
 ### R3 — Escape analysis + tiered codegen (the big one)
 
-**R3.1 — `src/escape/mod.rs` analysis module**
-- [ ] `Tier { T1, T2, T3 }`, `EscapeInfo` map per fn.
-- [ ] Forward HIR walk producing initial tier per Bind.
-- [ ] Promotion rules: return / struct store / container store / closure
-      capture / channel send / spawn capture / `@atomic`-source.
-- [ ] Inspection tests.
+**R3.1 — `src/escape/mod.rs` analysis module** ✅ (commit 7a278bd)
+- [x] `Tier { Auto, T1, T2, T3 }`, `EscapeInfo` map per fn, monotonic `join`.
+- [x] Two-phase HIR walk: seed every Bind/TupleBind/For binder at T1, then
+      re-classify by use site.
+- [x] Promotion rules implemented:
+      - `Ret` / store-into-container (`Struct`/`Builder`/`VariantCtor`/
+        container mutators / `ListComp` body / `KvSet`+`StoreAtVersion` value)
+        → T2.
+      - Closure / coroutine / generator body capture → T2 (in_lambda counter).
+      - `ChannelSend` value, `Spawn` field inits, `Send` (actor) args,
+        `Select` arm value → T3.
+- [x] Unit tests: `tier_join_is_monotonic`, `local_read_stays_t1`,
+      `returned_binding_escalates_to_t2`, `channel_send_escalates_to_t3`.
+- [ ] Not yet consumed by the typer — see R3.2.
 
 **R3.2 — Wire EscapeInfo into typer**
 - [ ] Replace `is_aliased_read_of_heap` with `EscapeInfo` lookup.
