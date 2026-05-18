@@ -182,7 +182,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Enum(_) => "enum",
             Type::Fn(_, _) => "closure",
             Type::Ptr(_)
-            | Type::Rc(_)
             | Type::Weak(_) => "pointer",
             _ => "any",
         }

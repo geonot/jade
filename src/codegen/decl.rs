@@ -106,7 +106,6 @@ impl<'ctx> Compiler<'ctx> {
                 let is_ptr_like = matches!(
                     field_ty,
                     Type::String
-                        | Type::Rc(_)
                         | Type::Weak(_)
                         | Type::Fn(_, _)
                 ) || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))

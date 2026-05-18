@@ -547,7 +547,6 @@ impl InferCtx {
                 self.unify(ra, rb)
             }
             (Type::Ptr(a), Type::Ptr(b)) => self.unify(a, b),
-            (Type::Rc(a), Type::Rc(b)) => self.unify(a, b),
             (Type::Weak(a), Type::Weak(b)) => self.unify(a, b),
             (Type::Channel(a), Type::Channel(b)) => self.unify(a, b),
             (Type::Coroutine(a), Type::Coroutine(b)) => self.unify(a, b),

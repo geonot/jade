@@ -20,47 +20,13 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 self.compile_to_string(&args[0])
             }
-            hir::BuiltinFn::RcAlloc => {
-                if args.len() != 1 {
-                    return Err("rc() takes 1 argument".into());
-                }
-                let val = self.compile_expr(&args[0])?;
-                self.rc_alloc(&args[0].ty, val)
-            }
-            hir::BuiltinFn::RcRetain => {
-                if args.len() != 1 {
-                    return Err("rc_retain() takes 1 argument".into());
-                }
-                let val = self.compile_expr(&args[0])?;
-                if let Type::Rc(inner) = &args[0].ty {
-                    self.rc_retain(val, inner)?;
-                    Ok(val)
-                } else {
-                    Err("rc_retain: argument must be Rc type".into())
-                }
-            }
-            hir::BuiltinFn::RcRelease => {
-                if args.len() != 1 {
-                    return Err("rc_release() takes 1 argument".into());
-                }
-                let val = self.compile_expr(&args[0])?;
-                if let Type::Rc(inner) = &args[0].ty {
-                    self.rc_release(val, inner)?;
-                    Ok(self.ctx.i64_type().const_int(0, false).into())
-                } else {
-                    Err("rc_release: argument must be Rc type".into())
-                }
-            }
             hir::BuiltinFn::WeakDowngrade => {
                 if args.len() != 1 {
-                    return Err("weak() takes 1 argument (an rc value)".into());
+                    return Err("weak() takes 1 argument (a heap value)".into());
                 }
                 let val = self.compile_expr(&args[0])?;
-                if let Type::Rc(inner) = &args[0].ty {
-                    self.weak_downgrade(val, inner)
-                } else {
-                    Err("weak(): argument must be rc type".into())
-                }
+                // Inner is the value's nominal type directly (no Rc wrapper).
+                self.weak_downgrade(val, &args[0].ty)
             }
             hir::BuiltinFn::WeakUpgrade => {
                 if args.len() != 1 {
@@ -74,7 +40,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             hir::BuiltinFn::WeakAlloc => {
-                Err("weak_alloc is internal — use weak() on an rc value".into())
+                Err("weak_alloc is internal — use weak() on a heap value".into())
             }
             hir::BuiltinFn::VolatileLoad => {
                 if args.len() != 1 {

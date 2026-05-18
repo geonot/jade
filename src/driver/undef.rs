@@ -368,7 +368,6 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             }
             Type::Vec(inner)
             | Type::Ptr(inner)
-            | Type::Rc(inner)
             | Type::Weak(inner)
             | Type::Channel(inner)
             | Type::Coroutine(inner)

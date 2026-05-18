@@ -119,7 +119,7 @@ impl PerceusPass {
             Type::I16 | Type::U16 => 2,
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::Ptr(_) | Type::Rc(_) | Type::Weak(_) => 8,
+            Type::Ptr(_) | Type::Weak(_) => 8,
             Type::String => 24,
             Type::Void => 0,
             Type::Array(inner, len) => Self::type_layout_size_pub(inner) * (*len as u64),
@@ -151,18 +151,8 @@ impl PerceusPass {
     /// Two types share a layout slot (used by reuse pairing) iff their
     /// underlying allocation sizes match.
     pub fn layouts_compatible(a: &Type, b: &Type) -> bool {
-        let inner_a = match a {
-            // Rc shares `rc_alloc` layout; strip the wrapper so reuse pairs
-            // across them.
-            Type::Rc(inner) => inner.as_ref(),
-            _ => a,
-        };
-        let inner_b = match b {
-            Type::Rc(inner) => inner.as_ref(),
-            _ => b,
-        };
-        let sa = Self::type_layout_size_pub(inner_a);
-        let sb = Self::type_layout_size_pub(inner_b);
+        let sa = Self::type_layout_size_pub(a);
+        let sb = Self::type_layout_size_pub(b);
         sa > 0 && sa == sb
     }
 }

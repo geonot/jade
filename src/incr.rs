@@ -76,7 +76,6 @@ fn hash_type(ty: &Type, h: &mut StableHasher) {
         }
         Type::Enum(n) | Type::ActorRef(n) => n.hash(h),
         Type::Vec(inner)
-        | Type::Rc(inner)
         | Type::Weak(inner)
         | Type::Ptr(inner)
         | Type::Channel(inner)

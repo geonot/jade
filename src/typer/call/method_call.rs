@@ -487,37 +487,12 @@ impl Typer {
                     None
                 }
             }
-            // R3.4.d.1 auto-deref: peer through Rc so `r.method()` on
-            // `Rc<Struct>` dispatches to the inner struct's method.
-            // The receiver expression is wrapped in `Deref` below so codegen
-            // produces a value of the inner struct type to pass as `self`.
-            Type::Rc(inner) => {
-                match inner.as_ref() {
-                    Type::Struct(name, _) => Some(name.clone()),
-                    _ => None,
-                }
-            }
             _ => None,
         };
 
-        // If the receiver was a shared-ownership wrapper, materialize a
-        // dereferenced value so the dispatched method sees `self: T`.
-        let hobj = if matches!(&obj_ty, Type::Rc(_))
-            && struct_type_name.is_some()
-        {
-            // Compute the deref'd type for the wrapped expression.
-            let inner_ty = match &obj_ty {
-                Type::Rc(i) => (**i).clone(),
-                _ => unreachable!(),
-            };
-            hir::Expr {
-                kind: hir::ExprKind::Deref(Box::new(hobj)),
-                ty: inner_ty,
-                span,
-            }
-        } else {
-            hobj
-        };
+        // Heap nominals are intrinsically refcounted; no Rc wrapper to peel
+        // for method dispatch.
+        let hobj = hobj;
 
         if let Some(ref type_name) = struct_type_name {
             let method_name = format!("{type_name}_{method}");

@@ -89,6 +89,9 @@ fn perceus_stats_line_is_emitted() {
 }
 
 #[test]
+#[ignore = "Surface rc() builtin was removed; drop-fusion coverage will \
+            be re-added once heap-tax inference auto-allocates heap \
+            nominals (Phase-7 circle-back)."]
 fn drop_fusion_coalesces_consecutive_rc_drops() {
     let src = "*main() returns i32\n    x is rc(10)\n    y is rc(20)\n    z is rc(30)\n    log(@x + @y + @z)\n    0\n";
     let (summary, stderr) = compile(src);

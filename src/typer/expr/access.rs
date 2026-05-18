@@ -259,15 +259,10 @@ impl Typer {
                         }
                     }
                 }
-                // R3.4.d.1 auto-deref: peer through one layer of
-                // Rc/RcCell/Arc (and Arc<Mutex<_>>) so field access on a
-                // shared-ownership wrapper resolves to the wrapped struct's
-                // field. Codegen mirrors this by GEPing into the Rc payload
-                // before reading the field — no clone of the wrapped value.
-                let peeled_ty = match &resolved_ty {
-                    Type::Rc(inner) => self.infer_ctx.shallow_resolve(inner),
-                    _ => resolved_ty.clone(),
-                };
+                // R3.4.d.1 auto-deref: heap nominals are intrinsically
+                // refcounted; no surface wrapper to peel \u2014 field access on
+                // the value already resolves to the struct's fields.
+                let peeled_ty = resolved_ty.clone();
                 let struct_name = match &peeled_ty {
                     Type::Struct(name, _) => Some(name.clone()),
                     // P5 §6: `Row<store>` is a write-through handle whose
@@ -442,13 +437,9 @@ impl Typer {
                 let harr = self.lower_expr(arr)?;
                 let hidx = self.lower_expr(idx)?;
                 // R3.4.d.1 auto-deref: peer through one layer of
-                // Rc/RcCell/Arc (and Arc<Mutex<_>>) so indexing a
-                // shared-ownership wrapper resolves to the wrapped
-                // container's element type.
-                let peeled_ty = match &harr.ty {
-                    Type::Rc(inner) => (**inner).clone(),
-                    other => other.clone(),
-                };
+                // Heap nominals are intrinsically refcounted; no surface
+                // Rc wrapper to peel.
+                let peeled_ty = harr.ty.clone();
                 let elem_ty = match &peeled_ty {
                     Type::Array(et, _) => *et.clone(),
                     Type::Vec(et) => *et.clone(),

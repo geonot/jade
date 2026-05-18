@@ -43,7 +43,6 @@ impl<'ctx> Compiler<'ctx> {
                 .into(),
             Type::Fn(_, _) => self.closure_type().into(),
             Type::Ptr(_)
-            | Type::Rc(_)
             | Type::Weak(_)
             | Type::ActorRef(_)
             | Type::Coroutine(_)

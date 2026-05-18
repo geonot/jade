@@ -34,7 +34,6 @@ impl Typer {
             Type::Vec(_)
                 | Type::Map(_, _)
                 | Type::String
-                | Type::Rc(_)
                 | Type::Struct(_, _)
                 | Type::Enum(_)
         );

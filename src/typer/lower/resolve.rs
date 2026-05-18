@@ -18,7 +18,6 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
             *n == name || type_references_name(inner, name)
         }
         Type::Vec(inner)
-        | Type::Rc(inner)
         | Type::Weak(inner)
         | Type::Ptr(inner)
         | Type::Channel(inner)
@@ -85,7 +84,6 @@ impl Typer {
                 Box::new(Self::normalize_actor_refs(*ret, actors)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(Self::normalize_actor_refs(*inner, actors))),
-            Type::Rc(inner) => Type::Rc(Box::new(Self::normalize_actor_refs(*inner, actors))),
             Type::Weak(inner) => Type::Weak(Box::new(Self::normalize_actor_refs(*inner, actors))),
             Type::Alias(name, inner) => {
                 Type::Alias(name, Box::new(Self::normalize_actor_refs(*inner, actors)))

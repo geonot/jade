@@ -13,7 +13,13 @@ impl<'ctx> Compiler<'ctx> {
                     let v = self.val(*val);
                     // Perceus reuse: stash the heap pointer for the matching
                     // alloc site to pick up via `current_reuse_slots`.
-                    if matches!(ty, Type::Rc(_)) && v.is_pointer_value() {
+                    if ty.is_ptr_represented()
+                        && !matches!(
+                            ty,
+                            Type::Ptr(_) | Type::ActorRef(_) | Type::Channel(_) | Type::Vec(_)
+                        )
+                        && v.is_pointer_value()
+                    {
                         if self.try_save_reuse_slot(*val, v.into_pointer_value()) {
                             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
                         }
@@ -51,23 +57,11 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
                 mir::InstKind::RcInc(val) => {
-                    let v = self.val(*val);
-                    match &inst.ty {
-                        Type::Rc(inner) => {
-                            self.rc_retain(v, inner)?;
-                        }
-                        _ => {}
-                    }
+                    let _ = self.val(*val);
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
                 mir::InstKind::RcDec(val) => {
-                    let v = self.val(*val);
-                    match &inst.ty {
-                        Type::Rc(inner) => {
-                            self.rc_release(v, inner)?;
-                        }
-                        _ => {}
-                    }
+                    let _ = self.val(*val);
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
                 mir::InstKind::RcNew(val, inner_ty) => {
@@ -78,18 +72,11 @@ impl<'ctx> Compiler<'ctx> {
                     r
                 }
                 mir::InstKind::RcClone(val) => {
-                    let v = self.val(*val);
-                    match &inst.ty {
-                        Type::Rc(inner) => {
-                            self.rc_retain(v, inner)?;
-                        }
-                        _ => {}
-                    }
-                    Ok(v)
+                    Ok(self.val(*val))
                 }
                 mir::InstKind::WeakUpgrade(val) => {
                     let v = self.val(*val);
-                    if let Type::Weak(inner) | Type::Rc(inner) = &inst.ty {
+                    if let Type::Weak(inner) = &inst.ty {
                         self.weak_upgrade(v, inner)
                     } else {
                         Ok(v)
@@ -97,6 +84,8 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::WeakDowngrade(val) => {
                     let v = self.val(*val);
+                    // The weak() builtin sets inst.ty to Type::Weak(inner);
+                    // inner is the heap nominal we are taking a weak ref to.
                     if let Type::Weak(inner) = &inst.ty {
                         self.weak_downgrade(v, inner)
                     } else {

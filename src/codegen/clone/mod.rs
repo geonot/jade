@@ -51,7 +51,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Array(elem, n) => self.clone_array(val, elem, *n),
             Type::Tuple(tys) => self.clone_tuple(val, tys),
             Type::Struct(name, _) => self.clone_struct(val, &name.as_str()),
-            Type::Rc(_) | Type::Weak(_) => self.bump_ptr_rc(val),
+            Type::Weak(_) => self.bump_ptr_rc(val),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.clone_value(val, inner),
             other => Err(format!(
                 "clone_value: unsupported type {:?} (caller should have checked is_value_clonable)",
@@ -448,7 +448,6 @@ impl<'ctx> Compiler<'ctx> {
         match ty {
             Type::Struct(n, _) => n == name,
             Type::Vec(inner)
-            | Type::Rc(inner)
             | Type::Weak(inner)
             | Type::Array(inner, _)
             | Type::Ptr(inner) => Self::type_references_struct_for_clone(inner, name),

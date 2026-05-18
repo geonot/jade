@@ -25,7 +25,6 @@ pub enum Type {
     Fn(Vec<Type>, Box<Type>),
     Param(Symbol),
     Ptr(Box<Type>),
-    Rc(Box<Type>),
     Weak(Box<Type>),
     ActorRef(Symbol),
     Coroutine(Box<Type>),
@@ -71,15 +70,6 @@ impl Type {
         }
     }
 
-    pub fn is_rc(&self) -> bool {
-        matches!(self, Self::Rc(_))
-    }
-
-    /// True for any heap-RC variant.
-    pub fn is_rc_family(&self) -> bool {
-        matches!(self, Self::Rc(_))
-    }
-
     pub fn is_weak(&self) -> bool {
         matches!(self, Self::Weak(_))
     }
@@ -89,7 +79,6 @@ impl Type {
         matches!(
             self,
             Self::Ptr(_)
-                | Self::Rc(_)
                 | Self::Weak(_)
                 | Self::ActorRef(_)
                 | Self::Coroutine(_)
@@ -138,7 +127,7 @@ impl Type {
             Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
             Self::Struct(_, _) => true,
-            Self::Rc(_) | Self::Weak(_) => true,
+            Self::Weak(_) => true,
             Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.is_value_clonable(),
             _ => false,
         }
@@ -146,7 +135,6 @@ impl Type {
 
     pub fn default_ownership(&self) -> crate::hir::Ownership {
         match self {
-            Self::Rc(_) => crate::hir::Ownership::Rc,
             Self::Weak(_) => crate::hir::Ownership::Weak,
             Self::Ptr(_) => crate::hir::Ownership::Raw,
             _ => crate::hir::Ownership::Owned,
@@ -158,7 +146,7 @@ impl Type {
     pub fn needs_atomic_rc(&self) -> bool {
         match self {
             Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,
-            Self::Rc(inner) | Self::Weak(inner) | Self::Vec(inner) | Self::Ptr(inner) => {
+            Self::Weak(inner) | Self::Vec(inner) | Self::Ptr(inner) => {
                 inner.needs_atomic_rc()
             }
             Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
@@ -220,7 +208,6 @@ impl std::fmt::Display for Type {
             }
             Self::Param(n) => write!(f, "{n}"),
             Self::Ptr(inner) => write!(f, "&{inner}"),
-            Self::Rc(inner) => write!(f, "rc {inner}"),
             Self::Weak(inner) => write!(f, "weak {inner}"),
             Self::ActorRef(name) => write!(f, "ActorRef<{name}>"),
             Self::Coroutine(inner) => write!(f, "Coroutine of {inner}"),
@@ -250,7 +237,6 @@ impl Type {
             Self::Array(inner, _)
             | Self::Vec(inner)
             | Self::Ptr(inner)
-            | Self::Rc(inner)
             | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.has_type_var(),
@@ -269,7 +255,6 @@ impl Type {
             Self::Array(inner, _)
             | Self::Vec(inner)
             | Self::Ptr(inner)
-            | Self::Rc(inner)
             | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.free_type_vars(out),

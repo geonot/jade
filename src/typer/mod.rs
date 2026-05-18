@@ -391,7 +391,6 @@ impl Typer {
 
     fn ownership_for_type(ty: &Type) -> Ownership {
         match ty {
-            Type::Rc(_) => Ownership::Rc,
             Type::Ptr(_) => Ownership::Raw,
             _ => Ownership::Owned,
         }
@@ -417,8 +416,6 @@ impl Typer {
         let promote_owned = || -> Ownership {
             if atomic {
                 Ownership::Arc
-            } else if matches!(ty, Type::Rc(_)) {
-                Ownership::Rc
             } else if matches!(ty, Type::Ptr(_)) {
                 Ownership::Raw
             } else {
@@ -535,7 +532,6 @@ impl Typer {
             Type::Row(_) => true,
             Type::Newtype(_, inner)
             | Type::Alias(_, inner)
-            | Type::Rc(inner)
             | Type::Weak(inner) => self.type_has_resource_annotation(inner),
             _ => false,
         }

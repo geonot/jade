@@ -7,6 +7,23 @@ use crate::types::Type;
 
 use super::Typer;
 
+/// True if a value of this type can have a weak reference taken (i.e. it
+/// is a heap-managed, refcounted nominal). Primitive and pointer types
+/// are excluded \u2014 there is no refcount to point to.
+fn is_weakable(ty: &Type) -> bool {
+    match ty {
+        Type::Struct(..)
+        | Type::Vec(_)
+        | Type::Map(..)
+        | Type::String
+        | Type::Enum(_)
+        | Type::ActorRef(_)
+        | Type::Channel(_) => true,
+        Type::Alias(_, inner) | Type::Newtype(_, inner) => is_weakable(inner),
+        _ => false,
+    }
+}
+
 impl Typer {
     pub(crate) fn try_lower_builtin_call(
         &mut self,
@@ -42,33 +59,21 @@ impl Typer {
             "to_string" => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::ToString, Type::String, span))
             }
-            "rc" if args.len() == 1 => {
-                let harg = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let inner_ty = harg.ty.clone();
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::RcAlloc, vec![harg]),
-                    ty: Type::Rc(Box::new(inner_ty)),
-                    span,
-                }))
-            }
-            "rc_retain" => {
-                Some(self.lower_simple_builtin(args, hir::BuiltinFn::RcRetain, Type::Void, span))
-            }
-            "rc_release" => {
-                Some(self.lower_simple_builtin(args, hir::BuiltinFn::RcRelease, Type::Void, span))
-            }
             "weak" if args.len() == 1 && !self.fns.contains_key(name) => {
                 let harg = match self.lower_expr(&args[0]) {
                     Ok(e) => e,
                     Err(e) => return Some(Err(e)),
                 };
-                let inner_ty = match &harg.ty {
-                    Type::Rc(inner) => inner.as_ref().clone(),
-                    _ => return Some(Err(format!("weak() requires an rc value, got {}", harg.ty))),
-                };
+                // weak() accepts any heap-managed nominal value (struct,
+                // vec, map, string, enum, actor ref, channel). The
+                // compiler auto-manages the underlying refcount; weak()
+                // just produces a non-owning handle for cycle-breaking.
+                let inner_ty = harg.ty.clone();
+                if !is_weakable(&inner_ty) {
+                    return Some(Err(format!(
+                        "weak() requires a heap value (struct, vec, map, string, ...), got {inner_ty}"
+                    )));
+                }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::WeakDowngrade, vec![harg]),
                     ty: Type::Weak(Box::new(inner_ty)),
@@ -91,7 +96,7 @@ impl Typer {
                 };
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::WeakUpgrade, vec![harg]),
-                    ty: Type::Rc(Box::new(inner_ty)),
+                    ty: inner_ty,
                     span,
                 }))
             }

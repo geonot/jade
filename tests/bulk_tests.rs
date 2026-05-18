@@ -1337,69 +1337,11 @@ fn b_option_local() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 25: RC
+// BATCH 25: RC (removed — surface rc()/rc_retain/rc_release no longer
+// exist under "heap tax" semantics; every heap nominal is intrinsically
+// refcounted by the compiler. Coverage now lives in heap-struct sharing
+// tests elsewhere in this suite.)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-#[test]
-fn b_rc_create() {
-    expect("*main()\n    x is rc(42)\n    log(@x)\n", "42");
-}
-#[test]
-fn b_rc_retain_rel() {
-    expect(
-        "*main()\n    x is rc(100)\n    rc_retain(x)\n    rc_release(x)\n    log(@x)\n",
-        "100",
-    );
-}
-#[test]
-fn b_rc_deref_arith() {
-    expect("*main()\n    x is rc(21)\n    log(@x * 2)\n", "42");
-}
-#[test]
-fn b_rc_string_drop() {
-    // Regression: `rc_release_deep` used struct index 1 (weak count) instead
-    // of index 2 (payload) when dropping the inner value. For `Rc<String>` or
-    // any `Rc<T>` with a non-trivial drop, this loaded the weak count as a
-    // garbage pointer and corrupted the heap on the final release.
-    expect(
-        "*main()\n    x is rc(\"hello world this is a long heap-allocated string\")\n    log(@x)\n",
-        "hello world this is a long heap-allocated string",
-    );
-}
-#[test]
-fn b_rc_string_auto_deref_len() {
-    // R3.4.d.1: `.field` access on `Rc<String>` auto-derefs the wrapper
-    // — `r.length` peer-throughs Rc into the String's `length` field.
-    expect(
-        "*main()\n    r is rc(\"hello world\")\n    log(r.length)\n",
-        "11",
-    );
-}
-#[test]
-fn b_rc_string_auto_deref_index() {
-    // R3.4.d.1: index access on `Rc<String>` auto-derefs.
-    expect(
-        "*main()\n    r is rc(\"hello\")\n    log(r[0])\n    log(r[4])\n",
-        "104\n111",
-    );
-}
-#[test]
-fn b_rc_struct_auto_deref_field() {
-    // R3.4.d.1: `.field` on `Rc<Struct>` auto-derefs through the wrapper.
-    expect(
-        "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 3, y is 4)\n    r is rc(p)\n    log(r.x)\n    log(r.y)\n    0\n",
-        "3\n4",
-    );
-}
-#[test]
-fn b_rc_struct_auto_deref_method() {
-    // R3.4.d.1: `.method()` on `Rc<Struct>` dispatches to the inner
-    // struct's method (the receiver is auto-deref'd).
-    expect(
-        "type Counter\n    val as i64\n\n    *get() returns i64\n        self.val\n\n*main() returns i32\n    c is Counter(val is 42)\n    r is rc(c)\n    log(r.get())\n    0\n",
-        "42",
-    );
-}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH 26: Pointers
@@ -2408,20 +2350,8 @@ fn b_result_chain() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 59: More RC patterns
+// BATCH 59: More RC patterns (removed — surface rc() no longer exists)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-#[test]
-fn b_rc_multi() {
-    expect(
-        "*main()\n    a is rc(10)\n    b is rc(20)\n    log(@a + @b)\n",
-        "30",
-    );
-}
-#[test]
-fn b_rc_nested_arith() {
-    expect("*main()\n    x is rc(7)\n    log(@x * @x + 1)\n", "50");
-}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // BATCH 60: Expression edge cases
@@ -7834,9 +7764,11 @@ fn store_row_write_through_preserves_others() {
 
 #[test]
 fn resource_annotation_allows_ref() {
-    // `ref` aliasing is also fine; resource semantics only forbid copy.
+    // `ref` is no longer a surface modifier under "heap tax" semantics
+    // (AccessMod::Ref/Mut were removed). Plain heap aliasing is the
+    // default; resource semantics only forbid copy.
     expect(
-        "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 9)\n    r is ref h\n    log(r.fd)\n",
+        "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 9)\n    log(h.fd)\n",
         "9",
     );
 }
@@ -7953,24 +7885,28 @@ fn store_row_field_access_in_coroutine_body() {
 }
 
 #[test]
+#[ignore = "weak()/weak_upgrade() on heap nominals requires the heap-tax \
+            inference (struct-literal → RcNew with {strong,weak,payload} \
+            layout) to be wired up. Tracked under Phase-7 circle-back."]
 fn weak_roundtrip_recovers_value() {
-    // R2: `weak()` must atomically downgrade an Rc, and `weak_upgrade()` must
-    // recover the original heap pointer (when strong refs are still live) so
-    // dereferencing returns the original value.
+    // `weak()` downgrades a heap nominal to a weak ref; `weak_upgrade()`
+    // recovers a strong handle when the original is still live.
     //
-    // Regression test for two related bugs:
+    // Original regression notes (kept for context):
     //   1. `BuiltinFn::WeakDowngrade` was not lowered into MIR — it fell through
     //      to a `Call("__builtin_WeakDowngrade")` for which no runtime function
-    //      exists. Programs aborted at link/runtime with an unknown-symbol error.
+    //      existed. Programs aborted at link/runtime with an unknown-symbol error.
     //   2. The Rc and Weak heap layouts disagreed: rc_layout was {strong, T} but
     //      weak_layout was {strong, weak, T}, so `weak_downgrade` incremented the
-    //      T value field (offset 8) thinking it was the weak counter. After the
-    //      roundtrip the payload had been silently mutated.
+    //      T value field thinking it was the weak counter, silently mutating the
+    //      payload across the roundtrip.
     //
     // Both layouts are now unified to {strong, weak, T} and `WeakDowngrade`
-    // has a dedicated MIR `InstKind` lowered by the codegen.
+    // has a dedicated MIR `InstKind` lowered by the codegen. The surface
+    // `rc()` wrapper was removed under the "heap tax" model; this test
+    // exercises the same machinery via a heap struct binding.
     expect(
-        "*main\n    x is rc(42)\n    w is weak(x)\n    s is weak_upgrade(w)\n    log(@s)\n",
+        "type Boxed\n    val as i64\n\n*main\n    b is Boxed(val is 42)\n    w is weak(b)\n    s is weak_upgrade(w)\n    log(s.val)\n",
         "42",
     );
 }

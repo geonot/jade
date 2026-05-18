@@ -1304,19 +1304,12 @@ fn for_in_array_sum() {
 }
 
 // ── Reference counting ──────────────────────────────────────────────
-
-#[test]
-fn rc_create_deref() {
-    expect("*main()\n    x is rc(42)\n    log(@x)\n", "42");
-}
-
-#[test]
-fn rc_retain_release() {
-    expect(
-        "*main()\n    x is rc(100)\n    rc_retain(x)\n    rc_release(x)\n    log(@x)\n",
-        "100",
-    );
-}
+//
+// Surface `rc()` / `rc_retain` / `rc_release` were removed under the
+// "heap tax" semantics: every heap nominal is intrinsically refcounted
+// and the compiler emits the inc/dec ops. There is no longer a user-
+// visible wrapper to test directly — coverage now lives in tests that
+// allocate, share, and drop heap structs.
 
 // ── Equals/Neq correctness (zext, not sext) ────────────────────────
 
@@ -2231,10 +2224,7 @@ fn drop_string_after_fn_call() {
     );
 }
 
-#[test]
-fn drop_rc_basic() {
-    expect("*main()\n    x is rc(42)\n    log(@x)\n", "42");
-}
+// drop_rc_basic removed — surface rc() no longer exists.
 
 #[test]
 fn drop_vec_basic() {
@@ -2308,23 +2298,9 @@ fn unlikely_builtin() {
 
 // ── Perceus reuse codegen ──────────────────────────────────────────
 
-#[test]
-fn perceus_rc_reuse_same_type() {
-    // Two sequential rc allocs of same type — second should reuse the first's memory
-    expect(
-        "*main()\n    x is rc(42)\n    log(@x)\n    y is rc(99)\n    log(@y)\n",
-        "42\n99",
-    );
-}
-
-#[test]
-fn perceus_rc_values_independent() {
-    // Ensure reused memory has correct new values
-    expect(
-        "*main()\n    a is rc(10)\n    log(@a)\n    b is rc(20)\n    log(@b)\n    c is rc(30)\n    log(@c)\n",
-        "10\n20\n30",
-    );
-}
+// perceus_rc_reuse_same_type / perceus_rc_values_independent removed —
+// surface rc() no longer exists. Equivalent reuse coverage for heap
+// nominals (structs/enums) lives in the fbip_* tests below.
 
 // ── FBIP (Functional But In-Place) ─────────────────────────────────
 
@@ -2379,33 +2355,9 @@ fn tail_reuse_enum_transform() {
     );
 }
 
-#[test]
-fn tail_reuse_rc_reconstruct() {
-    // Rc values get correct computed results in a function
-    expect(
-        "*main()\n    x is rc(7)\n    v is @x * 10\n    a is rc(v)\n    log(@a)\n",
-        "70",
-    );
-}
-
-#[test]
-fn pool_perceus_loop_alloc() {
-    // Rc allocations inside a loop should still produce correct results
-    // (Perceus pool hints detect this pattern for optimization)
-    expect(
-        "*main()\n    i is 0\n    while i < 5\n        x is rc(i * 10)\n        log(@x)\n        i is i + 1\n",
-        "0\n10\n20\n30\n40",
-    );
-}
-
-#[test]
-fn pool_perceus_nested_loop_alloc() {
-    // Nested loops with Rc allocs should work correctly
-    expect(
-        "*main()\n    i is 0\n    while i < 3\n        j is 0\n        while j < 2\n            x is rc(i + j)\n            log(@x)\n            j is j + 1\n        i is i + 1\n",
-        "0\n1\n1\n2\n2\n3",
-    );
-}
+// tail_reuse_rc_reconstruct / pool_perceus_loop_alloc /
+// pool_perceus_nested_loop_alloc removed — surface rc() no longer
+// exists under the "heap tax" model.
 
 // ── Comptime Reflection (Option C) ──────────────────────────────
 

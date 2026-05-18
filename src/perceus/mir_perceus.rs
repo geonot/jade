@@ -435,7 +435,13 @@ fn borrow_promote(
 ) {
     let mut promotable: HashSet<ValueId> = HashSet::new();
     for (vid, info) in uses {
-        if matches!(info.ty, Type::Rc(_)) && info.use_count <= 1 && !info.escapes && !info.captured
+        // Auto-Rc'd heap nominals are eligible for borrow promotion when
+        // they are single-use, non-escaping, and not captured by a closure.
+        if info.ty.is_ptr_represented()
+            && !matches!(info.ty, Type::Ptr(_) | Type::ActorRef(_) | Type::Channel(_))
+            && info.use_count <= 1
+            && !info.escapes
+            && !info.captured
         {
             promotable.insert(*vid);
         }
@@ -499,10 +505,16 @@ fn reuse_pairing(
         let mut kill_idxs: Vec<usize> = Vec::new();
         for (ii, inst) in func.blocks[bi].insts.iter().enumerate() {
             match &inst.kind {
-                InstKind::Drop(v, Type::Rc(inner)) => {
+                InstKind::Drop(v, drop_ty)
+                    if drop_ty.is_ptr_represented()
+                        && !matches!(
+                            drop_ty,
+                            Type::Ptr(_) | Type::ActorRef(_) | Type::Channel(_)
+                        ) =>
+                {
                     if let Some(info) = uses.get(v) {
                         if info.use_count == 1 && !info.escapes && !info.captured {
-                            let size = PerceusPass::type_layout_size_pub(inner);
+                            let size = PerceusPass::type_layout_size_pub(drop_ty);
                             if size > 0 {
                                 drops.push(DropSite {
                                     inst_idx: ii,
@@ -669,12 +681,17 @@ fn cross_block_loop_reuse(
         for &bi in &body {
             for inst in &func.blocks[bi].insts {
                 match &inst.kind {
-                    InstKind::Drop(v, Type::Rc(inner))
-                        if !func.perceus.reuse_save.contains_key(v) =>
+                    InstKind::Drop(v, drop_ty)
+                        if drop_ty.is_ptr_represented()
+                            && !matches!(
+                                drop_ty,
+                                Type::Ptr(_) | Type::ActorRef(_) | Type::Channel(_)
+                            )
+                            && !func.perceus.reuse_save.contains_key(v) =>
                     {
                         if let Some(info) = uses.get(v) {
                             if info.use_count == 1 && !info.escapes && !info.captured {
-                                let size = PerceusPass::type_layout_size_pub(inner);
+                                let size = PerceusPass::type_layout_size_pub(drop_ty);
                                 if size > 0 {
                                     drops.push((*v, size));
                                 }

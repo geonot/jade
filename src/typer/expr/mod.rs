@@ -219,7 +219,7 @@ impl Typer {
                 let hi = self.lower_expr(inner)?;
                 let resolved = self.infer_ctx.shallow_resolve(&hi.ty);
                 let ty = match &resolved {
-                    Type::Ptr(inner_ty) | Type::Rc(inner_ty) => *inner_ty.clone(),
+                    Type::Ptr(inner_ty) => *inner_ty.clone(),
                     Type::TypeVar(_) => {
                         let inner_var = self.infer_ctx.fresh_var();
                         let ptr_ty = Type::Ptr(Box::new(inner_var.clone()));

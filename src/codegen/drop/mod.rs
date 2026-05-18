@@ -44,9 +44,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Map(kt, vt) => {
                 self.drop_map_deep(val, kt, vt)?;
             }
-            Type::Rc(inner) => {
-                self.rc_release_deep(val, inner)?;
-            }
             Type::Weak(inner) => {
                 self.weak_release(val, inner)?;
             }

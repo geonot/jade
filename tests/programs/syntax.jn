@@ -637,12 +637,17 @@ type NetPacket @packed @strict @align(4)
 
 # ── 24. Reference Counting ─────────────────────────────────────────────────
 
+type RcDemoNode
+    val as i64
+
 *demo_rc
-    # RC wrapping (usually inferred, explicit for clarity)
-    x is rc(42)
+    # Heap nominals are intrinsically refcounted ("heap tax") — no
+    # surface `rc()` wrapper exists. Allocating a struct gives you
+    # an Rc-tier value automatically.
+    node is RcDemoNode(val is 42)
 
     # Weak references — explicit cycle-breaking
-    w is weak(x)                 # downgrade to weak
+    w is weak(node)              # downgrade to weak
     strong is weak_upgrade(w)    # upgrade back (or none)
 
 

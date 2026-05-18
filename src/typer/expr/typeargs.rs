@@ -30,11 +30,6 @@ impl Typer {
                     Self::collect_type_mapping(inner, ci, map);
                 }
             }
-            Type::Rc(inner) => {
-                if let Type::Rc(ci) = concrete {
-                    Self::collect_type_mapping(inner, ci, map);
-                }
-            }
             Type::Fn(params, ret) => {
                 if let Type::Fn(cp, cr) = concrete {
                     for (dp, cp) in params.iter().zip(cp.iter()) {
@@ -56,7 +51,6 @@ impl Typer {
             Type::Param(name) => map.get(name).cloned().unwrap_or_else(|| ty.clone()),
             Type::Vec(inner) => Type::Vec(Box::new(Self::substitute_type_params(inner, map))),
             Type::Ptr(inner) => Type::Ptr(Box::new(Self::substitute_type_params(inner, map))),
-            Type::Rc(inner) => Type::Rc(Box::new(Self::substitute_type_params(inner, map))),
             Type::Fn(params, ret) => Type::Fn(
                 params
                     .iter()

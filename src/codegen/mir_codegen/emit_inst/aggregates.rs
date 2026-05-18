@@ -306,36 +306,15 @@ impl<'ctx> Compiler<'ctx> {
 
                 // ── Indexing ──
                 mir::InstKind::Index(base, idx) | mir::InstKind::IndexUnchecked(base, idx) => {
-                    let mut base_val = self.val(*base);
+                    let base_val = self.val(*base);
                     let idx_val = self.val(*idx);
-                    let mut base_ty = self.value_types.get(base).cloned();
+                    let base_ty = self.value_types.get(base).cloned();
                     let unchecked = matches!(&inst.kind, mir::InstKind::IndexUnchecked(_, _));
 
-                    // R3.4.d.1 auto-deref through Rc/RcCell/Arc (and
-                    // Arc<Mutex<_>>). Indexing a shared-ownership wrapper
-                    // resolves to indexing the wrapped value: GEP into the
-                    // payload slot, then LOAD the wrapped value into a
-                    // regular SSA so the existing per-shape branches
-                    // (String / Vec / Array / Tuple) see what they expect.
-                    if let Some(outer) = base_ty.clone() {
-                        if let Type::Rc(inner) = outer {
-                            let (payload_inner, payload_idx, layout) =
-                                ((*inner).clone(), 2u32, self.rc_layout_ty(&inner));
-                            let rc_ptr = base_val.into_pointer_value();
-                            let payload_gep = b!(self.bld.build_struct_gep(
-                                layout,
-                                rc_ptr,
-                                payload_idx,
-                                "rc.payload"
-                            ));
-                            let inner_llvm = self.llvm_ty(&payload_inner);
-                            base_val =
-                                b!(self
-                                    .bld
-                                    .build_load(inner_llvm, payload_gep, "rc.payload.ld"));
-                            base_ty = Some(payload_inner);
-                        }
-                    }
+                    // Heap nominals are reference-typed by construction; no
+                    // surface Rc wrapper exists, so indexing dispatches
+                    // directly on the underlying String/Vec/Array/Tuple
+                    // shape below.
                     let base_ty = base_ty.as_ref();
 
                     // String indexing: get char at index (returns byte as i64)
@@ -641,12 +620,6 @@ impl<'ctx> Compiler<'ctx> {
                     let v = self.val(*val);
                     if !v.is_pointer_value() {
                         return Err(format!("Deref on non-pointer value {:?}", val));
-                    }
-                    // RC-family deref skips refcount header, reads payload
-                    // via rc_deref ({strong, weak, payload} layout).
-                    let val_ty = self.value_types.get(val).cloned();
-                    if let Some(Type::Rc(ref inner)) = val_ty {
-                        return Ok(Some((self.rc_deref(v, inner))?));
                     }
                     let inner_ty = self.llvm_ty(&inst.ty);
                     Ok(b!(self.bld.build_load(

@@ -143,11 +143,19 @@ fn test_ownership_default() {
 
 #[test]
 fn test_rc_ownership() {
-    let hir = type_check("*main()\n    x is rc(42)\n    log(@x)\n");
+    // Surface `rc()` was removed under the "heap tax" model. Heap
+    // nominals are intrinsically refcounted at the runtime layer; the
+    // typer-level Ownership::Rc promotion for heap bindings is a
+    // separate (later) phase, so for now we only assert the binding
+    // type-checks and produces a struct-typed binding.
+    let hir = type_check(
+        "type Foo\n    x as i64\n\n*main()\n    f is Foo(x is 42)\n    log(f.x)\n",
+    );
     let main = &hir.fns[0];
     if let hir::Stmt::Bind(b) = &main.body[0] {
-        assert_eq!(b.ownership, Ownership::Rc);
-        assert!(matches!(b.ty, Type::Rc(_)));
+        assert!(matches!(b.ty, Type::Struct(_, _)));
+    } else {
+        panic!("expected Bind statement");
     }
 }
 
@@ -476,12 +484,14 @@ fn test_no_typevar_in_enum_variants() {
 }
 
 #[test]
-fn test_unify_rc_types() {
+fn test_unify_weak_types() {
+    // Type::Rc was removed; weak references are the remaining
+    // explicit refcounted type constructor.
     let mut ctx = unify::InferCtx::new();
     let v = ctx.fresh_var();
-    let rc_a = Type::Rc(Box::new(v.clone()));
-    let rc_b = Type::Rc(Box::new(Type::I64));
-    ctx.unify(&rc_a, &rc_b).unwrap();
+    let w_a = Type::Weak(Box::new(v.clone()));
+    let w_b = Type::Weak(Box::new(Type::I64));
+    ctx.unify(&w_a, &w_b).unwrap();
     assert_eq!(ctx.resolve(&v), Type::I64);
 }
 
