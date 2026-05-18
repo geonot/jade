@@ -16,9 +16,7 @@ impl<'ctx> Compiler<'ctx> {
                         self.set_tbaa(si, Compiler::tbaa_type_name(&ty));
                         Ok(self.ctx.i8_type().const_int(0, false).into())
                     } else {
-                        Err(format!(
-                            "GlobalStore to undefined global `{name}`"
-                        ))
+                        Err(format!("GlobalStore to undefined global `{name}`"))
                     }
                 }
 
@@ -43,9 +41,8 @@ impl<'ctx> Compiler<'ctx> {
                             let pos = field_defs
                                 .iter()
                                 .position(|(n, _)| fname.with_str(|s| n == s))
-                                .ok_or_else(|| {
-                                    format!("struct `{name}` has no field `{fname}`")
-                                })? as u32;
+                                .ok_or_else(|| format!("struct `{name}` has no field `{fname}`"))?
+                                as u32;
                             provided.insert(pos);
                             pos
                         };
@@ -285,11 +282,14 @@ impl<'ctx> Compiler<'ctx> {
                         if let Some(name) = &struct_name {
                             if let Some(st) = self.module.get_struct_type(name) {
                                 let field_idx = self.field_index(name, &field.as_str());
-                                let field_ty = st.get_field_type_at_index(field_idx)
-                                    .ok_or_else(|| format!(
-                                        "ICE: field {} not found in struct {}",
-                                        field.as_str(), name
-                                    ))?;
+                                let field_ty =
+                                    st.get_field_type_at_index(field_idx).ok_or_else(|| {
+                                        format!(
+                                            "ICE: field {} not found in struct {}",
+                                            field.as_str(),
+                                            name
+                                        )
+                                    })?;
                                 let gep = b!(self.bld.build_struct_gep(
                                     st,
                                     alloca,
@@ -297,7 +297,8 @@ impl<'ctx> Compiler<'ctx> {
                                     &field.as_str()
                                 ));
                                 let zero = field_ty.const_zero();
-                                b!(self.bld.build_store(gep, zero));                            }
+                                b!(self.bld.build_store(gep, zero));
+                            }
                         }
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
@@ -317,23 +318,21 @@ impl<'ctx> Compiler<'ctx> {
                     // regular SSA so the existing per-shape branches
                     // (String / Vec / Array / Tuple) see what they expect.
                     if let Some(outer) = base_ty.clone() {
-                        if let Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) = outer {
-                            let (payload_inner, payload_idx, layout) = match inner.as_ref() {
-                                Type::Mutex(m_inner) => (
-                                    (**m_inner).clone(),
-                                    3u32,
-                                    self.arc_mutex_layout_ty(m_inner),
-                                ),
-                                _ => ((*inner).clone(), 2u32, self.rc_layout_ty(&inner)),
-                            };
+                        if let Type::Rc(inner) = outer {
+                            let (payload_inner, payload_idx, layout) =
+                                ((*inner).clone(), 2u32, self.rc_layout_ty(&inner));
                             let rc_ptr = base_val.into_pointer_value();
                             let payload_gep = b!(self.bld.build_struct_gep(
-                                layout, rc_ptr, payload_idx, "rc.payload"
+                                layout,
+                                rc_ptr,
+                                payload_idx,
+                                "rc.payload"
                             ));
                             let inner_llvm = self.llvm_ty(&payload_inner);
-                            base_val = b!(self.bld.build_load(
-                                inner_llvm, payload_gep, "rc.payload.ld"
-                            ));
+                            base_val =
+                                b!(self
+                                    .bld
+                                    .build_load(inner_llvm, payload_gep, "rc.payload.ld"));
                             base_ty = Some(payload_inner);
                         }
                     }
@@ -512,19 +511,15 @@ impl<'ctx> Compiler<'ctx> {
                             zero_i,
                             "vis.neg"
                         ));
-                        let wrapped =
-                            b!(self.bld.build_int_nsw_add(raw_idx, len, "vis.wrap"));
+                        let wrapped = b!(self.bld.build_int_nsw_add(raw_idx, len, "vis.wrap"));
                         let final_idx =
                             b!(self.bld.build_select(is_neg, wrapped, raw_idx, "vis.idx"))
                                 .into_int_value();
                         self.emit_vec_bounds_check(final_idx, len)?;
                         let elem_gep = unsafe {
-                            b!(self.bld.build_gep(
-                                elem_ty,
-                                data_ptr,
-                                &[final_idx],
-                                "vis.egep"
-                            ))
+                            b!(self
+                                .bld
+                                .build_gep(elem_ty, data_ptr, &[final_idx], "vis.egep"))
                         };
                         b!(self.bld.build_store(elem_gep, v));
                         // Forward the vec pointer as the SSA result so subsequent
@@ -647,16 +642,10 @@ impl<'ctx> Compiler<'ctx> {
                     if !v.is_pointer_value() {
                         return Err(format!("Deref on non-pointer value {:?}", val));
                     }
-                    // R3.4.c: RC-family deref skips refcount header, reads
-                    // payload via rc_deref. Rc, RcCell and Arc share the
-                    // {strong, weak, payload} layout; only Arc<Mutex<T>>
-                    // differs (extra mutex slot) and that case must go
-                    // through mutex_lock/unlock, not raw Deref.
+                    // RC-family deref skips refcount header, reads payload
+                    // via rc_deref ({strong, weak, payload} layout).
                     let val_ty = self.value_types.get(val).cloned();
-                    if let Some(
-                        Type::Rc(ref inner) | Type::RcCell(ref inner) | Type::Arc(ref inner),
-                    ) = val_ty
-                    {
+                    if let Some(Type::Rc(ref inner)) = val_ty {
                         return Ok(Some((self.rc_deref(v, inner))?));
                     }
                     let inner_ty = self.llvm_ty(&inst.ty);

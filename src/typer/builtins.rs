@@ -290,13 +290,10 @@ impl Typer {
                     Ok(v) => v,
                     Err(e) => return Some(Err(e)),
                 };
-                let elem_ty = hargs
-                    .first()
-                    .map(|a| a.ty.clone())
-                    .unwrap_or_else(|| {
-                        self.infer_ctx
-                            .fresh_var_at(span, "empty `vec()` literal — element type is unknown")
-                    });
+                let elem_ty = hargs.first().map(|a| a.ty.clone()).unwrap_or_else(|| {
+                    self.infer_ctx
+                        .fresh_var_at(span, "empty `vec()` literal — element type is unknown")
+                });
                 for a in hargs.iter().skip(1) {
                     let _ = self
                         .infer_ctx

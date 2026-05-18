@@ -107,9 +107,6 @@ impl<'ctx> Compiler<'ctx> {
                     field_ty,
                     Type::String
                         | Type::Rc(_)
-                        | Type::RcCell(_)
-                        | Type::Arc(_)
-                        | Type::Mutex(_)
                         | Type::Weak(_)
                         | Type::Fn(_, _)
                 ) || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))

@@ -33,8 +33,7 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|s| s.into())
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
-            Type::Vec(_)
-            | Type::Map(_, _) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Vec(_) | Type::Map(_, _) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Tuple(tys) => self
                 .ctx
                 .struct_type(
@@ -49,22 +48,12 @@ impl<'ctx> Compiler<'ctx> {
             | Type::ActorRef(_)
             | Type::Coroutine(_)
             | Type::Channel(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
-            // R3.4: Rc<Cell<T>> / Arc<T> / Mutex<T> are all heap-allocated
-            // header + payload — ptr-represented at the ABI level. The
-            // header layout differs by variant (see runtime/cell.c /
-            // atomic_rc.c / sync.c, landing in R3.4.b) but the LLVM type
-            // is uniformly `ptr`.
-            Type::RcCell(_) | Type::Arc(_) | Type::Mutex(_) => {
-                self.ctx.ptr_type(AddressSpace::default()).into()
-            }
             Type::Param(name) => {
                 panic!(
                     "ICE: unresolved type parameter '{name}' reached codegen — this indicates a monomorphization bug in the typer"
                 );
             }
-            Type::Generator(_) => {
-                self.ctx.ptr_type(AddressSpace::default()).into()
-            }
+            Type::Generator(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),
             // Row<T> v1: represented identically to the underlying
             // store row struct `__store_{name}`. The implicit `sid`
@@ -462,13 +451,11 @@ impl<'ctx> Compiler<'ctx> {
 
                 let buf_ptr = if n > 0 {
                     let buf_size = i64t.const_int(cap * elem_size, false);
-                    let p = b!(self
-                        .bld
-                        .build_call(malloc, &[buf_size.into()], "a2v.buf"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_pointer_value();
+                    let p = b!(self.bld.build_call(malloc, &[buf_size.into()], "a2v.buf"))
+                        .try_as_basic_value()
+                        .basic()
+                        .expect("ICE: call returned void")
+                        .into_pointer_value();
 
                     // The array value is an LLVM aggregate `[N x T]`. Spill it
                     // to a temporary alloca so we can GEP element-by-element
@@ -488,18 +475,17 @@ impl<'ctx> Compiler<'ctx> {
                         };
                         let v = b!(self.bld.build_load(lty, src, "a2v.v"));
                         let dst = unsafe {
-                            b!(self.bld.build_gep(
-                                lty,
-                                p,
-                                &[i64t.const_int(i, false)],
-                                "a2v.dst"
-                            ))
+                            b!(self
+                                .bld
+                                .build_gep(lty, p, &[i64t.const_int(i, false)], "a2v.dst"))
                         };
                         b!(self.bld.build_store(dst, v));
                     }
                     p
                 } else {
-                    self.ctx.ptr_type(inkwell::AddressSpace::default()).const_null()
+                    self.ctx
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null()
                 };
 
                 let ptr_gep = b!(self

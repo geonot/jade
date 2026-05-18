@@ -40,15 +40,9 @@ impl Typer {
         if let Type::Row(store) = &obj_ty {
             if method == "snapshot" {
                 if !args.is_empty() {
-                    return Err(format!(
-                        "{}: `.snapshot()` takes no arguments",
-                        span.loc()
-                    ));
+                    return Err(format!("{}: `.snapshot()` takes no arguments", span.loc()));
                 }
-                let struct_ty = Type::Struct(
-                    Symbol::intern(&format!("__store_{store}")),
-                    vec![],
-                );
+                let struct_ty = Type::Struct(Symbol::intern(&format!("__store_{store}")), vec![]);
                 return Ok(hir::Expr {
                     kind: hobj.kind,
                     ty: struct_ty,
@@ -493,17 +487,12 @@ impl Typer {
                     None
                 }
             }
-            // R3.4.d.1 auto-deref: peer through Rc/RcCell/Arc (and
-            // Arc<Mutex<_>>) so `r.method()` on `Rc<Struct>` dispatches
-            // to the inner struct's method. The receiver expression is
-            // wrapped in `Deref` below so codegen produces a value of
-            // the inner struct type to pass as `self`.
-            Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
-                let peeled = match inner.as_ref() {
-                    Type::Mutex(m_inner) => m_inner.as_ref(),
-                    other => other,
-                };
-                match peeled {
+            // R3.4.d.1 auto-deref: peer through Rc so `r.method()` on
+            // `Rc<Struct>` dispatches to the inner struct's method.
+            // The receiver expression is wrapped in `Deref` below so codegen
+            // produces a value of the inner struct type to pass as `self`.
+            Type::Rc(inner) => {
+                match inner.as_ref() {
                     Type::Struct(name, _) => Some(name.clone()),
                     _ => None,
                 }
@@ -513,17 +502,12 @@ impl Typer {
 
         // If the receiver was a shared-ownership wrapper, materialize a
         // dereferenced value so the dispatched method sees `self: T`.
-        let hobj = if matches!(
-            &obj_ty,
-            Type::Rc(_) | Type::RcCell(_) | Type::Arc(_)
-        ) && struct_type_name.is_some()
+        let hobj = if matches!(&obj_ty, Type::Rc(_))
+            && struct_type_name.is_some()
         {
             // Compute the deref'd type for the wrapped expression.
             let inner_ty = match &obj_ty {
-                Type::Rc(i) | Type::RcCell(i) | Type::Arc(i) => match i.as_ref() {
-                    Type::Mutex(m) => (**m).clone(),
-                    other => other.clone(),
-                },
+                Type::Rc(i) => (**i).clone(),
                 _ => unreachable!(),
             };
             hir::Expr {

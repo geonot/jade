@@ -435,10 +435,7 @@ fn borrow_promote(
 ) {
     let mut promotable: HashSet<ValueId> = HashSet::new();
     for (vid, info) in uses {
-        if matches!(info.ty, Type::Rc(_))
-            && info.use_count <= 1
-            && !info.escapes
-            && !info.captured
+        if matches!(info.ty, Type::Rc(_)) && info.use_count <= 1 && !info.escapes && !info.captured
         {
             promotable.insert(*vid);
         }
@@ -507,7 +504,11 @@ fn reuse_pairing(
                         if info.use_count == 1 && !info.escapes && !info.captured {
                             let size = PerceusPass::type_layout_size_pub(inner);
                             if size > 0 {
-                                drops.push(DropSite { inst_idx: ii, value: *v, size });
+                                drops.push(DropSite {
+                                    inst_idx: ii,
+                                    value: *v,
+                                    size,
+                                });
                             }
                         }
                     }
@@ -516,7 +517,11 @@ fn reuse_pairing(
                     if let Some(dest) = inst.dest {
                         let size = PerceusPass::type_layout_size_pub(alloc_inner);
                         if size > 0 {
-                            allocs.push(AllocSite { inst_idx: ii, dest, size });
+                            allocs.push(AllocSite {
+                                inst_idx: ii,
+                                dest,
+                                size,
+                            });
                         }
                     }
                 }
@@ -547,13 +552,23 @@ fn reuse_pairing(
         // Strategy 1: forward pair Drop@i → next compatible RcNew@j>i with
         // no kill in [i,j].
         for (di, d) in drops.iter().enumerate() {
-            if used_drops[di] { continue; }
+            if used_drops[di] {
+                continue;
+            }
             for (ai, a) in allocs.iter().enumerate() {
-                if used_allocs[ai] { continue; }
-                if a.inst_idx <= d.inst_idx { continue; }
-                if a.size != d.size { continue; }
+                if used_allocs[ai] {
+                    continue;
+                }
+                if a.inst_idx <= d.inst_idx {
+                    continue;
+                }
+                if a.size != d.size {
+                    continue;
+                }
                 let killed = kill_idxs.iter().any(|&k| k > d.inst_idx && k < a.inst_idx);
-                if killed { continue; }
+                if killed {
+                    continue;
+                }
                 let slot = *next_slot;
                 *next_slot += 1;
                 decisions.push((d.value, a.dest, slot));
@@ -568,17 +583,27 @@ fn reuse_pairing(
         // consumes the slot saved by this iteration's Drop.
         if is_loop_body {
             for (di, d) in drops.iter().enumerate() {
-                if used_drops[di] { continue; }
+                if used_drops[di] {
+                    continue;
+                }
                 for (ai, a) in allocs.iter().enumerate() {
-                    if used_allocs[ai] { continue; }
-                    if a.inst_idx >= d.inst_idx { continue; }
-                    if a.size != d.size { continue; }
+                    if used_allocs[ai] {
+                        continue;
+                    }
+                    if a.inst_idx >= d.inst_idx {
+                        continue;
+                    }
+                    if a.size != d.size {
+                        continue;
+                    }
                     // Kill check on the back-edge slice (Drop..end) ∪
                     // (start..Alloc) — any escape op invalidates the slot.
                     let killed = kill_idxs
                         .iter()
                         .any(|&k| (k > d.inst_idx) || (k < a.inst_idx));
-                    if killed { continue; }
+                    if killed {
+                        continue;
+                    }
                     let slot = *next_slot;
                     *next_slot += 1;
                     decisions.push((d.value, a.dest, slot));
@@ -845,9 +870,7 @@ fn vec_reuse_pairing(
         let mut kill_idxs: Vec<usize> = Vec::new();
         for (ii, inst) in func.blocks[bi].insts.iter().enumerate() {
             match &inst.kind {
-                InstKind::Drop(v, Type::Vec(elem))
-                    if !func.perceus.reuse_save.contains_key(v) =>
-                {
+                InstKind::Drop(v, Type::Vec(elem)) if !func.perceus.reuse_save.contains_key(v) => {
                     // The Drop instruction itself proves uniqueness at
                     // this program point — even if `push`/`get` are seen as
                     // escapes by the conservative use analysis, ownership
@@ -897,9 +920,7 @@ fn vec_reuse_pairing(
                 if a.elem_ty != d.elem_ty {
                     continue;
                 }
-                let killed = kill_idxs
-                    .iter()
-                    .any(|&k| k > d.inst_idx && k < a.inst_idx);
+                let killed = kill_idxs.iter().any(|&k| k > d.inst_idx && k < a.inst_idx);
                 if killed {
                     continue;
                 }

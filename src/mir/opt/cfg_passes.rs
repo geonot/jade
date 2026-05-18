@@ -182,9 +182,7 @@ pub fn branch_threading(func: &mut Function) -> bool {
                         {
                             let bb = func.block_mut(*bb_id);
                             let pred_still_referenced = match &bb.terminator {
-                                Terminator::Branch(_, t, e) => {
-                                    *t == *bb_id || *e == *bb_id
-                                }
+                                Terminator::Branch(_, t, e) => *t == *bb_id || *e == *bb_id,
                                 _ => false,
                             };
                             // pred_still_referenced is unused here; left for clarity.

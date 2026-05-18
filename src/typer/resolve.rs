@@ -182,8 +182,7 @@ impl Typer {
             self.inferred_field_structs.insert(td.name.clone());
         }
         self.structs.insert(td.name.clone(), fields);
-        self.struct_attrs
-            .insert(td.name.clone(), td.layout.clone());
+        self.struct_attrs.insert(td.name.clone(), td.layout.clone());
     }
 
     pub(crate) fn declare_enum_def(&mut self, ed: &ast::EnumDef) {

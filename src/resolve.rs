@@ -212,9 +212,7 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
         | Expr::Spread(e, _) => {
             rewrite_expr(e, renames);
         }
-        Expr::Array(es, _)
-        | Expr::Tuple(es, _)
-        | Expr::Syscall(es, _) => {
+        Expr::Array(es, _) | Expr::Tuple(es, _) | Expr::Syscall(es, _) => {
             for e in es {
                 rewrite_expr(e, renames);
             }
@@ -233,11 +231,7 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
                     rewrite_expr(&mut v, renames);
                     args.push(v);
                 }
-                *expr = Expr::Call(
-                    Box::new(Expr::Ident(renamed, *span)),
-                    args,
-                    *span,
-                );
+                *expr = Expr::Call(Box::new(Expr::Ident(renamed, *span)), args, *span);
                 return;
             }
             for f in fields {

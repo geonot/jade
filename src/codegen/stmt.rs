@@ -507,7 +507,7 @@ impl<'ctx> Compiler<'ctx> {
                 return Err(format!(
                     "invalid assignment target: {:?} (ty={:?})",
                     target.kind, target.ty
-                ))
+                ));
             }
         }
         Ok(())

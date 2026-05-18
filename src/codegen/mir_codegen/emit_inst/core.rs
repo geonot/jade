@@ -63,9 +63,9 @@ impl<'ctx> Compiler<'ctx> {
                         } else {
                             // libm fallback: declare and call directly.
                             const LIBM_UNARY_F64: &[&str] = &[
-                                "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin",
-                                "cos", "tan", "asin", "acos", "atan", "log", "log10", "log2",
-                                "exp", "exp2",
+                                "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos",
+                                "tan", "asin", "acos", "atan", "log", "log10", "log2", "exp",
+                                "exp2",
                             ];
                             const LIBM_BINARY_F64: &[&str] = &["pow", "atan2", "fmod", "copysign"];
                             let name_str = name.as_str();
@@ -73,11 +73,8 @@ impl<'ctx> Compiler<'ctx> {
                             if LIBM_UNARY_F64.contains(&&*name_str) && arg_vals.len() == 1 {
                                 let sig = f64t.fn_type(&[f64t.into()], false);
                                 let fv = self.module.add_function(&name_str, sig, None);
-                                let csv = b!(self.bld.build_call(
-                                    fv,
-                                    &[arg_vals[0].into()],
-                                    "libm"
-                                ));
+                                let csv =
+                                    b!(self.bld.build_call(fv, &[arg_vals[0].into()], "libm"));
                                 return Ok(Some(self.call_result(csv)));
                             }
                             if LIBM_BINARY_F64.contains(&&*name_str) && arg_vals.len() == 2 {
@@ -271,11 +268,8 @@ impl<'ctx> Compiler<'ctx> {
                                     ));
                                 }
                                 let closure_val = self.val(args[0]);
-                                let closure_ty = self
-                                    .value_types
-                                    .get(&args[0])
-                                    .cloned()
-                                    .ok_or_else(|| {
+                                let closure_ty =
+                                    self.value_types.get(&args[0]).cloned().ok_or_else(|| {
                                         format!(
                                             "missing closure type for `{}` callback",
                                             method.as_str()
@@ -300,19 +294,13 @@ impl<'ctx> Compiler<'ctx> {
                             }
                             "fold" | "reduce" => {
                                 if args.len() < 2 {
-                                    return Err(
-                                        "fold() requires (initial, callback)".into()
-                                    );
+                                    return Err("fold() requires (initial, callback)".into());
                                 }
                                 let init_val = self.val(args[0]);
                                 let closure_val = self.val(args[1]);
-                                let closure_ty = self
-                                    .value_types
-                                    .get(&args[1])
-                                    .cloned()
-                                    .ok_or_else(|| {
-                                        "missing closure type for fold callback"
-                                            .to_string()
+                                let closure_ty =
+                                    self.value_types.get(&args[1]).cloned().ok_or_else(|| {
+                                        "missing closure type for fold callback".to_string()
                                     })?;
                                 return Ok(Some(self.vec_fold_dynamic(
                                     header_ptr,
@@ -327,11 +315,8 @@ impl<'ctx> Compiler<'ctx> {
                                     return Err("find() requires a callback".into());
                                 }
                                 let closure_val = self.val(args[0]);
-                                let closure_ty = self
-                                    .value_types
-                                    .get(&args[0])
-                                    .cloned()
-                                    .ok_or_else(|| {
+                                let closure_ty =
+                                    self.value_types.get(&args[0]).cloned().ok_or_else(|| {
                                         "missing closure type for find callback".to_string()
                                     })?;
                                 return Ok(Some(self.vec_find_dynamic(
@@ -349,11 +334,8 @@ impl<'ctx> Compiler<'ctx> {
                                     ));
                                 }
                                 let closure_val = self.val(args[0]);
-                                let closure_ty = self
-                                    .value_types
-                                    .get(&args[0])
-                                    .cloned()
-                                    .ok_or_else(|| {
+                                let closure_ty =
+                                    self.value_types.get(&args[0]).cloned().ok_or_else(|| {
                                         format!(
                                             "missing closure type for `{}` callback",
                                             method.as_str()
@@ -377,54 +359,41 @@ impl<'ctx> Compiler<'ctx> {
                             }
                             "contains" => {
                                 if args.is_empty() {
-                                    return Err(
-                                        "contains() requires a needle".into()
-                                    );
+                                    return Err("contains() requires a needle".into());
                                 }
                                 let needle = self.val(args[0]);
-                                return Ok(Some(self.vec_contains_v(
-                                    header_ptr, &elem_ty, needle,
-                                )?));
+                                return Ok(Some(
+                                    self.vec_contains_v(header_ptr, &elem_ty, needle)?,
+                                ));
                             }
                             "join" => {
                                 if args.is_empty() {
-                                    return Err(
-                                        "join() requires a separator".into()
-                                    );
+                                    return Err("join() requires a separator".into());
                                 }
                                 let sep = self.val(args[0]);
                                 return Ok(Some(self.vec_join_v(header_ptr, sep)?));
                             }
                             "take" | "skip" | "drop" => {
                                 if args.is_empty() {
-                                    return Err(format!(
-                                        "{}() requires a count",
-                                        method.as_str()
-                                    ));
+                                    return Err(format!("{}() requires a count", method.as_str()));
                                 }
                                 let n = self.val(args[0]).into_int_value();
                                 let is_take = &*method.as_str() == "take";
-                                return Ok(Some(self.vec_take_skip_v(
-                                    header_ptr, &elem_ty, n, is_take,
-                                )?));
+                                return Ok(Some(
+                                    self.vec_take_skip_v(header_ptr, &elem_ty, n, is_take)?,
+                                ));
                             }
                             "slice" => {
                                 if args.len() < 2 {
-                                    return Err(
-                                        "slice() requires (start, end)".into()
-                                    );
+                                    return Err("slice() requires (start, end)".into());
                                 }
                                 let s = self.val(args[0]).into_int_value();
                                 let e = self.val(args[1]).into_int_value();
-                                return Ok(Some(self.vec_slice_v(
-                                    header_ptr, &elem_ty, s, e,
-                                )?));
+                                return Ok(Some(self.vec_slice_v(header_ptr, &elem_ty, s, e)?));
                             }
                             "zip" => {
                                 if args.is_empty() {
-                                    return Err(
-                                        "zip() requires another vector".into()
-                                    );
+                                    return Err("zip() requires another vector".into());
                                 }
                                 let other_val = self.val(args[0]);
                                 let other_ptr = if other_val.is_pointer_value() {
@@ -437,11 +406,7 @@ impl<'ctx> Compiler<'ctx> {
                                         "zip.optr"
                                     ))
                                 };
-                                let other_elem_ty = match self
-                                    .value_types
-                                    .get(&args[0])
-                                    .cloned()
-                                {
+                                let other_elem_ty = match self.value_types.get(&args[0]).cloned() {
                                     Some(Type::Vec(et)) => *et,
                                     Some(Type::Array(et, _)) => *et,
                                     _ => Type::I64,
@@ -571,13 +536,8 @@ impl<'ctx> Compiler<'ctx> {
                             args.iter().map(|a| self.val(*a)).collect();
                         let ptypes_full = fv.get_type().get_param_types();
                         let ptypes_rest: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
-                            ptypes_full
-                                .iter()
-                                .skip(1)
-                                .map(|t| (*t).into())
-                                .collect();
-                        let coerced =
-                            self.coerce_call_args(&arg_vals, args, &ptypes_rest);
+                            ptypes_full.iter().skip(1).map(|t| (*t).into()).collect();
+                        let coerced = self.coerce_call_args(&arg_vals, args, &ptypes_rest);
                         let mut all_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                             vec![self_arg.into()];
                         all_args.extend(coerced);
@@ -709,7 +669,8 @@ impl<'ctx> Compiler<'ctx> {
                     ) && !self.var_allocs.contains_key(name)
                         && let Some(src_ptr) = self.self_allocs.get(val).copied()
                     {
-                        self.var_allocs.insert(*name, (src_ptr, effective_ty.clone()));
+                        self.var_allocs
+                            .insert(*name, (src_ptr, effective_ty.clone()));
                         self.set_var(&name.as_str(), src_ptr, effective_ty);
                         return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
                     }
@@ -745,9 +706,7 @@ impl<'ctx> Compiler<'ctx> {
                         }
                         Ok(val)
                     } else {
-                        Err(format!(
-                            "GlobalLoad of undefined global `{name}`"
-                        ))
+                        Err(format!("GlobalLoad of undefined global `{name}`"))
                     }
                 }
                 _ => return Ok(None),

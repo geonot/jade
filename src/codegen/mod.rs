@@ -203,8 +203,7 @@ pub struct Compiler<'ctx> {
     /// This is the storage that lets loop-body reuse work across iterations
     /// of the dynamic loop (the SSA-scoped HashMap above does not survive
     /// runtime back-edges).
-    pub(crate) current_reuse_alloca_slots:
-        std::collections::HashMap<u32, PointerValue<'ctx>>,
+    pub(crate) current_reuse_alloca_slots: std::collections::HashMap<u32, PointerValue<'ctx>>,
     /// MIR ValueId of the current allocation site, so the runtime
     /// alloc helper can consult `current_perceus_meta.reuse_consume`.
     pub(crate) current_alloc_dest: Option<mir::ValueId>,

@@ -306,16 +306,10 @@ impl<'ctx> Compiler<'ctx> {
         // R3.4.c: Rc/RcCell/Arc all share the {strong, weak, payload} layout;
         // a deref reads payload at offset 2 via rc_deref regardless of
         // atomicity (no refcount touched by deref).
-        if let Type::Rc(ref elem_ty) | Type::RcCell(ref elem_ty) | Type::Arc(ref elem_ty) =
-            inner.ty
+        if let Type::Rc(ref elem_ty) = inner.ty
         {
             let rv = self.compile_expr(inner)?;
             return self.rc_deref(rv, elem_ty);
-        }
-        if let Type::Mutex(_) = inner.ty {
-            return Err(
-                "cannot deref Mutex<T> directly — it only lives inside Arc<Mutex<T>>".into(),
-            );
         }
         if let Type::Weak(_) = inner.ty {
             return Err("cannot deref a weak reference directly — use weak_upgrade() first".into());

@@ -220,8 +220,7 @@ impl Typer {
         // as `sys as Kernel` (where `Kernel` is an actor) leave the typer
         // unable to resolve `sys.handler(...)` to a Send and the return type
         // collapses to a fresh, ambiguous type variable.
-        let actor_names: std::collections::HashSet<Symbol> =
-            self.actors.keys().cloned().collect();
+        let actor_names: std::collections::HashSet<Symbol> = self.actors.keys().cloned().collect();
         if !actor_names.is_empty() {
             let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
             for k in fn_keys {

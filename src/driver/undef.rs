@@ -117,8 +117,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                     walk_block(eb, refs, defs);
                 }
             }
-            Expr::Array(elems, _)
-            | Expr::Tuple(elems, _) => {
+            Expr::Array(elems, _) | Expr::Tuple(elems, _) => {
                 for e in elems {
                     walk_expr(e, refs, defs);
                 }
@@ -370,9 +369,6 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Type::Vec(inner)
             | Type::Ptr(inner)
             | Type::Rc(inner)
-            | Type::RcCell(inner)
-            | Type::Arc(inner)
-            | Type::Mutex(inner)
             | Type::Weak(inner)
             | Type::Channel(inner)
             | Type::Coroutine(inner)

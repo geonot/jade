@@ -42,9 +42,11 @@ impl Typer {
             return false;
         }
         match &expr.kind {
-            hir::ExprKind::VecMethod(_, name, _)
-            | hir::ExprKind::MapMethod(_, name, _) => {
-                matches!(name.as_str().as_ref(), "get" | "peek" | "front" | "back" | "first" | "last")
+            hir::ExprKind::VecMethod(_, name, _) | hir::ExprKind::MapMethod(_, name, _) => {
+                matches!(
+                    name.as_str().as_ref(),
+                    "get" | "peek" | "front" | "back" | "first" | "last"
+                )
             }
             _ => false,
         }
@@ -113,10 +115,7 @@ impl Typer {
                 // reads (`x is vec.get(0)` for `Vec<@resource T>`) require
                 // an explicit access modifier (`ref`, `mut`, or `take`).
                 let is_resource = self.type_has_resource_annotation(&ty);
-                if is_resource
-                    && b.access_mod.is_none()
-                    && Self::is_aliased_read_of_heap(&value)
-                {
+                if is_resource && b.access_mod.is_none() && Self::is_aliased_read_of_heap(&value) {
                     return Err(format!(
                         "{}: cannot bind `@resource` value `{}` from a container read without an access modifier; use `take`, `ref`, or `mut`",
                         b.span.loc(),
@@ -443,10 +442,7 @@ impl Typer {
                                 let obj_resolved = self.infer_ctx.resolve(&obj.ty);
                                 let he_resolved = self.infer_ctx.resolve(&he.ty);
                                 if obj_resolved == he_resolved
-                                    && matches!(
-                                        obj_resolved,
-                                        Type::Vec(_) | Type::Map(_, _)
-                                    )
+                                    && matches!(obj_resolved, Type::Vec(_) | Type::Map(_, _))
                                 {
                                     Some((**obj).clone())
                                 } else {
@@ -606,7 +602,8 @@ impl Typer {
                     access_mod: f.access_mod,
                     span: f.span,
                 }))
-            }            ast::Stmt::Loop(l) => {
+            }
+            ast::Stmt::Loop(l) => {
                 let pre = self.snapshot_moved_fields();
                 let body = self.lower_block(&l.body, ret_ty)?;
                 self.restore_moved_fields(pre);

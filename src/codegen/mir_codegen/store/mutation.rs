@@ -13,9 +13,7 @@ impl<'ctx> Compiler<'ctx> {
         let (filter_part, fields_part) = if let Some(pos) = encoded_name.find("__fields_") {
             (&encoded_name[..pos], &encoded_name[pos + 9..]) // skip "__fields_"
         } else {
-            return Err(format!(
-                "malformed store.set name '{encoded_name}'"
-            ));
+            return Err(format!("malformed store.set name '{encoded_name}'"));
         };
 
         let field_names: Vec<&str> = fields_part.split('_').collect();

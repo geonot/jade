@@ -1,6 +1,6 @@
 use super::super::expr::{
-    contains_index_placeholder_in_block, contains_placeholder_in_block, replace_placeholder,
-    replace_index_placeholder_in_block, replace_placeholder_in_block,
+    contains_index_placeholder_in_block, contains_placeholder_in_block,
+    replace_index_placeholder_in_block, replace_placeholder, replace_placeholder_in_block,
 };
 use super::super::{ParseError, Parser};
 use crate::ast::*;

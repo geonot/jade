@@ -183,9 +183,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Fn(_, _) => "closure",
             Type::Ptr(_)
             | Type::Rc(_)
-            | Type::RcCell(_)
-            | Type::Arc(_)
-            | Type::Mutex(_)
             | Type::Weak(_) => "pointer",
             _ => "any",
         }
@@ -378,8 +375,7 @@ impl<'ctx> Compiler<'ctx> {
                         let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                             vec![first_arg.into()];
                         for i in 1..thunk_fn.count_params() {
-                            let raw =
-                                ice!(thunk_fn.get_nth_param(i), "vtable thunk missing param");
+                            let raw = ice!(thunk_fn.get_nth_param(i), "vtable thunk missing param");
                             // Match the callee's ABI: if it expects a pointer
                             // for this slot but we received a struct value via
                             // the thunk's signature, spill to an alloca and

@@ -207,8 +207,7 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
 /// reads (Vec.get/first/last, Map.get, Set.peek*, PQ.peek*, Deque.front/back).
 fn is_container_read_method(expr: &hir::Expr) -> bool {
     let name = match &expr.kind {
-        ExprKind::VecMethod(_, n, _)
-        | ExprKind::MapMethod(_, n, _) => n.as_str(),
+        ExprKind::VecMethod(_, n, _) | ExprKind::MapMethod(_, n, _) => n.as_str(),
         _ => return false,
     };
     matches!(
@@ -406,8 +405,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
                 seed_binds_in_expr(a, info);
             }
         }
-        ChannelSend(c, v) | AtomicStore(c, v) | AtomicAdd(c, v) | AtomicSub(c, v)
-        | Index(c, v) => {
+        ChannelSend(c, v) | AtomicStore(c, v) | AtomicAdd(c, v) | AtomicSub(c, v) | Index(c, v) => {
             seed_binds_in_expr(c, info);
             seed_binds_in_expr(v, info);
         }
@@ -592,9 +590,7 @@ impl<'a> EscapeWalk<'a> {
                 }
             }
             GlobalStore(_, e, _) => self.walk_expr_consumer(e, BindContext::StoredInContainer),
-            ChannelClose(e, _) | Stop(e, _) => {
-                self.walk_expr_consumer(e, BindContext::LocalRead)
-            }
+            ChannelClose(e, _) | Stop(e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
             Drop(_, _, _, _)
             | Nop(_)
             | Asm(_)
@@ -618,12 +614,34 @@ impl<'a> EscapeWalk<'a> {
         // Then recurse — but the children are typically in `LocalRead`
         // context unless we're at a structural escape site below.
         match &expr.kind {
-            Var(_, _) | Int(_) | Float(_) | Str(_) | Bool(_) | None | Void | FnRef(_, _)
-            | VariantRef(_, _, _) | Unreachable | GlobalLoad(_) | StoreQuery(_, _)
-            | StoreCount(_) | StoreAll(_) | StoreExists(_, _) | StoreDistinct(_, _)
-            | StoreSum(_, _) | StoreAvg(_, _) | StoreMin(_, _) | StoreMax(_, _)
-            | ViewCount(_, _) | ViewAll(_, _) | KvCount(_) | VecCount(_) | FtsCount(_, _)
-            | TsLatest(_) | IterNext(_, _, _) | MapNew => {}
+            Var(_, _)
+            | Int(_)
+            | Float(_)
+            | Str(_)
+            | Bool(_)
+            | None
+            | Void
+            | FnRef(_, _)
+            | VariantRef(_, _, _)
+            | Unreachable
+            | GlobalLoad(_)
+            | StoreQuery(_, _)
+            | StoreCount(_)
+            | StoreAll(_)
+            | StoreExists(_, _)
+            | StoreDistinct(_, _)
+            | StoreSum(_, _)
+            | StoreAvg(_, _)
+            | StoreMin(_, _)
+            | StoreMax(_, _)
+            | ViewCount(_, _)
+            | ViewAll(_, _)
+            | KvCount(_)
+            | VecCount(_)
+            | FtsCount(_, _)
+            | TsLatest(_)
+            | IterNext(_, _, _)
+            | MapNew => {}
 
             BinOp(a, _, b) => {
                 self.walk_expr_consumer(a, BindContext::LocalRead);
@@ -741,8 +759,7 @@ impl<'a> EscapeWalk<'a> {
             ChannelCreate(_, cap) => {
                 self.walk_expr_consumer(cap, BindContext::LocalRead);
             }
-            Field(e, _, _) | ChannelRecv(e) | CoroutineNext(e)
-            | GeneratorNext(e) | Yield(e) => {
+            Field(e, _, _) | ChannelRecv(e) | CoroutineNext(e) | GeneratorNext(e) | Yield(e) => {
                 self.walk_expr_consumer(e, BindContext::LocalRead);
             }
             CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts) => {

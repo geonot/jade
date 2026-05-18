@@ -3,7 +3,6 @@
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-
     pub(in crate::codegen) fn compile_bit_intrinsic(
         &mut self,
         builtin: &hir::BuiltinFn,

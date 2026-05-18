@@ -166,9 +166,6 @@ impl<'ctx> Compiler<'ctx> {
             }
             Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
             Type::Rc(inner)
-            | Type::RcCell(inner)
-            | Type::Arc(inner)
-            | Type::Mutex(inner)
             | Type::Weak(inner) => Self::type_references_struct(inner, name),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 Self::type_references_struct(inner, name)

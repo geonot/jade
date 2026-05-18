@@ -31,17 +31,12 @@ impl Typer {
                         .find(|(fn_, _)| fn_ == fname)
                         .map(|(_, t)| t.clone())
                         .ok_or_else(|| {
-                            format!(
-                                "spawn '{name}': unknown field '{fname}' in init list"
-                            )
+                            format!("spawn '{name}': unknown field '{fname}' in init list")
                         })?;
                     let hv = self.lower_expr_expected(fexpr, Some(&field_ty))?;
-                    let _ = self.infer_ctx.unify_at(
-                        &field_ty,
-                        &hv.ty,
-                        *span,
-                        "spawn init field",
-                    );
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&field_ty, &hv.ty, *span, "spawn init field");
                     // P3: cross-thread @resource safety check.
                     self.enforce_cross_thread_safe(&hv.ty, *span, "actor spawn init")?;
                     hir_inits.push((fname.clone(), hv));
@@ -76,7 +71,10 @@ impl Typer {
                     .join(", ");
                 Err(format!(
                     "{}: actor send syntax 'send target, @{}(...)' is not supported; use method-call syntax instead: target.{}({})",
-                    span.loc(), handler, handler, arg_placeholders
+                    span.loc(),
+                    handler,
+                    handler,
+                    arg_placeholders
                 ))
             }
             _ => unreachable!(),
@@ -99,12 +97,9 @@ impl Typer {
                 // element type from `gen.next()`.
                 if let Some(ref ret) = self.current_fn_ret_ty {
                     if let Type::Generator(inner_ty) = ret {
-                        let _ = self.infer_ctx.unify_at(
-                            inner_ty,
-                            &ty,
-                            *span,
-                            "yield expression type",
-                        );
+                        let _ =
+                            self.infer_ctx
+                                .unify_at(inner_ty, &ty, *span, "yield expression type");
                     }
                 }
                 Ok(hir::Expr {

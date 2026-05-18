@@ -76,16 +76,15 @@ impl Typer {
                 let pid = self.fresh_id();
                 let actor_names: std::collections::HashSet<Symbol> =
                     self.actors.keys().cloned().collect();
-                let ty = p
-                    .ty
-                    .clone()
-                    .map(|t| Self::normalize_actor_refs(t, &actor_names))
-                    .unwrap_or_else(|| {
-                        declared_ptys
-                            .get(pi)
-                            .map(|t| self.infer_ctx.resolve(t))
-                            .unwrap_or(Type::I64)
-                    });
+                let ty =
+                    p.ty.clone()
+                        .map(|t| Self::normalize_actor_refs(t, &actor_names))
+                        .unwrap_or_else(|| {
+                            declared_ptys
+                                .get(pi)
+                                .map(|t| self.infer_ctx.resolve(t))
+                                .unwrap_or(Type::I64)
+                        });
                 let ownership = self
                     .param_ownership_with_mod(&ty, p.access_mod)
                     .unwrap_or_else(|_| Self::ownership_for_type(&ty));

@@ -168,7 +168,8 @@ impl InferCtx {
                             for (site_span, site_reason) in sites.iter().take(5) {
                                 notes.push_str(&format!(
                                     "\n  note: used at {} ({})",
-                                    site_span.loc(), site_reason
+                                    site_span.loc(),
+                                    site_reason
                                 ));
                             }
                             if sites.len() > 5 {
@@ -187,7 +188,9 @@ impl InferCtx {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
                                     "{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`{}",
-                                    origin.span.loc(), origin.reason, usage_notes
+                                    origin.span.loc(),
+                                    origin.reason,
+                                    usage_notes
                                 )
                             } else {
                                 format!(
@@ -200,7 +203,8 @@ impl InferCtx {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
                                     "{}: numeric type defaults to i64 ({})\n  help: add `: i64` for integer or `: f64` for float",
-                                    origin.span.loc(), origin.reason
+                                    origin.span.loc(),
+                                    origin.reason
                                 )
                             } else {
                                 format!(
@@ -231,7 +235,8 @@ impl InferCtx {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
                                     "{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `: i64` or `: i32`",
-                                    origin.span.loc(), origin.reason
+                                    origin.span.loc(),
+                                    origin.reason
                                 )
                             } else {
                                 format!(
@@ -244,7 +249,8 @@ impl InferCtx {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
                                     "{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `: f64` or `: f32`",
-                                    origin.span.loc(), origin.reason
+                                    origin.span.loc(),
+                                    origin.reason
                                 )
                             } else {
                                 format!(

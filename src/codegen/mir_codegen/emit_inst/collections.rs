@@ -12,12 +12,8 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::Drop(val, ty) => {
                     let v = self.val(*val);
                     // Perceus reuse: stash the heap pointer for the matching
-                    // alloc site to pick up via `current_reuse_slots`. Rc and
-                    // RcCell share `rc_alloc` layout so reuse is safe across
-                    // them; Arc<T> (non-Mutex) also shares the layout but
-                    // Arc<Mutex<T>> does NOT (extra mutex slot), so Arc reuse
-                    // is gated separately in R3.4.d when promotion runs.
-                    if matches!(ty, Type::Rc(_) | Type::RcCell(_)) && v.is_pointer_value() {
+                    // alloc site to pick up via `current_reuse_slots`.
+                    if matches!(ty, Type::Rc(_)) && v.is_pointer_value() {
                         if self.try_save_reuse_slot(*val, v.into_pointer_value()) {
                             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
                         }
@@ -57,13 +53,8 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::RcInc(val) => {
                     let v = self.val(*val);
                     match &inst.ty {
-                        // R3.4.c: Rc / RcCell share non-atomic refcount.
-                        Type::Rc(inner) | Type::RcCell(inner) => {
+                        Type::Rc(inner) => {
                             self.rc_retain(v, inner)?;
-                        }
-                        // R3.4.c: Arc forces atomic refcount bump.
-                        Type::Arc(inner) => {
-                            self.arc_retain(v, inner)?;
                         }
                         _ => {}
                     }
@@ -72,11 +63,8 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::RcDec(val) => {
                     let v = self.val(*val);
                     match &inst.ty {
-                        Type::Rc(inner) | Type::RcCell(inner) => {
+                        Type::Rc(inner) => {
                             self.rc_release(v, inner)?;
-                        }
-                        Type::Arc(inner) => {
-                            self.arc_release(v, inner)?;
                         }
                         _ => {}
                     }
@@ -85,23 +73,15 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::RcNew(val, inner_ty) => {
                     let v = self.val(*val);
                     self.current_alloc_dest = inst.dest;
-                    // R3.4.c: allocator dispatch based on inst.ty wrapper.
-                    let r = match &inst.ty {
-                        Type::Arc(_) => self.arc_alloc(inner_ty, v),
-                        // Rc / RcCell share the rc_alloc layout.
-                        _ => self.rc_alloc(inner_ty, v),
-                    };
+                    let r = self.rc_alloc(inner_ty, v);
                     self.current_alloc_dest = None;
                     r
                 }
                 mir::InstKind::RcClone(val) => {
                     let v = self.val(*val);
                     match &inst.ty {
-                        Type::Rc(inner) | Type::RcCell(inner) => {
+                        Type::Rc(inner) => {
                             self.rc_retain(v, inner)?;
-                        }
-                        Type::Arc(inner) => {
-                            self.arc_retain(v, inner)?;
                         }
                         _ => {}
                     }

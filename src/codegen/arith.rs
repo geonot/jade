@@ -65,12 +65,13 @@ impl<'ctx> Compiler<'ctx> {
                     let ptypes = fv.get_type().get_param_types();
                     let self_arg = self.coerce_op_arg(lhs, ptypes.first(), "eq.self");
                     let rhs_arg = self.coerce_op_arg(rhs, ptypes.get(1), "eq.rhs");
-                    let result = b!(self
-                        .bld
-                        .build_call(fv, &[self_arg.into(), rhs_arg.into()], "eq.call"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void");
+                    let result =
+                        b!(self
+                            .bld
+                            .build_call(fv, &[self_arg.into(), rhs_arg.into()], "eq.call"))
+                        .try_as_basic_value()
+                        .basic()
+                        .expect("ICE: call returned void");
                     return if matches!(op, BinOp::Ne) {
                         Ok(b!(self.bld.build_not(result.into_int_value(), "neq")).into())
                     } else {

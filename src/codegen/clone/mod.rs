@@ -52,21 +52,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Tuple(tys) => self.clone_tuple(val, tys),
             Type::Struct(name, _) => self.clone_struct(val, &name.as_str()),
             Type::Rc(_) | Type::Weak(_) => self.bump_ptr_rc(val),
-            // R3.4.c: RcCell<T> shares Rc's non-atomic refcount layout
-            // (single-threaded interior-mut alias). Clone = same bump.
-            Type::RcCell(_) => self.bump_ptr_rc(val),
-            // R3.4.c: Arc<T> uses an atomic refcount bump. Layout-
-            // identical to Rc, but the operation must be atomic so
-            // cross-thread aliases observe a consistent count.
-            Type::Arc(_) => self.bump_ptr_arc(val),
-            // Mutex<T> standalone is meaningful only inside Arc<Mutex<T>>;
-            // the outer Arc carries the clone. Reaching this arm means a
-            // bare Mutex value is being cloned, which the promotion pass
-            // never emits.
-            Type::Mutex(_) => Err(
-                "clone_value: bare Mutex<T> is not clonable; must be wrapped in Arc<Mutex<T>>"
-                    .to_string(),
-            ),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.clone_value(val, inner),
             other => Err(format!(
                 "clone_value: unsupported type {:?} (caller should have checked is_value_clonable)",
@@ -85,10 +70,13 @@ impl<'ctx> Compiler<'ctx> {
         let st = self.string_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let void_ty = self.ctx.void_type();
-        let f = self.module.get_function("__jinn_str_clone").unwrap_or_else(|| {
-            let ft = void_ty.fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
-            self.module.add_function("__jinn_str_clone", ft, None)
-        });
+        let f = self
+            .module
+            .get_function("__jinn_str_clone")
+            .unwrap_or_else(|| {
+                let ft = void_ty.fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+                self.module.add_function("__jinn_str_clone", ft, None)
+            });
         self.needs_runtime = true;
         let out_slot = self.entry_alloca(st.into(), "str.clone.out");
         let in_slot = self.entry_alloca(st.into(), "str.clone.in");
@@ -120,16 +108,13 @@ impl<'ctx> Compiler<'ctx> {
                 .get_function("__jinn_vec_clone_pod")
                 .unwrap_or_else(|| {
                     let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into()], false);
-                    self.module
-                        .add_function("__jinn_vec_clone_pod", ft, None)
+                    self.module.add_function("__jinn_vec_clone_pod", ft, None)
                 });
             self.needs_runtime = true;
             let elem_size_v = i64t.const_int(elem_size, false);
-            let ret = b!(self.bld.build_call(
-                f,
-                &[val.into(), elem_size_v.into()],
-                "vec.clone"
-            ))
+            let ret = b!(self
+                .bld
+                .build_call(f, &[val.into(), elem_size_v.into()], "vec.clone"))
             .try_as_basic_value()
             .basic()
             .expect("ICE: __jinn_vec_clone_pod returned void");
@@ -144,32 +129,35 @@ impl<'ctx> Compiler<'ctx> {
         let null = ptr_ty.const_null();
 
         let pre_bb = self.current_bb();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            src_ptr,
-            null,
-            "vc.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, src_ptr, null, "vc.null"));
         let alloc_bb = self.ctx.append_basic_block(fv, "vc.alloc");
         let join_bb = self.ctx.append_basic_block(fv, "vc.join");
-        b!(self.bld.build_conditional_branch(is_null, join_bb, alloc_bb));
+        b!(self
+            .bld
+            .build_conditional_branch(is_null, join_bb, alloc_bb));
 
         // alloc_bb: allocate new header, copy len/cap, allocate new buffer if cap>0,
         // then loop-clone each element.
         self.bld.position_at_end(alloc_bb);
-        let new_hdr = b!(self
-            .bld
-            .build_call(malloc, &[i64t.const_int(24, false).into()], "vc.hdr"))
-        .try_as_basic_value()
-        .basic()
-        .expect("ICE: malloc returned void")
-        .into_pointer_value();
+        let new_hdr =
+            b!(self
+                .bld
+                .build_call(malloc, &[i64t.const_int(24, false).into()], "vc.hdr"))
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: malloc returned void")
+            .into_pointer_value();
 
         let src_len_gep = b!(self.bld.build_struct_gep(header_ty, src_ptr, 1, "vc.slenp"));
         let src_len = b!(self.bld.build_load(i64t, src_len_gep, "vc.slen")).into_int_value();
         let src_cap_gep = b!(self.bld.build_struct_gep(header_ty, src_ptr, 2, "vc.scapp"));
         let src_cap = b!(self.bld.build_load(i64t, src_cap_gep, "vc.scap")).into_int_value();
-        let src_data_gep = b!(self.bld.build_struct_gep(header_ty, src_ptr, 0, "vc.sdatap"));
+        let src_data_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, src_ptr, 0, "vc.sdatap"));
         let src_data =
             b!(self.bld.build_load(ptr_ty, src_data_gep, "vc.sdata")).into_pointer_value();
 
@@ -192,7 +180,9 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(cap_zero, nobuf_bb, buf_bb));
 
         self.bld.position_at_end(nobuf_bb);
-        let new_data_gep_z = b!(self.bld.build_struct_gep(header_ty, new_hdr, 0, "vc.ddatapz"));
+        let new_data_gep_z = b!(self
+            .bld
+            .build_struct_gep(header_ty, new_hdr, 0, "vc.ddatapz"));
         b!(self.bld.build_store(new_data_gep_z, null));
         b!(self.bld.build_unconditional_branch(join_bb));
 
@@ -204,7 +194,9 @@ impl<'ctx> Compiler<'ctx> {
             .basic()
             .expect("ICE: malloc returned void")
             .into_pointer_value();
-        let new_data_gep = b!(self.bld.build_struct_gep(header_ty, new_hdr, 0, "vc.ddatap"));
+        let new_data_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, new_hdr, 0, "vc.ddatap"));
         b!(self.bld.build_store(new_data_gep, new_buf));
 
         // Loop: for i in 0..len { dst[i] = clone(src[i]) }
@@ -217,12 +209,9 @@ impl<'ctx> Compiler<'ctx> {
         let i_phi = b!(self.bld.build_phi(i64t, "vc.i"));
         i_phi.add_incoming(&[(&i64t.const_int(0, false), buf_bb)]);
         let i = i_phi.as_basic_value().into_int_value();
-        let cont = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::ULT,
-            i,
-            src_len,
-            "vc.ilt"
-        ));
+        let cont = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, i, src_len, "vc.ilt"));
         b!(self.bld.build_conditional_branch(cont, body_bb, post_bb));
 
         self.bld.position_at_end(body_bb);
@@ -285,20 +274,14 @@ impl<'ctx> Compiler<'ctx> {
         for i in 0..n {
             let idx = i64t.const_int(i as u64, false);
             let s_ep = unsafe {
-                b!(self.bld.build_gep(
-                    arr_ty,
-                    src_slot,
-                    &[i64t.const_zero(), idx],
-                    "arr.sep"
-                ))
+                b!(self
+                    .bld
+                    .build_gep(arr_ty, src_slot, &[i64t.const_zero(), idx], "arr.sep"))
             };
             let d_ep = unsafe {
-                b!(self.bld.build_gep(
-                    arr_ty,
-                    dst,
-                    &[i64t.const_zero(), idx],
-                    "arr.dep"
-                ))
+                b!(self
+                    .bld
+                    .build_gep(arr_ty, dst, &[i64t.const_zero(), idx], "arr.dep"))
             };
             let s_v = b!(self.bld.build_load(lty, s_ep, "arr.sv"));
             let cloned = self.clone_value(s_v, elem)?;
@@ -325,8 +308,12 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(src_slot, val));
         let dst_slot = self.entry_alloca(tuple_ty.into(), "tup.cdst");
         for (i, t) in tys.iter().enumerate() {
-            let s_ep = b!(self.bld.build_struct_gep(tuple_ty, src_slot, i as u32, "tup.sep"));
-            let d_ep = b!(self.bld.build_struct_gep(tuple_ty, dst_slot, i as u32, "tup.dep"));
+            let s_ep = b!(self
+                .bld
+                .build_struct_gep(tuple_ty, src_slot, i as u32, "tup.sep"));
+            let d_ep = b!(self
+                .bld
+                .build_struct_gep(tuple_ty, dst_slot, i as u32, "tup.dep"));
             let s_v = b!(self.bld.build_load(field_tys[i], s_ep, "tup.sv"));
             let cloned = self.clone_value(s_v, t)?;
             b!(self.bld.build_store(d_ep, cloned));
@@ -370,7 +357,9 @@ impl<'ctx> Compiler<'ctx> {
             let src_slot = self.entry_alloca(lty_st.into(), "stc.src");
             let dst_slot = self.entry_alloca(lty_st.into(), "stc.dst");
             b!(self.bld.build_store(src_slot, val));
-            b!(self.bld.build_call(cfn, &[dst_slot.into(), src_slot.into()], ""));
+            b!(self
+                .bld
+                .build_call(cfn, &[dst_slot.into(), src_slot.into()], ""));
             return Ok(b!(self.bld.build_load(lty_st, dst_slot, "stc.cv")));
         }
 
@@ -385,8 +374,12 @@ impl<'ctx> Compiler<'ctx> {
             let dst_slot = self.entry_alloca(lty_st.into(), "stc.dst");
             for (i, (_, ft)) in fields.iter().enumerate() {
                 let lf = self.llvm_ty(ft);
-                let s_ep = b!(self.bld.build_struct_gep(lty_st, src_slot, i as u32, "stc.sep"));
-                let d_ep = b!(self.bld.build_struct_gep(lty_st, dst_slot, i as u32, "stc.dep"));
+                let s_ep = b!(self
+                    .bld
+                    .build_struct_gep(lty_st, src_slot, i as u32, "stc.sep"));
+                let d_ep = b!(self
+                    .bld
+                    .build_struct_gep(lty_st, dst_slot, i as u32, "stc.dep"));
                 let s_v = b!(self.bld.build_load(lf, s_ep, "stc.sv"));
                 let cloned = self.clone_value(s_v, ft)?;
                 b!(self.bld.build_store(d_ep, cloned));
@@ -419,8 +412,12 @@ impl<'ctx> Compiler<'ctx> {
 
         for (i, (_, ft)) in fields.iter().enumerate() {
             let lf = self.llvm_ty(ft);
-            let s_ep = b!(self.bld.build_struct_gep(lty_st, in_ptr, i as u32, "stc.sep"));
-            let d_ep = b!(self.bld.build_struct_gep(lty_st, out_ptr, i as u32, "stc.dep"));
+            let s_ep = b!(self
+                .bld
+                .build_struct_gep(lty_st, in_ptr, i as u32, "stc.sep"));
+            let d_ep = b!(self
+                .bld
+                .build_struct_gep(lty_st, out_ptr, i as u32, "stc.dep"));
             let s_v = b!(self.bld.build_load(lf, s_ep, "stc.sv"));
             let cloned = self.clone_value(s_v, ft)?;
             b!(self.bld.build_store(d_ep, cloned));
@@ -437,7 +434,9 @@ impl<'ctx> Compiler<'ctx> {
         let src_slot = self.entry_alloca(lty_st.into(), "stc.src");
         let dst_slot = self.entry_alloca(lty_st.into(), "stc.dst");
         b!(self.bld.build_store(src_slot, val));
-        b!(self.bld.build_call(cfn, &[dst_slot.into(), src_slot.into()], ""));
+        b!(self
+            .bld
+            .build_call(cfn, &[dst_slot.into(), src_slot.into()], ""));
         Ok(b!(self.bld.build_load(lty_st, dst_slot, "stc.cv")))
     }
 
@@ -450,9 +449,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Struct(n, _) => n == name,
             Type::Vec(inner)
             | Type::Rc(inner)
-            | Type::RcCell(inner)
-            | Type::Arc(inner)
-            | Type::Mutex(inner)
             | Type::Weak(inner)
             | Type::Array(inner, _)
             | Type::Ptr(inner) => Self::type_references_struct_for_clone(inner, name),
@@ -478,12 +474,10 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i64t = self.ctx.i64_type();
         let null = ptr_ty.const_null();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            ptr,
-            null,
-            "rc.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, ptr, null, "rc.null"));
         let fv = self.current_fn();
         let bump_bb = self.ctx.append_basic_block(fv, "rc.bump");
         let done_bb = self.ctx.append_basic_block(fv, "rc.done");
@@ -508,12 +502,10 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i64t = self.ctx.i64_type();
         let null = ptr_ty.const_null();
-        let is_null = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::EQ,
-            ptr,
-            null,
-            "arc.null"
-        ));
+        let is_null =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, ptr, null, "arc.null"));
         let fv = self.current_fn();
         let bump_bb = self.ctx.append_basic_block(fv, "arc.bump");
         let done_bb = self.ctx.append_basic_block(fv, "arc.done");

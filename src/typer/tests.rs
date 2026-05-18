@@ -100,8 +100,7 @@ fn test_enum_typed() {
 
 #[test]
 fn test_generic_fn_monomorphized() {
-    let hir =
-        type_check("*identity(x as T) returns T\n    x\n*main()\n    log(identity(42))\n");
+    let hir = type_check("*identity(x as T) returns T\n    x\n*main()\n    log(identity(42))\n");
     assert!(
         hir.fns.len() >= 2,
         "expected at least 2 fns, got {}",
@@ -172,7 +171,9 @@ fn test_constraint_provenance() {
         start: 0,
         end: 5,
         line: 1,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     let _ = ctx.unify_at(&v, &Type::String, span, "test constraint");
     let origin = ctx.origin_of(&v);
     assert!(origin.is_some(), "expected constraint origin");
@@ -184,9 +185,8 @@ fn test_constraint_provenance() {
 
 #[test]
 fn test_let_gen_fn_scheme_is_poly() {
-    let prog = parse(
-        "*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n",
-    );
+    let prog =
+        parse("*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(5))\n    0\n");
     let mut typer = Typer::new();
     let _hir = typer.lower_program(&prog).unwrap();
 }
@@ -277,8 +277,7 @@ fn test_numeric_var_defaults_i64() {
 
 #[test]
 fn test_return_type_inferred_from_tail() {
-    let hir =
-        type_check("*double(x as i64) returns i64\n    x * 2\n*main()\n    log(double(5))\n");
+    let hir = type_check("*double(x as i64) returns i64\n    x * 2\n*main()\n    log(double(5))\n");
     let double = hir.fns.iter().find(|f| f.name == "double").unwrap();
     assert_eq!(double.ret, Type::I64);
 }
@@ -575,7 +574,9 @@ fn test_strict_types_errors_on_unconstrained_typevar() {
         start: 0,
         end: 0,
         line: 5,
-        col: 3, file: None };
+        col: 3,
+        file: None,
+    };
     let v = ctx.fresh_var();
     let v2 = ctx.fresh_var();
     let _ = ctx.unify_at(&v, &v2, span, "test binding");
@@ -630,7 +631,9 @@ fn test_strict_types_numeric_defaults_with_warning() {
         start: 0,
         end: 0,
         line: 10,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     let v = ctx.fresh_numeric_var();
     let v2 = ctx.fresh_var();
     let _ = ctx.unify_at(&v, &v2, span, "numeric op");
@@ -705,12 +708,16 @@ fn test_error_message_type_mismatch_has_provenance() {
         start: 0,
         end: 0,
         line: 3,
-        col: 5, file: None };
+        col: 5,
+        file: None,
+    };
     let span2 = crate::ast::Span {
         start: 0,
         end: 0,
         line: 7,
-        col: 10, file: None };
+        col: 10,
+        file: None,
+    };
     ctx.unify_at(&v, &Type::String, span1, "bind annotation")
         .unwrap();
     let err = ctx
@@ -733,7 +740,9 @@ fn test_error_message_suggests_cast_for_int_float() {
         start: 0,
         end: 0,
         line: 5,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     let err = ctx
         .unify_at(&Type::I64, &Type::F64, span, "binary operands")
         .unwrap_err();
@@ -747,7 +756,9 @@ fn test_error_message_suggests_to_string() {
         start: 0,
         end: 0,
         line: 5,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     let err = ctx
         .unify_at(&Type::String, &Type::I64, span, "function argument")
         .unwrap_err();
@@ -764,7 +775,9 @@ fn test_error_message_binary_operand_help() {
         start: 0,
         end: 0,
         line: 3,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     let err = ctx
         .unify_at(&Type::String, &Type::Bool, span, "binary operands")
         .unwrap_err();
@@ -779,7 +792,9 @@ fn test_constrain_typevar_to_numeric() {
         start: 0,
         end: 0,
         line: 1,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic")
         .unwrap();
     let err = ctx.unify(&v, &Type::String);
@@ -802,7 +817,9 @@ fn test_constrain_typevar_to_integer() {
         start: 0,
         end: 0,
         line: 1,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     ctx.constrain(&v, unify::TypeConstraint::Integer, span, "bitwise")
         .unwrap();
     assert!(ctx.unify(&v, &Type::F64).is_err());
@@ -821,7 +838,9 @@ fn test_constrain_already_solved_validates() {
         start: 0,
         end: 0,
         line: 1,
-        col: 1, file: None };
+        col: 1,
+        file: None,
+    };
     ctx.unify(&v, &Type::String).unwrap();
     let err = ctx.constrain(&v, unify::TypeConstraint::Numeric, span, "arithmetic");
     assert!(err.is_err(), "should reject String for Numeric constraint");
@@ -959,8 +978,7 @@ fn test_scc_three_way_mutual_recursion() {
 
 #[test]
 fn test_implicit_generic_identity_multi_type() {
-    let src =
-        "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
+    let src = "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
     let hir = type_check(src);
     let id_fns: Vec<_> = hir
         .fns
@@ -1167,8 +1185,7 @@ fn test_fn_scheme_quantified_exempt_from_strict() {
 
 #[test]
 fn test_fn_scheme_polymorphic_identity_strict() {
-    let src =
-        "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
+    let src = "*identity(x)\n    x\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n";
     let prog = parse(src);
     let mut typer = Typer::new();
     typer.set_strict_types(true);
@@ -1213,8 +1230,7 @@ fn test_cross_function_constraint_flow() {
 
 #[test]
 fn test_struct_field_inferred_from_constructor() {
-    let src =
-        "type Point\n    x\n    y\n\n*main()\n    p is Point(x is 1, y is 2)\n    log(p.x)\n";
+    let src = "type Point\n    x\n    y\n\n*main()\n    p is Point(x is 1, y is 2)\n    log(p.x)\n";
     let prog = parse(src);
     let mut typer = Typer::new();
     typer.set_lenient(true);
@@ -1240,8 +1256,7 @@ fn test_return_type_inference_no_annotation() {
 
 #[test]
 fn test_multipath_return_type_inference() {
-    let src =
-        "*abs(x as i64)\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n";
+    let src = "*abs(x as i64)\n    if x < 0\n        return -x\n    x\n*main()\n    log(abs(-5))\n";
     let hir = type_check(src);
     let abs_fn = hir.fns.iter().find(|f| f.name == "abs").unwrap();
     assert_eq!(abs_fn.ret, Type::I64);
@@ -1370,7 +1385,8 @@ fn test_vec_push_constrains_element_type() {
 
 #[test]
 fn test_value_restriction_syntactic_value() {
-    let src = "*main()\n    id is |x| x\n    a is id(42)\n    b is id(\"hi\")\n    log(a)\n    log(b)\n";
+    let src =
+        "*main()\n    id is |x| x\n    a is id(42)\n    b is id(\"hi\")\n    log(a)\n    log(b)\n";
     let prog = parse(src);
     let mut typer = Typer::new();
     let hir = typer.lower_program(&prog).unwrap();

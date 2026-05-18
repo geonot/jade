@@ -243,9 +243,7 @@ impl Parser {
                 // for the `vector(...)` / `vec(...)` constructor. Desugars to
                 // a normal call so the typer's existing builtin handling for
                 // "vec" / "vector" produces a `VecNew`.
-                if (name.with_str(|s| s == "vector" || s == "vec"))
-                    && self.check(Token::LBracket)
-                {
+                if (name.with_str(|s| s == "vector" || s == "vec")) && self.check(Token::LBracket) {
                     self.advance();
                     self.skip_ws();
                     let mut elems = Vec::new();
@@ -262,11 +260,7 @@ impl Parser {
                         self.skip_ws();
                     }
                     self.expect(Token::RBracket)?;
-                    return Ok(Expr::Call(
-                        Box::new(Expr::Ident(name, sp)),
-                        elems,
-                        sp,
-                    ));
+                    return Ok(Expr::Call(Box::new(Expr::Ident(name, sp)), elems, sp));
                 }
                 if name.with_str(|s| s.starts_with(|c: char| c.is_uppercase()))
                     && self.check(Token::LParen)

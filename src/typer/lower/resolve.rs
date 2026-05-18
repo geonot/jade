@@ -548,8 +548,7 @@ impl Typer {
                 }
                 self.reclassify_method_call(expr);
             }
-            hir::ExprKind::VecMethod(recv, _, args)
-            | hir::ExprKind::MapMethod(recv, _, args) => {
+            hir::ExprKind::VecMethod(recv, _, args) | hir::ExprKind::MapMethod(recv, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {
                     self.resolve_expr(a);

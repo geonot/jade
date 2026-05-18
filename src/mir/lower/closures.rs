@@ -250,8 +250,7 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
                 collect_var_refs_block(default_body, refs);
             }
         }
-        ExprKind::Send(obj, _, _, _, args)
-        | ExprKind::Pipe(obj, _, _, args) => {
+        ExprKind::Send(obj, _, _, _, args) | ExprKind::Pipe(obj, _, _, args) => {
             collect_var_refs_expr(obj, refs);
             for arg in args {
                 collect_var_refs_expr(arg, refs);

@@ -379,7 +379,10 @@ impl<'ctx> Compiler<'ctx> {
             None => self.bld.position_at_end(entry),
         }
         // Place the store after the alloca so dominance is sound.
-        if let Some(after) = alloca.as_instruction_value().and_then(|i| i.get_next_instruction()) {
+        if let Some(after) = alloca
+            .as_instruction_value()
+            .and_then(|i| i.get_next_instruction())
+        {
             self.bld.position_before(&after);
         } else {
             self.bld.position_at_end(entry);
@@ -423,17 +426,12 @@ impl<'ctx> Compiler<'ctx> {
             .build_load(ptr_ty, alloca, "perceus.slot.load")
             .ok()?
             .into_pointer_value();
-        let is_null = self
-            .bld
-            .build_is_null(cur, "perceus.slot.isnull")
-            .ok()?;
+        let is_null = self.bld.build_is_null(cur, "perceus.slot.isnull").ok()?;
         let fv = self.current_fn();
         let then_bb = self.ctx.append_basic_block(fv, "perceus.consume.miss");
         let else_bb = self.ctx.append_basic_block(fv, "perceus.consume.hit");
         let cont_bb = self.ctx.append_basic_block(fv, "perceus.consume.cont");
-        let _ = self
-            .bld
-            .build_conditional_branch(is_null, then_bb, else_bb);
+        let _ = self.bld.build_conditional_branch(is_null, then_bb, else_bb);
         // miss: leave NULL, the caller will detect None and malloc.
         // hit: clear the slot and pass the pointer through a phi.
         self.bld.position_at_end(else_bb);
@@ -449,10 +447,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(then_bb);
         let _ = self.bld.build_unconditional_branch(cont_bb);
         self.bld.position_at_end(cont_bb);
-        let phi = self
-            .bld
-            .build_phi(ptr_ty, "perceus.slot.phi")
-            .ok()?;
+        let phi = self.bld.build_phi(ptr_ty, "perceus.slot.phi").ok()?;
         phi.add_incoming(&[(&null, then_bb), (&cur, else_bb)]);
         let result = phi.as_basic_value().into_pointer_value();
         // Caller treats NULL as "no reuse, please malloc". To avoid the
@@ -489,9 +484,7 @@ impl<'ctx> Compiler<'ctx> {
                 let fv = self.current_fn();
                 let free_bb = self.ctx.append_basic_block(fv, "perceus.save.free");
                 let cont_bb = self.ctx.append_basic_block(fv, "perceus.save.cont");
-                let _ = self
-                    .bld
-                    .build_conditional_branch(is_null, cont_bb, free_bb);
+                let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
                 self.bld.position_at_end(free_bb);
                 let free_fn = self.ensure_free();
                 let _ = self
@@ -533,9 +526,7 @@ impl<'ctx> Compiler<'ctx> {
             let fv = self.current_fn();
             let free_bb = self.ctx.append_basic_block(fv, "perceus.drain.free");
             let cont_bb = self.ctx.append_basic_block(fv, "perceus.drain.cont");
-            let _ = self
-                .bld
-                .build_conditional_branch(is_null, cont_bb, free_bb);
+            let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
             self.bld.position_at_end(free_bb);
             // For Vec slots: also free the data buffer (header[0]).
             if self.current_perceus_meta.vec_slots.contains(&slot) {
@@ -552,7 +543,9 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
             }
-            let _ = self.bld.build_call(free_fn, &[cur.into()], "perceus.drain.free");
+            let _ = self
+                .bld
+                .build_call(free_fn, &[cur.into()], "perceus.drain.free");
             // Clear the slot (defensive — function is about to return anyway).
             let null = ptr_ty.const_null();
             let _ = self.bld.build_store(alloca, null);
@@ -585,9 +578,7 @@ impl<'ctx> Compiler<'ctx> {
                 let fv = self.current_fn();
                 let free_bb = self.ctx.append_basic_block(fv, "vec.save.free");
                 let cont_bb = self.ctx.append_basic_block(fv, "vec.save.cont");
-                let _ = self
-                    .bld
-                    .build_conditional_branch(is_null, cont_bb, free_bb);
+                let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
                 self.bld.position_at_end(free_bb);
                 let free_fn = self.ensure_free();
                 if let Ok(data_gep) =

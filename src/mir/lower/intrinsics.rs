@@ -74,7 +74,7 @@ impl Lowerer {
                         // T larger than a pointer (Rc<String>, Rc<Vec<_>>,
                         // Rc<Struct>, ...).
                         let inner = match &ty {
-                            Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
+                            Type::Rc(inner) => {
                                 (**inner).clone()
                             }
                             other => other.clone(),
@@ -132,11 +132,7 @@ impl Lowerer {
                             "exp2" => "exp2",
                             other => other, // assume libm name matches
                         };
-                        self.emit(
-                            InstKind::Call(Symbol::intern(libm_name), vals),
-                            ty,
-                            span,
-                        )
+                        self.emit(InstKind::Call(Symbol::intern(libm_name), vals), ty, span)
                     }
                     _ => {
                         let name = Symbol::intern(&format!("__builtin_{builtin:?}"));

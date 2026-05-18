@@ -168,12 +168,15 @@ impl Typer {
                     }
                     return Err(format!(
                         "{}: '{}' has no variant '{}'",
-                        span.loc(), type_name, variant_name
+                        span.loc(),
+                        type_name,
+                        variant_name
                     ));
                 }
                 Err(format!(
                     "{}: '{}' is not an error or enum type",
-                    span.loc(), type_name
+                    span.loc(),
+                    type_name
                 ))
             }
             _ => unreachable!(),

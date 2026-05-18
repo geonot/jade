@@ -7591,10 +7591,7 @@ fn b_decimal_round_truncate() {
 
 #[test]
 fn access_mod_copy_on_bind_runs() {
-    expect(
-        "*main()\n    x is 5\n    y is copy x\n    log(y)\n",
-        "5",
-    );
+    expect("*main()\n    x is 5\n    y is copy x\n    log(y)\n", "5");
 }
 
 #[test]
@@ -7864,9 +7861,8 @@ fn atomic_annotation_parses() {
 
 #[test]
 fn atomic_and_resource_mutually_exclusive() {
-    let err = expect_compile_fail(
-        "type Bad @atomic @resource\n    x as i64\n\n*main()\n    log(1)\n",
-    );
+    let err =
+        expect_compile_fail("type Bad @atomic @resource\n    x as i64\n\n*main()\n    log(1)\n");
     assert!(
         err.contains("mutually exclusive") || err.contains("@resource") || err.contains("@atomic"),
         "expected mutual-exclusion diagnostic, got: {err}"
@@ -7875,9 +7871,7 @@ fn atomic_and_resource_mutually_exclusive() {
 
 #[test]
 fn weakable_requires_atomic() {
-    let err = expect_compile_fail(
-        "type Bad @weakable\n    x as i64\n\n*main()\n    log(1)\n",
-    );
+    let err = expect_compile_fail("type Bad @weakable\n    x as i64\n\n*main()\n    log(1)\n");
     assert!(
         err.contains("@weakable") || err.contains("@atomic") || err.contains("weak"),
         "expected weakable-requires-atomic diagnostic, got: {err}"

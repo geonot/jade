@@ -255,7 +255,8 @@ impl InferCtx {
                     .map_err(|e| {
                         format!(
                             "{}: conflicting constraints for {}: {e}",
-                            span.loc(), reason
+                            span.loc(),
+                            reason
                         )
                     })?;
                 self.constraints[root as usize] = merged;
@@ -267,15 +268,18 @@ impl InferCtx {
             ref concrete => match constraint {
                 TypeConstraint::Integer if !concrete.is_int() => Err(format!(
                     "{}: expected integer type for {}, found `{concrete}`",
-                    span.loc(), reason
+                    span.loc(),
+                    reason
                 )),
                 TypeConstraint::Float if !concrete.is_float() => Err(format!(
                     "{}: expected float type for {}, found `{concrete}`",
-                    span.loc(), reason
+                    span.loc(),
+                    reason
                 )),
                 TypeConstraint::Numeric if !concrete.is_num() => Err(format!(
                     "{}: expected numeric type for {}, found `{concrete}`",
-                    span.loc(), reason
+                    span.loc(),
+                    reason
                 )),
                 _ => Ok(()),
             },

@@ -191,9 +191,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                     walk_block(body, modules, defs);
                 }
             }
-            Expr::Array(elems, _)
-            | Expr::Tuple(elems, _)
-            | Expr::Syscall(elems, _) => {
+            Expr::Array(elems, _) | Expr::Tuple(elems, _) | Expr::Syscall(elems, _) => {
                 for elem in elems {
                     walk_expr(elem, modules, defs);
                 }

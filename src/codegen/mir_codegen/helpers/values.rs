@@ -31,14 +31,16 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
-                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
-                        fv.get_type().get_param_types().into_iter().map(|t| t.into()).collect();
+                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = fv
+                        .get_type()
+                        .get_param_types()
+                        .into_iter()
+                        .map(|t| t.into())
+                        .collect();
                     let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
-                    let csv = b!(self.bld.build_call(
-                        fv,
-                        &coerced,
-                        &format!("{method_name}.call")
-                    ));
+                    let csv = b!(self
+                        .bld
+                        .build_call(fv, &coerced, &format!("{method_name}.call")));
                     return Ok(self.call_result(csv));
                 }
             }
@@ -213,8 +215,12 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
-                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
-                        fv.get_type().get_param_types().into_iter().map(|t| t.into()).collect();
+                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = fv
+                        .get_type()
+                        .get_param_types()
+                        .into_iter()
+                        .map(|t| t.into())
+                        .collect();
                     let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
                     let csv = b!(self.bld.build_call(fv, &coerced, "cmp.call"));
                     let result = self.call_result(csv);
@@ -402,18 +408,14 @@ impl<'ctx> Compiler<'ctx> {
         // see what they expect.
         let mut obj_ty = self.value_types.get(&obj).cloned();
         if let Some(outer) = obj_ty.clone() {
-            if let Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) = outer {
-                let (payload_inner, payload_idx, layout) = match inner.as_ref() {
-                    Type::Mutex(m_inner) => (
-                        (**m_inner).clone(),
-                        3u32,
-                        self.arc_mutex_layout_ty(m_inner),
-                    ),
-                    _ => ((*inner).clone(), 2u32, self.rc_layout_ty(&inner)),
-                };
+            if let Type::Rc(inner) = outer {
+                let (payload_inner, payload_idx, layout) =
+                    ((*inner).clone(), 2u32, self.rc_layout_ty(&inner));
                 let rc_ptr = obj_val.into_pointer_value();
                 let payload_gep =
-                    b!(self.bld.build_struct_gep(layout, rc_ptr, payload_idx, "rc.payload"));
+                    b!(self
+                        .bld
+                        .build_struct_gep(layout, rc_ptr, payload_idx, "rc.payload"));
                 let keep_as_ptr = matches!(
                     &payload_inner,
                     Type::Struct(_, _) | Type::Enum(_) | Type::Row(_)
@@ -422,7 +424,9 @@ impl<'ctx> Compiler<'ctx> {
                     payload_gep.into()
                 } else {
                     let inner_llvm = self.llvm_ty(&payload_inner);
-                    b!(self.bld.build_load(inner_llvm, payload_gep, "rc.payload.ld"))
+                    b!(self
+                        .bld
+                        .build_load(inner_llvm, payload_gep, "rc.payload.ld"))
                 };
                 obj_ty = Some(payload_inner);
             }
@@ -572,8 +576,7 @@ impl<'ctx> Compiler<'ctx> {
                     // from compute_enum_payload_offset).
                     if self.enums.contains_key(name) {
                         if field == "__tag" {
-                            let tag_gep =
-                                b!(self.bld.build_struct_gep(st, ptr, 0, "tag"));
+                            let tag_gep = b!(self.bld.build_struct_gep(st, ptr, 0, "tag"));
                             let i32t = self.ctx.i32_type();
                             let i64t = self.ctx.i64_type();
                             let tag_i32 = b!(self.bld.build_load(i32t, tag_gep, "tag"));
@@ -604,16 +607,15 @@ impl<'ctx> Compiler<'ctx> {
                                         ))
                                     }
                                 };
-                                let is_rec = Compiler::is_recursive_field(result_ty, &name.as_str());
+                                let is_rec =
+                                    Compiler::is_recursive_field(result_ty, &name.as_str());
                                 if is_rec {
                                     let ptr_ty =
                                         self.ctx.ptr_type(inkwell::AddressSpace::default());
-                                    let heap_ptr = b!(self
-                                        .bld
-                                        .build_load(ptr_ty, field_ptr, "box.ptr"))
-                                    .into_pointer_value();
-                                    let val =
-                                        b!(self.bld.build_load(res_llvm, heap_ptr, field));
+                                    let heap_ptr =
+                                        b!(self.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
+                                            .into_pointer_value();
+                                    let val = b!(self.bld.build_load(res_llvm, heap_ptr, field));
                                     return Ok(val);
                                 }
                                 let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
@@ -693,22 +695,12 @@ impl<'ctx> Compiler<'ctx> {
                 .expect("ICE: call returned void")
                 .into_pointer_value();
                 // Initialize fresh header to {NULL, 0, 0}.
-                let dgep = b!(self
-                    .bld
-                    .build_struct_gep(header_ty, m, 0, "vec.hdr.d0"));
+                let dgep = b!(self.bld.build_struct_gep(header_ty, m, 0, "vec.hdr.d0"));
                 b!(self.bld.build_store(dgep, ptr_ty.const_null()));
-                let lgep = b!(self
-                    .bld
-                    .build_struct_gep(header_ty, m, 1, "vec.hdr.l0"));
-                b!(self
-                    .bld
-                    .build_store(lgep, i64t.const_int(0, false)));
-                let cgep = b!(self
-                    .bld
-                    .build_struct_gep(header_ty, m, 2, "vec.hdr.c0"));
-                b!(self
-                    .bld
-                    .build_store(cgep, i64t.const_int(0, false)));
+                let lgep = b!(self.bld.build_struct_gep(header_ty, m, 1, "vec.hdr.l0"));
+                b!(self.bld.build_store(lgep, i64t.const_int(0, false)));
+                let cgep = b!(self.bld.build_struct_gep(header_ty, m, 2, "vec.hdr.c0"));
+                b!(self.bld.build_store(cgep, i64t.const_int(0, false)));
                 b!(self.bld.build_unconditional_branch(cont_bb));
                 self.bld.position_at_end(cont_bb);
                 let phi = b!(self.bld.build_phi(ptr_ty, "vec.hdr.phi"));
@@ -716,12 +708,11 @@ impl<'ctx> Compiler<'ctx> {
                 let header_ptr = phi.as_basic_value().into_pointer_value();
                 // Reset `len = 0` (data + cap preserved on hit; on miss they
                 // are already zero from the fresh init).
-                let len_gep = b!(self
-                    .bld
-                    .build_struct_gep(header_ty, header_ptr, 1, "vec.len.reset"));
-                b!(self
-                    .bld
-                    .build_store(len_gep, i64t.const_int(0, false)));
+                let len_gep =
+                    b!(self
+                        .bld
+                        .build_struct_gep(header_ty, header_ptr, 1, "vec.len.reset"));
+                b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
                 return Ok(header_ptr.into());
             }
         }

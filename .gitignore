@@ -4,4 +4,4 @@ __pycache__
 
 *.log
 ok
-benchmarks/_build/
+benchmarks/_build/a.out

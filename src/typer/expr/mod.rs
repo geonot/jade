@@ -231,7 +231,8 @@ impl Typer {
                     other => {
                         return Err(format!(
                             "{}: cannot dereference type `{}`",
-                            span.loc(), other
+                            span.loc(),
+                            other
                         ));
                     }
                 };

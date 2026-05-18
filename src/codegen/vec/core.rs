@@ -163,10 +163,7 @@ impl<'ctx> Compiler<'ctx> {
                     "vl.empty"
                 ));
                 let i8t = self.ctx.i8_type();
-                Ok(b!(self
-                    .bld
-                    .build_int_z_extend(cmp, i8t, "vl.emptyi"))
-                .into())
+                Ok(b!(self.bld.build_int_z_extend(cmp, i8t, "vl.emptyi")).into())
             }
             "clear" => self.vec_clear(header_ptr),
             "map" => self.vec_map(header_ptr, &elem_ty, args),

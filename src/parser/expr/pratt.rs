@@ -271,9 +271,8 @@ impl Parser {
                                     && !matches!(arg, Expr::Lambda(..))
                                 {
                                     let asp = arg.span();
-                                    let replaced = super::placeholder::replace_placeholder(
-                                        &arg, "__ph",
-                                    );
+                                    let replaced =
+                                        super::placeholder::replace_placeholder(&arg, "__ph");
                                     Expr::Lambda(
                                         vec![Param {
                                             name: "__ph".into(),

@@ -34,23 +34,7 @@ pub enum Type {
     Alias(Symbol, Box<Type>),
     Newtype(Symbol, Box<Type>),
     Generator(Box<Type>),
-    /// A write-through handle to a row in a store. The `Symbol` is the
-    /// store name; the underlying record type is the store's row struct
-    /// `Struct("__store_{name}", [])`. `Row<T>` is `@resource` (P4 §5):
-    /// it must not be implicitly copied. See `docs/access-semantics-sprint.md §6`.
     Row(Symbol),
-    /// `Rc<Cell<T>>` — single-threaded shared mutable. Produced by the
-    /// T2-mut promotion pass (escape tier T2 + `mut`/`BorrowMut`).
-    /// See `docs/access-semantics-r34-design.md` and
-    /// `docs/access-semantics-sprint.md §3.3`.
-    RcCell(Box<Type>),
-    /// `Arc<T>` — cross-thread shared immutable. Produced by the T3-ref
-    /// promotion pass (escape tier T3 + `ref`/`Borrowed`/`Rc`), or by
-    /// user-written `@atomic T`.
-    Arc(Box<Type>),
-    /// `Mutex<T>` — pthread-mutex-guarded payload. Only meaningful inside
-    /// `Arc(Mutex(T))`, produced by the T3-mut promotion pass.
-    Mutex(Box<Type>),
 }
 
 impl Type {
@@ -91,15 +75,9 @@ impl Type {
         matches!(self, Self::Rc(_))
     }
 
-    /// True for any heap-RC variant (plain `Rc<T>` or `Rc<Cell<T>>`).
+    /// True for any heap-RC variant.
     pub fn is_rc_family(&self) -> bool {
-        matches!(self, Self::Rc(_) | Self::RcCell(_))
-    }
-
-    /// True for any atomic-RC variant (`Arc<T>` or `Arc<Mutex<T>>` — the
-    /// outer `Arc` is what carries the atomic refcount).
-    pub fn is_arc(&self) -> bool {
-        matches!(self, Self::Arc(_))
+        matches!(self, Self::Rc(_))
     }
 
     pub fn is_weak(&self) -> bool {
@@ -112,9 +90,6 @@ impl Type {
             self,
             Self::Ptr(_)
                 | Self::Rc(_)
-                | Self::RcCell(_)
-                | Self::Arc(_)
-                | Self::Mutex(_)
                 | Self::Weak(_)
                 | Self::ActorRef(_)
                 | Self::Coroutine(_)
@@ -164,10 +139,6 @@ impl Type {
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
             Self::Struct(_, _) => true,
             Self::Rc(_) | Self::Weak(_) => true,
-            // RcCell<T> / Arc<T> clone by bumping the (atomic) refcount.
-            // Mutex<T> by itself cannot be cloned — it must live inside an
-            // Arc, and Arc handles the sharing.
-            Self::RcCell(_) | Self::Arc(_) => true,
             Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.is_value_clonable(),
             _ => false,
         }
@@ -176,12 +147,6 @@ impl Type {
     pub fn default_ownership(&self) -> crate::hir::Ownership {
         match self {
             Self::Rc(_) => crate::hir::Ownership::Rc,
-            Self::RcCell(_) => crate::hir::Ownership::RcMut,
-            Self::Arc(_) => crate::hir::Ownership::Arc,
-            // Mutex outside of Arc is meaningless at the binding level;
-            // treat it as ArcMut for completeness (codegen will only ever
-            // see it inside an Arc).
-            Self::Mutex(_) => crate::hir::Ownership::ArcMut,
             Self::Weak(_) => crate::hir::Ownership::Weak,
             Self::Ptr(_) => crate::hir::Ownership::Raw,
             _ => crate::hir::Ownership::Owned,
@@ -193,14 +158,9 @@ impl Type {
     pub fn needs_atomic_rc(&self) -> bool {
         match self {
             Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,
-            // Arc / Mutex are the atomic refcount carriers; their
-            // *outermost* layer is what triggers atomic codegen.
-            Self::Arc(_) | Self::Mutex(_) => true,
-            Self::Rc(inner)
-            | Self::RcCell(inner)
-            | Self::Weak(inner)
-            | Self::Vec(inner)
-            | Self::Ptr(inner) => inner.needs_atomic_rc(),
+            Self::Rc(inner) | Self::Weak(inner) | Self::Vec(inner) | Self::Ptr(inner) => {
+                inner.needs_atomic_rc()
+            }
             Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
             Self::Array(inner, _) => inner.needs_atomic_rc(),
             Self::Tuple(tys) => tys.iter().any(|t| t.needs_atomic_rc()),
@@ -279,9 +239,6 @@ impl std::fmt::Display for Type {
             Self::Newtype(name, inner) => write!(f, "newtype {name} is {inner}"),
             Self::Generator(inner) => write!(f, "Generator of {inner}"),
             Self::Row(name) => write!(f, "Row<{name}>"),
-            Self::RcCell(inner) => write!(f, "RcCell<{inner}>"),
-            Self::Arc(inner) => write!(f, "Arc<{inner}>"),
-            Self::Mutex(inner) => write!(f, "Mutex<{inner}>"),
         }
     }
 }
@@ -294,9 +251,6 @@ impl Type {
             | Self::Vec(inner)
             | Self::Ptr(inner)
             | Self::Rc(inner)
-            | Self::RcCell(inner)
-            | Self::Arc(inner)
-            | Self::Mutex(inner)
             | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.has_type_var(),
@@ -316,9 +270,6 @@ impl Type {
             | Self::Vec(inner)
             | Self::Ptr(inner)
             | Self::Rc(inner)
-            | Self::RcCell(inner)
-            | Self::Arc(inner)
-            | Self::Mutex(inner)
             | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.free_type_vars(out),

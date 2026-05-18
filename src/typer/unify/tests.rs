@@ -183,7 +183,9 @@ fn test_unify_at_records_origin() {
         start: 0,
         end: 1,
         line: 10,
-        col: 5, file: None };
+        col: 5,
+        file: None,
+    };
     ctx.unify_at(&v, &Type::String, span, "test constraint")
         .unwrap();
     let origin = ctx.origin_of(&v).unwrap();
@@ -219,7 +221,9 @@ fn test_default_warnings_collected_when_enabled() {
         start: 0,
         end: 0,
         line: 5,
-        col: 3, file: None };
+        col: 3,
+        file: None,
+    };
     let v = ctx.fresh_var();
     let v2 = ctx.fresh_var();
     let _ = ctx.unify_at(&v, &v2, span, "test param");

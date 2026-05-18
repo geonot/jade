@@ -20,8 +20,8 @@ use crate::pkg::{Dependency, Package, SemVer};
 use crate::resolve::prefix_module;
 use crate::typer::Typer;
 
-use super::cli::*;
 use super::cli::strip_codegen_prefix;
+use super::cli::*;
 use super::project::*;
 use super::sources::{
     EntityIndex, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules,

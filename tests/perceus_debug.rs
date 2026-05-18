@@ -106,5 +106,8 @@ fn perceus_stats_are_nondestructive_for_trivial_main() {
     let src = "*main() returns i32\n    a is 1\n    b is 2\n    log(a + b)\n    0\n";
     let (summary, stderr) = compile(src);
     let s = require(summary, &stderr);
-    assert_eq!(s.drops_fused, 0, "unexpected fusion in scalar program: {s:?}");
+    assert_eq!(
+        s.drops_fused, 0,
+        "unexpected fusion in scalar program: {s:?}"
+    );
 }

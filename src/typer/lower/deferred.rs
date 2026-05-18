@@ -220,7 +220,9 @@ impl Typer {
                                 candidates.iter().map(|(n, _, _)| n.as_str()).collect();
                             self.type_errors.push(format!(
                                 "{}: ambiguous method `{}`: multiple types have this method: {}",
-                                dm.span.loc(), dm.method, names.join(", ")
+                                dm.span.loc(),
+                                dm.method,
+                                names.join(", ")
                             ));
                         } else if candidates.len() == 1 {
                             let (type_name, param_tys, ret) = &candidates[0];

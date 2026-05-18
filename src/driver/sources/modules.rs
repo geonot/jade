@@ -69,11 +69,7 @@ pub(in crate::driver) fn resolve_modules(
         //    (`use foo` → source/foo.jn or base_dir/foo.jn)
         candidates.push(base_dir.join(format!("{file_path}.jn")));
         if let Some(project_root) = base_dir.parent() {
-            candidates.push(
-                project_root
-                    .join("source")
-                    .join(format!("{file_path}.jn")),
-            );
+            candidates.push(project_root.join("source").join(format!("{file_path}.jn")));
         }
 
         // 2. Standard library (bundled with compiler)

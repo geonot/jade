@@ -158,8 +158,7 @@ impl Lowerer {
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
                 // Array/tuple literal elements are moved-in; auto-clone
                 // heap-typed field/index reads.
-                let vals: Vec<ValueId> =
-                    elems.iter().map(|e| self.lower_expr_owned(e)).collect();
+                let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr_owned(e)).collect();
                 self.emit(InstKind::ArrayInit(vals), ty, span)
             }
             ExprKind::Slice(arr, start, end) => {

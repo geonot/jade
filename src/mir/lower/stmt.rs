@@ -29,10 +29,7 @@ impl Lowerer {
                         // `lower_expr_owned` is what gives the new
                         // binding an independent value.
                         if matches!(b.ownership, hir::Ownership::Borrowed)
-                            && matches!(
-                                b.value.kind,
-                                ExprKind::Field(..) | ExprKind::Index(..)
-                            )
+                            && matches!(b.value.kind, ExprKind::Field(..) | ExprKind::Index(..))
                         {
                             self.lower_expr(&b.value)
                         } else if matches!(b.ownership, hir::Ownership::Borrowed)
@@ -72,8 +69,10 @@ impl Lowerer {
                                     set.insert(parent_name.clone());
                                     self.demote_vars_to_memory(&set, b.span);
                                 }
-                                self.func.block_mut(self.current_block).insts.push(
-                                    Instruction {
+                                self.func
+                                    .block_mut(self.current_block)
+                                    .insts
+                                    .push(Instruction {
                                         dest: None,
                                         kind: InstKind::FieldTombstone(
                                             parent_name.clone(),
@@ -82,8 +81,7 @@ impl Lowerer {
                                         ty: Type::Void,
                                         span: b.span,
                                         def_id: None,
-                                    },
-                                );
+                                    });
                             }
                         }
                     }

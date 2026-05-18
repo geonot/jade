@@ -40,7 +40,8 @@ impl Parser {
         // followed immediately by `(`.
         let access_mod = self.try_parse_access_mod_after_is();
         // Labeled loop: `outer is for i in items`
-        if self.check(Token::For) {            self.advance();
+        if self.check(Token::For) {
+            self.advance();
             let bind = self.ident()?;
             let bind2 = if self.check(Token::Comma) {
                 self.advance();

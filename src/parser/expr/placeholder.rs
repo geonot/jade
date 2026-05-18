@@ -33,9 +33,7 @@ pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
     match expr {
         Expr::Placeholder(_) => true,
         Expr::IndexPlaceholder(_) => false,
-        Expr::BinOp(l, _, r, _) => {
-            contains_lambda_placeholder(l) || contains_lambda_placeholder(r)
-        }
+        Expr::BinOp(l, _, r, _) => contains_lambda_placeholder(l) || contains_lambda_placeholder(r),
         Expr::UnaryOp(_, e, _) => contains_lambda_placeholder(e),
         Expr::Call(f, args, _) => {
             contains_lambda_placeholder(f) || args.iter().any(contains_lambda_placeholder)
@@ -44,9 +42,7 @@ pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
             contains_lambda_placeholder(obj) || args.iter().any(contains_lambda_placeholder)
         }
         Expr::Field(e, _, _) => contains_lambda_placeholder(e),
-        Expr::Index(a, b, _) => {
-            contains_lambda_placeholder(a) || contains_lambda_placeholder(b)
-        }
+        Expr::Index(a, b, _) => contains_lambda_placeholder(a) || contains_lambda_placeholder(b),
         Expr::Ternary(a, b, c, _) => {
             contains_lambda_placeholder(a)
                 || contains_lambda_placeholder(b)
@@ -57,9 +53,7 @@ pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
         Expr::Deref(e, _) => contains_lambda_placeholder(e),
         Expr::Array(elems, _) => elems.iter().any(contains_lambda_placeholder),
         Expr::Tuple(elems, _) => elems.iter().any(contains_lambda_placeholder),
-        Expr::Pipe(l, r, _, _) => {
-            contains_lambda_placeholder(l) || contains_lambda_placeholder(r)
-        }
+        Expr::Pipe(l, r, _, _) => contains_lambda_placeholder(l) || contains_lambda_placeholder(r),
         _ => false,
     }
 }

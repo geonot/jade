@@ -456,8 +456,7 @@ impl OwnershipVerifier {
                 }
             }
             ExprKind::MapNew => {}
-            ExprKind::VecMethod(obj, _, args)
-            | ExprKind::MapMethod(obj, _, args) => {
+            ExprKind::VecMethod(obj, _, args) | ExprKind::MapMethod(obj, _, args) => {
                 self.verify_expr(obj);
                 for a in args {
                     self.verify_expr(a);

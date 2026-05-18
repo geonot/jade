@@ -337,10 +337,7 @@ impl Typer {
 
     /// Record `parent.field` as moved out by a `take`.
     pub(crate) fn mark_field_moved(&mut self, parent: DefId, field: Symbol) {
-        self.moved_fields
-            .entry(parent)
-            .or_default()
-            .insert(field);
+        self.moved_fields.entry(parent).or_default().insert(field);
     }
 
     /// Clear the moved bit for `parent.field` (called on reassignment).
@@ -541,9 +538,6 @@ impl Typer {
             Type::Newtype(_, inner)
             | Type::Alias(_, inner)
             | Type::Rc(inner)
-            | Type::RcCell(inner)
-            | Type::Arc(inner)
-            | Type::Mutex(inner)
             | Type::Weak(inner) => self.type_has_resource_annotation(inner),
             _ => false,
         }

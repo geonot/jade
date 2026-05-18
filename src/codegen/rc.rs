@@ -216,11 +216,7 @@ impl<'ctx> Compiler<'ctx> {
         let val_gep = b!(self
             .bld
             .build_struct_gep(layout, ptr.into_pointer_value(), 2, "rc.val"));
-        let loaded = b!(self.bld.build_load(
-            self.llvm_ty(inner),
-            val_gep,
-            "rc.load"
-        ));
+        let loaded = b!(self.bld.build_load(self.llvm_ty(inner), val_gep, "rc.load"));
         // If the inner type owns heap (String, Vec<T>, ...), a raw load is a
         // bitwise alias of the Rc's interior: dropping both the caller's
         // value and the Rc's deep-drop path would double-free. Hand the
@@ -406,10 +402,7 @@ impl<'ctx> Compiler<'ctx> {
     /// macOS = 56). The init/lock/unlock calls go through the platform
     /// pthread symbols (already linked by the scheduler).
     #[allow(dead_code)]
-    pub(crate) fn arc_mutex_layout_ty(
-        &self,
-        inner: &Type,
-    ) -> inkwell::types::StructType<'ctx> {
+    pub(crate) fn arc_mutex_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
         let name = format!("ArcMutex_{inner}");
         self.module.get_struct_type(&name).unwrap_or_else(|| {
             let st = self.ctx.opaque_struct_type(&name);
@@ -506,9 +499,13 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<(), String> {
         let layout = self.arc_mutex_layout_ty(inner);
         let heap_ptr = arc_ptr.into_pointer_value();
-        let lock_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 2, "arc.mutex.lock"));
+        let lock_gep = b!(self
+            .bld
+            .build_struct_gep(layout, heap_ptr, 2, "arc.mutex.lock"));
         let lock_fn = self.ensure_pthread_mutex_lock();
-        b!(self.bld.build_call(lock_fn, &[lock_gep.into()], "mutex.lock"));
+        b!(self
+            .bld
+            .build_call(lock_fn, &[lock_gep.into()], "mutex.lock"));
         Ok(())
     }
 
@@ -521,9 +518,12 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<(), String> {
         let layout = self.arc_mutex_layout_ty(inner);
         let heap_ptr = arc_ptr.into_pointer_value();
-        let lock_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 2, "arc.mutex.lock"));
+        let lock_gep = b!(self
+            .bld
+            .build_struct_gep(layout, heap_ptr, 2, "arc.mutex.lock"));
         let unlock_fn = self.ensure_pthread_mutex_unlock();
-        b!(self.bld
+        b!(self
+            .bld
             .build_call(unlock_fn, &[lock_gep.into()], "mutex.unlock"));
         Ok(())
     }

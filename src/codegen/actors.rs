@@ -468,9 +468,7 @@ impl<'ctx> Compiler<'ctx> {
                         .fields
                         .iter()
                         .position(|f| f.name == *uname)
-                        .ok_or_else(|| {
-                            format!("spawn '{actor_name}': unknown field '{uname}'")
-                        })?;
+                        .ok_or_else(|| format!("spawn '{actor_name}': unknown field '{uname}'"))?;
                     let field_ptr = b!(self.bld.build_struct_gep(
                         state_st,
                         state_ptr,

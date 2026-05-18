@@ -253,12 +253,8 @@ impl Typer {
                 if let Type::ActorRef(actor_name) = &resolved_ty {
                     if let Some((_, _, handlers)) = self.actors.get(actor_name) {
                         if handlers.iter().any(|(n, _, _)| n == field) {
-                            let call_expr = ast::Expr::Method(
-                                obj.clone(),
-                                field.clone(),
-                                Vec::new(),
-                                *span,
-                            );
+                            let call_expr =
+                                ast::Expr::Method(obj.clone(), field.clone(), Vec::new(), *span);
                             return self.lower_expr_expected(&call_expr, expected);
                         }
                     }
@@ -269,12 +265,7 @@ impl Typer {
                 // field. Codegen mirrors this by GEPing into the Rc payload
                 // before reading the field — no clone of the wrapped value.
                 let peeled_ty = match &resolved_ty {
-                    Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
-                        match inner.as_ref() {
-                            Type::Mutex(m_inner) => self.infer_ctx.shallow_resolve(m_inner),
-                            _ => self.infer_ctx.shallow_resolve(inner),
-                        }
-                    }
+                    Type::Rc(inner) => self.infer_ctx.shallow_resolve(inner),
                     _ => resolved_ty.clone(),
                 };
                 let struct_name = match &peeled_ty {
@@ -283,9 +274,7 @@ impl Typer {
                     // inner record layout is the store's auto-generated
                     // `__store_{store}` struct. Field reads on the row
                     // see the underlying struct's fields transparently.
-                    Type::Row(store) => {
-                        Some(Symbol::intern(&format!("__store_{store}")))
-                    }
+                    Type::Row(store) => Some(Symbol::intern(&format!("__store_{store}"))),
                     Type::Ptr(inner) => match inner.as_ref() {
                         Type::Struct(name, _) => Some(name.clone()),
                         _ => None,
@@ -316,12 +305,17 @@ impl Typer {
                                     "{}: type '{}' has no field '{}' — \
                                  for the number of matching records use \
                                  `count {} where …`",
-                                    span.loc(), display, field, store
+                                    span.loc(),
+                                    display,
+                                    field,
+                                    store
                                 ));
                             }
                             return Err(format!(
                                 "{}: type '{}' has no field '{}'",
-                                span.loc(), display, field
+                                span.loc(),
+                                display,
+                                field
                             ));
                         }
                     } else {
@@ -329,13 +323,9 @@ impl Typer {
                     }
                 } else if matches!(peeled_ty, Type::String) && field == "length" {
                     (Type::I64, 0)
-                } else if matches!(&peeled_ty, Type::Vec(_))
-                    && field == "length"
-                {
+                } else if matches!(&peeled_ty, Type::Vec(_)) && field == "length" {
                     (Type::I64, 0)
-                } else if matches!(&peeled_ty, Type::Map(_, _))
-                    && field == "length"
-                {
+                } else if matches!(&peeled_ty, Type::Map(_, _)) && field == "length" {
                     (Type::I64, 0)
                 } else if let Type::Tuple(ref tys) = peeled_ty {
                     if let Ok(idx) = field.as_str().parse::<usize>() {
@@ -456,12 +446,7 @@ impl Typer {
                 // shared-ownership wrapper resolves to the wrapped
                 // container's element type.
                 let peeled_ty = match &harr.ty {
-                    Type::Rc(inner) | Type::RcCell(inner) | Type::Arc(inner) => {
-                        match inner.as_ref() {
-                            Type::Mutex(m_inner) => (**m_inner).clone(),
-                            _ => (**inner).clone(),
-                        }
-                    }
+                    Type::Rc(inner) => (**inner).clone(),
                     other => other.clone(),
                 };
                 let elem_ty = match &peeled_ty {

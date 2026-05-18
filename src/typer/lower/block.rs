@@ -142,8 +142,7 @@ impl Typer {
         out: &mut std::collections::HashSet<crate::hir::DefId>,
     ) {
         match &expr.kind {
-            hir::ExprKind::VecMethod(_, meth, args)
-            | hir::ExprKind::MapMethod(_, meth, args) => {
+            hir::ExprKind::VecMethod(_, meth, args) | hir::ExprKind::MapMethod(_, meth, args) => {
                 let m_owned = meth.as_str();
                 let m: &str = m_owned.as_ref();
                 if matches!(
@@ -211,10 +210,8 @@ impl Typer {
                     // access[0] corresponds to the synthetic `self` param.
                     // User-supplied args start at index 1.
                     for (i, a) in args.iter().enumerate() {
-                        if matches!(
-                            access.get(i + 1),
-                            Some(Some(crate::ast::AccessMod::Take))
-                        ) && let hir::ExprKind::Var(id, _) = &a.kind
+                        if matches!(access.get(i + 1), Some(Some(crate::ast::AccessMod::Take)))
+                            && let hir::ExprKind::Var(id, _) = &a.kind
                         {
                             let resolved = self.infer_ctx.resolve(&a.ty);
                             if Self::expr_type_needs_drop(&resolved) {
@@ -503,9 +500,10 @@ impl Typer {
                 // type args if any. `structs` stores the canonical field
                 // shape; if a generic instantiation, also try a mangled
                 // mono name.
-                let result = self.struct_field_types(name, args).into_iter().any(|fty| {
-                    self.needs_drop_inner(&fty, visiting)
-                });
+                let result = self
+                    .struct_field_types(name, args)
+                    .into_iter()
+                    .any(|fty| self.needs_drop_inner(&fty, visiting));
                 visiting.remove(name);
                 result
             }
@@ -514,9 +512,9 @@ impl Typer {
                     return false;
                 }
                 let result = if let Some(variants) = self.enums.get(name) {
-                    variants
-                        .iter()
-                        .any(|(_vname, ftys)| ftys.iter().any(|t| self.needs_drop_inner(t, visiting)))
+                    variants.iter().any(|(_vname, ftys)| {
+                        ftys.iter().any(|t| self.needs_drop_inner(t, visiting))
+                    })
                 } else {
                     false
                 };
@@ -578,14 +576,18 @@ impl Typer {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(Self::subst_type(inner, subs))),
             Type::Generator(inner) => Type::Generator(Box::new(Self::subst_type(inner, subs))),
             Type::Channel(inner) => Type::Channel(Box::new(Self::subst_type(inner, subs))),
-            Type::Map(k, v) => {
-                Type::Map(Box::new(Self::subst_type(k, subs)), Box::new(Self::subst_type(v, subs)))
+            Type::Map(k, v) => Type::Map(
+                Box::new(Self::subst_type(k, subs)),
+                Box::new(Self::subst_type(v, subs)),
+            ),
+            Type::Tuple(elts) => {
+                Type::Tuple(elts.iter().map(|t| Self::subst_type(t, subs)).collect())
             }
-            Type::Tuple(elts) => Type::Tuple(elts.iter().map(|t| Self::subst_type(t, subs)).collect()),
             Type::Array(elem, n) => Type::Array(Box::new(Self::subst_type(elem, subs)), *n),
-            Type::Struct(name, ts) => {
-                Type::Struct(name.clone(), ts.iter().map(|t| Self::subst_type(t, subs)).collect())
-            }
+            Type::Struct(name, ts) => Type::Struct(
+                name.clone(),
+                ts.iter().map(|t| Self::subst_type(t, subs)).collect(),
+            ),
             Type::Alias(name, inner) => {
                 Type::Alias(name.clone(), Box::new(Self::subst_type(inner, subs)))
             }

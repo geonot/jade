@@ -47,30 +47,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Rc(inner) => {
                 self.rc_release_deep(val, inner)?;
             }
-            // R3.4.c: RcCell<T> shares Rc's non-atomic refcount and the
-            // same deep-drop path on last release.
-            Type::RcCell(inner) => {
-                self.rc_release_deep(val, inner)?;
-            }
-            // R3.4.c: Arc<T> uses atomic refcount; share the deep-drop
-            // path via the same helper (rc_release_deep already routes
-            // on inner.needs_atomic_rc() — see src/codegen/rc.rs line
-            // 165). For Arc<T> the inner type's atomicity may be false
-            // (e.g. Arc<String>), so we must force atomic. The dedicated
-            // arc_release_deep does that.
-            Type::Arc(inner) => {
-                self.arc_release_deep(val, inner)?;
-            }
-            // Mutex<T> standalone is meaningful only inside Arc<Mutex<T>>;
-            // the outer Arc's release runs the inner Mutex drop. Reaching
-            // this arm means a bare Mutex<T> is being dropped — should
-            // never happen post-promotion.
-            Type::Mutex(_) => {
-                return Err(
-                    "drop_value: bare Mutex<T> cannot be dropped; must live inside Arc<Mutex<T>>"
-                        .to_string(),
-                );
-            }
             Type::Weak(inner) => {
                 self.weak_release(val, inner)?;
             }

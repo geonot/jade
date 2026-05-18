@@ -112,7 +112,11 @@ impl Parser {
                 .strip_prefix(&format!("line {line}:{col}: "))
                 .map(|s| s.to_string())
                 .unwrap_or(body);
-            return Err(ParseError::Error { line, col, msg: body });
+            return Err(ParseError::Error {
+                line,
+                col,
+                msg: body,
+            });
         }
         let mut prog = Program { decls };
         // If there are top-level statements and no explicit *main, wrap them into an implicit *main

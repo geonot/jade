@@ -145,9 +145,6 @@ impl PerceusPass {
             // conservatively as the sid + 0. Reuse pairing does not
             // apply to Row<T> (it's @resource).
             Type::Row(_) => 8,
-            // R3.4: heap-RC promoted types are pointer-sized on the
-            // binding slot (the header + payload live behind the pointer).
-            Type::RcCell(_) | Type::Arc(_) | Type::Mutex(_) => 8,
         }
     }
 
@@ -155,17 +152,13 @@ impl PerceusPass {
     /// underlying allocation sizes match.
     pub fn layouts_compatible(a: &Type, b: &Type) -> bool {
         let inner_a = match a {
-            // R3.4: Rc / RcCell / Arc share `rc_alloc` layout; strip the
-            // wrapper so reuse pairs across them. Arc<Mutex<T>> uses a
-            // different layout (extra lock slot) and is intentionally
-            // NOT stripped — its reuse pairing must match exactly.
-            Type::Rc(inner) | Type::RcCell(inner) => inner.as_ref(),
-            Type::Arc(inner) if !matches!(inner.as_ref(), Type::Mutex(_)) => inner.as_ref(),
+            // Rc shares `rc_alloc` layout; strip the wrapper so reuse pairs
+            // across them.
+            Type::Rc(inner) => inner.as_ref(),
             _ => a,
         };
         let inner_b = match b {
-            Type::Rc(inner) | Type::RcCell(inner) => inner.as_ref(),
-            Type::Arc(inner) if !matches!(inner.as_ref(), Type::Mutex(_)) => inner.as_ref(),
+            Type::Rc(inner) => inner.as_ref(),
             _ => b,
         };
         let sa = Self::type_layout_size_pub(inner_a);

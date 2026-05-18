@@ -99,11 +99,9 @@ impl<'ctx> Compiler<'ctx> {
         let keep1 = if keep.get_type().get_bit_width() == 1 {
             keep
         } else {
-            b!(self.bld.build_int_truncate(
-                keep,
-                self.ctx.bool_type(),
-                "filt.b"
-            ))
+            b!(self
+                .bld
+                .build_int_truncate(keep, self.ctx.bool_type(), "filt.b"))
         };
         b!(self.bld.build_conditional_branch(keep1, push_bb, cont_bb));
 
@@ -794,8 +792,7 @@ impl<'ctx> Compiler<'ctx> {
         let cur_acc = b!(self.bld.build_load(acc_lty, acc_ptr, "fold.cur"));
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "fold.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "fold.elem"));
-        let new_acc =
-            self.indirect_call_vals(closure_val, closure_fn_ty, &[cur_acc, elem])?;
+        let new_acc = self.indirect_call_vals(closure_val, closure_fn_ty, &[cur_acc, elem])?;
         b!(self.bld.build_store(acc_ptr, new_acc));
         let next = b!(self
             .bld
@@ -1016,10 +1013,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_compare(IntPredicate::SLT, end_val, len, "slc.cmp"));
         let end_clamped =
-            b!(self
-                .bld
-                .build_select(cmp_end, end_val, len, "slc.end"))
-            .into_int_value();
+            b!(self.bld.build_select(cmp_end, end_val, len, "slc.end")).into_int_value();
         let out_hdr = self.vec_alloc_empty()?;
         let idx_ptr = self.entry_alloca(i64t.into(), "slc.idx");
         b!(self.bld.build_store(idx_ptr, start_val));
@@ -1029,12 +1023,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "slc.i")).into_int_value();
-        let cond = b!(self.bld.build_int_compare(
-            IntPredicate::SLT,
-            idx,
-            end_clamped,
-            "slc.c"
-        ));
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, end_clamped, "slc.c"));
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
         self.bld.position_at_end(body_bb);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "slc.gep")) };
@@ -1067,8 +1058,7 @@ impl<'ctx> Compiler<'ctx> {
         let cmp = b!(self
             .bld
             .build_int_compare(IntPredicate::SLT, len_a, len_b, "zip.cmp"));
-        let min_len =
-            b!(self.bld.build_select(cmp, len_a, len_b, "zip.len")).into_int_value();
+        let min_len = b!(self.bld.build_select(cmp, len_a, len_b, "zip.len")).into_int_value();
         let out_hdr = self.vec_alloc_empty()?;
         let idx_ptr = self.entry_alloca(i64t.into(), "zip.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));

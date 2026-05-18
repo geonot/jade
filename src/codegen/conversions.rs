@@ -67,7 +67,8 @@ impl<'ctx> Compiler<'ctx> {
                         .first()
                         .map(|t| t.is_pointer_type())
                         .unwrap_or(false);
-                    let arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !val.is_pointer_value() {
+                    let arg: BasicValueEnum<'ctx> = if first_param_is_ptr && !val.is_pointer_value()
+                    {
                         let lty = self.llvm_ty(ty);
                         let tmp = self.entry_alloca(lty, "log.user.self");
                         b!(self.bld.build_store(tmp, val));
@@ -219,15 +220,11 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
-        let is_pos = b!(self.bld.build_int_compare(
-            IntPredicate::SGT,
-            idx,
-            i64t.const_zero(),
-            "vfmt.pos"
-        ));
-        b!(self
-            .bld
-            .build_conditional_branch(is_pos, sep_bb, print_bb));
+        let is_pos =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::SGT, idx, i64t.const_zero(), "vfmt.pos"));
+        b!(self.bld.build_conditional_branch(is_pos, sep_bb, print_bb));
 
         self.bld.position_at_end(sep_bb);
         let sep_fmt = b!(self.bld.build_global_string_ptr(", ", "vfmt.sep"));
@@ -237,18 +234,12 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(print_bb));
 
         self.bld.position_at_end(print_bb);
-        let elem_gep = unsafe {
-            b!(self
-                .bld
-                .build_gep(lty, data_ptr, &[idx], "vfmt.gep"))
-        };
+        let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vfmt.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "vfmt.elem"));
         self.emit_print(elem, elem_ty)?;
-        let next = b!(self.bld.build_int_nsw_add(
-            idx,
-            i64t.const_int(1, false),
-            "vfmt.next"
-        ));
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "vfmt.next"));
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
@@ -290,7 +281,9 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(ty);
         let (addr, struct_val): (BasicValueEnum<'ctx>, BasicValueEnum<'ctx>) =
             if val.is_pointer_value() {
-                let loaded = b!(self.bld.build_load(lty, val.into_pointer_value(), "log.load"));
+                let loaded = b!(self
+                    .bld
+                    .build_load(lty, val.into_pointer_value(), "log.load"));
                 (val, loaded)
             } else {
                 let tmp = self.entry_alloca(lty, "log.tmp");
@@ -329,14 +322,10 @@ impl<'ctx> Compiler<'ctx> {
                 format!(", {fname}: \0")
             };
             let lf = b!(self.bld.build_global_string_ptr(&label, "log.lbl"));
-            b!(self.bld.build_call(
-                printf,
-                &[lf.as_pointer_value().into()],
-                "log.lblc"
-            ));
-            let field_val = b!(self
+            b!(self
                 .bld
-                .build_extract_value(sv, i as u32, "log.fld"));
+                .build_call(printf, &[lf.as_pointer_value().into()], "log.lblc"));
+            let field_val = b!(self.bld.build_extract_value(sv, i as u32, "log.fld"));
             self.emit_print(field_val, fty)?;
         }
         let close_str = if newline { " }\n\0" } else { " }\0" };
