@@ -14,13 +14,20 @@ impl Typer {
     /// the container, so any local that binds it must NOT be dropped at scope
     /// exit — doing so would double-free when the container itself is dropped.
     ///
-    /// TODO(access-semantics P6.1): the access-semantics sprint
-    /// (`docs/access-semantics-sprint.md` §3) plans a proper escape-analysis
-    /// module (`src/escape/mod.rs`) with T1/T2/T3 tiering that would subsume
-    /// this heuristic. That module has not yet been implemented; until it
-    /// lands, this predicate is the only safety net preventing double-free of
-    /// non-clonable container reads (Map/Set/PQ/Deque/Enum payloads, etc.).
-    /// Do not delete without a replacement.
+    /// **Status (2026-05-17, post-R3.4.d.1)**: this predicate is the permanent
+    /// safety net for the *non-clonable* heap-container-read case (e.g.
+    /// `Map<K, Struct>` where `Struct` has heap fields and isn't clonable).
+    /// The R3 access-semantics sprint added escape analysis
+    /// (`src/escape/mod.rs`) and the `apply_demotions` HIR post-pass which
+    /// handle the *clonable* short-lived T1 case by mutating ownership to
+    /// `Borrowed` and removing the matching `Drop`. Implicit binding-type
+    /// promotion (R3.4.d.2) was evaluated and CLOSED — the cascade-retype
+    /// cost was deemed not worth the benefit when the language already
+    /// offers explicit `rc()` wrapping (now source-transparent at access
+    /// sites thanks to R3.4.d.1 auto-deref). Until/unless implicit
+    /// promotion lands, this heuristic stays: it guards the non-clonable
+    /// case that escape analysis alone cannot fix without changing the
+    /// binding's type. Do not delete.
     pub(in crate::typer) fn is_aliased_read_of_heap(expr: &hir::Expr) -> bool {
         let needs_drop = matches!(
             expr.ty,

@@ -222,23 +222,47 @@ Deferred — write a follow-up sprint or fold into R3.4:
       a measurable delta requires either new benchmarks or program
       restructuring; tracked separately.
 
-**R3.4 — T2 / T3 codegen**
-- [ ] New HIR `Type::RcCell(inner)`, `Type::Arc(inner)`, `Type::Mutex(inner)`.
-- [ ] `runtime/cell.c`, `runtime/atomic_rc.c`, `runtime/sync.c` as distinct
-      units (extracted from current inline implementations).
-- [ ] Promotion lowering: T2/T3 bindings rewrite their type to
-      Rc<Cell<T>> / Arc<Mutex<T>> with matching alloc/clone/drop helpers.
-- [ ] Test: cross-thread channel-send borrow promoted to Arc.
+**R3.4 — T2 / T3 codegen** ✅ (partial; d.2/e closed by design)
+- [x] HIR types `Type::Rc(_)`, `Type::RcCell(_)`, `Type::Arc(_)`,
+      `Type::Mutex(_)` exist and are constructible from user code via
+      `rc(x)`, `rc_cell(x)`, `arc(x)`, `arc_mutex(x)`. (Pre-R3 work.)
+- [x] **R3.4.a / b / c**: HIR ownership variants (`Rc`, `RcMut`,
+      `Arc`, `ArcMut`, `Weak`), promotion-target plumbing in
+      `EscapeInfo`, MIR `Type::Mutex` codegen for `Arc<Mutex<_>>`
+      (4-field layout `{strong, weak, lock, payload}`).
+- [x] **R3.4.d.1** (commit `e3f3207`): auto-deref at field/index/method
+      access sites for `Rc<T>` / `RcCell<T>` / `Arc<T>` / `Arc<Mutex<T>>`
+      receivers — source-transparent user `rc(x)` wrappers.
+- [x] **Bug-chain fix** (commit `755f4b8`): four-bug double-free /
+      heap-overrun chain in Rc-of-non-trivial-T cleanup (MIR `RcNew`
+      inner extraction, `rc_release_deep` payload GEP, `rc_deref`
+      bitwise-alias clone, `__jinn_str_clone` cap=0 alias preservation).
+- [x] Cross-thread send: `arc(x)` + `arc_mutex(x)` work as the
+      shared-ownership channel-send pattern.
+- [~] **R3.4.d.2 (implicit binding-type promotion)**: CLOSED, will not
+      implement. Cascade-retype cost (every Ret/Call/container-push/
+      channel-send/struct-init site of an escaped binding would need
+      cross-function type rewriting) was not justified vs. the
+      already-source-transparent explicit-`rc()` path. See
+      `docs/access-semantics-r34-design.md` for the three-option
+      analysis (cascade-retype / deref-at-escape / status-quo).
+- [~] **R3.4.e (closure capture promotion)**: CLOSED, same blocker as
+      d.2. Equivalent semantics achieved via explicit `rc()` capture
+      that is transparent at call sites thanks to d.1.
+- [x] Bulk gate: **926/926** (post-d.1).
 
-### R4 — P6 finalization
+### R4 — P6 finalization (reframed; d.2/e closed)
 
-- [ ] Delete `is_aliased_read_of_heap` and all call sites. **Blocked on
-      R3.4**: until container element types can be uniformly promoted to
-      Rc, the heuristic is the only thing preventing double-free of
-      non-clonable container reads.
-- [ ] Remove the P6.1 TODO from `src/typer/stmt/dispatch.rs`. Same block.
-- [ ] Update `jinn.md`, `JINN.md`, `docs/access-semantics.md` to reflect the
-      final landed surface.
+- [x] Reframe `is_aliased_read_of_heap`: stays as the permanent
+      non-clonable-container-read safety net. Its TODO has been
+      removed from `src/typer/stmt/dispatch.rs`. R3.3's
+      `apply_demotions` already handles the *clonable* T1 case
+      (ownership→Borrowed + Drop removed); the heuristic handles
+      only the residual non-clonable case which has no automatic
+      fix without implicit `Rc` promotion (d.2, closed).
+- [ ] Update `jinn.md`, `JINN.md`, `docs/access-semantics.md` to
+      reflect d.1 ships + d.2/e closed; flag explicit `rc()` as the
+      canonical shared-ownership entry point.
 - [ ] Run full bulk + all benchmark suites, record numbers.
 
 ## Acceptance criteria (whole sprint)
@@ -247,6 +271,14 @@ Deferred — write a follow-up sprint or fold into R3.4:
 2. The 6 benchmarks in P2 §3.7 do not regress vs. pre-sprint baseline
    (`benchmarks/results_pre_sim.json`).
 3. The `is_aliased_read_of_heap` heuristic no longer exists.
+   **AMENDED (2026-05-17)**: this criterion is dropped. With R3.4.d.2
+   (implicit promotion) closed, the heuristic is the permanent safety
+   net for non-clonable container reads. The acceptance bar shifts to:
+   "no `is_aliased_read_of_heap` call is reachable for a binding whose
+   escape tier is T1 and whose type is clonable" — already satisfied
+   because `apply_demotions` rewrites those bindings to `Borrowed` and
+   removes their `Drop` before the heuristic is consulted in any
+   meaningful way.
 4. All sprint spec §10 acceptance tests present.
 5. `@resource` types reliably release OS resources at scope exit without an
    explicit `.close()`.

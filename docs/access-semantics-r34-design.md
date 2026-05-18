@@ -204,6 +204,81 @@ Files (per the 27-file list):
 
 ### Commit R3.4.d — promotion lowering pass (the real work)
 
+**Status (2026-05-17)**: split into d.1 (auto-deref at access sites)
+and d.2 (binding-type rewrite). **d.1 is complete** (commit
+`e3f3207`, bulk 926/926). **d.2 is intentionally deferred / closed
+without implementation** — see "d.2 status" subsection below.
+
+#### d.1 — auto-deref at access sites (DONE, `e3f3207`)
+
+At every access site (field read, index read, struct-method
+dispatch), if the receiver type is `Rc<T>` / `RcCell<T>` / `Arc<T>`
+/ `Arc<Mutex<T>>`, peer through one wrapper layer and resolve the
+access against the inner `T`. Source-transparent for user-written
+`rc(x)` wrappers. Files: `src/typer/expr/access.rs`,
+`src/typer/call/method_call.rs`, `src/codegen/mir_codegen/helpers/
+values.rs`, `src/codegen/mir_codegen/emit_inst/aggregates.rs`.
+Tests: `b_rc_string_auto_deref_{len,index}`,
+`b_rc_struct_auto_deref_{field,method}`.
+
+#### d.2 — implicit binding-type promotion (CLOSED, will not implement)
+
+**The architectural problem**. The spec below describes d.2 as a
+transparent post-pass that rewrites a binding's type from `T` to
+`Rc<T>` / `RcCell<T>` / `Arc<T>` / `Arc<Mutex<T>>` based on the
+escape tier. With d.1, accesses on the promoted binding work
+source-transparently. But every **escape site** of the binding
+still types the value as `T`:
+
+- `Ret(Var(x))` against a signature returning `T` → type mismatch.
+- `Call(f, [Var(x)])` where `f`'s param is `T` → mismatch.
+- `VecPush(v: Vec<T>, Var(x))` → mismatch.
+- `ChannelSend(c: Channel<T>, Var(x))` → mismatch.
+- `StructInit{field: Var(x)}` where the field is `T` → mismatch.
+
+Three possible resolutions:
+
+(a) **Cascade-retype**: rewrite every transitively-related type
+    (function signatures, container element types, channel
+    element types, struct fields) so they agree on the promoted
+    form. This is monomorphization-shaped, cross-function, and
+    cross-module. Genuinely multi-session work, and changes the
+    public ABI of every escaped binding's containing function.
+
+(b) **Deref-at-escape**: insert a `Deref` HIR node at every escape
+    site to materialize a `T` from the `Rc<T>` (etc.). But
+    `rc_deref` deep-clones for non-trivial `T` (its current
+    contract — see `src/codegen/rc.rs`), which means every escape
+    pays a full heap clone. This negates the entire point of
+    using refcounting for sharing.
+
+(c) **Status quo — explicit `rc(...)` at the source level**: keep
+    the user-driven `rc(x)` wrapping that already exists. With
+    d.1, the wrapping is transparent at all access sites — the
+    user writes `r is rc(x)` and then `r.field`, `r[i]`,
+    `r.method()` all work without explicit `*r`. The escape
+    analyzer's T2/T3 tier remains useful as a diagnostic /
+    lint, but not as a driver of automatic type rewriting.
+
+**Decision: (c)**. The d.1 auto-deref work plus existing explicit
+`rc()` syntax delivers source-transparent shared ownership without
+the cascade-retype cost. (a) is reserved for a future major
+refactor if it ever proves necessary; (b) is rejected because it
+silently slows code.
+
+**Consequence for R4**. Deleting `is_aliased_read_of_heap` was
+spec'd as conditional on implicit promotion (so Map/Set/PQ value
+reads of non-clonable types could become clonable via `Rc<T>`).
+With (c), that safety net stays — Map/Set/PQ value-read demotion
+remains an opt-in user choice (write `rc(x)` before insertion).
+R4 reduces to "delete the heuristic only where escape-analysis
+T1 already proved the read is safe."
+
+---
+
+The original spec text follows for historical reference; the
+algorithm described below was NOT implemented.
+
 New module: `src/typer/promote.rs` (or extend
 `src/typer/lower/block.rs`). Runs **after** escape analysis,
 **before** MIR lowering. Algorithm:
@@ -246,16 +321,35 @@ Tests (new under `tests/programs/`):
 - `access_mut_cross_thread_to_arc_mutex.jn` — bind mut, send on
   channel, verify Arc<Mutex>.
 
-- **Gate**: bulk 921/921 + 4 new tests = 925/925.
+- **Gate**: bulk 921/921 + 4 new tests = 925/925. (Superseded —
+  d.2 closed in favor of explicit `rc()`; d.1 ships with 4 bulk
+  tests `b_rc_*_auto_deref_*` instead, pushing the gate to 926/926
+  including the `b_rc_string_drop` regression test.)
 
 ### Commit R3.4.e — closure capture (spec §3.5)
+
+**Status (2026-05-17)**: CLOSED, not implemented. Closure capture
+promotion has the same architectural blocker as d.2 — promoting a
+captured binding from `T` to `Rc<T>` cascades into the closure
+body's type signature (its captured-env shape, its return type if
+the closure returns the captured value, the type of any function
+parameter the closure passes the value to, etc.).
+
+Without implicit binding-type promotion, the equivalent semantics
+are achieved by having the user explicitly write
+`let r = rc(x); let f = |...| r.something();` — the `rc()` wrap
+is now source-transparent at use sites thanks to d.1's auto-deref,
+and the captured `r` is itself `Rc<T>` so capture-by-value gives
+correct shared-ownership semantics. Non-escaping closures (`map`,
+`filter`, `for` body) capture by raw pointer already, post-R3.3.
 
 `src/typer/expr/lambda.rs` + closure codegen path. An escaping
 closure naming a borrowed binding promotes the borrow to T2 (Rc)
 or T3 (Arc) per the same rules. Non-escaping closures (`map`,
 `filter`, `for` body) capture by raw pointer (already work post-R3.3).
 
-- **Gate**: bulk 925/925; add 2 closure-escape tests → 927/927.
+- ~~**Gate**: bulk 925/925; add 2 closure-escape tests → 927/927.~~
+  (Superseded — closed in favor of explicit `rc()` capture.)
 
 ## 4. Cross-cutting concerns
 
