@@ -111,6 +111,10 @@ pub struct Typer {
     /// after the join). Loops snapshot+restore — moves inside a loop body
     /// do not leak past the loop in this first cut.
     pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
+    /// P5 — set of `DefId`s declared with the `const` access modifier.
+    /// Any subsequent `name is <expr>` for a name whose `DefId` is in this
+    /// set is rejected at the typer level as a rebind of a const binding.
+    pub(crate) const_vars: std::collections::HashSet<DefId>,
     /// When > 0, `lower_expr_field` skips the use-after-partial-move
     /// check. Used to lower the LHS of an assignment, where reading the
     /// place is a write, not a read.
@@ -197,6 +201,7 @@ impl Typer {
             fn_defaults: IndexMap::new(),
             fn_param_access: IndexMap::new(),
             moved_fields: std::collections::HashMap::new(),
+            const_vars: std::collections::HashSet::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,
             modules: std::collections::HashSet::new(),
@@ -432,6 +437,7 @@ impl Typer {
                 promote_owned()
             }
             Some(Take) => promote_owned(),
+            Some(Const) => promote_owned(),
             None => promote_owned(),
         };
         Ok(ow)

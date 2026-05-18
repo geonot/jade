@@ -382,6 +382,10 @@ pub struct FnAttrs {
 pub enum AccessMod {
     Copy,
     Take,
+    /// `const` — binding cannot be rebound in its scope. The value
+    /// itself is whatever ownership tier the type calls for (borrow /
+    /// Rc / Arc); `const` is a typer-level rebind ban only.
+    Const,
 }
 
 impl std::fmt::Display for AccessMod {
@@ -389,6 +393,7 @@ impl std::fmt::Display for AccessMod {
         match self {
             AccessMod::Copy => f.write_str("copy"),
             AccessMod::Take => f.write_str("take"),
+            AccessMod::Const => f.write_str("const"),
         }
     }
 }

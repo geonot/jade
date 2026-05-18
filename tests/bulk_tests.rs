@@ -7879,9 +7879,31 @@ fn store_row_field_access_in_coroutine_body() {
 #[ignore = "weak()/weak_upgrade() on heap nominals requires the heap-tax \
             inference (struct-literal → RcNew with {strong,weak,payload} \
             layout) to be wired up. Tracked under Phase-7 circle-back."]
-fn weak_roundtrip_recovers_value_REMOVED() {
+fn weak_roundtrip_recovers_value_removed() {
     // Weak / weak() / weak_upgrade() were removed in Phase 4.5
     // (heap-tax cleanup). Cycle-breaking is now expressed via
     // ActorRef, raw Ptr<T>, or arena+index patterns. A future
     // incremental cycle collector may revive a weak primitive.
+}
+
+#[test]
+fn const_binding_rejects_rebind() {
+    // P5: `is const X` makes the binding immutable; any subsequent
+    // `name is ...` for the same name in the same scope is rejected.
+    let err = expect_compile_fail(
+        "*main()\n    x is const 42\n    x is 99\n    log(x)\n",
+    );
+    assert!(
+        err.contains("const") && err.contains("rebind"),
+        "expected const-rebind diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn const_binding_reads_normally() {
+    // P5: `const` is a rebind ban only; reads work normally.
+    expect(
+        "*main()\n    x is const 42\n    log(x)\n",
+        "42",
+    );
 }

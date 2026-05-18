@@ -154,6 +154,13 @@ impl Typer {
                 let id = self.fresh_id();
                 if let Some(existing) = self.find_var(&b.name.as_str()) {
                     let id = existing.def_id;
+                    // P5: reject any rebind of a `const`-declared binding.
+                    if self.const_vars.contains(&id) {
+                        return Err(format!(
+                            "cannot rebind `{}`: it was declared with `is const`",
+                            b.name.as_str()
+                        ));
+                    }
                     let existing_ty = existing.ty.clone();
                     let value = self.maybe_coerce_to(value, &existing_ty);
                     // Rebinding the whole variable clears any prior
@@ -207,6 +214,10 @@ impl Typer {
                             scheme: Some(scheme),
                         },
                     );
+                    // P5: tag the DefId as const so later rebinds are rejected.
+                    if matches!(b.access_mod, Some(ast::AccessMod::Const)) {
+                        self.const_vars.insert(id);
+                    }
                     if let Some((pid, fname)) = partial_move {
                         self.mark_field_moved(pid, fname);
                     }
