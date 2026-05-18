@@ -15,7 +15,7 @@ impl Lowerer {
                 // `ref`/`mut`/`take` modifiers opt out and keep the raw
                 // load (borrow / move semantics).
                 let val = match b.access_mod {
-                    Some(AccessMod::Ref) | Some(AccessMod::Mut) | Some(AccessMod::Take) => {
+                    Some(AccessMod::Take) => {
                         self.lower_expr(&b.value)
                     }
                     _ => {

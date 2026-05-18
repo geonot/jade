@@ -93,8 +93,8 @@ pub struct Typer {
     pub(crate) type_errors: Vec<String>,
     pub(crate) fn_param_names: IndexMap<Symbol, Vec<String>>,
     pub(crate) fn_defaults: IndexMap<Symbol, Vec<Option<ast::Expr>>>,
-    /// Per-function parameter access modifiers (Some(Take) / Some(Ref) /
-    /// Some(Mut) / Some(Copy) / None), aligned by index with the param
+    /// Per-function parameter access modifiers (Some(Take) /
+    /// Some(Copy) / None), aligned by index with the param
     /// types stored in `fns`. Used by `collect_consumed_in_expr` to mark
     /// call-site bare-Var args whose corresponding callee param is `take`
     /// as consumed, so the caller's scope-exit drop is suppressed and the
@@ -429,14 +429,12 @@ impl Typer {
             Some(Copy) => {
                 if resource {
                     return Err(format!(
-                        "cannot `copy` a @resource type ({ty}): use `take` (move), `ref` (alias) or `mut` (mutable alias) instead"
+                        "cannot `copy` a @resource type ({ty}): use `take` (move) instead"
                     ));
                 }
                 promote_owned()
             }
             Some(Take) => promote_owned(),
-            Some(Ref) => Ownership::Borrowed,
-            Some(Mut) => Ownership::BorrowMut,
             None => promote_owned(),
         };
         Ok(ow)

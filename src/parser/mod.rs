@@ -417,14 +417,12 @@ impl Parser {
 
     /// True if `name` is one of the four access-modifier keywords.
     fn is_access_mod_keyword(name: &str) -> bool {
-        matches!(name, "copy" | "ref" | "mut" | "take")
+        matches!(name, "copy" | "take")
     }
 
     fn ident_to_access_mod(name: &str) -> Option<crate::ast::AccessMod> {
         match name {
             "copy" => Some(crate::ast::AccessMod::Copy),
-            "ref" => Some(crate::ast::AccessMod::Ref),
-            "mut" => Some(crate::ast::AccessMod::Mut),
             "take" => Some(crate::ast::AccessMod::Take),
             _ => None,
         }

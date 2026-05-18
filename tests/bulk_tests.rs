@@ -7595,17 +7595,10 @@ fn access_mod_copy_on_bind_runs() {
 }
 
 #[test]
-fn access_mod_ref_on_bind_runs() {
+fn access_mod_auto_alias_on_bind_runs() {
+    // `ref`/`mut` keywords are gone — the compiler auto-aliases.
     expect(
-        "*main()\n    v is [10, 20, 30]\n    a is ref v\n    log(a.len())\n",
-        "3",
-    );
-}
-
-#[test]
-fn access_mod_mut_on_bind_runs() {
-    expect(
-        "*main()\n    v is [10, 20, 30]\n    a is mut v\n    log(a.len())\n",
+        "*main()\n    v is [10, 20, 30]\n    a is v\n    log(a.len())\n",
         "3",
     );
 }
@@ -7619,21 +7612,20 @@ fn access_mod_take_on_bind_runs() {
 }
 
 #[test]
-fn access_mod_ref_in_for_loop_parses() {
-    // The `ref` modifier in a for-binder marks the iteration variable as
-    // a borrow; codegen should not double-free elements of the vec.
+fn access_mod_for_loop_parses() {
+    // for-loop bindings auto-alias by default.
     expect(
-        "*main()\n    v is [1, 2, 3]\n    sum is 0\n    for ref x in v\n        sum is sum + x\n    log(sum)\n",
+        "*main()\n    v is [1, 2, 3]\n    sum is 0\n    for x in v\n        sum is sum + x\n    log(sum)\n",
         "6",
     );
 }
 
 #[test]
-fn access_mod_ref_on_field_parses() {
-    // A field declared `as ref T` should parse cleanly. Behavior of the
-    // borrow is exercised separately; here we just want surface acceptance.
+fn access_mod_field_parses() {
+    // Field declarations no longer accept `ref`/`mut` — aliasing is
+    // determined by usage, not declared on the field.
     expect(
-        "type Holder\n    items as ref Vec of i64\n\n*main()\n    log(1)\n",
+        "type Holder\n    items as Vec of i64\n\n*main()\n    log(1)\n",
         "1",
     );
 }

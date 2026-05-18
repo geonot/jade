@@ -373,17 +373,14 @@ pub struct FnAttrs {
 /// for-loop binder. See `docs/access-semantics.md` for the full model.
 ///
 /// - `Copy` — deep clone at the boundary; consumer owns an independent value.
-/// - `Ref`  — shared read-only alias; compiler picks T1 borrow / T2 Rc / T3 Arc.
-/// - `Mut`  — exclusive mutable alias; compiler picks T1 &mut / T2 Rc<Cell> / T3 Arc<Mutex>.
 /// - `Take` — move out (or remove from container slot).
 ///
-/// `Ref` and `Mut` are mutually exclusive; `Copy`/`Take` are exclusive with both.
-/// When `None`, default-inference from §4.3 of the design doc applies.
+/// When `None`, the compiler auto-picks the ownership tier (borrow / Rc /
+/// Arc) from usage. `ref` and `mut` are no longer surface keywords —
+/// shared and exclusive aliasing happen automatically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMod {
     Copy,
-    Ref,
-    Mut,
     Take,
 }
 
@@ -391,8 +388,6 @@ impl std::fmt::Display for AccessMod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AccessMod::Copy => f.write_str("copy"),
-            AccessMod::Ref => f.write_str("ref"),
-            AccessMod::Mut => f.write_str("mut"),
             AccessMod::Take => f.write_str("take"),
         }
     }
