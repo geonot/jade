@@ -20,7 +20,6 @@ fn main() {
         .file("runtime/sup.c")
         .file("runtime/select.c")
         .file("runtime/timer.c")
-        .file("runtime/pool.c")
         .file("runtime/vec.c")
         .file("runtime/wal.c")
         .file("runtime/index.c")

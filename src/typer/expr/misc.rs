@@ -11,60 +11,6 @@ use crate::types::Type;
 use std::path::PathBuf;
 
 impl Typer {
-    pub(in crate::typer) fn lower_expr_n_d_array(
-        &mut self,
-        expr: &ast::Expr,
-        expected: Option<&Type>,
-    ) -> Result<hir::Expr, String> {
-        let _ = expected;
-        match expr {
-            ast::Expr::NDArray(dims, span) => {
-                let hdims: Vec<hir::Expr> = dims
-                    .iter()
-                    .map(|d| self.lower_expr_expected(d, Some(&Type::I64)))
-                    .collect::<Result<_, _>>()?;
-                let shape: Vec<usize> = hdims
-                    .iter()
-                    .map(|d| {
-                        if let hir::ExprKind::Int(n) = &d.kind {
-                            *n as usize
-                        } else {
-                            0
-                        }
-                    })
-                    .collect();
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::NDArrayNew(hdims),
-                    ty: Type::NDArray(Box::new(Type::F64), shape),
-                    span: *span,
-                })
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub(in crate::typer) fn lower_expr_s_i_m_d_lit(
-        &mut self,
-        expr: &ast::Expr,
-        expected: Option<&Type>,
-    ) -> Result<hir::Expr, String> {
-        let _ = expected;
-        match expr {
-            ast::Expr::SIMDLit(elem_ty, lanes, elems, span) => {
-                let helems: Vec<hir::Expr> = elems
-                    .iter()
-                    .map(|e| self.lower_expr_expected(e, Some(elem_ty)))
-                    .collect::<Result<_, _>>()?;
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::SIMDNew(helems),
-                    ty: Type::SIMD(Box::new(elem_ty.clone()), *lanes),
-                    span: *span,
-                })
-            }
-            _ => unreachable!(),
-        }
-    }
-
     pub(in crate::typer) fn lower_expr_grad(
         &mut self,
         expr: &ast::Expr,
@@ -99,29 +45,6 @@ impl Typer {
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Einsum(Symbol::intern(notation), hops),
                     ty: Type::Void,
-                    span: *span,
-                })
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub(in crate::typer) fn lower_expr_deque(
-        &mut self,
-        expr: &ast::Expr,
-        expected: Option<&Type>,
-    ) -> Result<hir::Expr, String> {
-        let _ = expected;
-        match expr {
-            ast::Expr::Deque(elems, span) => {
-                let helems: Vec<hir::Expr> = elems
-                    .iter()
-                    .map(|e| self.lower_expr(e))
-                    .collect::<Result<_, _>>()?;
-                let elem_ty = helems.first().map(|e| e.ty.clone()).unwrap_or(Type::Void);
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::DequeNew,
-                    ty: Type::Deque(Box::new(elem_ty)),
                     span: *span,
                 })
             }

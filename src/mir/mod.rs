@@ -268,9 +268,6 @@ pub enum InstKind {
     VecPush(ValueId, ValueId),
     VecLen(ValueId),
     MapInit,
-    SetInit,
-    PQInit,
-    DequeInit,
 
     // ── Closures (needed for escape analysis) ──
     ClosureCreate(Symbol, Vec<ValueId>),
@@ -292,11 +289,6 @@ pub enum InstKind {
     // ── Builtins (needed so MIR can fold/eliminate them) ──
     Log(ValueId),
     Assert(ValueId, String),
-
-    // ── Dynamic dispatch ──
-    DynDispatch(ValueId, Symbol, Symbol, Vec<ValueId>),
-    /// Box a concrete value into a fat pointer {data_ptr, vtable_ptr} for dyn trait.
-    DynCoerce(ValueId, Symbol, Symbol),
 
     // ── Inline assembly ──
     InlineAsm(String, Vec<ValueId>),

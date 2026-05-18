@@ -176,7 +176,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::String => "string",
             Type::Vec(_) => "vec",
             Type::Map(_, _) => "map",
-            Type::Set(_) => "set",
             Type::Channel(_) => "channel",
             Type::ActorRef(_) => "actor_ref",
             Type::Struct(_, _) => "struct",

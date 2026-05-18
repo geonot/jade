@@ -187,32 +187,12 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::MapMethod(obj, method, args) => {
                 self.compile_map_method(obj, &method.as_str(), args)
             }
-            hir::ExprKind::SetNew => self.compile_set_new(),
-            hir::ExprKind::SetMethod(obj, method, args) => {
-                self.compile_set_method(obj, &method.as_str(), args)
-            }
-            hir::ExprKind::PQNew => self.compile_pq_new(),
-            hir::ExprKind::PQMethod(obj, method, args) => {
-                self.compile_pq_method(obj, &method.as_str(), args)
-            }
-            hir::ExprKind::NDArrayNew(dims) => self.compile_ndarray_new(dims),
-            hir::ExprKind::SIMDNew(elems) => self.compile_simd_new(elems, &expr.ty),
             hir::ExprKind::CoroutineCreate(name, body) => {
                 self.compile_coroutine_create(&name.as_str(), body)
             }
             hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro, &expr.ty),
             hir::ExprKind::Yield(_inner) => {
                 panic!("yield expression outside of coroutine body")
-            }
-            hir::ExprKind::DynDispatch(obj, trait_name, method, args) => self.compile_dyn_dispatch(
-                obj,
-                &trait_name.as_str(),
-                &method.as_str(),
-                args,
-                &expr.ty,
-            ),
-            hir::ExprKind::DynCoerce(inner, type_name, trait_name) => {
-                self.compile_dyn_coerce(inner, &type_name.as_str(), &trait_name.as_str())
             }
             hir::ExprKind::IterNext(iter_var, type_name, method_name) => self
                 .compile_iter_next_by_name(
@@ -257,10 +237,6 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_atomic_cas(ptr_expr, expected_expr, new_expr)
             }
             hir::ExprKind::Slice(obj, start, end) => self.compile_slice(obj, start, end),
-            hir::ExprKind::DequeNew => self.compile_deque_new(),
-            hir::ExprKind::DequeMethod(obj, method, args) => {
-                self.compile_deque_method(obj, &method.as_str(), args)
-            }
             hir::ExprKind::Grad(inner) => self.compile_grad(inner),
             hir::ExprKind::Einsum(notation, args) => self.compile_einsum(&notation.as_str(), args),
             hir::ExprKind::Builder(name, fields) => {
@@ -274,8 +250,6 @@ impl<'ctx> Compiler<'ctx> {
                     .collect();
                 self.compile_struct(&name.as_str(), &inits)
             }
-            hir::ExprKind::CowWrap(inner) => self.compile_cow_wrap(inner),
-            hir::ExprKind::CowClone(inner) => self.compile_cow_clone(inner),
             hir::ExprKind::GeneratorCreate(_, name, body) => {
                 self.compile_coroutine_create(&name.as_str(), body)
             }

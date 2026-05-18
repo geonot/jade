@@ -183,19 +183,6 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Unreachable(sp))
             }
-            Token::Deque => {
-                self.advance();
-                self.expect(Token::LParen)?;
-                let mut elems = Vec::new();
-                while !self.check(Token::RParen) && !self.eof() {
-                    elems.push(self.parse_expr()?);
-                    if !self.check(Token::RParen) {
-                        self.expect(Token::Comma)?;
-                    }
-                }
-                self.expect(Token::RParen)?;
-                Ok(Expr::Deque(elems, sp))
-            }
             Token::Grad => {
                 self.advance();
                 self.expect(Token::LParen)?;
@@ -280,29 +267,6 @@ impl Parser {
                         elems,
                         sp,
                     ));
-                }
-                if name == "SIMD" && self.check(Token::Of) {
-                    self.advance();
-                    let elem_ty = self.parse_type()?;
-                    self.expect(Token::Comma)?;
-                    let lanes = match self.peek() {
-                        Token::Int(n) => {
-                            let n = *n;
-                            self.advance();
-                            n as usize
-                        }
-                        _ => return Err(self.error("expected lane count after SIMD of <type>,")),
-                    };
-                    self.expect(Token::LParen)?;
-                    let mut elems = Vec::new();
-                    while !self.check(Token::RParen) && !self.eof() {
-                        elems.push(self.parse_expr()?);
-                        if !self.check(Token::RParen) {
-                            self.expect(Token::Comma)?;
-                        }
-                    }
-                    self.expect(Token::RParen)?;
-                    return Ok(Expr::SIMDLit(elem_ty, lanes, elems, sp));
                 }
                 if name.with_str(|s| s.starts_with(|c: char| c.is_uppercase()))
                     && self.check(Token::LParen)

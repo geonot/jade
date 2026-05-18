@@ -351,15 +351,6 @@ impl Parser {
                         break;
                     }
                 }
-                Token::By if !self.suppress_by => {
-                    let sp = e.span();
-                    let mut dims = vec![e.clone()];
-                    while self.check(Token::By) {
-                        self.advance();
-                        dims.push(self.parse_primary()?);
-                    }
-                    e = Expr::NDArray(dims, sp);
-                }
                 Token::Of if matches!(e, Expr::Ident(_, _) | Expr::Lambda(..)) => {
                     let sp = self.span();
                     self.advance();

@@ -12,23 +12,16 @@ impl Lowerer {
             ExprKind::StringMethod(obj, name, args)
             | ExprKind::DeferredMethod(obj, name, args)
             | ExprKind::VecMethod(obj, name, args)
-            | ExprKind::MapMethod(obj, name, args)
-            | ExprKind::SetMethod(obj, name, args)
-            | ExprKind::PQMethod(obj, name, args)
-            | ExprKind::DequeMethod(obj, name, args) => {
+            | ExprKind::MapMethod(obj, name, args) => {
                 let obj_val = self.lower_expr(obj);
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 self.emit(InstKind::MethodCall(obj_val, *name, vals, false), ty, span)
             }
-            ExprKind::VecNew(elems) | ExprKind::NDArrayNew(elems) | ExprKind::SIMDNew(elems) => {
+            ExprKind::VecNew(elems) => {
                 let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr(e)).collect();
                 self.emit(InstKind::VecNew(vals), ty, span)
             }
             ExprKind::MapNew => self.emit(InstKind::MapInit, ty, span),
-
-            ExprKind::SetNew => self.emit(InstKind::SetInit, ty, span),
-            ExprKind::PQNew => self.emit(InstKind::PQInit, ty, span),
-            ExprKind::DequeNew => self.emit(InstKind::DequeInit, ty, span),
 
             ExprKind::ListComp(body_expr, _def_id, bind, iter, end, cond) => {
                 // Desugar: vec = VecNew(); for bind in iter..end { if cond { VecPush(vec, body) } }

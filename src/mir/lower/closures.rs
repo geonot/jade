@@ -195,8 +195,6 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
         | ExprKind::Array(args)
         | ExprKind::Tuple(args)
         | ExprKind::VecNew(args)
-        | ExprKind::NDArrayNew(args)
-        | ExprKind::SIMDNew(args)
         | ExprKind::Syscall(args) => {
             for arg in args {
                 collect_var_refs_expr(arg, refs);
@@ -212,9 +210,6 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
         | ExprKind::StringMethod(obj, _, args)
         | ExprKind::VecMethod(obj, _, args)
         | ExprKind::MapMethod(obj, _, args)
-        | ExprKind::SetMethod(obj, _, args)
-        | ExprKind::PQMethod(obj, _, args)
-        | ExprKind::DequeMethod(obj, _, args)
         | ExprKind::DeferredMethod(obj, _, args) => {
             collect_var_refs_expr(obj, refs);
             for arg in args {
@@ -255,8 +250,7 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
                 collect_var_refs_block(default_body, refs);
             }
         }
-        ExprKind::DynDispatch(obj, _, _, args)
-        | ExprKind::Send(obj, _, _, _, args)
+        ExprKind::Send(obj, _, _, _, args)
         | ExprKind::Pipe(obj, _, _, args) => {
             collect_var_refs_expr(obj, refs);
             for arg in args {
@@ -278,7 +272,6 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
         ExprKind::ChannelRecv(inner)
         | ExprKind::CoroutineNext(inner)
         | ExprKind::Yield(inner)
-        | ExprKind::DynCoerce(inner, _, _)
         | ExprKind::AsFormat(inner, _)
         | ExprKind::AtomicLoad(inner)
         | ExprKind::Grad(inner) => collect_var_refs_expr(inner, refs),

@@ -152,23 +152,6 @@ impl Lowerer {
             }
 
             // Coroutines — opaque calls
-            ExprKind::DynDispatch(obj, trait_name, method, args) => {
-                let obj_val = self.lower_expr(obj);
-                let arg_vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(
-                    InstKind::DynDispatch(obj_val, *trait_name, *method, arg_vals),
-                    ty,
-                    span,
-                )
-            }
-            ExprKind::DynCoerce(inner, type_name, trait_name) => {
-                let inner_val = self.lower_expr(inner);
-                self.emit(
-                    InstKind::DynCoerce(inner_val, *type_name, *trait_name),
-                    ty,
-                    span,
-                )
-            }
 
             // Store operations — opaque calls
             ExprKind::Grad(inner) => {

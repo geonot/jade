@@ -164,14 +164,12 @@ impl<'ctx> Compiler<'ctx> {
             Type::Map(k, v) => {
                 Self::type_references_struct(k, name) || Self::type_references_struct(v, name)
             }
-            Type::Set(inner) => Self::type_references_struct(inner, name),
             Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
             Type::Rc(inner)
             | Type::RcCell(inner)
             | Type::Arc(inner)
             | Type::Mutex(inner)
-            | Type::Weak(inner)
-            | Type::Cow(inner) => Self::type_references_struct(inner, name),
+            | Type::Weak(inner) => Self::type_references_struct(inner, name),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 Self::type_references_struct(inner, name)
             }

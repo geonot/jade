@@ -268,12 +268,9 @@ pub enum Expr {
     Slice(Box<Expr>, Box<Expr>, Box<Expr>, Span),
     NamedArg(Symbol, Box<Expr>, Span),
     Spread(Box<Expr>, Span),
-    NDArray(Vec<Expr>, Span),
-    SIMDLit(Type, usize, Vec<Expr>, Span),
     Grad(Box<Expr>, Span),
     Einsum(String, Vec<Expr>, Span),
     Builder(Symbol, Vec<BuilderField>, Span),
-    Deque(Vec<Expr>, Span),
     OfCall(Box<Expr>, Box<Expr>, Span),
     QualifiedIdent(Symbol, Symbol, Span),
 }
@@ -331,14 +328,11 @@ impl Expr {
             | Self::StrictCast(_, _, s)
             | Self::Slice(_, _, _, s)
             | Self::NamedArg(_, _, s)
-            | Self::Spread(_, s)
-            | Self::NDArray(_, s)
-            | Self::SIMDLit(_, _, _, s) => *s,
+            | Self::Spread(_, s) => *s,
             Self::IfExpr(i) => i.span,
             Self::Grad(_, s)
             | Self::Einsum(_, _, s)
             | Self::Builder(_, _, s)
-            | Self::Deque(_, s)
             | Self::OfCall(_, _, s)
             | Self::QualifiedIdent(_, _, s) => *s,
         }

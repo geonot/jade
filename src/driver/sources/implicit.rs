@@ -193,8 +193,6 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             }
             Expr::Array(elems, _)
             | Expr::Tuple(elems, _)
-            | Expr::NDArray(elems, _)
-            | Expr::Deque(elems, _)
             | Expr::Syscall(elems, _) => {
                 for elem in elems {
                     walk_expr(elem, modules, defs);
@@ -278,7 +276,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 walk_expr(a, modules, defs);
                 walk_expr(b, modules, defs);
             }
-            Expr::Einsum(_, args, _) | Expr::SIMDLit(_, _, args, _) => {
+            Expr::Einsum(_, args, _) => {
                 for arg in args {
                     walk_expr(arg, modules, defs);
                 }

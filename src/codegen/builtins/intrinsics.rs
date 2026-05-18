@@ -3,145 +3,6 @@
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(in crate::codegen) fn compile_einsum_trace(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
-        let n = match &args[0].ty {
-            Type::NDArray(_, dims) if dims.len() == 2 && dims[0] == dims[1] => dims[0] as u64,
-            _ => return Err("einsum trace requires square 2D NDArray".into()),
-        };
-        let i64t = self.ctx.i64_type();
-        let f64t = self.ctx.f64_type();
-        let fn_val = self.current_fn();
-
-        let acc = self.entry_alloca(f64t.into(), "tr.acc");
-        b!(self.bld.build_store(acc, f64t.const_float(0.0)));
-        let iv = self.entry_alloca(i64t.into(), "tr.i");
-        b!(self.bld.build_store(iv, i64t.const_zero()));
-
-        let loop_bb = self.ctx.append_basic_block(fn_val, "tr.loop");
-        let body_bb = self.ctx.append_basic_block(fn_val, "tr.body");
-        let end_bb = self.ctx.append_basic_block(fn_val, "tr.end");
-        b!(self.bld.build_unconditional_branch(loop_bb));
-
-        self.bld.position_at_end(loop_bb);
-        let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(
-            IntPredicate::ULT,
-            i,
-            i64t.const_int(n, false),
-            "tr.cmp"
-        ));
-        b!(self.bld.build_conditional_branch(cmp, body_bb, end_bb));
-
-        self.bld.position_at_end(body_bb);
-        // A[i*n + i]
-        let idx = b!(self
-            .bld
-            .build_int_mul(i, i64t.const_int(n, false), "tr.row"));
-        let idx = b!(self.bld.build_int_add(idx, i, "tr.diag"));
-        let ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[idx], "tr.ep")) };
-        let val = b!(self.bld.build_load(f64t, ep, "tr.v")).into_float_value();
-        let cur = b!(self.bld.build_load(f64t, acc, "tr.cur")).into_float_value();
-        let sum = b!(self.bld.build_float_add(cur, val, "tr.sum"));
-        b!(self.bld.build_store(acc, sum));
-        let i_next = b!(self
-            .bld
-            .build_int_add(i, i64t.const_int(1, false), "i.next"));
-        b!(self.bld.build_store(iv, i_next));
-        b!(self.bld.build_unconditional_branch(loop_bb));
-
-        self.bld.position_at_end(end_bb);
-        Ok(b!(self.bld.build_load(f64t, acc, "tr.result")))
-    }
-
-    pub(in crate::codegen) fn compile_einsum_transpose(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let a_ptr = self.compile_expr(&args[0])?.into_pointer_value();
-        let (m, n) = match &args[0].ty {
-            Type::NDArray(_, dims) if dims.len() == 2 => (dims[0] as u64, dims[1] as u64),
-            _ => return Err("einsum transpose requires 2D NDArray".into()),
-        };
-        let i64t = self.ctx.i64_type();
-        let f64t = self.ctx.f64_type();
-        let malloc = self.ensure_malloc();
-
-        let total = m * n;
-        let byte_size = i64t.const_int(total * 8, false);
-        let result_ptr = b!(self.bld.build_call(malloc, &[byte_size.into()], "tp.ptr"))
-            .try_as_basic_value()
-            .basic()
-            .expect("ICE: call returned void")
-            .into_pointer_value();
-
-        let fn_val = self.current_fn();
-        let iv = self.entry_alloca(i64t.into(), "tp.i");
-        let jv = self.entry_alloca(i64t.into(), "tp.j");
-        b!(self.bld.build_store(iv, i64t.const_zero()));
-
-        let i_loop = self.ctx.append_basic_block(fn_val, "tp.i");
-        let j_loop = self.ctx.append_basic_block(fn_val, "tp.j");
-        let body = self.ctx.append_basic_block(fn_val, "tp.body");
-        let j_end = self.ctx.append_basic_block(fn_val, "tp.j.end");
-        let i_end = self.ctx.append_basic_block(fn_val, "tp.end");
-        b!(self.bld.build_unconditional_branch(i_loop));
-
-        self.bld.position_at_end(i_loop);
-        let i = b!(self.bld.build_load(i64t, iv, "i")).into_int_value();
-        let cmp_i = b!(self.bld.build_int_compare(
-            IntPredicate::ULT,
-            i,
-            i64t.const_int(m, false),
-            "tp.icmp"
-        ));
-        b!(self.bld.build_conditional_branch(cmp_i, j_loop, i_end));
-
-        self.bld.position_at_end(j_loop);
-        b!(self.bld.build_store(jv, i64t.const_zero()));
-        let j_loop2 = self.ctx.append_basic_block(fn_val, "tp.j2");
-        b!(self.bld.build_unconditional_branch(j_loop2));
-
-        self.bld.position_at_end(j_loop2);
-        let j = b!(self.bld.build_load(i64t, jv, "j")).into_int_value();
-        let cmp_j = b!(self.bld.build_int_compare(
-            IntPredicate::ULT,
-            j,
-            i64t.const_int(n, false),
-            "tp.jcmp"
-        ));
-        b!(self.bld.build_conditional_branch(cmp_j, body, j_end));
-
-        self.bld.position_at_end(body);
-        // src[i*n + j] -> dst[j*m + i]
-        let src_idx = b!(self.bld.build_int_mul(i, i64t.const_int(n, false), "s.row"));
-        let src_idx = b!(self.bld.build_int_add(src_idx, j, "s.idx"));
-        let src_ep = unsafe { b!(self.bld.build_gep(f64t, a_ptr, &[src_idx], "s.ep")) };
-        let val = b!(self.bld.build_load(f64t, src_ep, "s.v")).into_float_value();
-        let dst_idx = b!(self.bld.build_int_mul(j, i64t.const_int(m, false), "d.row"));
-        let dst_idx = b!(self.bld.build_int_add(dst_idx, i, "d.idx"));
-        let dst_ep = unsafe { b!(self.bld.build_gep(f64t, result_ptr, &[dst_idx], "d.ep")) };
-        b!(self.bld.build_store(dst_ep, val));
-
-        let j_next = b!(self
-            .bld
-            .build_int_add(j, i64t.const_int(1, false), "j.next"));
-        b!(self.bld.build_store(jv, j_next));
-        b!(self.bld.build_unconditional_branch(j_loop2));
-
-        self.bld.position_at_end(j_end);
-        let i_next = b!(self
-            .bld
-            .build_int_add(i, i64t.const_int(1, false), "i.next"));
-        b!(self.bld.build_store(iv, i_next));
-        b!(self.bld.build_unconditional_branch(i_loop));
-
-        self.bld.position_at_end(i_end);
-        Ok(result_ptr.into())
-    }
 
     pub(in crate::codegen) fn compile_bit_intrinsic(
         &mut self,
@@ -597,5 +458,19 @@ impl<'ctx> Compiler<'ctx> {
             .try_as_basic_value()
             .basic()
             .expect("ICE: call returned void"))
+    }
+
+    pub(in crate::codegen) fn compile_einsum_trace(
+        &mut self,
+        _args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        Err("einsum trace: NDArray type removed".into())
+    }
+
+    pub(in crate::codegen) fn compile_einsum_transpose(
+        &mut self,
+        _args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        Err("einsum transpose: NDArray type removed".into())
     }
 }

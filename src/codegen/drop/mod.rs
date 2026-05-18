@@ -44,9 +44,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Map(kt, vt) => {
                 self.drop_map_deep(val, kt, vt)?;
             }
-            Type::Set(elem) => {
-                self.drop_set_deep(val, elem)?;
-            }
             Type::Rc(inner) => {
                 self.rc_release_deep(val, inner)?;
             }
@@ -77,18 +74,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Weak(inner) => {
                 self.weak_release(val, inner)?;
             }
-            Type::Arena => {
-                self.drop_arena(val)?;
-            }
-            Type::Deque(elem) => {
-                self.drop_container_header(val, elem)?;
-            }
-            Type::PriorityQueue(elem) => {
-                self.drop_container_header(val, elem)?;
-            }
-            Type::NDArray(_, _) => {
-                self.drop_ndarray(val)?;
-            }
             Type::Generator(_) => {
                 self.drop_ptr_allocated(val)?;
             }
@@ -113,8 +98,8 @@ impl<'ctx> Compiler<'ctx> {
             Type::Coroutine(_) => {
                 self.drop_generator(val)?;
             }
-            // Channel, Cow — ptr-based, free the allocation if non-null.
-            Type::Channel(_) | Type::Cow(_) => {
+            // Channel — ptr-based, free the allocation if non-null.
+            Type::Channel(_) => {
                 self.drop_ptr_allocated(val)?;
             }
             _ => {

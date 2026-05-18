@@ -1,4 +1,4 @@
-//! Strict casts, formatting, atomics, deque, slice, COW, and gradient expression helpers.
+//! Strict casts, formatting, atomics, deque, slice, and gradient expression helpers.
 
 use super::*;
 
@@ -303,82 +303,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(old)
     }
 
-    pub(in crate::codegen) fn ensure_deque_fn(
-        &self,
-        name: &str,
-        param_tys: &[BasicMetadataTypeEnum<'ctx>],
-        ret_ty: inkwell::types::BasicTypeEnum<'ctx>,
-    ) -> inkwell::values::FunctionValue<'ctx> {
-        self.module.get_function(name).unwrap_or_else(|| {
-            let ft = ret_ty.fn_type(param_tys, false);
-            self.module
-                .add_function(name, ft, Some(inkwell::module::Linkage::External))
-        })
-    }
-
-    pub(in crate::codegen) fn compile_deque_new(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let f = self
-            .module
-            .get_function("__jinn_deque_new")
-            .unwrap_or_else(|| {
-                let ft = ptr_ty.fn_type(&[], false);
-                self.module.add_function(
-                    "__jinn_deque_new",
-                    ft,
-                    Some(inkwell::module::Linkage::External),
-                )
-            });
-        let result = b!(self.bld.build_call(f, &[], "deque.new"));
-        Ok(self.call_result(result))
-    }
-
-    pub(in crate::codegen) fn compile_deque_method(
-        &mut self,
-        obj: &hir::Expr,
-        method: &str,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let i64t = self.ctx.i64_type();
-        let void_ty = self.ctx.void_type();
-        let handle = self.compile_expr(obj)?;
-
-        match method {
-            "push_back" | "push_front" => {
-                let rt_name = if method == "push_back" {
-                    "__jinn_deque_push_back"
-                } else {
-                    "__jinn_deque_push_front"
-                };
-                let f = self.module.get_function(rt_name).unwrap_or_else(|| {
-                    let ft = void_ty.fn_type(&[ptr_ty.into(), i64t.into()], false);
-                    self.module
-                        .add_function(rt_name, ft, Some(inkwell::module::Linkage::External))
-                });
-                let val = self.compile_expr(&args[0])?;
-                b!(self.bld.build_call(f, &[handle.into(), val.into()], ""));
-                Ok(i64t.const_int(0, false).into())
-            }
-            "pop_front" | "pop_back" => {
-                let rt_name = if method == "pop_front" {
-                    "__jinn_deque_pop_front"
-                } else {
-                    "__jinn_deque_pop_back"
-                };
-                let f = self.ensure_deque_fn(rt_name, &[ptr_ty.into()], i64t.into());
-                let result = b!(self.bld.build_call(f, &[handle.into()], "dq.pop"));
-                Ok(self.call_result(result))
-            }
-            "len" => {
-                let f = self.ensure_deque_fn("__jinn_deque_len", &[ptr_ty.into()], i64t.into());
-                let result = b!(self.bld.build_call(f, &[handle.into()], "dq.len"));
-                Ok(self.call_result(result))
-            }
-            _ => Err(format!("no method '{method}' on Deque")),
-        }
-    }
-
     pub(in crate::codegen) fn compile_slice(
         &mut self,
         obj: &hir::Expr,
@@ -450,93 +374,6 @@ impl<'ctx> Compiler<'ctx> {
             }
             _ => Err(format!("slice not supported for type: {}", &obj.ty)),
         }
-    }
-
-    /// COW wrap: allocate {rc: i64, data: T}, set rc=1, copy value into data.
-    pub(in crate::codegen) fn compile_cow_wrap(
-        &mut self,
-        inner: &hir::Expr,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let val = self.compile_expr(inner)?;
-        let data_ty = self.llvm_ty(&inner.ty);
-        let i64t = self.ctx.i64_type();
-        let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
-        let malloc = self.ensure_malloc();
-        let size = cow_st.size_of().expect("ICE: type has no size");
-        let ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.alloc"))
-            .try_as_basic_value()
-            .basic()
-            .expect("ICE: call returned void")
-            .into_pointer_value();
-        // rc = 1
-        let rc_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 0, "cow.rc"));
-        b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
-        // store data
-        let data_gep = b!(self.bld.build_struct_gep(cow_st, ptr, 1, "cow.data"));
-        b!(self.bld.build_store(data_gep, val));
-        Ok(ptr.into())
-    }
-
-    /// COW clone: if RC > 1, duplicate the backing storage and decrement
-    /// the original's RC. Otherwise return the same pointer.
-    pub(in crate::codegen) fn compile_cow_clone(
-        &mut self,
-        inner: &hir::Expr,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let cow_ptr = self.compile_expr(inner)?.into_pointer_value();
-        let cow_inner_ty = match &inner.ty {
-            crate::types::Type::Cow(inner) => inner.as_ref().clone(),
-            other => other.clone(),
-        };
-        let data_ty = self.llvm_ty(&cow_inner_ty);
-        let i64t = self.ctx.i64_type();
-        let cow_st = self.ctx.struct_type(&[i64t.into(), data_ty], false);
-
-        let rc_gep = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 0, "cow.rcp"));
-        let rc = b!(self.bld.build_load(i64t, rc_gep, "cow.rc")).into_int_value();
-        let needs_clone = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::UGT,
-            rc,
-            i64t.const_int(1, false),
-            "cow.shared"
-        ));
-
-        let fn_val = self.current_fn();
-        let clone_bb = self.ctx.append_basic_block(fn_val, "cow.clone");
-        let done_bb = self.ctx.append_basic_block(fn_val, "cow.done");
-        let cur_bb = self.current_bb();
-        b!(self
-            .bld
-            .build_conditional_branch(needs_clone, clone_bb, done_bb));
-
-        // Clone path: allocate new cow, copy data, set rc=1, decrement original rc
-        self.bld.position_at_end(clone_bb);
-        let malloc = self.ensure_malloc();
-        let size = cow_st.size_of().expect("ICE: type has no size");
-        let new_ptr = b!(self.bld.build_call(malloc, &[size.into()], "cow.new"))
-            .try_as_basic_value()
-            .basic()
-            .expect("ICE: call returned void")
-            .into_pointer_value();
-        let new_rc = b!(self.bld.build_struct_gep(cow_st, new_ptr, 0, "cow.nrc"));
-        b!(self.bld.build_store(new_rc, i64t.const_int(1, false)));
-        let new_data = b!(self.bld.build_struct_gep(cow_st, new_ptr, 1, "cow.ndata"));
-        let old_data = b!(self.bld.build_struct_gep(cow_st, cow_ptr, 1, "cow.odata"));
-        let old_val = b!(self.bld.build_load(data_ty, old_data, "cow.oval"));
-        b!(self.bld.build_store(new_data, old_val));
-        // Decrement original rc
-        let dec = b!(self
-            .bld
-            .build_int_sub(rc, i64t.const_int(1, false), "cow.dec"));
-        b!(self.bld.build_store(rc_gep, dec));
-        b!(self.bld.build_unconditional_branch(done_bb));
-
-        // Merge
-        self.bld.position_at_end(done_bb);
-        let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        let phi = b!(self.bld.build_phi(ptr_t, "cow.result"));
-        phi.add_incoming(&[(&cow_ptr, cur_bb), (&new_ptr, clone_bb)]);
-        Ok(phi.as_basic_value())
     }
 
     /// Compile `grad(f)` — numerical derivative via central differences.

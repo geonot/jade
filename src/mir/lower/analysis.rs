@@ -128,7 +128,6 @@ impl Lowerer {
             | ExprKind::StringMethod(obj, _, args)
             | ExprKind::VecMethod(obj, _, args)
             | ExprKind::MapMethod(obj, _, args)
-            | ExprKind::SetMethod(obj, _, args)
             | ExprKind::DeferredMethod(obj, _, args) => {
                 Self::collect_assigned_vars_in_expr(obj, assigned);
                 for a in args {

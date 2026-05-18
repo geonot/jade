@@ -739,37 +739,8 @@ impl<'ctx> Compiler<'ctx> {
                 .any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
     }
 
-    pub(crate) fn uses_pool(prog: &hir::Program) -> bool {
-        use crate::hir::{BuiltinFn, ExprKind, Stmt};
-        fn has_pool(e: &hir::Expr) -> bool {
-            matches!(
-                &e.kind,
-                ExprKind::Builtin(
-                    BuiltinFn::PoolNew
-                        | BuiltinFn::PoolAlloc
-                        | BuiltinFn::PoolFree
-                        | BuiltinFn::PoolDestroy,
-                    _
-                )
-            )
-        }
-        fn scan_block(block: &[hir::Stmt]) -> bool {
-            block.iter().any(|s| match s {
-                Stmt::Expr(e) => has_pool(e),
-                Stmt::Bind(b) => has_pool(&b.value),
-                Stmt::If(i) => {
-                    scan_block(&i.then)
-                        || i.elifs.iter().any(|(_, b)| scan_block(b))
-                        || i.els.as_ref().map_or(false, |b| scan_block(b))
-                }
-                Stmt::While(w) => scan_block(&w.body),
-                Stmt::For(f) => scan_block(&f.body),
-                Stmt::Loop(l) => scan_block(&l.body),
-                Stmt::Match(m) => m.arms.iter().any(|a| scan_block(&a.body)),
-                _ => false,
-            })
-        }
-        prog.fns.iter().any(|f| scan_block(&f.body))
+    pub(crate) fn uses_pool(_prog: &hir::Program) -> bool {
+        false
     }
 
     pub(crate) fn declare_jinn_runtime(&mut self) {

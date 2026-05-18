@@ -228,18 +228,6 @@ void     jinn_timer_set(jinn_timer_t *t, uint64_t deadline_ns);
 int      jinn_timer_check(jinn_timer_t *t);
 uint64_t jinn_time_now_ns(void);
 
-/* ── Pool allocator ──────────────────────────────────────────────── */
-
-typedef struct jinn_pool jinn_pool_t;
-
-jinn_pool_t *jinn_pool_create(size_t obj_size, size_t count);
-void        *jinn_pool_alloc(jinn_pool_t *pool);
-void         jinn_pool_free(jinn_pool_t *pool, void *ptr);
-void         jinn_pool_reset(jinn_pool_t *pool);
-void         jinn_pool_destroy(jinn_pool_t *pool);
-size_t       jinn_pool_count(jinn_pool_t *pool);
-size_t       jinn_pool_capacity(jinn_pool_t *pool);
-
 /* ── Actor helpers ───────────────────────────────────────────────── */
 
 void jinn_actor_park(void *mailbox_ptr);

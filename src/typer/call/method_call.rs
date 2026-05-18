@@ -316,67 +316,6 @@ impl Typer {
             });
         }
 
-        if let Type::Set(ref elem_ty) = obj_ty {
-            let expected_arg_tys: Vec<Option<&Type>> = match method {
-                "add" => vec![Some(elem_ty.as_ref())],
-                "contains" => vec![Some(elem_ty.as_ref())],
-                "remove" => vec![Some(elem_ty.as_ref())],
-                "union" | "difference" | "intersection" => vec![Some(&obj_ty)],
-                _ => vec![],
-            };
-            let hargs: Vec<hir::Expr> = args
-                .iter()
-                .enumerate()
-                .map(|(i, e)| {
-                    self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
-                })
-                .collect::<Result<_, _>>()?;
-            for (i, ha) in hargs.iter().enumerate() {
-                if let Some(Some(expected)) = expected_arg_tys.get(i) {
-                    let _ = self
-                        .infer_ctx
-                        .unify_at(expected, &ha.ty, span, "set method argument");
-                }
-            }
-            let ret_ty = Self::set_method_ret_ty(method, elem_ty)
-                .ok_or_else(|| format!("no method '{method}' on Set"))?;
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::SetMethod(Box::new(hobj), method.into(), hargs),
-                ty: ret_ty,
-                span,
-            });
-        }
-
-        if let Type::PriorityQueue(ref elem_ty) = obj_ty {
-            let expected_arg_tys: Vec<Option<&Type>> = match method {
-                "push" => vec![Some(elem_ty.as_ref()), Some(&Type::I64)], // value, priority
-                "pop" | "peek" => vec![],
-                "len" => vec![],
-                "is_empty" => vec![],
-                "clear" => vec![],
-                _ => vec![],
-            };
-            let hargs: Vec<hir::Expr> = args
-                .iter()
-                .enumerate()
-                .map(|(i, e)| {
-                    self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
-                })
-                .collect::<Result<_, _>>()?;
-            let ret_ty = match method {
-                "push" | "clear" => Type::Void,
-                "pop" | "peek" => *elem_ty.clone(),
-                "len" => Type::I64,
-                "is_empty" => Type::Bool,
-                _ => return Err(format!("no method '{method}' on PriorityQueue")),
-            };
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::PQMethod(Box::new(hobj), method.into(), hargs),
-                ty: ret_ty,
-                span,
-            });
-        }
-
         // Char/Unicode methods on integer types (char codepoints)
         if matches!(
             obj_ty,
@@ -436,50 +375,6 @@ impl Typer {
             }
         }
 
-        if matches!(obj_ty, Type::Arena) {
-            let hargs: Vec<hir::Expr> = args
-                .iter()
-                .map(|e| self.lower_expr_expected(e, Some(&Type::I64)))
-                .collect::<Result<_, _>>()?;
-            for ha in &hargs {
-                let _ = self
-                    .infer_ctx
-                    .unify_at(&ha.ty, &Type::I64, span, "arena method argument");
-            }
-            let (builtin, ret_ty) = match method {
-                "alloc" => (hir::BuiltinFn::ArenaAlloc, Type::Ptr(Box::new(Type::I8))),
-                "reset" => (hir::BuiltinFn::ArenaReset, Type::Void),
-                _ => return Err(format!("no method '{method}' on Arena")),
-            };
-            let mut all_args = vec![hobj];
-            all_args.extend(hargs);
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::Builtin(builtin, all_args),
-                ty: ret_ty,
-                span,
-            });
-        }
-
-        if matches!(obj_ty, Type::Pool) {
-            let hargs: Vec<hir::Expr> = args
-                .iter()
-                .map(|e| self.lower_expr(e))
-                .collect::<Result<_, _>>()?;
-            let (builtin, ret_ty) = match method {
-                "alloc" => (hir::BuiltinFn::PoolAlloc, Type::Ptr(Box::new(Type::I8))),
-                "free" => (hir::BuiltinFn::PoolFree, Type::Void),
-                "destroy" => (hir::BuiltinFn::PoolDestroy, Type::Void),
-                _ => return Err(format!("no method '{method}' on Pool")),
-            };
-            let mut all_args = vec![hobj];
-            all_args.extend(hargs);
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::Builtin(builtin, all_args),
-                ty: ret_ty,
-                span,
-            });
-        }
-
         if let Type::Coroutine(ref yield_ty) = obj_ty {
             if method == "next" {
                 return Ok(hir::Expr {
@@ -502,23 +397,7 @@ impl Typer {
             return Err(format!("no method '{method}' on Generator"));
         }
 
-        if let Type::DynTrait(ref trait_name) = obj_ty {
-            let hargs: Vec<hir::Expr> = args
-                .iter()
-                .map(|e| self.lower_expr(e))
-                .collect::<Result<_, _>>()?;
-            let ret_ty = self.infer_dyn_method_ret(&trait_name.as_str(), method);
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::DynDispatch(
-                    Box::new(hobj),
-                    trait_name.clone(),
-                    method.into(),
-                    hargs,
-                ),
-                ty: ret_ty,
-                span,
-            });
-        }
+        // DynTrait removed
 
         // ── Option / Result enum methods ──
         if let Type::Enum(ref enum_name) = obj_ty {

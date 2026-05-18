@@ -114,7 +114,6 @@ static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
         ("unreachable", Token::Unreachable),
         ("alias", Token::Alias),
         ("defer", Token::Defer),
-        ("deque", Token::Deque),
         ("grad", Token::Grad),
         ("einsum", Token::Einsum),
         ("build", Token::Build),

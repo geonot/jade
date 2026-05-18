@@ -204,32 +204,12 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         // Handle Arena(cap) as builtin
         if name == "Arena" && inits.len() == 1 {
-            let harg = self.lower_expr_expected(&inits[0].value, Some(&Type::I64))?;
-            let _ = self
-                .infer_ctx
-                .unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::ArenaNew, vec![harg]),
-                ty: Type::Arena,
-                span,
-            });
+            return Err("Arena type removed".into());
         }
 
         // Handle Pool(obj_size, count) as builtin
         if name == "Pool" && inits.len() == 2 {
-            let hsize = self.lower_expr_expected(&inits[0].value, Some(&Type::I64))?;
-            let hcount = self.lower_expr_expected(&inits[1].value, Some(&Type::I64))?;
-            let _ = self
-                .infer_ctx
-                .unify_at(&hsize.ty, &Type::I64, span, "Pool obj_size");
-            let _ = self
-                .infer_ctx
-                .unify_at(&hcount.ty, &Type::I64, span, "Pool count");
-            return Ok(hir::Expr {
-                kind: hir::ExprKind::Builtin(crate::hir::BuiltinFn::PoolNew, vec![hsize, hcount]),
-                ty: Type::Pool,
-                span,
-            });
+            return Err("Pool type removed".into());
         }
 
         if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {

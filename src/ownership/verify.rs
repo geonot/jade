@@ -450,29 +450,14 @@ impl OwnershipVerifier {
             ExprKind::CoroutineNext(inner) | ExprKind::Yield(inner) => {
                 self.verify_expr(inner);
             }
-            ExprKind::DynDispatch(obj, _, _, args) => {
-                self.verify_expr(obj);
-                for a in args {
-                    self.verify_expr(a);
-                }
-            }
-            ExprKind::DynCoerce(inner, _, _) => {
-                self.verify_expr(inner);
-            }
             ExprKind::VecNew(args) => {
                 for a in args {
                     self.verify_expr(a);
                 }
             }
-            ExprKind::MapNew
-            | ExprKind::SetNew
-            | ExprKind::PQNew
-            | ExprKind::NDArrayNew(_)
-            | ExprKind::SIMDNew(_) => {}
+            ExprKind::MapNew => {}
             ExprKind::VecMethod(obj, _, args)
-            | ExprKind::MapMethod(obj, _, args)
-            | ExprKind::SetMethod(obj, _, args)
-            | ExprKind::PQMethod(obj, _, args) => {
+            | ExprKind::MapMethod(obj, _, args) => {
                 self.verify_expr(obj);
                 for a in args {
                     self.verify_expr(a);
@@ -527,16 +512,7 @@ impl OwnershipVerifier {
                 self.verify_expr(start);
                 self.verify_expr(end);
             }
-            ExprKind::DequeNew => {}
-            ExprKind::DequeMethod(obj, _, args) => {
-                self.verify_expr(obj);
-                for a in args {
-                    self.verify_expr(a);
-                }
-            }
             ExprKind::Grad(e)
-            | ExprKind::CowWrap(e)
-            | ExprKind::CowClone(e)
             | ExprKind::GeneratorNext(e)
             | ExprKind::EnumUnwrap(e, _, _)
             | ExprKind::EnumIs(e, _) => {

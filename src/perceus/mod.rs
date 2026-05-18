@@ -136,20 +136,8 @@ impl PerceusPass {
             Type::Param(_) | Type::TypeVar(_) => 0,
             Type::ActorRef(_) => 8,
             Type::Coroutine(_) => 8,
-            Type::DynTrait(_) => 16,
-            Type::Vec(_) | Type::Map(_, _) | Type::Set(_) => 24,
-            Type::PriorityQueue(_) => 24,
-            Type::NDArray(inner, dims) => {
-                let elem_size = Self::type_layout_size_pub(inner);
-                let total: u64 = dims.iter().map(|&d| d as u64).product();
-                elem_size * total
-            }
+            Type::Vec(_) | Type::Map(_, _) => 24,
             Type::Channel(_) => 8,
-            Type::SIMD(inner, lanes) => Self::type_layout_size_pub(inner) * (*lanes as u64),
-            Type::Arena => 24,
-            Type::Pool => 8,
-            Type::Deque(_) => 24,
-            Type::Cow(inner) => Self::type_layout_size_pub(inner),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size_pub(inner),
             Type::Generator(_) => 8,
             // Row<T> = { i64 sid, struct value }; struct size is opaque

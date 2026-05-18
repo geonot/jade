@@ -523,35 +523,6 @@ impl PrettyPrinter {
                 format!("vec[{}]", a.join(", "))
             }
             ExprKind::MapNew => "map{}".into(),
-            ExprKind::SetNew => "set{}".into(),
-            ExprKind::PQNew => "pq{}".into(),
-            ExprKind::NDArrayNew(dims) => {
-                format!(
-                    "ndarray[{}]",
-                    dims.iter()
-                        .map(|d| self.expr_str(d))
-                        .collect::<Vec<_>>()
-                        .join(" by ")
-                )
-            }
-            ExprKind::SIMDNew(elems) => {
-                format!(
-                    "simd({})",
-                    elems
-                        .iter()
-                        .map(|e| self.expr_str(e))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            ExprKind::SetMethod(recv, meth, args) => {
-                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
-                format!("{}.set::{meth}({})", self.expr_str(recv), a.join(", "))
-            }
-            ExprKind::PQMethod(recv, meth, args) => {
-                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
-                format!("{}.pq::{meth}({})", self.expr_str(recv), a.join(", "))
-            }
             ExprKind::Field(recv, name, idx) => format!("{}.{name}#{idx}", self.expr_str(recv)),
             ExprKind::Index(arr, idx) => format!("{}[{}]", self.expr_str(arr), self.expr_str(idx)),
             ExprKind::Ternary(c, t, f) => format!(
@@ -691,12 +662,6 @@ impl PrettyPrinter {
             ExprKind::CoroutineCreate(name, _) => format!("coroutine {name}"),
             ExprKind::CoroutineNext(e) => format!("{}.next()", self.expr_str(e)),
             ExprKind::Yield(e) => format!("yield {}", self.expr_str(e)),
-            ExprKind::DynDispatch(obj, trait_name, method, _args) => {
-                format!("({}).{trait_name}::{method}(...)", self.expr_str(obj))
-            }
-            ExprKind::DynCoerce(e, _ty, trait_name) => {
-                format!("dyn {trait_name}({})", self.expr_str(e))
-            }
             ExprKind::IterNext(var, ty, method) => {
                 format!("{var}.{ty}_{method}()")
             }
@@ -737,11 +702,6 @@ impl PrettyPrinter {
                 self.expr_str(start),
                 self.expr_str(end)
             ),
-            ExprKind::DequeNew => "deque()".into(),
-            ExprKind::DequeMethod(recv, meth, args) => {
-                let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
-                format!("{}.deque::{meth}({})", self.expr_str(recv), a.join(", "))
-            }
             ExprKind::Grad(e) => format!("grad({})", self.expr_str(e)),
             ExprKind::Einsum(spec, args) => {
                 let a: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
@@ -754,8 +714,6 @@ impl PrettyPrinter {
                     .collect();
                 format!("builder {name} {{ {} }}", fs.join(", "))
             }
-            ExprKind::CowWrap(e) => format!("cow({})", self.expr_str(e)),
-            ExprKind::CowClone(e) => format!("cow_clone({})", self.expr_str(e)),
             ExprKind::GeneratorCreate(_, name, _) => format!("generator {name}"),
             ExprKind::GeneratorNext(e) => format!("{}.next()", self.expr_str(e)),
             ExprKind::EnumUnwrap(e, _, _) => format!("{}.unwrap()", self.expr_str(e)),

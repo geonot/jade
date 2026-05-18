@@ -496,13 +496,8 @@ impl Typer {
             Type::String
             | Type::Vec(_)
             | Type::Map(_, _)
-            | Type::Set(_)
-            | Type::PriorityQueue(_)
-            | Type::Deque(_)
             | Type::Coroutine(_)
-            | Type::Generator(_)
-            | Type::NDArray(_, _)
-            | Type::Cow(_) => true,
+            | Type::Generator(_) => true,
             // User-defined structs/enums whose shape carries heap fields
             // (or are `@resource`). We delegate to the same predicate used
             // for scope-exit drop selection.
@@ -523,7 +518,7 @@ impl Typer {
     /// True iff `ty` is (or wraps) a user-defined struct annotated with
     /// `@resource`. See `docs/access-semantics.md` §3.
     ///
-    /// Walks through `Rc<T>`, `Vec<T>`, `Cow<T>`, `Newtype`, `Alias`, etc.
+    /// Walks through `Rc<T>`, `Vec<T>`, `Newtype`, `Alias`, etc.
     /// to find the underlying struct \u2014 a `Vec(Socket)` is still a vector
     /// *of* resources, so the linear discipline propagates.
     ///
@@ -549,8 +544,7 @@ impl Typer {
             | Type::RcCell(inner)
             | Type::Arc(inner)
             | Type::Mutex(inner)
-            | Type::Weak(inner)
-            | Type::Cow(inner) => self.type_has_resource_annotation(inner),
+            | Type::Weak(inner) => self.type_has_resource_annotation(inner),
             _ => false,
         }
     }
@@ -717,17 +711,6 @@ impl Typer {
             "len" => Some(Type::I64),
             "keys" => Some(Type::Vec(Box::new(key_ty.clone()))),
             "values" => Some(Type::Vec(Box::new(val_ty.clone()))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn set_method_ret_ty(method: &str, elem_ty: &Type) -> Option<Type> {
-        match method {
-            "add" | "remove" | "clear" => Some(Type::Void),
-            "contains" => Some(Type::Bool),
-            "len" => Some(Type::I64),
-            "union" | "difference" | "intersection" => Some(Type::Set(Box::new(elem_ty.clone()))),
-            "to_vec" => Some(Type::Vec(Box::new(elem_ty.clone()))),
             _ => None,
         }
     }

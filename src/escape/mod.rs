@@ -208,10 +208,7 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
 fn is_container_read_method(expr: &hir::Expr) -> bool {
     let name = match &expr.kind {
         ExprKind::VecMethod(_, n, _)
-        | ExprKind::MapMethod(_, n, _)
-        | ExprKind::SetMethod(_, n, _)
-        | ExprKind::PQMethod(_, n, _)
-        | ExprKind::DequeMethod(_, n, _) => n.as_str(),
+        | ExprKind::MapMethod(_, n, _) => n.as_str(),
         _ => return false,
     };
     matches!(
@@ -360,8 +357,6 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
         | Grad(e)
         | AsFormat(e, _)
         | AtomicLoad(e)
-        | CowWrap(e)
-        | CowClone(e)
         | EnumUnwrap(e, _, _)
         | EnumIs(e, _)
         | CoroutineNext(e)
@@ -370,8 +365,6 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
         Call(_, _, args)
         | Builtin(_, args)
         | VecNew(args)
-        | NDArrayNew(args)
-        | SIMDNew(args)
         | Array(args)
         | Tuple(args)
         | Einsum(_, args)
@@ -389,11 +382,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
         | StringMethod(r, _, args)
         | DeferredMethod(r, _, args)
         | VecMethod(r, _, args)
-        | MapMethod(r, _, args)
-        | SetMethod(r, _, args)
-        | PQMethod(r, _, args)
-        | DequeMethod(r, _, args)
-        | DynDispatch(r, _, _, args) => {
+        | MapMethod(r, _, args) => {
             seed_binds_in_expr(r, info);
             for a in args {
                 seed_binds_in_expr(a, info);
@@ -428,7 +417,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
             seed_binds_in_expr(b, info);
             seed_binds_in_expr(c, info);
         }
-        Field(e, _, _) | ChannelRecv(e) | DynCoerce(e, _, _) => seed_binds_in_expr(e, info),
+        Field(e, _, _) | ChannelRecv(e) => seed_binds_in_expr(e, info),
         Struct(_, inits) => {
             for fi in inits {
                 seed_binds_in_expr(&fi.value, info);
@@ -516,10 +505,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
         | FtsCount(_, _)
         | TsLatest(_)
         | IterNext(_, _, _)
-        | MapNew
-        | SetNew
-        | PQNew
-        | DequeNew => {}
+        | MapNew => {}
     }
 }
 
@@ -637,7 +623,7 @@ impl<'a> EscapeWalk<'a> {
             | StoreCount(_) | StoreAll(_) | StoreExists(_, _) | StoreDistinct(_, _)
             | StoreSum(_, _) | StoreAvg(_, _) | StoreMin(_, _) | StoreMax(_, _)
             | ViewCount(_, _) | ViewAll(_, _) | KvCount(_) | VecCount(_) | FtsCount(_, _)
-            | TsLatest(_) | IterNext(_, _, _) | MapNew | SetNew | PQNew | DequeNew => {}
+            | TsLatest(_) | IterNext(_, _, _) | MapNew => {}
 
             BinOp(a, _, b) => {
                 self.walk_expr_consumer(a, BindContext::LocalRead);
@@ -652,14 +638,12 @@ impl<'a> EscapeWalk<'a> {
             | Grad(e)
             | AsFormat(e, _)
             | AtomicLoad(e)
-            | CowWrap(e)
-            | CowClone(e)
             | EnumUnwrap(e, _, _)
             | EnumIs(e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
 
             // Stored-into-container sites: arguments flow into the
             // container's storage.  Conservative: every arg escapes.
-            VecMethod(r, name, args) | DequeMethod(r, name, args)
+            VecMethod(r, name, args)
                 if matches!(
                     name.as_str().as_ref(),
                     "push" | "push_back" | "push_front" | "insert" | "set"
@@ -672,22 +656,6 @@ impl<'a> EscapeWalk<'a> {
             }
             MapMethod(r, name, args)
                 if matches!(name.as_str().as_ref(), "insert" | "set" | "put") =>
-            {
-                self.walk_expr_consumer(r, BindContext::LocalRead);
-                for a in args {
-                    self.walk_expr_consumer(a, BindContext::StoredInContainer);
-                }
-            }
-            SetMethod(r, name, args)
-                if matches!(name.as_str().as_ref(), "insert" | "add") =>
-            {
-                self.walk_expr_consumer(r, BindContext::LocalRead);
-                for a in args {
-                    self.walk_expr_consumer(a, BindContext::StoredInContainer);
-                }
-            }
-            PQMethod(r, name, args)
-                if matches!(name.as_str().as_ref(), "push" | "insert") =>
             {
                 self.walk_expr_consumer(r, BindContext::LocalRead);
                 for a in args {
@@ -716,8 +684,6 @@ impl<'a> EscapeWalk<'a> {
             Call(_, _, args)
             | Builtin(_, args)
             | VecNew(args)
-            | NDArrayNew(args)
-            | SIMDNew(args)
             | Array(args)
             | Tuple(args)
             | Einsum(_, args)
@@ -733,13 +699,9 @@ impl<'a> EscapeWalk<'a> {
             }
             VecMethod(r, _, args)
             | MapMethod(r, _, args)
-            | SetMethod(r, _, args)
-            | PQMethod(r, _, args)
-            | DequeMethod(r, _, args)
             | Method(r, _, _, args)
             | StringMethod(r, _, args)
-            | DeferredMethod(r, _, args)
-            | DynDispatch(r, _, _, args) => {
+            | DeferredMethod(r, _, args) => {
                 self.walk_expr_consumer(r, BindContext::LocalRead);
                 for a in args {
                     self.walk_expr_consumer(a, BindContext::LocalRead);
@@ -779,7 +741,7 @@ impl<'a> EscapeWalk<'a> {
             ChannelCreate(_, cap) => {
                 self.walk_expr_consumer(cap, BindContext::LocalRead);
             }
-            Field(e, _, _) | ChannelRecv(e) | DynCoerce(e, _, _) | CoroutineNext(e)
+            Field(e, _, _) | ChannelRecv(e) | CoroutineNext(e)
             | GeneratorNext(e) | Yield(e) => {
                 self.walk_expr_consumer(e, BindContext::LocalRead);
             }

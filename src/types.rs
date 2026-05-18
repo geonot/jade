@@ -30,16 +30,7 @@ pub enum Type {
     ActorRef(Symbol),
     Coroutine(Box<Type>),
     Channel(Box<Type>),
-    Set(Box<Type>),
-    PriorityQueue(Box<Type>),
-    NDArray(Box<Type>, Vec<usize>),
-    SIMD(Box<Type>, usize),
-    DynTrait(Symbol),
-    Arena,
-    Pool,
     TypeVar(u32),
-    Deque(Box<Type>),
-    Cow(Box<Type>),
     Alias(Symbol, Box<Type>),
     Newtype(Symbol, Box<Type>),
     Generator(Box<Type>),
@@ -130,11 +121,6 @@ impl Type {
                 | Self::Channel(_)
                 | Self::Vec(_)
                 | Self::Map(_, _)
-                | Self::Set(_)
-                | Self::NDArray(_, _)
-                | Self::PriorityQueue(_)
-                | Self::Deque(_)
-                | Self::Cow(_)
                 | Self::Generator(_)
         )
     }
@@ -177,7 +163,7 @@ impl Type {
             Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
             Self::Struct(_, _) => true,
-            Self::Rc(_) | Self::Cow(_) | Self::Weak(_) => true,
+            Self::Rc(_) | Self::Weak(_) => true,
             // RcCell<T> / Arc<T> clone by bumping the (atomic) refcount.
             // Mutex<T> by itself cannot be cloned — it must live inside an
             // Arc, and Arc handles the sharing.
@@ -214,15 +200,9 @@ impl Type {
             | Self::RcCell(inner)
             | Self::Weak(inner)
             | Self::Vec(inner)
-            | Self::Set(inner)
-            | Self::Ptr(inner)
-            | Self::Cow(inner)
-            | Self::Deque(inner)
-            | Self::PriorityQueue(inner) => inner.needs_atomic_rc(),
+            | Self::Ptr(inner) => inner.needs_atomic_rc(),
             Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
-            Self::Array(inner, _) | Self::NDArray(inner, _) | Self::SIMD(inner, _) => {
-                inner.needs_atomic_rc()
-            }
+            Self::Array(inner, _) => inner.needs_atomic_rc(),
             Self::Tuple(tys) => tys.iter().any(|t| t.needs_atomic_rc()),
             Self::Fn(params, ret) => {
                 params.iter().any(|t| t.needs_atomic_rc()) || ret.needs_atomic_rc()
@@ -285,16 +265,6 @@ impl std::fmt::Display for Type {
             Self::ActorRef(name) => write!(f, "ActorRef<{name}>"),
             Self::Coroutine(inner) => write!(f, "Coroutine of {inner}"),
             Self::Channel(inner) => write!(f, "Channel of {inner}"),
-            Self::Set(inner) => write!(f, "Set of {inner}"),
-            Self::PriorityQueue(inner) => write!(f, "PriorityQueue of {inner}"),
-            Self::NDArray(inner, dims) => {
-                let ds: Vec<String> = dims.iter().map(|d| d.to_string()).collect();
-                write!(f, "NDArray of {inner} [{}]", ds.join(" by "))
-            }
-            Self::SIMD(inner, lanes) => write!(f, "SIMD of {inner}, {lanes}"),
-            Self::DynTrait(name) => write!(f, "dyn {name}"),
-            Self::Arena => f.write_str("Arena"),
-            Self::Pool => f.write_str("Pool"),
             Self::Fn(ps, r) => {
                 f.write_str("(")?;
                 for (i, p) in ps.iter().enumerate() {
@@ -305,8 +275,6 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, ") -> {r}")
             }
-            Self::Deque(inner) => write!(f, "Deque of {inner}"),
-            Self::Cow(inner) => write!(f, "cow {inner}"),
             Self::Alias(name, inner) => write!(f, "alias {name} is {inner}"),
             Self::Newtype(name, inner) => write!(f, "newtype {name} is {inner}"),
             Self::Generator(inner) => write!(f, "Generator of {inner}"),

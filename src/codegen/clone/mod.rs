@@ -51,7 +51,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Array(elem, n) => self.clone_array(val, elem, *n),
             Type::Tuple(tys) => self.clone_tuple(val, tys),
             Type::Struct(name, _) => self.clone_struct(val, &name.as_str()),
-            Type::Rc(_) | Type::Cow(_) | Type::Weak(_) => self.bump_ptr_rc(val),
+            Type::Rc(_) | Type::Weak(_) => self.bump_ptr_rc(val),
             // R3.4.c: RcCell<T> shares Rc's non-atomic refcount layout
             // (single-threaded interior-mut alias). Clone = same bump.
             Type::RcCell(_) => self.bump_ptr_rc(val),
@@ -449,17 +449,12 @@ impl<'ctx> Compiler<'ctx> {
         match ty {
             Type::Struct(n, _) => n == name,
             Type::Vec(inner)
-            | Type::Set(inner)
-            | Type::Deque(inner)
-            | Type::PriorityQueue(inner)
             | Type::Rc(inner)
             | Type::RcCell(inner)
             | Type::Arc(inner)
             | Type::Mutex(inner)
             | Type::Weak(inner)
-            | Type::Cow(inner)
             | Type::Array(inner, _)
-            | Type::NDArray(inner, _)
             | Type::Ptr(inner) => Self::type_references_struct_for_clone(inner, name),
             Type::Map(k, v) => {
                 Self::type_references_struct_for_clone(k, name)
@@ -475,7 +470,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Bump the refcount of an Rc/Cow/Weak-style cell (first 8 bytes = i64 rc).
+    /// Bump the refcount of an Rc/Weak-style cell (first 8 bytes = i64 rc).
     /// Returns the same pointer (the alias is now legitimate, since rc was incremented).
     /// Null pointers are passed through unchanged.
     fn bump_ptr_rc(&mut self, val: BasicValueEnum<'ctx>) -> Result<BasicValueEnum<'ctx>, String> {

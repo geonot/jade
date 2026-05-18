@@ -45,7 +45,6 @@ pub enum IType {
     ActorRef(std::string::String),
     Coroutine(Box<IType>),
     Channel(Box<IType>),
-    DynTrait(std::string::String),
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -156,15 +155,7 @@ impl From<&crate::types::Type> for IType {
             Type::ActorRef(n) => IType::ActorRef(n.to_string()),
             Type::Coroutine(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
             Type::Channel(inner) => IType::Channel(Box::new(inner.as_ref().into())),
-            Type::Set(inner) => IType::Vec(Box::new(inner.as_ref().into())),
-            Type::NDArray(inner, _dims) => IType::Vec(Box::new(inner.as_ref().into())),
-            Type::DynTrait(n) => IType::DynTrait(n.to_string()),
-            Type::Arena | Type::Pool => IType::I64, // arenas/pools not exposed in interfaces
-            Type::SIMD(inner, lanes) => IType::Array(Box::new(inner.as_ref().into()), *lanes),
-            Type::PriorityQueue(inner) => IType::Vec(Box::new(inner.as_ref().into())),
             Type::TypeVar(_) => IType::I64, // unsolved vars default to i64
-            Type::Deque(inner) => IType::Vec(Box::new(inner.as_ref().into())),
-            Type::Cow(inner) => inner.as_ref().into(),
             Type::Alias(_, inner) => inner.as_ref().into(),
             Type::Newtype(_, inner) => inner.as_ref().into(),
             Type::Generator(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
@@ -219,7 +210,6 @@ impl From<&IType> for crate::types::Type {
             IType::ActorRef(n) => Type::ActorRef(Symbol::intern(n)),
             IType::Coroutine(inner) => Type::Coroutine(Box::new(inner.as_ref().into())),
             IType::Channel(inner) => Type::Channel(Box::new(inner.as_ref().into())),
-            IType::DynTrait(n) => Type::DynTrait(Symbol::intern(n)),
         }
     }
 }

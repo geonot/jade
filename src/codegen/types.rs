@@ -34,18 +34,7 @@ impl<'ctx> Compiler<'ctx> {
                 .unwrap_or_else(|| self.ctx.i64_type().into()),
             Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
             Type::Vec(_)
-            | Type::Map(_, _)
-            | Type::Set(_)
-            | Type::NDArray(_, _)
-            | Type::PriorityQueue(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
-            Type::SIMD(inner, lanes) => {
-                let elem = self.llvm_ty(inner);
-                if inner.is_float() {
-                    elem.into_float_type().vec_type(*lanes as u32).into()
-                } else {
-                    elem.into_int_type().vec_type(*lanes as u32).into()
-                }
-            }
+            | Type::Map(_, _) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Tuple(tys) => self
                 .ctx
                 .struct_type(
@@ -68,20 +57,12 @@ impl<'ctx> Compiler<'ctx> {
             Type::RcCell(_) | Type::Arc(_) | Type::Mutex(_) => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
-            Type::DynTrait(_) => {
-                let ptr = self.ctx.ptr_type(AddressSpace::default());
-                self.ctx
-                    .struct_type(&[ptr.into(), ptr.into()], false)
-                    .into()
-            }
-            Type::Arena => self.arena_type().into(),
-            Type::Pool => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Param(name) => {
                 panic!(
                     "ICE: unresolved type parameter '{name}' reached codegen — this indicates a monomorphization bug in the typer"
                 );
             }
-            Type::Deque(_) | Type::Cow(_) | Type::Generator(_) => {
+            Type::Generator(_) => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),

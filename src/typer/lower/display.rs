@@ -206,10 +206,7 @@ impl Typer {
             | hir::ExprKind::StringMethod(recv, _, args)
             | hir::ExprKind::DeferredMethod(recv, _, args)
             | hir::ExprKind::VecMethod(recv, _, args)
-            | hir::ExprKind::MapMethod(recv, _, args)
-            | hir::ExprKind::SetMethod(recv, _, args)
-            | hir::ExprKind::PQMethod(recv, _, args)
-            | hir::ExprKind::DynDispatch(recv, _, _, args) => {
+            | hir::ExprKind::MapMethod(recv, _, args) => {
                 Self::collect_display_usage_expr(recv, needs);
                 for a in args {
                     Self::collect_display_usage_expr(a, needs);

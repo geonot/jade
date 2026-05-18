@@ -21,7 +21,6 @@ mod map;
 pub mod mir_codegen;
 mod pattern_match;
 mod rc;
-mod set;
 mod stmt;
 mod store_filter;
 mod store_ops;

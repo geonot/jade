@@ -227,8 +227,6 @@ impl Lowerer {
             | ExprKind::FnRef(..)
             | ExprKind::Builder(..)
             | ExprKind::AsFormat(..)
-            | ExprKind::CowWrap(..)
-            | ExprKind::CowClone(..)
             | ExprKind::EnumUnwrap(..)
             | ExprKind::EnumIs(..)
             | ExprKind::GlobalLoad(..)
@@ -238,16 +236,8 @@ impl Lowerer {
             | ExprKind::DeferredMethod(..)
             | ExprKind::VecMethod(..)
             | ExprKind::MapMethod(..)
-            | ExprKind::SetMethod(..)
-            | ExprKind::PQMethod(..)
-            | ExprKind::DequeMethod(..)
             | ExprKind::VecNew(..)
-            | ExprKind::NDArrayNew(..)
-            | ExprKind::SIMDNew(..)
             | ExprKind::MapNew
-            | ExprKind::SetNew
-            | ExprKind::PQNew
-            | ExprKind::DequeNew
             | ExprKind::ListComp(..)
             | ExprKind::IterNext(..) => self.lower_expr_collections(expr),
             ExprKind::Spawn(..)
@@ -299,8 +289,6 @@ impl Lowerer {
             | ExprKind::AtomicCas(..)
             | ExprKind::Builtin(..)
             | ExprKind::Syscall(..)
-            | ExprKind::DynDispatch(..)
-            | ExprKind::DynCoerce(..)
             | ExprKind::Grad(..)
             | ExprKind::Einsum(..) => self.lower_expr_intrinsics(expr),
         }

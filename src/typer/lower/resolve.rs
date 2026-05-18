@@ -23,9 +23,6 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
         | Type::Ptr(inner)
         | Type::Channel(inner)
         | Type::Coroutine(inner)
-        | Type::Set(inner)
-        | Type::Deque(inner)
-        | Type::Cow(inner)
         | Type::Generator(inner) => type_references_name(inner, name),
         Type::Map(k, v) => type_references_name(k, name) || type_references_name(v, name),
         Type::Array(inner, _) => type_references_name(inner, name),
@@ -34,9 +31,6 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
             params.iter().any(|p| type_references_name(p, name)) || type_references_name(ret, name)
         }
         Type::Enum(n) => *n == name,
-        Type::NDArray(inner, _) | Type::SIMD(inner, _) | Type::PriorityQueue(inner) => {
-            type_references_name(inner, name)
-        }
         _ => false,
     }
 }
@@ -68,12 +62,6 @@ impl Typer {
                 Box::new(Self::normalize_actor_refs(*k, actors)),
                 Box::new(Self::normalize_actor_refs(*v, actors)),
             ),
-            Type::Set(inner) => Type::Set(Box::new(Self::normalize_actor_refs(*inner, actors))),
-            Type::PriorityQueue(inner) => {
-                Type::PriorityQueue(Box::new(Self::normalize_actor_refs(*inner, actors)))
-            }
-            Type::Deque(inner) => Type::Deque(Box::new(Self::normalize_actor_refs(*inner, actors))),
-            Type::Cow(inner) => Type::Cow(Box::new(Self::normalize_actor_refs(*inner, actors))),
             Type::Channel(inner) => {
                 Type::Channel(Box::new(Self::normalize_actor_refs(*inner, actors)))
             }
@@ -99,12 +87,6 @@ impl Typer {
             Type::Ptr(inner) => Type::Ptr(Box::new(Self::normalize_actor_refs(*inner, actors))),
             Type::Rc(inner) => Type::Rc(Box::new(Self::normalize_actor_refs(*inner, actors))),
             Type::Weak(inner) => Type::Weak(Box::new(Self::normalize_actor_refs(*inner, actors))),
-            Type::NDArray(inner, dims) => {
-                Type::NDArray(Box::new(Self::normalize_actor_refs(*inner, actors)), dims)
-            }
-            Type::SIMD(inner, n) => {
-                Type::SIMD(Box::new(Self::normalize_actor_refs(*inner, actors)), n)
-            }
             Type::Alias(name, inner) => {
                 Type::Alias(name, Box::new(Self::normalize_actor_refs(*inner, actors)))
             }
@@ -216,27 +198,6 @@ impl Typer {
                         expr.kind =
                             hir::ExprKind::Builtin(hir::BuiltinFn::FloatMethod(method), all_args);
                     }
-                }
-            }
-            Type::Set(_) => {
-                if let hir::ExprKind::DeferredMethod(recv, method, args) =
-                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
-                {
-                    expr.kind = hir::ExprKind::SetMethod(recv, method, args);
-                }
-            }
-            Type::PriorityQueue(_) => {
-                if let hir::ExprKind::DeferredMethod(recv, method, args) =
-                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
-                {
-                    expr.kind = hir::ExprKind::PQMethod(recv, method, args);
-                }
-            }
-            Type::Deque(_) => {
-                if let hir::ExprKind::DeferredMethod(recv, method, args) =
-                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
-                {
-                    expr.kind = hir::ExprKind::DequeMethod(recv, method, args);
                 }
             }
             Type::Channel(_) if method == "send" || method == "recv" || method == "close" => {
@@ -514,10 +475,6 @@ impl Typer {
             | hir::ExprKind::None
             | hir::ExprKind::Void
             | hir::ExprKind::MapNew
-            | hir::ExprKind::SetNew
-            | hir::ExprKind::PQNew
-            | hir::ExprKind::NDArrayNew(_)
-            | hir::ExprKind::SIMDNew(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::GlobalLoad(_)
             | hir::ExprKind::StoreAll(_) => {}
@@ -592,9 +549,7 @@ impl Typer {
                 self.reclassify_method_call(expr);
             }
             hir::ExprKind::VecMethod(recv, _, args)
-            | hir::ExprKind::MapMethod(recv, _, args)
-            | hir::ExprKind::SetMethod(recv, _, args)
-            | hir::ExprKind::PQMethod(recv, _, args) => {
+            | hir::ExprKind::MapMethod(recv, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {
                     self.resolve_expr(a);
@@ -697,13 +652,6 @@ impl Typer {
             hir::ExprKind::CoroutineNext(e) | hir::ExprKind::Yield(e) => {
                 self.resolve_expr(e);
             }
-            hir::ExprKind::DynDispatch(obj, _, _, args) => {
-                self.resolve_expr(obj);
-                for a in args {
-                    self.resolve_expr(a);
-                }
-            }
-            hir::ExprKind::DynCoerce(e, _, _) => self.resolve_expr(e),
             hir::ExprKind::StoreQuery(_, filter) => self.resolve_filter(filter),
             hir::ExprKind::ViewCount(_, filter) | hir::ExprKind::ViewAll(_, filter) => {
                 self.resolve_filter(filter)
@@ -764,16 +712,7 @@ impl Typer {
                     self.resolve_block(block);
                 }
             }
-            hir::ExprKind::DequeNew => {}
-            hir::ExprKind::DequeMethod(obj, _, args) => {
-                self.resolve_expr(obj);
-                for a in args {
-                    self.resolve_expr(a);
-                }
-            }
             hir::ExprKind::Grad(e)
-            | hir::ExprKind::CowWrap(e)
-            | hir::ExprKind::CowClone(e)
             | hir::ExprKind::GeneratorNext(e)
             | hir::ExprKind::EnumUnwrap(e, _, _)
             | hir::ExprKind::EnumIs(e, _) => {

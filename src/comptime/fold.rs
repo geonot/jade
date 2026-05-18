@@ -253,9 +253,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
                 fold_expr(a);
             }
         }
-        ExprKind::MapMethod(obj, _, args)
-        | ExprKind::SetMethod(obj, _, args)
-        | ExprKind::PQMethod(obj, _, args) => {
+        ExprKind::MapMethod(obj, _, args) => {
             fold_expr(obj);
             for a in args {
                 fold_expr(a);
@@ -352,13 +350,6 @@ pub(super) fn fold_expr(expr: &mut Expr) {
                 fold_block(b);
             }
         }
-        ExprKind::DynDispatch(e, _, _, args) => {
-            fold_expr(e);
-            for a in args {
-                fold_expr(a);
-            }
-        }
-        ExprKind::DynCoerce(e, _, _) => fold_expr(e),
         ExprKind::CoroutineCreate(_, stmts) => {
             for s in stmts {
                 fold_stmt(s);
@@ -393,10 +384,6 @@ pub(super) fn fold_expr(expr: &mut Expr) {
         | ExprKind::FnRef(_, _)
         | ExprKind::VariantRef(_, _, _)
         | ExprKind::MapNew
-        | ExprKind::SetNew
-        | ExprKind::PQNew
-        | ExprKind::NDArrayNew(_)
-        | ExprKind::SIMDNew(_)
         | ExprKind::Spawn(_, _)
         | ExprKind::GlobalLoad(_)
         | ExprKind::StoreQuery(_, _)
@@ -415,17 +402,8 @@ pub(super) fn fold_expr(expr: &mut Expr) {
         | ExprKind::StoreVersionCount(_, _)
         | ExprKind::StoreHistory(_, _)
         | ExprKind::StoreAtVersion(_, _, _)
-        | ExprKind::IterNext(_, _, _)
-        | ExprKind::DequeNew => {}
-        ExprKind::DequeMethod(obj, _, args) => {
-            fold_expr(obj);
-            for a in args {
-                fold_expr(a);
-            }
-        }
+        | ExprKind::IterNext(_, _, _) => {}
         ExprKind::Grad(e)
-        | ExprKind::CowWrap(e)
-        | ExprKind::CowClone(e)
         | ExprKind::GeneratorNext(e)
         | ExprKind::EnumUnwrap(e, _, _)
         | ExprKind::EnumIs(e, _) => fold_expr(e),

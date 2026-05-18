@@ -248,13 +248,8 @@ impl HirValidator {
                             (&lhs.ty, &rhs.ty),
                             (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_))
                         );
-                        // Allow NDArray ⊕ scalar (and scalar ⊕ NDArray):
-                        // codegen broadcasts the scalar to every element.
-                        let is_nd_broadcast = matches!(
-                            (&lhs.ty, &rhs.ty),
-                            (Type::NDArray(_, _), _) | (_, Type::NDArray(_, _))
-                        );
-                        if lhs.ty != rhs.ty && !is_ptr_arith && !is_nd_broadcast {
+                        // Allow Vec ⊕ scalar broadcasting? (no — already removed NDArray)
+                        if lhs.ty != rhs.ty && !is_ptr_arith {
                             self.errors.push(format!(
                                 "BinOp {:?} type mismatch at line {}: lhs {:?} vs rhs {:?}",
                                 op, expr.span.line, lhs.ty, rhs.ty
@@ -306,9 +301,7 @@ impl HirValidator {
             hir::ExprKind::StringMethod(obj, _, args)
             | hir::ExprKind::DeferredMethod(obj, _, args)
             | hir::ExprKind::VecMethod(obj, _, args)
-            | hir::ExprKind::MapMethod(obj, _, args)
-            | hir::ExprKind::SetMethod(obj, _, args)
-            | hir::ExprKind::PQMethod(obj, _, args) => {
+            | hir::ExprKind::MapMethod(obj, _, args) => {
                 self.validate_expr(obj);
                 for a in args {
                     self.validate_expr(a);
@@ -319,10 +312,6 @@ impl HirValidator {
                     self.validate_expr(e);
                 }
             }
-            hir::ExprKind::SetNew
-            | hir::ExprKind::PQNew
-            | hir::ExprKind::NDArrayNew(_)
-            | hir::ExprKind::SIMDNew(_) => {}
             hir::ExprKind::Field(obj, _, _) => self.validate_expr(obj),
             hir::ExprKind::Index(arr, idx) => {
                 self.validate_expr(arr);
@@ -384,13 +373,6 @@ impl HirValidator {
                     self.validate_expr(a);
                 }
             }
-            hir::ExprKind::DynDispatch(obj, _, _, args) => {
-                self.validate_expr(obj);
-                for a in args {
-                    self.validate_expr(a);
-                }
-            }
-            hir::ExprKind::DynCoerce(inner, _, _) => self.validate_expr(inner),
             hir::ExprKind::CoroutineCreate(_, stmts) => {
                 self.validate_block(stmts);
             }
@@ -430,8 +412,7 @@ impl HirValidator {
             | hir::ExprKind::GlobalLoad(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_)
-            | hir::ExprKind::IterNext(_, _, _)
-            | hir::ExprKind::DequeNew => {}
+            | hir::ExprKind::IterNext(_, _, _) => {}
             hir::ExprKind::ChannelCreate(_, cap) => self.validate_expr(cap),
             hir::ExprKind::ChannelSend(ch, val) => {
                 self.validate_expr(ch);
@@ -469,15 +450,7 @@ impl HirValidator {
                     self.validate_block(body);
                 }
             }
-            hir::ExprKind::DequeMethod(obj, _, args) => {
-                self.validate_expr(obj);
-                for a in args {
-                    self.validate_expr(a);
-                }
-            }
             hir::ExprKind::Grad(e)
-            | hir::ExprKind::CowWrap(e)
-            | hir::ExprKind::CowClone(e)
             | hir::ExprKind::GeneratorNext(e)
             | hir::ExprKind::EnumUnwrap(e, _, _)
             | hir::ExprKind::EnumIs(e, _) => {

@@ -181,14 +181,6 @@ impl Lowerer {
                 let v = self.lower_expr(inner);
                 self.emit(InstKind::Call("__as_format".into(), vec![v]), ty, span)
             }
-            ExprKind::CowWrap(inner) => {
-                let v = self.lower_expr(inner);
-                self.emit(InstKind::Call("__cow_wrap".into(), vec![v]), ty, span)
-            }
-            ExprKind::CowClone(inner) => {
-                let v = self.lower_expr(inner);
-                self.emit(InstKind::Call("__cow_clone".into(), vec![v]), ty, span)
-            }
             ExprKind::EnumUnwrap(inner, _enum_name, success_tag) => {
                 let subj = self.lower_expr(inner);
                 // Get tag (field "__tag" is i64 after extension)

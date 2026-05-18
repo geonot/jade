@@ -33,12 +33,8 @@ impl Typer {
             expr.ty,
             Type::Vec(_)
                 | Type::Map(_, _)
-                | Type::Set(_)
-                | Type::PriorityQueue(_)
-                | Type::Deque(_)
                 | Type::String
                 | Type::Rc(_)
-                | Type::NDArray(_, _)
                 | Type::Struct(_, _)
                 | Type::Enum(_)
         );
@@ -47,10 +43,7 @@ impl Typer {
         }
         match &expr.kind {
             hir::ExprKind::VecMethod(_, name, _)
-            | hir::ExprKind::MapMethod(_, name, _)
-            | hir::ExprKind::SetMethod(_, name, _)
-            | hir::ExprKind::DequeMethod(_, name, _)
-            | hir::ExprKind::PQMethod(_, name, _) => {
+            | hir::ExprKind::MapMethod(_, name, _) => {
                 matches!(name.as_str().as_ref(), "get" | "peek" | "front" | "back" | "first" | "last")
             }
             _ => false,
@@ -445,15 +438,14 @@ impl Typer {
                 {
                     let target_opt = match &he.kind {
                         hir::ExprKind::VecMethod(obj, _, _)
-                        | hir::ExprKind::MapMethod(obj, _, _)
-                        | hir::ExprKind::SetMethod(obj, _, _) => {
+                        | hir::ExprKind::MapMethod(obj, _, _) => {
                             if matches!(obj.kind, hir::ExprKind::Var(_, _)) {
                                 let obj_resolved = self.infer_ctx.resolve(&obj.ty);
                                 let he_resolved = self.infer_ctx.resolve(&he.ty);
                                 if obj_resolved == he_resolved
                                     && matches!(
                                         obj_resolved,
-                                        Type::Vec(_) | Type::Map(_, _) | Type::Set(_)
+                                        Type::Vec(_) | Type::Map(_, _)
                                     )
                                 {
                                     Some((**obj).clone())

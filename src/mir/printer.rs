@@ -161,9 +161,6 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::VecPush(vec, val) => format!("vec_push {vec} {val}"),
         InstKind::VecLen(v) => format!("vec_len {v}"),
         InstKind::MapInit => "map_init".into(),
-        InstKind::SetInit => "set_init".into(),
-        InstKind::PQInit => "pq_init".into(),
-        InstKind::DequeInit => "deque_init".into(),
 
         // Closures
         InstKind::ClosureCreate(name, captures) => {
@@ -195,16 +192,6 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::Assert(v, msg) => format!("assert {v} {msg:?}"),
 
         // Dynamic dispatch
-        InstKind::DynDispatch(obj, trait_name, method, args) => {
-            format!(
-                "dyn_dispatch {obj}.{trait_name}::{method}({})",
-                fmt_args(args)
-            )
-        }
-        InstKind::DynCoerce(v, type_name, trait_name) => {
-            format!("dyn_coerce {v} as {type_name}:{trait_name}")
-        }
-
         InstKind::InlineAsm(template, args) => {
             format!("asm {:?} ({})", template, fmt_args(args))
         }

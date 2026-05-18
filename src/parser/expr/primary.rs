@@ -174,15 +174,6 @@ impl Parser {
                 Ok(Type::Ptr(Box::new(inner)))
             }
             Token::Ident(n) => {
-                if n == "dyn" {
-                    self.advance();
-                    if let Token::Ident(trait_name) = self.peek() {
-                        let name = trait_name.clone();
-                        self.advance();
-                        return Ok(Type::DynTrait(name));
-                    }
-                    return Err(self.error("expected trait name after 'dyn'"));
-                }
                 let t = n.with_str(|s| self.ident_to_type(s));
                 self.advance();
                 if self.check(Token::Of) {
@@ -194,9 +185,6 @@ impl Parser {
                         }
                         if name == "Map" {
                             return Ok(Type::Map(Box::new(Type::String), Box::new(arg)));
-                        }
-                        if name == "Set" {
-                            return Ok(Type::Set(Box::new(arg)));
                         }
                         let mangled = format!("{name}_{arg}");
                         Ok(Type::Struct(mangled.into(), vec![]))

@@ -337,12 +337,9 @@ impl Typer {
                 // is handled by lower_call
                 self.lower_expr(inner)
             }
-            ast::Expr::NDArray(..) => self.lower_expr_n_d_array(expr, expected),
-            ast::Expr::SIMDLit(..) => self.lower_expr_s_i_m_d_lit(expr, expected),
             ast::Expr::Grad(..) => self.lower_expr_grad(expr, expected),
             ast::Expr::Einsum(..) => self.lower_expr_einsum(expr, expected),
             ast::Expr::Builder(..) => self.lower_expr_builder(expr, expected),
-            ast::Expr::Deque(..) => self.lower_expr_deque(expr, expected),
             ast::Expr::OfCall(..) => self.lower_expr_of_call(expr, expected),
         }
     }
@@ -406,18 +403,6 @@ impl Typer {
                     CoercionKind::ArrayToVec { elem_ty, len },
                     target.clone(),
                 );
-            }
-        }
-        if let Type::DynTrait(trait_name) = &target {
-            if let Type::Struct(type_name, _) = &expr.ty {
-                let tn = type_name.clone();
-                let trn = trait_name.clone();
-                let span = expr.span;
-                return hir::Expr {
-                    kind: hir::ExprKind::DynCoerce(Box::new(expr), tn, trn),
-                    ty: target.clone(),
-                    span,
-                };
             }
         }
         expr

@@ -279,9 +279,6 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         | InstKind::StringConst(_)
         | InstKind::Void
         | InstKind::MapInit
-        | InstKind::SetInit
-        | InstKind::PQInit
-        | InstKind::DequeInit
         | InstKind::Load(_)
         | InstKind::FnRef(_)
         | InstKind::GlobalLoad(_) => vec![],
@@ -347,13 +344,6 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
 
         InstKind::Log(v) => vec![*v],
         InstKind::Assert(v, _) => vec![*v],
-
-        InstKind::DynDispatch(obj, _, _, args) => {
-            let mut v = vec![*obj];
-            v.extend(args);
-            v
-        }
-        InstKind::DynCoerce(v, _, _) => vec![*v],
 
         InstKind::InlineAsm(_, args) => args.clone(),
     }

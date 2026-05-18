@@ -118,9 +118,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                 }
             }
             Expr::Array(elems, _)
-            | Expr::Tuple(elems, _)
-            | Expr::NDArray(elems, _)
-            | Expr::Deque(elems, _) => {
+            | Expr::Tuple(elems, _) => {
                 for e in elems {
                     walk_expr(e, refs, defs);
                 }
@@ -218,11 +216,6 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Expr::Einsum(_, args, _) | Expr::Syscall(args, _) => {
                 for a in args {
                     walk_expr(a, refs, defs);
-                }
-            }
-            Expr::SIMDLit(_, _, elems, _) => {
-                for e in elems {
-                    walk_expr(e, refs, defs);
                 }
             }
             Expr::Select(arms, default, _) => {
@@ -382,11 +375,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             | Type::Mutex(inner)
             | Type::Weak(inner)
             | Type::Channel(inner)
-            | Type::Set(inner)
-            | Type::PriorityQueue(inner)
             | Type::Coroutine(inner)
-            | Type::Deque(inner)
-            | Type::Cow(inner)
             | Type::Generator(inner) => {
                 walk_type(inner, refs);
             }
@@ -406,12 +395,8 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                 }
                 walk_type(ret, refs);
             }
-            Type::NDArray(inner, _) | Type::SIMD(inner, _) => walk_type(inner, refs),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => walk_type(inner, refs),
             Type::ActorRef(name) => {
-                refs.insert(name.clone());
-            }
-            Type::DynTrait(name) => {
                 refs.insert(name.clone());
             }
             _ => {} // primitives, TypeVar, etc.

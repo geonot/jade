@@ -214,14 +214,7 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
         }
         Expr::Array(es, _)
         | Expr::Tuple(es, _)
-        | Expr::Syscall(es, _)
-        | Expr::NDArray(es, _)
-        | Expr::Deque(es, _) => {
-            for e in es {
-                rewrite_expr(e, renames);
-            }
-        }
-        Expr::SIMDLit(_, _, es, _) => {
+        | Expr::Syscall(es, _) => {
             for e in es {
                 rewrite_expr(e, renames);
             }

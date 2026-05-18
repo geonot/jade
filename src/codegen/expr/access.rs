@@ -210,13 +210,6 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 Err("tuple indexing on rvalue not supported".into())
             }
-            Type::SIMD(_inner, _) => {
-                let vec_val = self.compile_expr(arr)?.into_vector_value();
-                let elem = b!(self
-                    .bld
-                    .build_extract_element(vec_val, idx_val, "simd.lane"));
-                Ok(elem)
-            }
             Type::Vec(elem_ty) => {
                 let lty = self.llvm_ty(elem_ty);
                 let header_ptr = self.compile_expr(arr)?.into_pointer_value();

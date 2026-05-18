@@ -133,9 +133,6 @@ impl Typer {
                             // surface a clearer "no such method" diagnostic
                             // later if missing.
                             Type::Struct(_, _) => true,
-                            // NDArray + scalar (or NDArray + NDArray) is
-                            // accepted here; codegen broadcasts.
-                            Type::NDArray(_, _) => true,
                             _ => false,
                         }
                     };

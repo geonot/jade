@@ -96,47 +96,6 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 // ── Dynamic dispatch ──
-                mir::InstKind::DynDispatch(obj, trait_name, method, args) => self
-                    .emit_dyn_dispatch(
-                        *obj,
-                        &trait_name.as_str(),
-                        &method.as_str(),
-                        args,
-                        &inst.ty,
-                    ),
-
-                mir::InstKind::DynCoerce(inner, type_name, trait_name) => {
-                    let val = self.val(*inner);
-                    let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-
-                    let data_ptr = if val.is_pointer_value() {
-                        val.into_pointer_value()
-                    } else {
-                        let lty = val.get_type();
-                        let alloc = self.entry_alloca(lty, "dyn.data");
-                        b!(self.bld.build_store(alloc, val));
-                        alloc
-                    };
-
-                    let vtable_ptr = self
-                        .vtables
-                        .get(&(type_name.to_string(), trait_name.to_string()))
-                        .map(|gv| gv.as_pointer_value())
-                        .unwrap_or_else(|| ptr_ty.const_null());
-
-                    let fat_ty = self.ctx.struct_type(&[ptr_ty.into(), ptr_ty.into()], false);
-                    let fat = fat_ty.const_zero();
-                    let fat = b!(self
-                        .bld
-                        .build_insert_value(fat, data_ptr, 0, "dyn.fat.data"))
-                    .into_struct_value();
-                    let fat = b!(self
-                        .bld
-                        .build_insert_value(fat, vtable_ptr, 1, "dyn.fat.vtable"))
-                    .into_struct_value();
-                    Ok(fat.into())
-                }
-
                 mir::InstKind::InlineAsm(template, args) => {
                     let arg_vals: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                         args.iter().map(|a| self.val(*a).into()).collect();

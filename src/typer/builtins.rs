@@ -316,22 +316,6 @@ impl Typer {
                 ),
                 span,
             })),
-            "set" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
-                kind: hir::ExprKind::SetNew,
-                ty: Type::Set(Box::new(self.infer_ctx.fresh_var_at(
-                    span,
-                    "empty `set()` literal — element type is unknown",
-                ))),
-                span,
-            })),
-            "priority_queue" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
-                kind: hir::ExprKind::PQNew,
-                ty: Type::PriorityQueue(Box::new(self.infer_ctx.fresh_var_at(
-                    span,
-                    "empty `priority_queue()` literal — element type is unknown",
-                ))),
-                span,
-            })),
             "vec_with_alloc" if args.len() == 1 && !self.fns.contains_key(name) => {
                 let halloc = match self.lower_expr(&args[0]) {
                     Ok(e) => e,
@@ -361,18 +345,7 @@ impl Typer {
                 }))
             }
             "Arena" if args.len() == 1 && !self.fns.contains_key(name) => {
-                let harg = match self.lower_expr_expected(&args[0], Some(&Type::I64)) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let _ = self
-                    .infer_ctx
-                    .unify_at(&harg.ty, &Type::I64, span, "Arena capacity");
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::ArenaNew, vec![harg]),
-                    ty: Type::Arena,
-                    span,
-                }))
+                Some(Err("Arena type removed".into()))
             }
             "matmul" if args.len() == 2 && !self.fns.contains_key(name) => {
                 let ha = match self.lower_expr(&args[0]) {
@@ -611,19 +584,7 @@ impl Typer {
                 }))
             }
             "Pool" if args.len() == 2 && !self.fns.contains_key(name) => {
-                let hsize = match self.lower_expr_expected(&args[0], Some(&Type::I64)) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let hcount = match self.lower_expr_expected(&args[1], Some(&Type::I64)) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(hir::BuiltinFn::PoolNew, vec![hsize, hcount]),
-                    ty: Type::Pool,
-                    span,
-                }))
+                Some(Err("Pool type removed".into()))
             }
             _ => None,
         }

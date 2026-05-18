@@ -143,9 +143,7 @@ impl Typer {
     ) {
         match &expr.kind {
             hir::ExprKind::VecMethod(_, meth, args)
-            | hir::ExprKind::SetMethod(_, meth, args)
-            | hir::ExprKind::MapMethod(_, meth, args)
-            | hir::ExprKind::PQMethod(_, meth, args) => {
+            | hir::ExprKind::MapMethod(_, meth, args) => {
                 let m_owned = meth.as_str();
                 let m: &str = m_owned.as_ref();
                 if matches!(
@@ -239,11 +237,8 @@ impl Typer {
             ty,
             Type::Vec(_)
                 | Type::Map(_, _)
-                | Type::Set(_)
-                | Type::PriorityQueue(_)
                 | Type::String
                 | Type::Rc(_)
-                | Type::NDArray(_, _)
                 | Type::Struct(_, _)
                 | Type::Enum(_)
         )
@@ -372,10 +367,7 @@ impl Typer {
             | hir::ExprKind::StringMethod(e, _, args)
             | hir::ExprKind::DeferredMethod(e, _, args)
             | hir::ExprKind::VecMethod(e, _, args)
-            | hir::ExprKind::MapMethod(e, _, args)
-            | hir::ExprKind::SetMethod(e, _, args)
-            | hir::ExprKind::PQMethod(e, _, args)
-            | hir::ExprKind::DequeMethod(e, _, args) => {
+            | hir::ExprKind::MapMethod(e, _, args) => {
                 Self::collect_hir_var_ids_expr(e, out);
                 for a in args {
                     Self::collect_hir_var_ids_expr(a, out);
@@ -471,16 +463,11 @@ impl Typer {
             Type::String
                 | Type::Vec(_)
                 | Type::Map(_, _)
-                | Type::Set(_)
-                | Type::PriorityQueue(_)
-                | Type::Deque(_)
                 | Type::Rc(_)
                 | Type::Weak(_)
                 | Type::Coroutine(_)
                 | Type::Generator(_)
-                | Type::NDArray(_, _)
                 | Type::Channel(_)
-                | Type::Cow(_)
         ) {
             return true;
         }
@@ -586,14 +573,8 @@ impl Typer {
         match ty {
             Type::Param(name) => subs.get(name).cloned().unwrap_or_else(|| ty.clone()),
             Type::Vec(inner) => Type::Vec(Box::new(Self::subst_type(inner, subs))),
-            Type::Set(inner) => Type::Set(Box::new(Self::subst_type(inner, subs))),
-            Type::PriorityQueue(inner) => {
-                Type::PriorityQueue(Box::new(Self::subst_type(inner, subs)))
-            }
-            Type::Deque(inner) => Type::Deque(Box::new(Self::subst_type(inner, subs))),
             Type::Rc(inner) => Type::Rc(Box::new(Self::subst_type(inner, subs))),
             Type::Weak(inner) => Type::Weak(Box::new(Self::subst_type(inner, subs))),
-            Type::Cow(inner) => Type::Cow(Box::new(Self::subst_type(inner, subs))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(Self::subst_type(inner, subs))),
             Type::Generator(inner) => Type::Generator(Box::new(Self::subst_type(inner, subs))),
             Type::Channel(inner) => Type::Channel(Box::new(Self::subst_type(inner, subs))),

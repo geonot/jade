@@ -357,9 +357,6 @@ impl<'ctx> Compiler<'ctx> {
         match &field.ty {
             Type::Vec(_) => Ok(Some(self.compile_vec_new(&[])?)),
             Type::Map(_, _) => Ok(Some(self.compile_map_new()?)),
-            Type::Set(_) => Ok(Some(self.compile_set_new()?)),
-            Type::PriorityQueue(_) => Ok(Some(self.compile_pq_new()?)),
-            Type::Deque(_) => Ok(Some(self.compile_deque_new()?)),
             _ => Ok(None),
         }
     }

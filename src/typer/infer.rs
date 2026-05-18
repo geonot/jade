@@ -44,18 +44,6 @@ impl Typer {
         None
     }
 
-    pub(crate) fn infer_dyn_method_ret(&self, trait_name: &str, method: &str) -> Type {
-        for (type_name, impls) in &self.trait_impls {
-            if impls.contains(&trait_name.to_string()) {
-                let fn_name = format!("{type_name}_{method}");
-                if let Some((_, _, ret)) = self.fns.get(&fn_name) {
-                    return ret.clone();
-                }
-            }
-        }
-        Type::I64
-    }
-
     pub(crate) fn infer_field_ty(&mut self, f: &ast::Field) -> Type {
         let var = self.infer_ctx.fresh_var();
         if let Some(ref default) = f.default {

@@ -67,16 +67,14 @@ fn hash_type(ty: &Type, h: &mut StableHasher) {
         | Type::F32
         | Type::Bool
         | Type::String
-        | Type::Void
-        | Type::Arena
-        | Type::Pool => {}
+        | Type::Void => {}
         Type::Struct(n, args) => {
             n.hash(h);
             for a in args {
                 hash_type(a, h);
             }
         }
-        Type::Enum(n) | Type::ActorRef(n) | Type::DynTrait(n) => n.hash(h),
+        Type::Enum(n) | Type::ActorRef(n) => n.hash(h),
         Type::Vec(inner)
         | Type::Rc(inner)
         | Type::RcCell(inner)
@@ -86,24 +84,12 @@ fn hash_type(ty: &Type, h: &mut StableHasher) {
         | Type::Ptr(inner)
         | Type::Channel(inner)
         | Type::Coroutine(inner)
-        | Type::Set(inner)
-        | Type::Deque(inner)
-        | Type::Cow(inner)
-        | Type::Generator(inner)
-        | Type::PriorityQueue(inner) => hash_type(inner, h),
+        | Type::Generator(inner) => hash_type(inner, h),
         Type::Map(k, v) => {
             hash_type(k, h);
             hash_type(v, h);
         }
         Type::Array(inner, n) => {
-            hash_type(inner, h);
-            n.hash(h);
-        }
-        Type::NDArray(inner, dims) => {
-            hash_type(inner, h);
-            dims.hash(h);
-        }
-        Type::SIMD(inner, n) => {
             hash_type(inner, h);
             n.hash(h);
         }

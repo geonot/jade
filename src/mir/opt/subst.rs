@@ -139,17 +139,8 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
                 sub!(c);
             }
         }
-        InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit => {}
+        InstKind::MapInit => {}
         InstKind::Assert(v, _) => {
-            sub!(v);
-        }
-        InstKind::DynDispatch(obj, _, _, args) => {
-            sub!(obj);
-            for a in args {
-                sub!(a);
-            }
-        }
-        InstKind::DynCoerce(v, _, _) => {
             sub!(v);
         }
         InstKind::InlineAsm(_, args) => {

@@ -145,17 +145,8 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
                 s.insert(*c);
             }
         }
-        InstKind::MapInit | InstKind::SetInit | InstKind::PQInit | InstKind::DequeInit => {}
+        InstKind::MapInit => {}
         InstKind::Assert(v, _) => {
-            s.insert(*v);
-        }
-        InstKind::DynDispatch(obj, _, _, args) => {
-            s.insert(*obj);
-            for a in args {
-                s.insert(*a);
-            }
-        }
-        InstKind::DynCoerce(v, _, _) => {
             s.insert(*v);
         }
         InstKind::InlineAsm(_, args) => {
@@ -207,9 +198,6 @@ pub(super) fn is_pure(kind: &InstKind) -> bool {
             | InstKind::StructInit(..)
             | InstKind::VariantInit(..)
             | InstKind::MapInit
-            | InstKind::SetInit
-            | InstKind::PQInit
-            | InstKind::DequeInit
     )
     // NOTE: FieldGet is NOT pure — when the object is behind a pointer,
     // it reads mutable state that may be changed by FieldSet in a loop.

@@ -268,11 +268,7 @@ impl Lowerer {
 /// typer (escape::apply_demotions) and MIR (lower_stmt(Bind)) boundaries.
 pub(crate) fn is_container_read_method(expr: &hir::Expr) -> bool {
     let name = match &expr.kind {
-        ExprKind::VecMethod(_, n, _)
-        | ExprKind::MapMethod(_, n, _)
-        | ExprKind::SetMethod(_, n, _)
-        | ExprKind::PQMethod(_, n, _)
-        | ExprKind::DequeMethod(_, n, _) => n.as_str(),
+        ExprKind::VecMethod(_, n, _) | ExprKind::MapMethod(_, n, _) => n.as_str(),
         _ => return false,
     };
     matches!(
