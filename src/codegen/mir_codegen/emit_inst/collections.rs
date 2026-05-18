@@ -74,24 +74,6 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::RcClone(val) => {
                     Ok(self.val(*val))
                 }
-                mir::InstKind::WeakUpgrade(val) => {
-                    let v = self.val(*val);
-                    if let Type::Weak(inner) = &inst.ty {
-                        self.weak_upgrade(v, inner)
-                    } else {
-                        Ok(v)
-                    }
-                }
-                mir::InstKind::WeakDowngrade(val) => {
-                    let v = self.val(*val);
-                    // The weak() builtin sets inst.ty to Type::Weak(inner);
-                    // inner is the heap nominal we are taking a weak ref to.
-                    if let Type::Weak(inner) = &inst.ty {
-                        self.weak_downgrade(v, inner)
-                    } else {
-                        Ok(v)
-                    }
-                }
 
                 // ── Copy ──
                 mir::InstKind::Copy(val) => Ok(self.val(*val)),

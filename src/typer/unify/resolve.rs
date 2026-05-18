@@ -40,7 +40,6 @@ impl InferCtx {
             Type::Array(inner, _)
             | Type::Vec(inner)
             | Type::Ptr(inner)
-            | Type::Weak(inner)
             | Type::Coroutine(inner)
             | Type::Channel(inner) => self.occurs_in(v, inner),
             Type::Map(k, val) => self.occurs_in(v, k) || self.occurs_in(v, val),
@@ -76,7 +75,6 @@ impl InferCtx {
                 Box::new(self.canonicalize_type(ret)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.canonicalize_type(inner))),
-            Type::Weak(inner) => Type::Weak(Box::new(self.canonicalize_type(inner))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.canonicalize_type(inner))),
             Type::Channel(inner) => Type::Channel(Box::new(self.canonicalize_type(inner))),
             _ => ty.clone(),
@@ -283,7 +281,6 @@ impl InferCtx {
                 Box::new(self.resolve_core(ret, warn_only)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.resolve_core(inner, warn_only))),
-            Type::Weak(inner) => Type::Weak(Box::new(self.resolve_core(inner, warn_only))),
             Type::Coroutine(inner) => {
                 Type::Coroutine(Box::new(self.resolve_core(inner, warn_only)))
             }
@@ -353,7 +350,6 @@ impl InferCtx {
                 Box::new(self.substitute(ret, subst)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.substitute(inner, subst))),
-            Type::Weak(inner) => Type::Weak(Box::new(self.substitute(inner, subst))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.substitute(inner, subst))),
             Type::Channel(inner) => Type::Channel(Box::new(self.substitute(inner, subst))),
             _ => ty.clone(),

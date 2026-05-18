@@ -28,8 +28,6 @@ pub enum Ownership {
     Arc,
     /// T3 cross-thread atomic refcount + mutex (`Arc<Mutex<T>>`-equivalent).
     ArcMut,
-    /// Weak reference — may dangle; must be upgraded before use.
-    Weak,
     /// Raw user-managed pointer.
     Raw,
 }
@@ -43,17 +41,17 @@ impl Default for Ownership {
 impl Ownership {
     /// True if this ownership variant means the binding is an *alias* of
     /// storage owned elsewhere — i.e. drop glue must NOT release the
-    /// underlying memory at scope exit. Covers T1 borrows only; Rc/Arc/Weak
+    /// underlying memory at scope exit. Covers T1 borrows only; Rc/Arc
     /// own their own refcount slot and have their own drop semantics.
     pub fn is_borrow(self) -> bool {
         matches!(self, Ownership::Borrowed | Ownership::BorrowMut)
     }
 
-    /// True for any refcounted variant (Rc, RcMut, Arc, ArcMut, Weak).
+    /// True for any refcounted variant (Rc, RcMut, Arc, ArcMut).
     pub fn is_refcounted(self) -> bool {
         matches!(
             self,
-            Ownership::Rc | Ownership::RcMut | Ownership::Arc | Ownership::ArcMut | Ownership::Weak
+            Ownership::Rc | Ownership::RcMut | Ownership::Arc | Ownership::ArcMut
         )
     }
 
@@ -81,7 +79,6 @@ impl std::fmt::Display for Ownership {
             Ownership::RcMut => f.write_str("rc<mut>"),
             Ownership::Arc => f.write_str("arc"),
             Ownership::ArcMut => f.write_str("arc<mut>"),
-            Ownership::Weak => f.write_str("weak"),
             Ownership::Raw => f.write_str("*raw"),
         }
     }
@@ -495,9 +492,6 @@ pub enum BuiltinFn {
     Log,
     Print,
     ToString,
-    WeakAlloc,
-    WeakUpgrade,
-    WeakDowngrade,
     VolatileLoad,
     VolatileStore,
     WrappingAdd,

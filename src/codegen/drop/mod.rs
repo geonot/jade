@@ -44,9 +44,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Map(kt, vt) => {
                 self.drop_map_deep(val, kt, vt)?;
             }
-            Type::Weak(inner) => {
-                self.weak_release(val, inner)?;
-            }
             Type::Generator(_) => {
                 self.drop_ptr_allocated(val)?;
             }

@@ -33,7 +33,6 @@ impl Typer {
                 Box::new(Self::substitute_type(ret, type_map)),
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(Self::substitute_type(inner, type_map))),
-            Type::Weak(inner) => Type::Weak(Box::new(Self::substitute_type(inner, type_map))),
             Type::Channel(inner) => Type::Channel(Box::new(Self::substitute_type(inner, type_map))),
             Type::Coroutine(inner) => {
                 Type::Coroutine(Box::new(Self::substitute_type(inner, type_map)))
@@ -88,7 +87,6 @@ impl Typer {
             Type::Array(inner, _)
             | Type::Vec(inner)
             | Type::Ptr(inner)
-            | Type::Weak(inner)
             | Type::Channel(inner)
             | Type::Coroutine(inner) => {
                 Self::collect_type_params_from(inner, out);

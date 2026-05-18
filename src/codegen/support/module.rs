@@ -181,8 +181,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Struct(_, _) => "struct",
             Type::Enum(_) => "enum",
             Type::Fn(_, _) => "closure",
-            Type::Ptr(_)
-            | Type::Weak(_) => "pointer",
+            Type::Ptr(_) => "pointer",
             _ => "any",
         }
     }

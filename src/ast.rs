@@ -405,7 +405,7 @@ pub struct Param {
 
 /// Type-decl attributes parsed from `@`-prefixed annotations:
 /// `@packed`, `@strict`, `@align(N)` (layout), plus the access-semantics
-/// annotations `@resource`, `@atomic`, `@weakable`. Lives on `TypeDef`,
+/// annotations `@resource`, `@atomic`. Lives on `TypeDef`,
 /// `StoreDef`, `ActorDef`, etc. as a single bundle so each call site
 /// can ask the same struct for any annotation.
 #[derive(Debug, Clone, Default)]
@@ -417,8 +417,6 @@ pub struct LayoutAttrs {
     pub resource: bool,
     /// `@atomic` — sharing always uses Arc; mutations use Arc<Mutex>.
     pub atomic: bool,
-    /// `@weakable` — may be referenced via `weak ref`. Requires `@atomic`.
-    pub weakable: bool,
 }
 
 #[derive(Debug, Clone)]

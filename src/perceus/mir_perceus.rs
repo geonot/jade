@@ -334,7 +334,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         }
 
         InstKind::RcNew(val, _) => vec![*val],
-        InstKind::RcClone(v) | InstKind::WeakUpgrade(v) | InstKind::WeakDowngrade(v) => vec![*v],
+        InstKind::RcClone(v) => vec![*v],
 
         InstKind::SpawnActor(_, inits) => inits.iter().map(|(_, v)| *v).collect(),
         InstKind::ChanCreate(..) => vec![],

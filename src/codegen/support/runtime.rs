@@ -112,7 +112,7 @@ impl<'ctx> Compiler<'ctx> {
     /// - Owned pointer params  → `noalias` (exclusive, no other ref exists)
     /// - Borrowed pointer params → `noalias readonly` (shared read-only)
     /// - BorrowMut pointer params → `noalias` (exclusive mutable borrow)
-    /// - Rc/Weak → shared refcount, no noalias
+    /// - Rc/Arc → shared refcount, no noalias
     /// - Raw → user-managed, no assumptions
     pub(crate) fn tag_param_ownership(
         &self,
@@ -138,13 +138,12 @@ impl<'ctx> Compiler<'ctx> {
                 // Borrowed values don't escape
                 fv.add_attribute(loc, self.attr("nocapture"));
             }
-            // Rc/RcMut/Arc/ArcMut/Weak are shared-ownership — aliased by design.
+            // Rc/RcMut/Arc/ArcMut are shared-ownership — aliased by design.
             // Raw is user-managed — we make no assumptions.
             hir::Ownership::Rc
             | hir::Ownership::RcMut
             | hir::Ownership::Arc
             | hir::Ownership::ArcMut
-            | hir::Ownership::Weak
             | hir::Ownership::Raw => {}
         }
         // Add dereferenceable(N) for known struct sizes

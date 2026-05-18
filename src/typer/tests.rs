@@ -484,18 +484,6 @@ fn test_no_typevar_in_enum_variants() {
 }
 
 #[test]
-fn test_unify_weak_types() {
-    // Type::Rc was removed; weak references are the remaining
-    // explicit refcounted type constructor.
-    let mut ctx = unify::InferCtx::new();
-    let v = ctx.fresh_var();
-    let w_a = Type::Weak(Box::new(v.clone()));
-    let w_b = Type::Weak(Box::new(Type::I64));
-    ctx.unify(&w_a, &w_b).unwrap();
-    assert_eq!(ctx.resolve(&v), Type::I64);
-}
-
-#[test]
 fn test_unify_channel_types() {
     let mut ctx = unify::InferCtx::new();
     let v = ctx.fresh_var();

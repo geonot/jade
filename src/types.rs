@@ -25,7 +25,6 @@ pub enum Type {
     Fn(Vec<Type>, Box<Type>),
     Param(Symbol),
     Ptr(Box<Type>),
-    Weak(Box<Type>),
     ActorRef(Symbol),
     Coroutine(Box<Type>),
     Channel(Box<Type>),
@@ -70,16 +69,11 @@ impl Type {
         }
     }
 
-    pub fn is_weak(&self) -> bool {
-        matches!(self, Self::Weak(_))
-    }
-
     /// Returns true if this type is represented as an LLVM pointer at the ABI level.
     pub fn is_ptr_represented(&self) -> bool {
         matches!(
             self,
             Self::Ptr(_)
-                | Self::Weak(_)
                 | Self::ActorRef(_)
                 | Self::Coroutine(_)
                 | Self::Channel(_)
@@ -127,7 +121,6 @@ impl Type {
             Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
             Self::Struct(_, _) => true,
-            Self::Weak(_) => true,
             Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.is_value_clonable(),
             _ => false,
         }
@@ -135,7 +128,6 @@ impl Type {
 
     pub fn default_ownership(&self) -> crate::hir::Ownership {
         match self {
-            Self::Weak(_) => crate::hir::Ownership::Weak,
             Self::Ptr(_) => crate::hir::Ownership::Raw,
             _ => crate::hir::Ownership::Owned,
         }
@@ -146,9 +138,7 @@ impl Type {
     pub fn needs_atomic_rc(&self) -> bool {
         match self {
             Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,
-            Self::Weak(inner) | Self::Vec(inner) | Self::Ptr(inner) => {
-                inner.needs_atomic_rc()
-            }
+            Self::Vec(inner) | Self::Ptr(inner) => inner.needs_atomic_rc(),
             Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
             Self::Array(inner, _) => inner.needs_atomic_rc(),
             Self::Tuple(tys) => tys.iter().any(|t| t.needs_atomic_rc()),
@@ -208,7 +198,6 @@ impl std::fmt::Display for Type {
             }
             Self::Param(n) => write!(f, "{n}"),
             Self::Ptr(inner) => write!(f, "&{inner}"),
-            Self::Weak(inner) => write!(f, "weak {inner}"),
             Self::ActorRef(name) => write!(f, "ActorRef<{name}>"),
             Self::Coroutine(inner) => write!(f, "Coroutine of {inner}"),
             Self::Channel(inner) => write!(f, "Channel of {inner}"),
@@ -237,7 +226,6 @@ impl Type {
             Self::Array(inner, _)
             | Self::Vec(inner)
             | Self::Ptr(inner)
-            | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.has_type_var(),
             Self::Map(k, v) => k.has_type_var() || v.has_type_var(),
@@ -255,7 +243,6 @@ impl Type {
             Self::Array(inner, _)
             | Self::Vec(inner)
             | Self::Ptr(inner)
-            | Self::Weak(inner)
             | Self::Coroutine(inner)
             | Self::Channel(inner) => inner.free_type_vars(out),
             Self::Map(k, v) => {

@@ -43,7 +43,6 @@ impl<'ctx> Compiler<'ctx> {
                 .into(),
             Type::Fn(_, _) => self.closure_type().into(),
             Type::Ptr(_)
-            | Type::Weak(_)
             | Type::ActorRef(_)
             | Type::Coroutine(_)
             | Type::Channel(_) => self.ctx.ptr_type(AddressSpace::default()).into(),

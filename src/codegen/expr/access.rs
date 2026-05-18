@@ -303,12 +303,8 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         inner: &hir::Expr,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // R3.4.c: Weak references cannot be dereferenced directly; everything
-        // else is either a pointer load or the value itself (heap nominals
-        // are intrinsically refcounted, no surface Rc wrapper).
-        if let Type::Weak(_) = inner.ty {
-            return Err("cannot deref a weak reference directly — use weak_upgrade() first".into());
-        }
+        // Pointer load or value-itself fallback (heap nominals are
+        // intrinsically refcounted; no surface Rc wrapper).
         let ptr_val = self.compile_expr(inner)?;
         let load_ty = match &inner.ty {
             Type::Ptr(inner_ty) => self.llvm_ty(inner_ty),

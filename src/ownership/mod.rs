@@ -20,7 +20,6 @@ pub enum DiagKind {
     MoveOfBorrowed,
     InvalidRcDeref,
     ReturnOfBorrowed,
-    WeakUpgradeWithoutCheck,
     Warning,
 }
 
@@ -137,16 +136,6 @@ impl OwnershipVerifier {
                     message: format!(
                         "use of moved value `{name}` (moved at line {})",
                         state.move_span.map(|s| s.line).unwrap_or(0)
-                    ),
-                });
-            }
-            if state.ownership == Ownership::Weak {
-                self.diagnostics.push(OwnershipDiag {
-                    kind: DiagKind::WeakUpgradeWithoutCheck,
-                    span,
-                    message: format!(
-                        "weak reference `{name}` used directly — \
-                         call weak_upgrade() and check for none before use"
                     ),
                 });
             }

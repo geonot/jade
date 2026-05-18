@@ -387,7 +387,6 @@ pub fn run() {
                 has_hard_error = true;
                 "error"
             }
-            crate::ownership::DiagKind::WeakUpgradeWithoutCheck => "warning",
             crate::ownership::DiagKind::Warning => "warning",
         };
         eprintln!("ownership: {} (line {}): {}", level, d.span.line, d.message);

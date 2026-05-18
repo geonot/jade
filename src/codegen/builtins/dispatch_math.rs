@@ -20,28 +20,6 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 self.compile_to_string(&args[0])
             }
-            hir::BuiltinFn::WeakDowngrade => {
-                if args.len() != 1 {
-                    return Err("weak() takes 1 argument (a heap value)".into());
-                }
-                let val = self.compile_expr(&args[0])?;
-                // Inner is the value's nominal type directly (no Rc wrapper).
-                self.weak_downgrade(val, &args[0].ty)
-            }
-            hir::BuiltinFn::WeakUpgrade => {
-                if args.len() != 1 {
-                    return Err("weak_upgrade() takes 1 argument".into());
-                }
-                let val = self.compile_expr(&args[0])?;
-                if let Type::Weak(inner) = &args[0].ty {
-                    self.weak_upgrade(val, inner)
-                } else {
-                    Err("weak_upgrade(): argument must be weak type".into())
-                }
-            }
-            hir::BuiltinFn::WeakAlloc => {
-                Err("weak_alloc is internal — use weak() on a heap value".into())
-            }
             hir::BuiltinFn::VolatileLoad => {
                 if args.len() != 1 {
                     return Err("volatile_load() takes 1 argument".into());

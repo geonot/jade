@@ -16,18 +16,12 @@ impl<'ctx> Compiler<'ctx> {
             st.set_body(
                 &[
                     self.ctx.i64_type().into(),
-                    self.ctx.i64_type().into(),
                     self.llvm_ty(inner),
                 ],
                 false,
             );
             st
         })
-    }
-
-    /// Weak refs share the Rc heap layout; this is a back-compat alias.
-    pub(crate) fn weak_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
-        self.rc_layout_ty(inner)
     }
 
     pub(crate) fn rc_alloc(
@@ -79,9 +73,7 @@ impl<'ctx> Compiler<'ctx> {
         };
         let rc_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "rc.cnt"));
         b!(self.bld.build_store(rc_gep, i64t.const_int(1, false)));
-        let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.weak"));
-        b!(self.bld.build_store(weak_gep, i64t.const_int(0, false)));
-        let val_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 2, "rc.val"));
+        let val_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.val"));
         b!(self.bld.build_store(val_gep, val));
         Ok(heap_ptr.into())
     }
@@ -188,18 +180,7 @@ impl<'ctx> Compiler<'ctx> {
         let cont_bb = self.ctx.append_basic_block(fv, "rc.cont");
         b!(self.bld.build_conditional_branch(is_zero, dead_bb, cont_bb));
         self.bld.position_at_end(dead_bb);
-        // Strong refcount hit zero. Free only if no weak refs remain.
-        let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "rc.weak"));
-        let weak = b!(self.bld.build_load(i64t, weak_gep, "rc.weak.ld")).into_int_value();
-        let no_weak = b!(self.bld.build_int_compare(
-            IntPredicate::EQ,
-            weak,
-            i64t.const_int(0, false),
-            "rc.noweak"
-        ));
-        let free_bb = self.ctx.append_basic_block(fv, "rc.free");
-        b!(self.bld.build_conditional_branch(no_weak, free_bb, cont_bb));
-        self.bld.position_at_end(free_bb);
+        // Strong refcount hit zero. Free the heap allocation.
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
         b!(self.bld.build_unconditional_branch(cont_bb));
@@ -215,7 +196,7 @@ impl<'ctx> Compiler<'ctx> {
         let layout = self.rc_layout_ty(inner);
         let val_gep = b!(self
             .bld
-            .build_struct_gep(layout, ptr.into_pointer_value(), 2, "rc.val"));
+            .build_struct_gep(layout, ptr.into_pointer_value(), 1, "rc.val"));
         let loaded = b!(self.bld.build_load(self.llvm_ty(inner), val_gep, "rc.load"));
         // If the inner type owns heap (String, Vec<T>, ...), a raw load is a
         // bitwise alias of the Rc's interior: dropping both the caller's
@@ -235,128 +216,13 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // weak_layout_ty defined above as alias of rc_layout_ty.
-
-    pub(crate) fn weak_downgrade(
-        &mut self,
-        rc_ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let layout = self.weak_layout_ty(inner);
-        let heap_ptr = rc_ptr.into_pointer_value();
-        let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "weak.cnt"));
-        b!(self.bld.build_atomicrmw(
-            inkwell::AtomicRMWBinOp::Add,
-            weak_gep,
-            self.ctx.i64_type().const_int(1, false),
-            inkwell::AtomicOrdering::AcquireRelease,
-        ));
-        Ok(heap_ptr.into())
-    }
-
-    pub(crate) fn weak_upgrade(
-        &mut self,
-        weak_ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fv = self.current_fn();
-        let layout = self.weak_layout_ty(inner);
-        let i64t = self.ctx.i64_type();
-        let heap_ptr = weak_ptr.into_pointer_value();
-        let strong_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "strong.cnt"));
-        let strong = b!(self.bld.build_load(i64t, strong_gep, "strong")).into_int_value();
-        let is_alive = b!(self.bld.build_int_compare(
-            IntPredicate::SGT,
-            strong,
-            i64t.const_int(0, false),
-            "alive"
-        ));
-        let alive_bb = self.ctx.append_basic_block(fv, "weak.alive");
-        let dead_bb = self.ctx.append_basic_block(fv, "weak.dead");
-        let merge_bb = self.ctx.append_basic_block(fv, "weak.merge");
-        b!(self
-            .bld
-            .build_conditional_branch(is_alive, alive_bb, dead_bb));
-
-        self.bld.position_at_end(alive_bb);
-        let new_strong =
-            b!(self
-                .bld
-                .build_int_nuw_add(strong, i64t.const_int(1, false), "strong.inc"));
-        b!(self.bld.build_store(strong_gep, new_strong));
-        let alive_val: BasicValueEnum<'ctx> = heap_ptr.into();
-        b!(self.bld.build_unconditional_branch(merge_bb));
-
-        self.bld.position_at_end(dead_bb);
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let null_val: BasicValueEnum<'ctx> = ptr_ty.const_null().into();
-        b!(self.bld.build_unconditional_branch(merge_bb));
-
-        self.bld.position_at_end(merge_bb);
-        let phi = b!(self.bld.build_phi(ptr_ty, "weak.result"));
-        phi.add_incoming(&[(&alive_val, alive_bb), (&null_val, dead_bb)]);
-        Ok(phi.as_basic_value())
-    }
-
-    pub(crate) fn weak_release(
-        &mut self,
-        ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<(), String> {
-        let fv = self.current_fn();
-        let layout = self.weak_layout_ty(inner);
-        let i64t = self.ctx.i64_type();
-        let heap_ptr = ptr.into_pointer_value();
-        let weak_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 1, "weak.cnt"));
-        let old_weak = b!(self.bld.build_atomicrmw(
-            inkwell::AtomicRMWBinOp::Sub,
-            weak_gep,
-            i64t.const_int(1, false),
-            inkwell::AtomicOrdering::AcquireRelease,
-        ));
-        let new_weak =
-            b!(self
-                .bld
-                .build_int_nsw_sub(old_weak, i64t.const_int(1, false), "weak.dec"));
-
-        let strong_gep = b!(self.bld.build_struct_gep(layout, heap_ptr, 0, "strong.cnt"));
-        let strong = b!(self.bld.build_load(i64t, strong_gep, "strong")).into_int_value();
-        let strong_zero = b!(self.bld.build_int_compare(
-            IntPredicate::EQ,
-            strong,
-            i64t.const_int(0, false),
-            "s.zero"
-        ));
-        let weak_zero = b!(self.bld.build_int_compare(
-            IntPredicate::EQ,
-            new_weak,
-            i64t.const_int(0, false),
-            "w.zero"
-        ));
-        let both_zero = b!(self.bld.build_and(strong_zero, weak_zero, "both.zero"));
-
-        let free_bb = self.ctx.append_basic_block(fv, "weak.free");
-        let cont_bb = self.ctx.append_basic_block(fv, "weak.cont");
-        b!(self
-            .bld
-            .build_conditional_branch(both_zero, free_bb, cont_bb));
-
-        self.bld.position_at_end(free_bb);
-        let free_fn = self.ensure_free();
-        b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(cont_bb));
-
-        self.bld.position_at_end(cont_bb);
-        Ok(())
-    }
-
     // ─────────────────────────────────────────────────────────────────
     // R3.4.b — Arc / Arc<Mutex> codegen emitters.
     //
-    // Layout for `Arc<T>` is identical to `Rc<T>` (`{i64 strong, i64
-    // weak, T payload}`); only the *operations* differ (atomic vs.
-    // plain). Layout for `Arc<Mutex<T>>` adds a pthread_mutex_t slot
-    // between the weak count and the payload.
+    // Layout for `Arc<T>` is identical to `Rc<T>` (`{i64 strong,
+    // T payload}`); only the *operations* differ (atomic vs.
+    // plain). Layout for `Arc<Mutex<T>>` inserts a pthread_mutex_t
+    // slot between the strong count and the payload.
     //
     // No caller invokes these yet — they will be wired by R3.4.d
     // (the promotion lowering pass) and R3.4.c (codegen dispatch on
@@ -394,7 +260,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Layout for `Arc<Mutex<T>>`:
-    /// `{ i64 strong, i64 weak, pthread_mutex_t lock, T payload }`.
+    /// `{ i64 strong, pthread_mutex_t lock, T payload }`.
     /// The mutex slot is sized opaquely as `[i8 x N]` matching the
     /// platform's `sizeof(pthread_mutex_t)`. We can't query that at
     /// compile-time from LLVM, so we use a conservative 64-byte
@@ -409,7 +275,6 @@ impl<'ctx> Compiler<'ctx> {
             let mutex_slot = self.ctx.i8_type().array_type(64);
             st.set_body(
                 &[
-                    self.ctx.i64_type().into(),
                     self.ctx.i64_type().into(),
                     mutex_slot.into(),
                     self.llvm_ty(inner),
@@ -501,7 +366,7 @@ impl<'ctx> Compiler<'ctx> {
         let heap_ptr = arc_ptr.into_pointer_value();
         let lock_gep = b!(self
             .bld
-            .build_struct_gep(layout, heap_ptr, 2, "arc.mutex.lock"));
+            .build_struct_gep(layout, heap_ptr, 1, "arc.mutex.lock"));
         let lock_fn = self.ensure_pthread_mutex_lock();
         b!(self
             .bld
@@ -520,7 +385,7 @@ impl<'ctx> Compiler<'ctx> {
         let heap_ptr = arc_ptr.into_pointer_value();
         let lock_gep = b!(self
             .bld
-            .build_struct_gep(layout, heap_ptr, 2, "arc.mutex.lock"));
+            .build_struct_gep(layout, heap_ptr, 1, "arc.mutex.lock"));
         let unlock_fn = self.ensure_pthread_mutex_unlock();
         b!(self
             .bld

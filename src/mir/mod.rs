@@ -276,8 +276,6 @@ pub enum InstKind {
     // ── RC (needed for Perceus on MIR) ──
     RcNew(ValueId, Type),
     RcClone(ValueId),
-    WeakUpgrade(ValueId),
-    WeakDowngrade(ValueId),
 
     // ── Actors/channels (needed for actor optimization pass) ──
     SpawnActor(Symbol, Vec<(Symbol, ValueId)>),

@@ -106,7 +106,6 @@ impl<'ctx> Compiler<'ctx> {
                 let is_ptr_like = matches!(
                     field_ty,
                     Type::String
-                        | Type::Weak(_)
                         | Type::Fn(_, _)
                 ) || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))
                     && !Self::is_recursive_field(field_ty, name);

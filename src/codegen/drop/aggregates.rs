@@ -165,7 +165,6 @@ impl<'ctx> Compiler<'ctx> {
                 Self::type_references_struct(k, name) || Self::type_references_struct(v, name)
             }
             Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
-            Type::Weak(inner) => Self::type_references_struct(inner, name),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 Self::type_references_struct(inner, name)
             }
@@ -321,15 +320,12 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(free_bb);
         // Drop the inner value before freeing the Rc allocation. Payload is
-        // at struct index 2 in the {strong (0), weak (1), payload (2)}
-        // layout produced by rc_layout_ty (see src/codegen/rc.rs:12-26).
-        // Previously this used index 1, which loaded the weak count as
-        // garbage payload — corrupted free() for Rc<String> / Rc<Vec<_>>
-        // / Rc<Struct-with-drop>.
+        // at struct index 1 in the {strong (0), payload (1)} layout
+        // produced by rc_layout_ty (see src/codegen/rc.rs:12-26).
         if !inner.is_trivially_droppable() {
             let val_gep = b!(self
                 .bld
-                .build_struct_gep(layout, heap_ptr, 2, "rc.val.drop"));
+                .build_struct_gep(layout, heap_ptr, 1, "rc.val.drop"));
             let inner_val = b!(self
                 .bld
                 .build_load(self.llvm_ty(inner), val_gep, "rc.inner"));
@@ -379,11 +375,11 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(free_bb);
         // Drop the inner value before freeing the Arc allocation. Use the
-        // payload index (2) per the {strong, weak, payload} layout.
+        // payload index (1) per the {strong, payload} layout.
         if !inner.is_trivially_droppable() {
             let val_gep = b!(self
                 .bld
-                .build_struct_gep(layout, heap_ptr, 2, "arc.val.drop"));
+                .build_struct_gep(layout, heap_ptr, 1, "arc.val.drop"));
             let inner_val = b!(self
                 .bld
                 .build_load(self.llvm_ty(inner), val_gep, "arc.inner"));

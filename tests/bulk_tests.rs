@@ -7794,15 +7794,6 @@ fn atomic_and_resource_mutually_exclusive() {
 }
 
 #[test]
-fn weakable_requires_atomic() {
-    let err = expect_compile_fail("type Bad @weakable\n    x as i64\n\n*main()\n    log(1)\n");
-    assert!(
-        err.contains("@weakable") || err.contains("@atomic") || err.contains("weak"),
-        "expected weakable-requires-atomic diagnostic, got: {err}"
-    );
-}
-
-#[test]
 fn resource_drop_runs_at_scope_exit() {
     // A `*drop` method defined on a `@resource` type must be auto-invoked
     // when the owning binding's scope ends. The "dropped" log proves the
@@ -7888,25 +7879,9 @@ fn store_row_field_access_in_coroutine_body() {
 #[ignore = "weak()/weak_upgrade() on heap nominals requires the heap-tax \
             inference (struct-literal → RcNew with {strong,weak,payload} \
             layout) to be wired up. Tracked under Phase-7 circle-back."]
-fn weak_roundtrip_recovers_value() {
-    // `weak()` downgrades a heap nominal to a weak ref; `weak_upgrade()`
-    // recovers a strong handle when the original is still live.
-    //
-    // Original regression notes (kept for context):
-    //   1. `BuiltinFn::WeakDowngrade` was not lowered into MIR — it fell through
-    //      to a `Call("__builtin_WeakDowngrade")` for which no runtime function
-    //      existed. Programs aborted at link/runtime with an unknown-symbol error.
-    //   2. The Rc and Weak heap layouts disagreed: rc_layout was {strong, T} but
-    //      weak_layout was {strong, weak, T}, so `weak_downgrade` incremented the
-    //      T value field thinking it was the weak counter, silently mutating the
-    //      payload across the roundtrip.
-    //
-    // Both layouts are now unified to {strong, weak, T} and `WeakDowngrade`
-    // has a dedicated MIR `InstKind` lowered by the codegen. The surface
-    // `rc()` wrapper was removed under the "heap tax" model; this test
-    // exercises the same machinery via a heap struct binding.
-    expect(
-        "type Boxed\n    val as i64\n\n*main\n    b is Boxed(val is 42)\n    w is weak(b)\n    s is weak_upgrade(w)\n    log(s.val)\n",
-        "42",
-    );
+fn weak_roundtrip_recovers_value_REMOVED() {
+    // Weak / weak() / weak_upgrade() were removed in Phase 4.5
+    // (heap-tax cleanup). Cycle-breaking is now expressed via
+    // ActorRef, raw Ptr<T>, or arena+index patterns. A future
+    // incremental cycle collector may revive a weak primitive.
 }

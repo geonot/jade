@@ -645,10 +645,7 @@ type RcDemoNode
     # surface `rc()` wrapper exists. Allocating a struct gives you
     # an Rc-tier value automatically.
     node is RcDemoNode(val is 42)
-
-    # Weak references — explicit cycle-breaking
-    w is weak(node)              # downgrade to weak
-    strong is weak_upgrade(w)    # upgrade back (or none)
+    log(node.val)
 
 
 # ── 25. Float Builtins ─────────────────────────────────────────────────────

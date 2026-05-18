@@ -459,7 +459,6 @@ impl Typer {
             Type::String
                 | Type::Vec(_)
                 | Type::Map(_, _)
-                | Type::Weak(_)
                 | Type::Coroutine(_)
                 | Type::Generator(_)
                 | Type::Channel(_)
@@ -569,7 +568,6 @@ impl Typer {
         match ty {
             Type::Param(name) => subs.get(name).cloned().unwrap_or_else(|| ty.clone()),
             Type::Vec(inner) => Type::Vec(Box::new(Self::subst_type(inner, subs))),
-            Type::Weak(inner) => Type::Weak(Box::new(Self::subst_type(inner, subs))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(Self::subst_type(inner, subs))),
             Type::Generator(inner) => Type::Generator(Box::new(Self::subst_type(inner, subs))),
             Type::Channel(inner) => Type::Channel(Box::new(Self::subst_type(inner, subs))),

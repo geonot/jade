@@ -109,8 +109,6 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         InstKind::VecLen(v)
         | InstKind::ChanRecv(v)
         | InstKind::RcClone(v)
-        | InstKind::WeakUpgrade(v)
-        | InstKind::WeakDowngrade(v)
         | InstKind::Log(v) => {
             sub!(v);
         }

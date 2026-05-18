@@ -45,7 +45,7 @@ pub struct Typer {
     pub(crate) fns: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     pub(crate) structs: IndexMap<Symbol, Vec<(Symbol, Type)>>,
     /// Per-struct layout/annotation attributes (`@packed`, `@strict`,
-    /// `@align`, `@resource`, `@atomic`, `@weakable`). Populated when the
+    /// `@align`, `@resource`, `@atomic`). Populated when the
     /// declaration is registered; consulted by access-mode inference
     /// (§3 of `docs/access-semantics.md`) and codegen.
     pub(crate) struct_attrs: IndexMap<Symbol, crate::ast::LayoutAttrs>,
@@ -531,8 +531,7 @@ impl Typer {
             // `@resource` types.
             Type::Row(_) => true,
             Type::Newtype(_, inner)
-            | Type::Alias(_, inner)
-            | Type::Weak(inner) => self.type_has_resource_annotation(inner),
+            | Type::Alias(_, inner) => self.type_has_resource_annotation(inner),
             _ => false,
         }
     }

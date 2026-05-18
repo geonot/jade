@@ -84,19 +84,11 @@ impl Parser {
                 // `@resource` — linear type: never copies, auto-`*drop` at scope exit.
                 // See `docs/access-semantics.md` §3.
                 layout.resource = true;
-            } else if attr == "weakable" {
-                // `@weakable` — may be referenced via `weak ref`. Requires `@atomic`.
-                layout.weakable = true;
             } else {
                 return Err(self.error(&format!("unknown layout attribute: @{attr}")));
             }
         }
         // Validate combinations.
-        if layout.weakable && !layout.atomic {
-            return Err(self.error(
-                "@weakable requires @atomic (weak references are only valid against atomic-shared types)",
-            ));
-        }
         if layout.resource && layout.atomic {
             return Err(self.error(
                 "@resource and @atomic are mutually exclusive: a linear type cannot be cross-thread shared",
