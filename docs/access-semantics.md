@@ -69,11 +69,18 @@ Jinn's stated principles (jinn.md):
 
 > 2. Ownership is default. One owner per value. Compiler inserts drops statically.
 > 3. Borrowing is free. Read access borrows a reference — zero runtime cost.
-> 4. Sharing is inferred. The compiler determines when values need shared
->    ownership and inserts reference counting automatically.
+> 4. Sharing is explicit, access is transparent. Users opt in to shared
+>    ownership with `rc(x)` / `rc_cell(x)` / `arc(x)` / `arc_mutex(x)`;
+>    the compiler makes the wrapper invisible at every access site.
 
-So the *intent* is Rust-style affine ownership + auto-inferred Rc. The
-*implementation* has diverged in places. Here's the actual state:
+(Principle 4 was reworded after the R3.4.d.2 architectural review —
+see §4.8 below. The original "Sharing is inferred / automatic Rc"
+intent was found to require cross-function type rewriting, and was
+replaced by explicit-wrap + transparent-access.)
+
+So the *intent* is Rust-style affine ownership + user-explicit shared
+ownership where the wrapper is invisible at use sites. The *implementation*
+has diverged in places. Here's the actual state:
 
 ### 1.1 The `Ownership` enum (src/hir/mod.rs)
 
@@ -696,15 +703,47 @@ threads can hold an Arc to it; the wrapped resource is freed and its
 
 ### 4.8 What about Rc / Weak today?
 
-The `Rc(T)` / `Weak(T)` HIR types stay. They become the compiler's
-internal lowering targets for `ref` Tier-2 and the cycle-breaking
-escape hatch. **Users stop writing them at the surface.** Existing
-code that names `Rc(T)` continues to parse and compile; the type is
-deprecated but not removed. Migration tooling converts surface `Rc`
-bindings to `ref`.
+**Status update (2026-05-17, after R3.4.d.2 closure)**: the original
+vision below — "users stop writing `Rc` at the surface, the compiler
+infers it from escape tier" — was *partially* reversed during R3.4
+implementation. The transparent promotion pass (rewrite a binding's
+type from `T` to `Rc<T>` based on escape tier) requires cross-function
+type rewriting because every escape site (return, call, container
+push, channel send, struct init) names the *original* `T`. That is a
+monomorphization-shaped, multi-session refactor that touches the
+public ABI of every function whose locals escape.
 
-`weak` survives as a keyword for the rare case of explicit
-cycle-breaking: `parent as weak ref Parent`.
+The shipped design (commit `e3f3207`) is the smaller, sufficient
+alternative: **the user writes `rc(x)` / `rc_cell(x)` / `arc(x)` /
+`arc_mutex(x)` explicitly when they want shared ownership, and the
+compiler makes the wrapper invisible at every access site** —
+`r.field`, `r[i]`, `r.method(...)` all peer through the wrapper
+automatically. Escape analysis (tiers T1/T2/T3) is retained as a
+diagnostic and as the driver of the T1 raw-borrow optimization, but
+not as a driver of automatic type rewriting.
+
+In practice, users write Jinn the same way they did before R3 — most
+bindings are plain `T` (the compiler chooses `Owned` / `Borrowed` /
+in-place via escape analysis) and only the rare *intentional* shared
+binding gets an explicit `rc(...)` wrap.
+
+```jinn
+# Single owner — compiler handles drop.
+p is Point(x is 1, y is 2)
+
+# Short-lived field read of a clonable type — compiler downgrades
+# to a raw borrow (no clone) via escape analysis (T1).
+name is user.name
+
+# Shared ownership across two long-lived bindings — explicit.
+r is rc(BigState(...))
+thread1.send(r)              # arc(...) for cross-thread
+print(r.counter)             # auto-deref: writes r.counter, not (*r).counter
+```
+
+`Rc(T)` / `Weak(T)` HIR types remain the lowering targets;
+`RcCell(T)`, `Arc(T)`, `Mutex(T)` are also first-class. `weak` survives
+as the cycle-breaking escape hatch: `w is weak(r)`.
 
 ---
 
@@ -727,9 +766,10 @@ and acceptance criteria, lives in
    auto-copy for `x.field` escapes; partial-move on proven last-use.
 5. **P5 — Stores & smart rows.** `query(…)` returns `Row<T>`;
    `snapshot()` returns plain `T`. Bare-row mutation is an error.
-6. **P6 — Cleanup & docs.** Remove `is_aliased_read_of_heap`
-   heuristic, prune unused clone paths, update `jinn.md`,
-   write user-facing migration guide.
+6. **P6 — Cleanup & docs.** ~~Remove `is_aliased_read_of_heap`
+   heuristic~~ — kept as the permanent non-clonable-container-read
+   safety net after R3.4.d.2 closure; prune unused clone paths;
+   update `jinn.md`.
 
 ### Compatibility
 
