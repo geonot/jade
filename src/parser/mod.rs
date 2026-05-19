@@ -299,6 +299,26 @@ impl Parser {
                     self.advance();
                     return Ok("insert".into());
                 }
+                Token::Query => {
+                    self.advance();
+                    return Ok("query".into());
+                }
+                Token::Delete => {
+                    self.advance();
+                    return Ok("delete".into());
+                }
+                Token::View => {
+                    self.advance();
+                    return Ok("view".into());
+                }
+                Token::Send => {
+                    self.advance();
+                    return Ok("send".into());
+                }
+                Token::Close => {
+                    self.advance();
+                    return Ok("close".into());
+                }
 
                 Token::Log => {
                     self.advance();
