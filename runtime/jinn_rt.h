@@ -265,6 +265,11 @@ void       *jinn_sup_child_mailbox(jinn_sup_t *sup, size_t idx);
 extern jinn_sched_t g_sched;
 extern _Thread_local jinn_worker_t *tl_worker;
 
+/* ── Crash handlers (P0-6) ───────────────────────────────────────── */
+
+void jinn_install_crash_handlers(void);
+void jinn_install_worker_sigaltstack(void);
+
 /* ── Checked allocation ──────────────────────────────────────────── */
 
 void *jinn_xmalloc(size_t size);

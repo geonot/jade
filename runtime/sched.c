@@ -179,6 +179,7 @@ static jinn_coro_t *jinn_find_work(jinn_worker_t *w) {
 static void *jinn_worker_loop(void *arg) {
     jinn_worker_t *w = (jinn_worker_t *)arg;
     tl_worker = w;
+    jinn_install_worker_sigaltstack();
 
     while (!atomic_load_explicit(&g_sched.shutdown, memory_order_acquire)) {
         jinn_coro_t *c = jinn_find_work(w);
@@ -228,6 +229,7 @@ static void *jinn_worker_loop(void *arg) {
 /* ── Public API ─────────────────────────────────────────────────── */
 
 void jinn_sched_init(int num_workers) {
+    jinn_install_crash_handlers();
     if (num_workers <= 0) {
         num_workers = (int)sysconf(_SC_NPROCESSORS_ONLN);
         if (num_workers <= 0) num_workers = 4;
