@@ -1,5 +1,31 @@
 use super::*;
 
+/// Decode the UTF-8 codepoint starting at `src[*pos]` and append it
+/// (preserving the original bytes) to `val`, then advance `*pos` past
+/// the entire codepoint and bump `*col` once. Continuation bytes do
+/// not increment the column count, matching `Lexer::advance`.
+fn push_utf8_at(val: &mut String, src: &[u8], pos: &mut usize, col: &mut u32) {
+    let b = src[*pos];
+    let n = if b < 0x80 {
+        1
+    } else if b < 0xC0 {
+        1 // stray continuation byte; treat as one byte
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    };
+    let end = (*pos + n).min(src.len());
+    match std::str::from_utf8(&src[*pos..end]) {
+        Ok(s) => val.push_str(s),
+        Err(_) => val.push('\u{FFFD}'),
+    }
+    *pos = end;
+    *col += 1;
+}
+
 impl<'s> Lexer<'s> {
     pub(in crate::lexer) fn lex_number(&mut self) -> Result<Spanned, LexError> {
         let (start, sc) = (self.pos, self.col);
@@ -144,8 +170,7 @@ impl<'s> Lexer<'s> {
                     self.col = 0;
                     self.pos += 1;
                 } else {
-                    val.push(self.src[self.pos] as char);
-                    self.advance();
+                    push_utf8_at(&mut val, self.src, &mut self.pos, &mut self.col);
                 }
             }
             return self.err("unterminated triple-quoted string");
@@ -245,10 +270,10 @@ impl<'s> Lexer<'s> {
                     b'}' => val.push('}'),
                     o => return self.err(&format!("unknown escape: \\{}", o as char)),
                 }
+                self.advance();
             } else {
-                val.push(self.src[self.pos] as char);
+                push_utf8_at(&mut val, self.src, &mut self.pos, &mut self.col);
             }
-            self.advance();
         }
         if self.pos >= self.src.len() {
             return self.err("unterminated string");
