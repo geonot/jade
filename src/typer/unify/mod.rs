@@ -405,6 +405,14 @@ impl InferCtx {
         let a = self.shallow_resolve(&a);
         let b = self.shallow_resolve(&b);
 
+        // Canonicalize at the unification entry (P0-12). This collapses
+        // `Type::Struct("String", _)` ↔ `Type::String`, transparently
+        // unwraps `Type::Alias`, and recurses into composites. After this
+        // step the unifier sees a single canonical representation per
+        // semantic type.
+        let a = a.canonical();
+        let b = b.canonical();
+
         if a == b {
             return Ok(());
         }
@@ -540,6 +548,24 @@ impl InferCtx {
             (Type::Ptr(a), Type::Ptr(b)) => self.unify(a, b),
             (Type::Channel(a), Type::Channel(b)) => self.unify(a, b),
             (Type::Coroutine(a), Type::Coroutine(b)) => self.unify(a, b),
+            (Type::Generator(a), Type::Generator(b)) => self.unify(a, b),
+            (Type::Struct(na, aa), Type::Struct(nb, ab)) if na == nb && aa.len() == ab.len() => {
+                for (x, y) in aa.iter().zip(ab.iter()) {
+                    self.unify(x, y)?;
+                }
+                Ok(())
+            }
+            // P0-12 compatibility shim: until every site that produces
+            // `Type::Enum(n)` is migrated to produce `Type::Struct(n, args)`,
+            // accept `Struct(n, _) ↔ Enum(n)` when names match. Generic args
+            // on the struct side are not unified (the enum side carries no
+            // arg info), which preserves existing behaviour.
+            (Type::Struct(na, _), Type::Enum(nb)) | (Type::Enum(nb), Type::Struct(na, _))
+                if na == nb =>
+            {
+                Ok(())
+            }
+            (Type::Newtype(na, ia), Type::Newtype(nb, ib)) if na == nb => self.unify(ia, ib),
             (Type::Row(sa), Type::Row(sb)) => {
                 if sa == sb {
                     Ok(())

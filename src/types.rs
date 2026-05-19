@@ -211,6 +211,54 @@ impl std::fmt::Display for Type {
 }
 
 impl Type {
+    /// Canonicalize a type for comparison/unification purposes (P0-12).
+    ///
+    /// Resolves long-standing asymmetries between equivalent representations:
+    ///   - `Type::Struct("String"|"string", _)` collapses to `Type::String`.
+    ///   - `Type::Alias(_, inner)` collapses to `inner.canonical()`. Aliases
+    ///     are transparent.
+    ///   - `Type::Newtype(_, _)` is preserved — newtypes are nominally
+    ///     distinct from their underlying type.
+    ///   - Composites recurse into their components.
+    pub fn canonical(&self) -> Type {
+        match self {
+            Type::Struct(n, args) if n.as_str() == "String" || n.as_str() == "string" => {
+                let _ = args;
+                Type::String
+            }
+            Type::Alias(_, inner) => inner.canonical(),
+            Type::Array(inner, n) => Type::Array(Box::new(inner.canonical()), *n),
+            Type::Vec(inner) => Type::Vec(Box::new(inner.canonical())),
+            Type::Map(k, v) => Type::Map(Box::new(k.canonical()), Box::new(v.canonical())),
+            Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| t.canonical()).collect()),
+            Type::Struct(n, args) => {
+                Type::Struct(n.clone(), args.iter().map(|t| t.canonical()).collect())
+            }
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(|t| t.canonical()).collect(),
+                Box::new(r.canonical()),
+            ),
+            Type::Ptr(inner) => Type::Ptr(Box::new(inner.canonical())),
+            Type::Coroutine(inner) => Type::Coroutine(Box::new(inner.canonical())),
+            Type::Channel(inner) => Type::Channel(Box::new(inner.canonical())),
+            Type::Generator(inner) => Type::Generator(Box::new(inner.canonical())),
+            Type::Newtype(n, inner) => Type::Newtype(n.clone(), Box::new(inner.canonical())),
+            other => other.clone(),
+        }
+    }
+
+    /// True iff `self` and `other` denote the same canonical type.
+    pub fn eq_canonical(&self, other: &Type) -> bool {
+        self.canonical() == other.canonical()
+    }
+
+    /// True if this is the canonical string type regardless of representation.
+    pub fn is_string(&self) -> bool {
+        matches!(self.canonical(), Type::String)
+    }
+}
+
+impl Type {
     pub fn has_type_var(&self) -> bool {
         match self {
             Self::TypeVar(_) => true,
