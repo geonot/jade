@@ -133,7 +133,7 @@ fn alpha_audit_negative_compile_cases() {
     expect_compile_fail("negative_resource_channel.jn", &["resource", "thread"]);
     expect_compile_fail(
         "negative_type_mismatch.jn",
-        &["type mismatch", "I64", "String"],
+        &["type mismatch", "i64", "string"],
     );
     expect_compile_fail("negative_generic_empty_enum.jn", &["FieldGet", "__tag"]);
 }

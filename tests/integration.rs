@@ -2128,7 +2128,7 @@ fn comptime_type_of_expr() {
 
 #[test]
 fn comptime_type_of_string() {
-    expect("*main\n    s is 'hello'\n    log(type of s)\n", "String");
+    expect("*main\n    s is 'hello'\n    log(type of s)\n", "string");
 }
 
 #[test]
@@ -4070,7 +4070,7 @@ fn r8_arith_rejects_bool_mul() {
 fn r8_arith_string_minus_string_rejected() {
     let err = expect_compile_fail("*main\n    log(\"a\" - \"b\")\n");
     assert!(
-        err.contains("operator `-` not defined") && err.contains("String"),
+        err.contains("operator `-` not defined") && err.contains("string"),
         "expected `- not defined` error for String-String, got: {err}"
     );
 }

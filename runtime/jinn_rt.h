@@ -65,10 +65,14 @@ typedef struct {
     double d8_d15[8];
 } jinn_context_t;  /* 168 bytes */
 #else
-#include <setjmp.h>
-typedef struct {
-    jmp_buf env;
-} jinn_context_t;
+#error \
+"jinn runtime: unsupported target architecture. " \
+"Only x86_64 and aarch64 are supported. " \
+"The setjmp/longjmp fallback is known broken — it cannot " \
+"resume a coroutine onto a freshly mmap'd stack, which is " \
+"required by the scheduler. Port jinn_context_t and the " \
+"swap/start asm in runtime/sched.c, runtime/select.c and " \
+"runtime/channel.c before building on this architecture."
 #endif
 
 /* ── Coroutine ───────────────────────────────────────────────────── */

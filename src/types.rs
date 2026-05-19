@@ -157,7 +157,7 @@ impl std::fmt::Display for Type {
             Self::F64 => f.write_str("f64"),
             Self::Bool => f.write_str("bool"),
             Self::Void => f.write_str("void"),
-            Self::String => f.write_str("String"),
+            Self::String => f.write_str("string"),
             Self::TypeVar(n) => write!(f, "?{n}"),
             Self::Struct(n, params) => {
                 write!(f, "{n}")?;

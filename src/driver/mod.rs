@@ -250,6 +250,10 @@ pub fn run() {
     }
 
     let input = cli.input.unwrap_or_else(|| die("no input file provided"));
+    // P1-17: `jinnc PATH/` and `jinnc PATH/project.jn` should both
+    // resolve to the project's declared entry file rather than try
+    // to compile the directory or the manifest itself.
+    let input = resolve_project_input(input);
     let src = fs::read_to_string(&input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let tokens = Lexer::new(&src)
@@ -633,4 +637,49 @@ pub fn run() {
         Ok(s) => die(&format!("linker failed: {}", s.code().unwrap_or(-1))),
         Err(e) => die(&format!("linker: {e}")),
     }
+}
+
+/// P1-17: resolve `jinnc PATH/` and `jinnc PATH/project.jn` to the
+/// project's declared entry file. A plain `.jn` source file is
+/// returned unchanged.
+fn resolve_project_input(input: PathBuf) -> PathBuf {
+    let project_jinn = if input.is_dir() {
+        input.join("project.jn")
+    } else if input.file_name().and_then(|n| n.to_str()) == Some("project.jn") {
+        input.clone()
+    } else {
+        return input;
+    };
+    if !project_jinn.exists() {
+        die(&format!(
+            "no project.jn at {} (pass a .jn source file instead, or run `jinnc init`)",
+            project_jinn.display()
+        ));
+    }
+    let cfg = ProjectConfig::from_file(&project_jinn)
+        .unwrap_or_else(|e| die(&format!("project.jn: {e}")));
+    let project_dir = project_jinn.parent().unwrap_or(std::path::Path::new("."));
+    if let Some(entry) = cfg.entry {
+        let entry_path = project_dir.join(&entry);
+        if !entry_path.exists() {
+            die(&format!(
+                "entry file not found: {} (declared in {})",
+                entry_path.display(),
+                project_jinn.display()
+            ));
+        }
+        return entry_path;
+    }
+    for candidate in [
+        project_dir.join("source").join("main.jn"),
+        project_dir.join("src").join("main.jn"),
+    ] {
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    die(&format!(
+        "{} has no `entry is …` declaration and no source/main.jn or src/main.jn fallback",
+        project_jinn.display()
+    ));
 }

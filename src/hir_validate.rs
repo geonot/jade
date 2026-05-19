@@ -113,7 +113,7 @@ impl HirValidator {
                 self.validate_expr(&b.value);
                 if b.ty != b.value.ty && b.value.ty != Type::Void {
                     self.errors.push(format!(
-                        "type mismatch in binding `{}` at line {}: declared {:?} but value is {:?}",
+                        "type mismatch in binding `{}` at line {}: declared {} but value is {}",
                         b.name, b.span.line, b.ty, b.value.ty
                     ));
                 }
