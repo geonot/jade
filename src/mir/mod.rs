@@ -43,8 +43,6 @@ pub struct PerceusMeta {
 
     pub tail_reuse: HashMap<ValueId, ValueId>,
 
-    pub pool_allocs: HashSet<ValueId>,
-
     pub vec_slots: HashSet<u32>,
 }
 
