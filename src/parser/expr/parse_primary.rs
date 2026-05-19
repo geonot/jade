@@ -229,6 +229,22 @@ impl Parser {
                 let name = name.clone();
                 self.advance();
 
+                // P0-5: `take EXPR` in expression position. The borrow/ownership
+                // story for parameters with `take` access mod is already
+                // enforced at the binding (parameter) side — passing a Var to
+                // a `take` parameter moves it. Accept the `take EXPR` syntax
+                // at the call site as a transparent marker (no AST node yet;
+                // future P0-5 extension may add Expr::Take for richer moves
+                // like `take v.field`).
+                if name.with_str(|s| s == "take")
+                    && matches!(
+                        self.peek(),
+                        Token::Ident(_) | Token::LParen | Token::Star
+                    )
+                {
+                    return self.parse_unary();
+                }
+
                 if (name.with_str(|s| s == "vector" || s == "vec")) && self.check(Token::LBracket) {
                     self.advance();
                     self.skip_ws();
