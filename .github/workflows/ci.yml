@@ -41,3 +41,66 @@ jobs:
 
       - name: Tests
         run: cargo test --all-targets
+
+  fuzz-smoke:
+    # Coverage-guided fuzz harnesses (P0-11). Requires nightly for
+    # cargo-fuzz. Runs each target for a short window — long enough
+    # to catch new panics on every PR without blocking merges on
+    # exhaustive coverage. A separate scheduled job (TODO) can run
+    # the same harnesses for hours.
+    runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_210_PREFIX: /usr/lib/llvm-21
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust nightly + cargo-fuzz
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Install LLVM 21 + build deps
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo apt-key add llvm-snapshot.gpg.key
+          sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-21 llvm-21-dev clang-21 lld-21 pkg-config libssl-dev libsqlite3-dev
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Fuzz lexer (30s)
+        working-directory: fuzz
+        run: cargo +nightly fuzz run lexer -- -max_total_time=30
+      - name: Fuzz parser (30s)
+        working-directory: fuzz
+        run: cargo +nightly fuzz run parser -- -max_total_time=30
+      - name: Fuzz typer (30s)
+        working-directory: fuzz
+        run: cargo +nightly fuzz run typer -- -max_total_time=30
+
+  sanitize:
+    # Runtime C sanitizer sweep (P0-11). Builds the C runtime under
+    # ASan+UBSan and again under TSan, then runs the full test
+    # suite under each. Runs on every PR but is allowed to fail
+    # (continue-on-error) until the runtime is fully clean.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      LLVM_SYS_210_PREFIX: /usr/lib/llvm-21
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install LLVM 21 + build deps
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo apt-key add llvm-snapshot.gpg.key
+          sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-21 llvm-21-dev clang-21 lld-21 pkg-config libssl-dev libsqlite3-dev
+      - name: Run sanitize sweep
+        run: ./ci/sanitize.sh
