@@ -1,7 +1,6 @@
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Token;
-use crate::types::Type;
 
 impl Parser {
     pub(in crate::parser) fn parse_primary(&mut self) -> Result<Expr, ParseError> {

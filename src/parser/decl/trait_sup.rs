@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::lexer::Token;
-use crate::types::Type;
 
 use super::super::{ParseError, Parser};
 use super::Either;

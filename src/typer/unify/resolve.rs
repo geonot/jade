@@ -1,6 +1,4 @@
-use crate::ast::Span;
 use crate::types::Type;
-use indexmap::IndexMap;
 use std::collections::HashMap;
 
 use super::{InferCtx, TypeConstraint};

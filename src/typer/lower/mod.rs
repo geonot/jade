@@ -1,11 +1,10 @@
 use crate::intern::Symbol;
-use std::collections::HashMap;
 
-use crate::ast::{self, Span};
-use crate::hir::{self, DefId, Ownership};
+use crate::ast::{self};
+use crate::hir::{self};
 use crate::types::Type;
 
-use super::{Typer, VarInfo};
+use super::Typer;
 use resolve::type_references_name;
 
 mod block;
@@ -219,7 +218,7 @@ impl Typer {
         if !actor_names.is_empty() {
             let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
             for k in fn_keys {
-                if let Some((id, ptys, ret)) = self.fns.remove(&k) {
+                if let Some((id, ptys, ret)) = self.fns.shift_remove(&k) {
                     let ptys: Vec<Type> = ptys
                         .into_iter()
                         .map(|t| Self::normalize_actor_refs(t, &actor_names))
@@ -231,7 +230,7 @@ impl Typer {
 
             let actor_keys: Vec<Symbol> = self.actors.keys().cloned().collect();
             for k in actor_keys {
-                if let Some((id, fields, handlers)) = self.actors.remove(&k) {
+                if let Some((id, fields, handlers)) = self.actors.shift_remove(&k) {
                     let handlers = handlers
                         .into_iter()
                         .map(|(hn, ptys, tag)| {

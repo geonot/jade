@@ -2,7 +2,6 @@ use crate::ast::Span;
 use crate::intern::Symbol;
 use crate::types::Type;
 use indexmap::IndexMap;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ConstraintOrigin {

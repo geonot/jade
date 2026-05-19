@@ -217,103 +217,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    pub(in crate::codegen::drop) fn drop_set_deep(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        elem: &Type,
-    ) -> Result<(), String> {
-        if elem.is_trivially_droppable() {
-            return self.drop_container_simple(val);
-        }
-
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let header_ty = self.vec_header_type();
-        let i64t = self.ctx.i64_type();
-        let i8t = self.ctx.i8_type();
-        let fv = self.current_fn();
-        let free = self.ensure_free();
-        let null = ptr_ty.const_null();
-
-        let header_ptr = val.into_pointer_value();
-        let is_null =
-            b!(self
-                .bld
-                .build_int_compare(inkwell::IntPredicate::EQ, header_ptr, null, "dsd.null"));
-        let drop_bb = self.ctx.append_basic_block(fv, "dsd.drop");
-        let done_bb = self.ctx.append_basic_block(fv, "dsd.done");
-        b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
-        self.bld.position_at_end(drop_bb);
-
-        let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dsd.d"));
-        let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dsd.buf")).into_pointer_value();
-        let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "dsd.c"));
-        let cap = b!(self.bld.build_load(i64t, cap_gep, "dsd.cap")).into_int_value();
-
-        let bucket_size = i64t.const_int(48, false);
-
-        let loop_bb = self.ctx.append_basic_block(fv, "dsd.loop");
-        let check_bb = self.ctx.append_basic_block(fv, "dsd.check");
-        let body_bb = self.ctx.append_basic_block(fv, "dsd.body");
-        let inc_bb = self.ctx.append_basic_block(fv, "dsd.inc");
-        let post_bb = self.ctx.append_basic_block(fv, "dsd.post");
-
-        b!(self.bld.build_unconditional_branch(loop_bb));
-        self.bld.position_at_end(loop_bb);
-        let phi = b!(self.bld.build_phi(i64t, "dsd.i"));
-        phi.add_incoming(&[(&i64t.const_int(0, false), drop_bb)]);
-        let i = phi.as_basic_value().into_int_value();
-        let cond = b!(self
-            .bld
-            .build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dsd.cmp"));
-        b!(self.bld.build_conditional_branch(cond, check_bb, post_bb));
-
-        self.bld.position_at_end(check_bb);
-        let offset = b!(self.bld.build_int_mul(i, bucket_size, "dsd.off"));
-        let occ_off = b!(self
-            .bld
-            .build_int_add(offset, i64t.const_int(40, false), "dsd.ooff"));
-        let occ_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dsd.ocp")) };
-        let occ = b!(self.bld.build_load(i8t, occ_ptr, "dsd.occ")).into_int_value();
-        let is_occupied = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::NE,
-            occ,
-            i8t.const_int(0, false),
-            "dsd.occ_ne"
-        ));
-        b!(self
-            .bld
-            .build_conditional_branch(is_occupied, body_bb, inc_bb));
-
-        self.bld.position_at_end(body_bb);
-        let elem_off = b!(self
-            .bld
-            .build_int_add(offset, i64t.const_int(8, false), "dsd.eoff"));
-        let elem_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[elem_off], "dsd.ep")) };
-        let elem_llvm = self.llvm_ty(elem);
-        let elem_val = b!(self.bld.build_load(elem_llvm, elem_ptr, "dsd.ev"));
-        self.drop_value(elem_val, elem)?;
-        let after_drop_bb = self.current_bb();
-        b!(self.bld.build_unconditional_branch(inc_bb));
-
-        self.bld.position_at_end(inc_bb);
-        let inc_phi = b!(self.bld.build_phi(i64t, "dsd.iphi"));
-        inc_phi.add_incoming(&[(&i, check_bb), (&i, after_drop_bb)]);
-        let next = b!(self.bld.build_int_add(
-            inc_phi.as_basic_value().into_int_value(),
-            i64t.const_int(1, false),
-            "dsd.next"
-        ));
-        phi.add_incoming(&[(&next, inc_bb)]);
-        b!(self.bld.build_unconditional_branch(loop_bb));
-
-        self.bld.position_at_end(post_bb);
-        b!(self.bld.build_call(free, &[data_ptr.into()], ""));
-        b!(self.bld.build_call(free, &[header_ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(done_bb));
-        self.bld.position_at_end(done_bb);
-        Ok(())
-    }
-
     pub(in crate::codegen::drop) fn drop_container_simple(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -345,35 +248,6 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(done_bb);
         Ok(())
-    }
-
-    pub(in crate::codegen::drop) fn drop_container_header(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-        _elem: &Type,
-    ) -> Result<(), String> {
-        self.drop_container_simple(val)
-    }
-
-    pub(in crate::codegen::drop) fn drop_arena(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-    ) -> Result<(), String> {
-        let arena_ty = self.arena_type();
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let ptr = val.into_pointer_value();
-        let base_gep = b!(self.bld.build_struct_gep(arena_ty, ptr, 0, "da.base.p"));
-        let base = b!(self.bld.build_load(ptr_ty, base_gep, "da.base"));
-        let free = self.ensure_free();
-        b!(self.bld.build_call(free, &[base.into()], ""));
-        Ok(())
-    }
-
-    pub(in crate::codegen::drop) fn drop_ndarray(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-    ) -> Result<(), String> {
-        self.drop_ptr_allocated(val)
     }
 
     pub(in crate::codegen::drop) fn drop_ptr_allocated(

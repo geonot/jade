@@ -9,15 +9,14 @@ mod op;
 mod store;
 mod typeargs;
 
-use crate::intern::Symbol;
 use std::path::PathBuf;
 
-use crate::ast::{self, BinOp, Span, UnaryOp};
-use crate::hir::{self, CoercionKind, DefId, Ownership};
+use crate::ast::{self};
+use crate::hir::{self, CoercionKind};
 use crate::types::Type;
 
 pub(super) use super::{DeferredField, unify};
-use super::{Typer, VarInfo};
+use super::Typer;
 
 impl Typer {
     pub(crate) fn lower_expr(&mut self, expr: &ast::Expr) -> Result<hir::Expr, String> {

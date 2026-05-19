@@ -333,13 +333,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn compile_spawn(
-        &mut self,
-        actor_name: &str,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.compile_spawn_with_inits(actor_name, &[])
-    }
-
     pub(crate) fn synthesize_field_init(
         &mut self,
         field: &crate::hir::Field,

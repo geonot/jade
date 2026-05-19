@@ -1,28 +1,19 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
-use clap::{Parser as ClapParser, Subcommand};
 use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
-use crate::ast::{Decl, Program, Stmt};
-use crate::cache::{Cache, build_package_map};
 use crate::codegen::Compiler;
 use crate::intern::Symbol;
 use crate::lexer::Lexer;
-use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
 use crate::parser::Parser;
-use crate::perceus::PerceusPass;
-use crate::pkg::{Dependency, Package, SemVer};
-use crate::resolve::prefix_module;
 use crate::typer::Typer;
 
 use super::cli::strip_codegen_prefix;
 use super::cli::*;
-use super::project::*;
 use super::sources::{
     EntityIndex, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules,
 };
@@ -90,9 +81,6 @@ pub(super) fn compile_and_link(
     };
 
     crate::comptime::fold_program(&mut hir_prog);
-
-    let mut perceus = PerceusPass::new();
-    let _hir_hints = perceus.optimize(&hir_prog);
 
     let mut verifier = OwnershipVerifier::new();
     let diags = verifier.verify(&hir_prog);

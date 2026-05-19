@@ -1,7 +1,7 @@
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
 use crate::intern::Symbol;
-use crate::types::{Scheme, Type};
+use crate::types::Type;
 
 use super::super::{Typer, VarInfo};
 

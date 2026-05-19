@@ -234,63 +234,6 @@ impl<'ctx> Compiler<'ctx> {
         (target_idx * 8) as u64
     }
 
-    pub(in crate::codegen) fn emit_dyn_dispatch(
-        &mut self,
-        obj: mir::ValueId,
-        trait_name: &str,
-        method: &str,
-        args: &[mir::ValueId],
-        result_ty: &Type,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let fat = self.val(obj);
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let fat_ty = self.ctx.struct_type(&[ptr_ty.into(), ptr_ty.into()], false);
-
-        let tmp = self.entry_alloca(fat_ty.into(), "dyn.tmp");
-        b!(self.bld.build_store(tmp, fat));
-        let data_gep = b!(self.bld.build_struct_gep(fat_ty, tmp, 0, "dyn.data.gep"));
-        let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dyn.data")).into_pointer_value();
-        let vtable_gep = b!(self.bld.build_struct_gep(fat_ty, tmp, 1, "dyn.vtable.gep"));
-        let vtable_ptr =
-            b!(self.bld.build_load(ptr_ty, vtable_gep, "dyn.vtable")).into_pointer_value();
-
-        let method_idx = self
-            .trait_method_order
-            .get(trait_name)
-            .and_then(|methods| methods.iter().position(|m| m == method))
-            .unwrap_or(0) as u64;
-
-        let fn_ptr_gep = unsafe {
-            b!(self.bld.build_gep(
-                ptr_ty,
-                vtable_ptr,
-                &[self.ctx.i64_type().const_int(method_idx, false)],
-                "dyn.fn.gep"
-            ))
-        };
-        let fn_ptr = b!(self.bld.build_load(ptr_ty, fn_ptr_gep, "dyn.fn")).into_pointer_value();
-
-        let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
-            vec![data_ptr.into()];
-        for a in args {
-            call_args.push(self.val(*a).into());
-        }
-
-        let ret_ty = self.llvm_ty(result_ty);
-        let mut param_tys: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
-        for a in args {
-            param_tys.push(self.val(*a).get_type().into());
-        }
-        let fn_ty = ret_ty.fn_type(&param_tys, false);
-        let result = b!(self
-            .bld
-            .build_indirect_call(fn_ty, fn_ptr, &call_args, "dyn.call"));
-        Ok(result
-            .try_as_basic_value()
-            .basic()
-            .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
-    }
-
     pub(in crate::codegen) fn emit_slice(
         &mut self,
         base: mir::ValueId,

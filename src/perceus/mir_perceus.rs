@@ -4,7 +4,7 @@ use crate::ast::Span;
 use crate::mir::{self, InstKind, Instruction, Terminator, ValueId};
 use crate::types::Type;
 
-use super::{PerceusHints, PerceusPass};
+use super::PerceusHints;
 
 pub fn analyze_mir_program(prog: &mut mir::Program) -> PerceusHints {
     run(prog)
@@ -28,8 +28,7 @@ fn run_on_function(func: &mut mir::Function, hints: &mut PerceusHints, next_slot
 
     drop_elision(func, hints);
 
-    let uses = count_uses(func);
-    vec_reuse_pairing(func, &uses, hints, next_slot);
+    vec_reuse_pairing(func, hints, next_slot);
     drop_fusion(func, hints);
 }
 
@@ -38,7 +37,6 @@ struct UseInfo {
     use_count: u32,
     escapes: bool,
     captured: bool,
-    ty: Type,
 
     last_use: Option<(usize, usize)>,
 }
@@ -53,7 +51,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
                 use_count: 0,
                 escapes: false,
                 captured: false,
-                ty: p.ty.clone(),
                 last_use: None,
             },
         );
@@ -64,7 +61,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
                 use_count: 0,
                 escapes: false,
                 captured: false,
-                ty: phi.ty.clone(),
                 last_use: None,
             });
         }
@@ -74,7 +70,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
                     use_count: 0,
                     escapes: false,
                     captured: false,
-                    ty: inst.ty.clone(),
                     last_use: None,
                 });
             }
@@ -444,7 +439,6 @@ fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
 
 fn vec_reuse_pairing(
     func: &mut mir::Function,
-    uses: &HashMap<ValueId, UseInfo>,
     hints: &mut PerceusHints,
     next_slot: &mut u32,
 ) {

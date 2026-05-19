@@ -1,5 +1,4 @@
 use super::*;
-use super::*;
 
 #[test]
 fn test_fresh_var() {

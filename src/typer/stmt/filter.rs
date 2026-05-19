@@ -1,9 +1,9 @@
 use crate::ast;
-use crate::hir::{self, DefId, Ownership};
+use crate::hir::{self};
 use crate::intern::Symbol;
-use crate::types::{Scheme, Type};
+use crate::types::Type;
 
-use super::super::{Typer, VarInfo};
+use super::super::Typer;
 
 impl Typer {
     pub(crate) fn lower_store_filter(

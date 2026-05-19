@@ -390,13 +390,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    pub(super) fn emit_spawn_actor(
-        &mut self,
-        actor_name: &str,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.compile_spawn(actor_name)
-    }
-
     pub(super) fn emit_spawn_actor_with_inits(
         &mut self,
         actor_name: &str,

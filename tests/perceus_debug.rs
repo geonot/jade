@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct MirSummary {
     drops_elided: u32,
     drops_sunk: u32,

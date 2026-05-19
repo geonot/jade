@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_210_PREFIX: /usr/lib/llvm-21
+      RUSTFLAGS: "-D warnings"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

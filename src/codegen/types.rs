@@ -81,21 +81,6 @@ impl<'ctx> Compiler<'ctx> {
         self.ctx.struct_type(&[ptr.into(), ptr.into()], false)
     }
 
-    pub(crate) fn arena_type(&self) -> inkwell::types::StructType<'ctx> {
-        self.module.get_struct_type("Arena").unwrap_or_else(|| {
-            let st = self.ctx.opaque_struct_type("Arena");
-            st.set_body(
-                &[
-                    self.ctx.ptr_type(AddressSpace::default()).into(),
-                    self.ctx.i64_type().into(),
-                    self.ctx.i64_type().into(),
-                ],
-                false,
-            );
-            st
-        })
-    }
-
     pub(crate) fn type_store_size(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
         match ty {
             BasicTypeEnum::IntType(it) => ((it.get_bit_width() + 7) / 8) as u64,

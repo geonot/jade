@@ -1,10 +1,6 @@
 use crate::ast::*;
 use crate::lexer::Token;
 
-use super::expr::{
-    contains_index_placeholder_in_block, contains_placeholder_in_block,
-    replace_index_placeholder_in_block, replace_placeholder_in_block,
-};
 use super::{ParseError, Parser};
 
 impl Parser {

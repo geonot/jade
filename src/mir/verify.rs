@@ -65,7 +65,7 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
     }
 
     let mut value_ty: HashMap<ValueId, Type> = HashMap::new();
-    let mut redef = |v: ValueId,
+    let redef = |v: ValueId,
                      ty: &Type,
                      site: &str,
                      value_ty: &mut HashMap<ValueId, Type>,

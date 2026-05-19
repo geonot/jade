@@ -4,9 +4,8 @@ mod cmd_pkg;
 mod pipeline;
 mod project;
 mod sources;
-mod undef;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -15,24 +14,20 @@ use clap::Parser as ClapParser;
 use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 
-use crate::ast::{Decl, Program, Stmt};
-use crate::cache::Cache;
 use crate::codegen::Compiler;
 use crate::intern::Symbol;
 use crate::lexer::Lexer;
-use crate::lock::Lockfile;
 use crate::ownership::OwnershipVerifier;
 use crate::parser::Parser;
-use crate::perceus::PerceusPass;
 use crate::typer::Typer;
 
-use cli::{Cli, Cmd, die, dirs_cache, find_project_root, strip_codegen_prefix};
+use cli::{Cli, Cmd, die, dirs_cache, strip_codegen_prefix};
 use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{
-    EntityIndex, collect_jinn_files, find_project_entry, load_packages, merge_source_files,
+    EntityIndex, find_project_entry, load_packages, merge_source_files,
     resolve_implicit_imports, resolve_modules,
 };
 
