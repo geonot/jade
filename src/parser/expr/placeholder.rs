@@ -1,5 +1,61 @@
 use crate::ast::*;
 
+pub(in crate::parser) fn is_hof_name(name: &str) -> bool {
+    matches!(
+        name,
+        "map"
+            | "filter"
+            | "fold"
+            | "reduce"
+            | "each"
+            | "for_each"
+            | "any"
+            | "all"
+            | "find"
+            | "count_by"
+            | "group_by"
+            | "sort_by"
+            | "min_by"
+            | "max_by"
+            | "take_while"
+            | "drop_while"
+            | "flat_map"
+            | "partition"
+    )
+}
+
+/// Lift any argument containing a top-level lambda placeholder (`$`) into a
+/// single-parameter lambda. Used by HOF call/method dispatch so that
+/// `map(v, $ * 2)` and `v.map($ * 2)` both build a `Lambda` argument.
+pub(in crate::parser) fn lift_hof_placeholder_args(args: Vec<Expr>) -> Vec<Expr> {
+    args.into_iter()
+        .map(|arg| {
+            if contains_lambda_placeholder(&arg)
+                && !matches!(arg, Expr::Placeholder(_))
+                && !matches!(arg, Expr::Lambda(..))
+            {
+                let asp = arg.span();
+                let replaced = replace_placeholder(&arg, "__ph");
+                Expr::Lambda(
+                    vec![Param {
+                        name: "__ph".into(),
+                        ty: None,
+                        default: None,
+                        literal: None,
+                        access_mod: None,
+                        span: asp,
+                    }],
+                    None,
+                    vec![Stmt::Expr(replaced)],
+                    asp,
+                )
+            } else {
+                arg
+            }
+        })
+        .collect()
+}
+
 pub(in crate::parser) fn contains_placeholder(expr: &Expr) -> bool {
     match expr {
         Expr::Placeholder(_) | Expr::IndexPlaceholder(_) => true,

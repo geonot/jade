@@ -250,14 +250,31 @@ impl Typer {
                     span,
                 }))
             }
-            "map" if !self.fns.contains_key(name) => Some(Ok(hir::Expr {
-                kind: hir::ExprKind::MapNew,
-                ty: Type::Map(
-                    Box::new(Type::String),
-                    Box::new(self.infer_ctx.fresh_integer_var()),
-                ),
-                span,
-            })),
+            "map" if !self.fns.contains_key(name) => {
+                // P0-4: `map(v, f)` is a HOF over the first arg's collection;
+                // route to the method-call path so the closure parameter is
+                // inferred as the element type (not a slot pointer).
+                if args.len() >= 1 {
+                    let probe = match self.lower_expr(&args[0]) {
+                        Ok(e) => e,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
+                    if matches!(probe_ty, Type::Vec(_) | Type::Array(_, _)) {
+                        return Some(
+                            self.lower_method_call(&args[0], "map", &args[1..], span),
+                        );
+                    }
+                }
+                Some(Ok(hir::Expr {
+                    kind: hir::ExprKind::MapNew,
+                    ty: Type::Map(
+                        Box::new(Type::String),
+                        Box::new(self.infer_ctx.fresh_integer_var()),
+                    ),
+                    span,
+                }))
+            }
             "vec_with_alloc" if args.len() == 1 && !self.fns.contains_key(name) => {
                 let halloc = match self.lower_expr(&args[0]) {
                     Ok(e) => e,

@@ -222,58 +222,12 @@ impl Parser {
                         let a = self.parse_args()?;
                         self.expect(Token::RParen)?;
 
-                        let is_hof = f.with_str(|s| {
-                            matches!(
-                                s,
-                                "map"
-                                    | "filter"
-                                    | "fold"
-                                    | "reduce"
-                                    | "each"
-                                    | "for_each"
-                                    | "any"
-                                    | "all"
-                                    | "find"
-                                    | "count_by"
-                                    | "group_by"
-                                    | "sort_by"
-                                    | "min_by"
-                                    | "max_by"
-                                    | "take_while"
-                                    | "drop_while"
-                                    | "flat_map"
-                                    | "partition"
-                            )
-                        });
-                        let a: Vec<Expr> = a
-                            .into_iter()
-                            .map(|arg| {
-                                if is_hof
-                                    && super::placeholder::contains_lambda_placeholder(&arg)
-                                    && !matches!(arg, Expr::Placeholder(_))
-                                    && !matches!(arg, Expr::Lambda(..))
-                                {
-                                    let asp = arg.span();
-                                    let replaced =
-                                        super::placeholder::replace_placeholder(&arg, "__ph");
-                                    Expr::Lambda(
-                                        vec![Param {
-                                            name: "__ph".into(),
-                                            ty: None,
-                                            default: None,
-                                            literal: None,
-                                            access_mod: None,
-                                            span: asp,
-                                        }],
-                                        None,
-                                        vec![Stmt::Expr(replaced)],
-                                        asp,
-                                    )
-                                } else {
-                                    arg
-                                }
-                            })
-                            .collect();
+                        let is_hof = f.with_str(super::placeholder::is_hof_name);
+                        let a: Vec<Expr> = if is_hof {
+                            super::placeholder::lift_hof_placeholder_args(a)
+                        } else {
+                            a
+                        };
                         e = Expr::Method(Box::new(e), f, a, sp);
                     } else {
                         e = Expr::Field(Box::new(e), f, sp);
@@ -297,6 +251,19 @@ impl Parser {
                     self.advance();
                     let a = self.parse_args()?;
                     self.expect(Token::RParen)?;
+                    // P0-4: when the callee is a free-function HOF name
+                    // (`map(v, $ * 2)`, `filter(v, $ > 0)`, ...), apply the
+                    // same lambda-placeholder lift as for method form so the
+                    // typer's HOF dispatch sees a real Lambda.
+                    let a: Vec<Expr> = if let Expr::Ident(name, _) = &e {
+                        if name.with_str(super::placeholder::is_hof_name) {
+                            super::placeholder::lift_hof_placeholder_args(a)
+                        } else {
+                            a
+                        }
+                    } else {
+                        a
+                    };
                     e = Expr::Call(Box::new(e), a, sp);
                 }
                 Token::As => {
