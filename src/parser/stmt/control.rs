@@ -20,8 +20,7 @@ impl Parser {
             self.expect(Token::Newline)?;
             elifs.push((c, self.parse_block()?));
         }
-        // Accept `elif cond` and `else if cond` interchangeably, then an
-        // optional final `else` block.
+
         let mut consumed_else = false;
         loop {
             if self.check(Token::Elif) {
@@ -75,7 +74,7 @@ impl Parser {
     pub(in crate::parser) fn parse_for(&mut self) -> Result<Stmt, ParseError> {
         let sp = self.span();
         self.expect(Token::For)?;
-        // Optional access modifier on the loop binder: `for copy/ref/mut/take x in xs`.
+
         let access_mod = self.try_parse_access_mod_at_binder_pos();
         let bind = self.ident()?;
         let bind2 = if self.check(Token::Comma) {
@@ -146,8 +145,6 @@ impl Parser {
             self.advance();
             self.parse_block()?
         } else {
-            // Inline body: a single statement so `pat ? x is y` (assignment),
-            // `pat ? return x`, etc. all work — not just expressions.
             vec![self.parse_stmt()?]
         };
         Ok(Arm {
@@ -193,10 +190,9 @@ impl Parser {
                 let t = &self.tok[self.pos];
                 let tok_str = t.token.to_string();
                 if !line.is_empty() {
-                    // Don't insert space before closing delimiters or comma
                     let no_space_before =
                         matches!(t.token, Token::RParen | Token::RBracket | Token::Comma);
-                    // Don't insert space after opening delimiters
+
                     let no_space_after = line.ends_with('(') || line.ends_with('[');
                     if !no_space_before && !no_space_after {
                         line.push(' ');

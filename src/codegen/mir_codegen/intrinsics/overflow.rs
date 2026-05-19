@@ -1,9 +1,6 @@
-//! Overflow arithmetic intrinsic MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Handle overflow builtins that MIR lowered as `__builtin_WrappingAdd` etc.
     pub(in crate::codegen) fn try_handle_overflow_builtin(
         &mut self,
         name: &str,
@@ -13,7 +10,7 @@ impl<'ctx> Compiler<'ctx> {
             Some(n) => n,
             None => return Ok(None),
         };
-        // ── Bit intrinsics (1 arg) ──
+
         match builtin_name {
             "Bswap" | "Popcount" | "Clz" | "Ctz" | "RotateLeft" | "RotateRight" => {
                 return self.try_handle_bit_builtin(builtin_name, args);
@@ -345,7 +342,7 @@ impl<'ctx> Compiler<'ctx> {
                     self.ctx.i64_type().const_int(1, false),
                     ptr_t,
                     "sig_ign"
-                )); // SIG_IGN = 1
+                ));
                 let func = self.module.get_function("signal").unwrap_or_else(|| {
                     self.module
                         .add_function("signal", ft, Some(inkwell::module::Linkage::External))
@@ -477,11 +474,10 @@ impl<'ctx> Compiler<'ctx> {
         let lhs = self.val(args[0]).into_int_value();
         let rhs = self.val(args[1]).into_int_value();
         let result = match builtin_name {
-            // Wrapping ops — just normal LLVM int arithmetic (wraps naturally)
             "WrappingAdd" => b!(self.bld.build_int_add(lhs, rhs, "wrap.add")),
             "WrappingSub" => b!(self.bld.build_int_sub(lhs, rhs, "wrap.sub")),
             "WrappingMul" => b!(self.bld.build_int_mul(lhs, rhs, "wrap.mul")),
-            // Saturating ops — use LLVM intrinsics
+
             "SaturatingAdd" => {
                 let bw = lhs.get_type().get_bit_width();
                 let name = format!("llvm.sadd.sat.i{bw}");
@@ -515,7 +511,6 @@ impl<'ctx> Compiler<'ctx> {
                     .into_int_value()
             }
             "SaturatingMul" => {
-                // No LLVM intrinsic for sat mul; use checked mul + select
                 let bw = lhs.get_type().get_bit_width();
                 let intr = format!("llvm.smul.with.overflow.i{bw}");
                 let ovf_ty = self
@@ -536,7 +531,7 @@ impl<'ctx> Compiler<'ctx> {
                 let max_val = lhs.get_type().const_int(i64::MAX as u64, false);
                 b!(self.bld.build_select(ovf, max_val, val, "sat.mul")).into_int_value()
             }
-            // Checked ops — return {value, overflow_flag}
+
             "CheckedAdd" => {
                 let bw = lhs.get_type().get_bit_width();
                 let intr = format!("llvm.sadd.with.overflow.i{bw}");
@@ -553,7 +548,7 @@ impl<'ctx> Compiler<'ctx> {
                     .basic()
                     .expect("ICE: call returned void")
                     .into_struct_value();
-                // Return just the value; overflow info is in the struct
+
                 b!(self.bld.build_extract_value(r, 0, "cadd.val")).into_int_value()
             }
             "CheckedSub" => {

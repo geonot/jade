@@ -1,5 +1,3 @@
-//! Codegen for string transformation builtins (case, slice, split, etc.).
-
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 

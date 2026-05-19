@@ -1,10 +1,3 @@
-//! FFI re-exports of selected runtime entry points so integration tests
-//! can exercise the C runtime directly. Linking through `pub` items here
-//! prevents the static archive from being dead-stripped.
-//!
-//! Not part of the user-visible API surface; only used by the Jinn
-//! crash-recovery and runtime smoke tests.
-
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
@@ -29,8 +22,6 @@ unsafe extern "C" {
     pub fn jinn_wal_checkpoint(wal: *mut CFile);
 }
 
-/// Force linker to retain the WAL symbols by referencing each function
-/// pointer. Called from a constructor in the test harness.
 #[doc(hidden)]
 pub fn force_link_wal() -> [usize; 7] {
     [
@@ -44,7 +35,5 @@ pub fn force_link_wal() -> [usize; 7] {
     ]
 }
 
-// Suppress unused-import warnings for the C-int alias on platforms where
-// future runtime additions may need it.
 #[allow(dead_code)]
 fn _force_use(_: c_int) {}

@@ -1,5 +1,3 @@
-//! Numeric, string, raw string, and identifier lexing helpers.
-
 use super::*;
 
 impl<'s> Lexer<'s> {
@@ -99,9 +97,7 @@ impl<'s> Lexer<'s> {
             .filter(|&&b| b != b'_')
             .map(|&b| b as char)
             .collect();
-        // Use u64::from_str_radix so values that bit-fit in i64 but exceed
-        // i64::MAX (e.g. 0x180ec6d33cfd0aba) lex successfully and are
-        // reinterpreted as the equivalent signed bit pattern.
+
         let val = u64::from_str_radix(&text, radix)
             .map(|u| u as i64)
             .map_err(|_| self.mkerr(&format!("bad base-{radix} literal")))?;
@@ -113,15 +109,15 @@ impl<'s> Lexer<'s> {
 
     pub(in crate::lexer) fn lex_string(&mut self) -> Result<Spanned, LexError> {
         let (start, sc) = (self.pos, self.col);
-        self.advance(); // consume first '
-        // Check for triple-quoted string '''...'''
+        self.advance();
+
         if self.pos + 1 < self.src.len()
             && self.src[self.pos] == b'\''
             && self.src[self.pos + 1] == b'\''
         {
-            self.advance(); // consume second '
-            self.advance(); // consume third '
-            // Skip optional leading newline
+            self.advance();
+            self.advance();
+
             if self.pos < self.src.len() && self.src[self.pos] == b'\n' {
                 self.line += 1;
                 self.col = 0;
@@ -134,9 +130,9 @@ impl<'s> Lexer<'s> {
                     && self.src[self.pos + 1] == b'\''
                     && self.src[self.pos + 2] == b'\''
                 {
-                    self.advance(); // consume first '
-                    self.advance(); // consume second '
-                    self.advance(); // consume third '
+                    self.advance();
+                    self.advance();
+                    self.advance();
                     return Ok(Spanned {
                         token: Token::Str(val),
                         span: Span::new(start, self.pos, self.line, sc),
@@ -161,10 +157,6 @@ impl<'s> Lexer<'s> {
                 return self.err("unterminated string");
             }
             if self.src[self.pos] == b'{' {
-                // Heuristic: a `{` immediately followed by `"`, `'`, `{`, `}`,
-                // a digit-other-than-an-identifier, or end-of-string is treated
-                // as a literal brace (e.g. embedding JSON in a string). This
-                // avoids accidentally entering interpolation for `'{"x":1}'`.
                 let next = self.src.get(self.pos + 1).copied();
                 let starts_interp = match next {
                     None => false,
@@ -199,8 +191,8 @@ impl<'s> Lexer<'s> {
                     token: Token::InterpStart,
                     span: sp,
                 });
-                self.advance(); // skip '{'
-                // Inline lex: lex tokens at current position tracking brace depth
+                self.advance();
+
                 let mut depth = 1u32;
                 while self.pos < self.src.len() && depth > 0 {
                     let ch = self.src[self.pos];
@@ -233,7 +225,7 @@ impl<'s> Lexer<'s> {
                     token: Token::InterpEnd,
                     span: isp,
                 });
-                self.advance(); // skip '}'
+                self.advance();
                 continue;
             }
             if self.src[self.pos] == b'\\' {
@@ -305,11 +297,7 @@ impl<'s> Lexer<'s> {
             self.advance();
         }
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        // P0-10: when the immediately preceding token was `.`, this
-        // identifier is a member/method name. Don't promote it to a
-        // language keyword \u2014 otherwise `ch.send(x)`, `xs.take()`, `obj.match`
-        // etc. would tokenize a keyword in identifier position and the
-        // parser would reject them.
+
         let tok = if self.after_dot {
             Token::Ident(Symbol::intern(text))
         } else {

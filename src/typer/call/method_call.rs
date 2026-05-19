@@ -1,5 +1,3 @@
-//! Extracted call-typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::HashMap;
@@ -19,12 +17,10 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
-        // Extracted: store-method dispatch
         if let Some(e) = self.dispatch_store_methods(obj, method, args, span)? {
             return Ok(e);
         }
 
-        // Extracted: view-method dispatch
         if let Some(e) = self.dispatch_view_methods(obj, method, args, span)? {
             return Ok(e);
         }
@@ -32,11 +28,6 @@ impl Typer {
         let hobj = self.lower_expr(obj)?;
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
-        // P5 §6.3: `.snapshot()` on `Row<store>` produces an owned copy
-        // of the underlying record (its `__store_{store}` struct). At
-        // this stage Row<T> and the inner struct share the same runtime
-        // representation, so `.snapshot()` is a pure type-rewrap; no
-        // MIR/codegen node is required.
         if let Type::Row(store) = &obj_ty {
             if method == "snapshot" {
                 if !args.is_empty() {
@@ -86,7 +77,7 @@ impl Typer {
                     span,
                     "actor method argument",
                 );
-                // P3: cross-thread @resource safety check.
+
                 self.enforce_cross_thread_safe(&harg.ty, span, "actor handler argument")?;
                 hargs.push(harg);
             }
@@ -104,11 +95,6 @@ impl Typer {
             });
         }
 
-        // ── Channel methods: `.send(x)`, `.recv()`, `.close()` ────────
-        // Surface sugar for ChannelSend/ChannelRecv/ChannelClose; the
-        // underlying HIR nodes are identical to those produced by the
-        // `ch <~ x` / `<~ ch` operators. Cross-thread @resource safety
-        // is enforced on send just like the operator form.
         if let Type::Channel(elem_ty) = &obj_ty {
             let elem_ty = (**elem_ty).clone();
             match method {
@@ -147,10 +133,6 @@ impl Typer {
                     });
                 }
                 "close" => {
-                    // `close` is a statement (`close ch`), not an expression.
-                    // We could synthesize a Void-typed wrapper, but the dedicated
-                    // statement form is the canonical surface; keep things simple
-                    // and direct users to it.
                     return Err(format!(
                         "{}: channel close is the statement `close {{ch}}`, not a method; use `close {{ch}}` instead of `.close()`",
                         span.loc()
@@ -185,7 +167,6 @@ impl Typer {
         };
 
         if let Some(ref elem_ty) = vec_elem_ty {
-            // Iterator combinator methods that need special type handling
             match method {
                 "map" => {
                     if args.len() != 1 {
@@ -295,7 +276,7 @@ impl Typer {
                             span,
                         });
                     }
-                    // zip: Vec<A>.zip(Vec<B>) -> Vec<(A, B)>
+
                     let other_elem = match &harg.ty {
                         Type::Vec(et) => et.as_ref().clone(),
                         _ => return Err("zip() argument must be a Vec".into()),
@@ -324,7 +305,7 @@ impl Typer {
                     self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
                 })
                 .collect::<Result<_, _>>()?;
-            // Explicitly unify argument types with expected types
+
             for (i, ha) in hargs.iter().enumerate() {
                 if let Some(Some(expected)) = expected_arg_tys.get(i) {
                     let _ = self
@@ -354,7 +335,7 @@ impl Typer {
                     self.lower_expr_expected(e, expected_arg_tys.get(i).copied().flatten())
                 })
                 .collect::<Result<_, _>>()?;
-            // Explicitly unify argument types with expected types
+
             for (i, ha) in hargs.iter().enumerate() {
                 if let Some(Some(expected)) = expected_arg_tys.get(i) {
                     let _ = self
@@ -371,7 +352,6 @@ impl Typer {
             });
         }
 
-        // Char/Unicode methods on integer types (char codepoints)
         if matches!(
             obj_ty,
             Type::I8
@@ -401,7 +381,6 @@ impl Typer {
             }
         }
 
-        // Float math methods on f64/f32 types
         if matches!(obj_ty, Type::F64 | Type::F32) {
             let float_ret = match method {
                 "sqrt" | "abs" | "floor" | "ceil" | "round" | "trunc" | "sin" | "cos" | "tan"
@@ -452,9 +431,6 @@ impl Typer {
             return Err(format!("no method '{method}' on Generator"));
         }
 
-        // DynTrait removed
-
-        // ── Option / Result enum methods ──
         if let Type::Enum(ref enum_name) = obj_ty {
             let is_option = enum_name.starts_with("Option_") || enum_name == "Option";
             let is_result = enum_name.starts_with("Result_") || enum_name == "Result";
@@ -462,7 +438,6 @@ impl Typer {
                 let variants = self.enums.get(enum_name).cloned().unwrap_or_default();
                 match method {
                     "unwrap" => {
-                        // Some/Ok is tag 0, inner type is field 0
                         let inner_ty = variants
                             .first()
                             .and_then(|(_, ftys)| ftys.first().cloned())
@@ -512,7 +487,7 @@ impl Typer {
                             .first()
                             .and_then(|(_, ftys)| ftys.first().cloned())
                             .unwrap_or(Type::I64);
-                        // Lower the default argument, then use a ternary: is_some ? unwrap : default
+
                         let default_arg = self.lower_expr_expected(&args[0], Some(&inner_ty))?;
                         let is_check = hir::Expr {
                             kind: hir::ExprKind::EnumIs(Box::new(hobj.clone()), 0),
@@ -534,7 +509,7 @@ impl Typer {
                             span,
                         });
                     }
-                    _ => {} // Fall through for other methods
+                    _ => {}
                 }
             }
         }
@@ -551,8 +526,6 @@ impl Typer {
             _ => None,
         };
 
-        // Heap nominals are intrinsically refcounted; no Rc wrapper to peel
-        // for method dispatch.
         let hobj = hobj;
 
         if let Some(ref type_name) = struct_type_name {
@@ -577,12 +550,7 @@ impl Typer {
                     span,
                 });
             }
-            // Default `obj.log()` for any struct type without a user-defined
-            // `log` method: desugar to the `log(self)` builtin which uses the
-            // default `Name @ 0xADDR { fields }` formatter at codegen time.
-            // This makes `log` a universal method (every type can be logged
-            // out of the box) while still allowing user override via a
-            // `*log` method on the type.
+
             if method == "log" && args.is_empty() {
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::Log, vec![hobj]),
@@ -593,8 +561,6 @@ impl Typer {
         }
 
         if matches!(obj_ty, Type::TypeVar(_)) {
-            // String-exclusive methods: if receiver is TypeVar and method is unique to String,
-            // immediately constrain receiver to String and dispatch.
             if Self::is_string_exclusive_method(method) {
                 let _ = self.infer_ctx.unify_at(
                     &obj_ty,

@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -25,9 +23,7 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
-                // P5 §6: a mutable query yields a `Row<store>` — a
-                // write-through handle. Use `.snapshot()` to get an
-                // owned copy of the record.
+
                 let _struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreQuery(store.clone(), Box::new(hfilter)),
@@ -105,8 +101,7 @@ impl Typer {
                     return Err(format!("unknown store '{store}'"));
                 }
                 let hkey = self.lower_expr(key_expr)?;
-                // P5 §6: `store.get(key)` returns `Row<store>` — see
-                // `lower_expr_store_query` for rationale.
+
                 let _struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreGet(store.clone(), Box::new(hkey)),
@@ -132,8 +127,7 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
-                // P5 §6: `store.first` returns `Row<store>` — see
-                // `lower_expr_store_query` for rationale.
+
                 let _struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreFirst(store.clone(), Box::new(hfilter)),

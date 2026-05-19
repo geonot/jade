@@ -1,5 +1,3 @@
-//! Per-expression typing rules.
-
 mod access;
 mod concur;
 mod construct;
@@ -138,8 +136,7 @@ impl Typer {
                 let hc = self.lower_expr(cond)?;
                 let ht = self.lower_expr_expected(then, expected)?;
                 let he = self.lower_expr_expected(els, expected)?;
-                // For partial ternaries (if-only or else-only), skip unification
-                // when one branch is Void — the result type comes from the non-Void branch.
+
                 let ty = match (&ht.ty, &he.ty) {
                     (Type::Void, _) => he.ty.clone(),
                     (_, Type::Void) => ht.ty.clone(),
@@ -206,7 +203,7 @@ impl Typer {
 
             ast::Expr::Ref(inner, span) => {
                 let hi = self.lower_expr(inner)?;
-                // % always produces a raw i8 pointer (e.g. String → C buffer ptr)
+
                 let ty = Type::Ptr(Box::new(Type::I8));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Ref(Box::new(hi)),
@@ -328,16 +325,8 @@ impl Typer {
                     span: *span,
                 })
             }
-            ast::Expr::NamedArg(_, inner, _) => {
-                // NamedArg should be resolved by lower_call before reaching here;
-                // if it somehow reaches lower_expr, just lower the inner expression
-                self.lower_expr_expected(inner, expected)
-            }
-            ast::Expr::Spread(inner, _span) => {
-                // Spread lowered to the inner expression — actual spreading
-                // is handled by lower_call
-                self.lower_expr(inner)
-            }
+            ast::Expr::NamedArg(_, inner, _) => self.lower_expr_expected(inner, expected),
+            ast::Expr::Spread(inner, _span) => self.lower_expr(inner),
             ast::Expr::Grad(..) => self.lower_expr_grad(expr, expected),
             ast::Expr::Einsum(..) => self.lower_expr_einsum(expr, expected),
             ast::Expr::Builder(..) => self.lower_expr_builder(expr, expected),
@@ -345,8 +334,6 @@ impl Typer {
         }
     }
 
-    /// Collect a mapping from type parameter names to concrete types
-    /// by walking a declared (possibly-generic) type alongside a concrete type.
     pub(crate) fn maybe_coerce_to(&mut self, expr: hir::Expr, target: &Type) -> hir::Expr {
         if &expr.ty == target {
             return expr;
@@ -391,10 +378,7 @@ impl Typer {
         if expr.ty == Type::Bool && target.is_int() {
             return Self::make_coerce(expr, CoercionKind::BoolToInt, target.clone());
         }
-        // Stack `[N x T]` array → heap `Vec(T)`. Inserted at any boundary site
-        // where a fixed-size array value flows into a Vec slot (function arg,
-        // return, struct field, vec method receiver). Codegen materializes a
-        // vec header + buffer and copies the array contents.
+
         if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&expr.ty, target) {
             if **arr_elem == **vec_elem {
                 let elem_ty = (**arr_elem).clone();

@@ -11,7 +11,7 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Insert)?;
         let store = self.ident()?;
-        // Optional parenthesized form: `insert users (name is "alice", age is 30)`
+
         let parens = self.check(Token::LParen);
         if parens {
             self.advance();
@@ -27,18 +27,12 @@ impl Parser {
         Ok(Stmt::StoreInsert(store, values, sp))
     }
 
-    /// Parse one insert value: either `name is expr` (named) or a bare expr.
     pub(in crate::parser) fn parse_insert_value(
         &mut self,
     ) -> Result<crate::ast::FieldInit, ParseError> {
-        // Look-ahead for `Ident is …` — but only when the rhs is a value
-        // expression, not a relational comparison (so `users where age is 30`
-        // is unaffected — `where` parses separately).
         if let (Token::Ident(name), Token::Is) = (self.peek().clone(), self.peek_at(1)) {
-            // Reserve `where`/`from`/`to`/etc. as positional shorthands —
-            // unlikely as field names but err on the side of acceptance.
-            self.advance(); // ident
-            self.advance(); // is
+            self.advance();
+            self.advance();
             let value = self.parse_expr()?;
             return Ok(crate::ast::FieldInit {
                 name: Some(name),
@@ -144,7 +138,7 @@ impl Parser {
 
     pub(in crate::parser) fn parse_destroy_stmt(&mut self) -> Result<Stmt, ParseError> {
         let sp = self.span();
-        self.advance(); // consume 'destroy'
+        self.advance();
         let store = self.ident()?;
         let filter = self.parse_store_filter()?;
         Ok(Stmt::StoreDestroy(store, filter, sp))
@@ -152,7 +146,7 @@ impl Parser {
 
     pub(in crate::parser) fn parse_restore_stmt(&mut self) -> Result<Stmt, ParseError> {
         let sp = self.span();
-        self.advance(); // consume 'restore'
+        self.advance();
         let store = self.ident()?;
         let filter = self.parse_store_filter()?;
         Ok(Stmt::StoreRestore(store, filter, sp))
@@ -160,7 +154,7 @@ impl Parser {
 
     pub(in crate::parser) fn parse_save_stmt(&mut self) -> Result<Stmt, ParseError> {
         let sp = self.span();
-        self.advance(); // consume 'save'
+        self.advance();
         let store = self.ident()?;
         Ok(Stmt::StoreSave(store, sp))
     }

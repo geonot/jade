@@ -1,5 +1,3 @@
-//! HIR well-formedness checks invoked after the typer.
-
 use std::collections::HashMap;
 
 use crate::ast::Span;
@@ -8,7 +6,7 @@ use crate::types::Type;
 
 pub struct HirValidator {
     fn_defs: HashMap<u32, Span>,
-    fn_sigs: HashMap<u32, (String, usize, usize)>, // (name, max_params, min_required_params)
+    fn_sigs: HashMap<u32, (String, usize, usize)>,
     errors: Vec<String>,
 }
 
@@ -124,7 +122,6 @@ impl HirValidator {
                 self.validate_expr(expr);
             }
             hir::Stmt::Assign(target, value, _) => {
-                // Check for reassignment to ALL_CAPS constants
                 match &target.kind {
                     hir::ExprKind::Var(_, name) if is_all_caps(&name.as_str()) => {
                         self.errors
@@ -248,7 +245,7 @@ impl HirValidator {
                             (&lhs.ty, &rhs.ty),
                             (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_))
                         );
-                        // Allow Vec ⊕ scalar broadcasting? (no — already removed NDArray)
+
                         if lhs.ty != rhs.ty && !is_ptr_arith {
                             self.errors.push(format!(
                                 "BinOp {:?} type mismatch at line {}: lhs {:?} vs rhs {:?}",
@@ -469,7 +466,7 @@ impl HirValidator {
             hir::ExprKind::GeneratorCreate(_, _, stmts, _) => {
                 self.validate_block(stmts);
             }
-            // KV / specialized store ops
+
             hir::ExprKind::KvGet(_, e)
             | hir::ExprKind::KvHas(_, e)
             | hir::ExprKind::KvDel(_, e) => {
@@ -557,7 +554,6 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
     }
 }
 
-/// Returns true if the name is ALL_CAPS (at least 2 chars, all alphabetic chars uppercase).
 fn is_all_caps(name: &str) -> bool {
     name.len() >= 2
         && name.chars().any(|c| c.is_alphabetic())

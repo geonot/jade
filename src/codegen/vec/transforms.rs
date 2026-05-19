@@ -1,12 +1,6 @@
-//! Higher-order vector transform and reduction helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// MIR-friendly variant of `vec_map`: takes a precompiled closure value
-    /// (a `{fn_ptr, env_ptr}` struct) plus its `Type::Fn(...)` rather than
-    /// HIR expressions. Used by `mir_codegen` where args have already been
-    /// lowered to MIR values.
     pub(in crate::codegen) fn vec_map_dynamic(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -57,7 +51,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(out_hdr.into())
     }
 
-    /// MIR-friendly variant of `vec_filter`.
     pub(in crate::codegen) fn vec_filter_dynamic(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -221,7 +214,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(pred_bool, push_bb, cont_bb));
 
         self.bld.position_at_end(push_bb);
-        // Reload elem since we may need it fresh
+
         let elem2 = b!(self.bld.build_load(lty, elem_gep, "filt.elem2"));
         self.vec_push_raw(out_hdr, elem2, lty, elem_size)?;
         b!(self.bld.build_unconditional_branch(cont_bb));
@@ -302,8 +295,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
-        // For any: start false, short-circuit on true
-        // For all: start true, short-circuit on false
         let init = if is_any { 0u64 } else { 1u64 };
         let result_ptr = self.entry_alloca(bool_ty.into(), "aa.res");
         b!(self
@@ -337,7 +328,6 @@ impl<'ctx> Compiler<'ctx> {
             "aa.pb"
         ));
         if is_any {
-            // If true found, set result=true and exit
             let found_bb = self.ctx.append_basic_block(fv, "aa.found");
             let cont_bb = self.ctx.append_basic_block(fv, "aa.cont");
             b!(self
@@ -350,7 +340,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unconditional_branch(done_bb));
             self.bld.position_at_end(cont_bb);
         } else {
-            // If false found, set result=false and exit
             let fail_bb = self.ctx.append_basic_block(fv, "aa.fail");
             let cont_bb = self.ctx.append_basic_block(fv, "aa.cont");
             b!(self
@@ -515,8 +504,6 @@ impl<'ctx> Compiler<'ctx> {
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
 
-        // For take: iterate 0..min(n, len)
-        // For skip: iterate n..len
         let (start, end) = if is_take {
             let min_bb = self.ctx.append_basic_block(fv, "ts.min");
             let use_n_bb = self.ctx.append_basic_block(fv, "ts.usen");
@@ -583,7 +570,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty_a = self.llvm_ty(elem_ty);
         let lty_b = self.llvm_ty(&other_elem_ty);
-        // Tuple type: (A, B)
+
         let tuple_lty = self.ctx.struct_type(&[lty_a.into(), lty_b.into()], false);
         let tuple_size = self.type_store_size(tuple_lty.into());
         let fv = self.current_fn();
@@ -591,7 +578,6 @@ impl<'ctx> Compiler<'ctx> {
         let (data_a, len_a) = self.vec_data_and_len(header_ptr)?;
         let (data_b, len_b) = self.vec_data_and_len(other_val)?;
 
-        // min(len_a, len_b)
         let min_bb = self.ctx.append_basic_block(fv, "zip.min");
         let use_a_bb = self.ctx.append_basic_block(fv, "zip.usea");
         let use_b_bb = self.ctx.append_basic_block(fv, "zip.useb");
@@ -629,7 +615,7 @@ impl<'ctx> Compiler<'ctx> {
         let a_val = b!(self.bld.build_load(lty_a, a_gep, "zip.av"));
         let b_gep = unsafe { b!(self.bld.build_gep(lty_b, data_b, &[idx], "zip.b")) };
         let b_val = b!(self.bld.build_load(lty_b, b_gep, "zip.bv"));
-        // Build tuple
+
         let mut tup = tuple_lty.get_undef();
         tup = b!(self.bld.build_insert_value(tup, a_val, 0, "zip.t0")).into_struct_value();
         tup = b!(self.bld.build_insert_value(tup, b_val, 1, "zip.t1")).into_struct_value();
@@ -658,7 +644,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let out_hdr = self.vec_alloc_empty()?;
 
-        // Copy first vec
         let (data_a, len_a) = self.vec_data_and_len(header_ptr)?;
         let idx_ptr = self.entry_alloca(i64t.into(), "chn.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
@@ -682,7 +667,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(idx_ptr, next));
         b!(self.bld.build_unconditional_branch(loop1));
 
-        // Copy second vec
         self.bld.position_at_end(mid);
         let (data_b, len_b) = self.vec_data_and_len(other_val)?;
         let idx_ptr2 = self.entry_alloca(i64t.into(), "chn.idx2");
@@ -756,11 +740,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(out_hdr.into())
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // MIR-friendly variants: take precompiled values rather than HIR nodes.
-    // Used by `mir_codegen::emit_inst` where args are already lowered.
-    // ─────────────────────────────────────────────────────────────────────
-
     pub(in crate::codegen) fn vec_fold_dynamic(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -816,7 +795,7 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.current_fn();
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let result_ptr = self.entry_alloca(lty, "find.res");
-        // Initialise to zero so an unfound result is deterministic.
+
         b!(self.bld.build_store(result_ptr, lty.const_zero()));
         let idx_ptr = self.entry_alloca(i64t.into(), "find.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
@@ -1008,7 +987,7 @@ impl<'ctx> Compiler<'ctx> {
         let elem_size = self.type_store_size(lty);
         let fv = self.current_fn();
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
-        // Clamp end to len.
+
         let cmp_end = b!(self
             .bld
             .build_int_compare(IntPredicate::SLT, end_val, len, "slc.cmp"));

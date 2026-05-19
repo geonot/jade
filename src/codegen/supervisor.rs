@@ -1,22 +1,6 @@
-//! Supervisor codegen helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Compile a supervisor definition.
-    ///
-    /// Emits two LLVM functions per supervisor:
-    ///   `<name>_start()`         — first call creates the runtime supervisor,
-    ///                              registers each child (factory + loop), and
-    ///                              starts it. Subsequent calls are no-ops.
-    ///   `<name>_restart_count()` — returns the runtime restart counter.
-    ///
-    /// A module-private global `<name>_g` (jinn_sup_t*) holds the supervisor
-    /// handle. The strategy enum (one_for_one / one_for_all / rest_for_one)
-    /// is passed through to `jinn_sup_create`. Each child's loop function
-    /// (`<actor>_loop`) is paired with a generated factory
-    /// (`<actor>_create_mb`) so the runtime can re-allocate its mailbox on
-    /// restart without compile-time knowledge of the layout.
     pub(crate) fn compile_supervisor(&mut self, sup: &hir::SupervisorDef) -> Result<(), String> {
         use inkwell::AddressSpace;
         use inkwell::module::Linkage;
@@ -26,7 +10,6 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let void = self.ctx.void_type();
 
-        // Declare runtime functions (idempotent).
         let sup_create = self
             .module
             .get_function("jinn_sup_create")
@@ -60,22 +43,18 @@ impl<'ctx> Compiler<'ctx> {
                     .add_function("jinn_sup_restart_count", ft, Some(Linkage::External))
             });
 
-        // Module-private global holding the supervisor handle.
         let g_name = format!("{}_g", sup.name);
         let g = self.module.add_global(ptr, None, &g_name);
         g.set_initializer(&ptr.const_null());
         g.set_linkage(Linkage::Internal);
         let g_ptr = g.as_pointer_value();
 
-        // Strategy code.
         let strat_code: u64 = match sup.strategy {
             hir::SupervisorStrategy::OneForOne => 0,
             hir::SupervisorStrategy::OneForAll => 1,
             hir::SupervisorStrategy::RestForOne => 2,
         };
 
-        // Ensure factory + loop exist for each child up-front so we can take
-        // their function pointers.
         let mut child_info: Vec<(
             inkwell::values::FunctionValue<'ctx>,
             inkwell::values::FunctionValue<'ctx>,
@@ -93,7 +72,6 @@ impl<'ctx> Compiler<'ctx> {
             child_info.push((factory_fv, loop_fv, child.as_str().to_string()));
         }
 
-        // ── <sup>_start() -> i64 ──
         let start_name = format!("{}_start", sup.name);
         let start_ft = i64t.fn_type(&[], false);
         let start_fv = self.module.add_function(&start_name, start_ft, None);
@@ -146,7 +124,6 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(ret_bb);
         b!(self.bld.build_return(Some(&i64t.const_int(0, false))));
 
-        // ── <sup>_restart_count() -> i64 ──
         let rc_name = format!("{}_restart_count", sup.name);
         let rc_ft = i64t.fn_type(&[], false);
         let rc_fv = self.module.add_function(&rc_name, rc_ft, None);

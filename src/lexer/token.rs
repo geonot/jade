@@ -1,5 +1,3 @@
-//! Token enum and Display impl. See `docs/lexer/keywords.md`.
-
 use crate::intern::Symbol;
 
 #[derive(Debug, Clone, PartialEq)]

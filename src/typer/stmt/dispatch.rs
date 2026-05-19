@@ -1,5 +1,3 @@
-//! Per-statement typing rules.
-
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
 use crate::intern::Symbol;
@@ -8,34 +6,10 @@ use crate::types::{Scheme, Type};
 use super::super::{Typer, VarInfo};
 
 impl Typer {
-    /// Returns true when `expr` reads a heap-managed element out of a container
-    /// without taking ownership (e.g. `vec.get(i)`, `map.get(k)`, `deque.get(i)`,
-    /// `pq.peek()`). In those cases the returned value aliases storage owned by
-    /// the container, so any local that binds it must NOT be dropped at scope
-    /// exit — doing so would double-free when the container itself is dropped.
-    ///
-    /// **Status (2026-05-17, post-R3.4.d.1)**: this predicate is the permanent
-    /// safety net for the *non-clonable* heap-container-read case (e.g.
-    /// `Map<K, Struct>` where `Struct` has heap fields and isn't clonable).
-    /// The R3 access-semantics sprint added escape analysis
-    /// (`src/escape/mod.rs`) and the `apply_demotions` HIR post-pass which
-    /// handle the *clonable* short-lived T1 case by mutating ownership to
-    /// `Borrowed` and removing the matching `Drop`. Implicit binding-type
-    /// promotion (R3.4.d.2) was evaluated and CLOSED — the cascade-retype
-    /// cost was deemed not worth the benefit when the language already
-    /// offers explicit `rc()` wrapping (now source-transparent at access
-    /// sites thanks to R3.4.d.1 auto-deref). Until/unless implicit
-    /// promotion lands, this heuristic stays: it guards the non-clonable
-    /// case that escape analysis alone cannot fix without changing the
-    /// binding's type. Do not delete.
     pub(in crate::typer) fn is_aliased_read_of_heap(expr: &hir::Expr) -> bool {
         let needs_drop = matches!(
             expr.ty,
-            Type::Vec(_)
-                | Type::Map(_, _)
-                | Type::String
-                | Type::Struct(_, _)
-                | Type::Enum(_)
+            Type::Vec(_) | Type::Map(_, _) | Type::String | Type::Struct(_, _) | Type::Enum(_)
         );
         if !needs_drop {
             return false;
@@ -58,8 +32,6 @@ impl Typer {
     ) -> Result<hir::Stmt, String> {
         match stmt {
             ast::Stmt::Bind(b) => {
-                // If inside a method body and the name matches a struct field (but not a local var),
-                // convert `field is value` to `self.field = value`
                 if self.current_method_type.is_some() && self.find_var(&b.name.as_str()).is_none() {
                     let type_name = self.current_method_type.clone().unwrap();
                     let is_field = self
@@ -81,8 +53,7 @@ impl Typer {
                         return Ok(hir::Stmt::Assign(ht, hv, b.span));
                     }
                 }
-                // If the name matches a global mutable variable and isn't shadowed by a local,
-                // emit a GlobalStore instead of a local Bind.
+
                 if self.find_var(&b.name.as_str()).is_none() {
                     if let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned() {
                         let init_hir = self.lower_expr(&_gexpr)?;
@@ -109,10 +80,7 @@ impl Typer {
                     value.ty.clone()
                 };
                 let mut ownership = Self::ownership_for_type(&ty);
-                // P3: a `@resource` binding may never be the result of an
-                // implicit clone. Bare bindings of resources from container
-                // reads (`x is vec.get(0)` for `Vec<@resource T>`) require
-                // an explicit access modifier (`ref`, `mut`, or `take`).
+
                 let is_resource = self.type_has_resource_annotation(&ty);
                 if is_resource && b.access_mod.is_none() && Self::is_aliased_read_of_heap(&value) {
                     return Err(format!(
@@ -121,27 +89,15 @@ impl Typer {
                         ty
                     ));
                 }
-                // If the RHS is `container.get(idx)` (or analogous read) and
-                // the codegen does NOT yet deep-clone the returned value, the
-                // binding aliases storage owned by the container; it must NOT
-                // be dropped at scope exit or it will double-free. For types
-                // codegen knows how to clone (see Type::is_value_clonable),
-                // the .get() codegen returns a fresh owned copy, so we keep
-                // the default Owned ownership.
+
                 if Self::is_aliased_read_of_heap(&value) && !ty.is_value_clonable() {
                     ownership = Ownership::Borrowed;
                 }
-                // P2: explicit access modifier overrides the default heuristic.
-                // Also rejects `copy` on `@resource` types.
-                // See `docs/access-semantics.md`.
+
                 if b.access_mod.is_some() {
                     ownership = self.ownership_with_mod(&ty, b.access_mod)?;
                 }
-                // P4 §5.2: detect `x is take y.field` so we can poison
-                // `y.field` against subsequent reads in this scope until
-                // it is reassigned. The MIR-level FieldTombstone makes
-                // the memory safe; this typer check makes the language
-                // safe (no silent zero-reads from a moved slot).
+
                 let partial_move: Option<(DefId, Symbol)> =
                     if matches!(b.access_mod, Some(ast::AccessMod::Take))
                         && let hir::ExprKind::Field(parent, field, _) = &value.kind
@@ -154,7 +110,7 @@ impl Typer {
                 let id = self.fresh_id();
                 if let Some(existing) = self.find_var(&b.name.as_str()) {
                     let id = existing.def_id;
-                    // P5: reject any rebind of a `const`-declared binding.
+
                     if self.const_vars.contains(&id) {
                         return Err(format!(
                             "cannot rebind `{}`: it was declared with `is const`",
@@ -163,8 +119,7 @@ impl Typer {
                     }
                     let existing_ty = existing.ty.clone();
                     let value = self.maybe_coerce_to(value, &existing_ty);
-                    // Rebinding the whole variable clears any prior
-                    // partial-move state on it: the new value is whole.
+
                     self.clear_all_moved_for(id);
                     self.update_var(
                         &b.name.as_str(),
@@ -214,7 +169,7 @@ impl Typer {
                             scheme: Some(scheme),
                         },
                     );
-                    // P5: tag the DefId as const so later rebinds are rejected.
+
                     if matches!(b.access_mod, Some(ast::AccessMod::Const)) {
                         self.const_vars.insert(id);
                     }
@@ -268,19 +223,8 @@ impl Typer {
             }
 
             ast::Stmt::Assign(target, value, span) => {
-                // P5 §6.1: `row.field = value` is sugar for the store
-                // write-through update. Detect this case BEFORE we lower
-                // the LHS as an ordinary place — we want a `StoreSet`
-                // statement keyed on the row's `sid`, not a struct-field
-                // store (which would mutate a snapshot in-place and lose
-                // the write). Restrict to `<ident>.<field> = ...` so we
-                // can synthesize `row.sid` cheaply without re-running
-                // the underlying query.
                 if let ast::Expr::Field(obj, field, fspan) = target {
                     if let ast::Expr::Ident(row_name, _) = obj.as_ref() {
-                        // Probe the LHS receiver's type without lowering the
-                        // whole field expr (which would error on the inner
-                        // `.field` lookup path for some receivers).
                         let probe = self.lower_expr(obj.as_ref())?;
                         let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
                         if let Type::Row(store) = &probe_ty {
@@ -311,17 +255,10 @@ impl Typer {
                             );
                             self.collect_unify_error(r);
                             let hv = self.maybe_coerce_to(hv, &fty);
-                            // Synthesize the sid filter: `sid equals row.sid`.
-                            // `probe` is the bound row var; `probe.sid` is a
-                            // plain struct-field read on the underlying
-                            // `__store_{store}` layout (sid is field 0).
+
                             let sid_sym = Symbol::intern("sid");
                             let sid_expr = hir::Expr {
-                                kind: hir::ExprKind::Field(
-                                    Box::new(probe),
-                                    sid_sym,
-                                    0, // sid is field 0 of __store_{store}
-                                ),
+                                kind: hir::ExprKind::Field(Box::new(probe), sid_sym, 0),
                                 ty: Type::I64,
                                 span: *fspan,
                             };
@@ -332,7 +269,7 @@ impl Typer {
                                 span: *span,
                                 extra: Vec::new(),
                             };
-                            let _ = row_name; // reserved for diagnostics
+                            let _ = row_name;
                             return Ok(hir::Stmt::StoreSet(
                                 store,
                                 vec![(*field, hv)],
@@ -342,9 +279,7 @@ impl Typer {
                         }
                     }
                 }
-                // P4 §5.2: lowering an assignment LHS is a write to the
-                // place — do not flag a use-after-partial-move when
-                // reassigning a previously-moved field.
+
                 self.suppress_moved_field_check += 1;
                 let ht = self.lower_expr(target)?;
                 self.suppress_moved_field_check -= 1;
@@ -352,8 +287,7 @@ impl Typer {
                 let r = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
                 self.collect_unify_error(r);
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
-                // P4 §5.2: assigning to `p.f` clears any prior moved-out
-                // state on that field (the slot is whole again).
+
                 if let hir::ExprKind::Field(parent, field, _) = &ht.kind {
                     if let hir::ExprKind::Var(parent_id, _) = &parent.kind {
                         self.clear_field_moved(*parent_id, field);
@@ -363,7 +297,6 @@ impl Typer {
             }
 
             ast::Stmt::Expr(e) => {
-                // Intercept query blocks with delete/set clauses at statement level
                 if let ast::Expr::Query(source, clauses, span) = e {
                     let store_name = match source.as_ref() {
                         ast::Expr::Ident(name, _) => name.clone(),
@@ -433,15 +366,7 @@ impl Typer {
                 }
 
                 let he = self.lower_expr(e)?;
-                // Pragmatic ergonomics: when the user writes `x.method(...)`
-                // in statement position (discarding the result) and the
-                // method returns the same type as the receiver, treat it as
-                // `x = x.method(...)`. This makes things like
-                // `xs.map($ * 2)` / `xs.filter(p)` "just work" without
-                // requiring a rebind. Only triggers when the receiver is a
-                // plain identifier (so we have a clear lvalue) and both
-                // sides are the same collection type. Backwards-compatible
-                // because discarding the result was a no-op anyway.
+
                 if let ast::Expr::Method(recv, _, _, mspan) = e
                     && matches!(recv.as_ref(), ast::Expr::Ident(_, _))
                 {
@@ -478,12 +403,7 @@ impl Typer {
 
             ast::Stmt::While(w) => {
                 let cond = self.lower_expr_expected(&w.cond, Some(&Type::Bool))?;
-                // P4 §5.2: snapshot before loop body and restore after.
-                // Conservative: in-body partial moves do not leak past the
-                // loop. Within the body, linear analysis catches
-                // use-after-move within a single iteration. Multi-iteration
-                // use-after-move is an accepted gap (would need a fixed-
-                // point or 2-pass analysis we don't have yet).
+
                 let pre = self.snapshot_moved_fields();
                 let body = self.lower_block(&w.body, ret_ty)?;
                 self.restore_moved_fields(pre);
@@ -500,7 +420,6 @@ impl Typer {
                 let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let resolved_iter_ty = self.infer_ctx.shallow_resolve(&iter.ty);
 
-                // Map iteration: for k, v in map → desugar to keys-based iteration
                 if let (Some(val_bind), Type::Map(key_ty, val_ty)) = (&f.bind2, &resolved_iter_ty) {
                     return self.desugar_for_map(
                         f,
@@ -551,15 +470,7 @@ impl Typer {
                 };
                 let bind_id = self.fresh_id();
                 self.push_scope();
-                // R3.3: for a *collection* for-loop the binder aliases
-                // storage owned by the collection — MIR lowers the
-                // element load as a raw `IndexUnchecked` (no clone) and
-                // the typer does not emit a scope-exit Drop for the
-                // binder (the outer for-scope is popped without
-                // `emit_scope_drops`). Recording it as `Borrowed` makes
-                // that latent invariant explicit. *Range* for-loops
-                // (`for i in start..end` / `for i in N`) bind a fresh
-                // integer counter — that one stays `Owned`.
+
                 let is_collection_for = !(end.is_some() || iter_is_int);
                 let binder_ownership = if is_collection_for {
                     Ownership::Borrowed
@@ -575,7 +486,7 @@ impl Typer {
                         scheme: None,
                     },
                 );
-                // If bind2 is present, it's the index variable (i64)
+
                 let (bind2_id, bind2, bind2_ty) = if let Some(ref b2) = f.bind2 {
                     let id2 = self.fresh_id();
                     self.define_var(
@@ -591,8 +502,7 @@ impl Typer {
                 } else {
                     (None, None, None)
                 };
-                // P4 §5.2: snapshot before loop body so in-body partial
-                // moves do not leak past the loop (see lower While).
+
                 let pre_loop = self.snapshot_moved_fields();
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();
@@ -663,15 +573,8 @@ impl Typer {
             }
 
             ast::Stmt::ErrReturn(e, span) => {
-                // `! value` is a universal early-return form: the value must be
-                // assignable to the function's declared return type T.
-                // Use the same expected-type lowering as `Ret` so literals get
-                // the right context.
                 let he = self.lower_expr_expected(e, Some(ret_ty))?;
 
-                // Classify: if the expression's type resolves to an err-defined
-                // enum, record it so the function's error union can be inferred
-                // (and validated against any explicit `! E` declarations).
                 let resolved = self.infer_ctx.resolve(&he.ty);
                 let enum_name: Option<Symbol> = match &resolved {
                     Type::Enum(n) if self.err_enum_names.contains(n) => Some(n.clone()),
@@ -690,17 +593,6 @@ impl Typer {
                     self.current_fn_error_types.insert(en.clone());
                 }
 
-                // Unify the err-return value with the function's return type T.
-                // In jinn's unitary errors-as-values convention, `! value` returns
-                // a value of type T just like `return value` does. The `! E`
-                // signature suffix is a declarative annotation that constrains
-                // *which* variants can be early-returned this way; the value
-                // itself must still be type-compatible with T.
-                //
-                // Normalize the function's return type: a bare identifier in
-                // type position (e.g. `returns Outcome`) is parsed as
-                // `Type::Struct(N, [])` even when `N` is actually an enum.
-                // Treat such forms as the enum so unification succeeds.
                 let resolved_ret = self.infer_ctx.resolve(ret_ty);
                 let normalized_ret = match &resolved_ret {
                     Type::Struct(n, args) if args.is_empty() && self.enums.contains_key(n) => {
@@ -723,10 +615,6 @@ impl Typer {
                 );
                 if let Err(_) = &unify_res {
                     if let Some(en) = &enum_name {
-                        // Tailor the message to point users at the canonical
-                        // jinn convention: declare the function as returning the
-                        // err enum directly (`returns E`), or encode errors as
-                        // values of T (e.g., sentinel codes for primitives).
                         return Err(format!(
                             "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jinn, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
                             en, span, resolved_ret
@@ -750,8 +638,7 @@ impl Typer {
                     .get(store)
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
-                // Filter out built-in fields (sid, uuid, hash, created, updated, deleted)
-                // that are auto-populated; users only supply user-defined fields
+
                 let builtin_names = [
                     "sid",
                     "uuid",
@@ -778,7 +665,6 @@ impl Typer {
                 }
 
                 if all_named && !values.is_empty() {
-                    // Reorder by schema; require all user fields present.
                     let mut hvalues = Vec::with_capacity(user_schema.len());
                     for (fname, fty) in &user_schema {
                         let fi = values
@@ -789,7 +675,7 @@ impl Typer {
                             })?;
                         hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
                     }
-                    // Detect unknown / duplicate field names.
+
                     let mut seen = std::collections::HashSet::new();
                     for fi in values {
                         let n = fi.name.as_ref().unwrap();
@@ -943,7 +829,7 @@ impl Typer {
                         scheme: None,
                     },
                 );
-                // P4 §5.2: snapshot before loop body (see lower While).
+
                 let pre_loop = self.snapshot_moved_fields();
                 let body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.pop_scope();

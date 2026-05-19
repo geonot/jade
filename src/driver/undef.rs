@@ -23,13 +23,10 @@ use crate::typer::Typer;
 use super::cli::*;
 use super::project::*;
 
-/// Collect all identifiers referenced in the program (function calls, type refs,
-/// variable refs, struct constructors, etc.) that are not defined by the program itself.
 pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
     let mut defined = HashSet::new();
     let mut referenced = HashSet::new();
 
-    // Collect defined names
     for d in &prog.decls {
         match d {
             Decl::Fn(f) => {
@@ -82,7 +79,6 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
         }
     }
 
-    // Walk all expressions to find referenced identifiers
     fn walk_expr(e: &crate::ast::Expr, refs: &mut HashSet<Symbol>, defs: &mut HashSet<Symbol>) {
         use crate::ast::Expr;
         match e {
@@ -238,7 +234,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Expr::Query(base, _clauses, _) => {
                 walk_expr(base, refs, defs);
             }
-            _ => {} // Int, Float, Str, Bool, None, Void, Embed, Placeholder, etc.
+            _ => {}
         }
     }
 
@@ -260,7 +256,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Pat::Ident(name, _) => {
                 defs.insert(name.clone());
             }
-            _ => {} // Wild, Range
+            _ => {}
         }
     }
 
@@ -350,7 +346,7 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
                 walk_expr(&f.iter, refs, defs);
                 walk_block(&f.body, refs, defs);
             }
-            _ => {} // Asm, StoreDelete, StoreSet, UseLocal
+            _ => {}
         }
     }
 
@@ -393,26 +389,24 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
             Type::ActorRef(name) => {
                 refs.insert(name.clone());
             }
-            _ => {} // primitives, TypeVar, etc.
+            _ => {}
         }
     }
 
-    // Walk all function bodies in the program
     for d in &prog.decls {
         match d {
             Decl::Fn(f) => {
-                // Register parameter names as defined (local scope)
                 for p in &f.params {
                     defined.insert(p.name.clone());
                 }
                 for s in &f.body {
                     walk_stmt(s, &mut referenced, &mut defined);
                 }
-                // Check return type
+
                 if let Some(ret) = &f.ret {
                     walk_type(ret, &mut referenced);
                 }
-                // Check param types
+
                 for p in &f.params {
                     if let Some(ty) = &p.ty {
                         walk_type(ty, &mut referenced);
@@ -461,7 +455,6 @@ pub(super) fn collect_undefined_refs(prog: &Program) -> HashSet<Symbol> {
         }
     }
 
-    // Built-in names that should never trigger auto-import
     let builtins: HashSet<&str> = [
         "log",
         "print",

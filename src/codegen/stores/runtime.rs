@@ -1,5 +1,3 @@
-//! Store runtime declarations, schema declaration, and specialized handle accessors.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -73,7 +71,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("flock", ft, Some(Linkage::External));
         }
 
-        // WAL runtime functions
         if self.module.get_function("jinn_wal_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
@@ -99,7 +96,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_wal_close", ft, Some(Linkage::External));
         }
 
-        // Index runtime functions
         if self.module.get_function("jinn_idx_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
@@ -149,7 +145,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_idx_hash_f64", ft, Some(Linkage::External));
         }
 
-        // Version runtime functions
         if self.module.get_function("jinn_ver_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
@@ -210,7 +205,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_ver_history", ft, Some(Linkage::External));
         }
 
-        // Migration runtime functions
         if self.module.get_function("jinn_mig_log_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
@@ -247,7 +241,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_mig_drop_field", ft, Some(Linkage::External));
         }
 
-        // KV store runtime functions
         if self.module.get_function("jinn_kv_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
@@ -299,7 +292,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_kv_persist", ft, Some(Linkage::External));
         }
 
-        // Vector store runtime functions
         if self.module.get_function("jinn_vec_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
@@ -323,13 +315,11 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_vec_count", ft, Some(Linkage::External));
         }
         if self.module.get_function("jinn_vec_nearest").is_none() {
-            // (JinnVec*, query_ptr, k, out_indices) -> count
             let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into(), ptr.into()], false);
             self.module
                 .add_function("jinn_vec_nearest", ft, Some(Linkage::External));
         }
 
-        // Column store runtime functions
         if self.module.get_function("jinn_col_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
@@ -368,7 +358,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_col_max_i64", ft, Some(Linkage::External));
         }
 
-        // Bloom filter runtime functions
         if self.module.get_function("jinn_bloom_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
             self.module
@@ -392,7 +381,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_bloom_test_i64", ft, Some(Linkage::External));
         }
 
-        // Full-text search runtime functions
         if self.module.get_function("jinn_fts_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
@@ -453,14 +441,12 @@ impl<'ctx> Compiler<'ctx> {
         global.set_linkage(Linkage::Internal);
         global.set_initializer(&ptr_ty.const_null());
 
-        // WAL file pointer global
         let wal_global = self
             .module
             .add_global(ptr_ty, None, &format!("__store_{}_wal", sd.name));
         wal_global.set_linkage(Linkage::Internal);
         wal_global.set_initializer(&ptr_ty.const_null());
 
-        // Per-field index globals for @index and @unique fields
         for field in &sd.fields {
             let has_index = field.decorators.iter().any(|d| {
                 matches!(
@@ -479,7 +465,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Version file pointer global for @versioned stores
         let is_versioned = sd
             .decorators
             .iter()
@@ -492,7 +477,6 @@ impl<'ctx> Compiler<'ctx> {
             ver_global.set_initializer(&ptr_ty.const_null());
         }
 
-        // KV handle global for @kv stores
         let is_kv = sd
             .decorators
             .iter()
@@ -505,7 +489,6 @@ impl<'ctx> Compiler<'ctx> {
             kv_global.set_initializer(&ptr_ty.const_null());
         }
 
-        // Vector handle global for @vector stores
         let is_vector = sd
             .decorators
             .iter()
@@ -521,7 +504,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Lazily open a @kv store handle, returning the JinnKV pointer.
     pub(crate) fn load_kv_handle(
         &mut self,
         store_name: &str,
@@ -565,7 +547,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Lazily open a @vector store handle, returning the JinnVec pointer.
     pub(crate) fn load_vec_handle(
         &mut self,
         store_name: &str,

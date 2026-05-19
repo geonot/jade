@@ -1,5 +1,3 @@
-//! Package manifest loading for driver source resolution.
-
 use super::*;
 
 pub(in crate::driver) fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {

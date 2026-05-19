@@ -1,6 +1,3 @@
-// Compiler driver / CLI entry point. See `docs/architecture.md` for the pipeline overview.
-// (Regular comment, not a `//!` doc comment, because this file is `include!`d by `src/bin/jinn.rs`.)
-
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
@@ -74,28 +71,28 @@ pub(super) struct Cli {
     pub(super) dump_tokens: bool,
     #[arg(long)]
     pub(super) dump_ast: bool,
-    /// Enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
+
     #[arg(long)]
     pub(super) fast_math: bool,
-    /// Guarantee deterministic floating-point results (disable FP reordering)
+
     #[arg(long)]
     pub(super) deterministic_fp: bool,
-    /// Enable incremental compilation (cache unchanged function artifacts)
+
     #[arg(long, hide = true)]
     pub(super) incremental: bool,
-    /// Number of parallel codegen threads (0 = auto-detect)
+
     #[arg(long, default_value = "0")]
     pub(super) threads: usize,
-    /// Target triple for cross-compilation (e.g., aarch64-unknown-linux-gnu)
+
     #[arg(long)]
     pub(super) target: Option<String>,
-    /// Target CPU name (e.g., cortex-a53, skylake)
+
     #[arg(long)]
     pub(super) cpu: Option<String>,
-    /// Target CPU features (e.g., +avx2,+sse4.2)
+
     #[arg(long)]
     pub(super) features: Option<String>,
-    /// Standalone mode: no runtime, no libc dependency
+
     #[arg(long)]
     pub(super) standalone: bool,
 }
@@ -107,7 +104,7 @@ pub(super) enum Cmd {
     },
     Fetch,
     Update,
-    /// Compile the project (uses project.jn entry if available)
+
     Build {
         #[arg(short, long, default_value = "a.out")]
         output: Option<PathBuf>,
@@ -115,60 +112,55 @@ pub(super) enum Cmd {
         opt: Option<u8>,
         #[arg(long)]
         lto: bool,
-        /// Target triple for cross-compilation (e.g., aarch64-unknown-linux-gnu)
+
         #[arg(long)]
         target: Option<String>,
-        /// Target CPU name (e.g., cortex-a53, skylake)
+
         #[arg(long)]
         cpu: Option<String>,
-        /// Target CPU features (e.g., +avx2,+sse4.2)
+
         #[arg(long)]
         features: Option<String>,
-        /// Standalone mode: no runtime, no libc dependency
+
         #[arg(long)]
         standalone: bool,
     },
-    /// Generate jinn.pkg and (by default) a source archive in dist/
+
     Package {
-        /// Output manifest path (default: ./jinn.pkg)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Generate only jinn.pkg (skip dist/*.tar.gz creation)
+
         #[arg(long)]
         no_archive: bool,
     },
-    /// Tag the current git repo as v<version> for dependency publishing
+
     Publish {
-        /// Also push the created tag to remote (default remote: origin)
         #[arg(long)]
         push: bool,
-        /// Git remote to push to (default: origin)
+
         #[arg(long)]
         remote: Option<String>,
-        /// Force retag if tag already exists and skip clean-tree check
+
         #[arg(long)]
         force: bool,
     },
-    /// Compile and run a file or the project
+
     Run {
-        /// Source file to run (optional — uses project entry if omitted)
         file: Option<PathBuf>,
-        /// Arguments to pass to the program
+
         #[arg(last = true)]
         args: Vec<String>,
     },
-    /// Run project tests
+
     Test,
-    /// Type-check without codegen
+
     Check,
-    /// Format Jinn source files
+
     Fmt {
-        /// Files to format (default: all .jn files in current directory)
         files: Vec<PathBuf>,
     },
-    /// Generate Jinn extern declarations from a C header file
+
     Bind {
-        /// Path to the C header file
         header: PathBuf,
     },
 }
@@ -178,9 +170,6 @@ pub(super) fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
-/// Strip internal compiler-pass prefixes (`mir_codegen:`, `hir:`, etc.) from
-/// error messages before they reach the user. The user does not need to know
-/// which compiler pass found the bug.
 pub(crate) fn strip_codegen_prefix(s: &str) -> String {
     let trimmed = s.trim_start();
     for p in &[

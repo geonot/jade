@@ -1,5 +1,3 @@
-//! Field, lvalue, index, reference, syscall, list, and dynamic dispatch expression helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -18,8 +16,7 @@ impl<'ctx> Compiler<'ctx> {
             let v = self.compile_expr(obj)?;
             return self.vec_len(v.into_pointer_value());
         }
-        // P5 §6: Row<T> shares its LLVM layout with `__store_{T}`, so field
-        // access on a row resolves through the auto-generated record struct.
+
         let row_struct = match obj_ty {
             Type::Row(name) => Some(crate::intern::Symbol::intern(&format!(
                 "__store_{}",
@@ -58,7 +55,6 @@ impl<'ctx> Compiler<'ctx> {
             .get_struct_type(&ty_name.as_str())
             .ok_or_else(|| format!("no LLVM struct: {ty_name}"))?;
 
-        // Get a pointer to the struct, either from a variable or by spilling a value
         let struct_ptr = if let hir::ExprKind::Var(_, n) = &obj.kind {
             if let Some((ptr, _)) = self.find_var(&n.as_str()).cloned() {
                 if is_ptr {
@@ -72,14 +68,12 @@ impl<'ctx> Compiler<'ctx> {
                     ptr
                 }
             } else {
-                // Variable not found — compile and spill
                 let val = self.compile_expr(obj)?;
                 let spill = self.entry_alloca(st.into(), "field.spill");
                 b!(self.bld.build_store(spill, val));
                 spill
             }
         } else {
-            // Non-variable object (e.g., chained field access, function return) — compile and spill
             let val = self.compile_expr(obj)?;
             let spill = self.entry_alloca(st.into(), "field.spill");
             b!(self.bld.build_store(spill, val));
@@ -90,8 +84,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(self.llvm_ty(&fty), gep, field)))
     }
 
-    /// Return a pointer to the memory location of an lvalue expression.
-    /// Used for chained field assignment (e.g. `a.b.x = 42`).
     pub(crate) fn compile_lvalue_ptr(
         &mut self,
         expr: &hir::Expr,
@@ -103,7 +95,7 @@ impl<'ctx> Compiler<'ctx> {
                 .ok_or_else(|| format!("undefined: {name}")),
             hir::ExprKind::Field(obj, field, _idx) => {
                 let obj_ty = &obj.ty;
-                // P5 §6: Row<T> lvalue access uses the `__store_{T}` layout.
+
                 let row_struct = match obj_ty {
                     Type::Row(name) => Some(crate::intern::Symbol::intern(&format!(
                         "__store_{}",
@@ -303,8 +295,6 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         inner: &hir::Expr,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Pointer load or value-itself fallback (heap nominals are
-        // intrinsically refcounted; no surface Rc wrapper).
         let ptr_val = self.compile_expr(inner)?;
         let load_ty = match &inner.ty {
             Type::Ptr(inner_ty) => self.llvm_ty(inner_ty),

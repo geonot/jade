@@ -1,5 +1,3 @@
-//! Monomorphization: instantiate generic items with concrete type arguments.
-
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -53,7 +51,6 @@ impl Typer {
                 name.push('_');
             }
             if let Some(ty) = type_map.get(tp) {
-                // Encode type name to avoid collisions with user identifiers
                 let encoded = ty.to_string().replace('_', "U").replace(' ', "");
                 name.push_str(&encoded);
             }
@@ -114,8 +111,6 @@ impl Typer {
         !Self::effective_type_params(f).is_empty()
     }
 
-    /// Create a monomorphized copy of a struct with inferred fields.
-    /// Used when the same struct is instantiated with different concrete types.
     pub(crate) fn monomorphize_struct(
         &mut self,
         base_name: &str,
@@ -125,7 +120,6 @@ impl Typer {
     ) -> Result<Symbol, String> {
         use crate::hir;
 
-        // Build mangled name from the concrete argument types
         let ty_suffix = arg_tys
             .iter()
             .map(|t| format!("{t}"))
@@ -133,12 +127,10 @@ impl Typer {
             .join("_");
         let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
 
-        // If already monomorphized, reuse
         if self.structs.contains_key(&mangled) {
             return Ok(mangled);
         }
 
-        // Get the original AST definition for field names and layout
         let orig_fields_from_structs = self.structs.get(base_name).cloned().unwrap_or_default();
         let new_fields: Vec<(Symbol, Type)> = orig_fields_from_structs
             .iter()
@@ -149,10 +141,8 @@ impl Typer {
             })
             .collect();
 
-        // Register the monomorphized struct in self.structs
         self.structs.insert(mangled, new_fields.clone());
 
-        // Build an hir::TypeDef for codegen
         let hir_fields: Vec<hir::Field> = new_fields
             .iter()
             .map(|(fname, fty)| hir::Field {
@@ -168,10 +158,7 @@ impl Typer {
             .generic_types
             .get(base_name)
             .map(|td| td.layout.clone())
-            .or_else(|| {
-                // Try to get layout from the original AST declarations
-                None
-            })
+            .or_else(|| None)
             .unwrap_or_default();
 
         let htd = hir::TypeDef {

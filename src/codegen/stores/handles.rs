@@ -1,9 +1,6 @@
-//! Store handle loading, open/lock/WAL helpers, UUIDs, and index handles.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Lazily open a column file for a specific field. Returns JinnCol* pointer.
     pub(crate) fn load_col_handle(
         &mut self,
         store_name: &str,
@@ -14,7 +11,6 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let global_name = format!("__store_{store_name}_col_{field_name}");
 
-        // Create or get the global for this column handle
         let global = if let Some(g) = self.module.get_global(&global_name) {
             g
         } else {
@@ -67,7 +63,6 @@ impl<'ctx> Compiler<'ctx> {
         self.type_store_size(st.into())
     }
 
-    /// Lazily open a bloom filter for a specific field. Returns JinnBloom* pointer.
     pub(crate) fn load_bloom_handle(
         &mut self,
         store_name: &str,
@@ -121,7 +116,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Lazily open an FTS index for a specific field. Returns JinnFts* pointer.
     pub(crate) fn load_fts_handle(
         &mut self,
         store_name: &str,
@@ -209,7 +203,6 @@ impl<'ctx> Compiler<'ctx> {
         let fp = b!(self.bld.build_load(ptr_ty, global.as_pointer_value(), "fp"));
         let is_null = b!(self.bld.build_is_null(fp.into_pointer_value(), "is_null"));
 
-        // @transient stores always create fresh — skip trying to open existing file
         let is_transient = sd
             .decorators
             .iter()
@@ -336,7 +329,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(fp.into_pointer_value())
     }
 
-    /// Load WAL file pointer for a store, opening it lazily if needed.
     pub(crate) fn load_store_wal(
         &mut self,
         store_name: &str,
@@ -374,7 +366,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cont_bb));
 
         self.bld.position_at_end(cont_bb);
-        // Load again to get the potentially-updated pointer
+
         let result = b!(self
             .bld
             .build_load(ptr_ty, wal_global.as_pointer_value(), "wal.fp2"))
@@ -382,7 +374,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Write a WAL entry for an insert operation (op=1).
     pub(crate) fn wal_write_insert(
         &mut self,
         store_name: &str,
@@ -401,7 +392,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Write a WAL entry for a soft-delete operation (op=3).
     pub(crate) fn wal_write_delete(
         &mut self,
         store_name: &str,
@@ -420,7 +410,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Write a WAL entry for an update operation (op=2).
     pub(crate) fn wal_write_update(
         &mut self,
         store_name: &str,
@@ -439,7 +428,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Checkpoint WAL (truncate to just header).
     pub(crate) fn wal_checkpoint(&mut self, store_name: &str) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
         let wal_cp_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_checkpoint");
@@ -483,8 +471,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Generate a simple UUID-like string from sid and timestamp.
-    /// Format: "00000sid-0000-0000-0000-00timestamp0" (36 chars).
     pub(crate) fn gen_store_uuid(
         &mut self,
         sid: inkwell::values::IntValue<'ctx>,
@@ -495,7 +481,6 @@ impl<'ctx> Compiler<'ctx> {
         let i8t = self.ctx.i8_type();
         let _ptr = self.ctx.ptr_type(AddressSpace::default());
 
-        // Allocate 40 bytes for the UUID string
         let buf = self.entry_alloca(i8t.array_type(40).into(), "uuid.buf");
         let fmt = b!(self
             .bld
@@ -514,7 +499,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Build a Jinn String from the buffer
         let strlen_fn = crate::codegen::fn_or_die(&self.module, "strlen");
         let len = self
             .call_result(b!(self.bld.build_call(
@@ -544,7 +528,6 @@ impl<'ctx> Compiler<'ctx> {
         self.build_string(heap, len, i64t.const_int(0, false), "uuid.str")
     }
 
-    /// Check if a field has the @index or @unique decorator
     pub(crate) fn field_has_index(field: &hir::StoreField) -> bool {
         field.decorators.iter().any(|d| {
             matches!(
@@ -554,7 +537,6 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Check if a field has the @unique decorator
     pub(crate) fn field_is_unique(field: &hir::StoreField) -> bool {
         field
             .decorators
@@ -562,8 +544,6 @@ impl<'ctx> Compiler<'ctx> {
             .any(|d| matches!(d, crate::ast::FieldDecorator::Unique))
     }
 
-    /// Lazily open an index file, returning the JinnIndex pointer.
-    /// Global: __store_{name}_idx_{field}
     pub(crate) fn load_store_idx(
         &mut self,
         store_name: &str,
@@ -586,7 +566,6 @@ impl<'ctx> Compiler<'ctx> {
         let cont_bb = self.ctx.append_basic_block(fv, "idx.cont");
         b!(self.bld.build_conditional_branch(is_null, open_bb, cont_bb));
 
-        // open: open the index file
         self.bld.position_at_end(open_bb);
         let idx_path = format!("{store_name}.{field_name}.idx\0");
         let idx_str = b!(self.bld.build_global_string_ptr(&idx_path, "idx.path"));

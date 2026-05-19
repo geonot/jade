@@ -1,5 +1,3 @@
-//! Lightweight integer range analysis.
-
 use super::super::*;
 use std::collections::HashMap;
 
@@ -31,7 +29,6 @@ impl IntRange {
     }
 }
 
-/// Compute simple integer ranges for forward dataflow.
 pub fn compute_ranges(func: &Function) -> HashMap<ValueId, IntRange> {
     let mut ranges: HashMap<ValueId, IntRange> = HashMap::new();
     for bb in &func.blocks {
@@ -68,18 +65,15 @@ pub fn compute_ranges(func: &Function) -> HashMap<ValueId, IntRange> {
                         }),
                         _ => None,
                     },
-                    InstKind::BinOp(BinOp::BitAnd, l, r) => {
-                        // If both non-negative, result ≤ min(a.hi, b.hi)
-                        match (ranges.get(l), ranges.get(r)) {
-                            (Some(a), Some(b)) if a.is_non_negative() && b.is_non_negative() => {
-                                Some(IntRange {
-                                    lo: 0,
-                                    hi: a.hi.min(b.hi),
-                                })
-                            }
-                            _ => None,
+                    InstKind::BinOp(BinOp::BitAnd, l, r) => match (ranges.get(l), ranges.get(r)) {
+                        (Some(a), Some(b)) if a.is_non_negative() && b.is_non_negative() => {
+                            Some(IntRange {
+                                lo: 0,
+                                hi: a.hi.min(b.hi),
+                            })
                         }
-                    }
+                        _ => None,
+                    },
                     _ => None,
                 };
                 if let Some(range) = r {

@@ -1,5 +1,3 @@
-//! Insert-path MIR store codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -14,13 +12,10 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("unknown store '{store_name}'"))?
             .clone();
 
-        // Build fake hir::Expr values from MIR values — we need to call compile_store_insert
-        // which expects &[hir::Expr]. Instead, we'll emit the LLVM IR directly.
         let ensure_fn_name = format!("__store_ensure_{store_name}");
         if let Some(ensure_fn) = self.module.get_function(&ensure_fn_name) {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         } else {
-            // Generate the ensure_open function
             let ensure_fn = self.gen_store_ensure_open(&sd)?;
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
@@ -28,7 +23,6 @@ impl<'ctx> Compiler<'ctx> {
         let fp = self.load_store_fp(store_name)?;
         self.store_lock(fp)?;
 
-        // @before_insert hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec {
                 if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
@@ -59,7 +53,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Read current count for sid assignment
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         let count_for_sid = self.entry_alloca(i64t.into(), "ins.cnt");
@@ -87,7 +80,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_add(old_cnt, i64t.const_int(1, false), "new.sid"));
 
-        // Get current time
         self.ensure_time_fn();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let time_fn = crate::codegen::fn_or_die(&self.module, "time");
@@ -99,7 +91,6 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_int_value();
 
-        // Populate fields: auto-fill builtins, map user args to user fields
         let builtin_names = [
             "sid",
             "uuid",
@@ -159,8 +150,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // @unique enforcement: check uniqueness before writing
-        // Create a skip block for duplicates — branches past the write
         let fn_val = self.bld.get_insert_block().unwrap().get_parent().unwrap();
         let insert_done_bb = self.ctx.append_basic_block(fn_val, "insert.done");
         {
@@ -194,7 +183,6 @@ impl<'ctx> Compiler<'ctx> {
                     let ok_bb = self.ctx.append_basic_block(fn_val, "uniq.ok");
                     b!(self.bld.build_conditional_branch(cmp, dup_bb, ok_bb));
 
-                    // Duplicate: unlock and skip to done
                     self.bld.position_at_end(dup_bb);
                     self.store_unlock(fp)?;
                     b!(self.bld.build_unconditional_branch(insert_done_bb));
@@ -207,9 +195,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Seek to logical end (R13: file may be reserved larger; SEEK_END
-        // would land in zero-padded reserved region). Compute logical end
-        // first, reserve, then seek.
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         let header_size = crate::codegen::stores::HEADER_SIZE;
         let reserve_fn = self
@@ -254,7 +239,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Compute the byte offset of this new record for index insertion
         let rec_byte_offset =
             b!(self
                 .bld
@@ -277,7 +261,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Update count
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -328,14 +311,12 @@ impl<'ctx> Compiler<'ctx> {
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
-        // Index insertion: update all @index/@unique indexes with (hash, offset)
         {
             let insert_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_insert");
             let mut user_idx = 0usize;
             for field_def in &sd.fields {
                 let has_idx = Compiler::field_has_index(field_def);
                 if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
-                    // builtin fields — skip index (no @index on builtins)
                     continue;
                 }
                 if has_idx && user_idx < args.len() {
@@ -354,7 +335,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // @column store: append numeric user fields to column files
         let is_column = sd
             .decorators
             .iter()
@@ -385,7 +365,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // @bloom fields: add values to bloom filters
         {
             let mut bloom_user_idx = 0usize;
             for field_def in &sd.fields {
@@ -409,7 +388,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // @search fields: add text to FTS index
         {
             let mut fts_user_idx = 0usize;
             for field_def in &sd.fields {
@@ -426,7 +404,7 @@ impl<'ctx> Compiler<'ctx> {
                     let data = self.string_data(val)?;
                     let len = self.string_len(val)?;
                     let add_fn = crate::codegen::fn_or_die(&self.module, "jinn_fts_add");
-                    let doc_id = new_sid; // use the record's sid as document id
+                    let doc_id = new_sid;
                     b!(self.bld.build_call(
                         add_fn,
                         &[fts.into(), doc_id.into(), data.into(), len.into()],
@@ -437,10 +415,8 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // WAL: log the insert
         self.wal_write_insert(store_name, rec_ptr, rec_size)?;
 
-        // @after_insert hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterInsert(fname) = dec {
                 if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
@@ -451,7 +427,6 @@ impl<'ctx> Compiler<'ctx> {
 
         self.store_unlock(fp)?;
 
-        // Branch to the done block (for uniqueness skip merging)
         b!(self.bld.build_unconditional_branch(insert_done_bb));
         self.bld.position_at_end(insert_done_bb);
 

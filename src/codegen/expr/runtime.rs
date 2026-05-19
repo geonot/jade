@@ -1,5 +1,3 @@
-//! Strict casts, formatting, atomics, deque, slice, and gradient expression helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,14 +6,12 @@ impl<'ctx> Compiler<'ctx> {
         expr: &hir::Expr,
         target: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Strict cast: same as regular cast but with runtime bounds check for narrowing
         let val = self.compile_expr(expr)?;
         let src = &expr.ty;
         if src.is_int() && target.is_int() {
             let dst = self.llvm_ty(target);
             let (sb, db) = (src.bits(), target.bits());
             if sb > db {
-                // Narrowing: truncate then sign-extend back and compare
                 let truncated = b!(self.bld.build_int_truncate(
                     val.into_int_value(),
                     dst.into_int_type(),
@@ -67,14 +63,13 @@ impl<'ctx> Compiler<'ctx> {
             }
             return Ok(val);
         }
-        // Float→int strict cast: check for NaN, infinity, and out-of-range
+
         if src.is_float() && target.is_int() {
             let fv = self.current_fn();
             let float_val = val.into_float_value();
             let dst_int_ty = self.llvm_ty(target).into_int_type();
             let src_float_ty = float_val.get_type();
 
-            // Check NaN: float != float means NaN
             let is_nan = b!(self.bld.build_float_compare(
                 FloatPredicate::UNO,
                 float_val,
@@ -90,7 +85,6 @@ impl<'ctx> Compiler<'ctx> {
             self.emit_trap("strict cast: cannot convert NaN to integer");
             self.bld.position_at_end(nan_pass_bb);
 
-            // Convert float→int
             let int_val = if target.is_signed() {
                 b!(self
                     .bld
@@ -100,7 +94,7 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_float_to_unsigned_int(float_val, dst_int_ty, "strict.fptoui"))
             };
-            // Convert back int→float and compare: if not equal, value was out of range or fractional
+
             let roundtrip = if target.is_signed() {
                 b!(self
                     .bld
@@ -124,7 +118,7 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(pass_bb);
             return Ok(int_val.into());
         }
-        // For other casts, fall back to regular cast behavior
+
         self.compile_cast(expr, target)
     }
 
@@ -135,10 +129,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         match fmt {
             "json" => self.compile_as_json(expr),
-            _ => {
-                // Fallback: use compile_to_string
-                self.compile_to_string(expr)
-            }
+            _ => self.compile_to_string(expr),
         }
     }
 
@@ -151,22 +142,21 @@ impl<'ctx> Compiler<'ctx> {
             Type::Struct(name, _) => {
                 let fields = self.structs.get(name).cloned().unwrap_or_default();
                 let val = self.compile_expr(expr)?;
-                // Build JSON: {"field1": val1, "field2": val2, ...}
+
                 let mut result = self.compile_str_literal("{")?;
                 let struct_ty = self
                     .module
                     .get_struct_type(&name.as_str())
                     .ok_or_else(|| format!("unknown struct type: {name}"))?;
                 for (i, (fname, fty)) in fields.iter().enumerate() {
-                    // Add comma separator
                     if i > 0 {
                         let comma = self.compile_str_literal(", ")?;
                         result = self.string_concat(result, comma)?;
                     }
-                    // Add "fieldname":
+
                     let key_str = self.compile_str_literal(&format!("\"{fname}\": "))?;
                     result = self.string_concat(result, key_str)?;
-                    // Extract field value
+
                     let field_val = if val.is_pointer_value() {
                         let fgep = b!(self.bld.build_struct_gep(
                             struct_ty,
@@ -182,10 +172,9 @@ impl<'ctx> Compiler<'ctx> {
                             "json.fld"
                         ))
                     };
-                    // Format field value based on type
+
                     let fval_str = match fty {
                         Type::String => {
-                            // Wrap in quotes
                             let q = self.compile_str_literal("\"")?;
                             let s = self.string_concat(q.clone(), field_val)?;
                             self.string_concat(s, q)?
@@ -206,16 +195,12 @@ impl<'ctx> Compiler<'ctx> {
                 self.string_concat(result, close)
             }
             Type::String => {
-                // String: wrap in quotes
                 let q = self.compile_str_literal("\"")?;
                 let val = self.compile_expr(expr)?;
                 let s = self.string_concat(q.clone(), val)?;
                 self.string_concat(s, q)
             }
-            _ => {
-                // Primitives: just convert to string
-                self.compile_to_string(expr)
-            }
+            _ => self.compile_to_string(expr),
         }
     }
 
@@ -228,7 +213,7 @@ impl<'ctx> Compiler<'ctx> {
         let load = b!(self
             .bld
             .build_load(i64t, ptr.into_pointer_value(), "atomic.load"));
-        // Set atomic ordering
+
         load.as_instruction_value()
             .expect("ICE: not an instruction")
             .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
@@ -298,7 +283,7 @@ impl<'ctx> Compiler<'ctx> {
             inkwell::AtomicOrdering::SequentiallyConsistent,
             inkwell::AtomicOrdering::SequentiallyConsistent,
         ));
-        // cmpxchg returns {value, success_bit}; extract the old value
+
         let old = b!(self.bld.build_extract_value(cas, 0, "cas.old"));
         Ok(old)
     }
@@ -309,15 +294,11 @@ impl<'ctx> Compiler<'ctx> {
         start: &hir::Expr,
         end: &hir::Expr,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // For now, compile as a runtime call to a slice helper
-        // Arrays: create a new vec from the slice range
-        // Strings: create a substring
         let obj_val = self.compile_expr(obj)?;
         let start_val = self.compile_expr(start)?;
         let end_val = self.compile_expr(end)?;
         match &obj.ty {
             Type::Vec(elem_ty) => {
-                // Vec slice: call jinn_vec_slice(vec_ptr, start, end, elem_size) → new vec
                 let lty = self.llvm_ty(elem_ty);
                 let elem_size = self.type_store_size(lty);
                 let i64t = self.ctx.i64_type();
@@ -348,7 +329,6 @@ impl<'ctx> Compiler<'ctx> {
                     .unwrap_or_else(|| self.ctx.i64_type().const_zero().into()))
             }
             Type::String => {
-                // String slice: call jinn_str_slice(str, start, end) → new str
                 let slice_fn = self
                     .module
                     .get_function("__jinn_str_slice")
@@ -376,17 +356,12 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Compile `grad(f)` — numerical derivative via central differences.
-    /// `f` must be a function `f64 -> f64`. Returns a closure `f64 -> f64`.
     pub(in crate::codegen) fn compile_grad(
         &mut self,
         inner: &hir::Expr,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Compile the inner fn closure
         let f_closure = self.compile_expr(inner)?;
 
-        // Build the derivative wrapper function: (env_ptr, x) -> f64
-        // env_ptr points to the original closure stored as {fn_ptr, env_ptr}
         let f64t = self.ctx.f64_type();
         let ptr_t = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let grad_ft = f64t.fn_type(&[ptr_t.into(), f64t.into()], false);
@@ -407,25 +382,20 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: missing param")
             .into_float_value();
 
-        // Load the original closure from the env: {fn_ptr, env_ptr}
         let cl_ty = self.closure_type();
         let orig_cl = b!(self.bld.build_load(cl_ty, env_arg, "orig.cl")).into_struct_value();
         let orig_fn = b!(self.bld.build_extract_value(orig_cl, 0, "orig.fn")).into_pointer_value();
         let orig_env = b!(self.bld.build_extract_value(orig_cl, 1, "orig.env"));
 
-        // Build the inner function type: (env_ptr, f64) -> f64
         let inner_ft = f64t.fn_type(&[ptr_t.into(), f64t.into()], false);
 
-        // h = 1e-8
         let h = f64t.const_float(1e-8);
         let two_h = f64t.const_float(2e-8);
 
-        // x_plus = x + h
         let x_plus = b!(self.bld.build_float_add(x, h, "xp"));
-        // x_minus = x - h
+
         let x_minus = b!(self.bld.build_float_sub(x, h, "xm"));
 
-        // f(x + h)
         let fp = b!(self.bld.build_indirect_call(
             inner_ft,
             orig_fn,
@@ -433,7 +403,7 @@ impl<'ctx> Compiler<'ctx> {
             "fp"
         ));
         let fp_val = self.call_result(fp).into_float_value();
-        // f(x - h)
+
         let fm = b!(self.bld.build_indirect_call(
             inner_ft,
             orig_fn,
@@ -441,7 +411,7 @@ impl<'ctx> Compiler<'ctx> {
             "fm"
         ));
         let fm_val = self.call_result(fm).into_float_value();
-        // (f(x+h) - f(x-h)) / 2h
+
         let diff = b!(self.bld.build_float_sub(fp_val, fm_val, "diff"));
         let grad_val = b!(self.bld.build_float_div(diff, two_h, "grad"));
         b!(self.bld.build_return(Some(&grad_val)));
@@ -451,7 +421,6 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(bb);
         }
 
-        // Allocate env holding the original closure, build new closure
         let cl_alloc = self.entry_alloca(cl_ty.into(), "grad.env");
         b!(self.bld.build_store(cl_alloc, f_closure));
 

@@ -1,5 +1,3 @@
-//! Extended store codegen: KV, graph, time-series, vector, bloom, FTS, distinct, aggregation, and versioning operations.
-
 use super::super::Compiler;
 use super::super::b;
 use crate::mir;

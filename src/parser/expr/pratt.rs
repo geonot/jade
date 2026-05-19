@@ -1,5 +1,3 @@
-//! Operator-precedence ladder (ternary → pipeline → eq → cmp → exp → unary → postfix).
-
 use super::placeholder::{contains_placeholder, replace_placeholder};
 use super::{ParseError, Parser};
 use crate::ast::*;
@@ -11,7 +9,7 @@ impl Parser {
         if self.check(Token::Question) {
             let sp = self.span();
             self.advance();
-            // `cond ? ! false_expr` — else-only with explicit ?
+
             if self.check(Token::Bang) {
                 self.advance();
                 let f = self.parse_pipeline()?;
@@ -22,10 +20,8 @@ impl Parser {
                     sp,
                 ))
             } else {
-                // Use parse_pipeline for the true branch so `!` stays at this level
                 let t = self.parse_pipeline()?;
                 if self.check(Token::Bang) {
-                    // `cond ? true_expr ! false_expr` — full ternary
                     self.advance();
                     Ok(Expr::Ternary(
                         Box::new(e),
@@ -34,7 +30,6 @@ impl Parser {
                         sp,
                     ))
                 } else {
-                    // `cond ? true_expr` — if-only
                     Ok(Expr::Ternary(
                         Box::new(e),
                         Box::new(t),
@@ -44,7 +39,6 @@ impl Parser {
                 }
             }
         } else if self.check(Token::Bang) && !self.suppress_bang_else {
-            // `cond ! false_expr` — else-only shorthand
             let sp = self.span();
             self.advance();
             let f = self.parse_pipeline()?;
@@ -65,11 +59,8 @@ impl Parser {
             let sp = self.span();
             self.advance();
             let rhs = self.parse_or()?;
-            // If the RHS contains $ but is NOT just a bare $ or a call to a named function,
-            // wrap it in an implicit lambda: `$ * 2` → `*fn(__ph) __ph * 2`
+
             let rhs = if contains_placeholder(&rhs) && !matches!(rhs, Expr::Placeholder(_)) {
-                // If RHS is a Call(Ident(name), args) and $ appears only in args,
-                // leave it for the typer's existing placeholder substitution.
                 let is_named_call_with_ph = matches!(&rhs, Expr::Call(callee, _, _) if matches!(callee.as_ref(), Expr::Ident(_, _)));
                 if is_named_call_with_ph {
                     rhs
@@ -116,8 +107,8 @@ impl Parser {
                     l = Expr::BinOp(Box::new(l), BinOp::Ne, Box::new(r), sp);
                 }
                 Token::Not if matches!(self.peek_at(1), Token::Equals) => {
-                    self.advance(); // consume `not`
-                    self.advance(); // consume `equals`
+                    self.advance();
+                    self.advance();
                     let r = self.parse_cmp()?;
                     l = Expr::BinOp(Box::new(l), BinOp::Ne, Box::new(r), sp);
                 }
@@ -129,8 +120,7 @@ impl Parser {
 
     pub(in crate::parser) fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
         let mut l = self.parse_bitor()?;
-        // Track only the rightmost operand from the previous comparison to avoid
-        // quadratic cloning of the accumulated AND chain.
+
         let mut prev_right: Option<Expr> = None;
         loop {
             let sp = self.span();
@@ -145,7 +135,6 @@ impl Parser {
                 self.advance();
                 let r = self.parse_bitor()?;
                 if let Some(pr) = prev_right.take() {
-                    // Chained comparison: `a < b < c` → `a < b and b < c`
                     let right = Expr::BinOp(Box::new(pr), op, Box::new(r.clone()), sp);
                     l = Expr::BinOp(Box::new(l), BinOp::And, Box::new(right), sp);
                 } else {
@@ -232,13 +221,7 @@ impl Parser {
                         self.advance();
                         let a = self.parse_args()?;
                         self.expect(Token::RParen)?;
-                        // Implicit lambda for method args containing `$` —
-                        // mirrors the pipeline (`~`) shorthand so things like
-                        // `xs.map($ * 2)` and `xs.filter($ > 0)` Just Work.
-                        // Restricted to a known set of higher-order method
-                        // names so that `$` retains its loop-variable meaning
-                        // when used inside `loop`/`for` blocks for ordinary
-                        // calls like `items.push(int_val($))`.
+
                         let is_hof = f.with_str(|s| {
                             matches!(
                                 s,
@@ -319,7 +302,7 @@ impl Parser {
                 Token::As => {
                     let sp = self.span();
                     self.advance();
-                    // `as strict T` → strict narrowing cast
+
                     if self.check(Token::Strict) {
                         self.advance();
                         e = Expr::StrictCast(Box::new(e), self.parse_type()?, sp);

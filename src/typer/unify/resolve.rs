@@ -99,9 +99,6 @@ impl InferCtx {
         self.resolve_core(ty, self.collect_default_warnings)
     }
 
-    /// Resolve a container element type. If the element type is an unsolved TypeVar
-    /// with no constraint (e.g., from an empty `vec()`), default to I64 silently
-    /// without triggering strict-mode errors.
     pub(in crate::typer) fn resolve_container_elem(&mut self, ty: &Type) -> Type {
         if let Type::TypeVar(v) = ty {
             let root = self.find(*v);
@@ -115,10 +112,7 @@ impl InferCtx {
                     Type::I64
                 }
                 TypeConstraint::Integer => Type::I64,
-                TypeConstraint::Trait(_) => {
-                    // Trait-constrained container elements should still error
-                    self.resolve_core(ty, self.collect_default_warnings)
-                }
+                TypeConstraint::Trait(_) => self.resolve_core(ty, self.collect_default_warnings),
             }
         } else {
             self.resolve_core(ty, self.collect_default_warnings)
@@ -156,7 +150,6 @@ impl InferCtx {
                         }
                     }
                 } else if self.strict_types && !self.quantified_vars.contains(&root) {
-                    // Collect usage site notes for enhanced diagnostics
                     let usage_notes = {
                         let sites = &self.usage_sites[root as usize];
                         if !sites.is_empty() {

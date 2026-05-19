@@ -59,11 +59,6 @@ impl Lowerer {
             lambda_lowerer.var_map.insert(p.name, val);
         }
 
-        // Same tail-expression auto-clone treatment as top-level fn body
-        // lowering: identify the implicit-return position and use
-        // `lower_expr_owned` so a heap-typed field/index read at the tail
-        // produces an independently-owned value rather than aliasing
-        // storage about to be scope-exit dropped.
         let tail_idx: Option<usize> = body
             .iter()
             .enumerate()

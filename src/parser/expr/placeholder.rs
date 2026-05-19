@@ -1,8 +1,5 @@
-//! Lambda-shorthand placeholder substitution helpers.
-
 use crate::ast::*;
 
-/// Check if an AST expression contains `$` (Placeholder) or `$$` (IndexPlaceholder) anywhere.
 pub(in crate::parser) fn contains_placeholder(expr: &Expr) -> bool {
     match expr {
         Expr::Placeholder(_) | Expr::IndexPlaceholder(_) => true,
@@ -27,8 +24,6 @@ pub(in crate::parser) fn contains_placeholder(expr: &Expr) -> bool {
     }
 }
 
-/// Check if an AST expression contains `$` (Placeholder) anywhere.
-/// Does NOT match `$$` (IndexPlaceholder), which is the implicit loop index.
 pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
     match expr {
         Expr::Placeholder(_) => true,
@@ -58,8 +53,6 @@ pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
     }
 }
 
-/// Replace all `$` (Placeholder) in an expression with `Ident(name)`.
-/// Does NOT replace `$$` (IndexPlaceholder).
 pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
     match expr {
         Expr::Placeholder(sp) => Expr::Ident(name.into(), *sp),
@@ -117,7 +110,6 @@ pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
     }
 }
 
-/// Check if any statement in a block contains `$`.
 pub(in crate::parser) fn contains_placeholder_in_block(block: &[Stmt]) -> bool {
     block.iter().any(|s| contains_placeholder_in_stmt(s))
 }
@@ -159,7 +151,6 @@ pub(in crate::parser) fn contains_placeholder_in_stmt(stmt: &Stmt) -> bool {
     }
 }
 
-/// Replace all `$` in a block with `Ident(name)`.
 pub(in crate::parser) fn replace_placeholder_in_block(block: &[Stmt], name: &str) -> Vec<Stmt> {
     block
         .iter()
@@ -244,7 +235,6 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
     }
 }
 
-/// Check if an AST expression contains `$$` (IndexPlaceholder) anywhere.
 pub(in crate::parser) fn contains_index_placeholder(expr: &Expr) -> bool {
     match expr {
         Expr::IndexPlaceholder(_) => true,
@@ -273,7 +263,6 @@ pub(in crate::parser) fn contains_index_placeholder(expr: &Expr) -> bool {
     }
 }
 
-/// Replace all `$$` (IndexPlaceholder) in an expression with `Ident(name)`.
 pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> Expr {
     match expr {
         Expr::IndexPlaceholder(sp) => Expr::Ident(name.into(), *sp),
@@ -347,7 +336,6 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
     }
 }
 
-/// Check if any statement in a block contains `$$`.
 pub(in crate::parser) fn contains_index_placeholder_in_block(block: &[Stmt]) -> bool {
     block.iter().any(|s| contains_index_placeholder_in_stmt(s))
 }
@@ -395,7 +383,6 @@ pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool
     }
 }
 
-/// Replace all `$$` in a block with `Ident(name)`.
 pub(in crate::parser) fn replace_index_placeholder_in_block(
     block: &[Stmt],
     name: &str,

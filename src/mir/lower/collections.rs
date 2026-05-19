@@ -24,7 +24,6 @@ impl Lowerer {
             ExprKind::MapNew => self.emit(InstKind::MapInit, ty, span),
 
             ExprKind::ListComp(body_expr, _def_id, bind, iter, end, cond) => {
-                // Desugar: vec = VecNew(); for bind in iter..end { if cond { VecPush(vec, body) } }
                 let vec_val = self.emit(InstKind::VecNew(vec![]), ty.clone(), span);
                 let iter_val = self.lower_expr(iter);
 
@@ -33,7 +32,6 @@ impl Lowerer {
                 let inc_bb = self.new_block("listcomp.inc");
                 let exit_bb = self.new_block("listcomp.exit");
 
-                // Create loop index using Store/Load.
                 let init_val = if end.is_some() {
                     iter_val
                 } else {
@@ -59,8 +57,7 @@ impl Lowerer {
                 self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                 self.switch_to(body_bb);
-                // Bind the loop variable — for collection iteration (no end),
-                // bind the element at the current index, not the index itself.
+
                 if end.is_none() {
                     let elem = self.emit(InstKind::Index(iter_val, idx), ty.clone(), span);
                     self.var_map.insert(Symbol::intern(bind), elem);
@@ -85,7 +82,6 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(inc_bb));
                 }
 
-                // Increment index.
                 self.switch_to(inc_bb);
                 let cur_idx = self.emit(InstKind::Load(idx_name), Type::I64, span);
                 let next_idx =
@@ -97,9 +93,6 @@ impl Lowerer {
                 vec_val
             }
 
-            // Concurrency primitives — lower as dedicated MIR instructions
-
-            // Iterator
             ExprKind::IterNext(iter_var, type_name, method_name) => {
                 if let Some(&v) = self.var_map.get(iter_var) {
                     self.emit(

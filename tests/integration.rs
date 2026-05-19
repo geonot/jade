@@ -79,7 +79,6 @@ fn expect_compile_fail(src: &str) -> String {
     String::from_utf8_lossy(&output.stderr).to_string()
 }
 
-/// Like compile_and_run but sets working directory to temp dir so .store files are isolated.
 fn compile_and_run_in_dir(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let jinn = dir.path().join("test.jn");
@@ -110,14 +109,10 @@ fn expect_store(src: &str, expected: &str) {
     assert_eq!(got.trim(), expected.trim(), "source:\n{src}");
 }
 
-// ── Hello World ──────────────────────────────────────────────────────
-
 #[test]
 fn hello_world() {
     expect("*main()\n    log('hello')\n", "hello");
 }
-
-// ── Arithmetic ───────────────────────────────────────────────────────
 
 #[test]
 fn arithmetic_add() {
@@ -154,17 +149,13 @@ fn arithmetic_combined() {
     expect_file("tests/programs/arithmetic.jn", "5\n6\n42\n5\n2\n1024");
 }
 
-// ── Exponentiation ──────────────────────────────────────────────────
-
 #[test]
 fn exp_right_associative() {
-    // 2 pow 3 pow 2 = 2 pow 9 = 512
     expect("*main()\n    log(2 pow 3 pow 2)\n", "512");
 }
 
 #[test]
 fn exp_left_grouped() {
-    // (2 pow 3) pow 2 = 8 pow 2 = 64
     expect("*main()\n    log((2 pow 3) pow 2)\n", "64");
 }
 
@@ -177,8 +168,6 @@ fn exp_zero() {
 fn exp_large() {
     expect("*main()\n    log(2 pow 20)\n", "1048576");
 }
-
-// ── Comparisons ─────────────────────────────────────────────────────
 
 #[test]
 fn cmp_gt() {
@@ -210,8 +199,6 @@ fn cmp_isnt() {
     expect("*main()\n    log(7 neq 8)\n", "1");
 }
 
-// ── Bindings ────────────────────────────────────────────────────────
-
 #[test]
 fn binding_basic() {
     expect("*main()\n    x is 42\n    log(x)\n", "42");
@@ -221,8 +208,6 @@ fn binding_basic() {
 fn binding_computed() {
     expect_file("tests/programs/bindings.jn", "30\n20");
 }
-
-// ── Literals ────────────────────────────────────────────────────────
 
 #[test]
 fn literal_hex() {
@@ -248,8 +233,6 @@ fn literal_underscore() {
 fn literal_negative() {
     expect("*main()\n    log(-42)\n", "-42");
 }
-
-// ── If/Elif/Else ────────────────────────────────────────────────────
 
 #[test]
 fn if_true() {
@@ -288,8 +271,6 @@ fn elif_else_branch() {
     );
 }
 
-// ── While Loop ──────────────────────────────────────────────────────
-
 #[test]
 fn while_loop() {
     expect_file("tests/programs/while_loop.jn", "0\n1\n2\n3\n4");
@@ -302,8 +283,6 @@ fn while_zero_iter() {
         "99",
     );
 }
-
-// ── For Loop ────────────────────────────────────────────────────────
 
 #[test]
 fn for_loop() {
@@ -334,8 +313,6 @@ fn for_range_by() {
     );
 }
 
-// ── Loop/Break/Continue ─────────────────────────────────────────────
-
 #[test]
 fn loop_break() {
     expect_file("tests/programs/loop_break.jn", "0\n1\n2\n3\n4");
@@ -346,14 +323,10 @@ fn while_continue() {
     expect_file("tests/programs/continue_loop.jn", "1\n3\n5\n7\n9");
 }
 
-// ── Functions ───────────────────────────────────────────────────────
-
 #[test]
 fn function_calls() {
     expect_file("tests/programs/functions.jn", "7\n25\n25");
 }
-
-// ── Recursion ───────────────────────────────────────────────────────
 
 #[test]
 fn factorial() {
@@ -368,21 +341,15 @@ fn fibonacci_35() {
     expect_file("tests/fibonacci.jn", "9227465");
 }
 
-// ── Ternary ─────────────────────────────────────────────────────────
-
 #[test]
 fn ternary_ops() {
     expect_file("tests/programs/ternary.jn", "42\n42\n20\n30\n50\n0\n100");
 }
 
-// ── Bitwise ─────────────────────────────────────────────────────────
-
 #[test]
 fn bitwise_ops() {
     expect_file("tests/programs/bitwise.jn", "15\n255\n240\n1024\n32\n-1");
 }
-
-// ── Casts ───────────────────────────────────────────────────────────
 
 #[test]
 fn cast_int_to_float() {
@@ -393,8 +360,6 @@ fn cast_int_to_float() {
 fn cast_float_to_int() {
     expect("*main()\n    x is 3.14 as i64\n    log(x)\n", "3");
 }
-
-// ── Strings ─────────────────────────────────────────────────────────
 
 #[test]
 fn string_output() {
@@ -427,22 +392,15 @@ fn string_concat_length() {
     );
 }
 
-// ── Algorithms ──────────────────────────────────────────────────────
-
 #[test]
 fn collatz_27() {
-    // collatz(27) = 111 steps
     expect_file("tests/programs/algorithms.jn", "111\n6\n25");
 }
-
-// ── Iterative ───────────────────────────────────────────────────────
 
 #[test]
 fn iterative_fib() {
     expect_file("tests/programs/iterative.jn", "55\n6765\n4950\n499500");
 }
-
-// ── Nesting ─────────────────────────────────────────────────────────
 
 #[test]
 fn nested_if() {
@@ -453,8 +411,6 @@ fn nested_if() {
 fn nested_loops() {
     expect_file("tests/programs/nested_loops.jn", "100\n100");
 }
-
-// ── IR Emission ─────────────────────────────────────────────────────
 
 #[test]
 fn emit_ir_flag() {
@@ -468,8 +424,6 @@ fn emit_ir_flag() {
     assert!(ir.contains("define i32 @main(i32") || ir.contains("define i32 @main()"));
     assert!(ir.contains("@printf"));
 }
-
-// ── Error Handling ──────────────────────────────────────────────────
 
 #[test]
 fn error_on_missing_file() {
@@ -491,8 +445,6 @@ fn error_on_tab() {
         .expect("jinnc failed");
     assert!(!output.status.success());
 }
-
-// ── Structs ─────────────────────────────────────────────────────────
 
 #[test]
 fn struct_construction() {
@@ -526,8 +478,6 @@ fn struct_pass_to_fn() {
     );
 }
 
-// ── Enums ───────────────────────────────────────────────────────────
-
 #[test]
 fn enum_basic_match() {
     expect(
@@ -560,8 +510,6 @@ fn enum_wildcard_arm() {
     );
 }
 
-// ── Arrays ──────────────────────────────────────────────────────────
-
 #[test]
 fn array_literal_index() {
     expect(
@@ -586,8 +534,6 @@ fn array_in_loop() {
     );
 }
 
-// ── Tuples ──────────────────────────────────────────────────────────
-
 #[test]
 fn tuple_basic() {
     expect(
@@ -604,8 +550,6 @@ fn tuple_arithmetic() {
     );
 }
 
-// ── Integer Match ───────────────────────────────────────────────────
-
 #[test]
 fn match_int_literal() {
     expect(
@@ -621,8 +565,6 @@ fn match_int_wildcard() {
         "999",
     );
 }
-
-// ── Match Expressions ───────────────────────────────────────────────
 
 #[test]
 fn match_int_expr() {
@@ -642,14 +584,11 @@ fn match_enum_expr() {
 
 #[test]
 fn match_enum_expr_with_bind() {
-    // Match with block-style arms that use variable assignment
     expect(
         "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s as Shape) returns i64\n    result is 0\n    match s\n        Circle(r) ?\n            result is r * r\n        Rect(w, h) ?\n            result is w * h\n    result\n\n*main() returns i32\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n    0\n",
         "25\n21",
     );
 }
-
-// ── Higher-Order Functions ──────────────────────────────────────────
 
 #[test]
 fn hof_pass_function() {
@@ -675,8 +614,6 @@ fn hof_return_value_chains() {
     );
 }
 
-// ── Lambda Expressions ──────────────────────────────────────────────
-
 #[test]
 fn lambda_basic() {
     expect(
@@ -700,8 +637,6 @@ fn lambda_multi_param() {
         "42",
     );
 }
-
-// ── Pipeline Operator ───────────────────────────────────────────────
 
 #[test]
 fn pipeline_basic() {
@@ -775,8 +710,6 @@ fn lambda_do_end_with_if() {
     );
 }
 
-// ── Closures (captures) ────────────────────────────────────────────
-
 #[test]
 fn closure_single_capture() {
     expect(
@@ -809,8 +742,6 @@ fn closure_in_pipeline() {
     );
 }
 
-// ── Nullary Variants & Option/Result ───────────────────────────────
-
 #[test]
 fn nullary_variant() {
     expect(
@@ -834,8 +765,6 @@ fn result_ok_err() {
         "70\n-110",
     );
 }
-
-// ---- generics (of syntax) ----
 
 #[test]
 fn generic_identity() {
@@ -863,8 +792,6 @@ fn generic_add() {
 
 #[test]
 fn generic_struct_ctor_explicit_type() {
-    // N-2: `Box of i64(7)` constructs a generic struct with an
-    // explicit type binding and positional fields.
     expect(
         "type Box of T\n    value as T\n\n*main() returns i32\n    b is Box of i64(7)\n    log(b.value)\n    0\n",
         "7",
@@ -873,8 +800,6 @@ fn generic_struct_ctor_explicit_type() {
 
 #[test]
 fn generic_struct_ctor_positional_inferred() {
-    // N-2: `Box(7)` constructs the generic struct with the type
-    // parameter inferred from the positional argument.
     expect(
         "type Box of T\n    value as T\n\n*main() returns i32\n    b is Box(7)\n    log(b.value)\n    0\n",
         "7",
@@ -883,14 +808,11 @@ fn generic_struct_ctor_positional_inferred() {
 
 #[test]
 fn generic_struct_ctor_two_params_positional() {
-    // N-2: tuple type-arg list `Pair of (i64, String)(...)`.
     expect(
         "type Pair of A, B\n    first as A\n    second as B\n\n*main() returns i32\n    p is Pair of (i64, String)(1, \"hi\")\n    log(p.first)\n    log(p.second)\n    0\n",
         "1\nhi",
     );
 }
-
-// ---- extern (FFI) ----
 
 #[test]
 fn extern_puts() {
@@ -900,8 +822,6 @@ fn extern_puts() {
     );
 }
 
-// ---- struct methods ----
-
 #[test]
 fn struct_method_basic() {
     expect(
@@ -909,8 +829,6 @@ fn struct_method_basic() {
         "10",
     );
 }
-
-// ---- bit intrinsics ----
 
 #[test]
 fn bit_popcount() {
@@ -932,8 +850,6 @@ fn bit_bswap() {
         "16777216",
     );
 }
-
-// ---- inferred generics (no `of` keyword) ----
 
 #[test]
 fn inferred_generic_identity() {
@@ -1015,8 +931,6 @@ fn untyped_generic_multi_fn() {
     );
 }
 
-// --- Pointer tests ---
-
 #[test]
 fn pointer_ref_deref() {
     expect(
@@ -1032,8 +946,6 @@ fn pointer_ref_deref_arithmetic() {
         "30",
     );
 }
-
-// --- List comprehension tests ---
 
 #[test]
 fn list_comp_basic() {
@@ -1051,29 +963,21 @@ fn list_comp_with_filter() {
     );
 }
 
-// --- Syscall test ---
-
 #[test]
 fn syscall_write() {
-    // syscall(1, 1, ptr, len) = write(stdout, "OK\n", 3)
     expect(
         "extern *write(fd as i64, buf as %i8, len as i64) returns i64\n\n*main() returns i32\n    log(42)\n    0\n",
         "42",
     );
 }
 
-// --- Err definition test ---
-
 #[test]
 fn err_def_parse() {
-    // err definitions compile as tagged unions (same as enums)
     expect(
         "err IoError\n    NotFound\n    Permission\n\n*main() returns i32\n    log(99)\n    0\n",
         "99",
     );
 }
-
-// --- Bang return test ---
 
 #[test]
 fn bang_return_basic() {
@@ -1083,11 +987,8 @@ fn bang_return_basic() {
     );
 }
 
-// --- Asm block test ---
-
 #[test]
 fn asm_nop() {
-    // asm block with just nop, should not crash
     expect(
         "*main() returns i32\n    asm\n        nop\n    log(42)\n    0\n",
         "42",
@@ -1096,7 +997,6 @@ fn asm_nop() {
 
 #[test]
 fn list_comp_expression() {
-    // list comprehension with more complex expression
     expect(
         "*main() returns i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[1])\n    log(arr[2])\n    0\n",
         "10\n11\n12",
@@ -1105,7 +1005,6 @@ fn list_comp_expression() {
 
 #[test]
 fn pointer_write_through() {
-    // write through a pointer
     expect(
         "extern *memset(ptr as %i8, val as i32, len as i64) returns %i8\n\n*main() returns i32\n    x is 10\n    p is %x\n    log(@p)\n    0\n",
         "10",
@@ -1114,7 +1013,6 @@ fn pointer_write_through() {
 
 #[test]
 fn module_import() {
-    // test module system: create a helper module and import it
     let dir = tempfile::tempdir().unwrap();
     let helper = dir.path().join("helper.jn");
     let main = dir.path().join("main.jn");
@@ -1143,8 +1041,6 @@ fn module_import() {
         "module import: expected 42 got {stdout}"
     );
 }
-
-// --- Exhaustive pattern matching tests ---
 
 #[test]
 fn match_exhaustive_all_variants() {
@@ -1221,8 +1117,6 @@ fn exhaust_bool_wildcard() {
 
 #[test]
 fn exhaust_guard_not_counted() {
-    // Guard arms don't guarantee coverage — the only guard-free arm is `_`
-    // so this succeeds despite all enum arms having guards
     expect(
         "enum D\n    A\n    B\n\n*main() returns i32\n    d is A\n    match d\n        A when false ? log(0)\n        _ ? log(1)\n    0\n",
         "1",
@@ -1231,7 +1125,6 @@ fn exhaust_guard_not_counted() {
 
 #[test]
 fn exhaust_nested_enum() {
-    // Nested enum variant fields must also be exhaustive
     expect(
         "enum Inner\n    X\n    Y\n\nenum Outer\n    Wrap(Inner)\n\n*main() returns i32\n    o is Wrap(X)\n    match o\n        Wrap(X) ? log(1)\n        Wrap(Y) ? log(2)\n    0\n",
         "1",
@@ -1249,8 +1142,6 @@ fn exhaust_nested_enum_missing_fails() {
     );
 }
 
-// ── Option type ─────────────────────────────────────────────────────
-
 #[test]
 fn option_some() {
     expect(
@@ -1266,8 +1157,6 @@ fn option_nothing() {
         "0",
     );
 }
-
-// ── Result type ─────────────────────────────────────────────────────
 
 #[test]
 fn result_ok() {
@@ -1285,8 +1174,6 @@ fn result_err() {
     );
 }
 
-// ── Array iteration ─────────────────────────────────────────────────
-
 #[test]
 fn for_in_array() {
     expect(
@@ -1302,16 +1189,6 @@ fn for_in_array_sum() {
         "15",
     );
 }
-
-// ── Reference counting ──────────────────────────────────────────────
-//
-// Surface `rc()` / `rc_retain` / `rc_release` were removed under the
-// "heap tax" semantics: every heap nominal is intrinsically refcounted
-// and the compiler emits the inc/dec ops. There is no longer a user-
-// visible wrapper to test directly — coverage now lives in tests that
-// allocate, share, and drop heap structs.
-
-// ── Equals/Neq correctness (zext, not sext) ────────────────────────
 
 #[test]
 fn equals_returns_one_not_neg_one() {
@@ -1345,8 +1222,6 @@ fn equals_in_arithmetic() {
     );
 }
 
-// ── Integer exponentiation ──────────────────────────────────────────
-
 #[test]
 fn int_pow_basic() {
     expect("*main()\n    log(2 pow 10)\n", "1024");
@@ -1366,8 +1241,6 @@ fn int_pow_zero() {
 fn int_pow_one() {
     expect("*main()\n    log(99 pow 1)\n", "99");
 }
-
-// ── Nested control flow ─────────────────────────────────────────────
 
 #[test]
 fn nested_for_while() {
@@ -1393,8 +1266,6 @@ fn while_continue_skip() {
     );
 }
 
-// ── Recursion variants ──────────────────────────────────────────────
-
 #[test]
 fn mutual_recursion_like() {
     expect(
@@ -1410,8 +1281,6 @@ fn deep_recursion() {
         "5050",
     );
 }
-
-// ── Ternary edge cases ──────────────────────────────────────────────
 
 #[test]
 fn ternary_nested() {
@@ -1461,8 +1330,6 @@ fn ternary_variants() {
     );
 }
 
-// ── Loop patterns ───────────────────────────────────────────────────
-
 #[test]
 fn loop_collection_placeholder() {
     expect(
@@ -1511,8 +1378,6 @@ fn loop_patterns() {
     );
 }
 
-// ── Lambda edge cases ───────────────────────────────────────────────
-
 #[test]
 fn lambda_capture_multiple() {
     expect(
@@ -1520,8 +1385,6 @@ fn lambda_capture_multiple() {
         "35",
     );
 }
-
-// ── Generic function specialization ─────────────────────────────────
 
 #[test]
 fn generic_fn_different_types() {
@@ -1531,8 +1394,6 @@ fn generic_fn_different_types() {
     );
 }
 
-// ── Comparison chain correctness ────────────────────────────────────
-
 #[test]
 fn comparison_lt_gt_combined() {
     expect(
@@ -1540,8 +1401,6 @@ fn comparison_lt_gt_combined() {
         "1\n1\n1\n1",
     );
 }
-
-// ── Modular arithmetic ──────────────────────────────────────────────
 
 #[test]
 fn mod_operator() {
@@ -1551,8 +1410,6 @@ fn mod_operator() {
     );
 }
 
-// ── Loop with accumulator ───────────────────────────────────────────
-
 #[test]
 fn loop_break_with_counter() {
     expect(
@@ -1560,8 +1417,6 @@ fn loop_break_with_counter() {
         "10",
     );
 }
-
-// ── Array operations ────────────────────────────────────────────────
 
 #[test]
 fn array_index_access() {
@@ -1579,8 +1434,6 @@ fn array_iteration_sum() {
     );
 }
 
-// ── Enum with multiple variants ─────────────────────────────────────
-
 #[test]
 fn enum_three_variants() {
     expect(
@@ -1588,8 +1441,6 @@ fn enum_three_variants() {
         "2",
     );
 }
-
-// ── Option chain ────────────────────────────────────────────────────
 
 #[test]
 fn option_some_unwrap_math() {
@@ -1607,11 +1458,8 @@ fn result_ok_err_both() {
     );
 }
 
-// ── Recursive Enums ─────────────────────────────────────────────────
-
 #[test]
 fn recursive_enum_tree_sum_left_first() {
-    // Node(Tree, i64, Tree) — recursive fields before scalar
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*tree_sum(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(left, val, right) ? tree_sum(left) + val + tree_sum(right)\n\n*main() returns i32\n    t is Node(Leaf(1), 42, Leaf(3))\n    log(tree_sum(t))\n    0\n",
         "46",
@@ -1620,7 +1468,6 @@ fn recursive_enum_tree_sum_left_first() {
 
 #[test]
 fn recursive_enum_tree_sum_right_first() {
-    // Node(i64, Tree, Tree) — scalar before recursive fields
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(i64, Tree, Tree)\n\n*tree_sum(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(val, left, right) ? tree_sum(left) + val + tree_sum(right)\n\n*main() returns i32\n    t is Node(42, Leaf(1), Leaf(3))\n    log(tree_sum(t))\n    0\n",
         "46",
@@ -1629,7 +1476,6 @@ fn recursive_enum_tree_sum_right_first() {
 
 #[test]
 fn recursive_enum_deep_tree() {
-    // Multi-level nesting: Node(Node(Leaf, Leaf), val, Leaf)
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*tree_sum(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(left, val, right) ? tree_sum(left) + val + tree_sum(right)\n\n*main() returns i32\n    t is Node(Node(Leaf(10), 20, Leaf(30)), 100, Leaf(5))\n    log(tree_sum(t))\n    0\n",
         "165",
@@ -1638,7 +1484,6 @@ fn recursive_enum_deep_tree() {
 
 #[test]
 fn recursive_enum_single_recursive_field() {
-    // List with one recursive field
     expect(
         "enum List\n    Nil\n    Cons(i64, List)\n\n*list_sum(l as List) returns i64\n    match l\n        Nil() ? 0\n        Cons(x, rest) ? x + list_sum(rest)\n\n*main() returns i32\n    l is Cons(1, Cons(2, Cons(3, Nil())))\n    log(list_sum(l))\n    0\n",
         "6",
@@ -1647,7 +1492,6 @@ fn recursive_enum_single_recursive_field() {
 
 #[test]
 fn recursive_enum_leaf_only() {
-    // Non-recursive variant still works
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*tree_sum(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(left, val, right) ? tree_sum(left) + val + tree_sum(right)\n\n*main() returns i32\n    log(tree_sum(Leaf(99)))\n    0\n",
         "99",
@@ -1656,7 +1500,6 @@ fn recursive_enum_leaf_only() {
 
 #[test]
 fn recursive_enum_nested_match() {
-    // Extract and match on a recursive field's inner value
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*left_val(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(left, val, right) ? left_val(left)\n\n*main() returns i32\n    t is Node(Leaf(77), 0, Leaf(88))\n    log(left_val(t))\n    0\n",
         "77",
@@ -1665,7 +1508,6 @@ fn recursive_enum_nested_match() {
 
 #[test]
 fn recursive_enum_count_nodes() {
-    // Count internal nodes in a tree
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*count(t as Tree) returns i64\n    match t\n        Leaf(v) ? 0\n        Node(left, val, right) ? 1 + count(left) + count(right)\n\n*main() returns i32\n    t is Node(Node(Leaf(1), 2, Leaf(3)), 4, Node(Leaf(5), 6, Leaf(7)))\n    log(count(t))\n    0\n",
         "3",
@@ -1674,7 +1516,6 @@ fn recursive_enum_count_nodes() {
 
 #[test]
 fn recursive_enum_list_length() {
-    // Length of a linked list
     expect(
         "enum List\n    Nil\n    Cons(i64, List)\n\n*length(l as List) returns i64\n    match l\n        Nil() ? 0\n        Cons(x, rest) ? 1 + length(rest)\n\n*main() returns i32\n    l is Cons(10, Cons(20, Cons(30, Cons(40, Nil()))))\n    log(length(l))\n    0\n",
         "4",
@@ -1683,7 +1524,6 @@ fn recursive_enum_list_length() {
 
 #[test]
 fn recursive_enum_tree_depth() {
-    // Maximum depth of a binary tree (using ternary for max)
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*max(a as i64, b as i64) returns i64\n    a > b ? a ! b\n\n*depth(t as Tree) returns i64\n    match t\n        Leaf(v) ? 1\n        Node(left, val, right) ? 1 + max(depth(left), depth(right))\n\n*main() returns i32\n    t is Node(Node(Node(Leaf(1), 2, Leaf(3)), 4, Leaf(5)), 6, Leaf(7))\n    log(depth(t))\n    0\n",
         "4",
@@ -1692,7 +1532,6 @@ fn recursive_enum_tree_depth() {
 
 #[test]
 fn recursive_enum_tree_map() {
-    // Map a function over tree leaves (double each value)
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(Tree, i64, Tree)\n\n*tree_sum(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(left, val, right) ? tree_sum(left) + val + tree_sum(right)\n\n*main() returns i32\n    t is Node(Leaf(10), 100, Node(Leaf(20), 200, Leaf(30)))\n    log(tree_sum(t))\n    0\n",
         "360",
@@ -1701,7 +1540,6 @@ fn recursive_enum_tree_map() {
 
 #[test]
 fn if_else_implicit_return() {
-    // if/else as the last expression in a function body (implicit return)
     expect(
         "*max_val(a as i64, b as i64) returns i64\n    if a > b\n        a\n    else\n        b\n\n*main() returns i32\n    log(max_val(10, 20))\n    log(max_val(20, 10))\n    0\n",
         "20\n20",
@@ -1710,7 +1548,6 @@ fn if_else_implicit_return() {
 
 #[test]
 fn if_elif_else_implicit_return() {
-    // if/elif/else chain producing a value
     expect(
         "*classify(x as i64) returns i64\n    if x < 0\n        -1\n    elif x > 0\n        1\n    else\n        0\n\n*main() returns i32\n    log(classify(-5))\n    log(classify(0))\n    log(classify(42))\n    0\n",
         "-1\n0\n1",
@@ -1719,7 +1556,6 @@ fn if_elif_else_implicit_return() {
 
 #[test]
 fn enum_i32_multi_fields() {
-    // Enum with multiple i32 fields — tests correct type_store_size for sub-8-byte types
     expect(
         "enum Shape\n    Circle(i32)\n    Rect(i32, i32)\n    Point(i32, i32, i32)\n\n*describe(s as Shape) returns i64\n    match s\n        Circle(r) ? r as i64\n        Rect(w, h) ? (w as i64) * 100 + (h as i64)\n        Point(x, y, z) ? (x as i64) * 10000 + (y as i64) * 100 + (z as i64)\n\n*main() returns i32\n    c is Circle(7)\n    r is Rect(3, 4)\n    p is Point(1, 2, 3)\n    log(describe(c))\n    log(describe(r))\n    log(describe(p))\n    0\n",
         "7\n304\n10203",
@@ -1728,7 +1564,6 @@ fn enum_i32_multi_fields() {
 
 #[test]
 fn recursive_enum_dynamic_list() {
-    // Dynamic linked list construction via if/else return + recursive calls
     expect(
         "enum List\n    Nil\n    Cons(i64, List)\n\n*list_sum(l as List) returns i64\n    match l\n        Nil ? 0\n        Cons(x, rest) ? x + list_sum(rest)\n\n*build(n as i64) returns List\n    if n < 1\n        Nil\n    else\n        Cons(n, build(n - 1))\n\n*main() returns i32\n    l is build(10)\n    log(list_sum(l))\n    0\n",
         "55",
@@ -1737,7 +1572,6 @@ fn recursive_enum_dynamic_list() {
 
 #[test]
 fn enum_mixed_int_float_fields() {
-    // Enum with mixed i32/f64 fields — tests type_store_size and coercion
     expect(
         "enum Value\n    IntVal(i32)\n    FloatVal(f64)\n    Pair(i32, f64)\n\n*extract(v as Value) returns f64\n    match v\n        IntVal(i) ? i as f64\n        FloatVal(f) ? f\n        Pair(i, f) ? (i as f64) + f\n\n*main() returns i32\n    a is IntVal(42)\n    b is FloatVal(3.14)\n    c is Pair(10, 2.5)\n    log(extract(a))\n    log(extract(c))\n    0\n",
         "42.000000\n12.500000",
@@ -1746,14 +1580,11 @@ fn enum_mixed_int_float_fields() {
 
 #[test]
 fn recursive_enum_reversed_field_order() {
-    // Node(i64, Tree, Tree) — both orderings now work correctly
     expect(
         "enum Tree\n    Leaf(i64)\n    Node(i64, Tree, Tree)\n\n*tree_sum(t as Tree) returns i64\n    match t\n        Leaf(v) ? v\n        Node(val, left, right) ? val + tree_sum(left) + tree_sum(right)\n\n*main() returns i32\n    t is Node(6, Node(2, Leaf(1), Leaf(3)), Node(8, Leaf(7), Leaf(9)))\n    log(tree_sum(t))\n    0\n",
         "36",
     );
 }
-
-// ── Edge cases ──────────────────────────────────────────────────────
 
 #[test]
 fn closure_capture_mutation() {
@@ -1915,8 +1746,6 @@ fn nested_array_access() {
     );
 }
 
-// ── Store Tests ──────────────────────────────────────────────────────
-
 #[test]
 fn store_insert_count_int() {
     expect_store(
@@ -2053,10 +1882,6 @@ fn store_multi_type_fields() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Tuple destructuring in match
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn match_tuple_basic() {
     expect(
@@ -2080,10 +1905,6 @@ fn match_array_basic() {
         "60",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Operator overloading (Add, Sub, Mul, Div, Lt, Gt, Le, Ge)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn operator_overload_add() {
@@ -2141,13 +1962,6 @@ fn operator_overload_display() {
     );
 }
 
-// dyn Trait tests removed — Type::DynTrait was deleted in commit 62f893a
-// ("remove 8 deprecated types end-to-end"). See /memories/repo/type_removal_map.md.
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Fieldless enum zero-cost (tag-only)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn fieldless_enum_still_works() {
     expect(
@@ -2164,17 +1978,13 @@ fn option_still_works() {
     );
 }
 
-// ── Perceus / Drop tests ──────────────────────────────────────────────
-
 #[test]
 fn drop_short_string_sso() {
-    // SSO strings (≤23 chars) should not crash — no heap to free
     expect("*main()\n    s is 'short'\n    log(s)\n", "short");
 }
 
 #[test]
 fn drop_long_string_heap() {
-    // Long strings (>23 chars) use heap — drop should not crash
     expect(
         "*main()\n    s is 'this is a long string that exceeds sso'\n    log(s.length)\n",
         "38",
@@ -2183,7 +1993,6 @@ fn drop_long_string_heap() {
 
 #[test]
 fn drop_string_in_scope_block() {
-    // String bound inside an if-block should be dropped at block exit
     expect(
         "*main() returns i32\n    if true\n        temp is 'hello world from a block'\n        log(temp)\n    0\n",
         "hello world from a block",
@@ -2200,14 +2009,11 @@ fn drop_multiple_strings() {
 
 #[test]
 fn drop_string_after_fn_call() {
-    // String passed to a function should not double-free
     expect(
         "*greet(name as String)\n    log(name)\n\n*main()\n    s is 'world'\n    greet(s)\n",
         "world",
     );
 }
-
-// drop_rc_basic removed — surface rc() no longer exists.
 
 #[test]
 fn drop_vec_basic() {
@@ -2216,18 +2022,14 @@ fn drop_vec_basic() {
 
 #[test]
 fn drop_does_not_affect_scalars() {
-    // Scalars should have elided drops — no crash
     expect(
         "*main()\n    x is 42\n    y is 3.14\n    z is true\n    log(x)\n    log(y)\n    log(z)\n",
         "42\n3.140000\n1",
     );
 }
 
-// ── Layout attributes (@packed, @strict, @align) ───────────────────
-
 #[test]
 fn packed_struct_field_access() {
-    // @packed struct should work correctly with no padding
     expect(
         "type Compact @packed\n    a as i8\n    b as i64\n    c as i8\n\n*main()\n    s is Compact(a is 1, b is 42, c is 3)\n    log(s.a)\n    log(s.b)\n    log(s.c)\n",
         "1\n42\n3",
@@ -2236,7 +2038,6 @@ fn packed_struct_field_access() {
 
 #[test]
 fn strict_struct_field_order() {
-    // @strict guarantees declaration order is preserved
     expect(
         "type Ordered @strict\n    x as i64\n    y as i64\n    z as i64\n\n*main()\n    s is Ordered(x is 10, y is 20, z is 30)\n    log(s.x)\n    log(s.y)\n    log(s.z)\n",
         "10\n20\n30",
@@ -2245,7 +2046,6 @@ fn strict_struct_field_order() {
 
 #[test]
 fn align_struct_field_access() {
-    // @align(64) struct should work correctly with cache-line alignment
     expect(
         "type Aligned @align(64)\n    val as i64\n    flag as i8\n\n*main()\n    s is Aligned(val is 99, flag is 7)\n    log(s.val)\n    log(s.flag)\n",
         "99\n7",
@@ -2254,14 +2054,11 @@ fn align_struct_field_access() {
 
 #[test]
 fn packed_strict_combined() {
-    // @packed @strict together
     expect(
         "type PS @packed @strict\n    a as i8\n    b as i64\n\n*main()\n    s is PS(a is 5, b is 100)\n    log(s.a)\n    log(s.b)\n",
         "5\n100",
     );
 }
-
-// ── Branch hints (likely/unlikely) ─────────────────────────────────
 
 #[test]
 fn likely_builtin() {
@@ -2279,18 +2076,8 @@ fn unlikely_builtin() {
     );
 }
 
-// ── Perceus reuse codegen ──────────────────────────────────────────
-
-// perceus_rc_reuse_same_type / perceus_rc_values_independent removed —
-// surface rc() no longer exists. Equivalent reuse coverage for heap
-// nominals (structs/enums) lives in the fbip_* tests below.
-
-// ── FBIP (Functional But In-Place) ─────────────────────────────────
-
 #[test]
 fn fbip_match_reconstruct_enum() {
-    // Match on an enum, reconstruct a variant — should work correctly
-    // (FBIP analysis may detect reuse opportunity)
     expect(
         "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*double_shape(s as Shape) returns Shape\n    match s\n        Circle(r) ? Circle(r * 2.0)\n        Square(side) ? Square(side * 2.0)\n\n*main()\n    c is double_shape(Circle(5.0))\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
         "10.000000",
@@ -2299,34 +2086,19 @@ fn fbip_match_reconstruct_enum() {
 
 #[test]
 fn fbip_match_transform_variant() {
-    // Transform one variant to another of the same enum
     expect(
         "enum Op\n    Add(i64)\n    Mul(i64)\n\n*negate(op as Op) returns Op\n    match op\n        Add(n) ? Add(0 - n)\n        Mul(n) ? Mul(0 - n)\n\n*main()\n    r is negate(Add(42))\n    match r\n        Add(n) ? log(n)\n        Mul(n) ? log(n)\n",
         "-42",
     );
 }
 
-// Pool allocator tests removed — Type::Pool and runtime/pool.c were deleted
-// in commit 62f893a ("remove 8 deprecated types end-to-end").
-// See /memories/repo/type_removal_map.md.
-
-// ── Tail Reuse ─────────────────────────────────────────────────────
-
 #[test]
 fn tail_reuse_enum_transform() {
-    // Function takes owned enum, -> same enum type — Perceus should
-    // detect tail reuse opportunity. Values should be correct.
     expect(
         "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*scale(s as Shape, factor as f64) returns Shape\n    match s\n        Circle(r) ? Circle(r * factor)\n        Square(side) ? Square(side * factor)\n\n*main()\n    c is scale(Circle(3.0), 2.0)\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
         "6.000000",
     );
 }
-
-// tail_reuse_rc_reconstruct / pool_perceus_loop_alloc /
-// pool_perceus_nested_loop_alloc removed — surface rc() no longer
-// exists under the "heap tax" model.
-
-// ── Comptime Reflection (Option C) ──────────────────────────────
 
 #[test]
 fn comptime_fields_of_struct() {
@@ -2383,8 +2155,6 @@ fn auto_import_qualified_terminal_size_without_use() {
     );
 }
 
-// ── Atomic Keyword Binding ──────────────────────────────────────
-
 #[test]
 fn atomic_binding_basic() {
     expect(
@@ -2403,15 +2173,11 @@ fn atomic_binding_sub() {
 
 #[test]
 fn atomic_builtin_sub() {
-    // atomic_sub -> the old value; the pointer update may be
-    // optimized away in single-threaded context (LLVM constant prop)
     expect(
         "*main\n    x is 100\n    old is atomic_sub(%x, 30)\n    log old\n",
         "100",
     );
 }
-
-// ── Query Blocks ─────────────────────────────────────────────────────
 
 #[test]
 fn query_block_select() {
@@ -2487,7 +2253,6 @@ fn store_agg_min_max() {
 
 #[test]
 fn store_versioned_basic() {
-    // Test that @versioned stores track version_count correctly
     expect_store(
         "store posts @versioned\n    title as String\n    body as String\n\n*main\n    insert posts 'Draft', 'Hello'\n    set posts where title equals 'Draft' body 'Hello World'\n    set posts where title equals 'Draft' body 'Hello Updated'\n    vc is posts.version_count(1)\n    log vc\n",
         "3",
@@ -2496,7 +2261,6 @@ fn store_versioned_basic() {
 
 #[test]
 fn store_versioned_at_version() {
-    // Test at_version returns 1 (found) for version 1, 0 for non-existent
     expect_store(
         "store docs @versioned\n    title as String\n    body as String\n\n*main\n    insert docs 'Test', 'First'\n    set docs where title equals 'Test' body 'Second'\n    f1 is docs.at_version(1, 1)\n    f2 is docs.at_version(1, 99)\n    log f1\n    log f2\n",
         "1\n0",
@@ -2505,18 +2269,14 @@ fn store_versioned_at_version() {
 
 #[test]
 fn store_versioned_history_count() {
-    // history() returns the number of old versions in the versions file
     expect_store(
         "store notes @versioned\n    text as String\n\n*main\n    insert notes 'v1'\n    set notes where text equals 'v1' text 'v2'\n    set notes where text equals 'v2' text 'v3'\n    h is notes.history(1)\n    log h\n",
         "2",
     );
 }
 
-// ── @unique enforcement ──────────────────────────────────────────────
-
 #[test]
 fn store_unique_skips_duplicate() {
-    // Second insert with same @unique field should be silently skipped
     expect_store(
         "store emails\n    addr as String @unique\n    name as String\n\n*main\n    insert emails 'a@b.com', 'Alice'\n    insert emails 'a@b.com', 'Bob'\n    c is count emails\n    log c\n",
         "1",
@@ -2525,14 +2285,11 @@ fn store_unique_skips_duplicate() {
 
 #[test]
 fn store_unique_allows_different() {
-    // Different values should both be inserted
     expect_store(
         "store emails\n    addr as String @unique\n    name as String\n\n*main\n    insert emails 'a@b.com', 'Alice'\n    insert emails 'c@d.com', 'Bob'\n    c is count emails\n    log c\n",
         "2",
     );
 }
-
-// ── distinct ─────────────────────────────────────────────────────
 
 #[test]
 fn store_distinct_i64() {
@@ -2550,12 +2307,8 @@ fn store_distinct_string() {
     );
 }
 
-// ── migration ────────────────────────────────────────────────────
-
 #[test]
 fn store_migration_fresh_install() {
-    // Migration on a store that doesn't exist yet — should be a no-op,
-    // store created with current schema, migration recorded as applied.
     expect_store(
         "store items @simple\n    name as String\n    price as I64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as I64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n",
         "1",
@@ -2564,18 +2317,14 @@ fn store_migration_fresh_install() {
 
 #[test]
 fn store_migration_idempotent() {
-    // Running twice should NOT apply the migration a second time.
     expect_store(
         "store items @simple\n    name as String\n    price as I64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as I64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n",
         "1",
     );
 }
 
-// ── Views ────────────────────────────────────────────────────────────
-
 #[test]
 fn store_view_count_basic() {
-    // View with a where clause filters records; count returns matching count.
     expect_store(
         "store items @simple\n    name as String\n    price as i64\n\nview expensive from items\n    where price > 5\n\n*main\n    insert items 'apple', 3\n    insert items 'laptop', 999\n    insert items 'pen', 1\n    insert items 'phone', 500\n    c is expensive.count()\n    log c\n",
         "2",
@@ -2584,7 +2333,6 @@ fn store_view_count_basic() {
 
 #[test]
 fn store_view_count_no_match() {
-    // View where no records match returns 0.
     expect_store(
         "store items @simple\n    name as String\n    price as i64\n\nview cheap from items\n    where price < 0\n\n*main\n    insert items 'apple', 3\n    insert items 'laptop', 999\n    c is cheap.count()\n    log c\n",
         "0",
@@ -2593,14 +2341,11 @@ fn store_view_count_no_match() {
 
 #[test]
 fn store_view_count_no_filter() {
-    // View without a where clause delegates to source store count.
     expect_store(
         "store items @simple\n    name as String\n    price as i64\n\nview everything from items\n\n*main\n    insert items 'apple', 3\n    insert items 'laptop', 999\n    c is everything.count()\n    log c\n",
         "2",
     );
 }
-
-// ── @kv Store Tests ──────────────────────────────────────────────────
 
 #[test]
 fn kv_set_get() {
@@ -2658,8 +2403,6 @@ fn kv_overwrite() {
     );
 }
 
-// ── @graph Store Tests ───────────────────────────────────────────────
-
 #[test]
 fn graph_from_count() {
     expect_store(
@@ -2684,8 +2427,6 @@ fn graph_from_empty() {
     );
 }
 
-// ── @timeseries Store Tests ──────────────────────────────────────────
-
 #[test]
 fn ts_latest_count() {
     expect_store(
@@ -2693,8 +2434,6 @@ fn ts_latest_count() {
         "3",
     );
 }
-
-// ── @vector Store Tests ──────────────────────────────────────────────
 
 #[test]
 fn vec_insert_count() {
@@ -2727,8 +2466,6 @@ fn vec_count_after_insert() {
         "3",
     );
 }
-
-// ── Hook decorator tests ─────────────────────────────────────────────
 
 #[test]
 fn hook_before_insert() {
@@ -2778,8 +2515,6 @@ fn hook_multiple_inserts() {
     );
 }
 
-// ── Column store tests ───────────────────────────────────────────────
-
 #[test]
 fn column_sum() {
     expect_store(
@@ -2804,8 +2539,6 @@ fn column_max() {
     );
 }
 
-// ── Bloom filter tests ──────────────────────────────────────────────
-
 #[test]
 fn bloom_test_present() {
     expect_store(
@@ -2829,8 +2562,6 @@ fn bloom_multiple_inserts() {
         "1\n0",
     );
 }
-
-// ── FTS (full-text search) tests ────────────────────────────────────
 
 #[test]
 fn fts_search_basic() {
@@ -2864,10 +2595,6 @@ fn fts_posting_count() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: get by sid
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_get_by_sid() {
     expect_store(
@@ -2884,10 +2611,6 @@ fn store_get_by_sid_first() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: first (returns first matching record)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_first_match() {
     expect_store(
@@ -2895,10 +2618,6 @@ fn store_first_match() {
         "Alice",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: exists (boolean check)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn store_exists_found() {
@@ -2916,10 +2635,6 @@ fn store_exists_not_found() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: destroy (hard delete)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_destroy_removes_record() {
     expect_store(
@@ -2936,10 +2651,6 @@ fn store_destroy_then_query() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: restore (undelete soft-deleted records)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_restore_basic() {
     expect_store(
@@ -2948,8 +2659,6 @@ fn store_restore_basic() {
     );
 }
 
-// N-4: `count <store> where ...` shares the predicate evaluator with
-// `<store> where ...` and `delete users where ...`.
 #[test]
 fn store_count_where_basic() {
     expect_store(
@@ -2974,10 +2683,6 @@ fn store_restore_query_after() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: save (explicit flush)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_save_basic() {
     expect_store(
@@ -2985,10 +2690,6 @@ fn store_save_basic() {
         "1",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: float aggregations
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn store_agg_sum_float() {
@@ -3014,10 +2715,6 @@ fn store_agg_avg_int() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: delete + exists interaction
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_exists_after_delete() {
     expect_store(
@@ -3026,22 +2723,13 @@ fn store_exists_after_delete() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: get skips deleted records
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_get_skips_deleted() {
-    // After soft-deleting sid=2, get with sid=3 should still work
     expect_store(
         "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    delete users where name equals 'Bob'\n    r is get users 3\n    log r.name\n    log r.age\n",
         "Charlie\n35",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: destroy with compound filter
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn store_destroy_and_filter() {
@@ -3051,10 +2739,6 @@ fn store_destroy_and_filter() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: set after delete (only updates non-deleted records)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn store_set_skips_deleted() {
     expect_store(
@@ -3063,13 +2747,6 @@ fn store_set_skips_deleted() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Store: performance regression suite
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Store performance regression test — runs the full perf suite and
-/// verifies all operations complete within generous upper bounds.
-/// Run with: cargo test store_perf_regression -- --ignored --nocapture
 #[test]
 #[ignore]
 fn store_perf_regression() {
@@ -3136,7 +2813,6 @@ store bench
     let output = compile_and_run_in_dir(src);
     let wall_total = wall_start.elapsed();
 
-    // Parse timing results
     let lines: Vec<&str> = output.trim().lines().collect();
     assert_eq!(
         lines.last().copied(),
@@ -3162,10 +2838,7 @@ store bench
     }
     eprintln!("  wall total: {:.3}s", wall_total.as_secs_f64());
 
-    // Regression bounds: 2× baseline with generous margin for CI variance.
-    // Baselines (per ×100 batch): count ~0.06s, query ~0.05s, sum ~0.05s,
-    //   distinct ~0.08s, set ~0.10s
-    let max_allowed = 0.5; // 500ms per ×100 batch — 5× headroom over typical
+    let max_allowed = 0.5;
     for (name, secs) in &timings {
         assert!(
             *secs < max_allowed,
@@ -3173,7 +2846,6 @@ store bench
         );
     }
 
-    // Distinct should NOT regress to O(n²) behavior (was 0.5s, now ~0.07s)
     if let Some((_, distinct_time)) = timings.iter().find(|(n, _)| *n == "distinct_x100") {
         assert!(
             *distinct_time < 0.25,
@@ -3181,8 +2853,6 @@ store bench
         );
     }
 }
-
-// ── try keyword removed — replaced by `!` postfix and `defer` (Layer 1) ──
 
 #[test]
 fn defer_runs_on_normal_exit() {
@@ -3269,7 +2939,6 @@ fn defer_block_with_multiple_stmts() {
 
 #[test]
 fn try_option_some() {
-    // Replaced: `try` removed; verify equivalent shape using `!` early return.
     expect(
         "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    42\n\n*main()\n    log(do_thing())\n",
         "42",
@@ -3278,7 +2947,6 @@ fn try_option_some() {
 
 #[test]
 fn try_option_nothing() {
-    // Replaced: error-path early return via `!` returns sentinel value.
     expect(
         "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    ! -1\n    0\n\n*main()\n    log(do_thing())\n",
         "-1",
@@ -3301,12 +2969,8 @@ fn try_result_err() {
     );
 }
 
-// ── Layer 2: Unitary errors-as-values convention ────────────────────
-
 #[test]
 fn err_enum_as_return_type_ok_branch() {
-    // Canonical jinn convention: a function may return an err enum directly.
-    // Plain return / final expression yields a success-tagged variant.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3330,7 +2994,6 @@ err Outcome
 
 #[test]
 fn err_enum_as_return_type_err_branch() {
-    // Same convention; this time the err variant is taken via `! Variant`.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3354,9 +3017,6 @@ err Outcome
 
 #[test]
 fn err_return_to_incompatible_t_rejected() {
-    // T = i64, but `! Bad` returns an err-variant value of type `Fail`.
-    // The jinn convention says: errors are values; encode them as values of T
-    // (a sentinel) or declare the function to return the err enum directly.
     let src = r#"
 err Fail
     Bad
@@ -3373,8 +3033,6 @@ err Fail
 
 #[test]
 fn defer_in_nested_block_runs_at_function_exit() {
-    // `defer` is function-scoped: a defer inside an `if` block still runs
-    // when the *function* returns, in LIFO order with other defers.
     let src = r#"
 *go(x as i64)
     defer
@@ -3393,8 +3051,6 @@ fn defer_in_nested_block_runs_at_function_exit() {
 
 #[test]
 fn defer_runs_on_err_branch_of_err_enum_return() {
-    // Combining defer with an err-enum return: cleanup still fires before
-    // the early `! Variant` exits the function.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3418,12 +3074,8 @@ err Outcome
     expect(src, "cleanup\n-1");
 }
 
-// ── Layer 2 sugar: guard form & handler chain ───────────────────────
-
 #[test]
 fn bind_guard_propagates_variant() {
-    // `a is x() ! Bad` — when x() returns Bad, propagate it from the
-    // caller; otherwise bind a to the value and continue.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3451,8 +3103,6 @@ err Outcome
 
 #[test]
 fn bind_guard_falls_through_on_ok() {
-    // Same shape; non-Bad value falls through and `a` is bound to the
-    // raw enum value (so we can still pattern-match on it downstream).
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3480,8 +3130,6 @@ err Outcome
 
 #[test]
 fn bind_handler_chain_ok_path() {
-    // `a is x() ? on_ok ! on_err` — Ok-arm runs `on_ok` with `a` bound to
-    // the payload; non-Ok runs `on_err`.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3518,7 +3166,6 @@ err Outcome
 
 #[test]
 fn bind_handler_chain_ok_only() {
-    // Without `! on_err`, the err path silently falls through.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3538,9 +3185,6 @@ err Outcome
 
 #[test]
 fn ternary_in_bind_still_works() {
-    // The Layer-2 sugar must not break standard ternary on the RHS of
-    // `is`. `cond ? then ! else` and `cond ! else` continue to apply
-    // when no sugar shape matches.
     let src = r#"
 *main()
     x is 5
@@ -3552,13 +3196,8 @@ fn ternary_in_bind_still_works() {
     expect(src, "big\nfallback");
 }
 
-// ── Layer 2 sugar follow-ups: implicit `err`, lowercase variants,
-//    bare-statement form, type-driven rejection. ──────────────────────
-
 #[test]
 fn handler_chain_binds_implicit_err() {
-    // Inside the failure handler the err value is bound as the implicit
-    // identifier `err`. Pass it to a helper that pattern-matches it.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3584,7 +3223,6 @@ err Outcome
 
 #[test]
 fn handler_chain_bare_statement_form() {
-    // No `is` wrapper — `call() ? on_ok ! on_err` is a statement on its own.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3604,7 +3242,6 @@ err Outcome
 
 #[test]
 fn handler_chain_bare_binds_implicit_err() {
-    // Bare form also exposes `err` to the failure handler.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3630,8 +3267,6 @@ err Outcome
 
 #[test]
 fn bind_string_fallback_still_ternary() {
-    // `! "literal"` is unambiguously a ternary-else (token after `!` is a
-    // literal, not a bare ident) and must keep working.
     let src = r#"
 *main()
     x is 5
@@ -3641,12 +3276,8 @@ fn bind_string_fallback_still_ternary() {
     expect(src, "fallback");
 }
 
-// ── Layer 2: error-union annotation enforcement ─────────────────────
-
 #[test]
 fn err_annotation_narrows_must_list_used_variants() {
-    // `! E1` is declared but `! Bad2` (an E2 variant) is used in the body.
-    // The typer must reject this: the explicit annotation is the contract.
     let src = r#"
 err E1
     Bad1
@@ -3670,7 +3301,6 @@ err E2
 
 #[test]
 fn err_annotation_can_list_used_variant() {
-    // The body compiles when the signature lists the err enum it uses.
     let src = r#"
 err Outcome
     Ok(i64)
@@ -3692,11 +3322,8 @@ err Outcome
     expect(src, "6");
 }
 
-// ── Layer 2: `!!` error-throw sugar ──────────────────────────────────────────
-
 #[test]
 fn bangbang_bare_no_ok_arm() {
-    // `expr !! Variant` — on error throw Variant, on ok fall through silently.
     let src = r#"
 err Res
     Ok(i64)
@@ -3724,7 +3351,6 @@ err Res
 
 #[test]
 fn bangbang_propagates_on_error() {
-    // When the call returns an error, `!!` rethrows.
     let src = r#"
 err Res
     Ok(i64)
@@ -3752,8 +3378,6 @@ err Res
 
 #[test]
 fn bangbang_handler_chain_ok_arm() {
-    // `call() ? on_ok !! Variant` — ok: run on_ok, err: throw Variant.
-    // Must be inside a function that declares error returns.
     let src = r#"
 err Res
     Ok(i64)
@@ -3776,11 +3400,6 @@ err Res
 
 #[test]
 fn bangbang_handler_chain_with_err_handler() {
-    // `call() ? on_ok ! on_falsy !! Variant`:
-    //   - on_falsy is the ternary-else for a falsy-but-non-error Ok payload
-    //   - !! Variant fires for actual errors — mutually exclusive from on_falsy
-    // Here might_fail(0) returns an error, so on_falsy (log(-2)) must NOT run;
-    // only the !! arm fires, propagating Fail.
     let src = r#"
 err Res
     Ok(i64)
@@ -3803,14 +3422,12 @@ err Res
         Fail ?
             log(-9)
 "#;
-    // error arm fires (!! Fail), log(-2) is skipped, outer returns Fail, main logs -9
+
     expect(src, "-9");
 }
 
 #[test]
 fn bangbang_handler_chain_falsy_branch_runs() {
-    // Same `? on_ok ! on_falsy !! Variant` form, but the call succeeds with
-    // a falsy (zero) payload — on_falsy runs, !! does not fire.
     let src = r#"
 err Res
     Ok(i64)
@@ -3833,14 +3450,12 @@ err Res
         Fail ?
             log(-9)
 "#;
-    // might_fail(5) → Ok(15), 15 is truthy → log(7) runs; outer returns Ok(42); main logs 42
+
     expect(src, "7\n42");
 }
 
 #[test]
 fn bangbang_bind_form() {
-    // `x is call() !! Variant` — binds x to the full result (type Res), throws on any error.
-    // x is then matched to extract the ok payload.
     let src = r#"
 err Res
     Ok(i64)
@@ -3981,11 +3596,8 @@ global x is 42
     expect(src, "42");
 }
 
-// ── try chaining (replaced by `!` early-return chains) ───────────
-
 #[test]
 fn try_chain_two_levels() {
-    // Two `!` early-return calls don't fire when the operations succeed.
     expect(
         r#"
 err Fail
@@ -4011,7 +3623,6 @@ err Fail
 
 #[test]
 fn try_chain_short_circuits() {
-    // Sentinel-value short-circuit via `!`.
     expect(
         r#"
 err Fail
@@ -4039,11 +3650,8 @@ err Fail
     );
 }
 
-// ── multi-function error propagation chain ───────────────────────
-
 #[test]
 fn try_propagation_chain() {
-    // A → B → C; sentinel value propagates through plain returns.
     expect(
         r#"
 err Fail
@@ -4070,11 +3678,8 @@ err Fail
     );
 }
 
-// ── bang return (!) edge cases ────────────────────────────────────
-
 #[test]
 fn bang_return_in_loop() {
-    // Early return from inside a for loop.
     expect(
         r#"
 *find_first(n as i64) returns i64
@@ -4093,7 +3698,6 @@ fn bang_return_in_loop() {
 
 #[test]
 fn bang_return_nested_calls() {
-    // ! used inside a helper called from a loop.
     expect(
         r#"
 *check(x as i64) returns i64
@@ -4109,12 +3713,8 @@ fn bang_return_nested_calls() {
     );
 }
 
-// ── Perceus / ownership patterns ─────────────────────────────────
-
 #[test]
 fn rc_linear_use() {
-    // A string (heap-allocated) created and used exactly once — should compile
-    // and produce correct output even with aggressive drop elision.
     expect(
         r#"
 *make(x as i64) returns String
@@ -4135,8 +3735,6 @@ fn rc_linear_use() {
 
 #[test]
 fn string_concat_ownership() {
-    // String concatenation forces copies/moves; test that ownership is handled
-    // correctly across multiple bindings.
     expect(
         r#"
 *main()
@@ -4153,7 +3751,6 @@ fn string_concat_ownership() {
 
 #[test]
 fn vec_single_owner() {
-    // Vec with a single binding path — tests that the vec is dropped exactly once.
     expect(
         r#"
 *main()
@@ -4166,7 +3763,6 @@ fn vec_single_owner() {
 
 #[test]
 fn closure_captures_value() {
-    // Closure capturing an i64 by value; tests Perceus closure-capture tracking.
     expect(
         r#"
 *apply(f as (i64) returns i64, x as i64) returns i64
@@ -4182,11 +3778,8 @@ fn closure_captures_value() {
     );
 }
 
-// ── compilation pipeline: struct field inference ─────────────────
-
 #[test]
 fn struct_field_inferred_from_use() {
-    // Struct with typed fields.
     expect(
         r#"
 type Point
@@ -4221,11 +3814,8 @@ type Outer
     );
 }
 
-// ── exhaustiveness checking ───────────────────────────────────────
-
 #[test]
 fn match_wildcard_arm() {
-    // Integer match must have a wildcard (catch-all) arm.
     expect(
         r#"
 *classify(n as i64) returns i64
@@ -4267,8 +3857,6 @@ enum Color
     );
 }
 
-// ── compile-time constant folding ────────────────────────────────
-
 #[test]
 fn comptime_arithmetic() {
     expect(
@@ -4298,11 +3886,8 @@ const N is 4
     );
 }
 
-// ── higher-order functions / first-class fn ───────────────────────
-
 #[test]
 fn hof_map_manual() {
-    // Manual map over a vec using a loop and a function value.
     expect(
         r#"
 *double(x as i64) returns i64
@@ -4337,10 +3922,6 @@ fn hof_passed_as_argument() {
         "2\n12",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// N-7: Named-field insert into stores
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn store_insert_named_basic() {
@@ -4410,11 +3991,6 @@ fn store_insert_named_duplicate_fails() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// N-6: query blocks execute (where/delete/set), unsupported clauses
-// emit clear errors instead of being silently dropped.
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn query_block_executes_full_program() {
     expect_store(
@@ -4445,8 +4021,6 @@ fn query_block_limit_clause_errors() {
     );
 }
 
-// ── N-3: actor supervisor smoke tests ──
-
 #[test]
 fn supervisor_starts_and_restart_count_zero() {
     let out = compile_and_run_in_dir(
@@ -4473,8 +4047,6 @@ fn supervisor_unknown_child_errors() {
         "expected unknown-child error, got: {err}"
     );
 }
-
-// ── R8: Addable / arithmetic operand validation ──
 
 #[test]
 fn r8_arith_rejects_bool_add() {
@@ -4515,38 +4087,18 @@ fn r8_arith_string_concat_ok() {
     assert_eq!(out.trim(), "ab");
 }
 
-// ── asm path smoke (ROADMAP: A.3 "Asm path unverified") ──
-
 #[test]
 fn asm_block_nop_compiles_and_runs() {
-    // Verify inline-asm codegen path works end-to-end for a trivial nop.
-    // Operand-reference forms (e.g. `mov $42, $0`) are presently fragile due
-    // to the parser tokenizing the template; this test pins down the minimal
-    // working contract.
     let out = compile_and_run_in_dir("*main\n    asm\n        nop\n    log(0)\n");
     assert_eq!(out.trim(), "0");
 }
 
-// ── Access-semantics R1.3 placeholders ──────────────────────────────────
-//
-// These verify BEHAVIOR (correct output, no double-free, no leak) for
-// field-access patterns covered by spec §4.6 and §5.1. They are
-// "placeholder" only in the sense that the IR-inspection check
-// (asserting "no clone in the hot path" for short-lived borrows, and
-// "exactly one clone" for escaping field reads) lands with R3.3 — at
-// which point these tests gain an llvm-ir grep assertion.
-
 #[test]
 fn access_field_auto_copy_escape() {
-    // §4.6 / §5.1: `s is b.name` followed by returning `s` and then
-    // re-reading `b.name` in the caller. Must NOT move the field out
-    // of `b` — both reads must succeed.
     expect_file("tests/programs/field_auto_copy.jn", "alice\nalice");
 }
 
 #[test]
 fn access_field_short_lived_borrow() {
-    // §4.6 / §5.1: `b.field` read inside an `if` condition is a
-    // short-lived borrow; `b.field` must remain readable afterward.
     expect_file("tests/programs/field_short_lived_borrow.jn", "zero\n0\nhi");
 }

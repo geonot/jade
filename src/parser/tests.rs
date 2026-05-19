@@ -111,11 +111,6 @@ fn for_stmt() {
 
 #[test]
 fn c_style_loop_desugars_to_bind_then_while() {
-    // `loop(0, $ < 3, $ + 1)` should desugar to:
-    //     __cph_N is 0
-    //     while __cph_N < 3
-    //         log(__cph_N)
-    //         __cph_N is __cph_N + 1
     let p = parse("*main()\n    loop(0, $ < 3, $ + 1)\n        log($)\n");
     if let Decl::Fn(f) = &p.decls[0] {
         assert_eq!(f.body.len(), 2, "expected bind + while");
@@ -126,7 +121,6 @@ fn c_style_loop_desugars_to_bind_then_while() {
             panic!("expected bind, got {:?}", f.body[0]);
         };
         if let Stmt::While(w) = &f.body[1] {
-            // cond: ph < 3
             if let Expr::BinOp(l, _, _, _) = &w.cond {
                 if let Expr::Ident(n, _) = l.as_ref() {
                     assert_eq!(n.as_str(), ph);
@@ -136,7 +130,7 @@ fn c_style_loop_desugars_to_bind_then_while() {
             } else {
                 panic!("cond not binop");
             }
-            // body: [log(ph), assign ph = ph + 1]
+
             assert_eq!(w.body.len(), 2);
             assert!(matches!(w.body[1], Stmt::Assign(..)));
         } else {
@@ -147,7 +141,6 @@ fn c_style_loop_desugars_to_bind_then_while() {
 
 #[test]
 fn c_style_loop_paren_less_desugars() {
-    // Same desugar as the paren'd form but without the parens.
     let p = parse("*main()\n    loop 0, $ < 3, $ + 1\n        log($)\n");
     if let Decl::Fn(f) = &p.decls[0] {
         assert_eq!(f.body.len(), 2, "expected bind + while");
@@ -175,7 +168,6 @@ fn c_style_loop_paren_less_desugars() {
 
 #[test]
 fn loop_iter_with_index_placeholder() {
-    // `loop arr` with `$$` in body should produce For with bind2 set.
     let p = parse("*main()\n    arr is [1, 2]\n    loop arr\n        log($$)\n");
     if let Decl::Fn(f) = &p.decls[0] {
         if let Stmt::For(fo) = &f.body[1] {
@@ -278,7 +270,6 @@ fn as_cast() {
 
 #[test]
 fn array_literal() {
-    // `[1,2,3]` desugars to a vector literal — `vector(1,2,3)`.
     let p = parse("*main()\n    x is [1, 2, 3]\n");
     if let Decl::Fn(f) = &p.decls[0] {
         if let Stmt::Bind(b) = &f.body[0] {

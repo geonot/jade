@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -168,7 +166,6 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Query(source, clauses, span) => {
-                // Extract store name from source expression
                 let store_name = match source.as_ref() {
                     ast::Expr::Ident(name, _) => name.clone(),
                     _ => return Err("query block source must be a store name".into()),
@@ -179,7 +176,6 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
 
-                // Collect clauses
                 let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
                 let mut has_delete = false;
                 let mut sets: Vec<(Symbol, ast::Expr)> = Vec::new();
@@ -218,23 +214,18 @@ impl Typer {
                     self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?;
 
                 if has_delete {
-                    // Delete query block — void expression, side-effect handled
-                    // via the stmt-level interceptor
                     Ok(hir::Expr {
                         kind: hir::ExprKind::Void,
                         ty: Type::Void,
                         span: *span,
                     })
                 } else if !sets.is_empty() {
-                    // Set query block — void expression, side-effect handled
-                    // via the stmt-level interceptor
                     Ok(hir::Expr {
                         kind: hir::ExprKind::Void,
                         ty: Type::Void,
                         span: *span,
                     })
                 } else {
-                    // Read query → StoreQuery
                     let struct_name = Symbol::intern(&format!("__store_{store_name}"));
                     Ok(hir::Expr {
                         kind: hir::ExprKind::StoreQuery(store_name, Box::new(hfilter)),

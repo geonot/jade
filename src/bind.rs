@@ -1,11 +1,3 @@
-//! Name binding utilities used by the typer (resolve identifiers to symbols).
-
-/// C header import tool — parses C function declarations and generates Jinn `extern` declarations.
-///
-/// Usage: `jinn bind header.h` → prints Jinn extern declarations to stdout.
-///
-/// Handles: function declarations, typedefs (ignored), structs (comments), macros (ignored).
-/// Does NOT handle: templates, C++ features, complex macros, inline functions.
 use std::fs;
 use std::path::Path;
 
@@ -29,7 +21,7 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
             CDecl::Struct(name) => {
                 out.push_str(&format!("// struct {name} (opaque)\n"));
             }
-            CDecl::Typedef(_) => {} // silently skip
+            CDecl::Typedef(_) => {}
         }
     }
 
@@ -42,17 +34,15 @@ fn strip_comments(src: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
-            // line comment
             while i < bytes.len() && bytes[i] != b'\n' {
                 i += 1;
             }
         } else if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
-            // block comment
             i += 2;
             while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
                 i += 1;
             }
-            i += 2; // skip */
+            i += 2;
             out.push(' ');
         } else {
             out.push(bytes[i] as char);
@@ -126,7 +116,7 @@ enum CType {
 
 fn parse_declarations(src: &str) -> Vec<CDecl> {
     let mut decls = Vec::new();
-    // Join lines that end with semicolons across multiple lines
+
     let joined = join_declarations(src);
 
     for line in joined.lines() {
@@ -135,7 +125,6 @@ fn parse_declarations(src: &str) -> Vec<CDecl> {
             continue;
         }
 
-        // Skip struct/union/enum bodies
         if trimmed.contains('{') {
             if let Some(name) = try_parse_struct_name(trimmed) {
                 decls.push(CDecl::Struct(name));
@@ -153,7 +142,6 @@ fn parse_declarations(src: &str) -> Vec<CDecl> {
             continue;
         }
 
-        // Try to parse as function declaration
         if let Some(f) = try_parse_function(trimmed) {
             decls.push(CDecl::Function(f));
         }
@@ -163,8 +151,6 @@ fn parse_declarations(src: &str) -> Vec<CDecl> {
 }
 
 fn join_declarations(src: &str) -> String {
-    // Simple: just return as-is, declarations should be on single lines after preprocessing
-    // But handle multi-line declarations by joining until ';'
     let mut out = String::new();
     let mut current = String::new();
     let mut brace_depth: u32 = 0;
@@ -180,7 +166,7 @@ fn join_declarations(src: &str) -> String {
         }
 
         if brace_depth > 0 {
-            continue; // skip struct/union/enum bodies
+            continue;
         }
 
         if !current.is_empty() {
@@ -203,7 +189,7 @@ fn join_declarations(src: &str) -> String {
 
 fn try_parse_struct_name(line: &str) -> Option<String> {
     let line = line.trim();
-    // "struct Foo {" or "typedef struct Foo {"
+
     let rest = line
         .strip_prefix("typedef")
         .map(|s| s.trim())
@@ -219,7 +205,6 @@ fn try_parse_struct_name(line: &str) -> Option<String> {
 }
 
 fn try_parse_typedef_name(line: &str) -> Option<String> {
-    // "typedef ... name;"
     let line = line
         .strip_prefix("typedef")?
         .trim()
@@ -234,10 +219,9 @@ fn try_parse_typedef_name(line: &str) -> Option<String> {
 
 fn try_parse_function(line: &str) -> Option<CFn> {
     let line = line.strip_suffix(';')?.trim();
-    // Skip static/inline functions
+
     let line = strip_qualifiers(line);
 
-    // Find the function name and params: "ret_type name(params)"
     let lparen = line.find('(')?;
     let rparen = line.rfind(')')?;
     if rparen <= lparen {
@@ -247,11 +231,8 @@ fn try_parse_function(line: &str) -> Option<CFn> {
     let before_paren = line[..lparen].trim();
     let params_str = line[lparen + 1..rparen].trim();
 
-    // Split before_paren into return type and name
-    // Handle pointer returns: "int *foo" or "int* foo"
     let (ret_str, name) = split_ret_and_name(before_paren)?;
 
-    // Skip if name looks weird (contains spaces, operators, etc.)
     if name.contains(|c: char| !c.is_alphanumeric() && c != '_') {
         return None;
     }
@@ -285,10 +266,8 @@ fn strip_qualifiers(line: &str) -> &str {
 }
 
 fn split_ret_and_name(s: &str) -> Option<(&str, &str)> {
-    // Find the last word token — that's the function name
-    // Handle: "int foo", "int *foo", "int * foo", "void* foo", "struct foo *bar"
     let s = s.trim();
-    // Remove trailing pointer stars from name
+
     let last_space = s.rfind(|c: char| c.is_whitespace() || c == '*')?;
     let name = s[last_space + 1..].trim();
     let ret = s[..last_space + 1].trim();
@@ -300,7 +279,7 @@ fn split_ret_and_name(s: &str) -> Option<(&str, &str)> {
 
 fn parse_c_type(s: &str) -> CType {
     let s = s.trim();
-    // Count pointer indirections
+
     let s_no_const = s.replace("const ", "").replace(" const", "");
     let s = s_no_const.trim();
 
@@ -351,7 +330,6 @@ fn parse_params(s: &str) -> Vec<CParam> {
     let mut depth = 0;
     let mut start = 0;
 
-    // Split by commas, respecting parentheses (for function pointer params)
     for (i, ch) in s.char_indices() {
         match ch {
             '(' => depth += 1,
@@ -369,7 +347,6 @@ fn parse_params(s: &str) -> Vec<CParam> {
         params.push(p);
     }
 
-    // If no names given, generate p0, p1, ...
     for (i, p) in params.iter_mut().enumerate() {
         if p.name.is_empty() {
             p.name = format!("p{i}");
@@ -382,19 +359,16 @@ fn parse_params(s: &str) -> Vec<CParam> {
 fn parse_single_param(s: &str) -> Option<CParam> {
     let s = s.trim();
     if s.is_empty() || s == "..." {
-        return None; // skip varargs
+        return None;
     }
 
-    // Try to split into type and name
-    // Cases: "int x", "int *x", "const char *x", "int" (no name)
     let s_clean = s.replace("const ", "").replace(" const", "");
     let s_use = s_clean.trim();
 
-    // Find last alphanumeric token
     if let Some(last_space_pos) = s_use.rfind(|c: char| c.is_whitespace() || c == '*') {
         let name_part = s_use[last_space_pos + 1..].trim();
         let type_part = s_use[..last_space_pos + 1].trim();
-        // Check if name looks like a type keyword
+
         if is_type_keyword(name_part) {
             Some(CParam {
                 name: String::new(),
@@ -433,7 +407,6 @@ fn is_type_keyword(s: &str) -> bool {
 }
 
 fn sanitize_name(name: &str) -> String {
-    // Jinn reserved words get suffixed with _
     let reserved = [
         "fn", "let", "if", "else", "for", "while", "loop", "match", "return", "break", "continue",
         "type", "enum", "use", "as", "true", "false", "none", "and", "or", "not", "in", "is",
@@ -483,7 +456,6 @@ fn emit_extern(f: &CFn) -> String {
     }
     out.push(')');
 
-    // Return type (skip if void)
     match &f.ret {
         CType::Void => {}
         ty => {

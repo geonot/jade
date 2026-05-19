@@ -25,7 +25,6 @@ impl Lowerer {
                 }
             }
 
-            // HIR uses ast::BinOp which includes comparison operators
             ExprKind::BinOp(lhs, op, rhs) => {
                 let l = self.lower_expr(lhs);
                 let r = self.lower_expr(rhs);
@@ -64,9 +63,6 @@ impl Lowerer {
                 self.emit(InstKind::UnaryOp(mir_op, v), ty, span)
             }
             ExprKind::Call(_, name, args) => {
-                // Args are moved into the callee (Jinn parameters are owned),
-                // so a field-/index-read passed as an argument must be
-                // auto-cloned to avoid aliasing the caller's storage.
                 let arg_vals: Vec<ValueId> =
                     args.iter().map(|a| self.lower_expr_owned(a)).collect();
                 self.emit(InstKind::Call(name.clone(), arg_vals), ty, span)
@@ -78,11 +74,7 @@ impl Lowerer {
                 self.emit(InstKind::IndirectCall(f, arg_vals), ty, span)
             }
 
-            // Method(obj, mangled_name, plain_method_name, args)
             ExprKind::Method(obj, mangled_name, _method_name, args) => {
-                // Receiver is borrowed by the method dispatch (no clone);
-                // additional method args are moved-in and must be cloned
-                // if they alias parent storage.
                 let obj_val = self.lower_expr(obj);
                 let arg_vals: Vec<ValueId> =
                     args.iter().map(|a| self.lower_expr_owned(a)).collect();
@@ -102,9 +94,6 @@ impl Lowerer {
                 self.emit(InstKind::Index(a, i), ty, span)
             }
             ExprKind::Struct(name, inits) => {
-                // Each field value is moved into the new struct; auto-clone
-                // heap-typed field/index reads so the new struct owns its
-                // fields independently of the source aggregate.
                 let fields: Vec<(Symbol, ValueId)> = inits
                     .iter()
                     .map(|fi| {
@@ -138,7 +127,6 @@ impl Lowerer {
                 self.emit(InstKind::Call(*name, args), ty, span)
             }
 
-            // Collection methods — all follow the same pattern
             ExprKind::Cast(inner, target_ty) => {
                 let v = self.lower_expr(inner);
                 self.emit(InstKind::Cast(v, target_ty.clone()), ty, span)
@@ -156,8 +144,6 @@ impl Lowerer {
                 self.emit(InstKind::Deref(v), ty, span)
             }
             ExprKind::Array(elems) | ExprKind::Tuple(elems) => {
-                // Array/tuple literal elements are moved-in; auto-clone
-                // heap-typed field/index reads.
                 let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr_owned(e)).collect();
                 self.emit(InstKind::ArrayInit(vals), ty, span)
             }
@@ -169,7 +155,6 @@ impl Lowerer {
             }
             ExprKind::FnRef(_, name) => self.emit(InstKind::FnRef(*name), ty, span),
             ExprKind::Builder(name, fields) => {
-                // Desugar builder into StructInit + field sets.
                 let inits: Vec<(Symbol, ValueId)> = fields
                     .iter()
                     .map(|(n, e)| (*n, self.lower_expr_owned(e)))
@@ -182,7 +167,7 @@ impl Lowerer {
             }
             ExprKind::EnumUnwrap(inner, _enum_name, success_tag) => {
                 let subj = self.lower_expr(inner);
-                // Get tag (field "__tag" is i64 after extension)
+
                 let tag = self.emit(InstKind::FieldGet(subj, "__tag".into()), Type::I64, span);
                 let expected = self.emit(InstKind::IntConst(*success_tag as i64), Type::I64, span);
                 let cmp = self.emit(
@@ -190,13 +175,13 @@ impl Lowerer {
                     Type::Bool,
                     span,
                 );
-                // Assert: panics with message if tag doesn't match
+
                 self.emit(
                     InstKind::Assert(cmp, "unwrap called on Nothing/Err".into()),
                     Type::Void,
                     span,
                 );
-                // Extract field _0
+
                 self.emit(InstKind::FieldGet(subj, "_0".into()), ty.clone(), span)
             }
             ExprKind::EnumIs(inner, check_tag) => {

@@ -1,7 +1,3 @@
-//! HIR → MIR lowering.
-//!
-//! Converts HIR functions into MIR basic blocks with explicit control flow.
-
 use super::*;
 use crate::ast;
 use crate::hir::{self, ExprKind};
@@ -29,13 +25,13 @@ pub fn lower_program(prog: &hir::Program) -> Program {
     for f in &prog.fns {
         functions.extend(lower_function(f));
     }
-    // Also lower type methods
+
     for td in &prog.types {
         for m in &td.methods {
             functions.extend(lower_function(m));
         }
     }
-    // Also lower trait impl methods
+
     for ti in &prog.trait_impls {
         for m in &ti.methods {
             functions.extend(lower_function(m));
@@ -83,7 +79,6 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
     lowerer.func.ret_ty = f.ret.clone();
     lowerer.func.attrs = f.attrs.clone();
 
-    // Create value IDs for parameters
     for p in &f.params {
         let val = lowerer.new_value();
         lowerer.func.params.push(Param {
@@ -94,14 +89,6 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
         lowerer.var_map.insert(p.name.clone(), val);
     }
 
-    // Lower body. We pre-identify the index of the *implicit-return*
-    // statement — the last non-Drop, non-jump stmt that produces the
-    // function's return value. If that statement is a bare `Stmt::Expr(e)`
-    // (i.e. a tail expression, not an explicit `return`), we lower its
-    // expression via `lower_expr_owned` so that a heap-typed field/index
-    // read at the tail position is auto-cloned. Without this, the SSA
-    // return value aliases storage owned by a local that is about to be
-    // scope-exit dropped, producing a use-after-free in the caller.
     let tail_idx: Option<usize> = f
         .body
         .iter()
@@ -129,15 +116,12 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
         } else {
             lowerer.lower_stmt(stmt)
         };
-        // Don't let Drop/void statements clobber the result value
-        // for non-void functions (drops are inserted by perceus after
-        // the last-expression that should be returned).
+
         if !matches!(stmt, hir::Stmt::Drop(..)) {
             last = v;
         }
     }
 
-    // Add implicit return if not already terminated
     if matches!(
         lowerer.func.block(lowerer.current_block).terminator,
         Terminator::Unreachable
@@ -171,7 +155,7 @@ fn lower_binop(op: &ast::BinOp) -> BinOp {
         ast::BinOp::Ushr => BinOp::Ushr,
         ast::BinOp::And => BinOp::And,
         ast::BinOp::Or => BinOp::Or,
-        // Comparisons handled separately in lower_expr; this path is unreachable.
+
         ast::BinOp::Eq
         | ast::BinOp::Ne
         | ast::BinOp::Lt
@@ -294,16 +278,6 @@ impl Lowerer {
         }
     }
 
-    /// Lower an expression at a *consuming* / escape boundary. When the
-    /// expression is a heap-typed field or index read — i.e. the codegen
-    /// would otherwise hand us a pointer-share into a parent's storage —
-    /// emit an implicit deep `Clone` so the consumer gets an independent
-    /// owned value. This is the P4 auto-copy at all binding /
-    /// struct-init / call-arg / return / send / spawn-init sites.
-    ///
-    /// For everything else (function calls that already produce a fresh
-    /// owned value, struct literals, primitive ops, etc.) this falls
-    /// through to plain `lower_expr`.
     pub(super) fn lower_expr_owned(&mut self, expr: &hir::Expr) -> ValueId {
         let v = self.lower_expr(expr);
         if Self::needs_auto_clone(expr) {
@@ -317,9 +291,6 @@ impl Lowerer {
         }
     }
 
-    /// True iff the expression is a field- or index-read whose result is
-    /// a heap-owning value that would otherwise alias the parent's
-    /// storage. Callers use this from consuming positions.
     fn needs_auto_clone(expr: &hir::Expr) -> bool {
         if expr.ty.is_trivially_droppable() || !expr.ty.is_value_clonable() {
             return false;

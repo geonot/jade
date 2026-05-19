@@ -1,5 +1,3 @@
-//! MIR closure, channel, type-layout, dynamic dispatch, slice, and coroutine extraction helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -12,14 +10,12 @@ impl<'ctx> Compiler<'ctx> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let closure_ty = self.closure_type();
 
-        // Look up the inner lambda function (has captures prepended as params).
         let inner_fv = if let Some((fv, _, _)) = self.fns.get(fn_name).cloned() {
             Some(fv)
         } else {
             self.module.get_function(fn_name)
         };
 
-        // Build env struct from capture values.
         let cap_vals: Vec<BasicValueEnum<'ctx>> = captures.iter().map(|v| self.val(*v)).collect();
         let cap_tys: Vec<BasicTypeEnum<'ctx>> = cap_vals.iter().map(|v| v.get_type()).collect();
 
@@ -43,8 +39,6 @@ impl<'ctx> Compiler<'ctx> {
             ptr_ty.const_null()
         };
 
-        // Build a wrapper function that takes (env_ptr, ...declared_params)
-        // and calls the inner function with (captures..., declared_params...).
         let wrapper_ptr = if let Some(ifv) = inner_fv {
             let wrapper_name = format!("{fn_name}.env_wrap");
             if let Some(w) = self.module.get_function(&wrapper_name) {
@@ -53,7 +47,7 @@ impl<'ctx> Compiler<'ctx> {
                 let inner_type = ifv.get_type();
                 let inner_params = inner_type.get_param_types();
                 let n_captures = captures.len();
-                // Declared params are everything after the captures.
+
                 let declared_param_tys = &inner_params[n_captures..];
                 let mut wrapper_params: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
                 wrapper_params.extend(
@@ -76,7 +70,6 @@ impl<'ctx> Compiler<'ctx> {
                 let entry = self.ctx.append_basic_block(wrapper_fv, "entry");
                 self.bld.position_at_end(entry);
 
-                // Build call args: unpack captures from env, then forward declared params.
                 let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = Vec::new();
                 if n_captures > 0 {
                     let env_struct_ty = self.ctx.struct_type(&cap_tys, false);
@@ -96,7 +89,7 @@ impl<'ctx> Compiler<'ctx> {
                         call_args.push(cap.into());
                     }
                 }
-                // Forward declared params (skip env_ptr at index 0).
+
                 for i in 0..declared_param_tys.len() {
                     let p = wrapper_fv.get_nth_param((i + 1) as u32).unwrap();
                     call_args.push(p.into());
@@ -119,11 +112,9 @@ impl<'ctx> Compiler<'ctx> {
                 wrapper_fv.as_global_value().as_pointer_value()
             }
         } else {
-            // Fallback: no function found, use null.
             ptr_ty.const_null()
         };
 
-        // Build {wrapper_ptr, env_ptr} closure struct.
         let mut agg: BasicValueEnum<'ctx> = closure_ty.const_zero().into();
         agg =
             b!(self
@@ -154,7 +145,7 @@ impl<'ctx> Compiler<'ctx> {
             let capacity = if let Some(cap_id) = cap {
                 self.val(*cap_id).into_int_value()
             } else {
-                i64t.const_int(64, false) // default capacity
+                i64t.const_int(64, false)
             };
             let csv = b!(self
                 .bld
@@ -214,9 +205,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Compute the byte offset for enum payload field at `target_idx`,
-    /// matching the VariantInit layout (8-byte aligned actual type sizes).
-    /// When we don't have type info, defaults to `target_idx * 8`.
     pub(in crate::codegen) fn compute_enum_payload_offset(
         &self,
         enum_name: &str,
@@ -231,7 +219,7 @@ impl<'ctx> Compiler<'ctx> {
                             return offset;
                         }
                         let type_size = if Compiler::is_recursive_field(fty, enum_name) {
-                            8 // pointer
+                            8
                         } else {
                             self.llvm_ty(fty)
                                 .size_of()
@@ -246,7 +234,6 @@ impl<'ctx> Compiler<'ctx> {
         (target_idx * 8) as u64
     }
 
-    /// Emit dynamic dispatch: fat pointer vtable lookup and indirect call.
     pub(in crate::codegen) fn emit_dyn_dispatch(
         &mut self,
         obj: mir::ValueId,
@@ -304,7 +291,6 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into()))
     }
 
-    /// Emit slice operation for Vec or String types.
     pub(in crate::codegen) fn emit_slice(
         &mut self,
         base: mir::ValueId,
@@ -357,30 +343,27 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // ── HIR coroutine/generator body extraction ───────────────────
-
-    /// Walk the entire HIR program to extract CoroutineCreate and GeneratorCreate
-    /// bodies, keyed by their name for later use in MIR codegen.
     pub(in crate::codegen) fn extract_coro_bodies_from_program(
         prog: &hir::Program,
         out: &mut HashMap<Symbol, Vec<hir::Stmt>>,
+        caps_out: &mut HashMap<Symbol, Vec<(Symbol, Type)>>,
     ) {
         for f in &prog.fns {
             for stmt in &f.body {
-                Self::extract_coro_bodies_from_stmt(stmt, out);
+                Self::extract_coro_bodies_from_stmt(stmt, out, caps_out);
             }
         }
         for td in &prog.types {
             for m in &td.methods {
                 for stmt in &m.body {
-                    Self::extract_coro_bodies_from_stmt(stmt, out);
+                    Self::extract_coro_bodies_from_stmt(stmt, out, caps_out);
                 }
             }
         }
         for ti in &prog.trait_impls {
             for m in &ti.methods {
                 for stmt in &m.body {
-                    Self::extract_coro_bodies_from_stmt(stmt, out);
+                    Self::extract_coro_bodies_from_stmt(stmt, out, caps_out);
                 }
             }
         }
@@ -389,66 +372,67 @@ impl<'ctx> Compiler<'ctx> {
     pub(in crate::codegen) fn extract_coro_bodies_from_stmt(
         stmt: &hir::Stmt,
         out: &mut HashMap<Symbol, Vec<hir::Stmt>>,
+        caps_out: &mut HashMap<Symbol, Vec<(Symbol, Type)>>,
     ) {
         match stmt {
-            hir::Stmt::Bind(b) => Self::extract_coro_bodies_from_expr(&b.value, out),
-            hir::Stmt::Expr(e) => Self::extract_coro_bodies_from_expr(e, out),
+            hir::Stmt::Bind(b) => Self::extract_coro_bodies_from_expr(&b.value, out, caps_out),
+            hir::Stmt::Expr(e) => Self::extract_coro_bodies_from_expr(e, out, caps_out),
             hir::Stmt::If(i) => {
-                Self::extract_coro_bodies_from_expr(&i.cond, out);
+                Self::extract_coro_bodies_from_expr(&i.cond, out, caps_out);
                 for s in &i.then {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
                 if let Some(ref eb) = i.els {
                     for s in eb {
-                        Self::extract_coro_bodies_from_stmt(s, out);
+                        Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                     }
                 }
                 for elif in &i.elifs {
-                    Self::extract_coro_bodies_from_expr(&elif.0, out);
+                    Self::extract_coro_bodies_from_expr(&elif.0, out, caps_out);
                     for s in &elif.1 {
-                        Self::extract_coro_bodies_from_stmt(s, out);
+                        Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                     }
                 }
             }
             hir::Stmt::While(w) => {
-                Self::extract_coro_bodies_from_expr(&w.cond, out);
+                Self::extract_coro_bodies_from_expr(&w.cond, out, caps_out);
                 for s in &w.body {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             hir::Stmt::For(f) => {
-                Self::extract_coro_bodies_from_expr(&f.iter, out);
+                Self::extract_coro_bodies_from_expr(&f.iter, out, caps_out);
                 for s in &f.body {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             hir::Stmt::Loop(l) => {
                 for s in &l.body {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
-            hir::Stmt::Ret(Some(e), _, _) => Self::extract_coro_bodies_from_expr(e, out),
+            hir::Stmt::Ret(Some(e), _, _) => Self::extract_coro_bodies_from_expr(e, out, caps_out),
             hir::Stmt::Assign(a, b, _) => {
-                Self::extract_coro_bodies_from_expr(a, out);
-                Self::extract_coro_bodies_from_expr(b, out);
+                Self::extract_coro_bodies_from_expr(a, out, caps_out);
+                Self::extract_coro_bodies_from_expr(b, out, caps_out);
             }
             hir::Stmt::Match(m) => {
-                Self::extract_coro_bodies_from_expr(&m.subject, out);
+                Self::extract_coro_bodies_from_expr(&m.subject, out, caps_out);
                 for arm in &m.arms {
                     for s in &arm.body {
-                        Self::extract_coro_bodies_from_stmt(s, out);
+                        Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                     }
                 }
             }
             hir::Stmt::SimFor(f, _) => {
-                Self::extract_coro_bodies_from_expr(&f.iter, out);
+                Self::extract_coro_bodies_from_expr(&f.iter, out, caps_out);
                 for s in &f.body {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             hir::Stmt::SimBlock(b, _) => {
                 for s in b {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             _ => {}
@@ -458,56 +442,60 @@ impl<'ctx> Compiler<'ctx> {
     pub(in crate::codegen) fn extract_coro_bodies_from_expr(
         expr: &hir::Expr,
         out: &mut HashMap<Symbol, Vec<hir::Stmt>>,
+        caps_out: &mut HashMap<Symbol, Vec<(Symbol, Type)>>,
     ) {
         match &expr.kind {
             hir::ExprKind::CoroutineCreate(name, body) => {
                 out.insert(name.clone(), body.clone());
-                // Also recurse into the body for nested coroutines
+
+                caps_out.entry(name.clone()).or_default();
+
                 for s in body {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
-            hir::ExprKind::GeneratorCreate(_, name, body) => {
+            hir::ExprKind::GeneratorCreate(_, name, body, captures) => {
                 out.insert(name.clone(), body.clone());
+                caps_out.insert(name.clone(), captures.clone());
                 for s in body {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             hir::ExprKind::BinOp(a, _, b) => {
-                Self::extract_coro_bodies_from_expr(a, out);
-                Self::extract_coro_bodies_from_expr(b, out);
+                Self::extract_coro_bodies_from_expr(a, out, caps_out);
+                Self::extract_coro_bodies_from_expr(b, out, caps_out);
             }
-            hir::ExprKind::UnaryOp(_, a) => Self::extract_coro_bodies_from_expr(a, out),
+            hir::ExprKind::UnaryOp(_, a) => Self::extract_coro_bodies_from_expr(a, out, caps_out),
             hir::ExprKind::Call(_, _, args) => {
                 for a in args {
-                    Self::extract_coro_bodies_from_expr(a, out);
+                    Self::extract_coro_bodies_from_expr(a, out, caps_out);
                 }
             }
             hir::ExprKind::IndirectCall(f, args) => {
-                Self::extract_coro_bodies_from_expr(f, out);
+                Self::extract_coro_bodies_from_expr(f, out, caps_out);
                 for a in args {
-                    Self::extract_coro_bodies_from_expr(a, out);
+                    Self::extract_coro_bodies_from_expr(a, out, caps_out);
                 }
             }
             hir::ExprKind::IfExpr(i) => {
-                Self::extract_coro_bodies_from_expr(&i.cond, out);
+                Self::extract_coro_bodies_from_expr(&i.cond, out, caps_out);
                 for s in &i.then {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
                 if let Some(ref eb) = i.els {
                     for s in eb {
-                        Self::extract_coro_bodies_from_stmt(s, out);
+                        Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                     }
                 }
             }
             hir::ExprKind::Block(b) => {
                 for s in b {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             hir::ExprKind::Lambda(_, b) => {
                 for s in b {
-                    Self::extract_coro_bodies_from_stmt(s, out);
+                    Self::extract_coro_bodies_from_stmt(s, out, caps_out);
                 }
             }
             _ => {}

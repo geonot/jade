@@ -1,5 +1,3 @@
-//! Codegen for coroutine spawn/yield/resume operations.
-
 use indexmap::IndexMap;
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
@@ -11,13 +9,6 @@ use crate::types::Type;
 use super::Compiler;
 use super::b;
 
-/// Generator control block layout (shared between producer coroutine and consumer):
-///   offset 0:  coro_ptr        (*jinn_coro_t)    — 8 bytes
-///   offset 8:  value           (i64)             — 8 bytes
-///   offset 16: has_value       (u8)              — 1 byte
-///   offset 17: done            (u8)              — 1 byte
-///   offset 24: caller_ctx_ptr  (*jinn_context_t) — 8 bytes
-/// Total: 32 bytes
 impl<'ctx> Compiler<'ctx> {
     pub(crate) const GEN_CORO_PTR_OFF: u64 = 0;
     pub(crate) const GEN_VALUE_OFF: u64 = 8;
@@ -44,7 +35,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Declare jinn_gen_resume, jinn_gen_suspend, jinn_gen_destroy if not already declared.
     pub(crate) fn declare_gen_runtime(&mut self) {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let void = self.ctx.void_type();
@@ -57,15 +47,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Compile a coroutine/generator constructor.
-    ///
-    /// `name` becomes the symbol suffix of the internal body function
-    /// (`__coro_<name>`). `body` is the HIR statements that execute inside
-    /// the coroutine. `captures` lists enclosing-fn parameters that the
-    /// body references; their runtime values are passed in `capture_vals`
-    /// in the same order. The captured values are stored in the generator
-    /// control block immediately after the 32-byte header and re-hydrated
-    /// as locals when the coroutine begins executing.
     pub(crate) fn compile_coroutine_create(
         &mut self,
         name: &str,
@@ -87,7 +68,6 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let void = self.ctx.void_type();
 
-        // Build the coroutine body function: void __coro_<name>(void *arg)
         let coro_fn_name = format!("__coro_{name}");
         let fn_ty = void.fn_type(&[ptr.into()], false);
         let coro_fn = self
@@ -105,7 +85,6 @@ impl<'ctx> Compiler<'ctx> {
         let entry = self.ctx.append_basic_block(coro_fn, "entry");
         self.bld.position_at_end(entry);
 
-        // arg is the generator control block pointer
         let gen_ptr_param = coro_fn
             .get_first_param()
             .expect("ICE: function has no first param")
@@ -115,12 +94,6 @@ impl<'ctx> Compiler<'ctx> {
 
         self.set_var("__coro_ctx", gen_ptr_alloca, Type::Ptr(Box::new(Type::I64)));
 
-        // Re-hydrate captured enclosing-fn parameters from the generator
-        // control block.  Each capture occupies an 8-byte slot starting at
-        // `GEN_SIZE`.  The slots are populated by the create-site after
-        // allocation; here we load them back into entry-block allocas and
-        // register them as named locals so the body can reference them
-        // exactly as it did inside the original function body.
         for (i, (cap_name, cap_ty)) in captures.iter().enumerate() {
             let off = Self::GEN_SIZE + (i as u64) * 8;
             let slot_ptr = self.gen_field_ptr(gen_ptr_param, off, "cap.slot")?;
@@ -133,7 +106,6 @@ impl<'ctx> Compiler<'ctx> {
 
         self.compile_coroutine_body(body)?;
 
-        // Mark done and suspend back to caller (final suspension)
         if self.no_term() {
             let gen_ptr_val =
                 b!(self.bld.build_load(ptr, gen_ptr_alloca, "gen.ptr")).into_pointer_value();
@@ -144,7 +116,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unreachable());
         }
 
-        // Restore caller context
         self.cur_fn = saved_fn;
         self.vars = saved_vars;
         self.var_shadows = saved_shadows;
@@ -155,11 +126,11 @@ impl<'ctx> Compiler<'ctx> {
         let bb = saved_bb.unwrap_or_else(|| self.ctx.append_basic_block(fv, "coro.after"));
         self.bld.position_at_end(bb);
 
-        // Allocate and zero-init the generator control block
+        let total_size = Self::GEN_SIZE + (captures.len() as u64) * 8;
         let malloc_fn = self.ensure_malloc();
         let gen_mem = b!(self.bld.build_call(
             malloc_fn,
-            &[i64t.const_int(Self::GEN_SIZE, false).into()],
+            &[i64t.const_int(total_size, false).into()],
             "gen.mem"
         ))
         .try_as_basic_value()
@@ -177,12 +148,17 @@ impl<'ctx> Compiler<'ctx> {
             &[
                 gen_mem.into(),
                 i32t.const_int(0, false).into(),
-                i64t.const_int(Self::GEN_SIZE, false).into()
+                i64t.const_int(total_size, false).into()
             ],
             ""
         ));
 
-        // Create coroutine via jinn_coro_create and store ptr in gen block
+        for (i, val) in capture_vals.iter().enumerate() {
+            let off = Self::GEN_SIZE + (i as u64) * 8;
+            let slot_ptr = self.gen_field_ptr(gen_mem, off, "cap.slot")?;
+            b!(self.bld.build_store(slot_ptr, *val));
+        }
+
         let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
         let coro = b!(self.bld.build_call(
             coro_create,
@@ -198,8 +174,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let coro_ptr_field = self.gen_field_ptr(gen_mem, Self::GEN_CORO_PTR_OFF, "gen.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
-
-        // Generator is NOT scheduled — it runs via direct context swap (jinn_gen_resume/suspend)
 
         if name != "__anon" {
             let name_alloca = self.entry_alloca(ptr.into(), name);
@@ -267,9 +241,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Yield a value from inside a coroutine body.
-    /// Writes value to gen block, sets has_value=1, then suspends
-    /// via direct context swap back to the caller.
     fn emit_coroutine_yield(&mut self, val_expr: &hir::Expr) -> Result<(), String> {
         let val = self.compile_expr(val_expr)?;
         let ptr = self.ctx.ptr_type(AddressSpace::default());
@@ -282,11 +253,9 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or("internal: no __coro_ctx in coroutine body")?;
         let gen_ptr = b!(self.bld.build_load(ptr, gen_alloca, "gen.ctx")).into_pointer_value();
 
-        // Write value — store directly as raw bytes (8 bytes for i64/f64/ptr)
         let value_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_VALUE_OFF, "gen.y.val")?;
         match val {
             BasicValueEnum::FloatValue(fv) => {
-                // Store f64 directly — load side will read as f64
                 b!(self.bld.build_store(value_ptr, fv));
             }
             _ => {
@@ -295,11 +264,9 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Set has_value = 1
         let has_val_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_HAS_VALUE_OFF, "gen.y.hv")?;
         b!(self.bld.build_store(has_val_ptr, i8t.const_int(1, false)));
 
-        // Suspend back to caller via direct context swap
         let gen_suspend = crate::codegen::fn_or_die(&self.module, "jinn_gen_suspend");
         b!(self.bld.build_call(gen_suspend, &[gen_ptr.into()], ""));
 
@@ -329,9 +296,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// .next() — read the next yielded value from a generator.
-    /// Directly resumes the producer coroutine via context swap.
-    /// When the producer yields or finishes, control returns here.
     pub(crate) fn compile_coroutine_next(
         &mut self,
         coro_expr: &hir::Expr,
@@ -341,16 +305,12 @@ impl<'ctx> Compiler<'ctx> {
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
 
-        // Resume the producer coroutine (direct context swap)
         let gen_resume = crate::codegen::fn_or_die(&self.module, "jinn_gen_resume");
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
-        // After resume returns, the producer has either yielded a value or finished.
-        // Read the value (0 if done without yielding).
         let value_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_VALUE_OFF, "gen.n.val")?;
         let raw = b!(self.bld.build_load(i64t, value_ptr, "gen.result"));
 
-        // Convert back from i64 to the expected type
         let result = match yield_ty {
             Type::F64 => {
                 let f64t = self.ctx.f64_type();
@@ -364,7 +324,6 @@ impl<'ctx> Compiler<'ctx> {
             _ => raw,
         };
 
-        // Clear has_value
         let has_val_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_HAS_VALUE_OFF, "gen.n.hv")?;
         b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
 
@@ -375,7 +334,6 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.current_fn();
         let i64t = self.ctx.i64_type();
 
-        // Handle `for i in N` (means 0..N) vs `for i from A to B`
         let start_val = if f.end.is_some() {
             self.compile_expr(&f.iter)?
         } else {

@@ -1,5 +1,3 @@
-//! High-level store delete and set HIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -30,13 +28,12 @@ impl<'ctx> Compiler<'ctx> {
         let buf = self.store_load_records(fp, count, rec_size)?;
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
 
-        // Rewind and truncate the file in-place (keeps the lock held)
         b!(self.bld.build_call(
             fseek_fn,
             &[
                 fp.into(),
                 i64t.const_int(0, false).into(),
-                i32t.const_int(0, false).into() // SEEK_SET
+                i32t.const_int(0, false).into()
             ],
             ""
         ));
@@ -44,7 +41,7 @@ impl<'ctx> Compiler<'ctx> {
         let fd = self
             .call_result(b!(self.bld.build_call(fileno_fn, &[fp.into()], "del.fd")))
             .into_int_value();
-        // Declare ftruncate if needed
+
         let ftruncate_fn = self.module.get_function("ftruncate").unwrap_or_else(|| {
             let ft = i32t.fn_type(&[i32t.into(), i64t.into()], false);
             self.module

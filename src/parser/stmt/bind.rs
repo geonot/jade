@@ -22,24 +22,16 @@ impl Parser {
                 span: sp,
             }));
         }
-        // Optional type annotation: `a as Type is RHS`.
+
         let mut declared_ty: Option<crate::types::Type> = None;
         if self.check(Token::As) {
             self.advance();
             declared_ty = Some(self.parse_type()?);
         }
         self.expect(Token::Is)?;
-        // Optional access modifier immediately after `is`:
-        //   `x is copy RHS` — deep clone
-        //   `x is ref  RHS` — shared alias
-        //   `x is mut  RHS` — exclusive mutable alias
-        //   `x is take RHS` — move out / remove
-        // These are contextual keywords (the lexer emits them as Ident).
-        // We disambiguate `copy(…)` etc. (a call expression whose callee
-        // happens to be named `copy`) by requiring the keyword to NOT be
-        // followed immediately by `(`.
+
         let access_mod = self.try_parse_access_mod_after_is();
-        // Labeled loop: `outer is for i in items`
+
         if self.check(Token::For) {
             self.advance();
             let bind = self.ident()?;
@@ -83,28 +75,15 @@ impl Parser {
                 span: sp,
             }));
         }
-        // Layer 2 sugar: `a is RHS ! Variant` (guard) and
-        // `a is RHS ? on_ok ! on_err` (handler chain). Both desugar at
-        // parse-time into a small block of statements, wrapped in an
-        // `if true { ... }` so we can return a single Stmt from this
-        // function (jinn has no Stmt::Block variant).
-        //
-        // We parse RHS with parse_pipeline so the trailing `?` and `!`
-        // are visible to us (parse_expr/parse_ternary would consume them
-        // as ternary operators).
+
         let value = self.parse_pipeline()?;
-        // Re-attach `query` post-fix block so `r is users query ...`
-        // continues to work (parse_expr does this for normal callers).
+
         let value = if self.check(Token::Query) {
             self.parse_query_block(value)?
         } else {
             value
         };
 
-        // ── Form 1: `a is RHS ? on_ok [! on_err] [!! Variant]` ──────────
-        // Only treat `?` as a handler-chain when RHS is a call expression
-        // (otherwise `r is x > 3 ? "big" ! "small"` would lose its
-        // standard ternary meaning).
         if self.check(Token::Question) && matches!(value, Expr::Call(..)) {
             self.advance();
             let on_ok = self.parse_pipeline()?;
@@ -138,12 +117,10 @@ impl Parser {
                 access_mod: None,
                 span: sp,
             }));
-            // Build arms: same three-way logic as finish_bare_handler_chain but the
-            // Ok arm always binds `name` (the user-visible bind target).
+
             let ok_arm;
             let err_arm;
             if let Some((variant_name, var_sp)) = throw_variant {
-                // `!!` present: `!` is the falsy-Ok ternary-else, NOT an error handler.
                 if let Some(falsy_expr) = on_falsy_or_err {
                     let v_name: Symbol = self.gensym("__v").into();
                     let ternary = Expr::Ternary(
@@ -173,7 +150,6 @@ impl Parser {
                     span: sp,
                 };
             } else {
-                // No `!!`: `! on_err` is the error/else handler with implicit `err` binding.
                 ok_arm = Arm {
                     pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name.clone(), sp)], sp),
                     guard: None,
@@ -202,14 +178,6 @@ impl Parser {
             }));
         }
 
-        // ── Form 1b: `a is RHS !! Variant` ──────────────────────────────
-        // Bind a to the Ok payload; on any error throw Variant.
-        // Desugars (via pre-stmts):
-        //   __guard is RHS
-        //   match __guard
-        //       Ok(_) ?   (fall through)
-        //       _     ?   ! Variant
-        //   a is __guard
         if self.check(Token::BangBang) {
             self.advance();
             let var_sp = self.span();
@@ -250,24 +218,6 @@ impl Parser {
             }));
         }
 
-        // ── Form 2: `a is RHS ! Variant` (guard form) ───────────────────
-        // Desugar to (spliced into the enclosing block via pending queues):
-        //   __guard is RHS
-        //   match __guard
-        //       Variant ?
-        //           ! __guard
-        //       _ ?
-        //           (fall through)
-        //   a is __guard      ← returned as the main Stmt
-        //
-        // The `!` must be followed immediately by a bare identifier (the
-        // err-variant tag). We do NOT require an uppercase prefix — the
-        // disambiguation against ternary-else is done by token shape:
-        //   `a is x() ! Bad`        → guard (next is bare ident)
-        //   `a is x ! "fallback"`   → ternary-else (next is a literal)
-        //   `a is x ! foo()`        → ternary-else (ident followed by `(`)
-        // If the named tag turns out not to be an err-variant, the typer
-        // will produce an error when lowering the synthesized match arm.
         let next_is_bare_ident = self.check(Token::Bang)
             && self.pos + 1 < self.tok.len()
             && matches!(&self.tok[self.pos + 1].token, Token::Ident(_))
@@ -290,7 +240,7 @@ impl Parser {
             if let Token::Ident(_) = &self.tok[self.pos + 1].token {
                 {
                     {
-                        self.advance(); // consume `!`
+                        self.advance();
                         let var_sp = self.span();
                         let variant_name = self.ident()?;
 
@@ -320,8 +270,7 @@ impl Parser {
                             arms: vec![propagate_arm, fall_arm],
                             span: sp,
                         });
-                        // Splice the temp-bind and match BEFORE the user-
-                        // visible `a is __tmp` bind that we return.
+
                         self.pending_pre_stmts.push(bind_tmp);
                         self.pending_pre_stmts.push(match_stmt);
                         return Ok(Stmt::Bind(Bind {
@@ -337,14 +286,10 @@ impl Parser {
             }
         }
 
-        // ── Plain bind ──────────────────────────────────────────────────
-        // If the RHS is followed by ternary operators that we did not
-        // consume as sugar, re-parse them at this level to preserve the
-        // standard ternary semantics for `is` bindings.
         let value = if self.check(Token::Question) {
             let qsp = self.span();
             self.advance();
-            // `cond ? ! else_expr`
+
             if self.check(Token::Bang) {
                 self.advance();
                 let f = self.parse_pipeline()?;
@@ -377,15 +322,10 @@ impl Parser {
         }))
     }
 
-    /// Continue an expression after `parse_pipeline` has returned, applying
-    /// the same ternary / query-block continuations that `parse_expr` would
-    /// have. Used by callers that intercept tokens between the pipeline and
-    /// the rest of the expression (e.g. the bare-statement handler chain).
     pub(in crate::parser) fn complete_expr_after_pipeline(
         &mut self,
         head: Expr,
     ) -> Result<Expr, ParseError> {
-        // Ternary continuations. We mirror parse_ternary's logic.
         let value = if self.check(Token::Question) {
             let qsp = self.span();
             self.advance();
@@ -411,8 +351,7 @@ impl Parser {
         } else {
             head
         };
-        // Query block (`expr query ...`) — parse_expr_inner does this after
-        // the ternary layer.
+
         if self.check(Token::Query) {
             self.parse_query_block(value)
         } else {
@@ -420,16 +359,13 @@ impl Parser {
         }
     }
 
-    /// Bare `!! Variant` form: `expr !! Variant`.
-    /// On any error from `head`, propagate as a freshly-constructed `Variant`.
-    /// On Ok, silently fall through.
     pub(in crate::parser) fn finish_bare_bangbang(
         &mut self,
         head: Expr,
     ) -> Result<Stmt, ParseError> {
         let sp = head.span();
         debug_assert!(self.check(Token::BangBang));
-        self.advance(); // consume `!!`
+        self.advance();
         let var_sp = self.span();
         let variant_name = self.ident()?;
         let tmp_name: Symbol = self.gensym("__hc").into();
@@ -460,25 +396,15 @@ impl Parser {
         }))
     }
 
-    /// Bare-statement handler chain: `call() ? on_ok [! on_falsy] [!! Variant]`.
-    /// Desugars to a `match` on the call's return value.
-    ///
-    /// - `call() ? on_ok`                   — ok: on_ok, err: no-op
-    /// - `call() ? on_ok ! on_err`          — ok: on_ok, err: on_err (implicit `err` binding)
-    /// - `call() ? on_ok !! Variant`        — ok: on_ok, err: throw Variant
-    /// - `call() ? on_ok ! on_falsy !! V`   — truthy-ok: on_ok, falsy-ok: on_falsy, err: throw V
-    ///
-    /// When `!!` is present, `!` is the ternary-else (falsy non-error) branch, NOT an error
-    /// handler. `!` is only the error handler (with implicit `err` binding) when `!!` is absent.
     pub(in crate::parser) fn finish_bare_handler_chain(
         &mut self,
         call: Expr,
     ) -> Result<Stmt, ParseError> {
         let sp = call.span();
         debug_assert!(self.check(Token::Question));
-        self.advance(); // consume `?`
+        self.advance();
         let on_ok = self.parse_pipeline()?;
-        // Parse the remaining arms.
+
         let (on_falsy_or_err, throw_variant): (Option<Expr>, Option<(Symbol, Span)>) =
             if self.check(Token::BangBang) {
                 self.advance();
@@ -500,7 +426,7 @@ impl Parser {
             } else {
                 (None, None)
             };
-        // Bind the call to a temp so codegen has a stable subject.
+
         let tmp_name: Symbol = self.gensym("__hc").into();
         self.pending_pre_stmts.push(Stmt::Bind(Bind {
             name: tmp_name.clone(),
@@ -510,12 +436,10 @@ impl Parser {
             access_mod: None,
             span: sp,
         }));
-        // Build arms.
+
         let ok_arm;
         let err_arm;
         if let Some((variant_name, var_sp)) = throw_variant {
-            // `!!` present: `!` (if present) is the falsy-Ok ternary-else, NOT an error handler.
-            // Three-way desugar: truthy-ok → on_ok, falsy-ok → on_falsy, error → throw Variant.
             if let Some(falsy_expr) = on_falsy_or_err {
                 let v_name: Symbol = self.gensym("__v").into();
                 let ternary = Expr::Ternary(
@@ -545,7 +469,6 @@ impl Parser {
                 span: sp,
             };
         } else {
-            // No `!!`: `! on_err` is the error/else handler with implicit `err` binding.
             ok_arm = Arm {
                 pat: Pat::Ctor("Ok".into(), vec![Pat::Wild(sp)], sp),
                 guard: None,

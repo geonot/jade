@@ -34,7 +34,6 @@ impl Lowerer {
                 self.emit(InstKind::Call("__atomic_cas".into(), args), ty, span)
             }
 
-            // Builtin functions — dedicated MIR instructions for optimizable ones
             ExprKind::Builtin(builtin, args) => {
                 use crate::hir::BuiltinFn;
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
@@ -45,8 +44,7 @@ impl Lowerer {
                             .into_iter()
                             .next()
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
-                        // NOTE: inst.ty carries the argument type (not Void) so
-                        // codegen can determine the format specifier for printing.
+
                         self.emit(InstKind::Log(v), arg_ty, span)
                     }
                     BuiltinFn::Print => {
@@ -61,7 +59,6 @@ impl Lowerer {
                         self.emit(InstKind::Assert(v, "assertion failed".into()), ty, span)
                     }
                     BuiltinFn::FloatMethod(method) => {
-                        // Map x.abs()/floor()/ceil()/sqrt()/etc. to libm calls.
                         let m = method.as_str();
                         let libm_name: &str = match &*m {
                             "abs" => "fabs",
@@ -81,7 +78,7 @@ impl Lowerer {
                             "log2" => "log2",
                             "exp" => "exp",
                             "exp2" => "exp2",
-                            other => other, // assume libm name matches
+                            other => other,
                         };
                         self.emit(InstKind::Call(Symbol::intern(libm_name), vals), ty, span)
                     }
@@ -92,15 +89,11 @@ impl Lowerer {
                 }
             }
 
-            // Syscall — opaque call
             ExprKind::Syscall(args) => {
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 self.emit(InstKind::Call("__syscall".into(), vals), ty, span)
             }
 
-            // Coroutines — opaque calls
-
-            // Store operations — opaque calls
             ExprKind::Grad(inner) => {
                 let v = self.lower_expr(inner);
                 self.emit(InstKind::Call("__grad".into(), vec![v]), ty, span)

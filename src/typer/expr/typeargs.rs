@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -42,7 +40,6 @@ impl Typer {
         }
     }
 
-    /// Substitute type parameter names in a type with their concrete types.
     pub(in crate::typer) fn substitute_type_params(
         ty: &Type,
         map: &std::collections::HashMap<Symbol, Type>,
@@ -68,11 +65,6 @@ impl Typer {
         }
     }
 
-    /// Convert a type-argument expression as it appears after `of` in a
-    /// generic constructor call (e.g. `Box of i64(7)` or
-    /// `Pair of (i64, String)(1, "a")`) into the corresponding ordered
-    /// list of `Type`s. Returns `None` if any sub-expression cannot be
-    /// resolved to a type.
     pub(crate) fn expr_to_type_args(&self, e: &ast::Expr) -> Option<Vec<Type>> {
         match e {
             ast::Expr::Tuple(elems, _) => {
@@ -90,7 +82,6 @@ impl Typer {
         match e {
             ast::Expr::Ident(name, _) => Some(Self::ident_to_type(&name.as_str())),
             ast::Expr::OfCall(outer, inner, _) => {
-                // E.g. `Vec of i64`, `Box of i64`.
                 let outer_name = match outer.as_ref() {
                     ast::Expr::Ident(n, _) => n.as_str(),
                     _ => return None,

@@ -1,5 +1,3 @@
-//! Extracted call-typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::HashMap;

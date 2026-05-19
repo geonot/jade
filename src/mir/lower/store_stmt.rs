@@ -20,7 +20,6 @@ impl Lowerer {
                 )
             }
             hir::Stmt::StoreDelete(store_name, filter, span) => {
-                // Encode filter field+op in the call name so MIR codegen can reconstruct.
                 let filter_val = self.lower_expr(&filter.value);
                 let op_str = match filter.op {
                     ast::BinOp::Eq => "eq",
@@ -37,7 +36,7 @@ impl Lowerer {
                 }
                 let mut all_vals = vec![filter_val];
                 all_vals.extend(extra_vals);
-                // Encode extra filter conditions in the name: __store_delete_{name}__{field}__{op}[__and__{field2}__{op2}]*
+
                 let mut encoded =
                     format!("__store_delete_{store_name}__{}__{op_str}", filter.field);
                 for (logic_op, cond) in &filter.extra {
@@ -166,10 +165,10 @@ impl Lowerer {
                 }
                 let mut all_vals = vec![filter_val];
                 all_vals.extend(extra_vals);
-                // Append field assignment values after filter values.
+
                 let field_names: Vec<Symbol> = fields.iter().map(|(n, _)| n.clone()).collect();
                 all_vals.extend(fields.iter().map(|(_, e)| self.lower_expr(e)));
-                // Encode: __store_set_{name}__{field}__{op}[__and/or_{field2}__{op2}]*__fields_{f1}_{f2}_...
+
                 let mut encoded = format!("__store_set_{store_name}__{}__{op_str}", filter.field);
                 for (logic_op, cond) in &filter.extra {
                     let lop = match logic_op {

@@ -1,5 +1,3 @@
-//! Core type system data structures shared across the typer pipeline.
-
 use crate::intern::Symbol;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -69,7 +67,6 @@ impl Type {
         }
     }
 
-    /// Returns true if this type is represented as an LLVM pointer at the ABI level.
     pub fn is_ptr_represented(&self) -> bool {
         matches!(
             self,
@@ -108,10 +105,6 @@ impl Type {
         }
     }
 
-    /// True iff codegen knows how to produce an independently-owned deep
-    /// copy of a value of this type at a `.get()` site. Mirrors
-    /// `Compiler::is_value_clonable`. Trivially-droppable types are clonable
-    /// trivially (the value is its own copy).
     pub fn is_value_clonable(&self) -> bool {
         if self.is_trivially_droppable() {
             return true;
@@ -133,8 +126,6 @@ impl Type {
         }
     }
 
-    /// Returns true if this type (or any nested type) involves concurrency
-    /// primitives that require atomic reference counting.
     pub fn needs_atomic_rc(&self) -> bool {
         match self {
             Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,

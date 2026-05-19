@@ -1,5 +1,3 @@
-//! Specialized KV, graph, time-series, vector, bloom, and FTS store MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -74,7 +72,7 @@ impl<'ctx> Compiler<'ctx> {
                 "kv.has"
             )))
             .into_int_value();
-        // Convert i32 result to i1 bool
+
         let bool_val = b!(self.bld.build_int_compare(
             inkwell::IntPredicate::NE,
             result,
@@ -141,14 +139,10 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result.into())
     }
 
-    // ── @graph store codegen ────────────────────────────────────────
-
-    /// Graph query: count edges where field[0] or field[1] == node_value.
-    /// .from(node) matches first user field (src), .to(node) matches second user field (dst).
     pub(in crate::codegen) fn emit_graph_query(
         &mut self,
         store_name: &str,
-        direction: &str, // "from" or "to"
+        direction: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if args.is_empty() {
@@ -157,7 +151,6 @@ impl<'ctx> Compiler<'ctx> {
         let (sd, _st, rec_size, fp) = self.setup_store_access(store_name)?;
         let node_val = self.value_map[&args[0]];
 
-        // Skip builtin fields to find user fields
         let builtin_names = [
             "sid",
             "uuid",
@@ -173,7 +166,7 @@ impl<'ctx> Compiler<'ctx> {
             .enumerate()
             .filter(|(_, f)| !builtin_names.contains(&&*f.name.as_str()))
             .collect();
-        // .from() → first user field, .to() → second user field
+
         let target_idx = if direction == "from" { 0usize } else { 1 };
         if target_idx >= user_fields.len() {
             return Err(format!(
@@ -186,23 +179,20 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
 
-        // fseek to after header
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,
             &[
                 fp.into(),
-                i64t.const_int(24, false).into(), // HEADER_SIZE
-                i32t.const_int(0, false).into(),  // SEEK_SET
+                i64t.const_int(24, false).into(),
+                i32t.const_int(0, false).into(),
             ],
             ""
         ));
 
-        // Read record count from header: fseek(0), fread count, fseek back
         let _ftell_fn = crate::codegen::fn_or_die(&self.module, "ftell");
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
 
-        // First read count from offset 8
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -225,7 +215,6 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let total = b!(self.bld.build_load(i64t, count_alloca, "g.total")).into_int_value();
 
-        // Seek back to data start
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -236,7 +225,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Allocate one record buffer
         let rec_name = format!("__store_{store_name}_rec");
         let rec_st = self
             .module
@@ -248,7 +236,6 @@ impl<'ctx> Compiler<'ctx> {
         let match_count = self.entry_alloca(i64t.into(), "g.matches");
         b!(self.bld.build_store(match_count, i64t.const_int(0, false)));
 
-        // Loop through records
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
         let loop_bb = self.ctx.append_basic_block(fv, "g.loop");
         let body_bb = self.ctx.append_basic_block(fv, "g.body");
@@ -279,7 +266,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Load the field value and compare with node_val
         let field_ptr = b!(self
             .bld
             .build_struct_gep(rec_st, rec_buf, field_idx as u32, "g.fp"));
@@ -294,21 +280,20 @@ impl<'ctx> Compiler<'ctx> {
                 ))
             }
             crate::types::Type::String => {
-                // Compare fixed-size string buffer
                 let memcmp_fn = crate::codegen::fn_or_die(&self.module, "memcmp");
                 let node_data = self.string_data(node_val)?;
                 let node_len = self.string_len(node_val)?;
-                // Load stored string length (first 8 bytes of the 256-byte buffer)
+
                 let stored_len =
                     b!(self.bld.build_load(i64t, field_ptr, "g.slen")).into_int_value();
-                // Compare lengths first
+
                 let len_eq = b!(self.bld.build_int_compare(
                     inkwell::IntPredicate::EQ,
                     stored_len,
                     node_len.into_int_value(),
                     "g.leq"
                 ));
-                // If lengths match, compare data
+
                 let _ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let data_ptr = unsafe {
                     b!(self.bld.build_gep(
@@ -341,7 +326,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         };
 
-        // If match, increment count
         let match_bb = self.ctx.append_basic_block(fv, "g.matched");
         b!(self
             .bld
@@ -367,9 +351,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result.into())
     }
 
-    // ── @timeseries store codegen ───────────────────────────────────
-
-    /// Return the count of records in a timeseries store (latest = highest index).
     pub(in crate::codegen) fn emit_ts_latest(
         &mut self,
         store_name: &str,
@@ -380,7 +361,6 @@ impl<'ctx> Compiler<'ctx> {
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
 
-        // Read count from header offset 8
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -405,16 +385,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(count.into())
     }
 
-    // ── @vector store codegen ───────────────────────────────────
-
-    /// Emit vec.nearest(query_array, k) — calls jinn_vec_nearest with stack-allocated buffers.
-    /// Returns the count of results found (up to k). For now we return just the count.
     pub(in crate::codegen) fn emit_vec_nearest(
         &mut self,
         store_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Look up the vector dimensions from store decorators
         let sd = self
             .store_defs
             .get(store_name)
@@ -433,10 +408,8 @@ impl<'ctx> Compiler<'ctx> {
         let _f64t = self.ctx.f64_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
-        // Load the vector handle (lazy open)
         let vec_handle = self.load_vec_handle(store_name, dims)?;
 
-        // args[0] = query vector — could be PointerValue (Jinn Vec) or ArrayValue (literal)
         let arg_val = self.val(args[0]);
         let query_ptr = if arg_val.is_pointer_value() {
             let header_ty = self.vec_header_type();
@@ -453,10 +426,8 @@ impl<'ctx> Compiler<'ctx> {
 
         let k_val = self.val(args[1]).into_int_value();
 
-        // Allocate output indices buffer on stack (k * sizeof(i64))
         let out_indices = b!(self.bld.build_array_alloca(i64t, k_val, "vec.out"));
 
-        // Call jinn_vec_nearest(handle, query_ptr, k, out_indices) -> count
         let nearest_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_nearest");
         let result = self.call_result(b!(self.bld.build_call(
             nearest_fn,
@@ -471,7 +442,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Emit vec.insert(vec_array) — insert a vector into the store, returns count.
     pub(in crate::codegen) fn emit_vec_insert(
         &mut self,
         store_name: &str,
@@ -494,12 +464,8 @@ impl<'ctx> Compiler<'ctx> {
         let vec_handle = self.load_vec_handle(store_name, dims)?;
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
-        // args[0] is the vector data — could be:
-        // 1. A PointerValue to a Jinn Vec header {ptr, len, cap} — extract field 0
-        // 2. An ArrayValue [N x double] from a literal — alloca + store, pass pointer
         let arg_val = self.val(args[0]);
         let data_ptr = if arg_val.is_pointer_value() {
-            // Jinn Vec: extract data pointer from header field 0
             let header_ty = self.vec_header_type();
             let gep =
                 b!(self
@@ -507,7 +473,6 @@ impl<'ctx> Compiler<'ctx> {
                     .build_struct_gep(header_ty, arg_val.into_pointer_value(), 0, "vi.dp"));
             b!(self.bld.build_load(ptr_ty, gep, "vi.data")).into_pointer_value()
         } else {
-            // LLVM array value: alloca, store, pass pointer to the alloca
             let alloca = self.entry_alloca(arg_val.get_type(), "vi.arr");
             b!(self.bld.build_store(alloca, arg_val));
             alloca
@@ -518,7 +483,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(insert_fn, &[vec_handle.into(), data_ptr.into()], ""));
 
-        // Return the new count
         let count_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_count");
         let count = self.call_result(b!(self.bld.build_call(
             count_fn,
@@ -528,7 +492,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(count)
     }
 
-    /// Emit vec.count() — return the number of vectors in the store.
     pub(in crate::codegen) fn emit_vec_count(
         &mut self,
         store_name: &str,
@@ -562,7 +525,6 @@ impl<'ctx> Compiler<'ctx> {
         rest: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // rest = {store_name}_{field_name}
         let parts: Vec<&str> = rest.splitn(2, '_').collect();
         if parts.len() < 2 || args.is_empty() {
             return Err(format!("malformed bloom_test name: {rest}"));
@@ -582,7 +544,6 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_int_value();
 
-        // Convert i64 result to i1 bool
         let bool_val = b!(self.bld.build_int_compare(
             inkwell::IntPredicate::NE,
             result,
@@ -597,7 +558,6 @@ impl<'ctx> Compiler<'ctx> {
         rest: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // rest = {store_name}_{field_name}
         let parts: Vec<&str> = rest.splitn(2, '_').collect();
         if parts.len() < 2 || args.is_empty() {
             return Err(format!("malformed fts_search name: {rest}"));

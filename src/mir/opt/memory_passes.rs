@@ -1,5 +1,3 @@
-//! Memory passes: store-load forwarding, redundant store elim, branch elim.
-
 use super::super::*;
 use super::subst::{subst_inst, subst_term};
 use std::collections::{HashMap, HashSet};
@@ -9,10 +7,6 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
     let mut dead_loads: HashSet<ValueId> = HashSet::new();
 
     for bb in &func.blocks {
-        // Skip blocks that loop back to themselves (self-loops).
-        // In such blocks, a Store at the end of the iteration updates
-        // the value that a Load at the beginning of the next iteration
-        // should see — forwarding would incorrectly use the initial value.
         if bb.terminator.successors().contains(&bb.id) {
             continue;
         }
@@ -43,7 +37,6 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                     known.clear();
                 }
                 InstKind::FieldStore(var_name, _, _) => {
-                    // Mutating a field of a variable invalidates its cached Load.
                     known.remove(var_name);
                 }
                 InstKind::FieldTombstone(var_name, _) => {
@@ -73,23 +66,19 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
             subst_inst(inst, &replacements);
         }
         subst_term(&mut bb.terminator, &replacements);
-        // Remove dead loads (whose values were forwarded).
+
         bb.insts
             .retain(|inst| !inst.dest.map_or(false, |d| dead_loads.contains(&d)));
     }
     true
 }
 
-/// Remove stores that are overwritten before being read.
-/// Within each basic block, if `Store(name, v1)` is followed by
-/// `Store(name, v2)` with no intervening `Load(name)`, the first store
-/// is dead.
 pub fn redundant_store_elimination(func: &mut Function) -> bool {
     let mut changed = false;
 
     for bb in &mut func.blocks {
         let mut to_remove: HashSet<usize> = HashSet::new();
-        // Maps variable name → index of last Store instruction.
+
         let mut last_store_idx: HashMap<Symbol, usize> = HashMap::new();
 
         for (i, inst) in bb.insts.iter().enumerate() {
@@ -100,7 +89,6 @@ pub fn redundant_store_elimination(func: &mut Function) -> bool {
                     }
                 }
                 InstKind::Load(name) => {
-                    // A load reads the stored value — the store is live.
                     last_store_idx.remove(name);
                 }
                 InstKind::Call(..)
@@ -108,7 +96,6 @@ pub fn redundant_store_elimination(func: &mut Function) -> bool {
                 | InstKind::ChanRecv(..)
                 | InstKind::SelectArm(..)
                 | InstKind::Log(..) => {
-                    // Conservative: calls/effects might observe memory.
                     last_store_idx.clear();
                 }
                 _ => {}
@@ -128,8 +115,6 @@ pub fn redundant_store_elimination(func: &mut Function) -> bool {
     changed
 }
 
-/// Replace branches on constant booleans with unconditional gotos,
-/// making the dead successor potentially unreachable.
 pub fn constant_branch_elimination(func: &mut Function) -> bool {
     let mut consts: HashMap<ValueId, bool> = HashMap::new();
     for bb in &func.blocks {

@@ -1,5 +1,3 @@
-//! Filtered store query and count MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,7 +6,6 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Name format: {store_name}__{field}__{op}[__and__{field2}__{op2}]*
         let parts: Vec<&str> = encoded_name.splitn(3, "__").collect();
         if parts.len() < 3 || args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
@@ -16,13 +13,10 @@ impl<'ctx> Compiler<'ctx> {
         let store_name = parts[0];
         let field_name = parts[1];
 
-        // Parse primary op and any extra conditions from parts[2]
-        // parts[2] could be "eq" or "eq__and__val__gt" etc.
         let remainder = parts[2];
         let segments: Vec<&str> = remainder.split("__").collect();
         let op = Self::parse_store_op(segments[0]);
 
-        // Parse extra compound conditions: __and/or__field__op
         let mut extra_specs: Vec<(crate::ast::LogicalOp, &str, crate::ast::BinOp)> = Vec::new();
         let mut i = 1;
         while i + 2 < segments.len() {
@@ -65,7 +59,6 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(&sd);
 
-        // Find field index and type
         let (field_idx, field_ty) = sd
             .fields
             .iter()
@@ -76,14 +69,12 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = self.value_map[&args[0]];
 
-        // ── Index-accelerated path: O(1) lookup for equality on indexed fields ──
         let primary_field = &sd.fields[field_idx];
         let use_index = matches!(op, crate::ast::BinOp::Eq)
             && Compiler::field_has_index(primary_field)
             && extra_specs.is_empty();
 
         if use_index {
-            // Allocate zero'd result
             let result_ptr = self.entry_alloca(st.into(), "qi.result");
             let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
             b!(self.bld.build_call(
@@ -96,7 +87,6 @@ impl<'ctx> Compiler<'ctx> {
                 ""
             ));
 
-            // Hash the filter value and look up in index
             let idx_ptr = self.load_store_idx(store_name, field_name)?;
             let hash = self.idx_hash_field(filter_val, &field_ty)?;
             let lookup_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_lookup");
@@ -112,18 +102,16 @@ impl<'ctx> Compiler<'ctx> {
             let found_bb = self.ctx.append_basic_block(fv_fn, "qi.found");
             let done_bb = self.ctx.append_basic_block(fv_fn, "qi.done");
 
-            // If offset == -1, not found → return empty result
             let not_found = b!(self.bld.build_int_compare(
                 inkwell::IntPredicate::EQ,
                 file_offset,
-                i64t.const_int(u64::MAX, false), // -1 as unsigned
+                i64t.const_int(u64::MAX, false),
                 "qi.miss"
             ));
             b!(self
                 .bld
                 .build_conditional_branch(not_found, done_bb, found_bb));
 
-            // Found path: seek to the record and read it
             self.bld.position_at_end(found_bb);
             let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
             b!(self.bld.build_call(
@@ -147,7 +135,6 @@ impl<'ctx> Compiler<'ctx> {
                 ""
             ));
 
-            // Check soft-deleted
             if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
                 let del_gep =
                     b!(self
@@ -161,7 +148,7 @@ impl<'ctx> Compiler<'ctx> {
                     "qi.is_del"
                 ));
                 let copy_bb = self.ctx.append_basic_block(fv_fn, "qi.copy");
-                // If deleted, zero out result and skip
+
                 let zero_bb = self.ctx.append_basic_block(fv_fn, "qi.zero");
                 b!(self
                     .bld
@@ -181,7 +168,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 self.bld.position_at_end(copy_bb);
             }
-            // Record is valid, result_ptr already has the data from fread
+
             b!(self.bld.build_unconditional_branch(done_bb));
 
             self.bld.position_at_end(done_bb);
@@ -189,7 +176,6 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(result);
         }
 
-        // ── Full scan path: linear search through all records ──
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
@@ -234,7 +220,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "q.rec"))
         };
 
-        // Skip soft-deleted records (deleted != 0)
         if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
             let del_gep = b!(self
                 .bld
@@ -254,7 +239,6 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let cond = {
-            // Build extras for compound filters
             let mut extras: Vec<(
                 crate::ast::LogicalOp,
                 usize,
@@ -338,11 +322,9 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
 
-        // Check if store has a `deleted` field (non-@simple)
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
         if deleted_idx.is_none() {
-            // Simple store: just read header count
             let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
             b!(self.bld.build_call(
                 fseek_fn,
@@ -369,7 +351,6 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(b!(self.bld.build_load(i64t, count_buf, "count")));
         }
 
-        // Non-simple store: scan records, count where deleted == 0
         let rec_name = format!("__store_{store_name}_rec");
         let st = self
             .module
@@ -445,7 +426,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(i64t, live_ptr, "count")))
     }
 
-    /// Emit a view count: iterate source store, count records matching filter.
     pub(in crate::codegen) fn emit_view_count(
         &mut self,
         encoded_name: &str,
@@ -548,7 +528,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "vc.rec"))
         };
 
-        // Skip soft-deleted records
         if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
             let del_gep = b!(self
                 .bld
@@ -567,7 +546,6 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(filter_bb);
         }
 
-        // Apply filter
         let extras: Vec<(
             crate::ast::LogicalOp,
             usize,
@@ -593,7 +571,6 @@ impl<'ctx> Compiler<'ctx> {
             self.eval_store_filter(rec_ptr, st, field_idx, &field_ty, op, filter_val, &extras)?;
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
-        // Match: increment counter
         self.bld.position_at_end(match_bb);
         let cur = b!(self.bld.build_load(i64t, match_count_ptr, "vc.cur")).into_int_value();
         let inc = b!(self

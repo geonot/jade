@@ -1,5 +1,3 @@
-//! LSP JSON-RPC transport over stdio.
-
 use std::io::{self, BufRead, Write};
 
 pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {

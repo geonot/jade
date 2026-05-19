@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -19,11 +17,6 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Struct(name, inits, span) => {
-                // The parser routes `Uppercase(args)` directly to Expr::Struct
-                // (per N-2 generic-ctor support). If no struct/generic/variant
-                // exists with this name but a function does, fall back to a
-                // regular function call. This permits identifiers like
-                // `MySupervisor_start()` or any uppercase-prefixed function.
                 let known_struct = self.structs.contains_key(name)
                     || self.generic_types.contains_key(name)
                     || self.variant_tags.contains_key(name)
@@ -77,7 +70,6 @@ impl Typer {
         span: Span,
         type_args: &[Type],
     ) -> Result<hir::Expr, String> {
-        // Generic struct path with explicit type bindings.
         if let Some(gtd) = self.generic_types.get(name).cloned() {
             if type_args.len() != gtd.type_params.len() {
                 return Err(format!(
@@ -92,7 +84,6 @@ impl Typer {
                 type_map.insert(tp.clone(), ta.clone());
             }
 
-            // Build concrete fields and mangled name up front.
             let concrete_fields: Vec<(Symbol, Type)> = gtd
                 .fields
                 .iter()
@@ -153,8 +144,6 @@ impl Typer {
                 }
             }
 
-            // Lower the inits with the concrete field types as expected
-            // hints, so literal arguments (e.g. `7`) get the right type.
             let mut hinits: Vec<hir::FieldInit> = Vec::with_capacity(inits.len());
             for (i, fi) in inits.iter().enumerate() {
                 let declared_ty = if let Some(fname) = &fi.name {
@@ -185,14 +174,10 @@ impl Typer {
             });
         }
 
-        // Non-generic struct: explicit `of` arguments are ignored but
-        // accepted gracefully so the constructor still works.
         if self.structs.contains_key(name) {
             return self.lower_struct_or_variant(name, inits, span);
         }
 
-        // Variant constructor — just delegate; type args inform inference
-        // through the field expected types.
         self.lower_struct_or_variant(name, inits, span)
     }
 
@@ -202,12 +187,10 @@ impl Typer {
         inits: &[ast::FieldInit],
         span: Span,
     ) -> Result<hir::Expr, String> {
-        // Handle Arena(cap) as builtin
         if name == "Arena" && inits.len() == 1 {
             return Err("Arena type removed".into());
         }
 
-        // Handle Pool(obj_size, count) as builtin
         if name == "Pool" && inits.len() == 2 {
             return Err("Pool type removed".into());
         }
@@ -239,11 +222,8 @@ impl Typer {
 
         let struct_fields = self.structs.get(name).cloned();
 
-        // ── Generic type monomorphization ──
-        // If the struct isn't known but is a generic type, monomorphize it.
         if struct_fields.is_none() {
             if let Some(gtd) = self.generic_types.get(name).cloned() {
-                // Lower all field init values first (without expected type — generic).
                 let mut hinits_g: Vec<hir::FieldInit> = inits
                     .iter()
                     .map(|fi| {
@@ -254,7 +234,6 @@ impl Typer {
                     })
                     .collect::<Result<_, String>>()?;
 
-                // Build type_map: map type params to concrete types from args.
                 let mut type_map = std::collections::HashMap::new();
                 for (i, fi) in hinits_g.iter().enumerate() {
                     let field_def = if let Some(fname) = &fi.name {
@@ -269,12 +248,10 @@ impl Typer {
                     }
                 }
 
-                // Fill in any unmapped type params with i64 default
                 for tp in &gtd.type_params {
                     type_map.entry(tp.clone()).or_insert(Type::I64);
                 }
 
-                // Build concrete field list
                 let concrete_fields: Vec<(Symbol, Type)> = gtd
                     .fields
                     .iter()
@@ -287,7 +264,6 @@ impl Typer {
                     })
                     .collect();
 
-                // Build mangled name
                 let ty_suffix = gtd
                     .type_params
                     .iter()
@@ -297,10 +273,8 @@ impl Typer {
                 let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
 
                 if !self.structs.contains_key(&mangled) {
-                    // Register the monomorphized struct
                     self.structs.insert(mangled, concrete_fields.clone());
 
-                    // Build HIR TypeDef for codegen
                     let hir_fields: Vec<hir::Field> = concrete_fields
                         .iter()
                         .map(|(fname, fty)| hir::Field {
@@ -321,10 +295,9 @@ impl Typer {
                     };
                     self.mono_types.push(htd);
 
-                    // Register methods for the monomorphized type
                     for m in &gtd.methods {
                         let mut mono_method = m.clone();
-                        // Substitute type params in method param types and return type
+
                         for p in &mut mono_method.params {
                             if let Some(ref ty) = p.ty {
                                 p.ty = Some(Self::substitute_type_params(ty, &type_map));
@@ -341,7 +314,6 @@ impl Typer {
                     }
                 }
 
-                // Unify field inits with concrete types
                 for (i, fi) in hinits_g.iter_mut().enumerate() {
                     let declared_ty = if let Some(fname) = &fi.name {
                         concrete_fields
@@ -401,8 +373,6 @@ impl Typer {
         }
 
         if let Some(fields) = self.structs.get(name).cloned() {
-            // For structs with inferred fields, check if the resolved field types
-            // conflict with the argument types. If so, create a monomorphized variant.
             if self.inferred_field_structs.contains(&Symbol::intern(name)) {
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
                     let resolved = self.infer_ctx.shallow_resolve(declared_ty);
@@ -424,7 +394,6 @@ impl Typer {
                             let constraint = self.infer_ctx.constraint(root);
                             match &arg_resolved {
                                 Type::TypeVar(av) => {
-                                    // Both TypeVars — check constraint compatibility
                                     let arg_root = self.infer_ctx.find(*av);
                                     let arg_constraint = self.infer_ctx.constraint(arg_root);
                                     super::unify::InferCtx::constraints_conflict(
@@ -432,37 +401,33 @@ impl Typer {
                                         &arg_constraint,
                                     )
                                 }
-                                _ => {
-                                    // Concrete arg type — check constraint compatibility
-                                    match constraint {
-                                        super::unify::TypeConstraint::Integer
-                                            if !arg_resolved.is_int() =>
-                                        {
-                                            true
-                                        }
-                                        super::unify::TypeConstraint::Float
-                                            if !arg_resolved.is_float() =>
-                                        {
-                                            true
-                                        }
-                                        super::unify::TypeConstraint::Numeric
-                                            if !arg_resolved.is_num() =>
-                                        {
-                                            true
-                                        }
-                                        super::unify::TypeConstraint::Addable
-                                            if !arg_resolved.is_num()
-                                                && !matches!(arg_resolved, Type::String) =>
-                                        {
-                                            true
-                                        }
-                                        _ => false,
+                                _ => match constraint {
+                                    super::unify::TypeConstraint::Integer
+                                        if !arg_resolved.is_int() =>
+                                    {
+                                        true
                                     }
-                                }
+                                    super::unify::TypeConstraint::Float
+                                        if !arg_resolved.is_float() =>
+                                    {
+                                        true
+                                    }
+                                    super::unify::TypeConstraint::Numeric
+                                        if !arg_resolved.is_num() =>
+                                    {
+                                        true
+                                    }
+                                    super::unify::TypeConstraint::Addable
+                                        if !arg_resolved.is_num()
+                                            && !matches!(arg_resolved, Type::String) =>
+                                    {
+                                        true
+                                    }
+                                    _ => false,
+                                },
                             }
                         }
                         _ => {
-                            // Already resolved to concrete type — direct comparison
                             if matches!(arg_resolved, Type::TypeVar(_)) {
                                 return false;
                             }

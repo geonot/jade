@@ -1,5 +1,3 @@
-//! Scalar passes: copy-prop, phi simplify, DCE, strength reduction.
-
 use super::subst::{subst_inst, subst_term};
 use super::uses::{collect_used, is_pure};
 
@@ -21,7 +19,6 @@ pub fn copy_propagation(func: &mut Function) -> bool {
         return false;
     }
 
-    // Resolve transitive chains
     let resolved: HashMap<ValueId, ValueId> = copies
         .keys()
         .map(|&k| {
@@ -51,7 +48,7 @@ pub fn copy_propagation(func: &mut Function) -> bool {
             changed |= subst_inst(inst, &resolved);
         }
         changed |= subst_term(&mut bb.terminator, &resolved);
-        // Remove dead Copy instructions whose dests have been resolved away.
+
         bb.insts.retain(|inst| {
             if let (Some(d), InstKind::Copy(_)) = (inst.dest, &inst.kind) {
                 !resolved.contains_key(&d)
@@ -63,11 +60,6 @@ pub fn copy_propagation(func: &mut Function) -> bool {
     changed
 }
 
-// ━━━━━━━━━━━━━━━━━━ Phi Simplification ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Simplify trivial phi nodes:
-///  - All incoming values identical → replace with that value
-///  - Single predecessor → replace with the one value
 pub fn simplify_phis(func: &mut Function) -> bool {
     let mut replacements: HashMap<ValueId, ValueId> = HashMap::new();
 
@@ -77,12 +69,11 @@ pub fn simplify_phis(func: &mut Function) -> bool {
                 .incoming
                 .iter()
                 .map(|(_, v)| *v)
-                .filter(|v| *v != phi.dest) // ignore self-references
+                .filter(|v| *v != phi.dest)
                 .collect();
             if unique.len() == 1 {
                 replacements.insert(phi.dest, *unique.iter().next().unwrap());
             } else if unique.is_empty() {
-                // All incoming values are self-references — unreachable phi, skip.
                 continue;
             }
         }
@@ -92,8 +83,6 @@ pub fn simplify_phis(func: &mut Function) -> bool {
         return false;
     }
 
-    // Resolve transitive chains: if v9 → v_inner and v_inner → v2,
-    // replace v9 → v2 directly to avoid dangling references.
     let resolved: HashMap<ValueId, ValueId> = replacements
         .keys()
         .map(|&k| {
@@ -126,9 +115,6 @@ pub fn simplify_phis(func: &mut Function) -> bool {
     true
 }
 
-// ━━━━━━━━━━━━━━━━ Dead Code Elimination ━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Remove pure instructions whose results are never used.
 pub fn dead_code_elimination(func: &mut Function) -> bool {
     let used = collect_used(func);
     let mut changed = false;
@@ -145,9 +131,6 @@ pub fn dead_code_elimination(func: &mut Function) -> bool {
     changed
 }
 
-// ━━━━━━━━━━━━━━━━ Strength Reduction ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Replace expensive operations with cheaper equivalents.
 pub fn strength_reduction(func: &mut Function) -> bool {
     let mut changed = false;
     let mut iconsts: HashMap<ValueId, i64> = HashMap::new();
@@ -160,8 +143,6 @@ pub fn strength_reduction(func: &mut Function) -> bool {
         }
     }
 
-    // Pre-create shift constants needed for power-of-two multiplication rewrites.
-    // Scan for x * 2^k and ensure a constant for k exists.
     let mut needed_shifts: Vec<i64> = Vec::new();
     for bb in &func.blocks {
         for inst in &bb.insts {
@@ -176,8 +157,7 @@ pub fn strength_reduction(func: &mut Function) -> bool {
             }
         }
     }
-    // Build a map from shift amount → ValueId.
-    // Always insert at entry block start to guarantee dominance over all uses.
+
     let mut shift_vals: HashMap<i64, ValueId> = HashMap::new();
     for shift in needed_shifts {
         if shift_vals.contains_key(&shift) {
@@ -201,7 +181,6 @@ pub fn strength_reduction(func: &mut Function) -> bool {
     for bb in &mut func.blocks {
         for inst in &mut bb.insts {
             let new_kind = match &inst.kind {
-                // x * 2^k → x << k
                 InstKind::BinOp(BinOp::Mul, l, r) => match (iconsts.get(l), iconsts.get(r)) {
                     (_, Some(n)) if *n > 0 && (*n as u64).is_power_of_two() => {
                         let shift = (*n as u64).trailing_zeros() as i64;
@@ -219,12 +198,11 @@ pub fn strength_reduction(func: &mut Function) -> bool {
                             Some(InstKind::BinOp(BinOp::Shl, *r, shift_vals[&shift]))
                         }
                     }
-                    // x * 0 → 0 (IntConst(0) is correct for all int widths
-                    // because codegen uses inst.ty to determine the constant width)
+
                     (_, Some(0)) | (Some(0), _) => Some(InstKind::IntConst(0)),
                     _ => None,
                 },
-                // x + 0 | x - 0 → copy x
+
                 InstKind::BinOp(BinOp::Add, l, r) if iconsts.get(r) == Some(&0) => {
                     Some(InstKind::Copy(*l))
                 }
@@ -234,15 +212,15 @@ pub fn strength_reduction(func: &mut Function) -> bool {
                 InstKind::BinOp(BinOp::Sub, l, r) if iconsts.get(r) == Some(&0) => {
                     Some(InstKind::Copy(*l))
                 }
-                // x / 1 → copy x
+
                 InstKind::BinOp(BinOp::Div, l, r) if iconsts.get(r) == Some(&1) => {
                     Some(InstKind::Copy(*l))
                 }
-                // x % 1 → 0
+
                 InstKind::BinOp(BinOp::Mod, _, r) if iconsts.get(r) == Some(&1) => {
                     Some(InstKind::IntConst(0))
                 }
-                // x & 0 → 0, x | 0 → copy x, x ^ 0 → copy x
+
                 InstKind::BinOp(BinOp::BitAnd, _, r) if iconsts.get(r) == Some(&0) => {
                     Some(InstKind::IntConst(0))
                 }
@@ -252,9 +230,9 @@ pub fn strength_reduction(func: &mut Function) -> bool {
                 InstKind::BinOp(BinOp::BitXor, l, r) if iconsts.get(r) == Some(&0) => {
                     Some(InstKind::Copy(*l))
                 }
-                // x - x → 0  (same value id)
+
                 InstKind::BinOp(BinOp::Sub, l, r) if l == r => Some(InstKind::IntConst(0)),
-                // x ^ x → 0
+
                 InstKind::BinOp(BinOp::BitXor, l, r) if l == r => Some(InstKind::IntConst(0)),
                 _ => None,
             };

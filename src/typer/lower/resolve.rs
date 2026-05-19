@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};
@@ -34,9 +32,6 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
 }
 
 impl Typer {
-    /// Walks a type and rewrites any `Type::Struct(name, [])` whose name
-    /// is a known actor into `Type::ActorRef(name)`. Recursively descends
-    /// into composites.
     pub(in crate::typer) fn normalize_actor_refs(
         ty: Type,
         actors: &std::collections::HashSet<Symbol>,
@@ -197,8 +192,6 @@ impl Typer {
                 }
             }
             Type::Channel(_) if method == "send" || method == "recv" || method == "close" => {
-                // Channel methods handled by codegen — reclassify to StringMethod
-                // so codegen's channel dispatch works (it matches StringMethod).
                 if let hir::ExprKind::DeferredMethod(recv, method, args) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
@@ -213,7 +206,6 @@ impl Typer {
             | Type::U32
             | Type::U16
             | Type::U8 => {
-                // Integer char/numeric methods
                 let int_methods = ["abs", "to_float", "to_str", "min", "max", "clamp"];
                 if int_methods.iter().any(|m| method == *m) {
                     if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
@@ -227,17 +219,13 @@ impl Typer {
                 }
             }
             Type::String => {
-                // Receiver resolved to String — promote to StringMethod
                 if let hir::ExprKind::DeferredMethod(recv, method, args) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
                     expr.kind = hir::ExprKind::StringMethod(recv, method, args);
                 }
             }
-            _ => {
-                // Any other resolved type — leave as DeferredMethod; codegen
-                // will report an error if it's truly unresolvable.
-            }
+            _ => {}
         }
     }
 
@@ -316,8 +304,6 @@ impl Typer {
         }
     }
 
-    /// Auto-derive Display for structs that are passed to log/to_string
-    /// but don't have an explicit display method.
     pub(in crate::typer) fn resolve_fn(&mut self, f: &mut hir::Fn) {
         f.ret = self.infer_ctx.resolve(&f.ret);
         for p in &mut f.params {
@@ -476,8 +462,6 @@ impl Typer {
             | hir::ExprKind::StoreAll(_) => {}
             hir::ExprKind::Var(_, _) | hir::ExprKind::VariantRef(_, _, _) => {}
             hir::ExprKind::FnRef(_, _) => {
-                // If this references a polymorphic inferable function, monomorphize it
-                // now that we know the concrete types from type inference.
                 if let hir::ExprKind::FnRef(ref mut id, ref mut name) = expr.kind {
                     let has_poly_scheme = self
                         .fn_schemes
@@ -485,9 +469,7 @@ impl Typer {
                         .map_or(false, |s| !s.0.is_empty());
                     if has_poly_scheme {
                         if let Type::Fn(ref param_tys, _) = expr.ty {
-                            // Only monomorphize if all types are fully resolved (no type vars)
                             if expr.ty.has_type_var() {
-                                // Leave unresolved — codegen will emit a proper error
                             } else if let Some(inf_fn) = self.inferable_fns.get(&*name).cloned() {
                                 let normalized = Self::normalize_inferable_fn(&inf_fn);
                                 let type_map =

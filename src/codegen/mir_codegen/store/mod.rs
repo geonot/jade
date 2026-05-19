@@ -1,5 +1,3 @@
-//! Store operation codegen: insert, query, count, all, delete, set, get, first, exists, destroy, restore, save.
-
 use super::super::Compiler;
 use super::super::b;
 use crate::hir;

@@ -143,14 +143,8 @@ fn test_ownership_default() {
 
 #[test]
 fn test_rc_ownership() {
-    // Surface `rc()` was removed under the "heap tax" model. Heap
-    // nominals are intrinsically refcounted at the runtime layer; the
-    // typer-level Ownership::Rc promotion for heap bindings is a
-    // separate (later) phase, so for now we only assert the binding
-    // type-checks and produces a struct-typed binding.
-    let hir = type_check(
-        "type Foo\n    x as i64\n\n*main()\n    f is Foo(x is 42)\n    log(f.x)\n",
-    );
+    let hir =
+        type_check("type Foo\n    x as i64\n\n*main()\n    f is Foo(x is 42)\n    log(f.x)\n");
     let main = &hir.fns[0];
     if let hir::Stmt::Bind(b) = &main.body[0] {
         assert!(matches!(b.ty, Type::Struct(_, _)));

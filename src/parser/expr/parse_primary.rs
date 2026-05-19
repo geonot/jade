@@ -1,5 +1,3 @@
-//! Primary expression parsing — literals, idents, calls, types, interpolation.
-
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Token;
@@ -9,31 +7,25 @@ impl Parser {
     pub(in crate::parser) fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let sp = self.span();
         match self.peek() {
-            // `err` used in expression position — implicit identifier
-            // bound by handler-chain failure arms (e.g.
-            // `compute() ? log(a) ! log(err)`). The `err` keyword
-            // otherwise introduces an err-enum declaration; here it is
-            // safe to treat as an identifier reference because the
-            // declaration form is only valid at the top-level decl tier.
             Token::Err => {
                 self.advance();
                 Ok(Expr::Ident("err".into(), sp))
             }
-            // `extern.fn(...)` — extern dispatch syntax
+
             Token::Extern
                 if self.pos + 1 < self.tok.len()
                     && matches!(self.tok[self.pos + 1].token, Token::Dot) =>
             {
-                self.advance(); // consume `extern`
+                self.advance();
                 Ok(Expr::Ident("extern".into(), sp))
             }
-            // `type of expr` — comptime reflection
+
             Token::Type
                 if self.pos + 1 < self.tok.len()
                     && matches!(self.tok[self.pos + 1].token, Token::Of) =>
             {
-                self.advance(); // consume `type`
-                self.advance(); // consume `of`
+                self.advance();
+                self.advance();
                 let arg = self.parse_primary()?;
                 Ok(Expr::OfCall(
                     Box::new(Expr::Ident("type".into(), sp)),
@@ -103,7 +95,7 @@ impl Parser {
                 self.skip_ws();
                 if self.check(Token::RBracket) {
                     self.advance();
-                    // Empty `[]` desugars to `vector()`.
+
                     return Ok(Expr::Call(
                         Box::new(Expr::Ident("vector".into(), sp)),
                         Vec::new(),
@@ -149,9 +141,7 @@ impl Parser {
                 }
                 self.skip_ws();
                 self.expect(Token::RBracket)?;
-                // `[a, b, c]` desugars to a vector literal — the unified
-                // collection literal. The compiler may later choose stack
-                // representation when it can prove it is safe.
+
                 Ok(Expr::Call(
                     Box::new(Expr::Ident("vector".into(), sp)),
                     v,
@@ -209,7 +199,6 @@ impl Parser {
                 Ok(Expr::Einsum(spec, args, sp))
             }
             Token::Build => {
-                // If followed by '(' treat as function call, not builder syntax
                 let next = if self.pos + 1 < self.tok.len() {
                     &self.tok[self.pos + 1].token
                 } else {
@@ -239,10 +228,7 @@ impl Parser {
             Token::Ident(name) => {
                 let name = name.clone();
                 self.advance();
-                // `vector[a, b, c]` / `vec[a, b, c]` — bracket literal sugar
-                // for the `vector(...)` / `vec(...)` constructor. Desugars to
-                // a normal call so the typer's existing builtin handling for
-                // "vec" / "vector" produces a `VecNew`.
+
                 if (name.with_str(|s| s == "vector" || s == "vec")) && self.check(Token::LBracket) {
                     self.advance();
                     self.skip_ws();
@@ -340,10 +326,10 @@ impl Parser {
                         return Ok(Expr::StoreDistinct(store, field, sp));
                     }
                 }
-                // Qualified variant: ErrorType:VariantName
+
                 if matches!(self.peek(), Token::Colon) {
                     if let Token::Ident(_) = self.peek_at(1) {
-                        self.advance(); // consume ':'
+                        self.advance();
                         let variant = self.ident()?;
                         return Ok(Expr::QualifiedIdent(name, variant, sp));
                     }
@@ -351,7 +337,6 @@ impl Parser {
                 Ok(Expr::Ident(name, sp))
             }
             Token::Pipe => {
-                // |params| body lambda syntax
                 self.advance();
                 let mut params = Vec::new();
                 while !self.check(Token::Pipe) && !self.eof() {
@@ -385,7 +370,7 @@ impl Parser {
                 } else if self.check(Token::Do) {
                     self.advance();
                     self.skip_nl();
-                    // The lexer may emit INDENT for indented content inside do...end
+
                     if self.check(Token::Indent) {
                         self.advance();
                     }
@@ -441,13 +426,12 @@ impl Parser {
             Token::Spawn => {
                 self.advance();
                 let mut name = self.ident()?;
-                // Allow qualified `spawn module.Actor` — strip the module
-                // prefix; actors are looked up by their unqualified name.
+
                 while self.check(Token::Dot) {
                     self.advance();
                     name = self.ident()?;
                 }
-                // Optional struct-literal-style init: `spawn Foo(field is val, ...)`.
+
                 let mut inits: Vec<(crate::intern::Symbol, Expr)> = Vec::new();
                 if self.check(Token::LParen) {
                     self.advance();
@@ -458,7 +442,7 @@ impl Parser {
                                 "spawn init args must be `field is value` (struct-literal style)",
                             ));
                         }
-                        self.advance(); // consume `is`
+                        self.advance();
                         let val = self.parse_expr()?;
                         inits.push((fname, val));
                         if self.check(Token::Comma) {
@@ -594,14 +578,8 @@ impl Parser {
                         self.expect(Token::RParen)?;
                     }
                     if is_dispatch {
-                        // Desugar `dispatch target, @handler(args)` to a method call
-                        // `target.handler(args)` so the typer routes it through the
-                        // actor-dispatch path rather than the deprecated Send AST node.
                         Ok(Expr::Method(Box::new(target), handler, args, sp))
                     } else {
-                        // The `send` keyword is reserved for channel sends in 0.5+.
-                        // For actor handler dispatch use method-call syntax
-                        // `target.handler(args)` (or `dispatch target, @handler(args)`).
                         Ok(Expr::Send(Box::new(target), handler, args, sp))
                     }
                 } else {

@@ -12,7 +12,7 @@ impl Lowerer {
             ExprKind::StoreQuery(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
                 let mut args = vec![filter_val];
-                // Encode field name and op in the call name for codegen
+
                 let op_str = match filter.op {
                     ast::BinOp::Eq => "eq",
                     ast::BinOp::Ne => "ne",
@@ -23,7 +23,7 @@ impl Lowerer {
                     _ => "eq",
                 };
                 let mut name = format!("__store_query_{store_name}__{}__{op_str}", filter.field);
-                // Encode extra compound conditions
+
                 for (lop, cond) in &filter.extra {
                     let lop_str = match lop {
                         ast::LogicalOp::And => "and",
@@ -275,7 +275,6 @@ impl Lowerer {
                 )
             }
 
-            // @kv store operations
             ExprKind::KvGet(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
@@ -330,7 +329,6 @@ impl Lowerer {
                 )
             }
 
-            // Specialized store operations
             ExprKind::VecInsert(store_name, vec_expr) => {
                 let v = self.lower_expr(vec_expr);
                 self.emit(

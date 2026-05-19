@@ -120,10 +120,6 @@ impl Parser {
             }
             self.expect(Token::RParen)?;
         } else {
-            // Parens-less function definition: `*greet name as String`
-            // We still allow `as Type` annotations on each param.
-            // NOTE: in parens-less mode `is` separates the inline body, so we
-            // must NOT treat `is` as a default-value introducer here.
             while !self.check(Token::Newline)
                 && !self.check(Token::Returns)
                 && !self.check(Token::Is)
@@ -143,9 +139,6 @@ impl Parser {
             None
         };
 
-        // Optional error union: `returns T ! E1 ! E2 ...` or `! E1 ! E2 ...`
-        // Each `! Ident` after the return type names an err-type that this
-        // function may early-return via `! Variant`.
         let mut error_types = Vec::new();
         while self.check(Token::Bang) {
             self.advance();
@@ -234,9 +227,6 @@ impl Parser {
         })
     }
 
-    /// Like `parse_fn_param` but never consumes `is` as a default-value
-    /// introducer. Used by parens-less function definitions where `is`
-    /// instead introduces an inline single-expression body.
     pub(in crate::parser) fn parse_fn_param_no_default(
         &mut self,
         idx: usize,

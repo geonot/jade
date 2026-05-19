@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};
@@ -132,7 +130,6 @@ impl Typer {
                 }
                 _ => {
                     if matches!(recv_ty, Type::TypeVar(_)) {
-                        // If the method is exclusive to String, resolve immediately
                         if Self::is_string_exclusive_method(&dm.method.as_str()) {
                             let _ = self.infer_ctx.unify_at(
                                 &recv_ty,

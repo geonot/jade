@@ -1,5 +1,3 @@
-//! Source code formatter (`jinn fmt`).
-
 use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -204,12 +202,8 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
         Decl::TopStmt(stmt) => {
             format_stmt(out, stmt, level);
         }
-        Decl::Migration(_) => {
-            // Migrations are compile-time directives, not formatted
-        }
-        Decl::View(_) => {
-            // Views are compile-time directives, not formatted
-        }
+        Decl::Migration(_) => {}
+        Decl::View(_) => {}
     }
 }
 

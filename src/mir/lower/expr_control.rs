@@ -57,8 +57,6 @@ impl Lowerer {
 
             ExprKind::Block(stmts) => self.lower_block_expr(stmts),
             ExprKind::IfExpr(if_expr) => {
-                // Demote variables assigned in branches to memory
-                // so the merge point reads current values via Load.
                 let mut assigned = HashSet::new();
                 Self::collect_assigned_vars(&if_expr.then, &mut assigned);
                 for (_, elif_body) in &if_expr.elifs {
@@ -74,7 +72,6 @@ impl Lowerer {
                     .collect();
                 self.demote_vars_to_memory(&pre_existing, span);
 
-                // Variables first defined in BOTH then and else → promote to mem_vars
                 if if_expr.els.is_some() || !if_expr.elifs.is_empty() {
                     let mut then_binds = HashSet::new();
                     Self::collect_new_binds(&if_expr.then, &mut then_binds);
@@ -96,8 +93,6 @@ impl Lowerer {
                 let then_bb = self.new_block("if.then");
                 let merge_bb = self.new_block("if.merge");
 
-                // Determine the false-branch target:
-                // elif chain first, then else, then merge.
                 let first_elif_bb = if !if_expr.elifs.is_empty() {
                     Some(self.new_block("elif.test"))
                 } else {
@@ -111,13 +106,11 @@ impl Lowerer {
 
                 self.set_terminator(Terminator::Branch(cond_val, then_bb, else_bb));
 
-                // Then branch
                 self.switch_to(then_bb);
                 let then_val = self.lower_block_expr(&if_expr.then);
                 let then_end = self.current_block;
                 self.set_terminator(Terminator::Goto(merge_bb));
 
-                // Lower elif chains
                 let mut elif_vals: Vec<(BlockId, ValueId)> = Vec::new();
                 let mut prev_false_bb = first_elif_bb;
                 for (i, (elif_cond, elif_body)) in if_expr.elifs.iter().enumerate() {
@@ -152,7 +145,6 @@ impl Lowerer {
                     prev_false_bb = elif_false_bb;
                 }
 
-                // Else branch
                 let else_val_info = if let Some(els) = &if_expr.els {
                     let else_target = prev_false_bb.unwrap_or(else_bb);
                     self.switch_to(else_target);
@@ -164,7 +156,6 @@ impl Lowerer {
                     None
                 };
 
-                // Merge
                 self.switch_to(merge_bb);
                 if !matches!(ty, Type::Void) && (else_val_info.is_some() || !elif_vals.is_empty()) {
                     let mut incoming = vec![(then_end, then_val)];
@@ -174,10 +165,8 @@ impl Lowerer {
                     if let Some((eb, ev)) = else_val_info {
                         incoming.push((eb, ev));
                     }
-                    // If no else branch, add a void from the last false branch
-                    if else_val_info.is_none() && elif_vals.is_empty() {
-                        // No phi needed — only then branch produces a value
-                    }
+
+                    if else_val_info.is_none() && elif_vals.is_empty() {}
                     let result = self.new_value();
                     self.func.block_mut(merge_bb).phis.push(Phi {
                         dest: result,
@@ -186,8 +175,6 @@ impl Lowerer {
                     });
                     result
                 } else if !matches!(ty, Type::Void) {
-                    // No elif/else — no phi, just pass through then value
-                    // via a phi from then or a void from merge
                     let void_val = self.emit(InstKind::Void, Type::Void, span);
                     let result = self.new_value();
                     self.func.block_mut(merge_bb).phis.push(Phi {

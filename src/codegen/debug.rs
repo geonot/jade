@@ -1,5 +1,3 @@
-//! Debug-info helpers for source locations and local variable declarations.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -29,11 +27,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// R15: emit `llvm.dbg.declare` for an alloca'd local so debuggers
-    /// (lldb, gdb) can resolve `frame variable <name>`. Uses an opaque
-    /// 64-bit basic type as a stand-in DIType — accurate enough for
-    /// integers/pointers and gives the variable a name binding.
-    /// No-op when debug info is disabled.
     pub(crate) fn attach_dbg_declare(&self, ptr: PointerValue<'ctx>, name: &str, line: u32) {
         if !self.debug {
             return;
@@ -48,15 +41,8 @@ impl<'ctx> Compiler<'ctx> {
             return;
         };
         let file = cu.get_file();
-        // Use a generic 64-bit unsigned DI type. This is a stand-in:
-        // proper per-Type DI metadata is a follow-up. lldb still prints
-        // the address and bytes, which is the main thing the user gets.
-        let di_ty = di.create_basic_type(
-            "__jinn_local",
-            64,
-            0x07, /* DW_ATE_unsigned */
-            DIFlags::PUBLIC,
-        );
+
+        let di_ty = di.create_basic_type("__jinn_local", 64, 0x07, DIFlags::PUBLIC);
         let Ok(di_ty) = di_ty else { return };
         let var_info = di.create_auto_variable(
             scope,

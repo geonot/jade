@@ -1,4 +1,4 @@
-//! Codegen for Perceus reference-counting ops (`rc.alloc`, `rc.retain`, `rc.release`).
+
 
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
@@ -33,12 +33,12 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let size = layout.size_of().expect("ICE: type has no size");
         let needed_bytes = size.get_zero_extended_constant().unwrap_or(8);
-        // Perceus reuse: try to reuse a saved heap pointer instead of malloc.
-        // The runtime alloca path may return a NULL pointer (slot was empty
-        // at runtime), in which case we still need to malloc. We model this
-        // with a `phi` over the (reuse-hit, malloc-fallback) branches.
+
+
+
+
         let heap_ptr = if let Some(reused) = self.try_consume_reuse_token(needed_bytes) {
-            // Branch on null at runtime: if NULL, malloc; else use `reused`.
+
             let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
             let is_null = b!(self.bld.build_is_null(reused, "rc.alloc.reuse.null"));
             let fv = self.current_fn();
@@ -86,9 +86,9 @@ impl<'ctx> Compiler<'ctx> {
         self.rc_retain_impl(ptr, inner, inner.needs_atomic_rc())
     }
 
-    /// Atomic-forced variant used by `Arc<T>` codegen. Layout-identical
-    /// to `rc_retain` but always uses an atomic add regardless of
-    /// `inner`'s natural atomicity. R3.4.b.
+
+
+
     #[allow(dead_code)]
     pub(crate) fn arc_retain(
         &mut self,
@@ -134,7 +134,7 @@ impl<'ctx> Compiler<'ctx> {
         self.rc_release_impl(ptr, inner, inner.needs_atomic_rc())
     }
 
-    /// Atomic-forced variant used by `Arc<T>` codegen. R3.4.b.
+
     #[allow(dead_code)]
     pub(crate) fn arc_release(
         &mut self,
@@ -180,7 +180,7 @@ impl<'ctx> Compiler<'ctx> {
         let cont_bb = self.ctx.append_basic_block(fv, "rc.cont");
         b!(self.bld.build_conditional_branch(is_zero, dead_bb, cont_bb));
         self.bld.position_at_end(dead_bb);
-        // Strong refcount hit zero. Free the heap allocation.
+
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[heap_ptr.into()], ""));
         b!(self.bld.build_unconditional_branch(cont_bb));
@@ -198,12 +198,12 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_struct_gep(layout, ptr.into_pointer_value(), 1, "rc.val"));
         let loaded = b!(self.bld.build_load(self.llvm_ty(inner), val_gep, "rc.load"));
-        // If the inner type owns heap (String, Vec<T>, ...), a raw load is a
-        // bitwise alias of the Rc's interior: dropping both the caller's
-        // value and the Rc's deep-drop path would double-free. Hand the
-        // caller an independently-owned clone instead. POD inners
-        // (i64, ptrs, ...) take the identity fast path inside clone_value.
-        // Auto-deref (R3.4.d.1) will refine this to a true borrow.
+
+
+
+
+
+
         if inner.is_trivially_droppable() {
             Ok(loaded)
         } else if Self::is_value_clonable(inner) {
@@ -216,27 +216,27 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    // R3.4.b — Arc / Arc<Mutex> codegen emitters.
-    //
-    // Layout for `Arc<T>` is identical to `Rc<T>` (`{i64 strong,
-    // T payload}`); only the *operations* differ (atomic vs.
-    // plain). Layout for `Arc<Mutex<T>>` inserts a pthread_mutex_t
-    // slot between the strong count and the payload.
-    //
-    // No caller invokes these yet — they will be wired by R3.4.d
-    // (the promotion lowering pass) and R3.4.c (codegen dispatch on
-    // Type::Arc / Type::Mutex). #[allow(dead_code)] silences the
-    // unused warnings until then.
-    // ─────────────────────────────────────────────────────────────────
 
-    /// `Arc<T>` alloc — layout-identical to `rc_alloc`, but the
-    /// initial refcount is published with release-ordering so that
-    /// other threads that later observe the pointer see a fully
-    /// initialized payload. Since `rc_alloc` stores the refcount
-    /// before any potential publication, the publication ordering is
-    /// the responsibility of whatever channel/send moves the pointer
-    /// to another thread (already enforced by `runtime/channel.c`).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     #[allow(dead_code)]
     pub(crate) fn arc_alloc(
         &mut self,
@@ -246,10 +246,10 @@ impl<'ctx> Compiler<'ctx> {
         self.rc_alloc(inner, val)
     }
 
-    /// `Arc<T>` payload deref — layout-identical to `rc_deref`.
-    /// The load itself is non-atomic; if the payload is mutable
-    /// (`Arc<Mutex<T>>`) callers must wrap reads in `mutex_lock` /
-    /// `mutex_unlock`.
+
+
+
+
     #[allow(dead_code)]
     pub(crate) fn arc_deref(
         &mut self,
@@ -259,14 +259,14 @@ impl<'ctx> Compiler<'ctx> {
         self.rc_deref(ptr, inner)
     }
 
-    /// Layout for `Arc<Mutex<T>>`:
-    /// `{ i64 strong, pthread_mutex_t lock, T payload }`.
-    /// The mutex slot is sized opaquely as `[i8 x N]` matching the
-    /// platform's `sizeof(pthread_mutex_t)`. We can't query that at
-    /// compile-time from LLVM, so we use a conservative 64-byte
-    /// reservation (sufficient on Linux x86_64 = 40, aarch64 = 48,
-    /// macOS = 56). The init/lock/unlock calls go through the platform
-    /// pthread symbols (already linked by the scheduler).
+
+
+
+
+
+
+
+
     #[allow(dead_code)]
     pub(crate) fn arc_mutex_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
         let name = format!("ArcMutex_{inner}");
@@ -285,8 +285,8 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Declare (or fetch) `int pthread_mutex_init(pthread_mutex_t*,
-    /// const pthread_mutexattr_t*)`. Returns the FunctionValue.
+
+
     #[allow(dead_code)]
     pub(crate) fn ensure_pthread_mutex_init(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         self.module
@@ -303,7 +303,7 @@ impl<'ctx> Compiler<'ctx> {
             })
     }
 
-    /// Declare (or fetch) `int pthread_mutex_lock(pthread_mutex_t*)`.
+
     #[allow(dead_code)]
     pub(crate) fn ensure_pthread_mutex_lock(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         self.module
@@ -320,7 +320,7 @@ impl<'ctx> Compiler<'ctx> {
             })
     }
 
-    /// Declare (or fetch) `int pthread_mutex_unlock(pthread_mutex_t*)`.
+
     #[allow(dead_code)]
     pub(crate) fn ensure_pthread_mutex_unlock(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         self.module
@@ -337,7 +337,7 @@ impl<'ctx> Compiler<'ctx> {
             })
     }
 
-    /// Declare (or fetch) `int pthread_mutex_destroy(pthread_mutex_t*)`.
+
     #[allow(dead_code)]
     pub(crate) fn ensure_pthread_mutex_destroy(&mut self) -> inkwell::values::FunctionValue<'ctx> {
         self.module
@@ -354,8 +354,8 @@ impl<'ctx> Compiler<'ctx> {
             })
     }
 
-    /// Emit `pthread_mutex_lock(&arc_ptr->lock)` for an
-    /// `Arc<Mutex<T>>` value.
+
+
     #[allow(dead_code)]
     pub(crate) fn mutex_lock(
         &mut self,
@@ -374,7 +374,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Emit `pthread_mutex_unlock(&arc_ptr->lock)`.
+
     #[allow(dead_code)]
     pub(crate) fn mutex_unlock(
         &mut self,

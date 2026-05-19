@@ -1,5 +1,3 @@
-//! Target setup, LLVM utility helpers, local variables, allocation, runtime detection, and runtime declarations.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -56,7 +54,6 @@ impl<'ctx> Compiler<'ctx> {
             .create_enum_attribute(Attribute::get_named_enum_kind_id(name), 0)
     }
 
-    /// Create a zero initializer for the given type (used for global variables).
     pub(crate) fn zero_init(&self, ty: &Type) -> BasicValueEnum<'ctx> {
         match ty {
             Type::I8 | Type::U8 => self.ctx.i8_type().const_int(0, false).into(),
@@ -70,7 +67,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Compile a simple constant HIR expression (literals only, used for global init).
     pub(crate) fn compile_const_expr(
         &self,
         expr: &hir::Expr,
@@ -97,44 +93,10 @@ impl<'ctx> Compiler<'ctx> {
         self.tag_fn_inner(fv, true);
     }
 
-    /// Apply function attributes that hold for all Jinn-emitted functions.
-    ///
-    /// IMPORTANT: We intentionally apply ONLY `nounwind` here. Jinn has no
-    /// exception unwinding (panics abort the process via `__jinn_trap`), so
-    /// `nounwind` is a true language-level invariant.
-    ///
-    /// Other attributes that look tempting (`willreturn`, `norecurse`,
-    /// `mustprogress`, `nosync`, `nofree`) are UNSOUND for arbitrary user
-    /// code:
-    /// - `willreturn`  — false for any function that calls `__jinn_trap`,
-    ///                   `abort`, `exit`, or an infinite loop.
-    /// - `norecurse`   — false for any recursive user function.
-    /// - `mustprogress`— false for daemons, infinite event/actor loops.
-    /// - `nosync`      — false for actors/channels that synchronize via
-    ///                   shared memory.
-    /// - `nofree`      — false for any function that drops heap memory or
-    ///                   calls `free`.
-    ///
-    /// Marking a function `willreturn` when it can in fact trap is a
-    /// soundness bug: LLVM uses `willreturn` to assume the only reachable
-    /// paths are those that return, and it will delete trap paths (and
-    /// the entire function body that leads to them) at -O2 and above.
-    /// This previously caused vec-OOB and div-by-zero traps to be silently
-    /// erased from release builds. See alpha P0 fixes.
-    ///
-    /// These attributes should be re-introduced per-function by a future
-    /// static-analysis pass that proves them, not blanket-applied here.
     pub(in crate::codegen) fn tag_fn_inner(&self, fv: FunctionValue<'ctx>, _will_return: bool) {
         fv.add_attribute(AttributeLoc::Function, self.attr("nounwind"));
     }
 
-    /// Emit LLVM parameter attributes based on Jinn's ownership model.
-    ///
-    /// - Owned pointer params  → `noalias` (exclusive, no other ref exists)
-    /// - Borrowed pointer params → `noalias readonly` (shared read-only)
-    /// - BorrowMut pointer params → `noalias` (exclusive mutable borrow)
-    /// - Rc/Arc → shared refcount, no noalias
-    /// - Raw → user-managed, no assumptions
     pub(crate) fn tag_param_ownership(
         &self,
         fv: FunctionValue<'ctx>,
@@ -145,24 +107,24 @@ impl<'ctx> Compiler<'ctx> {
         if !ty.is_ptr_represented() {
             return;
         }
-        // All pointer params are non-nullable in Jinn
+
         fv.add_attribute(loc, self.attr("nonnull"));
         match ownership {
             hir::Ownership::Owned | hir::Ownership::BorrowMut => {
                 fv.add_attribute(loc, self.attr("noalias"));
-                // Owned values don't escape the callee
+
                 fv.add_attribute(loc, self.attr("nocapture"));
             }
             hir::Ownership::Borrowed => {
                 fv.add_attribute(loc, self.attr("noalias"));
                 fv.add_attribute(loc, self.attr("readonly"));
-                // Borrowed values don't escape
+
                 fv.add_attribute(loc, self.attr("nocapture"));
             }
-            // Raw is user-managed — we make no assumptions.
+
             hir::Ownership::Raw => {}
         }
-        // Add dereferenceable(N) for known struct sizes
+
         if let Some(size) = self.dereferenceable_bytes(ty) {
             let deref_attr = self
                 .ctx
@@ -250,7 +212,6 @@ impl<'ctx> Compiler<'ctx> {
         ptr
     }
 
-    /// Alloca that respects @align layout attribute for struct types.
     pub(crate) fn alloca_for_type(
         &self,
         llvm_ty: BasicTypeEnum<'ctx>,
@@ -296,13 +257,11 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into())
     }
 
-    /// Return the current LLVM function, panicking with an ICE if none is set.
     #[track_caller]
     pub(crate) fn current_fn(&self) -> FunctionValue<'ctx> {
         ice!(self.cur_fn, "no current function")
     }
 
-    /// Return the current insert basic block, panicking with an ICE if none exists.
     #[track_caller]
     pub(crate) fn current_bb(&self) -> inkwell::basic_block::BasicBlock<'ctx> {
         ice!(self.bld.get_insert_block(), "no current basic block")
@@ -319,7 +278,6 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .add_function("jinn_xmalloc", ft, Some(Linkage::WeakAny));
 
-        // Define the function body inline: call malloc, abort on NULL
         let entry = self.ctx.append_basic_block(func, "entry");
         let ok_bb = self.ctx.append_basic_block(func, "ok");
         let fail_bb = self.ctx.append_basic_block(func, "fail");
@@ -375,17 +333,13 @@ impl<'ctx> Compiler<'ctx> {
         func
     }
 
-    /// Get-or-create the entry-block alloca that backs a runtime reuse slot.
-    /// The alloca holds an `i8*` initialized to NULL exactly once on first
-    /// touch; subsequent calls return the cached pointer.
     pub(crate) fn get_or_create_reuse_alloca(&mut self, slot: u32) -> PointerValue<'ctx> {
         if let Some(p) = self.current_reuse_alloca_slots.get(&slot) {
             return *p;
         }
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let alloca = self.entry_alloca(ptr_ty.into(), &format!("perceus.slot.{slot}"));
-        // Initialize to NULL by storing into the alloca at the entry-block
-        // position (just after the alloca itself).
+
         let fv = self.current_fn();
         let entry = fv.get_first_basic_block().expect("entry block");
         let saved = self.bld.get_insert_block();
@@ -393,7 +347,7 @@ impl<'ctx> Compiler<'ctx> {
             Some(first) => self.bld.position_before(&first),
             None => self.bld.position_at_end(entry),
         }
-        // Place the store after the alloca so dominance is sound.
+
         if let Some(after) = alloca
             .as_instruction_value()
             .and_then(|i| i.get_next_instruction())
@@ -411,10 +365,6 @@ impl<'ctx> Compiler<'ctx> {
         alloca
     }
 
-    /// Free any pointers still resident in this function's reuse slots.
-    /// Called immediately before each `Return` terminator so that loop-body
-    /// reuse slots that were saved on the last iteration but never consumed
-    /// do not leak when the function exits.
     pub(crate) fn drain_reuse_slots(&mut self) {
         if self.current_reuse_alloca_slots.is_empty() {
             return;
@@ -441,7 +391,7 @@ impl<'ctx> Compiler<'ctx> {
             let cont_bb = self.ctx.append_basic_block(fv, "perceus.drain.cont");
             let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
             self.bld.position_at_end(free_bb);
-            // For Vec slots: also free the data buffer (header[0]).
+
             if self.current_perceus_meta.vec_slots.contains(&slot) {
                 if let Ok(data_gep) =
                     self.bld
@@ -459,7 +409,7 @@ impl<'ctx> Compiler<'ctx> {
             let _ = self
                 .bld
                 .build_call(free_fn, &[cur.into()], "perceus.drain.free");
-            // Clear the slot (defensive — function is about to return anyway).
+
             let null = ptr_ty.const_null();
             let _ = self.bld.build_store(alloca, null);
             let _ = self.bld.build_unconditional_branch(cont_bb);
@@ -467,11 +417,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Save a Vec header pointer into a reuse slot. Element drop has already
-    /// been performed by the caller (which knows the element type). Frees any
-    /// previously-stashed Vec (header + buffer) before storing the new one.
-    /// Returns `false` if `dropped` is not a Vec slot — the caller should
-    /// fall back to the normal `drop_value` path.
     pub(crate) fn try_save_vec_slot(
         &mut self,
         dropped: mir::ValueId,
@@ -484,7 +429,7 @@ impl<'ctx> Compiler<'ctx> {
         let alloca = self.get_or_create_reuse_alloca(slot);
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let header_ty = self.vec_header_type();
-        // Free any previously-stashed (header + buffer) before overwriting.
+
         if let Ok(prev) = self.bld.build_load(ptr_ty, alloca, "vec.save.prev") {
             let prev_ptr = prev.into_pointer_value();
             if let Ok(is_null) = self.bld.build_is_null(prev_ptr, "vec.save.prev.null") {
@@ -517,11 +462,6 @@ impl<'ctx> Compiler<'ctx> {
         true
     }
 
-    /// Try to consume a saved Vec header for the empty `VecNew` currently
-    /// being emitted. Returns the saved header pointer on hit, `None` on
-    /// miss. The caller (`emit_vec_new`) is responsible for null-checking
-    /// at runtime — a hit may still be NULL if the slot has not been
-    /// populated this far at runtime.
     pub(crate) fn try_consume_vec_slot(&mut self) -> Option<PointerValue<'ctx>> {
         let dest = self.current_alloc_dest?;
         let slot = *self.current_perceus_meta.reuse_consume.get(&dest)?;
@@ -535,8 +475,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_load(ptr_ty, alloca, "vec.consume.load")
             .ok()?
             .into_pointer_value();
-        // Clear the slot eagerly; if `cur` turns out to be NULL the caller
-        // mallocs fresh anyway, so storing NULL is the right idle state.
+
         let null = ptr_ty.const_null();
         let _ = self.bld.build_store(alloca, null);
         Some(cur)

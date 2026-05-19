@@ -1,5 +1,3 @@
-//! High-level IR data types produced by the typer and consumed by Perceus, MIR lower, and codegen.
-
 use crate::ast::{self, Span};
 use crate::intern::Symbol;
 use crate::types::Type;
@@ -13,13 +11,12 @@ impl DefId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ownership {
-    /// Sole owner; responsible for drop at scope exit.
     Owned,
-    /// T1 shared borrow — raw pointer alias, no refcount, no drop.
+
     Borrowed,
-    /// T1 exclusive mutable borrow — raw mut pointer, no refcount, no drop.
+
     BorrowMut,
-    /// Raw user-managed pointer.
+
     Raw,
 }
 
@@ -30,14 +27,10 @@ impl Default for Ownership {
 }
 
 impl Ownership {
-    /// True if this ownership variant means the binding is an *alias* of
-    /// storage owned elsewhere — i.e. drop glue must NOT release the
-    /// underlying memory at scope exit.
     pub fn is_borrow(self) -> bool {
         matches!(self, Ownership::Borrowed | Ownership::BorrowMut)
     }
 
-    /// True for the mutable-alias variants (currently just T1 BorrowMut).
     pub fn is_mutable_alias(self) -> bool {
         matches!(self, Ownership::BorrowMut)
     }
@@ -94,8 +87,7 @@ pub struct Fn {
     pub name: Symbol,
     pub params: Vec<Param>,
     pub ret: Type,
-    /// Error types (declared or inferred) that this function may early-return
-    /// via `! Variant`. Each entry is the enum type of an `err`-defined union.
+
     pub error_types: Vec<Type>,
     pub body: Block,
     pub span: Span,
@@ -110,9 +102,7 @@ pub struct Param {
     pub name: Symbol,
     pub ty: Type,
     pub ownership: Ownership,
-    /// User-written access modifier from the parameter type position.
-    /// `None` means default inference. Carried through to codegen so
-    /// callers can pick the right ABI (value vs pointer vs Arc bump).
+
     pub access_mod: Option<crate::ast::AccessMod>,
     pub default: Option<Expr>,
     pub span: Span,
@@ -133,8 +123,7 @@ pub struct Field {
     pub name: Symbol,
     pub ty: Type,
     pub default: Option<Expr>,
-    /// Access modifier written on the field declaration
-    /// (e.g. `f as ref Foo`, `bytes as mut Vec(u8)`).
+
     pub access_mod: Option<crate::ast::AccessMod>,
     pub span: Span,
 }
@@ -276,13 +265,13 @@ pub enum Stmt {
     Ret(Option<Expr>, Type, Span),
     Break(Option<Expr>, Span),
     Continue(Span),
-    /// `nop` — no-op statement (Python-style `pass`). Compiles to nothing.
+
     Nop(Span),
     Match(Match),
     Asm(AsmBlock),
     Drop(DefId, Symbol, Type, Span),
     ErrReturn(Expr, Type, Span),
-    /// `defer <block>` — runs at every function exit point. Lowered by MIR.
+
     Defer(Block, Span),
     StoreInsert(Symbol, Vec<Expr>, Span),
     StoreDelete(Symbol, Box<StoreFilter>, Span),
@@ -296,7 +285,7 @@ pub enum Stmt {
     SimFor(For, Span),
     SimBlock(Block, Span),
     UseLocal(Vec<Symbol>, Option<Vec<Symbol>>, Option<Symbol>, Span),
-    /// Store a value into a global mutable variable.
+
     GlobalStore(Symbol, Expr, Span),
 }
 
@@ -320,8 +309,7 @@ pub struct Bind {
     pub ty: Type,
     pub ownership: Ownership,
     pub atomic: bool,
-    /// User-written access modifier (`copy`/`ref`/`mut`/`take`).
-    /// Drives ownership tier selection during escape analysis.
+
     pub access_mod: Option<crate::ast::AccessMod>,
     pub span: Span,
 }
@@ -353,10 +341,7 @@ pub enum ExprKind {
     Builtin(BuiltinFn, Vec<Expr>),
     Method(Box<Expr>, Symbol, Symbol, Vec<Expr>),
     StringMethod(Box<Expr>, Symbol, Vec<Expr>),
-    /// Placeholder for method calls whose receiver type was unknown at
-    /// lowering time.  `reclassify_method_call` resolves these to the
-    /// correct variant once type inference has run.  If one survives to
-    /// codegen it is a bug.
+
     DeferredMethod(Box<Expr>, Symbol, Vec<Expr>),
     VecMethod(Box<Expr>, Symbol, Vec<Expr>),
     MapMethod(Box<Expr>, Symbol, Vec<Expr>),
@@ -402,32 +387,32 @@ pub enum ExprKind {
     StoreAvg(Symbol, Symbol),
     StoreMin(Symbol, Symbol),
     StoreMax(Symbol, Symbol),
-    StoreVersionCount(Symbol, Box<Expr>), // store_name, sid_expr
-    StoreHistory(Symbol, Box<Expr>),      // store_name, sid_expr
-    StoreAtVersion(Symbol, Box<Expr>, Box<Expr>), // store_name, sid_expr, version_expr
-    ViewCount(Symbol, Box<StoreFilter>),  // source_store, filter
-    ViewAll(Symbol, Box<StoreFilter>),    // source_store, filter
-    // @kv store operations
-    KvGet(Symbol, Box<Expr>),             // store_name, key_expr → i64
-    KvHas(Symbol, Box<Expr>),             // store_name, key_expr → bool
-    KvCount(Symbol),                      // store_name → i64
-    KvSet(Symbol, Box<Expr>, Box<Expr>),  // store_name, key_expr, val_expr → void
-    KvDel(Symbol, Box<Expr>),             // store_name, key_expr → void
-    KvIncr(Symbol, Box<Expr>, Box<Expr>), // store_name, key_expr, delta_expr → void
-    // @vector store operations
-    VecNearest(Symbol, Box<Expr>, Box<Expr>), // store_name, query_vec, k → count
-    VecInsert(Symbol, Box<Expr>),             // store_name, vec_expr → void
-    VecCount(Symbol),                         // store_name → i64
-    // @bloom filter operations
-    BloomTest(Symbol, Symbol, Box<Expr>), // store_name, field_name, value → bool
-    // @fts operations
-    FtsSearch(Symbol, Symbol, Box<Expr>), // store_name, field_name, query → count
-    FtsCount(Symbol, Symbol),             // store_name, field_name → count
-    // @graph store operations
-    GraphFrom(Symbol, Box<Expr>), // store_name, node_sid → ptr (edges from)
-    GraphTo(Symbol, Box<Expr>),   // store_name, node_sid → ptr (edges to)
-    // @timeseries operations
-    TsLatest(Symbol), // store_name → record (latest entry)
+    StoreVersionCount(Symbol, Box<Expr>),
+    StoreHistory(Symbol, Box<Expr>),
+    StoreAtVersion(Symbol, Box<Expr>, Box<Expr>),
+    ViewCount(Symbol, Box<StoreFilter>),
+    ViewAll(Symbol, Box<StoreFilter>),
+
+    KvGet(Symbol, Box<Expr>),
+    KvHas(Symbol, Box<Expr>),
+    KvCount(Symbol),
+    KvSet(Symbol, Box<Expr>, Box<Expr>),
+    KvDel(Symbol, Box<Expr>),
+    KvIncr(Symbol, Box<Expr>, Box<Expr>),
+
+    VecNearest(Symbol, Box<Expr>, Box<Expr>),
+    VecInsert(Symbol, Box<Expr>),
+    VecCount(Symbol),
+
+    BloomTest(Symbol, Symbol, Box<Expr>),
+
+    FtsSearch(Symbol, Symbol, Box<Expr>),
+    FtsCount(Symbol, Symbol),
+
+    GraphFrom(Symbol, Box<Expr>),
+    GraphTo(Symbol, Box<Expr>),
+
+    TsLatest(Symbol),
     IterNext(Symbol, Symbol, Symbol),
     ChannelCreate(Type, Box<Expr>),
     ChannelSend(Box<Expr>, Box<Expr>),
@@ -445,22 +430,14 @@ pub enum ExprKind {
     Grad(Box<Expr>),
     Einsum(Symbol, Vec<Expr>),
     Builder(Symbol, Vec<(Symbol, Expr)>),
-    /// Construct a generator handle.
-    ///
-    /// Fields: `(def_id, name, body, captures)`. `captures` lists the
-    /// enclosing function's parameters that the generator body refers to,
-    /// in declaration order, as `(name, type)`. The lowerer stores them in
-    /// the generator control block at create-time and rehydrates them as
-    /// locals when the coroutine body begins running.
+
     GeneratorCreate(DefId, Symbol, Vec<Stmt>, Vec<(Symbol, Type)>),
     GeneratorNext(Box<Expr>),
-    /// Unwrap an Option/Result enum — extract inner value or abort.
-    /// Fields: (expr, enum_name, success_tag)
+
     EnumUnwrap(Box<Expr>, Symbol, u32),
-    /// Check an enum tag — returns bool.
-    /// Fields: (expr, tag_to_check)
+
     EnumIs(Box<Expr>, u32),
-    /// Load from a global mutable variable.
+
     GlobalLoad(Symbol),
 }
 
@@ -554,9 +531,7 @@ pub enum CoercionKind {
         signed: bool,
     },
     BoolToInt,
-    /// Coerce a stack `[N x T]` array value to a heap `Vec(T)`. Codegen
-    /// allocates a vec header + buffer of size N, copies the array into the
-    /// buffer, and yields the header pointer.
+
     ArrayToVec {
         elem_ty: Type,
         len: u64,
@@ -592,7 +567,7 @@ pub struct For {
     pub step: Option<Expr>,
     pub body: Block,
     pub label: Option<Symbol>,
-    /// Access modifier on the loop binder (`for ref/copy/mut/take x in xs`).
+
     pub access_mod: Option<crate::ast::AccessMod>,
     pub span: Span,
 }

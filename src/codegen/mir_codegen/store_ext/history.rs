@@ -1,10 +1,6 @@
-//! Store history MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Emit history(sid) for a @versioned store.
-    /// Returns the number of version entries found.
     pub(in crate::codegen) fn emit_store_history(
         &mut self,
         store_name: &str,

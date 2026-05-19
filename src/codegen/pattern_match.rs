@@ -1,5 +1,3 @@
-//! Codegen for `match` expressions and pattern destructuring.
-
 use inkwell::basic_block::BasicBlock;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
@@ -19,8 +17,6 @@ impl<'ctx> Compiler<'ctx> {
         let subject_val = self.compile_expr(&m.subject)?;
         let subject_ty = self.resolve_ty(m.subject.ty.clone());
 
-        // FBIP: if the subject is a variable with FBIP sites,
-        // save its pointer as a reuse token for constructors in match arms.
         if let hir::ExprKind::Var(subject_id, _) = &m.subject.kind {
             let has_fbip = self
                 .hints

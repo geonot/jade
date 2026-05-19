@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};
@@ -158,8 +156,6 @@ impl Typer {
         }))
     }
 
-    /// Desugar `for k, v in map` into keys-based iteration:
-    /// `__keys = map.keys(); for __i from 0 to __keys.len() { k = __keys.get(__i); v = map.get(k); ...body }`
     pub(in crate::typer) fn desugar_for_map(
         &mut self,
         f: &ast::For,
@@ -173,7 +169,6 @@ impl Typer {
         let key_ty = key_ty.clone();
         let val_ty = val_ty.clone();
 
-        // Bind the map to a temp variable
         let map_id = self.fresh_id();
         let map_var = "__map_iter".to_string();
         let map_ty = map_expr.ty.clone();
@@ -197,7 +192,6 @@ impl Typer {
             span,
         });
 
-        // __keys = map.keys()
         let keys_id = self.fresh_id();
         let keys_var = "__map_keys".to_string();
         let keys_ty = Type::Vec(Box::new(key_ty.clone()));
@@ -234,7 +228,6 @@ impl Typer {
             span,
         });
 
-        // for __i from 0 to __keys.len() { k = __keys.get(__i); v = map.get(k); ...body }
         let i_id = self.fresh_id();
         let i_var = "__map_i".to_string();
         self.push_scope();
@@ -248,7 +241,6 @@ impl Typer {
             },
         );
 
-        // k = __keys.get(__i)
         let k_id = self.fresh_id();
         let k_get = hir::Expr {
             kind: hir::ExprKind::VecMethod(
@@ -287,7 +279,6 @@ impl Typer {
             span,
         });
 
-        // v = map.get(k)
         let v_id = self.fresh_id();
         let v_get = hir::Expr {
             kind: hir::ExprKind::MapMethod(
@@ -332,7 +323,6 @@ impl Typer {
         let mut for_body = vec![k_bind, v_bind];
         for_body.extend(user_body);
 
-        // __keys.len() as the end expression
         let keys_len = hir::Expr {
             kind: hir::ExprKind::VecMethod(
                 Box::new(hir::Expr {

@@ -1,5 +1,3 @@
-//! Codegen for loop constructs: `while`, `for`, `loop`, and parallel/sim variants.
-
 use indexmap::IndexMap;
 use inkwell::module::Linkage;
 use inkwell::types::BasicType;

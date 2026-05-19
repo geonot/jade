@@ -1,5 +1,3 @@
-//! Codegen for lambda expressions and closure environments.
-
 use crate::intern::Symbol;
 use std::collections::HashSet;
 
@@ -31,7 +29,6 @@ impl<'ctx> Compiler<'ctx> {
         };
         let lambda_name = format!("lambda.{}", self.module.get_functions().count());
 
-        // Collect captured variables
         let mut body_ids = HashSet::new();
         Self::collect_var_refs_block(body, &mut body_ids);
         let param_names: HashSet<String> = params.iter().map(|p| p.name.as_str()).collect();
@@ -49,9 +46,8 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Build lambda function with env_ptr as first parameter
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let mut lp: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()]; // env_ptr
+        let mut lp: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
         lp.extend(
             ptys.iter()
                 .map(|t| BasicMetadataTypeEnum::from(self.llvm_ty(t))),
@@ -68,11 +64,9 @@ impl<'ctx> Compiler<'ctx> {
             (lambda_fv, ptys.clone(), ret_ty.clone()),
         );
 
-        // Build env struct type for captures
         let env_field_tys: Vec<_> = captures.iter().map(|(_, _, ty)| self.llvm_ty(ty)).collect();
         let env_struct_ty = self.ctx.struct_type(&env_field_tys, false);
 
-        // Allocate environment on the heap (in the caller's context)
         let env_ptr = if !captures.is_empty() {
             let env_size = env_struct_ty.size_of().expect("ICE: type has no size");
             let raw = self.ensure_malloc();
@@ -81,7 +75,7 @@ impl<'ctx> Compiler<'ctx> {
                 .basic()
                 .expect("ICE: call returned void")
                 .into_pointer_value();
-            // Store captured values into environment
+
             for (i, (_, val, _)) in captures.iter().enumerate() {
                 let field_ptr =
                     b!(self
@@ -94,7 +88,6 @@ impl<'ctx> Compiler<'ctx> {
             ptr_ty.const_null()
         };
 
-        // Switch to lambda function body
         let saved_fn = self.cur_fn;
         let saved_bb = self.bld.get_insert_block();
         self.cur_fn = Some(lambda_fv);
@@ -102,7 +95,6 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(entry);
         self.push_var_scope();
 
-        // Load captures from env struct (param 0 is env_ptr)
         let env_param = lambda_fv
             .get_nth_param(0)
             .expect("ICE: missing param")
@@ -119,7 +111,6 @@ impl<'ctx> Compiler<'ctx> {
             self.set_var(name, a, ty.clone());
         }
 
-        // Bind function parameters (offset by 1 for env_ptr)
         for (i, p) in params.iter().enumerate() {
             let ty = &ptys[i];
             let a = self.entry_alloca(self.llvm_ty(ty), &p.name.as_str());
@@ -150,11 +141,9 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(bb);
         }
 
-        // Build closure fat pointer {fn_ptr, env_ptr}
         self.make_closure(lambda_fv.as_global_value().as_pointer_value(), env_ptr)
     }
 
-    /// Build a {fn_ptr, env_ptr} closure struct value.
     pub(crate) fn make_closure(
         &mut self,
         fn_ptr: inkwell::values::PointerValue<'ctx>,
@@ -167,15 +156,12 @@ impl<'ctx> Compiler<'ctx> {
         Ok(sv.into())
     }
 
-    /// Create a wrapper function that takes (env_ptr, ...params) and calls the
-    /// original function with just (...params), ignoring env_ptr.
-    /// Used when converting a top-level function reference into a closure value.
     pub(crate) fn fn_ref_wrapper(
         &mut self,
         fv: inkwell::values::FunctionValue<'ctx>,
     ) -> inkwell::values::PointerValue<'ctx> {
         let wrapper_name = format!("{}.cl_wrap", fv.get_name().to_str().unwrap_or("fn"));
-        // Return cached wrapper if already exists
+
         if let Some(w) = self.module.get_function(&wrapper_name) {
             return w.as_global_value().as_pointer_value();
         }
@@ -208,7 +194,6 @@ impl<'ctx> Compiler<'ctx> {
         let entry = self.ctx.append_basic_block(wrapper_fv, "entry");
         self.bld.position_at_end(entry);
 
-        // Forward all params except env_ptr (index 0)
         let args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = (1..wrapper_fv
             .count_params())
             .map(|i| wrapper_fv.get_nth_param(i).unwrap().into())

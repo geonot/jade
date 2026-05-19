@@ -1,7 +1,3 @@
-//! Expression codegen helpers. Reached transitively from `mir_codegen` via the
-//! actor/coroutine/closure entry points which still walk HIR. The `compile_str_literal`
-//! and `compile_const_expr` helpers are direct MIR utilities.
-
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum};
 use inkwell::{FloatPredicate, IntPredicate};

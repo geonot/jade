@@ -13,12 +13,6 @@ impl Lowerer {
                     assigned.insert(b.name.clone());
                 }
                 hir::Stmt::Assign(target, _, _) => {
-                    // Find the root variable being mutated. For both
-                    // `x = ...` and `x.f.g = ...`, x is rebound in
-                    // var_map by the lowerer (see lower_field_assign in
-                    // ctx.rs). All such roots must be promoted to memory
-                    // so SSA values from one branch don't leak across the
-                    // merge point.
                     let mut cur = target;
                     loop {
                         match &cur.kind {
@@ -69,8 +63,6 @@ impl Lowerer {
         }
     }
 
-    /// Walk an expression tree to find block-containing expressions
-    /// and collect assigned vars from their bodies.
     pub(super) fn collect_assigned_vars_in_expr(expr: &hir::Expr, assigned: &mut HashSet<Symbol>) {
         match &expr.kind {
             ExprKind::Select(arms, default) => {
@@ -103,7 +95,7 @@ impl Lowerer {
                     Self::collect_assigned_vars_in_expr(c, assigned);
                 }
             }
-            // Recurse into sub-expressions that may contain blocks.
+
             ExprKind::BinOp(l, _, r) => {
                 Self::collect_assigned_vars_in_expr(l, assigned);
                 Self::collect_assigned_vars_in_expr(r, assigned);
@@ -138,7 +130,6 @@ impl Lowerer {
         }
     }
 
-    /// Collect variable names first defined via Bind in a block (non-recursive into sub-blocks).
     pub(super) fn collect_new_binds(body: &[hir::Stmt], binds: &mut HashSet<Symbol>) {
         for stmt in body {
             match stmt {
@@ -155,12 +146,9 @@ impl Lowerer {
         }
     }
 
-    /// Demote variables to memory (Store/Load) — emit Store for their current
-    /// var_map value and remove them from var_map so reads use Load.
     pub(super) fn demote_vars_to_memory(&mut self, vars: &HashSet<Symbol>, span: Span) {
         for name in vars {
             if let Some(&val) = self.var_map.get(name) {
-                // Find the type of this variable from the value.
                 let ty = self
                     .func
                     .blocks
@@ -176,8 +164,7 @@ impl Lowerer {
                             .map(|p| p.ty.clone())
                     })
                     .unwrap_or(Type::I64);
-                // Emit Store with the variable's type (not Void) so codegen
-                // creates the alloca with the correct LLVM type.
+
                 self.func
                     .block_mut(self.current_block)
                     .insts

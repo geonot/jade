@@ -1,5 +1,3 @@
-//! Codegen for primitive type conversions (int/float/bool/string).
-
 use inkwell::IntPredicate;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 
@@ -45,18 +43,8 @@ impl<'ctx> Compiler<'ctx> {
             self.emit_vec_format(val, elem_ty, true)?;
             return Ok(val);
         }
-        // Struct types: dispatch to user-defined `<Name>_log` method if present,
-        // otherwise emit the default `Name @ 0xADDR { field: value, ... }`
-        // formatter. This is the "default log" semantics: every type prints
-        // something useful out of the box; users may override by writing their
-        // own `log` method on the type.
+
         if let Type::Struct(name, _) = ty {
-            // Defensive: the typer can occasionally infer a struct type for an
-            // expression whose codegen actually yields a primitive (e.g. an
-            // overloaded operator whose user method returns `i64`). Only take
-            // the struct-formatter path when the runtime value really is a
-            // struct or a pointer (to one); otherwise fall through to the
-            // primitive printer below using the *value's* LLVM type.
             let value_is_struct_like = val.is_struct_value() || val.is_pointer_value();
             if value_is_struct_like {
                 let log_method_name = format!("{name}_log");
@@ -130,12 +118,7 @@ impl<'ctx> Compiler<'ctx> {
             self.emit_vec_format(val, elem_ty, false)?;
             return Ok(val);
         }
-        // Structs: nest the same default formatter (no trailing newline).
-        // We do NOT dispatch to a user `<Name>_log` method here because
-        // print is the lower-level building block and may be invoked from
-        // contexts (e.g. vec element printing) where the user's log format
-        // would inject newlines or be otherwise undesirable. The user
-        // override applies at the top-level log() call.
+
         if let Type::Struct(name, _) = ty {
             let name_str = name.as_str();
             self.emit_struct_format(&name_str, val, ty, false)?;
@@ -178,9 +161,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(val)
     }
 
-    /// Print a vector value as `[a, b, c]` (optionally trailing newline).
-    /// Recurses through `emit_print` for elements so primitives, strings,
-    /// and nested collections all format sensibly.
     pub(crate) fn emit_vec_format(
         &mut self,
         header_val: BasicValueEnum<'ctx>,
@@ -191,7 +171,6 @@ impl<'ctx> Compiler<'ctx> {
         let header_ptr = header_val.into_pointer_value();
         let i64t = self.ctx.i64_type();
 
-        // print "["
         let open_fmt = b!(self.bld.build_global_string_ptr("[", "vfmt.open"));
         b!(self
             .bld
@@ -252,17 +231,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Default struct formatter: `Name @ 0xADDR { f1: v1, f2: v2 }` with an
-    /// optional trailing newline. Recurses through `emit_print` for fields,
-    /// so nested structs print inline (without their own newline) and
-    /// primitives use their normal formatting.
-    ///
-    /// Address semantics: if `val` is already a pointer (typical for methods
-    /// invoked via `obj.log()` where `self` is by-ptr) we use it directly;
-    /// otherwise we spill the value to a stack alloca and print that
-    /// address. For value-typed receivers this address is the temporary's
-    /// stack slot, which is the only well-defined "address" such a value
-    /// has at this program point.
     pub(crate) fn emit_struct_format(
         &mut self,
         name: &str,
@@ -277,7 +245,6 @@ impl<'ctx> Compiler<'ctx> {
             .cloned()
             .unwrap_or_default();
 
-        // Compute address and the loadable struct value.
         let lty = self.llvm_ty(ty);
         let (addr, struct_val): (BasicValueEnum<'ctx>, BasicValueEnum<'ctx>) =
             if val.is_pointer_value() {
@@ -291,7 +258,6 @@ impl<'ctx> Compiler<'ctx> {
                 (tmp.into(), val)
             };
 
-        // Header: "Name @ %p { " (or "Name @ %p {}\n" if no fields)
         if fields.is_empty() {
             let hdr = if newline {
                 format!("{name} @ %p {{}}\n\0")
@@ -422,11 +388,9 @@ impl<'ctx> Compiler<'ctx> {
             iv.into()
         };
 
-        // Fast path for integer formatting: one snprintf into a fixed stack buffer,
-        // then convert to SSO/heap string as needed. Avoids the length-probe snprintf.
         let snprintf = self.ensure_snprintf();
         let fmt = b!(self.bld.build_global_string_ptr(fmt_str, "ts.ifmt"));
-        let cap = i64t.const_int(32, false); // enough for signed/unsigned 64-bit + NUL
+        let cap = i64t.const_int(32, false);
         let buf_arr_ty = i8t.array_type(32);
         let buf_arr = self.entry_alloca(buf_arr_ty.into(), "ts.ibuf");
         let zero = i64t.const_int(0, false);

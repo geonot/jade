@@ -1,5 +1,3 @@
-//! Extracted call-typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::HashMap;
@@ -19,10 +17,8 @@ impl Typer {
         args: &[ast::Expr],
         span: crate::ast::Span,
     ) -> Result<Option<hir::Expr>, String> {
-        // Store aggregation methods: store.avg(field), store.sum(field), etc.
         if let ast::Expr::Ident(name, _) = obj {
             if self.store_schemas.contains_key(&name.as_str()) {
-                // @kv store methods: .set(), .get(), .del(), .has(), .incr(), .count()
                 let is_kv = self
                     .store_decorators
                     .get(&name.as_str())
@@ -127,7 +123,6 @@ impl Typer {
                                 );
                             };
                             let delta_expr = if args.len() == 2 {
-                                // Negate the delta
                                 let d = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
                                 hir::Expr {
                                     kind: hir::ExprKind::BinOp(
@@ -167,7 +162,6 @@ impl Typer {
                     }
                 }
 
-                // @graph store methods
                 let is_graph = self
                     .store_decorators
                     .get(&name.as_str())
@@ -179,7 +173,7 @@ impl Typer {
                             if args.len() != 1 {
                                 return Err("graph.from() requires 1 argument (node)".into());
                             }
-                            // .from(node) queries the first user field of the graph store
+
                             let schema = self.store_schemas.get(&name.as_str()).unwrap();
                             let builtin = [
                                 "sid",
@@ -209,7 +203,7 @@ impl Typer {
                             if args.len() != 1 {
                                 return Err("graph.to() requires 1 argument (node)".into());
                             }
-                            // .to(node) queries the second user field of the graph store
+
                             let schema = self.store_schemas.get(&name.as_str()).unwrap();
                             let builtin = [
                                 "sid",
@@ -235,11 +229,10 @@ impl Typer {
                                 span,
                             }));
                         }
-                        _ => {} // fall through to aggregation methods
+                        _ => {}
                     }
                 }
 
-                // @timeseries store methods
                 let is_ts = self
                     .store_decorators
                     .get(&name.as_str())
@@ -260,11 +253,10 @@ impl Typer {
                                 span,
                             }));
                         }
-                        _ => {} // fall through
+                        _ => {}
                     }
                 }
 
-                // @vector store methods
                 let vec_dims = self.store_decorators.get(&name.as_str()).and_then(|decs| {
                     decs.iter().find_map(|d| match d {
                         crate::ast::StoreDecorator::Vector(dims) => Some(*dims),
@@ -314,11 +306,10 @@ impl Typer {
                                 span,
                             }));
                         }
-                        _ => {} // fall through
+                        _ => {}
                     }
                 }
 
-                // @bloom field methods: store.maybe(field, value)
                 if method == "maybe" {
                     if args.len() != 2 {
                         return Err("maybe() requires 2 arguments (field_name, value)".into());
@@ -335,7 +326,6 @@ impl Typer {
                     }));
                 }
 
-                // @search field methods: store.search(field, term)
                 if method == "search" {
                     if args.len() != 2 {
                         return Err("search() requires 2 arguments (field_name, query)".into());
@@ -444,7 +434,7 @@ impl Typer {
                         let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreHistory(name.clone(), Box::new(sid_expr)),
-                            ty: Type::I64, // returns count of versions written
+                            ty: Type::I64,
                             span,
                         }));
                     }
@@ -460,7 +450,7 @@ impl Typer {
                                 Box::new(sid_expr),
                                 Box::new(ver_expr),
                             ),
-                            ty: Type::I64, // returns 1 if found, 0 if not
+                            ty: Type::I64,
                             span,
                         }));
                     }

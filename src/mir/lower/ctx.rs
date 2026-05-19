@@ -50,8 +50,6 @@ impl Lowerer {
         }
     }
 
-    /// Lower all registered defer blocks at the current insertion point in
-    /// LIFO order. Used before function exits to run cleanup code.
     pub(super) fn lower_deferred_in_reverse(&mut self) {
         let defers: Vec<crate::hir::Block> = self.function_defers.clone();
         for block in defers.into_iter().rev() {
@@ -69,12 +67,6 @@ impl Lowerer {
         self.func.new_block(label)
     }
 
-    /// Recursively lower a field assignment on an SSA (non-mem_var) struct.
-    /// For `o.inner.val is 42`:
-    ///   inner = FieldGet(o, "inner")
-    ///   updated_inner = FieldSet(inner, "val", 42)
-    ///   updated_o = FieldSet(o, "inner", updated_inner)
-    ///   var_map["o"] = updated_o
     pub(super) fn lower_field_assign(
         &mut self,
         obj: &hir::Expr,
@@ -89,11 +81,7 @@ impl Lowerer {
             obj_ty.clone(),
             span,
         );
-        // For pointer types, the FieldSet stores through the pointer and
-        // returns the same pointer — the var_map entry must NOT be
-        // updated.  Updating it creates an SSA value that is only
-        // available in the current block, which breaks references from
-        // blocks where FieldSet didn't execute (e.g. after a while loop).
+
         if matches!(obj_ty, Type::Ptr(_)) {
             return;
         }
@@ -102,7 +90,6 @@ impl Lowerer {
                 self.var_map.insert(name.clone(), updated);
             }
             ExprKind::Field(parent, parent_field, _) => {
-                // Propagate the update up: parent.parent_field = updated
                 self.lower_field_assign(parent, &parent_field.as_str(), updated, span);
             }
             _ => {}
@@ -137,8 +124,6 @@ impl Lowerer {
             });
     }
 
-    /// Emit an instruction with no destination but carrying a type annotation.
-    /// Used for Store instructions so the variable type is preserved.
     pub(super) fn emit_void_typed(&mut self, kind: InstKind, ty: Type, span: Span) {
         self.func
             .block_mut(self.current_block)
@@ -167,8 +152,6 @@ impl Lowerer {
         )
     }
 
-    /// Try to extract an integer constant from a ValueId by scanning the
-    /// current function's instructions.
     pub(super) fn try_extract_int_const(&self, val: ValueId) -> Option<i64> {
         for bb in &self.func.blocks {
             for inst in &bb.insts {
@@ -186,7 +169,6 @@ impl Lowerer {
         None
     }
 
-    /// Look up the type of a ValueId by scanning instructions and params.
     pub(super) fn value_type(&self, val: ValueId) -> Type {
         for p in &self.func.params {
             if p.value == val {
@@ -205,8 +187,7 @@ impl Lowerer {
                 }
             }
         }
-        // All value types should be resolvable. If not, it indicates a compiler bug
-        // in MIR lowering.
+
         panic!(
             "MIR lower: cannot resolve type for {:?} — this is a compiler bug",
             val

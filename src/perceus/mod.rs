@@ -1,16 +1,3 @@
-//! Perceus reference-counting optimization pass root.
-//!
-//! Perceus operates on **MIR** as a sequence of transformation passes that
-//! mutate the program in place; see [`mir_perceus::run`]. The driver invokes
-//! the MIR pipeline after lowering and reports stats via `--debug-perceus`.
-//!
-//! The HIR-level analyzer that previously lived here (`analysis.rs`,
-//! `uses/`) has been removed: it produced advisory hints keyed by `DefId`
-//! that the MIR-codegen path could not consume, so the work was diagnostic
-//! at best. Current callers retain the [`PerceusPass`] type as a shim that
-//! returns empty hints; new code should call [`mir_perceus::run`] directly
-//! after MIR lowering.
-
 use std::collections::HashMap;
 
 use crate::ast::Span;
@@ -19,8 +6,6 @@ use crate::types::Type;
 
 #[derive(Debug, Clone, Default)]
 pub struct PerceusHints {
-    /// Drop instructions that the elision pass removed. Kept as an empty set
-    /// for backward compatibility; the IR no longer contains those drops.
     pub elide_drops: std::collections::HashSet<DefId>,
     pub reuse_candidates: HashMap<DefId, ReuseInfo>,
     pub speculative_reuse: HashMap<DefId, ReuseInfo>,
@@ -83,9 +68,6 @@ pub struct PerceusStats {
 
 pub mod mir_perceus;
 
-/// Backward-compat shim. The old HIR-level analysis is gone; this returns an
-/// empty `PerceusHints` so existing call sites compile and their stats lines
-/// remain quiet (they are now driven by [`mir_perceus::run`]).
 pub struct PerceusPass {
     pub(crate) hints: PerceusHints,
 }
@@ -103,14 +85,10 @@ impl PerceusPass {
         }
     }
 
-    /// No-op; the HIR analyzer has been retired in favour of
-    /// [`mir_perceus::run`]. Returns an empty `PerceusHints`.
     pub fn optimize(&mut self, _prog: &Program) -> PerceusHints {
         PerceusHints::default()
     }
 
-    /// Compute the layout size in bytes used by Perceus reuse matching.
-    /// Public because codegen consults it for slot-size sanity checks.
     pub fn type_layout_size_pub(ty: &Type) -> u64 {
         match ty {
             Type::I8 | Type::U8 | Type::Bool => 1,
@@ -138,16 +116,11 @@ impl PerceusPass {
             Type::Channel(_) => 8,
             Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::type_layout_size_pub(inner),
             Type::Generator(_) => 8,
-            // Row<T> = { i64 sid, struct value }; struct size is opaque
-            // at this layer (same as Type::Struct → 0), so Row is sized
-            // conservatively as the sid + 0. Reuse pairing does not
-            // apply to Row<T> (it's @resource).
+
             Type::Row(_) => 8,
         }
     }
 
-    /// Two types share a layout slot (used by reuse pairing) iff their
-    /// underlying allocation sizes match.
     pub fn layouts_compatible(a: &Type, b: &Type) -> bool {
         let sa = Self::type_layout_size_pub(a);
         let sb = Self::type_layout_size_pub(b);

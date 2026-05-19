@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};
@@ -13,7 +11,6 @@ use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn auto_derive_display(&mut self, prog: &mut hir::Program) {
-        // Collect struct names that need Display
         let mut needs_display: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
         for f in &prog.fns {
             Self::collect_display_usage(&f.body, &mut needs_display);
@@ -23,10 +20,9 @@ impl Typer {
                 Self::collect_display_usage(&m.body, &mut needs_display);
             }
         }
-        // Remove structs that already have a display method
+
         needs_display.retain(|name| !self.fns.contains_key(&format!("{name}_display")));
 
-        // Generate display methods for structs
         for type_name in &needs_display {
             if let Some(fields) = self.structs.get(type_name).cloned() {
                 let method_name: Symbol = format!("{type_name}_display").into();
@@ -34,8 +30,6 @@ impl Typer {
                 let self_ty = Type::Struct(type_name.clone(), vec![]);
                 let span = crate::ast::Span::dummy();
 
-                // Build a single nested concat expression:
-                // "TypeName(" + field1_label + to_string(field1) + ... + ")"
                 let mk_str = |s: String| hir::Expr {
                     kind: hir::ExprKind::Str(s),
                     ty: Type::String,

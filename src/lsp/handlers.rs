@@ -1,5 +1,3 @@
-//! LSP request/notification handlers (textDocument/* and workspace/*).
-
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -176,7 +174,7 @@ pub fn handle_definition(state: &ServerState, params: Value) -> Value {
         Some(id) => id,
         None => return Value::Null,
     };
-    // Try same-file first
+
     let analysis = analysis::analyze(src);
     if let Some((_sig, span)) = analysis.defs.get(&ident) {
         let loc = Location {
@@ -185,7 +183,7 @@ pub fn handle_definition(state: &ServerState, params: Value) -> Value {
         };
         return serde_json::to_value(loc).expect("ICE: LSP serialization");
     }
-    // Try cross-file workspace index
+
     if let Some(ws) = state.find_in_workspace(&ident) {
         let loc = Location {
             uri: ws.uri.clone(),
@@ -247,8 +245,6 @@ pub fn handle_completion(state: &ServerState, params: Value) -> Value {
     serde_json::to_value(items).expect("ICE: LSP serialization")
 }
 
-// ── References handler ─────────────────────────────────────────
-
 pub fn handle_references(state: &ServerState, params: Value) -> Value {
     let p: ReferenceParams = match serde_json::from_value(params) {
         Ok(p) => p,
@@ -267,7 +263,6 @@ pub fn handle_references(state: &ServerState, params: Value) -> Value {
 
     let mut locations: Vec<Location> = Vec::new();
 
-    // Same-file references
     for r in analysis::find_references(src, &ident) {
         locations.push(Location {
             uri: p.text_document.uri.clone(),
@@ -284,7 +279,6 @@ pub fn handle_references(state: &ServerState, params: Value) -> Value {
         });
     }
 
-    // Cross-file references
     for (uri, src) in &state.files {
         if *uri == p.text_document.uri {
             continue;
@@ -309,8 +303,6 @@ pub fn handle_references(state: &ServerState, params: Value) -> Value {
     serde_json::to_value(locations).expect("ICE: LSP serialization")
 }
 
-// ── Rename handler ─────────────────────────────────────────────
-
 pub fn handle_rename(state: &ServerState, params: Value) -> Value {
     let p: RenameParams = match serde_json::from_value(params) {
         Ok(p) => p,
@@ -329,7 +321,6 @@ pub fn handle_rename(state: &ServerState, params: Value) -> Value {
 
     let mut changes: HashMap<String, Vec<TextEdit>> = HashMap::new();
 
-    // Same-file edits
     let refs = analysis::find_references(src, &ident);
     if !refs.is_empty() {
         let edits: Vec<TextEdit> = refs
@@ -351,7 +342,6 @@ pub fn handle_rename(state: &ServerState, params: Value) -> Value {
         changes.insert(p.text_document.uri.clone(), edits);
     }
 
-    // Cross-file edits
     for (uri, file_src) in &state.files {
         if *uri == p.text_document.uri {
             continue;
@@ -382,8 +372,6 @@ pub fn handle_rename(state: &ServerState, params: Value) -> Value {
     serde_json::to_value(edit).expect("ICE: LSP serialization")
 }
 
-// ── Semantic tokens handler ────────────────────────────────────
-
 pub fn handle_semantic_tokens(state: &ServerState, params: Value) -> Value {
     let p: DocumentSymbolParams = match serde_json::from_value(params) {
         Ok(p) => p,
@@ -405,8 +393,6 @@ pub fn handle_semantic_tokens(state: &ServerState, params: Value) -> Value {
     let result = SemanticTokensResult { data };
     serde_json::to_value(result).expect("ICE: LSP serialization")
 }
-
-// ── Signature help handler ─────────────────────────────────────
 
 pub fn handle_signature_help(state: &ServerState, params: Value) -> Value {
     let p: TextDocumentPositionParams = match serde_json::from_value(params) {

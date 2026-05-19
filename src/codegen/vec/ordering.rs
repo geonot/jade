@@ -1,5 +1,3 @@
-//! Vector flattening, membership, ordering, joining, and array containment helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,7 +6,6 @@ impl<'ctx> Compiler<'ctx> {
         header_ptr: inkwell::values::PointerValue<'ctx>,
         elem_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // elem_ty should be Vec<inner>
         let inner_ty = match elem_ty {
             Type::Vec(inner) => inner.as_ref().clone(),
             _ => return Err("flatten requires Vec<Vec<T>>".into()),
@@ -41,7 +38,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(ocond, outer_body, done_bb));
 
         self.bld.position_at_end(outer_body);
-        // Each element is a ptr to vec header
+
         let inner_gep = unsafe { b!(self.bld.build_gep(ptr_ty, data_ptr, &[oidx], "flat.ig")) };
         let inner_hdr = b!(self.bld.build_load(ptr_ty, inner_gep, "flat.ih")).into_pointer_value();
         let (inner_data, inner_len) = self.vec_data_and_len(inner_hdr)?;
@@ -174,7 +171,6 @@ impl<'ctx> Compiler<'ctx> {
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
         let out_hdr = self.vec_alloc_empty()?;
 
-        // Iterate from len-1 down to 0
         let idx_ptr = self.entry_alloca(i64t.into(), "rev.idx");
         let start = b!(self
             .bld
@@ -215,7 +211,6 @@ impl<'ctx> Compiler<'ctx> {
         header_ptr: inkwell::values::PointerValue<'ctx>,
         elem_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Simple insertion sort (copies to new vec first)
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);
@@ -223,7 +218,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let (data_ptr, len) = self.vec_data_and_len(header_ptr)?;
 
-        // Copy to new vec first
         let out_hdr = self.vec_alloc_empty()?;
         let cp_idx = self.entry_alloca(i64t.into(), "sort.ci");
         b!(self.bld.build_store(cp_idx, i64t.const_int(0, false)));
@@ -248,7 +242,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cp_loop));
 
         self.bld.position_at_end(cp_done);
-        // In-place insertion sort on out_hdr
+
         let header_ty = self.vec_header_type();
         let out_ptr_gep = b!(self
             .bld
@@ -260,7 +254,6 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
 
-        // Fast path for primitive numeric vectors: delegate to C qsort-backed runtime.
         match elem_ty {
             Type::I64 => {
                 let sort_fn = self
@@ -380,7 +373,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(gt, shift_bb, inner_done));
 
         self.bld.position_at_end(shift_bb);
-        // a[j+1] = a[j]
+
         let j1 = b!(self
             .bld
             .build_int_nsw_add(j, i64t.const_int(1, false), "sort.j1"));
@@ -393,7 +386,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(inner_loop));
 
         self.bld.position_at_end(inner_done);
-        // a[j+1] = key
+
         let j_final = b!(self.bld.build_load(i64t, j_ptr, "sort.jf")).into_int_value();
         let j1f = b!(self
             .bld
@@ -440,13 +433,11 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_empty, empty_bb, start_bb));
 
-        // Empty vec → empty string
         self.bld.position_at_end(empty_bb);
         let empty_str = self.compile_str_literal("")?;
         let empty_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
-        // Non-empty: start with first element
         self.bld.position_at_end(start_bb);
         let first = b!(self.bld.build_load(st, data_ptr, "jn.first"));
         let cond_bb = self.ctx.append_basic_block(fv, "jn.cond");
@@ -470,7 +461,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let elem_ptr = unsafe { b!(self.bld.build_gep(st, data_ptr, &[i], "jn.ep")) };
         let elem = b!(self.bld.build_load(st, elem_ptr, "jn.elem"));
-        // acc = acc + sep + elem
+
         let with_sep = self.string_concat(acc, sep)?;
         let with_elem = self.string_concat(with_sep, elem)?;
         let next_i = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "jn.ni"));
@@ -490,7 +481,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
-    /// Inline linear scan for `x in [a, b, c]` on fixed-size arrays.
     pub(in crate::codegen) fn array_contains(
         &mut self,
         obj: &hir::Expr,
@@ -574,8 +564,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(bool_ty, result_ptr, "acont.v")))
     }
 
-    // ── MIR-friendly variants accepting precompiled values ──
-
     pub(in crate::codegen) fn vec_contains_v(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -614,10 +602,7 @@ impl<'ctx> Compiler<'ctx> {
                 "vc.eq"
             ))
             .into(),
-            Type::String => {
-                // Use string equality (returns i1).
-                self.string_eq(elem, needle, false)?.into_int_value()
-            }
+            Type::String => self.string_eq(elem, needle, false)?.into_int_value(),
             _ => b!(self.bld.build_int_compare(
                 IntPredicate::EQ,
                 elem.into_int_value(),

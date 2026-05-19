@@ -1,6 +1,3 @@
-//! Store schema codegen: declarations, runtime initialization, handle accessors,
-//! and WAL helpers. Consumed by `mir_codegen/store.rs` and `mir_codegen/store_ext.rs`.
-
 use inkwell::AddressSpace;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;

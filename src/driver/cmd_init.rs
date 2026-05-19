@@ -41,7 +41,6 @@ pub(super) fn cmd_init(name: Option<String>) {
     fs::write(&project_path, &project_content)
         .unwrap_or_else(|e| die(&format!("cannot write project.jn: {e}")));
 
-    // Create source directory and main.jn
     let source_dir = PathBuf::from("source");
     if !source_dir.exists() {
         fs::create_dir_all(&source_dir)

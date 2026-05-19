@@ -1,22 +1,3 @@
-//! Codegen for value-clone glue.
-//!
-//! `clone_value(val, ty)` is the dual of `drop_value(val, ty)`: it produces a
-//! fresh, independently-owned copy of `val`. Used by container readers like
-//! `vec.get(i)` / `map.get(k)` so the bound local owns its value and can be
-//! freely dropped, returned, or pushed into another container without aliasing
-//! the source.
-//!
-//! Cost model:
-//! - Trivial scalars / pointers / Rc-like cells: O(1) (value or RC bump).
-//! - Strings: O(len) — sso path is just a 24-byte struct copy.
-//! - Vec / Array of POD: one malloc + memcpy.
-//! - Vec / Array of heap elements: one malloc + per-element clone loop.
-//! - Struct / Tuple: per-field clone, generated inline.
-//! - Containers we don't yet deep-clone (Map, Set, Deque, PriorityQueue,
-//!   Enum, NDArray, Channel, Coroutine, Generator) report `false` from
-//!   `is_value_clonable`. The typer marks bindings to those as `Borrowed`
-//!   to suppress the drop, and rejects attempts to consume the alias.
-
 use inkwell::AddressSpace;
 use inkwell::types::BasicType;
 use inkwell::values::{BasicValueEnum, PointerValue};
@@ -27,16 +8,10 @@ use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Static predicate: does codegen know how to deep-clone this type?
-    /// Trivially-droppable types (scalars, pointers, etc.) are always
-    /// "clonable" because cloning is the identity (the value itself is the copy).
-    /// Delegates to `Type::is_value_clonable` so the typer and codegen agree.
     pub(crate) fn is_value_clonable(ty: &Type) -> bool {
         ty.is_value_clonable()
     }
 
-    /// Emit IR producing a fresh, independently-owned copy of `val` of type `ty`.
-    /// Pre: `is_value_clonable(ty)` returns true.
     pub(crate) fn clone_value(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -59,13 +34,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Clone a String. Calls __jinn_str_clone in the runtime.
-    /// SSO inline path is a 24-byte memcpy (no allocation); heap path mallocs
-    /// and copies the buffer.
     fn clone_string(&mut self, val: BasicValueEnum<'ctx>) -> Result<BasicValueEnum<'ctx>, String> {
-        // Pointer-based ABI: `void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src)`.
-        // The struct is 24 bytes; System V AMD64 passes it via memory and LLVM's
-        // implicit by-value lowering disagrees with clang's, so we marshal explicitly.
         let st = self.string_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let void_ty = self.ctx.void_type();
@@ -87,9 +56,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(ret)
     }
 
-    /// Clone a Vec. If the element type is trivially droppable, defer to the
-    /// runtime helper __jinn_vec_clone_pod (single malloc + memcpy). Otherwise
-    /// emit an IR loop that clones each element.
     fn clone_vec(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -120,8 +86,6 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(ret);
         }
 
-        // Deep-clone path: handle null source, allocate new header + buffer,
-        // loop and clone each element.
         let fv = self.current_fn();
         let malloc = self.ensure_malloc();
         let src_ptr = val.into_pointer_value();
@@ -138,8 +102,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_null, join_bb, alloc_bb));
 
-        // alloc_bb: allocate new header, copy len/cap, allocate new buffer if cap>0,
-        // then loop-clone each element.
         self.bld.position_at_end(alloc_bb);
         let new_hdr =
             b!(self
@@ -165,7 +127,6 @@ impl<'ctx> Compiler<'ctx> {
         let new_cap_gep = b!(self.bld.build_struct_gep(header_ty, new_hdr, 2, "vc.dcapp"));
         b!(self.bld.build_store(new_cap_gep, src_cap));
 
-        // Allocate new buffer if cap > 0.
         let cap_zero = b!(self.bld.build_int_compare(
             inkwell::IntPredicate::EQ,
             src_cap,
@@ -198,7 +159,6 @@ impl<'ctx> Compiler<'ctx> {
             .build_struct_gep(header_ty, new_hdr, 0, "vc.ddatap"));
         b!(self.bld.build_store(new_data_gep, new_buf));
 
-        // Loop: for i in 0..len { dst[i] = clone(src[i]) }
         let loop_bb = self.ctx.append_basic_block(fv, "vc.loop");
         let body_bb = self.ctx.append_basic_block(fv, "vc.body");
         let post_bb = self.ctx.append_basic_block(fv, "vc.post");
@@ -238,11 +198,9 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(post_bb);
         b!(self.bld.build_unconditional_branch(join_bb));
 
-        // Join: phi over [null path, nobuf path, post path]
         self.bld.position_at_end(join_bb);
         let phi = b!(self.bld.build_phi(ptr_ty, "vc.r"));
-        // For the null source we re-use src_ptr (= null) so dropping the
-        // result is also a no-op.
+
         phi.add_incoming(&[
             (&src_ptr, pre_bb),
             (&new_hdr, nobuf_bb),
@@ -251,8 +209,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
-    /// Clone a fixed-size Array. Allocates an alloca on the stack (matching
-    /// existing array codegen) and clones each element.
     fn clone_array(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -260,13 +216,12 @@ impl<'ctx> Compiler<'ctx> {
         n: usize,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if elem.is_trivially_droppable() {
-            // Aggregate copy is just a value-level copy.
             return Ok(val);
         }
         let lty = self.llvm_ty(elem);
         let arr_ty = lty.array_type(n as u32);
         let dst = self.entry_alloca(arr_ty.into(), "arr.clone");
-        // Store source aggregate into a tmp so we can GEP into it.
+
         let src_slot = self.entry_alloca(arr_ty.into(), "arr.csrc");
         b!(self.bld.build_store(src_slot, val));
         let i64t = self.ctx.i64_type();
@@ -289,7 +244,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(arr_ty, dst, "arr.cv")))
     }
 
-    /// Clone a Tuple by cloning each field.
     fn clone_tuple(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -320,16 +274,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(tuple_ty, dst_slot, "tup.cv")))
     }
 
-    /// Clone a Struct value by cloning each field. Looks up the schema by
-    /// name. The result has the same struct type as the source.
-    ///
-    /// For self-referential struct types (e.g. `Value` with a `Vec of Value`
-    /// field), the recursive inline emission would never terminate. In that
-    /// case we materialize an out-of-line helper
-    /// `__clone_<Name>(out_ptr, in_ptr)` and call it; the helper body uses the
-    /// same recursive emission, but every nested clone of the same struct now
-    /// resolves to a call back to the helper rather than another inline
-    /// expansion. Mirrors `drop_struct_fields`.
     fn clone_struct(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -337,7 +281,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let fields = match self.structs.get(name).cloned() {
             Some(f) => f,
-            None => return Ok(val), // unknown struct — treat as opaque
+            None => return Ok(val),
         };
         let trivial = fields.iter().all(|(_, t)| t.is_trivially_droppable());
         if trivial {
@@ -350,8 +294,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let clone_fn_name = format!("__clone_{}", name);
 
-        // If the helper already exists (or this is a recursive re-entry while
-        // we are mid-emit of it), just call it.
         if let Some(cfn) = self.module.get_function(&clone_fn_name) {
             let src_slot = self.entry_alloca(lty_st.into(), "stc.src");
             let dst_slot = self.entry_alloca(lty_st.into(), "stc.dst");
@@ -367,7 +309,6 @@ impl<'ctx> Compiler<'ctx> {
             .any(|(_, ty)| Self::type_references_struct_for_clone(ty, name));
 
         if !is_recursive {
-            // Inline the per-field clone.
             let src_slot = self.entry_alloca(lty_st.into(), "stc.src");
             b!(self.bld.build_store(src_slot, val));
             let dst_slot = self.entry_alloca(lty_st.into(), "stc.dst");
@@ -386,13 +327,11 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(b!(self.bld.build_load(lty_st, dst_slot, "stc.cv")));
         }
 
-        // Recursive struct: materialize __clone_<Name>(out, in).
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let void_ty = self.ctx.void_type();
         let fn_ty = void_ty.fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
         let cfn = self.module.add_function(&clone_fn_name, fn_ty, None);
 
-        // Save current emission state.
         let saved_fn = self.cur_fn;
         let saved_bb = self.bld.get_insert_block();
 
@@ -423,13 +362,11 @@ impl<'ctx> Compiler<'ctx> {
         }
         b!(self.bld.build_return(None));
 
-        // Restore caller state.
         self.cur_fn = saved_fn;
         if let Some(bb) = saved_bb {
             self.bld.position_at_end(bb);
         }
 
-        // Call the freshly-built helper at the original call site.
         let src_slot = self.entry_alloca(lty_st.into(), "stc.src");
         let dst_slot = self.entry_alloca(lty_st.into(), "stc.dst");
         b!(self.bld.build_store(src_slot, val));
@@ -439,16 +376,12 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(lty_st, dst_slot, "stc.cv")))
     }
 
-    /// Does `ty` reference (directly or via container) the named struct?
-    /// Used to detect self-referential structs that need an out-of-line clone
-    /// helper to bound codegen recursion. Mirrors
-    /// `drop::aggregates::type_references_struct`.
     fn type_references_struct_for_clone(ty: &Type, name: &str) -> bool {
         match ty {
             Type::Struct(n, _) => n == name,
-            Type::Vec(inner)
-            | Type::Array(inner, _)
-            | Type::Ptr(inner) => Self::type_references_struct_for_clone(inner, name),
+            Type::Vec(inner) | Type::Array(inner, _) | Type::Ptr(inner) => {
+                Self::type_references_struct_for_clone(inner, name)
+            }
             Type::Map(k, v) => {
                 Self::type_references_struct_for_clone(k, name)
                     || Self::type_references_struct_for_clone(v, name)
@@ -463,9 +396,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Bump the refcount of an Rc/Weak-style cell (first 8 bytes = i64 rc).
-    /// Returns the same pointer (the alias is now legitimate, since rc was incremented).
-    /// Null pointers are passed through unchanged.
     fn bump_ptr_rc(&mut self, val: BasicValueEnum<'ctx>) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = val.into_pointer_value();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
@@ -490,10 +420,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(val)
     }
 
-    /// R3.4.c — atomic-bump variant for `Arc<T>` clone. Layout-identical
-    /// to `bump_ptr_rc` but uses `atomicrmw add` with AcquireRelease
-    /// ordering so that other threads observing the pointer see a
-    /// consistent refcount.
     fn bump_ptr_arc(&mut self, val: BasicValueEnum<'ctx>) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = val.into_pointer_value();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
@@ -519,8 +445,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(val)
     }
 
-    /// Aliased pointer placeholder for use in PHI nodes when a path is
-    /// unreachable (parameter type matches).
     #[allow(dead_code)]
     fn null_ptr(&self) -> PointerValue<'ctx> {
         self.ctx.ptr_type(AddressSpace::default()).const_null()

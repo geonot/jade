@@ -1,5 +1,3 @@
-//! Package management: dependency resolution and module discovery.
-
 use crate::ast::{Decl, Expr, Stmt};
 use crate::intern::Symbol;
 use crate::lexer::{Lexer, Token};

@@ -1,5 +1,3 @@
-//! Extracted call-typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::HashMap;
@@ -19,7 +17,6 @@ impl Typer {
         args: &[ast::Expr],
         span: crate::ast::Span,
     ) -> Result<Option<hir::Expr>, String> {
-        // View method dispatch: view_name.count(), view_name.all()
         if let ast::Expr::Ident(name, _) = obj {
             if let Some((source, clauses)) = self.view_defs.get(&name.as_str()).cloned() {
                 let schema = self
@@ -28,7 +25,6 @@ impl Typer {
                     .ok_or_else(|| format!("view '{name}' references unknown store '{source}'"))?
                     .clone();
 
-                // Build filter from view's where clauses
                 let where_exprs: Vec<(ast::Expr, ast::Span)> = clauses
                     .iter()
                     .filter_map(|c| {
@@ -41,7 +37,6 @@ impl Typer {
                     .collect();
 
                 if where_exprs.is_empty() {
-                    // View with no filter — delegate to source store
                     match method {
                         "count" => {
                             return Ok(Some(hir::Expr {
@@ -59,7 +54,6 @@ impl Typer {
                             }));
                         }
                         "select" | "first" => {
-                            // delegate to StoreQuery on source (returns first match)
                             if args.is_empty() {
                                 return Err(format!("view .{method}() requires a filter argument"));
                             }
@@ -116,7 +110,6 @@ impl Typer {
                         }));
                     }
                     "select" | "first" => {
-                        // For filtered views, the view's filter is already the query filter
                         let struct_name = Symbol::intern(&format!("__store_{source}"));
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreQuery(source.clone(), Box::new(hfilter)),

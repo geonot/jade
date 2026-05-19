@@ -1,5 +1,3 @@
-//! Codegen for arithmetic and comparison operators.
-
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
@@ -246,12 +244,6 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Lower `l / r` or `l % r` with a runtime zero-divisor check and, for
-    /// signed division, an `INT_MIN / -1` overflow check. Both bad cases
-    /// abort the program with a clear diagnostic via `__jinn_trap` rather
-    /// than executing undefined LLVM `sdiv`/`udiv`/`srem`/`urem`.
-    ///
-    /// Reachable from both the HIR-direct and MIR codegen paths.
     pub(crate) fn checked_divmod(
         &mut self,
         l: inkwell::values::IntValue<'ctx>,
@@ -276,10 +268,6 @@ impl<'ctx> Compiler<'ctx> {
             "integer remainder by zero"
         });
 
-        // Signed division/remainder also has UB at INT_MIN / -1 (overflow).
-        // Guard against it explicitly for `is_div` cases; for signed `srem`
-        // the same combination is technically UB but produces 0, so we trap
-        // for symmetry and predictability.
         self.bld.position_at_end(chk_bb);
         if signed {
             let bits = r.get_type().get_bit_width();
@@ -297,8 +285,12 @@ impl<'ctx> Compiler<'ctx> {
                 int_min,
                 &format!("{prefix}.min")
             ));
-            let ov = b!(self.bld.build_and(r_is_neg1, l_is_min, &format!("{prefix}.ov")));
-            let ov_trap_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.ov.trap"));
+            let ov = b!(self
+                .bld
+                .build_and(r_is_neg1, l_is_min, &format!("{prefix}.ov")));
+            let ov_trap_bb = self
+                .ctx
+                .append_basic_block(fv, &format!("{prefix}.ov.trap"));
             let ok_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.ok"));
             b!(self.bld.build_conditional_branch(ov, ov_trap_bb, ok_bb));
             self.bld.position_at_end(ov_trap_bb);
@@ -477,11 +469,9 @@ impl<'ctx> Compiler<'ctx> {
         let lptr = self.compile_expr(left)?.into_pointer_value();
         let rptr = self.compile_expr(right)?.into_pointer_value();
 
-        // Total elements = product of dims
         let total: u64 = dims.iter().map(|&d| d as u64).product();
         let total_v = i64t.const_int(total, false);
 
-        // Allocate result array
         let elem_size = i64t.const_int(8, false);
         let byte_size = b!(self.bld.build_int_mul(total_v, elem_size, "bcast.bytes"));
         let result_ptr = b!(self
@@ -492,7 +482,6 @@ impl<'ctx> Compiler<'ctx> {
         .expect("ICE: call returned void")
         .into_pointer_value();
 
-        // Loop over elements
         let fn_val = self.current_fn();
         let loop_bb = self.ctx.append_basic_block(fn_val, "bcast.loop");
         let body_bb = self.ctx.append_basic_block(fn_val, "bcast.body");
@@ -541,10 +530,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result_ptr.into())
     }
 
-    /// Coerce a value to match an operator-overload callee's parameter type.
-    /// If the callee expects a pointer but we have a struct value, spill it
-    /// to an alloca and pass the pointer (matches the struct-by-ref ABI in
-    /// `declare_mir_fn`).
     fn coerce_op_arg(
         &self,
         v: BasicValueEnum<'ctx>,

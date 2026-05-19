@@ -1,8 +1,3 @@
-//! Crash-recovery test for the WAL. Each test exercises the durability
-//! contract advertised in `runtime/wal.c`: an entry that returns from
-//! `jinn_wal_write` under the default `fdatasync` policy must survive a
-//! `SIGKILL` of the writing process.
-
 use std::ffi::{CString, c_void};
 use std::path::PathBuf;
 
@@ -89,9 +84,6 @@ fn wal_group_commit_durability() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// Worst-case crash test: child writes N records with fdatasync, then
-/// SIGKILLs itself. Per the durability contract, all entries must
-/// survive in the parent.
 #[test]
 fn wal_survives_kill_9() {
     ensure_linked();

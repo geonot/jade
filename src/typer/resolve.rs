@@ -1,5 +1,3 @@
-//! Path resolution for the typer (vs. `src/resolve.rs` which handles modules).
-
 use crate::ast::{self, Span};
 use crate::intern::Symbol;
 use crate::types::Type;
@@ -84,11 +82,7 @@ impl Typer {
         } else {
             self.infer_ctx.fresh_var()
         };
-        // Generator functions return a Generator that yields the body's
-        // yield-type. We don't know the yield type here yet, so wrap the
-        // freshly-inferred return in Type::Generator(_) to keep the
-        // call-site receiver typed correctly. The inner type is unified
-        // later by the body lowering of `yield` expressions.
+
         let ret = if f.is_generator && f.name != "main" {
             Type::Generator(Box::new(ret))
         } else {
@@ -147,10 +141,7 @@ impl Typer {
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
         let id = self.fresh_id();
         self.fns.insert(method_name.clone(), (id, ptys, ret));
-        // Record access modifiers aligned with `ptys`. The synthetic
-        // self parameter is BorrowMut for both by-value and by-ptr methods
-        // (the receiver is not user-annotated), so we record None for it
-        // and the user's access_mod for the remaining params.
+
         let mut accs: Vec<Option<ast::AccessMod>> = vec![None];
         for p in &m.params {
             if by_ptr && p.name == "self" {
@@ -197,14 +188,12 @@ impl Typer {
     }
 
     pub(crate) fn declare_extern_sig(&mut self, ef: &ast::ExternFn) {
-        // Deduplicate externs by C symbol name
         if self.externs.contains_key(&ef.name) {
             return;
         }
         let ptys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
         let id = self.fresh_id();
-        // Externs are ONLY registered in self.externs — accessed via extern.fn() syntax.
-        // They are never registered in self.fns to avoid namespace collisions.
+
         self.externs
             .insert(ef.name.clone(), (id, ptys, ef.ret.clone()));
     }
@@ -346,7 +335,6 @@ impl Typer {
                     .insert((ib.type_name.clone(), *assoc_name), assoc_ty.clone());
             }
         } else {
-            // no trait — standalone impl block
         }
 
         for m in &ib.methods {

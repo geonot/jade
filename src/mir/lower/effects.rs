@@ -32,10 +32,7 @@ impl Lowerer {
                 self.lower_block_stmts(body);
                 self.emit(InstKind::Void, Type::Void, *span)
             }
-            hir::Stmt::UseLocal(_, _, _, _) => {
-                // No-op in MIR — use declarations are resolved at HIR level
-                self.emit(InstKind::Void, Type::Void, Span::dummy())
-            }
+            hir::Stmt::UseLocal(_, _, _, _) => self.emit(InstKind::Void, Type::Void, Span::dummy()),
             hir::Stmt::GlobalStore(name, value, _span) => {
                 let val = self.lower_expr(value);
                 self.emit(

@@ -1,5 +1,3 @@
-//! MIR instruction dispatch and value emission.
-
 use super::*;
 
 mod aggregates;

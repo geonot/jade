@@ -1,5 +1,3 @@
-//! Codegen for direct calls, indirect calls, and method dispatch.
-
 use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue};
 
@@ -58,12 +56,10 @@ impl<'ctx> Compiler<'ctx> {
         vals: &[BasicValueEnum<'ctx>],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if let Type::Fn(ptys, ret) = fn_ty {
-            // Extract fn_ptr and env_ptr from closure fat pointer {fn_ptr, env_ptr}
             let sv = closure_val.into_struct_value();
             let fn_ptr = b!(self.bld.build_extract_value(sv, 0, "cl.fn")).into_pointer_value();
             let env_ptr = b!(self.bld.build_extract_value(sv, 1, "cl.env"));
 
-            // Build function type with env_ptr as first parameter
             let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
             let mut lp: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
             lp.extend(
@@ -72,7 +68,6 @@ impl<'ctx> Compiler<'ctx> {
             );
             let ft = self.mk_fn_type(ret.as_ref(), &lp, false);
 
-            // Prepend env_ptr to argument list
             let mut a: Vec<BasicMetadataValueEnum<'ctx>> = vec![env_ptr.into()];
             a.extend(vals.iter().map(|v| BasicMetadataValueEnum::from(*v)));
 
@@ -90,7 +85,6 @@ impl<'ctx> Compiler<'ctx> {
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if let Some(fv) = self.module.get_function(resolved_name) {
-            // Check if the method expects self by pointer (first param is ptr type)
             let first_param_is_ptr = fv
                 .get_type()
                 .get_param_types()
@@ -98,14 +92,12 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|t| t.is_pointer_type())
                 .unwrap_or(false);
             let self_val = if first_param_is_ptr {
-                // By-pointer method: pass the alloca pointer directly
                 if let hir::ExprKind::Var(_, name) = &obj.kind {
                     self.find_var(&name.as_str())
                         .ok_or_else(|| format!("undefined variable: {name}"))?
                         .0
                         .into()
                 } else if let hir::ExprKind::Field(_inner, _, _) = &obj.kind {
-                    // Nested field access — compile and store to a temp alloca
                     let val = self.compile_expr(obj)?;
                     let ty = val.get_type();
                     let tmp = self.entry_alloca(ty, "method.tmp");
@@ -125,8 +117,7 @@ impl<'ctx> Compiler<'ctx> {
             let param_types = fv.get_type().get_param_types();
             for (i, arg) in args.iter().enumerate() {
                 let mut val = self.compile_expr(arg)?;
-                // If the function expects a struct value but we have a pointer (e.g. self passed as arg),
-                // load the struct from the pointer.
+
                 if let Some(expected_ty) = param_types.get(i + 1) {
                     if let Ok(basic_ty) = BasicTypeEnum::try_from(*expected_ty) {
                         if basic_ty.is_struct_type() && val.is_pointer_value() {

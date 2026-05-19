@@ -1,5 +1,3 @@
-//! Helper methods for MIR codegen: binary/unary/comparison ops, casts, field access, closures, channels, slicing, and coroutine body extraction.
-
 use super::super::Compiler;
 use super::super::b;
 use crate::hir;

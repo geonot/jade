@@ -1,5 +1,3 @@
-//! LSP server entry point (`jinnc-lsp` binary).
-
 use std::io::{self, BufReader, Write};
 
 use serde_json::Value;

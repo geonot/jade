@@ -1,67 +1,19 @@
-//! Escape analysis — Phase 2 of the access-semantics sprint.
-//!
-//! Walks the HIR of a single function and assigns each `Bind` a `Tier`:
-//!
-//! - `T1` — does not escape the source's scope. May be lowered to a raw
-//!   pointer alias (no refcount, no drop at scope exit).
-//! - `T2` — escapes within a single thread (returned, stored in a struct or
-//!   container, captured by a non-spawning closure). Must be lowered to a
-//!   single-threaded refcount (`Rc<T>` / `Rc<Cell<T>>`).
-//! - `T3` — escapes across threads (sent on a `Channel`, sent to an
-//!   `ActorRef`, captured by `spawn`).
-//!   Must be lowered to an atomic refcount (`Arc<T>` / `Arc<Mutex<T>>`).
-//!
-//! `Tier::Auto` is the sentinel for bindings that have not been visited yet.
-//!
-//! ## Algorithm (forward pass, single fn at a time)
-//!
-//! 1. Initialise every `Bind` in the function to `T1` (the optimistic
-//!    default).  Function parameters are *sinks*: their tier is decided by
-//!    their declared `Ownership` and is not analysed here.
-//! 2. Walk the body in source order.  For every `ExprKind::Var(def_id, _)`
-//!    use, find the enclosing statement and classify the use:
-//!    * Return → at least T2.
-//!    * Store in a struct field / container / map / set / deque / PQ /
-//!      store-insert / global-store → at least T2.
-//!    * Sent through a `Channel` (`ChannelSend`) or actor (`Send`) or
-//!      captured by `Spawn` → T3 (sticky).
-//!    * Captured by a `Lambda` whose body escapes (returned, stored,
-//!      spawned, sent) → at least T2.  Conservatively: any capture by a
-//!      `Lambda` that is itself bound to a variable or returned upgrades to
-//!      at least T2.
-//! 3. Tier escalation is monotonic: `T1 → T2 → T3`.  Once a binding hits
-//!    T3 it stays T3.
-//!
-//! ## Status (R3.1)
-//!
-//! This module is intentionally a *pure analysis*: it does not mutate the
-//! HIR.  R3.2 wires `EscapeInfo` into the typer and lets the chosen tier
-//! drive `Bind::ownership`.  R3.3/R3.4 add the T1 raw-pointer and T2/T3
-//! refcount codegen paths.  Until R3.2 lands, the existing
-//! `is_aliased_read_of_heap` safety net in [`crate::typer::stmt::dispatch`]
-//! remains the canonical source of truth and this module is not consulted
-//! by the compile pipeline.
-
 use std::collections::HashMap;
 
 use crate::hir::{self, BuiltinFn, DefId, Expr, ExprKind, Stmt};
 
-/// Lowering tier assigned to a binding by escape analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Tier {
-    /// Not yet analysed (every binding starts here before the walk).
     Auto,
-    /// No escape — lower to a raw pointer alias.
+
     T1,
-    /// Escapes within a single thread — lower to `Rc<T>` or `Rc<Cell<T>>`.
+
     T2,
-    /// Escapes across threads — lower to `Arc<T>` or `Arc<Mutex<T>>`.
+
     T3,
 }
 
 impl Tier {
-    /// Monotonic join: `Tier::join(self, other)` returns the strictly
-    /// stronger tier.  `T3` absorbs everything; `Auto` is the unit.
     pub fn join(self, other: Tier) -> Tier {
         use Tier::*;
         match (self, other) {
@@ -84,11 +36,6 @@ impl std::fmt::Display for Tier {
     }
 }
 
-/// Per-function map from each `Bind`'s `DefId` to its escape tier.
-///
-/// Bindings not present in the map are conservatively treated as `T2` by
-/// downstream consumers (the safe default — heap-managed values without
-/// known short-lived bounds).
 #[derive(Debug, Clone, Default)]
 pub struct EscapeInfo {
     tiers: HashMap<DefId, Tier>,
@@ -99,12 +46,10 @@ impl EscapeInfo {
         Self::default()
     }
 
-    /// Look up a binding's tier.  Returns `Tier::T2` for unknown DefIds.
     pub fn tier(&self, id: DefId) -> Tier {
         self.tiers.get(&id).copied().unwrap_or(Tier::T2)
     }
 
-    /// Record / escalate a binding's tier (monotonic join).
     pub fn escalate(&mut self, id: DefId, tier: Tier) {
         let entry = self.tiers.entry(id).or_insert(Tier::Auto);
         *entry = entry.join(tier);
@@ -123,12 +68,11 @@ impl EscapeInfo {
     }
 }
 
-/// Run escape analysis on a single function body.
 pub fn analyze_fn(f: &hir::Fn) -> EscapeInfo {
     let mut info = EscapeInfo::new();
-    // Seed every Bind with T1; the walk below escalates as use-sites demand.
+
     seed_binds_in_block(&f.body, &mut info);
-    // Walk every statement and classify each use of a known binding.
+
     let mut walker = EscapeWalk {
         info: &mut info,
         in_lambda: 0,
@@ -137,35 +81,6 @@ pub fn analyze_fn(f: &hir::Fn) -> EscapeInfo {
     info
 }
 
-/// R3.3 post-pass: mutate a function's HIR body to demote each `Owned`
-/// binding the escape analysis classified as `T1` AND whose value is a
-/// `Field`/`Index` read of a clonable, heap-managed type to
-/// `Ownership::Borrowed`.
-///
-/// For each demoted `Bind`, the matching `Stmt::Drop(def_id, …)` in the
-/// enclosing block is removed (Drops were inserted by the typer at scope
-/// exit based on the original `Owned` ownership). The MIR lowerer pairs
-/// the demotion by skipping the auto-clone in
-/// [`crate::mir::lower::stmt`]'s `Stmt::Bind` handler whenever it sees a
-/// `Borrowed` binding with a `Field`/`Index` RHS.
-///
-/// Together these two changes eliminate the allocate-and-immediately-free
-/// pair for short-lived field/index borrows (the canonical "T1" pattern
-/// from `docs/access-semantics-sprint.md` §3.3).
-///
-/// **Soundness**: only bindings the escape analysis proved do NOT escape
-/// (the value is never returned, stored in a container or struct,
-/// captured by a closure, sent on a channel, etc.) are demoted, so the
-/// parent aggregate cannot be dropped before the alias goes out of scope.
-///
-/// **Scope**: the walk is per-`Stmt`-block local; it does NOT descend
-/// into expression-embedded blocks (lambda bodies, comprehensions,
-/// coroutines, generators, select arms). Bindings inside those constructs
-/// retain their conservative owned-plus-clone behavior — a future
-/// extension can handle them once the escape analysis distinguishes
-/// captures.
-///
-/// Returns the number of bindings demoted (for telemetry).
 pub fn apply_demotions(f: &mut hir::Fn, info: &EscapeInfo) -> usize {
     let mut count = 0usize;
     demote_block(&mut f.body, info, &mut count);
@@ -200,9 +115,6 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
     }
 }
 
-/// Mirror of `mir::lower::stmt::is_container_read_method` for the HIR-level
-/// demotion pass. Recognises the same set of element-borrow-shape container
-/// reads (Vec.get/first/last, Map.get, Set.peek*, PQ.peek*, Deque.front/back).
 fn is_container_read_method(expr: &hir::Expr) -> bool {
     let name = match &expr.kind {
         ExprKind::VecMethod(_, n, _) | ExprKind::MapMethod(_, n, _) => n.as_str(),
@@ -252,8 +164,7 @@ fn seed_binds_in_stmt(stmt: &Stmt, info: &mut EscapeInfo) {
     match stmt {
         Bind(b) => {
             info.escalate(b.def_id, Tier::T1);
-            // Recurse into the RHS for nested lambdas containing their own
-            // Bind statements.
+
             seed_binds_in_expr(&b.value, info);
         }
         TupleBind(bindings, e, _) => {
@@ -505,13 +416,9 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
     }
 }
 
-/// Use-site classifier.  Each call to `note_var_use` records that a known
-/// binding is being read; the surrounding context determines what tier the
-/// use demands.
 struct EscapeWalk<'a> {
     info: &'a mut EscapeInfo,
-    /// `> 0` while traversing a `Lambda` body.  Captures inside escaping
-    /// lambdas force at least T2.
+
     in_lambda: u32,
 }
 
@@ -526,17 +433,10 @@ impl<'a> EscapeWalk<'a> {
         use Stmt::*;
         match stmt {
             Bind(b) => {
-                // The RHS is evaluated in the binding's source context.
-                // Vars read on the RHS are "consumed by Bind" — that's a
-                // local use; tier remains T1 unless something else
-                // escalates it.
                 self.walk_expr_consumer(&b.value, BindContext::LocalRead);
             }
             TupleBind(_, e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
             Assign(lhs, rhs, _) => {
-                // LHS expression positions like `obj.field` or `vec[i]`
-                // mean the RHS is being stored into a longer-lived
-                // location.  Any binding flowing into RHS escapes.
                 let ctx = lvalue_store_context(lhs);
                 self.walk_expr_consumer(lhs, BindContext::LocalRead);
                 self.walk_expr_consumer(rhs, ctx);
@@ -605,12 +505,11 @@ impl<'a> EscapeWalk<'a> {
 
     fn walk_expr_consumer(&mut self, expr: &Expr, ctx: BindContext) {
         use ExprKind::*;
-        // First record this expression itself as a use under the given ctx.
+
         if let Var(id, _) = &expr.kind {
             self.note_var_use(*id, ctx);
         }
-        // Then recurse — but the children are typically in `LocalRead`
-        // context unless we're at a structural escape site below.
+
         match &expr.kind {
             Var(_, _)
             | Int(_)
@@ -657,8 +556,6 @@ impl<'a> EscapeWalk<'a> {
             | EnumUnwrap(e, _, _)
             | EnumIs(e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
 
-            // Stored-into-container sites: arguments flow into the
-            // container's storage.  Conservative: every arg escapes.
             VecMethod(r, name, args)
                 if matches!(
                     name.as_str().as_ref(),
@@ -679,7 +576,6 @@ impl<'a> EscapeWalk<'a> {
                 }
             }
 
-            // Cross-thread sites — sticky T3.
             ChannelSend(c, v) => {
                 self.walk_expr_consumer(c, BindContext::LocalRead);
                 self.walk_expr_consumer(v, BindContext::CrossThread);
@@ -696,7 +592,6 @@ impl<'a> EscapeWalk<'a> {
                 }
             }
 
-            // Generic recursion: every other node's children are local reads.
             Call(_, _, args)
             | Builtin(_, args)
             | VecNew(args)
@@ -761,9 +656,6 @@ impl<'a> EscapeWalk<'a> {
                 self.walk_expr_consumer(e, BindContext::LocalRead);
             }
             CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts, _) => {
-                // Coroutine bodies execute later — anything they capture
-                // outlives the current scope.  Treat them like spawn for
-                // safety (cross-task even if single-thread).
                 for s in stmts {
                     let prev = self.in_lambda;
                     self.in_lambda = prev + 1;
@@ -790,8 +682,6 @@ impl<'a> EscapeWalk<'a> {
             }
             Block(b) => self.walk_block(b),
             ListComp(body, _, _, iter, filt, _) => {
-                // The list-comp result is itself a fresh container — its
-                // body produces values stored in that container.
                 self.walk_expr_consumer(body, BindContext::StoredInContainer);
                 self.walk_expr_consumer(iter, BindContext::LocalRead);
                 if let Some(f) = filt {
@@ -837,8 +727,7 @@ impl<'a> EscapeWalk<'a> {
             BindContext::Returned | BindContext::StoredInContainer => Tier::T2,
             BindContext::CrossThread => Tier::T3,
         };
-        // Only escalate bindings we've previously seeded — otherwise we'd
-        // record tiers for params / globals / unrelated DefIds.
+
         if self.info.tiers.contains_key(&id) {
             self.info.escalate(id, tier);
         }
@@ -847,20 +736,15 @@ impl<'a> EscapeWalk<'a> {
 
 #[derive(Debug, Clone, Copy)]
 enum BindContext {
-    /// Read for an immediate, scope-local consumer (binding RHS, condition,
-    /// arithmetic operand, log/print argument…).
     LocalRead,
-    /// Returned from the enclosing function (or `err`-returned).
+
     Returned,
-    /// Stored in a struct field, container slot, store row, or global.
+
     StoredInContainer,
-    /// Sent across a thread boundary (channel/actor/spawn).
+
     CrossThread,
 }
 
-/// Inspect a top-level assignment LHS to decide what kind of *store* it
-/// represents.  `obj.field = ...` and `vec[i] = ...` are container stores;
-/// a plain `x = ...` is a local rebind.
 fn lvalue_store_context(lhs: &Expr) -> BindContext {
     match &lhs.kind {
         ExprKind::Var(_, _) => BindContext::LocalRead,
@@ -869,7 +753,6 @@ fn lvalue_store_context(lhs: &Expr) -> BindContext {
     }
 }
 
-// Silence "unused" warnings for BuiltinFn pulled in for future extension.
 #[allow(dead_code)]
 fn _builtin_kept_for_future_use(_b: BuiltinFn) {}
 
@@ -918,7 +801,6 @@ mod tests {
 
     #[test]
     fn local_read_stays_t1() {
-        // x is 42; log(x)
         let body: Block = vec![
             Stmt::Bind(Bind {
                 def_id: DefId(10),
@@ -946,7 +828,6 @@ mod tests {
 
     #[test]
     fn returned_binding_escalates_to_t2() {
-        // x is vec_new(); ret x
         let body: Block = vec![
             Stmt::Bind(Bind {
                 def_id: DefId(20),
@@ -974,7 +855,6 @@ mod tests {
 
     #[test]
     fn channel_send_escalates_to_t3() {
-        // x is 5; chan.send(x)
         let chan_ty = Type::Channel(Box::new(Type::I64));
         let body: Block = vec![
             Stmt::Bind(Bind {
@@ -1008,17 +888,8 @@ mod tests {
         assert_eq!(info.tier(DefId(30)), Tier::T3);
     }
 
-    /// R3.3: a Bind whose RHS is a Field/Index read of a clonable heap
-    /// type AND whose use stays local should be demoted Owned → Borrowed
-    /// AND its matching `Stmt::Drop` should be removed.
     #[test]
     fn apply_demotions_demotes_t1_field_read_and_removes_drop() {
-        // Build:
-        //   x is owner.payload    // String field read, T1 (local read only)
-        //   <log x>               // local use → stays T1
-        //   drop(x)               // typer-emitted scope-exit drop
-        //
-        // Expect: x.ownership becomes Borrowed, the Drop is removed.
         let owner = Expr {
             kind: ExprKind::Var(DefId(100), Symbol::intern("owner")),
             ty: Type::Struct(Symbol::intern("Box"), vec![]),
@@ -1050,12 +921,12 @@ mod tests {
         assert_eq!(info.tier(DefId(40)), Tier::T1);
         let n = apply_demotions(&mut hfn, &info);
         assert_eq!(n, 1, "expected exactly one demotion");
-        // The Bind's ownership flipped to Borrowed.
+
         match &hfn.body[0] {
             Stmt::Bind(b) => assert_eq!(b.ownership, Ownership::Borrowed),
             _ => panic!("expected Bind in slot 0"),
         }
-        // The matching Drop was removed.
+
         assert!(
             !hfn.body
                 .iter()
@@ -1065,8 +936,6 @@ mod tests {
         );
     }
 
-    /// R3.3 inverse: a Bind whose value escapes (e.g. via `return x`) must
-    /// NOT be demoted. Drop must remain in place.
     #[test]
     fn apply_demotions_skips_when_value_escapes() {
         let owner = Expr {
@@ -1105,8 +974,6 @@ mod tests {
         }
     }
 
-    /// An explicit `access_mod` on the binding (e.g. `x is take y.field`)
-    /// must opt out of demotion regardless of escape tier.
     #[test]
     fn apply_demotions_respects_explicit_access_mod() {
         let owner = Expr {
@@ -1145,10 +1012,6 @@ mod tests {
         }
     }
 
-    /// R3.3 (container reads): a Bind whose RHS is `v.get(i)` on a
-    /// `Vec<String>` and whose use stays local should be demoted
-    /// Owned → Borrowed and its matching scope-exit Drop removed —
-    /// mirroring the Field/Index case.
     #[test]
     fn apply_demotions_demotes_t1_vec_get_and_removes_drop() {
         let vec_ty = Type::Vec(Box::new(Type::String));
@@ -1201,8 +1064,6 @@ mod tests {
         );
     }
 
-    /// R3.3 (container reads, inverse): a Bind whose `v.get(i)` value
-    /// escapes via Ret must NOT be demoted, and its Drop must remain.
     #[test]
     fn apply_demotions_skips_when_vec_get_value_escapes() {
         let vec_ty = Type::Vec(Box::new(Type::String));

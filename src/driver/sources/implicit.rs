@@ -1,9 +1,5 @@
-//! Implicit auto-import analysis and qualified module reference discovery.
-
 use super::*;
 
-/// Auto-import modules based on undefined references found in the program.
-/// Uses the entity index to find which files provide the needed symbols.
 pub(in crate::driver) fn resolve_implicit_imports(
     prog: &mut Program,
     base_dir: &std::path::Path,
@@ -35,9 +31,6 @@ pub(in crate::driver) fn resolve_implicit_imports(
         })
         .collect();
 
-    // Find which module files need to be imported. Bare names intentionally
-    // never trigger implicit imports; users must write `module.symbol` or an
-    // explicit `use` declaration.
     let mut files_to_import: HashMap<PathBuf, Vec<String>> = HashMap::new();
     for module in &module_refs {
         if explicit_modules.contains(module) {
@@ -52,7 +45,6 @@ pub(in crate::driver) fn resolve_implicit_imports(
     }
 
     for (file_path, _symbols) in &files_to_import {
-        // Check if already loaded via a module key
         let file_canon = file_path
             .canonicalize()
             .unwrap_or_else(|_| file_path.clone());
@@ -91,7 +83,6 @@ pub(in crate::driver) fn resolve_implicit_imports(
             Err(_) => continue,
         };
 
-        // Recursively resolve this module's explicit imports
         resolve_modules(
             &mut mod_prog,
             file_path.parent().unwrap_or(base_dir),
@@ -99,7 +90,6 @@ pub(in crate::driver) fn resolve_implicit_imports(
             packages,
         );
 
-        // Derive module name from file path (e.g., "/path/to/json.jn" → "json")
         let mod_name = file_path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -112,7 +102,6 @@ pub(in crate::driver) fn resolve_implicit_imports(
             }
             if let Decl::Fn(ref f) = d {
                 if f.name == "main" && f.params.is_empty() {
-                    // Unwrap implicit main constants
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
                             importable.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));

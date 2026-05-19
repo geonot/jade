@@ -1,5 +1,3 @@
-//! Soft and hard store delete MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,8 +6,6 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // For non-@simple stores: soft-delete by setting deleted timestamp
-        // For @simple stores: fall back to hard delete
         let (store_name, _, _, _) = Self::parse_encoded_filter(encoded_name)?;
         let sd = self
             .store_defs
@@ -25,7 +21,6 @@ impl<'ctx> Compiler<'ctx> {
             return self.emit_store_hard_delete(encoded_name, args);
         }
 
-        // Soft delete: set deleted = time() on matching records
         let (store_name, field_name, op, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
@@ -33,7 +28,6 @@ impl<'ctx> Compiler<'ctx> {
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
         self.store_lock(fp)?;
 
-        // @before_delete hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec {
                 if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
@@ -60,7 +54,6 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
-        // Get current time for the deleted timestamp
         self.ensure_time_fn();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
         let time_fn = crate::codegen::fn_or_die(&self.module, "time");
@@ -131,7 +124,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_struct_gep(st, rec_ptr, deleted_idx as u32, "sdel.del"));
         b!(self.bld.build_store(del_gep, now));
-        // WAL: log the soft-delete
+
         self.wal_write_delete(store_name, rec_ptr, rec_size)?;
         b!(self.bld.build_unconditional_branch(next_bb));
 
@@ -143,10 +136,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(done_bb);
-        // Write updated records back
+
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
 
-        // @after_delete hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec {
                 if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
@@ -200,7 +192,6 @@ impl<'ctx> Compiler<'ctx> {
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
         self.store_lock(fp)?;
 
-        // @before_delete hook
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec {
                 if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
@@ -225,7 +216,6 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
-        // Rewrite file: close and reopen in w+b mode
         let fclose_fn = crate::codegen::fn_or_die(&self.module, "fclose");
         b!(self.bld.build_call(fclose_fn, &[fp.into()], ""));
 
@@ -248,7 +238,6 @@ impl<'ctx> Compiler<'ctx> {
         let global = self.module.get_global(&global_name).unwrap();
         b!(self.bld.build_store(global.as_pointer_value(), new_fp));
 
-        // Write header: magic + count placeholder + rec_size
         let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "del.magic"));
         b!(self.bld.build_call(
@@ -292,7 +281,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Loop: keep records that DON'T match the filter
         let fv_fn = self.cur_fn.expect("ICE: cur_fn not set");
         let idx_ptr = self.entry_alloca(i64t.into(), "del.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
@@ -353,9 +341,8 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(matches, del_hook_bb, keep_bb));
 
-        // @after_delete hook — only fires for records being deleted
         self.bld.position_at_end(del_hook_bb);
-        // WAL: log the hard-delete
+
         self.wal_write_delete(store_name, rec_ptr, rec_size)?;
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec {
@@ -392,7 +379,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(done_bb);
-        // Update count in header
+
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,

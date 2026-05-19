@@ -1,5 +1,3 @@
-//! Argument, arena, pool, and char builtin helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -161,7 +159,6 @@ impl<'ctx> Compiler<'ctx> {
         match method {
             "to_code" => Ok(char_val.into()),
             "is_digit" => {
-                // 0x30..=0x39 ('0'..='9')
                 let ge = b!(self.bld.build_int_compare(
                     IntPredicate::SGE,
                     char_val,
@@ -178,7 +175,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(result.into())
             }
             "is_alpha" => {
-                // A-Z (0x41..=0x5A) or a-z (0x61..=0x7A)
                 let ge_a = b!(self.bld.build_int_compare(
                     IntPredicate::SGE,
                     char_val,
@@ -209,7 +205,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(result.into())
             }
             "is_alphanumeric" => {
-                // Combination of is_alpha and is_digit
                 let ge_0 = b!(self.bld.build_int_compare(
                     IntPredicate::SGE,
                     char_val,
@@ -284,7 +279,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_and(ge, le, "ch.islower")).into())
             }
             "is_whitespace" => {
-                // space(0x20), tab(0x09), newline(0x0A), carriage return(0x0D)
                 let is_sp = b!(self.bld.build_int_compare(
                     IntPredicate::EQ,
                     char_val,
@@ -314,7 +308,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_or(t1, t2, "ch.isws")).into())
             }
             "to_upper" => {
-                // If lowercase (0x61..=0x7A), subtract 0x20
                 let ge = b!(self.bld.build_int_compare(
                     IntPredicate::SGE,
                     char_val,
@@ -338,7 +331,6 @@ impl<'ctx> Compiler<'ctx> {
                 .into())
             }
             "to_lower" => {
-                // If uppercase (0x41..=0x5A), add 0x20
                 let ge = b!(self.bld.build_int_compare(
                     IntPredicate::SGE,
                     char_val,
@@ -367,7 +359,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(result.into())
             }
             "abs" => {
-                // x < 0 ? -x : x
                 let neg = b!(self.bld.build_int_neg(char_val, "int.neg"));
                 let is_neg = b!(self.bld.build_int_compare(
                     IntPredicate::SLT,
@@ -405,7 +396,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 let lo = self.compile_expr(&args[1])?.into_int_value();
                 let hi = self.compile_expr(&args[2])?.into_int_value();
-                // max(lo, min(x, hi))
+
                 let cmp_hi =
                     b!(self
                         .bld

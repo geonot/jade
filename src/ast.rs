@@ -1,5 +1,3 @@
-//! Abstract syntax tree produced by the parser. Pure data; no semantics.
-
 pub use crate::intern::Symbol;
 use crate::types::Type;
 
@@ -11,10 +9,7 @@ pub struct Span {
     pub end: usize,
     pub line: u32,
     pub col: u32,
-    /// Optional source-file marker (interned). `None` means "unknown" or
-    /// "synthesized". When `Some`, diagnostics print `file:line:col`
-    /// instead of just `line L:C`, which is essential for multi-file
-    /// projects where the same line/col can refer to different sources.
+
     pub file: Option<Symbol>,
 }
 
@@ -38,17 +33,11 @@ impl Span {
         }
     }
 
-    /// Builder: attach a filename to this span. Used by the lexer/parser
-    /// pipeline after tokens are produced for a given source file.
     pub fn with_file(mut self, file: Symbol) -> Self {
         self.file = Some(file);
         self
     }
 
-    /// Render as `"path/to/file.jn:LINE:COL"` when a file is known,
-    /// otherwise as `"line LINE:COL"`. Use this in diagnostic messages
-    /// to keep prior output format when no filename, while making
-    /// multi-file projects unambiguous when a filename is set.
     pub fn loc(&self) -> String {
         match self.file {
             Some(f) => format!("{}:{}:{}", f.as_str(), self.line, self.col),
@@ -124,12 +113,12 @@ pub enum Stmt {
     Ret(Option<Expr>, Span),
     Break(Option<Expr>, Span),
     Continue(Span),
-    /// `nop` — a no-op statement (Python-style `pass`). Compiles to nothing.
+
     Nop(Span),
     Match(Match),
     Asm(AsmBlock),
     ErrReturn(Expr, Span),
-    /// `defer <block>` — runs the block at function exit (any return path).
+
     Defer(Block, Span),
     StoreInsert(Symbol, Vec<FieldInit>, Span),
     StoreDelete(Symbol, StoreFilter, Span),
@@ -351,8 +340,7 @@ pub struct Fn {
     pub type_bounds: Vec<(Symbol, Vec<Symbol>)>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
-    /// Error types declared in the signature: `returns T ! E1 ! E2`.
-    /// Empty when the user omits them; the typer infers from the body.
+
     pub error_types: Vec<Type>,
     pub body: Block,
     pub is_generator: bool,
@@ -360,7 +348,6 @@ pub struct Fn {
     pub span: Span,
 }
 
-/// Function attributes from `@inline`, `@noinline`, `@cold`, `@hot` annotations.
 #[derive(Debug, Clone, Default)]
 pub struct FnAttrs {
     pub inline: bool,
@@ -369,22 +356,11 @@ pub struct FnAttrs {
     pub hot: bool,
 }
 
-/// User-written access-mode modifier on a binding, parameter, field, or
-/// for-loop binder. See `docs/access-semantics.md` for the full model.
-///
-/// - `Copy` — deep clone at the boundary; consumer owns an independent value.
-/// - `Take` — move out (or remove from container slot).
-///
-/// When `None`, the compiler auto-picks the ownership tier (borrow / Rc /
-/// Arc) from usage. `ref` and `mut` are no longer surface keywords —
-/// shared and exclusive aliasing happen automatically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMod {
     Copy,
     Take,
-    /// `const` — binding cannot be rebound in its scope. The value
-    /// itself is whatever ownership tier the type calls for (borrow /
-    /// Rc / Arc); `const` is a typer-level rebind ban only.
+
     Const,
 }
 
@@ -408,17 +384,12 @@ pub struct Param {
     pub span: Span,
 }
 
-/// Type-decl attributes parsed from `@`-prefixed annotations:
-/// `@packed`, `@strict`, `@align(N)` (layout), plus the access-semantics
-/// annotation `@resource`. Lives on `TypeDef`, `StoreDef`, `ActorDef`,
-/// etc. as a single bundle so each call site can ask the same struct for
-/// any annotation.
 #[derive(Debug, Clone, Default)]
 pub struct LayoutAttrs {
     pub packed: bool,
     pub strict: bool,
     pub align: Option<u32>,
-    /// `@resource` — linear type: never copies, auto-`*drop` at scope end.
+
     pub resource: bool,
 }
 
@@ -469,8 +440,7 @@ pub struct Bind {
     pub value: Expr,
     pub ty: Option<Type>,
     pub atomic: bool,
-    /// User-written access modifier: `x is copy/ref/mut/take RHS`.
-    /// `None` means "use default inference from §4.3".
+
     pub access_mod: Option<AccessMod>,
     pub span: Span,
 }
@@ -500,8 +470,7 @@ pub struct For {
     pub end: Option<Expr>,
     pub step: Option<Expr>,
     pub body: Block,
-    /// `for copy/ref/mut/take x in xs` — access modifier on the binder.
-    /// `None` means "use default inference".
+
     pub access_mod: Option<AccessMod>,
     pub span: Span,
 }

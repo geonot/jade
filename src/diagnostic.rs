@@ -1,5 +1,3 @@
-//! Diagnostic emission: spans, severities, and pretty-printing.
-
 use crate::ast::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -140,8 +138,6 @@ impl Diagnostic {
             None => out.push_str(&format!("{sev}: {}\n", self.message)),
         }
         if let Some(sp) = self.span {
-            // Prefer the span's own filename when present (multi-file projects):
-            // the caller's `filename` argument is just a fallback display name.
             let file_disp: String = match sp.file {
                 Some(f) => f.as_str().to_string(),
                 None => filename.to_string(),

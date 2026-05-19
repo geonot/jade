@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};

@@ -1,5 +1,3 @@
-//! Store update, lookup, first, and existence MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,10 +6,8 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Name format: {store_name}__{field}__{op}[__and/or__{f2}__{op2}]*__fields_{f1}_{f2}_...
-        // Split out the __fields_ suffix first.
         let (filter_part, fields_part) = if let Some(pos) = encoded_name.find("__fields_") {
-            (&encoded_name[..pos], &encoded_name[pos + 9..]) // skip "__fields_"
+            (&encoded_name[..pos], &encoded_name[pos + 9..])
         } else {
             return Err(format!("malformed store.set name '{encoded_name}'"));
         };
@@ -39,11 +35,9 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("unknown field '{filter_field}' in store '{store_name}'"))?;
 
         let filter_val = self.val(args[0]);
-        // args[1..1+extra_count] are extra filter vals
-        // args[1+extra_count..] are the field assignment values
+
         let assign_start = 1 + extra_count;
 
-        // Pre-gather field assignment values
         let mut assign_vals: Vec<(usize, &str, BasicValueEnum<'ctx>)> = Vec::new();
         for (i, fname) in field_names.iter().enumerate() {
             let arg_idx = assign_start + i;
@@ -93,7 +87,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "set.rec"))
         };
 
-        // Skip soft-deleted records
         if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
             let del_gep = b!(self
                 .bld
@@ -144,10 +137,8 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(update_bb);
 
-        // Phase 7: If @versioned, save old record to versions file and increment __version
         let is_versioned = Compiler::store_is_versioned(&sd);
         if is_versioned {
-            // Read the record's current sid and __version
             let sid_idx = sd.fields.iter().position(|f| f.name == "sid");
             let ver_idx = sd.fields.iter().position(|f| f.name == "__version");
             if let (Some(si), Some(vi)) = (sid_idx, ver_idx) {
@@ -160,7 +151,6 @@ impl<'ctx> Compiler<'ctx> {
                     .build_struct_gep(st, rec_ptr, vi as u32, "ver.ver.gep"));
                 let old_ver = b!(self.bld.build_load(i64t, ver_gep, "ver.old")).into_int_value();
 
-                // Save old record to versions file
                 let ver_fp = self.load_store_ver(store_name)?;
                 let ver_append_fn = crate::codegen::fn_or_die(&self.module, "jinn_ver_append");
                 b!(self.bld.build_call(
@@ -175,7 +165,6 @@ impl<'ctx> Compiler<'ctx> {
                     ""
                 ));
 
-                // Increment __version
                 let new_ver =
                     b!(self
                         .bld
@@ -199,7 +188,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // Update the `updated` timestamp on modified records
         if let Some(upd_idx) = sd.fields.iter().position(|f| f.name == "updated") {
             self.ensure_time_fn();
             let time_fn = crate::codegen::fn_or_die(&self.module, "time");
@@ -217,7 +205,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_store(upd_gep, now));
         }
 
-        // WAL: log the update
         self.wal_write_update(store_name, rec_ptr, rec_size)?;
 
         b!(self.bld.build_unconditional_branch(next_bb));
@@ -262,7 +249,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    /// Parse a filter op string back to a BinOp.
     pub(in crate::codegen) fn parse_filter_op(s: &str) -> crate::ast::BinOp {
         match s {
             "eq" => crate::ast::BinOp::Eq,
@@ -275,7 +261,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Parse the encoded filter name into (store_name, field, op, extra_conds).
     pub(in crate::codegen) fn parse_encoded_filter(
         encoded: &str,
     ) -> Result<
@@ -316,7 +301,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok((store_name, field_name, op, extra))
     }
 
-    /// Common helper to set up store access: ensure open, load_fp, get sd + rec type + rec size.
     pub(in crate::codegen) fn setup_store_access(
         &mut self,
         store_name: &str,
@@ -353,7 +337,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok((sd, st, rec_size, fp))
     }
 
-    // ── StoreGet: lookup by sid (i64) ──
     pub(in crate::codegen) fn emit_store_get(
         &mut self,
         store_name: &str,
@@ -383,8 +366,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // sid is always the first field (index 0) for non-@simple stores
-        // Find sid index
         let sid_idx = sd.fields.iter().position(|f| f.name == "sid").unwrap_or(0);
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
@@ -416,7 +397,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "get.rec"))
         };
 
-        // Skip soft-deleted records
         if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
             let del_gep = b!(self
                 .bld
@@ -474,17 +454,14 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    // ── StoreFirst: like query but returns first match ──
     pub(in crate::codegen) fn emit_store_first(
         &mut self,
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Same as emit_store_query — the query already returns first match
         self.emit_store_query(encoded_name, args)
     }
 
-    // ── StoreExists: returns bool (1 if match found, 0 otherwise) ──
     pub(in crate::codegen) fn emit_store_exists(
         &mut self,
         encoded_name: &str,
@@ -544,7 +521,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "exists.rec"))
         };
 
-        // Skip soft-deleted records
         if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
             let del_gep = b!(self
                 .bld
@@ -609,6 +585,4 @@ impl<'ctx> Compiler<'ctx> {
             .build_load(self.ctx.bool_type(), found_ptr, "exists.result"));
         Ok(result)
     }
-
-    // ── StoreDestroy: hard delete (physically remove matching records) ──
 }

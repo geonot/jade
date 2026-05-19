@@ -1,5 +1,3 @@
-//! Float methods and raw string construction helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,13 +6,11 @@ impl<'ctx> Compiler<'ctx> {
         method: &str,
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // args[0] is the receiver (the f64 value), rest are method arguments
         let receiver = self.compile_expr(&args[0])?.into_float_value();
         let f64t = self.ctx.f64_type();
         let i64t = self.ctx.i64_type();
 
         match method {
-            // Single-argument LLVM intrinsics
             "sqrt" => {
                 let f = self
                     .module
@@ -111,7 +107,7 @@ impl<'ctx> Compiler<'ctx> {
                     .basic()
                     .expect("ICE: call returned void"))
             }
-            // Trig via libm
+
             "sin" => {
                 let f = self.module.get_function("llvm.sin.f64").unwrap_or_else(|| {
                     self.module.add_function(
@@ -230,7 +226,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(b!(self.bld.build_float_div(one, receiver, "recip")).into())
             }
             "signum" => {
-                // signum: returns -1.0, 0.0, or 1.0
                 let zero = f64t.const_float(0.0);
                 let neg_one = f64t.const_float(-1.0);
                 let pos_one = f64t.const_float(1.0);
@@ -261,7 +256,7 @@ impl<'ctx> Compiler<'ctx> {
                 ))
                 .into())
             }
-            // Two-argument methods
+
             "pow" => {
                 if args.len() < 2 {
                     return Err("pow() requires 1 argument".into());
@@ -366,7 +361,7 @@ impl<'ctx> Compiler<'ctx> {
                 .basic()
                 .expect("ICE: call returned void"))
             }
-            // Boolean predicates
+
             "is_nan" => {
                 let result = b!(self.bld.build_float_compare(
                     inkwell::FloatPredicate::UNO,

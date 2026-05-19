@@ -1,5 +1,3 @@
-//! Source module discovery, explicit module resolution, entry discovery, and source merging.
-
 use super::*;
 
 pub(in crate::driver) fn decl_name(d: &Decl) -> Option<Symbol> {
@@ -65,18 +63,15 @@ pub(in crate::driver) fn resolve_modules(
         let name = path.last().unwrap();
         let mut candidates = Vec::new();
 
-        // 1. Project source directory FIRST: a local module shadows stdlib.
-        //    (`use foo` → source/foo.jn or base_dir/foo.jn)
         candidates.push(base_dir.join(format!("{file_path}.jn")));
         if let Some(project_root) = base_dir.parent() {
             candidates.push(project_root.join("source").join(format!("{file_path}.jn")));
         }
 
-        // 2. Standard library (bundled with compiler)
         if let Ok(exe) = std::env::current_exe() {
             if let Some(exe_dir) = exe.parent() {
                 candidates.push(exe_dir.join("std").join(format!("{name}.jn")));
-                // Check parent dirs (handles target/release/ layout during development)
+
                 if let Some(parent) = exe_dir.parent() {
                     candidates.push(parent.join("std").join(format!("{name}.jn")));
                     if let Some(grandparent) = parent.parent() {
@@ -94,7 +89,6 @@ pub(in crate::driver) fn resolve_modules(
         }
         candidates.push(base_dir.join("std").join(format!("{name}.jn")));
 
-        // 3. Packages from project.jn / lock
         if let Some(pkg_path) = packages.get(&path[0]) {
             if path.len() > 1 {
                 let rest = path_strs[1..].join("/");
@@ -106,7 +100,6 @@ pub(in crate::driver) fn resolve_modules(
             }
         }
 
-        // 4. JINN_PACKAGE_PATH directories
         if let Ok(pkg_paths) = std::env::var("JINN_PACKAGE_PATH") {
             for pkg_dir in pkg_paths.split(':') {
                 let pkg_dir = PathBuf::from(pkg_dir);
@@ -119,10 +112,8 @@ pub(in crate::driver) fn resolve_modules(
             .find(|c| c.exists())
             .unwrap_or_else(|| die(&format!("module not found: {key}")));
 
-        // Check for a cached .jni interface file
         let jni_path = candidate.with_extension("jni");
         if jni_path.exists() {
-            // If the interface file is newer than the source, use it
             let src_meta = fs::metadata(&candidate).ok();
             let iface_meta = fs::metadata(&jni_path).ok();
             let use_cache = match (src_meta, iface_meta) {
@@ -160,14 +151,13 @@ pub(in crate::driver) fn resolve_modules(
             loaded,
             packages,
         );
-        // Collect all importable declarations from the module
+
         let mut importable: Vec<Decl> = Vec::new();
         for d in mod_prog.decls {
             if matches!(d, Decl::Use(_)) {
                 continue;
             }
-            // The parser wraps module-level top-level statements into an implicit *main.
-            // Skip the implicit main from imported modules; constants are already Decl::Const.
+
             if let Decl::Fn(ref f) = d {
                 if f.name == "main" && f.params.is_empty() {
                     for stmt in &f.body {
@@ -205,7 +195,7 @@ pub(in crate::driver) fn find_project_entry() -> PathBuf {
             die(&format!("entry file not found: {entry}"));
         }
     }
-    // Try source/main.jn (new convention), then src/main.jn (legacy)
+
     let source_main = cwd.join("source").join("main.jn");
     if source_main.exists() {
         return source_main;
@@ -219,9 +209,6 @@ pub(in crate::driver) fn find_project_entry() -> PathBuf {
     );
 }
 
-/// Find all .jn files in source_dir (recursively), excluding the entry file,
-/// parse them, and merge their declarations into the program.
-/// Recursively collect .jn files under a directory.
 pub(in crate::driver) fn collect_jinn_files(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -235,7 +222,6 @@ pub(in crate::driver) fn collect_jinn_files(dir: &std::path::Path, files: &mut V
     }
 }
 
-/// Returns the set of module keys (e.g. "math_utils", "utils.strings") for merged files.
 pub(in crate::driver) fn merge_source_files(
     prog: &mut Program,
     source_dir: &std::path::Path,
@@ -250,7 +236,7 @@ pub(in crate::driver) fn merge_source_files(
         if file_canon == entry_canon {
             continue;
         }
-        // Compute module key from relative path (e.g. source/utils/strings.jn → "utils.strings")
+
         if let Ok(rel) = file.strip_prefix(source_dir) {
             let key = rel
                 .with_extension("")
@@ -282,7 +268,7 @@ pub(in crate::driver) fn merge_source_files(
                 continue;
             }
         };
-        // Derive module name from file stem (e.g., "helpers.jn" → "helpers")
+
         let mod_name = file
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -290,12 +276,11 @@ pub(in crate::driver) fn merge_source_files(
         let mut importable: Vec<Decl> = Vec::new();
         for d in mod_prog.decls {
             if matches!(d, Decl::Use(_)) {
-                continue; // Use decls in source files will be resolved via the entry
+                continue;
             }
-            // Skip *main from non-entry files — only include type/fn/const/enum decls
+
             if let Decl::Fn(ref f) = d {
                 if f.name == "main" {
-                    // Extract any top-level constants from the implicit *main wrapper
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
                             importable.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));

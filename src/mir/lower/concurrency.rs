@@ -11,7 +11,6 @@ impl Lowerer {
         let ty = expr.ty.clone();
         match &expr.kind {
             ExprKind::Spawn(name, inits) => {
-                // Spawned-actor init values cross thread boundary; clone.
                 let lowered: Vec<(Symbol, ValueId)> = inits
                     .iter()
                     .map(|(fname, e)| (*fname, self.lower_expr_owned(e)))
@@ -48,8 +47,6 @@ impl Lowerer {
                 self.emit(InstKind::ChanRecv(c), ty, span)
             }
             ExprKind::Select(arms, default) => {
-                // Demote variables assigned in any arm to memory (Store/Load)
-                // so the merge point sees correct values.
                 let mut assigned = HashSet::new();
                 for arm in arms.iter() {
                     Self::collect_assigned_vars(&arm.body, &mut assigned);
@@ -64,7 +61,6 @@ impl Lowerer {
                     .collect();
                 self.demote_vars_to_memory(&pre_existing, span);
 
-                // Lower select as a SelectArm with all channel values
                 let ch_vals: Vec<ValueId> =
                     arms.iter().map(|arm| self.lower_expr(&arm.chan)).collect();
                 let has_default = default.is_some();
@@ -73,7 +69,7 @@ impl Lowerer {
                     ty.clone(),
                     span,
                 );
-                // Lower bodies as a switch on the selected arm index
+
                 if !arms.is_empty() {
                     let merge_bb = self.new_block("select.merge");
                     let mut cases: Vec<(i64, BlockId)> = Vec::new();
@@ -82,8 +78,6 @@ impl Lowerer {
                         cases.push((i as i64, arm_bb));
                         self.switch_to(arm_bb);
                         if let Some(bind_name) = &arm.binding {
-                            // Use __select_recv instead of ChanRecv — jinn_select
-                            // already received the data into the case data buffer.
                             let idx_val = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
                             let recv_val = self.emit(
                                 InstKind::Call(
@@ -107,9 +101,7 @@ impl Lowerer {
                     } else {
                         merge_bb
                     };
-                    // We need to go back and set the switch terminator
-                    // The select_val block ended where we emitted SelectArm
-                    // Find the block that contains the select inst
+
                     let select_block = self
                         .func
                         .blocks
@@ -121,19 +113,15 @@ impl Lowerer {
                         Terminator::Switch(select_val, cases, default_bb);
                     self.switch_to(merge_bb);
                 }
-                // Return 0 from the merge block, not the jinn_select result
+
                 self.emit(InstKind::IntConst(0), Type::I64, span)
             }
 
-            // Atomics — all lowered as intrinsic calls
-            ExprKind::CoroutineCreate(name, _body) => {
-                // Body is compiled separately — don't inline it here.
-                self.emit(
-                    InstKind::Call(Symbol::intern(&format!("__coro_create_{name}")), vec![]),
-                    ty,
-                    span,
-                )
-            }
+            ExprKind::CoroutineCreate(name, _body) => self.emit(
+                InstKind::Call(Symbol::intern(&format!("__coro_create_{name}")), vec![]),
+                ty,
+                span,
+            ),
             ExprKind::CoroutineNext(coro) => {
                 let c = self.lower_expr(coro);
                 self.emit(InstKind::Call("__coro_next".into(), vec![c]), ty, span)
@@ -143,11 +131,20 @@ impl Lowerer {
                 self.emit(InstKind::Call("__yield".into(), vec![v]), ty, span)
             }
 
-            // Dynamic dispatch
-            ExprKind::GeneratorCreate(_def_id, name, _body) => {
-                // Body is compiled separately — don't inline it here.
+            ExprKind::GeneratorCreate(_def_id, name, _body, captures) => {
+                let arg_ids: Vec<ValueId> = captures
+                    .iter()
+                    .map(|(cap_name, _cap_ty)| {
+                        *self.var_map.get(cap_name).unwrap_or_else(|| {
+                            panic!(
+                                "ICE: generator `{name}` captures `{}` not in var_map",
+                                cap_name.as_str()
+                            )
+                        })
+                    })
+                    .collect();
                 self.emit(
-                    InstKind::Call(Symbol::intern(&format!("__gen_create_{name}")), vec![]),
+                    InstKind::Call(Symbol::intern(&format!("__gen_create_{name}")), arg_ids),
                     ty,
                     span,
                 )

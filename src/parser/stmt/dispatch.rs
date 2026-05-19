@@ -153,7 +153,6 @@ impl Parser {
                         sp,
                     ))
                 } else {
-                    // sim block: run statements in parallel
                     self.expect(Token::Newline)?;
                     let body = self.parse_block()?;
                     Ok(Stmt::SimBlock(body, sp))
@@ -162,7 +161,7 @@ impl Parser {
             Token::Loop => {
                 let sp = self.span();
                 self.advance();
-                // Bare `loop` → infinite loop
+
                 if self.check(Token::Newline) || self.check(Token::Indent) || self.eof() {
                     self.expect(Token::Newline)?;
                     return Ok(Stmt::Loop(Loop {
@@ -170,18 +169,13 @@ impl Parser {
                         span: sp,
                     }));
                 }
-                // Parens around the loop header are optional. Accept all of:
-                //   loop(init, cond, step) BODY      — C-style with parens
-                //   loop init, cond, step    BODY    — C-style, paren-less
-                //   loop iterable            BODY    — iterate (`$` value, `$$` index)
-                //   loop start to end [by s] BODY    — range loop
-                //   loop(iterable)           BODY    — iterate (parens around expr)
+
                 let has_paren = self.check(Token::LParen);
                 if has_paren {
                     self.advance();
                 }
                 let first = self.parse_expr()?;
-                // C-style: three comma-separated expressions form the header.
+
                 if self.check(Token::Comma) {
                     self.advance();
                     let cond = self.parse_expr()?;
@@ -192,11 +186,7 @@ impl Parser {
                     }
                     self.expect(Token::Newline)?;
                     let body = self.parse_block()?;
-                    // Desugar (in the enclosing block) to:
-                    //     __cph_N is init
-                    //     while cond[$ := __cph_N]
-                    //         body[$ := __cph_N]
-                    //         __cph_N is step[$ := __cph_N]
+
                     let ph_name = self.gensym("cph");
                     let ph_sym: Symbol = ph_name.as_str().into();
                     let cond_r = replace_placeholder(&cond, &ph_name);
@@ -225,8 +215,7 @@ impl Parser {
                 if has_paren {
                     self.expect(Token::RParen)?;
                 }
-                // Single-expression header → iterate / range.
-                // `loop start to end [by step]` is a range loop; otherwise iterate `first`.
+
                 let iter = first;
                 let (end, step) = if self.check(Token::To) {
                     self.advance();
@@ -247,13 +236,13 @@ impl Parser {
                 let body = self.parse_block()?;
                 let ph_name = self.gensym("ph");
                 let ph_idx_name = format!("{ph_name}_idx");
-                // Replace any $ in the body with the unique placeholder
+
                 let body = if contains_placeholder_in_block(&body) {
                     replace_placeholder_in_block(&body, &ph_name)
                 } else {
                     body
                 };
-                // Replace any $$ in the body with the unique index placeholder
+
                 let has_idx = contains_index_placeholder_in_block(&body);
                 let body = if has_idx {
                     replace_index_placeholder_in_block(&body, &ph_idx_name)
@@ -290,10 +279,7 @@ impl Parser {
             Token::Break => {
                 let sp = self.span();
                 self.advance();
-                // `break LABEL` — when the next token is an identifier that
-                // matches an active loop label, swallow it and represent the
-                // labeled jump as a magic string literal that MIR lowering
-                // recognizes (`__break_label__<name>`).
+
                 if let Token::Ident(sym) = self.peek().clone() {
                     if self.label_stack.iter().any(|l| *l == sym) {
                         self.advance();
@@ -318,9 +304,7 @@ impl Parser {
                 if let Token::Ident(sym) = self.peek().clone() {
                     if self.label_stack.iter().any(|l| *l == sym) {
                         self.advance();
-                        // Emit as Break with a continue marker (we add a tag
-                        // so MIR lowering can distinguish; reusing Break
-                        // avoids touching every Continue site).
+
                         let marker = format!("__continue_label__{}", sym.as_str());
                         return Ok(Stmt::Break(Some(Expr::Str(marker, sp)), sp));
                     }
@@ -365,8 +349,7 @@ impl Parser {
             Token::Defer => {
                 let sp = self.span();
                 self.advance();
-                // `defer` followed by either an indented block or a single
-                // inline statement (`defer close(fd)`).
+
                 let body = if self.check(Token::Newline) {
                     self.expect(Token::Newline)?;
                     self.parse_block()?
@@ -407,7 +390,6 @@ impl Parser {
                 }))
             }
             _ => {
-                // Store statement keywords parsed as identifiers
                 if let Token::Ident(kw) = self.peek() {
                     let kw = kw.clone();
                     match &*kw.as_str() {
@@ -422,11 +404,6 @@ impl Parser {
                 } else if self.is_bind() {
                     self.parse_bind()
                 } else {
-                    // Bare-statement handler chain: `call() ? on_ok ! on_err`.
-                    // We parse via parse_pipeline so the trailing `?` and
-                    // `!` remain visible at this level. If neither sugar
-                    // shape applies we splice the rest of the expression
-                    // back together and behave exactly as `parse_expr`.
                     let head = self.parse_pipeline()?;
                     if self.check(Token::Question) && matches!(head, Expr::Call(..)) {
                         return self.finish_bare_handler_chain(head);
@@ -471,8 +448,7 @@ impl Parser {
         ) {
             return true;
         }
-        // `name as Type is RHS` typed bind: scan forward past the type to
-        // find an `Is` before any newline / dedent / semicolon.
+
         if matches!(self.tok[self.pos + 1].token, Token::As) {
             let mut i = self.pos + 2;
             while i < self.tok.len() {

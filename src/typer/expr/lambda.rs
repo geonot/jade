@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;

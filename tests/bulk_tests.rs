@@ -196,10 +196,6 @@ fn compile_and_run_with_file(src: &str, extra_name: &str, extra_content: &str) -
     String::from_utf8(output.stdout).unwrap()
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 1: Integer arithmetic
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_add_neg_pos() {
     expect("*main()\n    log(-3 + 10)\n", "7");
@@ -261,10 +257,6 @@ fn b_mod_zero_num() {
     expect("*main()\n    log(0 % 7)\n", "0");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 2: Floating point
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_f64_add() {
     expect("*main()\n    log(1.5 + 2.5)\n", "4.000000");
@@ -292,10 +284,6 @@ fn b_f64_var() {
 fn b_f64_neg() {
     expect("*main()\n    log(-3.5 + 10.0)\n", "6.500000");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 3: Boolean ops
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_bool_true() {
@@ -345,10 +333,6 @@ fn b_and_or_chain() {
 fn b_not_and() {
     expect("*main()\n    log(not false and true)\n", "1");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 4: Comparisons (equals / neq)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_eq_true() {
@@ -415,10 +399,6 @@ fn b_isnt_kw() {
     expect("*main()\n    log(7 neq 8)\n", "1");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 5: Bitwise
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_bit_and() {
     expect("*main()\n    log(0xFF & 0x0F)\n", "15");
@@ -459,10 +439,6 @@ fn b_or_combine() {
 fn b_xor_toggle() {
     expect("*main()\n    log(0b1111 ^ 0b1010)\n", "5");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 6: Variables and bindings
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_bind_simple() {
@@ -508,10 +484,6 @@ fn b_incr_loop() {
         "3",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 7: If/elif/else
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_if_true() {
@@ -581,10 +553,6 @@ fn b_if_multi_elif() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 8: While loops
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_while_count() {
     expect(
@@ -641,10 +609,6 @@ fn b_while_mul_acc() {
         "120",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 9: For loops
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_for_basic() {
@@ -711,10 +675,6 @@ fn b_for_triple_nest() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 10: Loop/break
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_loop_break() {
     expect(
@@ -729,10 +689,6 @@ fn b_loop_break_early() {
         "0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 11: Functions
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_fn_basic() {
@@ -795,10 +751,6 @@ fn b_fn_ten_params() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 12: Closures
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_lambda_inline() {
     expect(
@@ -842,10 +794,6 @@ fn b_do_end_lambda() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 13: Ternary (uses ? ! syntax)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_ternary_t() {
     expect("*main()\n    log(true ? 1 ! 0)\n", "1");
@@ -869,10 +817,6 @@ fn b_ternary_nested() {
 fn b_ternary_arith() {
     expect("*main()\n    log((3 > 2 ? 10 ! 5) + 1)\n", "11");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 14: Structs
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_struct_basic() {
@@ -924,10 +868,6 @@ fn b_struct_3field() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 15: Enums & match
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_enum_2() {
     expect(
@@ -971,10 +911,6 @@ fn b_enum_fn_arg() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 16: Match expressions
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_match_int_1() {
     expect(
@@ -1003,10 +939,6 @@ fn b_match_enum_expr() {
         "7\n-10",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 17: Arrays
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_arr_index() {
@@ -1058,10 +990,6 @@ fn b_arr_for_product() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 18: Tuples
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_tuple_2() {
     expect(
@@ -1084,10 +1012,6 @@ fn b_tuple_arith() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 19: Casts
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_cast_to_i32() {
     expect("*main()\n    x is 42 as i32\n    log(x)\n", "42");
@@ -1100,10 +1024,6 @@ fn b_cast_to_f64() {
 fn b_cast_f64_int() {
     expect("*main()\n    x is 3.14 as i64\n    log(x)\n", "3");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 20as Strings
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_str_lit() {
@@ -1155,10 +1075,6 @@ fn b_str_long() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 21: Pipeline
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_pipe_single() {
     expect(
@@ -1194,10 +1110,6 @@ fn b_pipe_with_args() {
         "15",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 22: Generics
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_gen_id() {
@@ -1256,10 +1168,6 @@ fn b_untyped_rec() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 23: HOF
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_hof_pass() {
     expect(
@@ -1281,10 +1189,6 @@ fn b_hof_chain() {
         "21",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 24 as Option / Result
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_option_some() {
@@ -1336,17 +1240,6 @@ fn b_option_local() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 25: RC (removed — surface rc()/rc_retain/rc_release no longer
-// exist under "heap tax" semantics; every heap nominal is intrinsically
-// refcounted by the compiler. Coverage now lives in heap-struct sharing
-// tests elsewhere in this suite.)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 26: Pointers
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_ptr_ref_deref() {
     expect(
@@ -1361,10 +1254,6 @@ fn b_ptr_arith() {
         "30",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 27 as List comprehension
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_listcomp_squares() {
@@ -1395,10 +1284,6 @@ fn b_listcomp_double() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 28: Exponentiation
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_exp_2_10() {
     expect("*main()\n    log(2 pow 10)\n", "1024");
@@ -1420,10 +1305,6 @@ fn b_exp_2_20() {
     expect("*main()\n    log(2 pow 20)\n", "1048576");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 29: Literals
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_hex_lit() {
     expect("*main()\n    log(0xFF)\n", "255");
@@ -1444,10 +1325,6 @@ fn b_underscore_lit() {
 fn b_neg_lit() {
     expect("*main()\n    log(-42)\n", "-42");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 30: Err defs and bang return
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_err_def() {
@@ -1471,10 +1348,6 @@ fn b_err_safe_div() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 31: Bit intrinsics
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_popcount() {
     expect(
@@ -1491,10 +1364,6 @@ fn b_popcount_0() {
     expect("*main() returns i32\n    log(popcount(0))\n    0\n", "0");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 32: ASM
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_asm_nop() {
     expect(
@@ -1502,10 +1371,6 @@ fn b_asm_nop() {
         "42",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 33: Compile-fail tests
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_fail_no_main() {
@@ -1526,10 +1391,6 @@ fn b_fail_non_exhaustive() {
 fn b_fail_tab_indent() {
     expect_compile_fail("*main()\n\tlog(1)\n");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 34: Complex algorithms
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_fibonacci() {
@@ -1644,10 +1505,6 @@ fn b_dot_product() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 35: Edge cases
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_zero_div() {
     expect("*main()\n    log(0 / 1)\n", "0");
@@ -1683,10 +1540,6 @@ fn b_complex_expr() {
     expect("*main()\n    log((1 + 2) * (3 + 4) - (5 + 6))\n", "10");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 36: Short-circuit eval
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_sc_and_skip() {
     expect(
@@ -1716,10 +1569,6 @@ fn b_sc_or_neither() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 37: Extern
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_extern_puts() {
     expect(
@@ -1727,10 +1576,6 @@ fn b_extern_puts() {
         "hello extern",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 38: Module system
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_module_import() {
@@ -1757,10 +1602,6 @@ fn b_module_import() {
     assert_eq!(stdout.trim(), "42");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 39: Exhaustive match
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_exhaust_all() {
     expect(
@@ -1782,10 +1623,6 @@ fn b_exhaust_fail() {
     );
     assert!(err.contains("non-exhaustive") || err.contains("missing"));
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 40: Complex algorithm patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_iterative_fib() {
@@ -1886,10 +1723,6 @@ fn b_enum_as_return() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 41: Additional for-in array tests
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_arr_count_gt() {
     expect(
@@ -1911,10 +1744,6 @@ fn b_arr_all_positive() {
         "1",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 42: Additional patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_match_5() {
@@ -1945,10 +1774,6 @@ fn b_struct_pass_return() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 43: Math utility functions
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_abs_fn() {
     expect(
@@ -1978,10 +1803,6 @@ fn b_clamp() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 44: Additional closures
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_closure_in_pipe() {
     expect(
@@ -2003,10 +1824,6 @@ fn b_lambda_chain_pipe() {
         "26",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 45: Additional number theory
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_is_palindrome() {
@@ -2037,10 +1854,6 @@ fn b_harmonic_int() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 46: More struct patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_struct_default() {
     expect(
@@ -2062,10 +1875,6 @@ fn b_struct_cmp() {
         "20",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 47: More loop patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_for_sum_odd() {
@@ -2096,10 +1905,6 @@ fn b_nested_for_mult_table() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 48: Generics + closures combined
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_gen_apply() {
     expect(
@@ -2114,10 +1919,6 @@ fn b_gen_compose() {
         "12\n11",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 49 as String operations
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_str_multi_concat() {
@@ -2138,13 +1939,8 @@ fn b_str_escape_backslash() {
     expect("*main()\n    log('a\\\\b')\n", "a\\b");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 50: More complex algorithms
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_binary_search_manual() {
-    // Binary search via explicit while loop (no array mutation needed)
     expect(
         "*main()\n    arr is [2, 5, 8, 12, 16, 23, 38, 56, 72, 91]\n    target is 23\n    lo is 0\n    hi is 9\n    found is -1\n    while lo <= hi\n        mid is (lo + hi) / 2\n        if arr[mid] equals target\n            found is mid\n            lo is hi + 1\n        elif arr[mid] < target\n            lo is mid + 1\n        else\n            hi is mid - 1\n    log(found)\n",
         "5",
@@ -2159,7 +1955,6 @@ fn b_fibonacci_loop() {
 }
 #[test]
 fn b_euler_sum_div() {
-    // Sum of numbers 1..999 divisible by 3 or 5
     expect(
         "*main()\n    sum is 0\n    for i in 1 to 1000\n        if i % 3 equals 0 or i % 5 equals 0\n            sum is sum + i\n    log(sum)\n",
         "233168",
@@ -2172,10 +1967,6 @@ fn b_perfect_number() {
         "1\n1\n0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 51: Pipeline advanced
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_pipe_4_chain() {
@@ -2191,10 +1982,6 @@ fn b_pipe_placeholder_2() {
         "7",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 52: Array advanced
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_arr_nested_access() {
@@ -2217,10 +2004,6 @@ fn b_listcomp_chain() {
         "1\n3\n5\n7\n9",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 53: More function patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_fn_no_return_type() {
@@ -2251,10 +2034,6 @@ fn b_fn_arg_expr() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 54: Modular arithmetic
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_mod_basic() {
     expect("*main()\n    log(10 % 3)\n", "1");
@@ -2267,10 +2046,6 @@ fn b_mod_even_check() {
 fn b_mod_large() {
     expect("*main()\n    log(1000000007 % 1000)\n", "7");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 55: More enum patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_enum_data_3_variants() {
@@ -2287,10 +2062,6 @@ fn b_enum_unit_all() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 56: Cast combinations
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_cast_chain() {
     expect("*main()\n    x is 42 as i32 as i64\n    log(x)\n", "42");
@@ -2303,10 +2074,6 @@ fn b_cast_i8() {
 fn b_cast_u8() {
     expect("*main()\n    x is 200 as u8\n    log(x)\n", "200");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 57: While with complex conditions
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_while_compound() {
@@ -2330,10 +2097,6 @@ fn b_while_not_cond() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 58: Additional Option/Result patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_option_fn() {
     expect(
@@ -2348,14 +2111,6 @@ fn b_result_chain() {
         "20\n-1",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 59: More RC patterns (removed — surface rc() no longer exists)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 60: Expression edge cases
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_double_neg() {
@@ -2381,10 +2136,6 @@ fn b_unary_neg() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH 61: For-in with computations
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_for_in_max_arr() {
     expect(
@@ -2406,10 +2157,6 @@ fn b_for_in_nested_if() {
         "3",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as String Interpolation
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_interp_str_var() {
@@ -2465,10 +2212,6 @@ fn b_interp_complex_expr() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Augmented Assignment
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_aug_plus() {
     expect("*main()\n    x is 10\n    x += 5\n    log(x)\n", "15");
@@ -2485,7 +2228,7 @@ fn b_aug_mul() {
 fn b_aug_div() {
     expect("*main()\n    x is 100\n    x /= 4\n    log(x)\n", "25");
 }
-// b_aug_mod removed as %= dropped from language
+
 #[test]
 fn b_aug_bitand() {
     expect("*main()\n    x is 0xFF\n    x &= 0x0F\n    log(x)\n", "15");
@@ -2513,10 +2256,6 @@ fn b_aug_chain() {
         "24",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as String Methods
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_str_contains_yes() {
@@ -2576,8 +2315,6 @@ fn b_str_slice_len() {
     );
 }
 
-// --- Array element assignment ---
-
 #[test]
 fn b_arr_assign_basic() {
     expect(
@@ -2618,8 +2355,6 @@ fn b_arr_assign_neg() {
     );
 }
 
-// --- Struct field assignment ---
-
 #[test]
 fn b_field_assign_basic() {
     expect(
@@ -2635,8 +2370,6 @@ fn b_field_assign_both() {
         "30",
     );
 }
-
-// --- Negative array indexing ---
 
 #[test]
 fn b_neg_idx_last() {
@@ -2659,8 +2392,6 @@ fn b_neg_idx_first() {
     expect("*main()\n    arr is [10, 20, 30]\n    log(arr[-3])\n", "10");
 }
 
-// --- Bitwise NOT ---
-
 #[test]
 fn b_bitnot_zero() {
     expect("*main()\n    log(~0)\n", "-1");
@@ -2676,8 +2407,6 @@ fn b_bitnot_double() {
     expect("*main()\n    x is 42\n    log(~~x)\n", "42");
 }
 
-// --- String length method ---
-
 #[test]
 fn b_str_len_method() {
     expect("*main()\n    s is 'hello'\n    log(s.len())\n", "5");
@@ -2687,8 +2416,6 @@ fn b_str_len_method() {
 fn b_str_len_empty() {
     expect("*main()\n    s is ''\n    log(s.length)\n", "0");
 }
-
-// --- Tuple destructuring ---
 
 #[test]
 fn b_tuple_bind_basic() {
@@ -2730,10 +2457,6 @@ fn b_tuple_bind_expr() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// PATTERN MATCHING GUARDS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_match_guard_value() {
     expect(
@@ -2766,10 +2489,6 @@ fn b_match_guard_enum_fail() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// EXTENSION METHODS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_ext_method_basic() {
     expect(
@@ -2785,10 +2504,6 @@ fn b_ext_method_with_args() {
         "4\n6",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// ASSERT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_assert_pass() {
@@ -2813,10 +2528,6 @@ fn b_assert_expr() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// EMBED
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_embed_file() {
     let out = compile_and_run_with_file(
@@ -2826,10 +2537,6 @@ fn b_embed_file() {
     );
     assert_eq!(out.trim(), "hello embedded");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TEST BLOCKS (--test mode)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_test_mode_runs_tests() {
@@ -2866,8 +2573,6 @@ fn b_test_blocks_stripped_normal() {
     );
 }
 
-// --- Pattern-directed function clauses ---
-
 #[test]
 fn b_clause_fn_fib() {
     expect(
@@ -2899,8 +2604,6 @@ fn b_clause_fn_gcd() {
         "4",
     );
 }
-
-// --- Inline body ---
 
 #[test]
 fn b_inline_body_parens() {
@@ -2934,10 +2637,6 @@ fn b_inline_fib_all_clauses() {
     );
 }
 
-// ── Actor tests ──────────────────────────────────────────────────────
-
-// Helper: compile and run a Jinn program, executing the binary inside the tempdir
-// so that .store files are created in isolation.
 fn compile_and_run_in_dir(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let jinn = dir.path().join("test.jn");
@@ -2968,7 +2667,6 @@ fn compile_and_run_in_dir(src: &str) -> String {
 
 #[test]
 fn b_actor_spawn_send_basic() {
-    // Actor that logs a value when it receives a message
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Printer\n    @say n as i64\n        log(n)\n\n*main()\n    p is spawn Printer\n    p.say(42)\n    extern.usleep(100000)\n    0\n",
         "42",
@@ -3037,11 +2735,8 @@ fn b_actor_loop_sleep_is_ms() {
     );
 }
 
-// ── Additional actor tests ───────────────────────────────────────────
-
 #[test]
 fn b_actor_zero_param_handler() {
-    // Handler with no parameters
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Pinger\n    count as i64\n    @ping\n        count is count + 1\n    @show\n        log(count)\n\n*main()\n    p is spawn Pinger\n    p.ping()\n    p.ping()\n    p.ping()\n    extern.usleep(100000)\n    p.show()\n    extern.usleep(100000)\n    0\n",
         "3",
@@ -3050,7 +2745,6 @@ fn b_actor_zero_param_handler() {
 
 #[test]
 fn b_actor_two_param_handler() {
-    // Handler with two parameters
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    c.add(17, 25)\n    extern.usleep(100000)\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "42",
@@ -3059,7 +2753,6 @@ fn b_actor_two_param_handler() {
 
 #[test]
 fn b_actor_multiple_state_fields() {
-    // Actor with multiple state fields
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Point\n    x as i64\n    y as i64\n    @set_x n as i64\n        x is n\n    @set_y n as i64\n        y is n\n    @show\n        log(x + y)\n\n*main()\n    p is spawn Point\n    p.set_x(10)\n    p.set_y(20)\n    extern.usleep(100000)\n    p.show()\n    extern.usleep(100000)\n    0\n",
         "30",
@@ -3068,18 +2761,14 @@ fn b_actor_multiple_state_fields() {
 
 #[test]
 fn b_actor_sequential_messages() {
-    // Actor processes messages in FIFO order
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    l.say(10)\n    l.say(20)\n    l.say(30)\n    l.say(40)\n    l.say(50)\n    extern.usleep(100000)\n    0\n",
         "10\n20\n30\n40\n50",
     );
 }
 
-// ── Store tests ──────────────────────────────────────────────────────
-
 #[test]
 fn b_store_insert_and_count() {
-    // Basic insert and count
     let out = compile_and_run_in_dir(
         "store items\n    key as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    c is count items\n    log(c)\n",
     );
@@ -3088,7 +2777,6 @@ fn b_store_insert_and_count() {
 
 #[test]
 fn b_store_query_equals() {
-    // Query with equals filter
     let out = compile_and_run_in_dir(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    log(r.val)\n",
     );
@@ -3097,7 +2785,6 @@ fn b_store_query_equals() {
 
 #[test]
 fn b_store_query_less_than() {
-    // Query with less-than filter
     let out = compile_and_run_in_dir(
         "store nums\n    id as i64\n    score as i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is nums where score < 40\n    log(r.id)\n",
     );
@@ -3106,7 +2793,6 @@ fn b_store_query_less_than() {
 
 #[test]
 fn b_store_query_greater_than() {
-    // Query with greater-than filter
     let out = compile_and_run_in_dir(
         "store vals\n    x as i64\n    y as i64\n\n*main()\n    insert vals 10, 1\n    insert vals 20, 2\n    insert vals 30, 3\n    r is vals where x > 15\n    log(r.y)\n",
     );
@@ -3115,7 +2801,6 @@ fn b_store_query_greater_than() {
 
 #[test]
 fn b_store_delete() {
-    // Delete records matching a filter
     let out = compile_and_run_in_dir(
         "store items\n    key as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 2, 20\n    insert items 3, 30\n    delete items where key equals 2\n    c is count items\n    log(c)\n",
     );
@@ -3124,7 +2809,6 @@ fn b_store_delete() {
 
 #[test]
 fn b_store_all() {
-    // Get all records and verify data via count
     let out = compile_and_run_in_dir(
         "store recs\n    n as i64\n\n*main()\n    insert recs 10\n    insert recs 20\n    insert recs 30\n    c is count recs\n    log(c)\n    a is all recs\n    log(0)\n",
     );
@@ -3133,7 +2817,6 @@ fn b_store_all() {
 
 #[test]
 fn b_store_set_update() {
-    // Update records with set (spec syntax: set store where filter field value)
     let out = compile_and_run_in_dir(
         "store users\n    id as i64\n    score as i64\n\n*main()\n    insert users 1, 100\n    insert users 2, 200\n    set users where id equals 1 score 999\n    r is users where id equals 1\n    log(r.score)\n",
     );
@@ -3142,7 +2825,6 @@ fn b_store_set_update() {
 
 #[test]
 fn b_store_multiple_inserts_query() {
-    // Insert many records and query
     let out = compile_and_run_in_dir(
         "store db\n    key as i64\n    val as i64\n\n*main()\n    i is 0\n    while i < 100\n        insert db i, i * 7\n        i is i + 1\n    r is db where key equals 50\n    log(r.val)\n",
     );
@@ -3151,7 +2833,6 @@ fn b_store_multiple_inserts_query() {
 
 #[test]
 fn b_store_transaction_basic() {
-    // Transaction block groups store operations
     let out = compile_and_run_in_dir(
         "store ledger\n    amount as i64\n\n*main()\n    transaction\n        insert ledger 10\n        insert ledger 20\n        insert ledger 30\n    c is count ledger\n    log(c)\n",
     );
@@ -3160,7 +2841,6 @@ fn b_store_transaction_basic() {
 
 #[test]
 fn b_store_compound_filter_and() {
-    // AND compound filter
     let out = compile_and_run_in_dir(
         "store items\n    cat as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 1, 20\n    insert items 2, 30\n    insert items 2, 40\n    r is items where cat equals 1 and val > 15\n    log(r.val)\n",
     );
@@ -3169,7 +2849,6 @@ fn b_store_compound_filter_and() {
 
 #[test]
 fn b_store_string_field() {
-    // Store with string fields
     let out = compile_and_run_in_dir(
         "store people\n    name as String\n    age as i64\n\n*main()\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    r is people where age equals 25\n    log(r.name)\n",
     );
@@ -3178,18 +2857,14 @@ fn b_store_string_field() {
 
 #[test]
 fn b_store_delete_and_recount() {
-    // Delete multiple records and verify count
     let out = compile_and_run_in_dir(
         "store records\n    key as i64\n    val as i64\n\n*main()\n    insert records 1, 10\n    insert records 2, 20\n    insert records 3, 30\n    insert records 4, 40\n    insert records 5, 50\n    delete records where key > 3\n    c is count records\n    log(c)\n",
     );
     assert_eq!(out, "3");
 }
 
-// ==================== Trait tests ====================
-
 #[test]
 fn b_trait_basic_impl() {
-    // Define a trait and implement it for a struct
     expect(
         "type Vec2\n    x as i64\n    y as i64\n\ntrait Summable\n    *sum() returns i64\n\nimpl Summable for Vec2\n    *sum() returns i64\n        self.x + self.y\n\n*main()\n    v is Vec2(x is 3, y is 7)\n    log(v.sum())\n",
         "10",
@@ -3198,7 +2873,6 @@ fn b_trait_basic_impl() {
 
 #[test]
 fn b_trait_multiple_methods() {
-    // Trait with multiple methods
     expect(
         "type Point\n    x as i64\n    y as i64\n\ntrait Describable\n    *get_x() returns i64\n    *get_y() returns i64\n\nimpl Describable for Point\n    *get_x() returns i64\n        self.x\n    *get_y() returns i64\n        self.y\n\n*main()\n    p is Point(x is 5, y is 12)\n    log(p.get_x())\n    log(p.get_y())\n",
         "5\n12",
@@ -3207,7 +2881,6 @@ fn b_trait_multiple_methods() {
 
 #[test]
 fn b_trait_with_params() {
-    // Trait method with extra parameters
     expect(
         "type Counter\n    val as i64\n\ntrait Addable\n    *add_to(n as i64) returns i64\n\nimpl Addable for Counter\n    *add_to(n as i64) returns i64\n        self.val + n\n\n*main()\n    c is Counter(val is 10)\n    log(c.add_to(5))\n",
         "15",
@@ -3216,7 +2889,6 @@ fn b_trait_with_params() {
 
 #[test]
 fn b_trait_impl_alongside_methods() {
-    // Struct with inline methods AND trait impl methods
     expect(
         "type Num\n    v as i64\n\n    *double() returns i64\n        self.v * 2\n\ntrait Showable\n    *value() returns i64\n\nimpl Showable for Num\n    *value() returns i64\n        self.v\n\n*main()\n    n is Num(v is 21)\n    log(n.double())\n    log(n.value())\n",
         "42\n21",
@@ -3225,7 +2897,6 @@ fn b_trait_impl_alongside_methods() {
 
 #[test]
 fn b_trait_multiple_impls() {
-    // Same trait implemented for different types
     expect(
         "type A\n    x as i64\n\ntype B\n    y as i64\n\ntrait GetVal\n    *val() returns i64\n\nimpl GetVal for A\n    *val() returns i64\n        self.x\n\nimpl GetVal for B\n    *val() returns i64\n        self.y\n\n*main()\n    a is A(x is 10)\n    b is B(y is 20)\n    log(a.val())\n    log(b.val())\n",
         "10\n20",
@@ -3234,7 +2905,6 @@ fn b_trait_multiple_impls() {
 
 #[test]
 fn b_trait_missing_method_fails() {
-    // Impl missing a required method should fail compilation
     let err = expect_compile_fail(
         "type Foo\n    x as i64\n\ntrait NeedTwo\n    *first() returns i64\n    *second() returns i64\n\nimpl NeedTwo for Foo\n    *first() returns i64\n        self.x\n\n*main()\n    log(0)\n",
     );
@@ -3246,7 +2916,6 @@ fn b_trait_missing_method_fails() {
 
 #[test]
 fn b_trait_unknown_trait_fails() {
-    // Impl for nonexistent trait should fail
     let err = expect_compile_fail(
         "type Bar\n    x as i64\n\nimpl Nonexistent for Bar\n    *foo() returns i64\n        self.x\n\n*main()\n    log(0)\n",
     );
@@ -3258,7 +2927,6 @@ fn b_trait_unknown_trait_fails() {
 
 #[test]
 fn b_trait_unknown_type_fails() {
-    // Impl for nonexistent type should fail
     let err = expect_compile_fail(
         "trait MyTrait\n    *foo() returns i64\n\nimpl MyTrait for Nonexistent\n    *foo() returns i64\n        0\n\n*main()\n    log(0)\n",
     );
@@ -3267,10 +2935,6 @@ fn b_trait_unknown_type_fails() {
         "expected unknown type error, got: {err}"
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as Vec operations
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_vec_create_empty() {
@@ -3332,7 +2996,6 @@ fn b_vec_clear() {
 
 #[test]
 fn b_vec_push_grow() {
-    // Push enough to trigger realloc
     expect(
         "*main()\n    v is vec()\n    for i in 0 to 100\n        v.push(i)\n    log(v.len())\n    log(v.get(99))\n",
         "100\n99",
@@ -3354,10 +3017,6 @@ fn b_vec_for_in_empty() {
         "0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as Map operations
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_map_create_empty() {
@@ -3411,10 +3070,6 @@ fn b_map_clear() {
         "0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as String new methods
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_str_find_found() {
@@ -3504,10 +3159,6 @@ fn b_str_split_no_delim() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as String equality
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_str_eq_same() {
     expect("*main()\n    log('hello' equals 'hello')\n", "1");
@@ -3540,10 +3191,6 @@ fn b_str_eq_var() {
         "1",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Range patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_range_pat_hit() {
@@ -3585,10 +3232,6 @@ fn b_range_pat_multi() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Or-patterns
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_or_pat_match() {
     expect(
@@ -3621,10 +3264,6 @@ fn b_or_pat_second() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Struct operator overloading (eq/neq)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_struct_eq_true() {
     expect(
@@ -3649,15 +3288,8 @@ fn b_struct_neq() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Dispatch keyword (actor send alias)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_dispatch_keyword_parses() {
-    // dispatch is an alias for send — verify it compiles and runs.
-    // The actor may or may not process the message before main exits
-    // (daemon coroutine race), so accept either "" or "0".
     let out = compile_and_run(
         "actor Counter\n    count as i64\n    @show\n        log(count)\n\n*main()\n    c is spawn Counter\n    dispatch c, @show()\n",
     );
@@ -3668,13 +3300,8 @@ fn b_dispatch_keyword_parses() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH as String iteration (for ch in string)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_string_iter_ascii_sum() {
-    // 'hello' = 104+101+108+108+111 = 532
     expect(
         "*main()\n    total is 0\n    for ch in 'hello'\n        total is total + ch\n    log(total)\n",
         "532",
@@ -3691,7 +3318,6 @@ fn b_string_iter_empty() {
 
 #[test]
 fn b_string_iter_abc() {
-    // A=65, B=66, C=67
     expect(
         "*main()\n    for ch in 'ABC'\n        log(ch)\n",
         "65\n66\n67",
@@ -3700,7 +3326,6 @@ fn b_string_iter_abc() {
 
 #[test]
 fn b_string_iter_var() {
-    // Iterate string held in a variable
     expect(
         "*main()\n    s is 'xyz'\n    total is 0\n    for ch in s\n        total is total + ch\n    log(total)\n",
         "363",
@@ -3709,7 +3334,6 @@ fn b_string_iter_var() {
 
 #[test]
 fn b_string_iter_break() {
-    // Break after 2 chars
     expect(
         "*main()\n    count is 0\n    for ch in 'abcde'\n        count is count + 1\n        if count equals 2\n            break\n    log(count)\n",
         "2",
@@ -3721,13 +3345,8 @@ fn b_string_iter_single_char() {
     expect("*main()\n    for ch in 'X'\n        log(ch)\n", "88");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Trait bounds on generics
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_trait_bound_basic() {
-    // Basic bounded generic
     expect(
         "*max of T: Ord(a as T, b as T) returns T\n    if a > b\n        return a\n    b\n\n*main()\n    log(max(3, 7))\n",
         "7",
@@ -3736,7 +3355,6 @@ fn b_trait_bound_basic() {
 
 #[test]
 fn b_trait_bound_violation() {
-    // Type without Ord impl should fail
     let err = expect_compile_fail(
         "type Blob\n    data as i64\n\n*bad of T: Ord(x as T) returns T\n    x\n\n*main()\n    log(bad(Blob(data is 1)))\n",
     );
@@ -3748,7 +3366,6 @@ fn b_trait_bound_violation() {
 
 #[test]
 fn b_trait_bound_i64_satisfies() {
-    // i64 satisfies Ord, Add, etc.
     expect(
         "*min of T: Ord(a as T, b as T) returns T\n    if a < b\n        return a\n    b\n\n*main()\n    log(min(10, 3))\n",
         "3",
@@ -3757,7 +3374,6 @@ fn b_trait_bound_i64_satisfies() {
 
 #[test]
 fn b_trait_bound_no_bound_still_works() {
-    // Unbounded generics continue to work
     expect(
         "*id of T(x as T) returns T\n    x\n\n*main()\n    log(id(42))\n",
         "42",
@@ -3766,7 +3382,6 @@ fn b_trait_bound_no_bound_still_works() {
 
 #[test]
 fn b_trait_bound_multiple_uses() {
-    // Use bounded generic with multiple types
     expect(
         "*bigger of T: Ord(a as T, b as T) returns T\n    if a > b\n        return a\n    b\n\n*main()\n    log(bigger(10, 20))\n    log(bigger(100, 50))\n",
         "20\n100",
@@ -3775,7 +3390,6 @@ fn b_trait_bound_multiple_uses() {
 
 #[test]
 fn b_trait_bound_with_impl() {
-    // Bound satisfied via explicit impl
     expect(
         "type Score\n    val as i64\n\ntrait Rankable\n    *rank() returns i64\n\nimpl Rankable for Score\n    *rank() returns i64\n        self.val\n\n*get_rank of T: Rankable(x as T) returns i64\n    x.rank()\n\n*main()\n    s is Score(val is 42)\n    log(get_rank(s))\n",
         "42",
@@ -3784,7 +3398,6 @@ fn b_trait_bound_with_impl() {
 
 #[test]
 fn b_trait_bound_struct_satisfies() {
-    // Struct with trait impl satisfies generic bound
     expect(
         "type Weight\n    kg as i64\n\ntrait Measurable\n    *measure() returns i64\n\nimpl Measurable for Weight\n    *measure() returns i64\n        self.kg\n\n*weigh of T: Measurable(item as T) returns i64\n    item.measure()\n\n*main()\n    w is Weight(kg is 75)\n    log(weigh(w))\n",
         "75",
@@ -3793,7 +3406,6 @@ fn b_trait_bound_struct_satisfies() {
 
 #[test]
 fn b_trait_bound_param_name() {
-    // Type::Param fallthrough gives clear error with type param name
     let err = expect_compile_fail(
         "type Empty\n    x as i64\n\n*process of T: Ord(v as T) returns T\n    v\n\n*main()\n    log(process(Empty(x is 1)))\n",
     );
@@ -3803,13 +3415,8 @@ fn b_trait_bound_param_name() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Associated types in traits
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_assoc_type_basic() {
-    // Trait with associated type, impl provides it
     expect(
         "trait Container\n    type Item\n    *get() returns i64\n\ntype Box\n    val as i64\n\nimpl Container for Box\n    type Item is i64\n    *get() returns i64\n        self.val\n\n*main()\n    b is Box(val is 42)\n    log(b.get())\n",
         "42",
@@ -3818,7 +3425,6 @@ fn b_assoc_type_basic() {
 
 #[test]
 fn b_assoc_type_missing() {
-    // Missing associated type binding should fail
     let err = expect_compile_fail(
         "trait Container\n    type Item\n    *get() returns i64\n\ntype Box\n    val as i64\n\nimpl Container for Box\n    *get() returns i64\n        self.val\n\n*main()\n    log(0)\n",
     );
@@ -3830,7 +3436,6 @@ fn b_assoc_type_missing() {
 
 #[test]
 fn b_assoc_type_multiple() {
-    // Trait with multiple associated types
     expect(
         "trait Pair\n    type First\n    type Second\n    *sum() returns i64\n\ntype TwoVals\n    a as i64\n    b as i64\n\nimpl Pair for TwoVals\n    type First is i64\n    type Second is i64\n    *sum() returns i64\n        self.a + self.b\n\n*main()\n    t is TwoVals(a is 10, b is 20)\n    log(t.sum())\n",
         "30",
@@ -3839,7 +3444,6 @@ fn b_assoc_type_multiple() {
 
 #[test]
 fn b_assoc_type_partial_missing() {
-    // One of two associated types missing
     let err = expect_compile_fail(
         "trait Pair\n    type First\n    type Second\n    *sum() returns i64\n\ntype TwoVals\n    a as i64\n    b as i64\n\nimpl Pair for TwoVals\n    type First is i64\n    *sum() returns i64\n        self.a + self.b\n\n*main()\n    log(0)\n",
     );
@@ -3851,7 +3455,6 @@ fn b_assoc_type_partial_missing() {
 
 #[test]
 fn b_assoc_type_no_assoc_required() {
-    // Trait without associated types still works
     expect(
         "trait Simple\n    *val() returns i64\n\ntype Num\n    v as i64\n\nimpl Simple for Num\n    *val() returns i64\n        self.v\n\n*main()\n    n is Num(v is 7)\n    log(n.val())\n",
         "7",
@@ -3860,20 +3463,14 @@ fn b_assoc_type_no_assoc_required() {
 
 #[test]
 fn b_assoc_type_with_methods() {
-    // Associated type alongside multiple methods
     expect(
         "trait Collection\n    type Elem\n    *first() returns i64\n    *second() returns i64\n\ntype Duo\n    x as i64\n    y as i64\n\nimpl Collection for Duo\n    type Elem is i64\n    *first() returns i64\n        self.x\n    *second() returns i64\n        self.y\n\n*main()\n    d is Duo(x is 3, y is 7)\n    log(d.first())\n    log(d.second())\n",
         "3\n7",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Custom iterator protocol (for x in CustomIter)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_iter_basic_counter() {
-    // Counter yields 0,1,2,3,4 — sum should be 10
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 5)\n        total is total + x\n    log(total)\n",
         "10",
@@ -3882,7 +3479,6 @@ fn b_iter_basic_counter() {
 
 #[test]
 fn b_iter_empty() {
-    // max is 0, nothing yielded
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 0)\n        total is total + x\n    log(total)\n",
         "0",
@@ -3891,17 +3487,14 @@ fn b_iter_empty() {
 
 #[test]
 fn b_iter_single_element() {
-    // max is 1, yields only 0
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 1)\n        total is total + x\n    log(total)\n",
         "0",
     );
 }
 
-// #[test]
 #[test]
 fn b_iter_log_each() {
-    // Log each element individually
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    for x in Counter(n is 0, max is 3)\n        log(x)\n",
         "0\n1\n2",
@@ -3910,7 +3503,6 @@ fn b_iter_log_each() {
 
 #[test]
 fn b_iter_break() {
-    // Break after accumulating 3 elements
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 10)\n        count is count + 1\n        if count equals 3\n            break\n    log(count)\n",
         "3",
@@ -3919,7 +3511,6 @@ fn b_iter_break() {
 
 #[test]
 fn b_iter_with_offset() {
-    // Start from 5, go to 8: yields 5,6,7 — sum 18
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 5, max is 8)\n        total is total + x\n    log(total)\n",
         "18",
@@ -3928,7 +3519,6 @@ fn b_iter_with_offset() {
 
 #[test]
 fn b_iter_count_elements() {
-    // Count how many elements yielded
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    count is 0\n    for x in Counter(n is 0, max is 7)\n        count is count + 1\n    log(count)\n",
         "7",
@@ -3937,7 +3527,6 @@ fn b_iter_count_elements() {
 
 #[test]
 fn b_iter_two_sequential() {
-    // Two separate iterators in sequence
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    a is 0\n    for x in Counter(n is 0, max is 3)\n        a is a + x\n    b is 0\n    for y in Counter(n is 10, max is 13)\n        b is b + y\n    log(a)\n    log(b)\n",
         "3\n33",
@@ -3946,7 +3535,6 @@ fn b_iter_two_sequential() {
 
 #[test]
 fn b_iter_accumulate_product() {
-    // Product: 1*2*3*4 = 24
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    prod is 1\n    for x in Counter(n is 1, max is 5)\n        prod is prod * x\n    log(prod)\n",
         "24",
@@ -3955,20 +3543,14 @@ fn b_iter_accumulate_product() {
 
 #[test]
 fn b_iter_large_range() {
-    // Sum 0..100 = 4950
     expect(
         "type Counter\n    n as i64\n    max as i64\n\nimpl Iter of i64 for Counter\n    *next self\n        if self.n >= self.max\n            Nothing\n        else\n            val is self.n\n            self.n is self.n + 1\n            Some(val)\n\n*main()\n    total is 0\n    for x in Counter(n is 0, max is 100)\n        total is total + x\n    log(total)\n",
         "4950",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Channel tests
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_channel_send_recv_basic() {
-    // Send 3 values into channel, receive them in order
     expect(
         "*main()\n    ch is channel of i64(16)\n    send ch, 10\n    send ch, 20\n    send ch, 30\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a)\n    log(b)\n    log(c)\n",
         "10\n20\n30",
@@ -3977,7 +3559,6 @@ fn b_channel_send_recv_basic() {
 
 #[test]
 fn b_channel_send_recv_single() {
-    // Single send/recv pair
     expect(
         "*main()\n    ch is channel of i64\n    send ch, 42\n    val is receive ch\n    log(val)\n",
         "42",
@@ -3986,7 +3567,6 @@ fn b_channel_send_recv_single() {
 
 #[test]
 fn b_channel_close_after_send() {
-    // Send values, close channel, then receive remaining values
     expect(
         "*main()\n    ch is channel of i64(16)\n    send ch, 1\n    send ch, 2\n    close ch\n    a is receive ch\n    b is receive ch\n    log(a)\n    log(b)\n",
         "1\n2",
@@ -3995,7 +3575,6 @@ fn b_channel_close_after_send() {
 
 #[test]
 fn b_channel_large_batch() {
-    // Send and receive many values, verify count
     expect(
         "*main()\n    ch is channel of i64(256)\n    i is 0\n    while i < 100\n        send ch, i\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 100\n        val is receive ch\n        total is total + val\n        j is j + 1\n    log(total)\n",
         "4950",
@@ -4004,17 +3583,14 @@ fn b_channel_large_batch() {
 
 #[test]
 fn b_channel_capacity_exact() {
-    // Fill channel to exact capacity, then drain
     expect(
         "*main()\n    ch is channel of i64(4)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    send ch, 4\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    d is receive ch\n    log(a + b + c + d)\n",
         "10",
     );
 }
 
-// Phase 2B: Channel type inference from usage
 #[test]
 fn b_channel_infer_from_send() {
-    // Channel without type annotation — type inferred from send
     expect(
         "*main()\n    ch is channel(16)\n    send ch, 42\n    val is receive ch\n    log(val)\n",
         "42",
@@ -4023,20 +3599,14 @@ fn b_channel_infer_from_send() {
 
 #[test]
 fn b_channel_infer_multiple_sends() {
-    // Channel type inferred, multiple values
     expect(
         "*main()\n    ch is channel(16)\n    send ch, 10\n    send ch, 20\n    a is receive ch\n    b is receive ch\n    log(a + b)\n",
         "30",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Dispatch (coroutine/generator) tests
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_dispatch_basic_yield() {
-    // Dispatch block yields 3 values, consumer calls .next() on the dispatch name
     expect(
         "*main()\n    foo is dispatch producer\n        yield 10\n        yield 20\n        yield 30\n    a is producer.next()\n    b is producer.next()\n    c is producer.next()\n    log(a)\n    log(b)\n    log(c)\n",
         "10\n20\n30",
@@ -4045,7 +3615,6 @@ fn b_dispatch_basic_yield() {
 
 #[test]
 fn b_dispatch_sum_yields() {
-    // Sum values from a dispatch block using the dispatch name
     expect(
         "*main()\n    foo is dispatch nums\n        yield 1\n        yield 2\n        yield 3\n        yield 4\n        yield 5\n    total is 0\n    total is total + nums.next()\n    total is total + nums.next()\n    total is total + nums.next()\n    total is total + nums.next()\n    total is total + nums.next()\n    log(total)\n",
         "15",
@@ -4054,7 +3623,6 @@ fn b_dispatch_sum_yields() {
 
 #[test]
 fn b_dispatch_with_loop() {
-    // Dispatch block yields multiple computed values via the name
     expect(
         "*main()\n    foo is dispatch counter\n        yield 0\n        yield 1\n        yield 2\n        yield 3\n        yield 4\n    total is counter.next() + counter.next() + counter.next() + counter.next() + counter.next()\n    log(total)\n",
         "10",
@@ -4063,20 +3631,14 @@ fn b_dispatch_with_loop() {
 
 #[test]
 fn b_dispatch_anonymous() {
-    // Anonymous dispatch block (no name) — binding var is the handle
     expect(
         "*main()\n    gen is dispatch\n        yield 99\n        yield 42\n    log(gen.next())\n    log(gen.next())\n",
         "99\n42",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Select tests
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_select_one_ready() {
-    // Select over 2 channels, one has data — correct arm executes
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch1, 42\n    select\n        receive ch1 as val\n            log(val)\n        receive ch2 as val\n            log(val)\n",
         "42",
@@ -4085,20 +3647,14 @@ fn b_select_one_ready() {
 
 #[test]
 fn b_select_default_arm() {
-    // Select with default when no channels have data
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    select\n        receive ch1 as val\n            log(val)\n        receive ch2 as val\n            log(val)\n        default\n            log(0)\n",
         "0",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Actor stop/lifecycle tests
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_actor_stop_basic() {
-    // Spawn actor, send messages, stop it, program exits cleanly
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    a.add(5)\n    a.add(10)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    stop a\n    0\n",
         "15",
@@ -4107,7 +3663,6 @@ fn b_actor_stop_basic() {
 
 #[test]
 fn b_actor_sequential_message_order() {
-    // Send many messages sequentially, verify accumulated state
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 10\n        s.add(i)\n        i is i + 1\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "45",
@@ -4116,7 +3671,6 @@ fn b_actor_sequential_message_order() {
 
 #[test]
 fn b_actor_multiple_state_tracking() {
-    // Actor with multiple state fields
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Stats\n    count as i64\n    sum as i64\n    @record n as i64\n        count is count + 1\n        sum is sum + n\n    @show\n        log(count)\n        log(sum)\n\n*main()\n    s is spawn Stats\n    s.record(10)\n    s.record(20)\n    s.record(30)\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "3\n60",
@@ -4125,20 +3679,14 @@ fn b_actor_multiple_state_tracking() {
 
 #[test]
 fn b_actor_two_param_handler_math() {
-    // Handler with two parameters
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add_mul a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    c.add_mul(3, 4)\n    c.add_mul(5, 6)\n    extern.usleep(200000)\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "42",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Actor — compile-time validation (C3, C4, C5)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_actor_send_too_few_args() {
-    // C4: handler expects 2 args, only 1 given → compile error
     let err = expect_compile_fail(
         "extern *usleep(us as i32) returns i32\n\nactor Calc\n    result as i64\n    @add a as i64, b as i64\n        result is a + b\n    @show\n        log(result)\n\n*main()\n    c is spawn Calc\n    c.add(10)\n    extern.usleep(100000)\n    0\n",
     );
@@ -4150,7 +3698,6 @@ fn b_actor_send_too_few_args() {
 
 #[test]
 fn b_actor_send_too_many_args() {
-    // C4: handler expects 1 arg, 3 given → compile error
     let err = expect_compile_fail(
         "extern *usleep(us as i32) returns i32\n\nactor Adder\n    total as i64\n    @add n as i64\n        total is total + n\n\n*main()\n    a is spawn Adder\n    a.add(1, 2, 3)\n    extern.usleep(100000)\n    0\n",
     );
@@ -4162,7 +3709,6 @@ fn b_actor_send_too_many_args() {
 
 #[test]
 fn b_actor_send_zero_args_to_parameterized_handler() {
-    // C4: handler expects 1 arg, 0 given → compile error
     let err = expect_compile_fail(
         "extern *usleep(us as i32) returns i32\n\nactor Logger\n    @say n as i64\n        log(n)\n\n*main()\n    l is spawn Logger\n    l.say()\n    extern.usleep(100000)\n    0\n",
     );
@@ -4174,7 +3720,6 @@ fn b_actor_send_zero_args_to_parameterized_handler() {
 
 #[test]
 fn b_actor_send_unknown_handler() {
-    // Call a handler that doesn't exist → compile error
     let err = expect_compile_fail(
         "extern *usleep(us as i32) returns i32\n\nactor Counter\n    count as i64\n    @increment\n        count is count + 1\n\n*main()\n    c is spawn Counter\n    c.decrement()\n    extern.usleep(100000)\n    0\n",
     );
@@ -4197,7 +3742,6 @@ fn b_actor_send_syntax_removed() {
 
 #[test]
 fn b_actor_receive_outside_handler() {
-    // C3: actor-style receive (with @handler arms) outside actor → compile error
     let err = expect_compile_fail(
         "*main()\n    x is receive\n        @foo(v)\n            log(v)\n    log(x)\n",
     );
@@ -4207,13 +3751,8 @@ fn b_actor_receive_outside_handler() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Actor — extended runtime correctness (M1)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_actor_f64_state_and_handler() {
-    // Actor with f64 state and f64 handler parameter
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Accum\n    total as f64\n    @add n as f64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Accum\n    a.add(1.5)\n    a.add(2.5)\n    a.add(3.0)\n    extern.usleep(200000)\n    a.show()\n    extern.usleep(100000)\n    0\n",
         "7.000000",
@@ -4222,7 +3761,6 @@ fn b_actor_f64_state_and_handler() {
 
 #[test]
 fn b_actor_mixed_param_types() {
-    // Handler with two i64 parameters using arithmetic
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Mixer\n    result as i64\n    @compute a as i64, b as i64\n        result is result + a * b\n    @show\n        log(result)\n\n*main()\n    m is spawn Mixer\n    m.compute(3, 4)\n    m.compute(5, 6)\n    extern.usleep(200000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "42",
@@ -4231,7 +3769,6 @@ fn b_actor_mixed_param_types() {
 
 #[test]
 fn b_actor_stop_clean_exit() {
-    // Spawn, send, stop, and program exits cleanly without hang
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Worker\n    @ping\n        log(1)\n\n*main()\n    w is spawn Worker\n    w.ping()\n    extern.usleep(100000)\n    stop w\n    extern.usleep(50000)\n    log(0)\n",
         "1\n0",
@@ -4240,7 +3777,6 @@ fn b_actor_stop_clean_exit() {
 
 #[test]
 fn b_actor_multiple_actors_independent() {
-    // Two independent actors accumulate separately
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor A\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\nactor B\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    a is spawn A\n    b is spawn B\n    a.set(10)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    b.set(20)\n    extern.usleep(100000)\n    b.show()\n    extern.usleep(100000)\n    0\n",
         "10\n20",
@@ -4249,8 +3785,6 @@ fn b_actor_multiple_actors_independent() {
 
 #[test]
 fn b_actor_spawn_in_loop() {
-    // Spawn multiple actors in a loop, each sends a message
-    // Use a single accumulator to avoid nondeterministic output order
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Acc\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Acc\n    i is 1\n    while i <= 5\n        a.add(i)\n        i is i + 1\n    extern.usleep(200000)\n    a.show()\n    extern.usleep(100000)\n    0\n",
         "15",
@@ -4259,7 +3793,6 @@ fn b_actor_spawn_in_loop() {
 
 #[test]
 fn b_actor_handler_with_conditional() {
-    // Handler body contains conditional logic
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Filter\n    @check n as i64\n        if n > 10\n            log(n)\n\n*main()\n    f is spawn Filter\n    f.check(5)\n    f.check(15)\n    f.check(3)\n    f.check(20)\n    extern.usleep(200000)\n    0\n",
         "15\n20",
@@ -4268,7 +3801,6 @@ fn b_actor_handler_with_conditional() {
 
 #[test]
 fn b_actor_handler_with_while_loop() {
-    // Handler body contains a while loop
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Counter\n    @count_to n as i64\n        i is 1\n        while i <= n\n            log(i)\n            i is i + 1\n\n*main()\n    c is spawn Counter\n    c.count_to(3)\n    extern.usleep(200000)\n    0\n",
         "1\n2\n3",
@@ -4277,7 +3809,6 @@ fn b_actor_handler_with_while_loop() {
 
 #[test]
 fn b_actor_stress_many_messages() {
-    // Send 500 messages to an accumulator, verify sum
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor BigSum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn BigSum\n    i is 1\n    while i <= 500\n        s.add(i)\n        i is i + 1\n    extern.usleep(500000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "125250",
@@ -4286,7 +3817,6 @@ fn b_actor_stress_many_messages() {
 
 #[test]
 fn b_actor_three_actors_three_handlers() {
-    // Three actors with different handler signatures, sequenced output
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor X\n    v as i64\n    @set n as i64\n        v is n\n    @show\n        log(v)\n\nactor Y\n    v as i64\n    @add a as i64, b as i64\n        v is a + b\n    @show\n        log(v)\n\nactor Z\n    @echo n as i64\n        log(n)\n\n*main()\n    x is spawn X\n    y is spawn Y\n    z is spawn Z\n    x.set(1)\n    extern.usleep(100000)\n    x.show()\n    extern.usleep(100000)\n    y.add(2, 3)\n    extern.usleep(100000)\n    y.show()\n    extern.usleep(100000)\n    z.echo(5)\n    extern.usleep(200000)\n    0\n",
         "1\n5\n5",
@@ -4295,7 +3825,6 @@ fn b_actor_three_actors_three_handlers() {
 
 #[test]
 fn b_actor_handler_mutates_multiple_fields() {
-    // Single handler updates multiple state fields
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Pair\n    x as i64\n    y as i64\n    @set_both a as i64, b as i64\n        x is a\n        y is b\n    @show\n        log(x)\n        log(y)\n\n*main()\n    p is spawn Pair\n    p.set_both(42, 99)\n    extern.usleep(200000)\n    p.show()\n    extern.usleep(100000)\n    0\n",
         "42\n99",
@@ -4304,20 +3833,14 @@ fn b_actor_handler_mutates_multiple_fields() {
 
 #[test]
 fn b_actor_repeated_stop() {
-    // Stop an actor that was already stopped — should not crash
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Simple\n    @ping\n        log(1)\n\n*main()\n    s is spawn Simple\n    s.ping()\n    extern.usleep(100000)\n    stop s\n    extern.usleep(50000)\n    log(0)\n",
         "1\n0",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Channel — extended coverage (M2)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_channel_close_then_recv_returns_remaining() {
-    // Close channel with buffered items, recv still returns them
     expect(
         "*main()\n    ch is channel of i64(16)\n    send ch, 10\n    send ch, 20\n    send ch, 30\n    close ch\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a + b + c)\n",
         "60",
@@ -4326,7 +3849,6 @@ fn b_channel_close_then_recv_returns_remaining() {
 
 #[test]
 fn b_channel_send_recv_interleaved() {
-    // Interleave send/recv operations
     expect(
         "*main()\n    ch is channel of i64(4)\n    send ch, 1\n    a is receive ch\n    send ch, 2\n    b is receive ch\n    send ch, 3\n    c is receive ch\n    log(a + b + c)\n",
         "6",
@@ -4335,20 +3857,14 @@ fn b_channel_send_recv_interleaved() {
 
 #[test]
 fn b_channel_f64_values() {
-    // Channel carrying f64 values
     expect(
         "*main()\n    ch is channel of f64(16)\n    send ch, 1.5\n    send ch, 2.5\n    a is receive ch\n    b is receive ch\n    log(a + b)\n",
         "4.000000",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Select — extended coverage (M3)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_select_multiple_ready_first_wins() {
-    // Both channels have data — first arm should win
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch1, 10\n    send ch2, 20\n    select\n        receive ch1 as val\n            log(val)\n        receive ch2 as val\n            log(val)\n",
         "10",
@@ -4357,7 +3873,6 @@ fn b_select_multiple_ready_first_wins() {
 
 #[test]
 fn b_select_in_loop() {
-    // Select inside a loop, consume from channel round by round
     expect(
         "*main()\n    ch is channel of i64(16)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    dummy is channel of i64(16)\n    total is 0\n    i is 0\n    while i < 3\n        select\n            receive ch as val\n                total is total + val\n            default\n                total is total\n        i is i + 1\n    log(total)\n",
         "6",
@@ -4366,18 +3881,11 @@ fn b_select_in_loop() {
 
 #[test]
 fn b_select_default_when_empty() {
-    // No channels ready → default arm fires
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    ch3 is channel of i64(16)\n    select\n        receive ch1 as v\n            log(1)\n        receive ch2 as v\n            log(2)\n        receive ch3 as v\n            log(3)\n        default\n            log(0)\n",
         "0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// P3.14: Extended concurrency test coverage
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// ── Channel: edge cases ──
 
 #[test]
 fn b_channel_send_recv_fifo_order() {
@@ -4405,7 +3913,6 @@ fn b_channel_capacity_one() {
 
 #[test]
 fn b_channel_empty_recv_after_drain() {
-    // Send and fully drain, confirm values correct
     expect(
         "*main()\n    ch is channel of i64(8)\n    i is 0\n    while i < 8\n        send ch, i * 10\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 8\n        val is receive ch\n        total is total + val\n        j is j + 1\n    log(total)\n",
         "280",
@@ -4446,7 +3953,6 @@ fn b_channel_send_recv_interleaved_loop() {
 
 #[test]
 fn b_channel_reuse_after_drain() {
-    // Use a channel, drain it, then use it again
     expect(
         "*main()\n    ch is channel of i64(4)\n    send ch, 1\n    send ch, 2\n    a is receive ch\n    b is receive ch\n    send ch, 3\n    send ch, 4\n    c is receive ch\n    d is receive ch\n    log(a + b + c + d)\n",
         "10",
@@ -4455,18 +3961,14 @@ fn b_channel_reuse_after_drain() {
 
 #[test]
 fn b_channel_multiple_channels() {
-    // Multiple independent channels
     expect(
         "*main()\n    ch1 is channel of i64(4)\n    ch2 is channel of i64(4)\n    send ch1, 10\n    send ch2, 20\n    a is receive ch1\n    b is receive ch2\n    log(a + b)\n",
         "30",
     );
 }
 
-// ── Select: extended ──
-
 #[test]
 fn b_select_two_channels_both_ready() {
-    // Both channels have data — first arm wins
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch1, 10\n    send ch2, 20\n    select\n        receive ch1 as v\n            log(v)\n        receive ch2 as v\n            log(v)\n",
         "10",
@@ -4475,7 +3977,6 @@ fn b_select_two_channels_both_ready() {
 
 #[test]
 fn b_select_second_channel_ready() {
-    // Only second channel has data
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    send ch2, 77\n    select\n        receive ch1 as v\n            log(v)\n        receive ch2 as v\n            log(v)\n",
         "77",
@@ -4484,7 +3985,6 @@ fn b_select_second_channel_ready() {
 
 #[test]
 fn b_select_three_channels() {
-    // Three channels, only third has data
     expect(
         "*main()\n    ch1 is channel of i64(16)\n    ch2 is channel of i64(16)\n    ch3 is channel of i64(16)\n    send ch3, 33\n    select\n        receive ch1 as v\n            log(v)\n        receive ch2 as v\n            log(v)\n        receive ch3 as v\n            log(v)\n",
         "33",
@@ -4493,7 +3993,6 @@ fn b_select_three_channels() {
 
 #[test]
 fn b_select_in_loop_multiple() {
-    // Select in a loop, draining a channel
     expect(
         "*main()\n    ch is channel of i64(16)\n    send ch, 1\n    send ch, 2\n    send ch, 3\n    total is 0\n    i is 0\n    while i < 3\n        select\n            receive ch as v\n                total is total + v\n        i is i + 1\n    log(total)\n",
         "6",
@@ -4502,7 +4001,6 @@ fn b_select_in_loop_multiple() {
 
 #[test]
 fn b_select_default_no_channels() {
-    // Default with an empty channel and default arm
     expect(
         "*main()\n    ch is channel of i64(16)\n    select\n        receive ch as v\n            log(v)\n        default\n            log(42)\n",
         "42",
@@ -4511,14 +4009,11 @@ fn b_select_default_no_channels() {
 
 #[test]
 fn b_select_value_computation() {
-    // Use received value in computation
     expect(
         "*main()\n    ch is channel of i64(16)\n    send ch, 5\n    result is 0\n    select\n        receive ch as v\n            result is v * 10 + 7\n    log(result)\n",
         "57",
     );
 }
-
-// ── Dispatch/coroutine: extended ──
 
 #[test]
 fn b_dispatch_yield_in_loop() {
@@ -4546,7 +4041,6 @@ fn b_dispatch_many_yields() {
 
 #[test]
 fn b_dispatch_computed_yields() {
-    // Yield results of computation
     expect(
         "*main()\n    gen is dispatch squares\n        yield 1\n        yield 4\n        yield 9\n        yield 16\n    a is squares.next()\n    b is squares.next()\n    c is squares.next()\n    d is squares.next()\n    log(a + b + c + d)\n",
         "30",
@@ -4555,7 +4049,6 @@ fn b_dispatch_computed_yields() {
 
 #[test]
 fn b_dispatch_anonymous_multiple() {
-    // Multiple named dispatch blocks
     expect(
         "*main()\n    g1 is dispatch a\n        yield 10\n    g2 is dispatch b\n        yield 20\n    log(a.next() + b.next())\n",
         "30",
@@ -4578,11 +4071,8 @@ fn b_dispatch_yield_zero() {
     );
 }
 
-// ── Actor: extended lifecycle & patterns ──
-
 #[test]
 fn b_actor_state_init_zero() {
-    // State fields default to zero
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @show\n        log(val)\n\n*main()\n    c is spawn Counter\n    c.show()\n    extern.usleep(100000)\n    0\n",
         "0",
@@ -4599,7 +4089,6 @@ fn b_actor_increment_decrement() {
 
 #[test]
 fn b_actor_overwrite_state() {
-    // Repeatedly overwrite state
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Box\n    val as i64\n    @set n as i64\n        val is n\n    @show\n        log(val)\n\n*main()\n    b is spawn Box\n    b.set(1)\n    b.set(2)\n    b.set(3)\n    b.set(99)\n    extern.usleep(100000)\n    b.show()\n    extern.usleep(100000)\n    0\n",
         "99",
@@ -4608,7 +4097,6 @@ fn b_actor_overwrite_state() {
 
 #[test]
 fn b_actor_state_tracks_max() {
-    // Actor that tracks the maximum value seen
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor MaxTracker\n    best as i64\n    @update n as i64\n        if n > best\n            best is n\n    @show\n        log(best)\n\n*main()\n    m is spawn MaxTracker\n    m.update(5)\n    m.update(3)\n    m.update(9)\n    m.update(1)\n    m.update(7)\n    extern.usleep(100000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "9",
@@ -4617,7 +4105,6 @@ fn b_actor_state_tracks_max() {
 
 #[test]
 fn b_actor_conditional_handler() {
-    // Handler with conditional logic
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor EvenCounter\n    evens as i64\n    @check n as i64\n        if n % 2 equals 0\n            evens is evens + 1\n    @show\n        log(evens)\n\n*main()\n    e is spawn EvenCounter\n    e.check(1)\n    e.check(2)\n    e.check(3)\n    e.check(4)\n    e.check(5)\n    e.check(6)\n    extern.usleep(100000)\n    e.show()\n    extern.usleep(100000)\n    0\n",
         "3",
@@ -4626,7 +4113,6 @@ fn b_actor_conditional_handler() {
 
 #[test]
 fn b_actor_handler_with_math() {
-    // Handler performing arithmetic on state
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Multiply\n    product as i64\n    @init\n        product is 1\n    @mul n as i64\n        product is product * n\n    @show\n        log(product)\n\n*main()\n    m is spawn Multiply\n    m.init()\n    m.mul(2)\n    m.mul(3)\n    m.mul(4)\n    extern.usleep(100000)\n    m.show()\n    extern.usleep(100000)\n    0\n",
         "24",
@@ -4635,7 +4121,6 @@ fn b_actor_handler_with_math() {
 
 #[test]
 fn b_actor_many_messages_stress() {
-    // 50 messages to an actor
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Sum\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Sum\n    i is 0\n    while i < 50\n        s.add(1)\n        i is i + 1\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "50",
@@ -4644,7 +4129,6 @@ fn b_actor_many_messages_stress() {
 
 #[test]
 fn b_actor_two_actors_same_type() {
-    // Two actors of the same type, independent state — show sum to avoid ordering
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Counter\n    val as i64\n    @inc\n        val is val + 1\n    @get\n        log(val)\n\n*main()\n    a is spawn Counter\n    b is spawn Counter\n    a.inc()\n    a.inc()\n    a.inc()\n    b.inc()\n    extern.usleep(200000)\n    a.get()\n    extern.usleep(200000)\n    0\n",
         "3",
@@ -4661,7 +4145,6 @@ fn b_actor_three_state_fields() {
 
 #[test]
 fn b_actor_handler_logs_directly() {
-    // Handler that logs immediately (no state read)
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Greeter\n    @greet n as i64\n        log(n * 100)\n\n*main()\n    g is spawn Greeter\n    g.greet(5)\n    extern.usleep(100000)\n    0\n",
         "500",
@@ -4670,7 +4153,6 @@ fn b_actor_handler_logs_directly() {
 
 #[test]
 fn b_actor_accumulate_then_stop() {
-    // Accumulate, show, stop
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Acc\n    sum as i64\n    @add n as i64\n        sum is sum + n\n    @show\n        log(sum)\n\n*main()\n    a is spawn Acc\n    a.add(1)\n    a.add(2)\n    a.add(3)\n    extern.usleep(100000)\n    a.show()\n    extern.usleep(100000)\n    stop a\n    extern.usleep(100000)\n    0\n",
         "6",
@@ -4679,7 +4161,6 @@ fn b_actor_accumulate_then_stop() {
 
 #[test]
 fn b_actor_spawn_five_independent() {
-    // Spawn 5 independent actors — order may vary, so use a single actor that accumulates
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Summer\n    total as i64\n    @add n as i64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    s is spawn Summer\n    s.add(1)\n    s.add(2)\n    s.add(3)\n    s.add(4)\n    s.add(5)\n    extern.usleep(200000)\n    s.show()\n    extern.usleep(100000)\n    0\n",
         "15",
@@ -4688,18 +4169,14 @@ fn b_actor_spawn_five_independent() {
 
 #[test]
 fn b_actor_handler_while_loop() {
-    // Handler uses while loop to log multiple values
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Repeater\n    @repeat n as i64\n        i is 0\n        while i < n\n            log(i)\n            i is i + 1\n\n*main()\n    r is spawn Repeater\n    r.repeat(3)\n    extern.usleep(100000)\n    0\n",
         "0\n1\n2",
     );
 }
 
-// ── Channels: combined with functions ──
-
 #[test]
 fn b_channel_passed_to_function() {
-    // Pass channel to a function that sends to it
     expect(
         "*fill(ch)\n    send ch, 10\n    send ch, 20\n    send ch, 30\n\n*main()\n    ch is channel of i64(8)\n    fill(ch)\n    a is receive ch\n    b is receive ch\n    c is receive ch\n    log(a + b + c)\n",
         "60",
@@ -4708,7 +4185,6 @@ fn b_channel_passed_to_function() {
 
 #[test]
 fn b_channel_accumulate_in_loop() {
-    // Accumulate channel values in a loop
     expect(
         "*main()\n    ch is channel of i64(32)\n    i is 1\n    while i <= 10\n        send ch, i * i\n        i is i + 1\n    sum is 0\n    j is 0\n    while j < 10\n        v is receive ch\n        sum is sum + v\n        j is j + 1\n    log(sum)\n",
         "385",
@@ -4717,14 +4193,11 @@ fn b_channel_accumulate_in_loop() {
 
 #[test]
 fn b_channel_conditional_send() {
-    // Only send even values
     expect(
         "*main()\n    ch is channel of i64(16)\n    i is 0\n    while i < 10\n        if i % 2 equals 0\n            send ch, i\n        i is i + 1\n    total is 0\n    j is 0\n    while j < 5\n        v is receive ch\n        total is total + v\n        j is j + 1\n    log(total)\n",
         "20",
     );
 }
-
-// ── Select: more patterns ──
 
 #[test]
 fn b_select_compute_with_default() {
@@ -4742,11 +4215,8 @@ fn b_select_nested_computation() {
     );
 }
 
-// ── Dispatch: more patterns ──
-
 #[test]
 fn b_dispatch_fibonacci_yields() {
-    // Dispatch that yields fibonacci-like values
     expect(
         "*main()\n    gen is dispatch fib\n        yield 1\n        yield 1\n        yield 2\n        yield 3\n        yield 5\n        yield 8\n    total is 0\n    i is 0\n    while i < 6\n        total is total + fib.next()\n        i is i + 1\n    log(total)\n",
         "20",
@@ -4768,10 +4238,6 @@ fn b_dispatch_alternating_sign() {
         "0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STDLIB: std.math
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_std_math_factorial() {
@@ -4799,7 +4265,6 @@ fn b_std_math_lcm() {
 
 #[test]
 fn b_std_math_constants() {
-    // Verify PI, E, TAU are in the expected ranges
     expect(
         "use std/math\n\n*main()\n    log(math.PI > 3.14)\n    log(math.PI < 3.15)\n    log(math.E > 2.71)\n    log(math.E < 2.72)\n    log(math.TAU > 6.28)\n    log(math.TAU < 6.29)\n",
         "1\n1\n1\n1\n1\n1",
@@ -4829,10 +4294,6 @@ fn b_std_math_lerp() {
         "1\n1",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STDLIB: std.fmt
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_std_fmt_hex() {
@@ -4890,10 +4351,6 @@ fn b_std_fmt_join() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STDLIB: std.path
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_std_path_join() {
     expect(
@@ -4920,16 +4377,11 @@ fn b_std_path_base() {
 
 #[test]
 fn b_std_path_ext() {
-    // path.ext('noext') -> "" — log("") prints empty line, trimmed by expect
     expect(
         "use std/path\n\n*main()\n    log(path.ext('/foo/bar.txt'))\n",
         ".txt",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STDLIB: std.time
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_std_time_monotonic() {
@@ -4947,10 +4399,6 @@ fn b_std_time_elapsed() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// STDLIB: std.os
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_std_os_pid() {
     expect(
@@ -4967,10 +4415,6 @@ fn b_std_os_cwd() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Vec.length field access
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_vec_length_field() {
     expect(
@@ -4983,10 +4427,6 @@ fn b_vec_length_field() {
 fn b_vec_length_empty() {
     expect("*main()\n    v is vec()\n    log(v.length)\n", "0");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// PKG MANAGER: Package parsing
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_pkg_parse_basic() {
@@ -5020,10 +4460,10 @@ require json https://github.com/jinn-lang/json 1.0.2
 
 #[test]
 fn b_pkg_parse_malformed() {
-    assert!(Package::parse("package myapp\n").is_err()); // missing version
-    assert!(Package::parse("version 1.0.0\n").is_err()); // missing package
-    assert!(Package::parse("package myapp\nversion bad\n").is_err()); // bad semver
-    assert!(Package::parse("package myapp\nversion 1.0.0\nfoo bar\n").is_err()); // unknown directive
+    assert!(Package::parse("package myapp\n").is_err());
+    assert!(Package::parse("version 1.0.0\n").is_err());
+    assert!(Package::parse("package myapp\nversion bad\n").is_err());
+    assert!(Package::parse("package myapp\nversion 1.0.0\nfoo bar\n").is_err());
 }
 
 #[test]
@@ -5045,10 +4485,6 @@ require lib1 https://example.com/lib1 0.1.0
     assert_eq!(pkg2.requires[0].name, "lib1");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// PKG MANAGER: Lockfile parsing
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_lock_parse_write_roundtrip() {
     let input = "\
@@ -5061,7 +4497,7 @@ json https://github.com/jinn-lang/json 1.0.2 def456
     let output = lock.write();
     let lock2 = Lockfile::parse(&output).unwrap();
     assert_eq!(lock2.entries.len(), 2);
-    // Entries are sorted by name in write()
+
     assert_eq!(lock2.entries[0].name, "http");
     assert_eq!(lock2.entries[1].name, "json");
     assert_eq!(lock2.entries[0].commit, "abc123");
@@ -5095,25 +4531,18 @@ beta https://example.com/b 2.0.0 bbb
     assert_eq!(lock.find("beta").unwrap().version.major, 2);
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// COMPTIME: Constant folding verification
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_comptime_int_arithmetic() {
-    // 2 + 3 * 4 should fold to 14 at compile time
     expect("*main()\n    log(2 + 3 * 4)\n", "14");
 }
 
 #[test]
 fn b_comptime_int_nested() {
-    // Nested arithmetic folding
     expect("*main()\n    log((10 - 3) * (2 + 1))\n", "21");
 }
 
 #[test]
 fn b_comptime_float_fold() {
-    // Float constant folding
     expect(
         "*main()\n    x is 1.0 + 2.5\n    log(x > 3.4)\n    log(x < 3.6)\n",
         "1\n1",
@@ -5146,25 +4575,18 @@ fn b_comptime_division() {
     expect("*main()\n    log(100 / 7)\n    log(100 % 7)\n", "14\n2");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Type inference — assignment constraint propagation
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_infer_assign_propagates() {
-    // Assignment should unify target and value types
     expect("*main()\n    x is 42\n    x is 100\n    log(x)\n", "100");
 }
 
 #[test]
 fn b_infer_ternary_branches() {
-    // Ternary branches should produce the same type
     expect("*main()\n    x is true ? 1 ! 2\n    log(x)\n", "1");
 }
 
 #[test]
 fn b_infer_array_element_unification() {
-    // All array elements should have the same type (unification)
     expect(
         "*main()\n    arr is [10, 20, 30]\n    log(arr[0] + arr[1] + arr[2])\n",
         "60",
@@ -5173,7 +4595,6 @@ fn b_infer_array_element_unification() {
 
 #[test]
 fn b_infer_return_type() {
-    // Return type should be inferred from the return expression
     expect(
         "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
@@ -5182,7 +4603,6 @@ fn b_infer_return_type() {
 
 #[test]
 fn b_infer_lambda_from_context() {
-    // Lambda param types inferred from function signature
     expect(
         "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    result is apply(|x as i64| returns i64 x * 2, 21)\n    log(result)\n    0\n",
         "42",
@@ -5191,19 +4611,16 @@ fn b_infer_lambda_from_context() {
 
 #[test]
 fn b_infer_bind_simple() {
-    // Bind infers type from value expression
     expect("*main()\n    x is 42\n    y is x + 8\n    log(y)\n", "50");
 }
 
 #[test]
 fn b_infer_vec_element_type() {
-    // Vec element type unified across all elements
     expect("*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n", "3");
 }
 
 #[test]
 fn b_infer_nested_lambda() {
-    // Nested lambda should infer types correctly
     expect(
         "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main() returns i32\n    log(apply(|x as i64| returns i64 x + 10, 32))\n    0\n",
         "42",
@@ -5212,7 +4629,6 @@ fn b_infer_nested_lambda() {
 
 #[test]
 fn b_infer_struct_field_from_literal() {
-    // Struct field type inferred from literal
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*main() returns i32\n    p is Point(x is 10, y is 20)\n    log(p.x + p.y)\n    0\n",
         "30",
@@ -5221,17 +4637,11 @@ fn b_infer_struct_field_from_literal() {
 
 #[test]
 fn b_infer_if_expr_type() {
-    // If expression: ternary infers unified type
     expect("*main()\n    val is true ? 42 ! 0\n    log(val)\n", "42");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: Struct field inference & row polymorphism
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_struct_field_infer_basic() {
-    // Struct with no type annotations — types inferred from constructor
     expect(
         "type Point\n    x\n    y\n\n*main() returns i32\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n    0\n",
         "7",
@@ -5240,7 +4650,6 @@ fn b_struct_field_infer_basic() {
 
 #[test]
 fn b_struct_field_infer_default() {
-    // Struct with default values, no type annotations
     expect(
         "type Config\n    width is 800\n    height is 600\n\n*main() returns i32\n    c is Config()\n    log(c.width)\n    log(c.height)\n    0\n",
         "800\n600",
@@ -5249,7 +4658,6 @@ fn b_struct_field_infer_default() {
 
 #[test]
 fn b_struct_field_infer_partial_override() {
-    // Override one default, keep another
     expect(
         "type Cfg\n    a is 10\n    b is 20\n\n*main() returns i32\n    c is Cfg(a is 99)\n    log(c.a)\n    log(c.b)\n    0\n",
         "99\n20",
@@ -5258,7 +4666,6 @@ fn b_struct_field_infer_partial_override() {
 
 #[test]
 fn b_struct_field_infer_method() {
-    // Method on struct with inferred fields
     expect(
         "type Vec2\n    x\n    y\n\n    *mag_sq() returns i64\n        self.x * self.x + self.y * self.y\n\n*main() returns i32\n    v is Vec2(x is 3, y is 4)\n    log(v.mag_sq())\n    0\n",
         "25",
@@ -5267,7 +4674,6 @@ fn b_struct_field_infer_method() {
 
 #[test]
 fn b_struct_field_infer_mixed() {
-    // Mix of annotated and unannotated fields
     expect(
         "type Item\n    name as str\n    count\n\n*main() returns i32\n    i is Item(name is 'widget', count is 42)\n    log(i.count)\n    0\n",
         "42",
@@ -5276,7 +4682,6 @@ fn b_struct_field_infer_mixed() {
 
 #[test]
 fn b_row_poly_basic() {
-    // Generic function accessing struct field — row polymorphism via monomorphization
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*get_x(p)\n    p.x\n\n*main() returns i32\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n    0\n",
         "42",
@@ -5285,7 +4690,6 @@ fn b_row_poly_basic() {
 
 #[test]
 fn b_row_poly_two_structs() {
-    // Same generic function works with different struct types
     expect(
         "type A\n    x as i64\n    y as i64\n\ntype B\n    x as i64\n    z as i64\n\n*get_x(p)\n    p.x\n\n*main() returns i32\n    a is A(x is 10, y is 20)\n    b is B(x is 30, z is 40)\n    log(get_x(a))\n    log(get_x(b))\n    0\n",
         "10\n30",
@@ -5294,7 +4698,6 @@ fn b_row_poly_two_structs() {
 
 #[test]
 fn b_row_poly_inferred_fields() {
-    // Row polymorphism with inferred field types
     expect(
         "type P\n    x\n    y\n\ntype Q\n    x\n    w\n\n*get_x(obj)\n    obj.x\n\n*main() returns i32\n    p is P(x is 5, y is 6)\n    q is Q(x is 7, w is 8)\n    log(get_x(p))\n    log(get_x(q))\n    0\n",
         "5\n7",
@@ -5303,17 +4706,14 @@ fn b_row_poly_inferred_fields() {
 
 #[test]
 fn b_row_poly_computation() {
-    // Row poly function does computation on struct fields
     expect(
         "type Rect\n    w as i64\n    h as i64\n\n*area(r)\n    r.w * r.h\n\n*main() returns i32\n    r is Rect(w is 6, h is 7)\n    log(area(r))\n    0\n",
         "42",
     );
 }
 
-// Phase 2C: Positional struct constructor with inferred fields
 #[test]
 fn b_struct_field_infer_positional() {
-    // Unannotated struct fields inferred from positional constructor
     expect(
         "type Pair\n    a\n    b\n\n*main() returns i32\n    p is Pair(5, 15)\n    log(p.a + p.b)\n    0\n",
         "20",
@@ -5322,7 +4722,6 @@ fn b_struct_field_infer_positional() {
 
 #[test]
 fn b_struct_field_infer_positional_string() {
-    // Positional constructor with string type inference
     expect(
         "type Name\n    first\n    last\n\n*main() returns i32\n    n is Name('John', 'Doe')\n    log(n.first)\n    log(n.last)\n    0\n",
         "John\nDoe",
@@ -5331,7 +4730,6 @@ fn b_struct_field_infer_positional_string() {
 
 #[test]
 fn b_row_poly_with_defaults() {
-    // Row poly on struct with defaults
     expect(
         "type Settings\n    scale is 2\n    offset is 10\n\n*apply_scale(s)\n    s.scale * s.offset\n\n*main() returns i32\n    s is Settings()\n    log(apply_scale(s))\n    0\n",
         "20",
@@ -5340,7 +4738,6 @@ fn b_row_poly_with_defaults() {
 
 #[test]
 fn b_struct_default_typed() {
-    // Explicit types with defaults
     expect(
         "type Dims\n    w as i64 is 100\n    h as i64 is 200\n\n*main() returns i32\n    d is Dims()\n    log(d.w)\n    log(d.h)\n    0\n",
         "100\n200",
@@ -5349,7 +4746,6 @@ fn b_struct_default_typed() {
 
 #[test]
 fn b_struct_default_partial_typed() {
-    // Explicit types with partial override
     expect(
         "type Dims\n    w as i64 is 100\n    h as i64 is 200\n\n*main() returns i32\n    d is Dims(w is 50)\n    log(d.w)\n    log(d.h)\n    0\n",
         "50\n200",
@@ -5358,7 +4754,6 @@ fn b_struct_default_partial_typed() {
 
 #[test]
 fn b_row_poly_missing_field_error() {
-    // Accessing a field that doesn't exist on the struct should fail at compile time
     let err = expect_compile_fail(
         "type Box\n    w as i64\n    h as i64\n\n*get_x(p)\n    p.x\n\n*main() returns i32\n    b is Box(w is 10, h is 20)\n    log(get_x(b))\n    0\n",
     );
@@ -5368,13 +4763,8 @@ fn b_row_poly_missing_field_error() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Phase 1 (P0): Strict Type Checking — Error on Ambiguity
-// ══════════════════════════════════════════════════════════════════════
-
 #[test]
 fn strict_types_well_typed_program() {
-    // A well-typed program with no ambiguity should pass strict mode
     let out = compile_with_strict("*main()\n    x is 42\n    log(x)\n");
     assert_eq!(out.trim(), "42");
 }
@@ -5403,21 +4793,18 @@ fn strict_types_bool_operations() {
 
 #[test]
 fn strict_types_inferred_param_types() {
-    // Params inferred from call site should pass strict mode
     let out = compile_with_strict("*double(x)\n    x * 2\n*main()\n    log(double(21))\n");
     assert_eq!(out.trim(), "42");
 }
 
 #[test]
 fn strict_types_integer_literal_default() {
-    // Integer-constrained TypeVars should default safely
     let out = compile_with_strict("*main()\n    x is 100\n    log(x)\n");
     assert_eq!(out.trim(), "100");
 }
 
 #[test]
 fn strict_types_float_literal_default() {
-    // Float-constrained TypeVars should default safely
     let out = compile_with_strict("*main()\n    x is 3.14\n    log(x)\n");
     assert!(out.trim().starts_with("3.14"));
 }
@@ -5438,25 +4825,20 @@ fn strict_types_enum_inference() {
     assert_eq!(out.trim(), "1");
 }
 
-// ── Phase 4 (P2): Operator Constraint Propagation Bulk Tests ──
-
 #[test]
 fn operator_constraint_arithmetic_params() {
-    // Unannotated params used in arithmetic should resolve to numeric types
     let out = compile_and_run("*add(a, b)\n    a + b\n*main()\n    log(add(10, 20))\n");
     assert_eq!(out.trim(), "30");
 }
 
 #[test]
 fn operator_constraint_float_arithmetic() {
-    // Float arithmetic inline (cross-function float param inference requires generalization)
     let out = compile_and_run("*main()\n    a is 2.5\n    b is 3.0\n    log(a * b)\n");
     assert!(out.trim().starts_with("7.5"));
 }
 
 #[test]
 fn operator_constraint_string_concat_preserved() {
-    // String concat via + should still work (not broken by Numeric constraint)
     let out = compile_and_run("*main()\n    s is \"hello\" + \" world\"\n    log(s)\n");
     assert_eq!(out.trim(), "hello world");
 }
@@ -5483,7 +4865,6 @@ fn operator_constraint_unary_neg() {
 
 #[test]
 fn operator_constraint_chained_arithmetic() {
-    // Multiple arithmetic ops should all constrain consistently
     let out =
         compile_and_run("*compute(a, b, c)\n    a * b + c\n*main()\n    log(compute(3, 4, 5))\n");
     assert_eq!(out.trim(), "17");
@@ -5495,11 +4876,8 @@ fn operator_constraint_modulo() {
     assert_eq!(out.trim(), "2");
 }
 
-// ── Phase 2 (P3): SCC Mutual Recursion Bulk Tests ──
-
 #[test]
 fn scc_mutual_recursion_unannotated() {
-    // is_even/is_odd without type annotations — SCC-aware lowering
     let out = compile_and_run(
         "*is_even(n)\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(7))\n",
     );
@@ -5508,7 +4886,6 @@ fn scc_mutual_recursion_unannotated() {
 
 #[test]
 fn scc_three_way_mutual() {
-    // Three mutually recursive functions in a cycle: f1→f2→f3→f1
     let out = compile_and_run(
         "*f1(n)\n    if n equals 0\n        return 0\n    f2(n - 1)\n\n*f2(n)\n    if n equals 0\n        return 0\n    f3(n - 1)\n\n*f3(n)\n    if n equals 0\n        return 0\n    f1(n - 1)\n\n*main()\n    log(f1(9))\n",
     );
@@ -5517,7 +4894,6 @@ fn scc_three_way_mutual() {
 
 #[test]
 fn scc_mutual_with_arithmetic() {
-    // Mutual recursion where both functions do arithmetic
     let out = compile_and_run(
         "*count_down_even(n)\n    if n <= 0\n        return 0\n    n + count_down_odd(n - 1)\n\n*count_down_odd(n)\n    if n <= 0\n        return 0\n    n + count_down_even(n - 1)\n\n*main()\n    log(count_down_even(6))\n",
     );
@@ -5526,18 +4902,14 @@ fn scc_mutual_with_arithmetic() {
 
 #[test]
 fn scc_self_recursive_unannotated() {
-    // Self-recursion (single-member SCC) remains correct
     let out = compile_and_run(
         "*fact(n)\n    if n <= 1\n        return 1\n    n * fact(n - 1)\n\n*main()\n    log(fact(5))\n",
     );
     assert_eq!(out.trim(), "120");
 }
 
-// ── Phase 3 (P4): Function Generalization ──────────────────────────
-
 #[test]
 fn implicit_generic_identity_two_types() {
-    // identity called with i64 and string produces correct output for both
     let out = compile_and_run(
         "*identity(x)\n    x\n\n*main()\n    log(identity(42))\n    log(identity(\"hello\"))\n",
     );
@@ -5546,14 +4918,12 @@ fn implicit_generic_identity_two_types() {
 
 #[test]
 fn implicit_generic_with_arithmetic() {
-    // Implicit generic function that does arithmetic - called with i64
     let out = compile_and_run("*double(x)\n    x + x\n\n*main()\n    log(double(21))\n");
     assert_eq!(out.trim(), "42");
 }
 
 #[test]
 fn implicit_generic_multiple_params() {
-    // Function with multiple untyped params
     let out = compile_and_run(
         "*pick_first(a, b)\n    a\n\n*main()\n    log(pick_first(10, 20))\n    log(pick_first(\"yes\", \"no\"))\n",
     );
@@ -5562,7 +4932,6 @@ fn implicit_generic_multiple_params() {
 
 #[test]
 fn implicit_generic_same_type_multiple_calls() {
-    // Multiple calls with same type should all work
     let out = compile_and_run(
         "*wrap(x)\n    x\n\n*main()\n    log(wrap(1))\n    log(wrap(2))\n    log(wrap(3))\n",
     );
@@ -5571,7 +4940,6 @@ fn implicit_generic_same_type_multiple_calls() {
 
 #[test]
 fn annotated_fn_still_works() {
-    // Annotated functions should not be affected by implicit generic changes
     let out = compile_and_run(
         "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(10, 32))\n",
     );
@@ -5580,7 +4948,6 @@ fn annotated_fn_still_works() {
 
 #[test]
 fn implicit_generic_with_conditional() {
-    // Implicit generic with a conditional
     let out = compile_and_run(
         "*abs_val(x)\n    if x < 0\n        return 0 - x\n    x\n\n*main()\n    log(abs_val(-5))\n    log(abs_val(3))\n",
     );
@@ -5589,17 +4956,13 @@ fn implicit_generic_with_conditional() {
 
 #[test]
 fn implicit_generic_chained_calls() {
-    // Chained implicit generic calls
     let out =
         compile_and_run("*id(x)\n    x\n\n*add1(x)\n    x + 1\n\n*main()\n    log(add1(id(41)))\n");
     assert_eq!(out.trim(), "42");
 }
 
-// ── Phase 6 (P5): Higher-Order Inference ───────────────────────────
-
 #[test]
 fn hof_apply_named_fn() {
-    // *apply(f, x) → f(x) with a named function
     let out = compile_and_run(
         "*add1(x as i64) returns i64\n    x + 1\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 42))\n",
     );
@@ -5608,7 +4971,6 @@ fn hof_apply_named_fn() {
 
 #[test]
 fn hof_apply_with_lambda() {
-    // apply with a lambda argument
     let out = compile_and_run(
         "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(|x as i64| x + 10, 32))\n",
     );
@@ -5617,7 +4979,6 @@ fn hof_apply_with_lambda() {
 
 #[test]
 fn hof_compose_two_functions() {
-    // compose(f, g, x) = f(g(x))
     let out = compile_and_run(
         "*inc(x as i64) returns i64\n    x + 1\n\n*dbl(x as i64) returns i64\n    x * 2\n\n*compose(f, g, x)\n    f(g(x))\n\n*main()\n    log(compose(inc, dbl, 20))\n",
     );
@@ -5626,7 +4987,6 @@ fn hof_compose_two_functions() {
 
 #[test]
 fn hof_apply_twice() {
-    // apply_twice(f, x) = f(f(x))
     let out = compile_and_run(
         "*apply_twice(f, x)\n    f(f(x))\n\n*main()\n    log(apply_twice(|x as i64| x + 1, 40))\n",
     );
@@ -5635,7 +4995,6 @@ fn hof_apply_twice() {
 
 #[test]
 fn hof_transform_and_add() {
-    // Higher-order fn calling f twice with different args and combining results
     let out = compile_and_run(
         "*transform_and_add(f, x, y)\n    f(x) + f(y)\n\n*main()\n    log(transform_and_add(|x as i64| x * x, 3, 4))\n",
     );
@@ -5644,7 +5003,6 @@ fn hof_transform_and_add() {
 
 #[test]
 fn hof_apply_different_fns() {
-    // Same apply function used with different function arguments (monomorphized separately)
     let out = compile_and_run(
         "*add1(x as i64) returns i64\n    x + 1\n\n*double(x as i64) returns i64\n    x * 2\n\n*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(add1, 41))\n    log(apply(double, 21))\n",
     );
@@ -5653,16 +5011,12 @@ fn hof_apply_different_fns() {
 
 #[test]
 fn hof_pipeline_with_untyped_functions() {
-    // Pipeline operator with typed functions
     let out = compile_and_run(
         "*add1(x as i64) returns i64\n    x + 1\n\n*double(x as i64) returns i64\n    x * 2\n\n*main()\n    result is 20 ~ double ~ add1\n    log(result)\n",
     );
     assert_eq!(out.trim(), "41");
 }
 
-// ── Phase 4A: Comprehensive Type Inference Tests ──────────────────────────
-
-// 4A.1 Function-level generalization: *id(x) x used at two types
 #[test]
 fn b_hm_identity_two_types() {
     expect(
@@ -5673,7 +5027,6 @@ fn b_hm_identity_two_types() {
 
 #[test]
 fn b_hm_identity_int_and_string() {
-    // Same untyped function called with int and string
     expect(
         "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    log(id(\"hello\"))\n    0\n",
         "42\nhello",
@@ -5682,34 +5035,28 @@ fn b_hm_identity_int_and_string() {
 
 #[test]
 fn b_hm_identity_bool_and_int() {
-    // Bools are printed as 1/0 in Jinn
     expect(
         "*id(x)\n    x\n\n*main() returns i32\n    log(id(true))\n    log(id(7))\n    0\n",
         "1\n7",
     );
 }
 
-// 4A.2 Lambda without context
 #[test]
 fn b_hm_lambda_standalone() {
-    // Lambda with no expected-type context — inline syntax
     expect(
         "*main() returns i32\n    f is |x as i64| returns i64 x + 1\n    log(f(41))\n    0\n",
         "42",
     );
 }
 
-// 4A.5 Mixed annotated/unannotated params
 #[test]
 fn b_hm_mixed_params() {
-    // *f(a: i64, b) where b inferred from usage
     expect(
         "*f(a as i64, b)\n    a + b\n\n*main() returns i32\n    log(f(10, 32))\n    0\n",
         "42",
     );
 }
 
-// 4A.7 Map value type inference from set/get
 #[test]
 fn b_hm_map_value_type() {
     expect(
@@ -5718,27 +5065,22 @@ fn b_hm_map_value_type() {
     );
 }
 
-// 4A.9 Ambiguity error programs — polymorphic identity should compile
 #[test]
 fn b_hm_poly_compile_ok() {
-    // Polymorphic function called at two types should compile fine
     expect(
         "*f(x)\n    x\n\n*main() returns i32\n    log(f(42))\n    log(f(\"hello\"))\n    0\n",
         "42\nhello",
     );
 }
 
-// 4A.10 Cross-function constraint propagation
 #[test]
 fn b_hm_cross_fn_constraint() {
-    // *f(x) calls g(x), g has known type → f's param constrained
     expect(
         "*g(x as i64) returns i64\n    x * 2\n\n*f(x)\n    g(x)\n\n*main() returns i32\n    log(f(21))\n    0\n",
         "42",
     );
 }
 
-// Phase 2A: Deep cross-function chain: f -> g -> h
 #[test]
 fn b_cross_fn_deep_chain() {
     expect(
@@ -5747,7 +5089,6 @@ fn b_cross_fn_deep_chain() {
     );
 }
 
-// 4A.11 Recursive function return type with branches
 #[test]
 fn b_hm_recursive_branches() {
     expect(
@@ -5764,7 +5105,6 @@ fn b_hm_recursive_factorial() {
     );
 }
 
-// 4A.12 Generic enum instantiation from variant constructors (built-in Option)
 #[test]
 fn b_hm_generic_enum_variant() {
     expect(
@@ -5773,7 +5113,6 @@ fn b_hm_generic_enum_variant() {
     );
 }
 
-// 4A.14 Higher-order passing of inferred-type functions
 #[test]
 fn b_hm_higher_order_inferred() {
     expect(
@@ -5782,7 +5121,6 @@ fn b_hm_higher_order_inferred() {
     );
 }
 
-// 4A.15 Nested function calls: f(g(h(x))) with all inferred
 #[test]
 fn b_hm_nested_calls() {
     expect(
@@ -5791,10 +5129,8 @@ fn b_hm_nested_calls() {
     );
 }
 
-// Additional edge cases for scheme-based generalization
 #[test]
 fn b_hm_identity_called_once() {
-    // Scheme works even with single call site
     expect(
         "*id(x)\n    x\n\n*main() returns i32\n    log(id(42))\n    0\n",
         "42",
@@ -5803,7 +5139,6 @@ fn b_hm_identity_called_once() {
 
 #[test]
 fn b_hm_mutual_recursion_untyped() {
-    // Mutual recursion with both functions untyped — bools print as 1/0
     expect(
         "*is_even(n)\n    if n equals 0\n        return true\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return false\n    is_even(n - 1)\n\n*main() returns i32\n    log(is_even(10))\n    log(is_odd(7))\n    0\n",
         "1\n1",
@@ -5812,7 +5147,6 @@ fn b_hm_mutual_recursion_untyped() {
 
 #[test]
 fn b_hm_gcd_untyped() {
-    // Classic GCD — recursive with untyped params
     expect(
         "*gcd(a, b)\n    if b equals 0\n        return a\n    gcd(b, a % b)\n\n*main() returns i32\n    log(gcd(48, 18))\n    0\n",
         "6",
@@ -5821,7 +5155,6 @@ fn b_hm_gcd_untyped() {
 
 #[test]
 fn b_hm_poly_pair_functions() {
-    // Two different functions using the same polymorphic helper
     expect(
         "*first(a, b)\n    a\n\n*main() returns i32\n    log(first(1, 2))\n    log(first(\"a\", \"b\"))\n    0\n",
         "1\na",
@@ -5830,7 +5163,6 @@ fn b_hm_poly_pair_functions() {
 
 #[test]
 fn b_hm_untyped_with_comparison() {
-    // Untyped function that uses comparison operators
     expect(
         "*max_val(a, b)\n    if a > b\n        return a\n    b\n\n*main() returns i32\n    log(max_val(3, 7))\n    log(max_val(9, 2))\n    0\n",
         "7\n9",
@@ -5839,7 +5171,6 @@ fn b_hm_untyped_with_comparison() {
 
 #[test]
 fn b_hm_listcomp_range_typed() {
-    // List comprehension with range: bind type should be I64
     expect(
         "*main() returns i32\n    arr is [x * x for x in 0 to 4]\n    log(arr[0])\n    log(arr[1])\n    log(arr[3])\n    0\n",
         "0\n1\n9",
@@ -5848,17 +5179,14 @@ fn b_hm_listcomp_range_typed() {
 
 #[test]
 fn b_hm_ptr_index() {
-    // Ptr indexing should properly extract element type
     expect(
         "*main() returns i32\n    arr is [x + 10 for x in 0 to 3]\n    log(arr[0])\n    log(arr[2])\n    0\n",
         "10\n12",
     );
 }
 
-// Strict mode tests (now default — these should compile successfully)
 #[test]
 fn b_strict_integer_literal_defaults() {
-    // Integer literals with no context should get Integer constraint → I64 default (no error)
     expect(
         "*main() returns i32\n    x is 42\n    log(x)\n    0\n",
         "42",
@@ -5867,14 +5195,12 @@ fn b_strict_integer_literal_defaults() {
 
 #[test]
 fn b_strict_float_literal_defaults() {
-    // Float literals should get Float constraint → F64 default (no error)
     expect(
         "*main() returns i32\n    x is 3.14\n    log(x)\n    0\n",
         "3.140000",
     );
 }
 
-// Strict mode should now be default; --lenient should suppress errors
 #[test]
 fn b_lenient_flag() {
     let dir = tempfile::tempdir().unwrap();
@@ -5895,7 +5221,6 @@ fn b_lenient_flag() {
     assert!(status.success(), "jinnc --lenient compilation failed");
 }
 
-// Phase 3A: standalone method function with inferred self type
 #[test]
 fn b_standalone_method_self_infer() {
     expect(
@@ -5904,7 +5229,6 @@ fn b_standalone_method_self_infer() {
     );
 }
 
-// Phase 3A: standalone method called via inferred parameter
 #[test]
 fn b_standalone_method_via_inferred_param() {
     expect(
@@ -5913,7 +5237,6 @@ fn b_standalone_method_via_inferred_param() {
     );
 }
 
-// Phase 3A: multi-candidate row poly with monomorphization
 #[test]
 fn b_multi_candidate_row_poly() {
     expect(
@@ -5922,7 +5245,6 @@ fn b_multi_candidate_row_poly() {
     );
 }
 
-// Phase 3A: trait-based candidate narrowing (2 structs, 1 with trait impl for method)
 #[test]
 fn b_trait_narrows_candidates() {
     expect(
@@ -5931,7 +5253,6 @@ fn b_trait_narrows_candidates() {
     );
 }
 
-// Phase 3B: lambda passed to higher-order function (strict mode)
 #[test]
 fn b_lambda_hof_apply() {
     expect(
@@ -5940,7 +5261,6 @@ fn b_lambda_hof_apply() {
     );
 }
 
-// Phase 3B: function composition via HOF
 #[test]
 fn b_lambda_hof_compose() {
     expect(
@@ -5949,7 +5269,6 @@ fn b_lambda_hof_compose() {
     );
 }
 
-// Phase 3B: apply-twice HOF
 #[test]
 fn b_lambda_hof_twice() {
     expect(
@@ -5958,7 +5277,6 @@ fn b_lambda_hof_twice() {
     );
 }
 
-// Phase 3B: lambda with closure capture passed to HOF
 #[test]
 fn b_lambda_hof_closure() {
     expect(
@@ -5967,7 +5285,6 @@ fn b_lambda_hof_closure() {
     );
 }
 
-// Phase 3C: constrained polymorphism — sum at integer type
 #[test]
 fn b_constrained_poly_sum_int() {
     expect(
@@ -5976,7 +5293,6 @@ fn b_constrained_poly_sum_int() {
     );
 }
 
-// Phase 3C: constrained polymorphism — sum at multiple types
 #[test]
 fn b_constrained_poly_sum_multi() {
     expect(
@@ -5985,7 +5301,6 @@ fn b_constrained_poly_sum_multi() {
     );
 }
 
-// Phase 3C: constrained polymorphism — inferred mul at integer type
 #[test]
 fn b_constrained_poly_mul() {
     expect(
@@ -5994,13 +5309,8 @@ fn b_constrained_poly_mul() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Phase 3.1: Match narrowing — verify pattern bindings infer types
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_match_narrowing_some_binding() {
-    // Positive narrowing: v gets type i64 from Some(42)
     expect(
         "*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v + 1)\n        Nothing ? log(0)\n",
         "43",
@@ -6009,7 +5319,6 @@ fn b_match_narrowing_some_binding() {
 
 #[test]
 fn b_match_narrowing_nothing_arm() {
-    // Nothing arm correctly matches
     expect(
         "*main()\n    x is Nothing\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(99)\n",
         "99",
@@ -6018,7 +5327,6 @@ fn b_match_narrowing_nothing_arm() {
 
 #[test]
 fn b_match_narrowing_result_ok() {
-    // Ok variant binding
     expect(
         "*main()\n    x is Ok(10)\n    match x\n        Ok(v) ? log(v * 3)\n        Err(e) ? log(e)\n",
         "30",
@@ -6027,7 +5335,6 @@ fn b_match_narrowing_result_ok() {
 
 #[test]
 fn b_match_narrowing_result_err() {
-    // Err variant binding
     expect(
         "*main()\n    x is Err(77)\n    match x\n        Ok(v) ? log(v)\n        Err(e) ? log(e + 1)\n",
         "78",
@@ -6036,20 +5343,14 @@ fn b_match_narrowing_result_err() {
 
 #[test]
 fn b_match_narrowing_multi_arm() {
-    // Multiple arms with different computations on bound value
     expect(
         "*main()\n    x is Some(5)\n    match x\n        Some(v) ? log(v * 10)\n        Nothing ? log(-1)\n",
         "50",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Phase 3.2: If-let — `if <expr> is <pattern>` desugars to match
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_if_let_some_basic() {
-    // if-let binds v from Some variant
     expect(
         "*main()\n    x is Some(42)\n    if x is Some(v)\n        log(v)\n    else\n        log(0)\n",
         "42",
@@ -6058,7 +5359,6 @@ fn b_if_let_some_basic() {
 
 #[test]
 fn b_if_let_nothing_else() {
-    // if-let falls through to else for Nothing
     expect(
         "*main()\n    x is Nothing\n    if x is Some(v)\n        log(v)\n    else\n        log(99)\n",
         "99",
@@ -6067,7 +5367,6 @@ fn b_if_let_nothing_else() {
 
 #[test]
 fn b_if_let_some_compute() {
-    // if-let with computation on bound variable
     expect(
         "*main()\n    x is Some(10)\n    if x is Some(v)\n        log(v * 5)\n    else\n        log(0)\n",
         "50",
@@ -6076,7 +5375,6 @@ fn b_if_let_some_compute() {
 
 #[test]
 fn b_if_let_no_else() {
-    // if-let without else — no output when pattern doesn't match
     expect(
         "*main()\n    x is Nothing\n    if x is Some(v)\n        log(v)\n    log(88)\n",
         "88",
@@ -6085,7 +5383,6 @@ fn b_if_let_no_else() {
 
 #[test]
 fn b_if_let_ok_variant() {
-    // if-let with Ok variant from Result
     expect(
         "*main()\n    x is Ok(7)\n    if x is Ok(v)\n        log(v * 3)\n    else\n        log(0)\n",
         "21",
@@ -6094,21 +5391,14 @@ fn b_if_let_ok_variant() {
 
 #[test]
 fn b_if_let_err_fallthrough() {
-    // if-let on Err falls through to else
     expect(
         "*main()\n    x is Err(55)\n    if x is Ok(v)\n        log(v)\n    else\n        log(55)\n",
         "55",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Phase 4.1: Inference Integration Tests
-// Verify inferred types are correct, not just that compilation succeeds.
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_p41_identity_polymorphism() {
-    // Identity function inferred as ∀a. a -> a, used at i64 and bool
     expect(
         "*identity(x)\n    x\n\n*main()\n    log(identity(42))\n    log(identity(true))\n",
         "42\n1",
@@ -6117,7 +5407,6 @@ fn b_p41_identity_polymorphism() {
 
 #[test]
 fn b_p41_identity_string() {
-    // Identity at string type
     expect(
         "*identity(x)\n    x\n\n*main()\n    log(identity('hello'))\n",
         "hello",
@@ -6126,7 +5415,6 @@ fn b_p41_identity_string() {
 
 #[test]
 fn b_p41_const_function() {
-    // const: ∀a b. a -> b -> a
     expect(
         "*first(a, b)\n    a\n\n*main()\n    log(first(42, true))\n    log(first('x', 99))\n",
         "42\nx",
@@ -6135,7 +5423,6 @@ fn b_p41_const_function() {
 
 #[test]
 fn b_p41_compose_numeric() {
-    // Composition of inferred-type functions
     expect(
         "*double(x)\n    x * 2\n\n*inc(x)\n    x + 1\n\n*main()\n    log(inc(double(10)))\n",
         "21",
@@ -6144,7 +5431,6 @@ fn b_p41_compose_numeric() {
 
 #[test]
 fn b_p41_lambda_infer_from_call() {
-    // Lambda type inferred from function parameter context
     expect(
         "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main()\n    log(apply(|x as i64| returns i64 x + 10, 32))\n",
         "42",
@@ -6153,7 +5439,6 @@ fn b_p41_lambda_infer_from_call() {
 
 #[test]
 fn b_p41_let_generalization() {
-    // Let-bound lambda with inferred param type used at i64
     expect(
         "*main()\n    id is |x| x\n    log(id(42))\n    log(id(7))\n",
         "42\n7",
@@ -6162,7 +5447,6 @@ fn b_p41_let_generalization() {
 
 #[test]
 fn b_p41_numeric_constraint_add() {
-    // Numeric constraint: + infers Numeric, defaults to i64
     expect(
         "*add(a, b)\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
@@ -6171,13 +5455,11 @@ fn b_p41_numeric_constraint_add() {
 
 #[test]
 fn b_p41_numeric_constraint_float() {
-    // Float literal propagates Float constraint
     expect("*main()\n    x is 3.14\n    log(x)\n", "3.140000");
 }
 
 #[test]
 fn b_p41_struct_param_infer_unique_field() {
-    // Struct param inferred by unique field access
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*get_x(p)\n    p.x\n\n*main()\n    pt is Point(x is 42, y is 99)\n    log(get_x(pt))\n",
         "42",
@@ -6186,7 +5468,6 @@ fn b_p41_struct_param_infer_unique_field() {
 
 #[test]
 fn b_p41_enum_variant_infer() {
-    // Enum variant constructor infers the enum type
     expect(
         "*main()\n    x is Some(10)\n    match x\n        Some(v) ? log(v)\n        Nothing ? log(0)\n",
         "10",
@@ -6195,7 +5476,6 @@ fn b_p41_enum_variant_infer() {
 
 #[test]
 fn b_p41_recursive_function_type() {
-    // Recursive function type inferred correctly
     expect(
         "*fib(n as i64) returns i64\n    if n < 2\n        n\n    else\n        fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
         "55",
@@ -6204,7 +5484,6 @@ fn b_p41_recursive_function_type() {
 
 #[test]
 fn b_p41_match_return_type_infer() {
-    // Match expression return type unified from arm types
     expect(
         "*describe(x as i64) returns i64\n    match x\n        0 ? 100\n        1 ? 200\n        _ ? 300\n\n*main()\n    log(describe(0))\n    log(describe(1))\n    log(describe(42))\n",
         "100\n200\n300",
@@ -6213,28 +5492,20 @@ fn b_p41_match_return_type_infer() {
 
 #[test]
 fn b_p41_strict_types_basic() {
-    // Strict mode with fully-determined types should compile
     let out = compile_with_strict("*main()\n    x is 42\n    log(x)\n");
     assert_eq!(out.trim(), "42");
 }
 
 #[test]
 fn b_p41_strict_types_arithmetic() {
-    // Strict mode: arithmetic result types fully determined
     let out = compile_with_strict(
         "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
     );
     assert_eq!(out.trim(), "7");
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Phase 4.2: Negative Constraint Tests
-// Programs that SHOULD FAIL with specific errors.
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_p42_type_mismatch_add_string_int() {
-    // Cannot add string and integer
     let err = expect_compile_fail("*main()\n    x is 'hello' + 42\n    log(x)\n");
     assert!(
         err.contains("type")
@@ -6247,7 +5518,6 @@ fn b_p42_type_mismatch_add_string_int() {
 
 #[test]
 fn b_p42_non_exhaustive_match() {
-    // Match without covering all variants
     let err =
         expect_compile_fail("*main()\n    x is Some(42)\n    match x\n        Some(v) ? log(v)\n");
     assert!(
@@ -6261,7 +5531,6 @@ fn b_p42_non_exhaustive_match() {
 
 #[test]
 fn b_p42_undefined_variable() {
-    // Reference to undefined variable should fail compilation
     let err = expect_compile_fail("*main()\n    log(undefined_var)\n");
     assert!(
         !err.is_empty(),
@@ -6271,7 +5540,6 @@ fn b_p42_undefined_variable() {
 
 #[test]
 fn b_p42_wrong_arg_count() {
-    // Function called with wrong number of arguments
     let err = expect_compile_fail(
         "*foo(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(foo(1))\n",
     );
@@ -6286,10 +5554,6 @@ fn b_p42_wrong_arg_count() {
 
 #[test]
 fn b_p42_strict_unsolved_typevar() {
-    // After R1.4/R3.1: *foo(x) x is a valid polymorphic function — scheme-quantified
-    // vars are exempt from strict-mode errors. The program still fails because
-    // foo is referenced but never called, so monomorphization can't produce a
-    // concrete version. The error is now at codegen, not type checking.
     let err = expect_strict_fail("*foo(x)\n    x\n\n*main()\n    foo\n");
     assert!(
         err.contains("ambiguous")
@@ -6302,20 +5566,13 @@ fn b_p42_strict_unsolved_typevar() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Phase 4.3: Deferred Resolution Tests
-// Methods/fields accessed on variables whose types are resolved later.
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_p43_deferred_method_on_vec() {
-    // Method .len() called on vec — type resolved via element type
     expect("*main()\n    v is vec(1, 2, 3)\n    log(v.len())\n", "3");
 }
 
 #[test]
 fn b_p43_deferred_field_from_return() {
-    // Field accessed on value returned from function
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*make_point() returns Point\n    Point(x is 10, y is 20)\n\n*main()\n    p is make_point()\n    log(p.x)\n    log(p.y)\n",
         "10\n20",
@@ -6324,7 +5581,6 @@ fn b_p43_deferred_field_from_return() {
 
 #[test]
 fn b_p43_deferred_method_chain() {
-    // Chained method calls on inferred types
     expect(
         "type Counter\n    val as i64\n\nimpl Counter\n    *get() returns i64\n        self.val\n\n*make(n as i64) returns Counter\n    Counter(val is n)\n\n*main()\n    log(make(42).get())\n",
         "42",
@@ -6333,7 +5589,6 @@ fn b_p43_deferred_method_chain() {
 
 #[test]
 fn b_p43_deferred_field_unique_match() {
-    // Unique field name resolves struct type
     expect(
         "type Circle\n    radius as i64\n\n*area_approx(c)\n    c.radius * c.radius * 3\n\n*main()\n    ci is Circle(radius is 5)\n    log(area_approx(ci))\n",
         "75",
@@ -6342,7 +5597,6 @@ fn b_p43_deferred_field_unique_match() {
 
 #[test]
 fn b_p43_deferred_vec_push_len() {
-    // vec operations with deferred type resolution
     expect(
         "*main()\n    v is vec()\n    v.push(10)\n    v.push(20)\n    v.push(30)\n    log(v.len())\n",
         "3",
@@ -6351,7 +5605,6 @@ fn b_p43_deferred_vec_push_len() {
 
 #[test]
 fn b_p43_deferred_struct_method_on_param() {
-    // Method resolved on param whose struct type is inferred from call site
     expect(
         "type Box\n    value as i64\n\nimpl Box\n    *get() returns i64\n        self.value\n\n*extract(b as Box) returns i64\n    b.get()\n\n*main()\n    bx is Box(value is 99)\n    log(extract(bx))\n",
         "99",
@@ -6360,23 +5613,14 @@ fn b_p43_deferred_struct_method_on_param() {
 
 #[test]
 fn b_p43_deferred_map_operations() {
-    // Map type inferred from usage context
     expect(
         "*main()\n    m is map()\n    m.set('key', 42)\n    log(m.len())\n",
         "1",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Phase 5: Annotation Reduction Verification
-// Verify reduced annotation requirements for lambda, struct, and function params.
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// --- Lambda parameter inference (target: <20% annotated) ---
-
 #[test]
 fn b_p5_lambda_no_annotation_i64() {
-    // Lambda param inferred from i64 context — no annotation needed
     expect(
         "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main()\n    log(apply(|x as i64| returns i64 x + 10, 32))\n",
         "42",
@@ -6385,21 +5629,16 @@ fn b_p5_lambda_no_annotation_i64() {
 
 #[test]
 fn b_p5_lambda_unannotated_let_bound() {
-    // Let-bound lambda with unannotated param, type inferred from usage
     expect("*main()\n    f is |x| x + 1\n    log(f(41))\n", "42");
 }
 
 #[test]
 fn b_p5_lambda_unannotated_mul() {
-    // Unannotated lambda doing multiplication
     expect("*main()\n    g is |a| a * 3\n    log(g(14))\n", "42");
 }
 
-// --- Struct parameter inference (target: <50% annotated) ---
-
 #[test]
 fn b_p5_struct_param_unique_field() {
-    // Struct param inferred by unique field name — no annotation needed
     expect(
         "type Circle\n    radius as i64\n\n*get_radius(c)\n    c.radius\n\n*main()\n    ci is Circle(radius is 7)\n    log(get_radius(ci))\n",
         "7",
@@ -6408,7 +5647,6 @@ fn b_p5_struct_param_unique_field() {
 
 #[test]
 fn b_p5_struct_param_unique_method() {
-    // Struct param inferred by unique method name
     expect(
         "type Box\n    value as i64\n\nimpl Box\n    *get() returns i64\n        self.value\n\n*unbox(b as Box) returns i64\n    b.get()\n\n*main()\n    bx is Box(value is 42)\n    log(unbox(bx))\n",
         "42",
@@ -6417,18 +5655,14 @@ fn b_p5_struct_param_unique_method() {
 
 #[test]
 fn b_p5_struct_param_from_constructor() {
-    // Param type inferred from constructor at call site
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*add_coords(p as Point) returns i64\n    p.x + p.y\n\n*main()\n    log(add_coords(Point(x is 10, y is 32)))\n",
         "42",
     );
 }
 
-// --- Function parameter inference (target: <30% annotated) ---
-
 #[test]
 fn b_p5_func_param_numeric_infer() {
-    // Function param type inferred from arithmetic operations (Numeric constraint)
     expect(
         "*double(x)\n    x * 2\n\n*main()\n    log(double(21))\n",
         "42",
@@ -6437,7 +5671,6 @@ fn b_p5_func_param_numeric_infer() {
 
 #[test]
 fn b_p5_func_param_multiple_infer() {
-    // Multiple params inferred from arithmetic
     expect(
         "*sum3(a, b, c)\n    a + b + c\n\n*main()\n    log(sum3(10, 20, 12))\n",
         "42",
@@ -6446,7 +5679,6 @@ fn b_p5_func_param_multiple_infer() {
 
 #[test]
 fn b_p5_func_param_comparison_infer() {
-    // Param type inferred from comparison and return
     expect(
         "*max(a, b)\n    if a > b\n        a\n    else\n        b\n\n*main()\n    log(max(42, 7))\n",
         "42",
@@ -6455,7 +5687,6 @@ fn b_p5_func_param_comparison_infer() {
 
 #[test]
 fn b_p5_func_param_chain_infer() {
-    // Type flows through chain of unannotated functions
     expect(
         "*inc(x)\n    x + 1\n\n*double(x)\n    x * 2\n\n*main()\n    log(double(inc(20)))\n",
         "42",
@@ -6464,30 +5695,19 @@ fn b_p5_func_param_chain_infer() {
 
 #[test]
 fn b_p5_func_no_annotation_identity() {
-    // Identity function with zero annotations
     expect("*id(x)\n    x\n\n*main()\n    log(id(42))\n", "42");
 }
 
 #[test]
 fn b_p5_annotation_reduction_combo() {
-    // Combined: unannotated functions, struct inference, lambda all working together
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*dist_sq(p as Point) returns i64\n    p.x * p.x + p.y * p.y\n\n*scale(n, factor)\n    n * factor\n\n*main()\n    p is Point(x is 3, y is 4)\n    d is dist_sq(p)\n    log(scale(d, 2))\n",
         "50",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// PHASE 5 — TESTING REMEDIATION
-// 8 categories, 40+ tests for type inference correctness
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// ─── Category 1: Polymorphic multi-use tests ────────────────────────
-// Same function called with different types at different call sites
-
 #[test]
 fn b_r5_poly_identity_int_then_string() {
-    // Identity function used at i64 then String
     expect(
         "*id(x)\n    x\n\n*main()\n    log(id(42))\n    log(id(\"hello\"))\n",
         "42\nhello",
@@ -6504,7 +5724,6 @@ fn b_r5_poly_identity_bool_then_int() {
 
 #[test]
 fn b_r5_poly_add_int_then_float() {
-    // Same add function used with integers and floats in separate calls
     expect(
         "*add(a, b)\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
@@ -6513,7 +5732,6 @@ fn b_r5_poly_add_int_then_float() {
 
 #[test]
 fn b_r5_poly_pair_accessors() {
-    // Fn returning first of two args, used at different types
     expect(
         "*first(a, b)\n    a\n\n*main()\n    log(first(10, 20))\n    log(first(\"hi\", \"bye\"))\n",
         "10\nhi",
@@ -6522,7 +5740,6 @@ fn b_r5_poly_pair_accessors() {
 
 #[test]
 fn b_r5_poly_nested_calls() {
-    // Polymorphic fn used inside another polymorphic fn
     expect(
         "*id(x)\n    x\n\n*wrap(x)\n    id(x)\n\n*main()\n    log(wrap(42))\n    log(wrap(\"yo\"))\n",
         "42\nyo",
@@ -6531,7 +5748,6 @@ fn b_r5_poly_nested_calls() {
 
 #[test]
 fn b_r5_poly_apply_with_lambdas() {
-    // Apply function used with different lambda types
     expect(
         "*apply(f, x)\n    f(x)\n\n*main()\n    log(apply(|x| x + 1, 5))\n    log(apply(|x| x * 2, 10))\n",
         "6\n20",
@@ -6540,7 +5756,6 @@ fn b_r5_poly_apply_with_lambdas() {
 
 #[test]
 fn b_r5_poly_choose_first() {
-    // choose function used multiple times with different integer args
     expect(
         "*choose(a, b, flag as i64) returns i64\n    if flag equals 1\n        return a\n    b\n\n*main()\n    log(choose(10, 20, 1))\n    log(choose(30, 40, 0))\n",
         "10\n40",
@@ -6549,19 +5764,14 @@ fn b_r5_poly_choose_first() {
 
 #[test]
 fn b_r5_poly_three_calls() {
-    // Same function called 3 times — tests that scheme is properly re-instantiated each time
     expect(
         "*id(x)\n    x\n\n*main()\n    a is id(1)\n    b is id(2)\n    c is id(3)\n    log(a + b + c)\n",
         "6",
     );
 }
 
-// ─── Category 2: Lambda capture inference ───────────────────────────
-// Closures capturing variables of different types
-
 #[test]
 fn b_r5_lambda_capture_int() {
-    // Lambda captures integer variable
     expect(
         "*main()\n    x is 10\n    f is |y| x + y\n    log(f(5))\n",
         "15",
@@ -6570,7 +5780,6 @@ fn b_r5_lambda_capture_int() {
 
 #[test]
 fn b_r5_lambda_capture_two_vars() {
-    // Lambda captures two variables
     expect(
         "*main()\n    a is 3\n    b is 7\n    f is |x| a * x + b\n    log(f(4))\n",
         "19",
@@ -6579,7 +5788,6 @@ fn b_r5_lambda_capture_two_vars() {
 
 #[test]
 fn b_r5_lambda_capture_outer_param() {
-    // Inner function captures outer function's parameter
     expect(
         "*make_adder(n as i64) returns (i64) returns i64\n    |x as i64| returns i64 n + x\n\n*main()\n    add5 is make_adder(5)\n    log(add5(10))\n",
         "15",
@@ -6588,7 +5796,6 @@ fn b_r5_lambda_capture_outer_param() {
 
 #[test]
 fn b_r5_lambda_capture_nested() {
-    // Nested lambdas each capturing from different scopes
     expect(
         "*main()\n    x is 100\n    f is |a as i64| returns i64 x + a\n    log(f(42))\n",
         "142",
@@ -6597,19 +5804,14 @@ fn b_r5_lambda_capture_nested() {
 
 #[test]
 fn b_r5_lambda_capture_in_hof() {
-    // Closure passed to higher-order function
     expect(
         "*apply(f, x)\n    f(x)\n\n*main()\n    base is 50\n    add_base is |x| x + base\n    log(apply(add_base, 7))\n",
         "57",
     );
 }
 
-// ─── Category 3: Recursive type regression ──────────────────────────
-// Recursive functions with complex return types
-
 #[test]
 fn b_r5_recursive_factorial() {
-    // Classic factorial with inferred types
     expect(
         "*factorial(n as i64) returns i64\n    if n <= 1\n        return 1\n    n * factorial(n - 1)\n\n*main()\n    log(factorial(6))\n",
         "720",
@@ -6618,7 +5820,6 @@ fn b_r5_recursive_factorial() {
 
 #[test]
 fn b_r5_recursive_sum_to() {
-    // Recursive sum 1..n
     expect(
         "*sum_to(n as i64) returns i64\n    if n <= 0\n        return 0\n    n + sum_to(n - 1)\n\n*main()\n    log(sum_to(10))\n",
         "55",
@@ -6627,7 +5828,6 @@ fn b_r5_recursive_sum_to() {
 
 #[test]
 fn b_r5_recursive_power() {
-    // Recursive exponentiation
     expect(
         "*power(base as i64, exp as i64) returns i64\n    if exp equals 0\n        return 1\n    base * power(base, exp - 1)\n\n*main()\n    log(power(2, 10))\n",
         "1024",
@@ -6636,7 +5836,6 @@ fn b_r5_recursive_power() {
 
 #[test]
 fn b_r5_recursive_fib_inferred() {
-    // Fibonacci with full annotations but still exercises recursive unification
     expect(
         "*fib(n as i64) returns i64\n    if n <= 1\n        return n\n    fib(n - 1) + fib(n - 2)\n\n*main()\n    log(fib(10))\n",
         "55",
@@ -6645,19 +5844,14 @@ fn b_r5_recursive_fib_inferred() {
 
 #[test]
 fn b_r5_recursive_mutual_even_odd() {
-    // Mutual recursion: is_even and is_odd
     expect(
         "*is_even(n as i64) returns i64\n    if n equals 0\n        return 1\n    is_odd(n - 1)\n\n*is_odd(n as i64) returns i64\n    if n equals 0\n        return 0\n    is_even(n - 1)\n\n*main()\n    log(is_even(10))\n    log(is_odd(7))\n",
         "1\n1",
     );
 }
 
-// ─── Category 4: Deferred method edge cases ─────────────────────────
-// Method calls on TypeVars resolved late via deferred resolution
-
 #[test]
 fn b_r5_deferred_struct_method() {
-    // Method on struct where receiver type resolves late
     expect(
         "type Counter\n    val as i64\n\n    *get() returns i64\n        self.val\n\n*use_counter(c) returns i64\n    c.get()\n\n*main()\n    c is Counter(val is 99)\n    log(use_counter(c))\n",
         "99",
@@ -6666,7 +5860,6 @@ fn b_r5_deferred_struct_method() {
 
 #[test]
 fn b_r5_deferred_field_access() {
-    // Field access on unknown-type var resolved through usage
     expect(
         "type Pt\n    x as i64\n    y as i64\n\n*get_x(p) returns i64\n    p.x\n\n*main()\n    p is Pt(x is 5, y is 6)\n    log(get_x(p))\n",
         "5",
@@ -6675,7 +5868,6 @@ fn b_r5_deferred_field_access() {
 
 #[test]
 fn b_r5_deferred_method_chain() {
-    // Chained method calls resolved through deferred mechanism
     expect(
         "type Box\n    val as i64\n\n    *get_val() returns i64\n        self.val\n\n*extract(b) returns i64\n    b.get_val()\n\n*main()\n    b is Box(val is 77)\n    log(extract(b))\n",
         "77",
@@ -6684,7 +5876,6 @@ fn b_r5_deferred_method_chain() {
 
 #[test]
 fn b_r5_deferred_method_with_arg() {
-    // Method taking argument, deferred resolution
     expect(
         "type Acc\n    total as i64\n\n    *add(n as i64) returns i64\n        self.total + n\n\n*use_acc(a, n as i64) returns i64\n    a.add(n)\n\n*main()\n    a is Acc(total is 10)\n    log(use_acc(a, 32))\n",
         "42",
@@ -6693,19 +5884,14 @@ fn b_r5_deferred_method_with_arg() {
 
 #[test]
 fn b_r5_deferred_vec_method() {
-    // Vec method called through typed function
     expect(
         "*get_len(v as Vec of i64) returns i64\n    v.len()\n\n*main()\n    v is vec(1, 2, 3, 4)\n    log(get_len(v))\n",
         "4",
     );
 }
 
-// ─── Category 5: Mixed annotation tests ─────────────────────────────
-// Functions with some params annotated, some not
-
 #[test]
 fn b_r5_mixed_one_annotated() {
-    // First param annotated, second inferred
     expect(
         "*add(a as i64, b) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
@@ -6714,7 +5900,6 @@ fn b_r5_mixed_one_annotated() {
 
 #[test]
 fn b_r5_mixed_ret_annotated_params_not() {
-    // Return type annotated, params inferred
     expect(
         "*mul(a, b) returns i64\n    a * b\n\n*main()\n    log(mul(6, 7))\n",
         "42",
@@ -6723,7 +5908,6 @@ fn b_r5_mixed_ret_annotated_params_not() {
 
 #[test]
 fn b_r5_mixed_struct_param_annotated() {
-    // Struct param annotated, other inferred
     expect(
         "type Pt\n    x as i64\n    y as i64\n\n*scale_x(p as Pt, factor) returns i64\n    p.x * factor\n\n*main()\n    p is Pt(x is 5, y is 3)\n    log(scale_x(p, 10))\n",
         "50",
@@ -6732,7 +5916,6 @@ fn b_r5_mixed_struct_param_annotated() {
 
 #[test]
 fn b_r5_mixed_return_inferred() {
-    // No return annotation — inferred from body
     expect(
         "*double(x as i64)\n    x * 2\n\n*main()\n    log(double(21))\n",
         "42",
@@ -6741,19 +5924,14 @@ fn b_r5_mixed_return_inferred() {
 
 #[test]
 fn b_r5_mixed_all_inferred_multi_param() {
-    // All parameters inferred from call site
     expect(
         "*compute(a, b, c)\n    a + b * c\n\n*main()\n    log(compute(1, 2, 3))\n",
         "7",
     );
 }
 
-// ─── Category 6: Nested container inference ─────────────────────────
-// Vec, Map with nested types
-
 #[test]
 fn b_r5_nested_vec_of_ints() {
-    // Basic vec with inferred element type
     expect(
         "*main()\n    v is vec(10, 20, 30)\n    log(v.get(0) + v.get(2))\n",
         "40",
@@ -6762,7 +5940,6 @@ fn b_r5_nested_vec_of_ints() {
 
 #[test]
 fn b_r5_nested_vec_push_infer() {
-    // Vec element type inferred from push
     expect(
         "*main()\n    v is vec()\n    v.push(42)\n    log(v.get(0))\n",
         "42",
@@ -6771,7 +5948,6 @@ fn b_r5_nested_vec_push_infer() {
 
 #[test]
 fn b_r5_nested_map_string_int() {
-    // Map<String, I64> inferred from usage
     expect(
         "*main()\n    m is map()\n    m.set(\"x\", 10)\n    m.set(\"y\", 20)\n    log(m.get(\"x\") + m.get(\"y\"))\n",
         "30",
@@ -6780,7 +5956,6 @@ fn b_r5_nested_map_string_int() {
 
 #[test]
 fn b_r5_nested_vec_len_after_push() {
-    // Vec push multiple and check length
     expect(
         "*main()\n    v is vec()\n    v.push(10)\n    v.push(20)\n    v.push(30)\n    log(v.len())\n    log(v.get(1))\n",
         "3\n20",
@@ -6789,15 +5964,11 @@ fn b_r5_nested_vec_len_after_push() {
 
 #[test]
 fn b_r5_nested_vec_iteration() {
-    // Vec used with for loop
     expect(
         "*main()\n    v is vec(1, 2, 3, 4, 5)\n    total is 0\n    for x in v\n        total is total + x\n    log(total)\n",
         "15",
     );
 }
-
-// ─── Category 7: Error recovery tests ───────────────────────────────
-// Multiple type errors in one compilation
 
 #[test]
 fn b_r5_error_undefined_var() {
@@ -6810,7 +5981,6 @@ fn b_r5_error_undefined_var() {
 
 #[test]
 fn b_r5_error_type_mismatch_add() {
-    // Adding string and int should fail
     let err = expect_compile_fail("*main()\n    x is \"hello\" + 5\n    log(x)\n");
     assert!(!err.is_empty(), "expected type error for string + int");
 }
@@ -6826,7 +5996,6 @@ fn b_r5_error_missing_main() {
 
 #[test]
 fn b_r5_error_wrong_arity() {
-    // Calling function with wrong number of arguments
     let err = expect_compile_fail(
         "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(1))\n",
     );
@@ -6835,23 +6004,17 @@ fn b_r5_error_wrong_arity() {
 
 #[test]
 fn b_r5_error_tab_in_source() {
-    // Tab characters in source should fail compilation
     let err = expect_compile_fail("*main()\n\tlog(1)\n");
     assert!(!err.is_empty(), "expected error for tab in source");
 }
 
-// ─── Category 8: Struct-without-constructor tests ───────────────────
-// Declare structs, never construct, verify behavior
-
 #[test]
 fn b_r5_struct_unused_compiles() {
-    // Struct declared but never used — should still compile
     expect("type Phantom\n    x as i64\n\n*main()\n    log(42)\n", "42");
 }
 
 #[test]
 fn b_r5_struct_only_in_type_sig() {
-    // Struct used only in type signature, constructed at call site
     expect(
         "type Wrap\n    val as i64\n\n*unwrap(w as Wrap) returns i64\n    w.val\n\n*main()\n    log(unwrap(Wrap(val is 99)))\n",
         "99",
@@ -6860,24 +6023,19 @@ fn b_r5_struct_only_in_type_sig() {
 
 #[test]
 fn b_r5_struct_field_default() {
-    // Struct with fields that get default types
     expect(
         "type Pair\n    a as i64\n    b as i64\n\n*sum_pair(p as Pair) returns i64\n    p.a + p.b\n\n*main()\n    log(sum_pair(Pair(a is 11, b is 22)))\n",
         "33",
     );
 }
 
-// ==================== Type Inference Remediation Tests ====================
-
 #[test]
 fn b_infer_t1_occurs_check() {
-    // Self-application x(x) creates infinite type — must fail
     expect_compile_fail("*main()\n    f is |x| x(x)\n    log(f(f))\n");
 }
 
 #[test]
 fn b_infer_t2_value_restriction() {
-    // apply result is monomorphic — not generalized since it's not a syntactic value
     expect(
         "*apply(f, x)\n    f(x)\n\n*main()\n    r is apply(|x| x + 1, 5)\n    log(r)\n",
         "6",
@@ -6886,7 +6044,6 @@ fn b_infer_t2_value_restriction() {
 
 #[test]
 fn b_infer_t3_poly_lambda_multi_instantiate() {
-    // Let-bound polymorphic lambda called at I64 and String
     expect(
         "*main()\n    id is |x| x\n    a is id(42)\n    b is id(\"hello\")\n    log(a)\n    log(b)\n",
         "42\nhello",
@@ -6895,7 +6052,6 @@ fn b_infer_t3_poly_lambda_multi_instantiate() {
 
 #[test]
 fn b_infer_t4_lambda_capture() {
-    // Lambda capturing outer variable
     expect(
         "*main()\n    offset is 10\n    f is |x as i64| returns i64 x + offset\n    log(f(32))\n",
         "42",
@@ -6904,7 +6060,6 @@ fn b_infer_t4_lambda_capture() {
 
 #[test]
 fn b_infer_t6_match_type_propagation() {
-    // Match arms propagate return type correctly
     expect(
         "enum Shape\n    Circle(i64)\n    Rect(i64, i64)\n\n*area(s as Shape) returns i64\n    match s\n        Circle(r) ? r * r\n        Rect(w, h) ? w * h\n\n*main()\n    log(area(Circle(5)))\n    log(area(Rect(3, 7)))\n",
         "25\n21",
@@ -6913,7 +6068,6 @@ fn b_infer_t6_match_type_propagation() {
 
 #[test]
 fn b_infer_t7_pipe_inference() {
-    // Pipe operator infers function param type
     expect(
         "*double(x as i64) returns i64\n    x * 2\n\n*main()\n    log(21 ~ double)\n",
         "42",
@@ -6922,7 +6076,6 @@ fn b_infer_t7_pipe_inference() {
 
 #[test]
 fn b_infer_t8_mixed_params() {
-    // Mixed annotated and unannotated params
     expect(
         "*mixed(a, b as i64) returns i64\n    a + b\n\n*main()\n    log(mixed(1, 2))\n",
         "3",
@@ -6931,7 +6084,6 @@ fn b_infer_t8_mixed_params() {
 
 #[test]
 fn b_infer_t9_struct_field_inference() {
-    // Struct field types inferred from constructor call
     expect(
         "type Point\n    x as i64\n    y as i64\n\n*main()\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n",
         "7",
@@ -6940,7 +6092,6 @@ fn b_infer_t9_struct_field_inference() {
 
 #[test]
 fn b_infer_t10_trait_method_dispatch() {
-    // Trait method resolution on struct instance
     expect(
         "type Foo\n    x as i64\n\ntrait Show\n    *show() returns String\n\nimpl Show for Foo\n    *show() returns String\n        \"Foo\"\n\n*main()\n    f is Foo(x is 42)\n    log(f.show())\n",
         "Foo",
@@ -6949,7 +6100,6 @@ fn b_infer_t10_trait_method_dispatch() {
 
 #[test]
 fn b_infer_e3_strict_unconstrained_struct_field() {
-    // Strict mode: unannotated struct field never constrained should error
     let err = expect_strict_fail("type Bag\n    mystery\n\n*main()\n    log(1)\n");
     assert!(
         err.contains("has no type annotation and was never constrained"),
@@ -6959,7 +6109,6 @@ fn b_infer_e3_strict_unconstrained_struct_field() {
 
 #[test]
 fn b_infer_i3_pedantic_rejects_integer_default() {
-    // Pedantic mode: integer literal without explicit annotation is rejected
     let err = expect_pedantic_fail("*main()\n    x is 42\n    log(x)\n");
     assert!(
         err.contains("pedantic") && err.contains("integer"),
@@ -6969,18 +6118,14 @@ fn b_infer_i3_pedantic_rejects_integer_default() {
 
 #[test]
 fn b_infer_i3_pedantic_passes_annotated() {
-    // Pedantic mode: fully annotated function should pass
     expect(
         "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    log(add(3, 4))\n",
         "7",
     );
 }
 
-// ── 10.1 / 10.2 Remediation Tests ──
-
 #[test]
 fn b_s6_enum_inference_from_match_pattern() {
-    // S6: Unannotated param inferred as enum type from match variant patterns
     expect(
         "enum Op\n    Add(i64, i64)\n    Mul(i64, i64)\n    Neg(i64)\n\n*eval(op)\n    match op\n        Add(a, b) ? a + b\n        Mul(a, b) ? a * b\n        Neg(a) ? 0 - a\n\n*main()\n    log(eval(Add(3, 4)))\n    log(eval(Mul(5, 6)))\n    log(eval(Neg(10)))\n",
         "7\n30\n-10",
@@ -6989,7 +6134,6 @@ fn b_s6_enum_inference_from_match_pattern() {
 
 #[test]
 fn b_s6_enum_inference_single_variant() {
-    // S6: Even a single variant pattern infers the enum type
     expect(
         "enum Color\n    Red\n    Green\n    Blue\n\n*is_red(c)\n    match c\n        Red ? 1\n        _ ? 0\n\n*main()\n    log(is_red(Red))\n    log(is_red(Blue))\n",
         "1\n0",
@@ -6998,7 +6142,6 @@ fn b_s6_enum_inference_single_variant() {
 
 #[test]
 fn b_r41_trait_guided_single_implementor() {
-    // R4.1: TypeVar with trait constraint resolved to single implementing type
     expect(
         "trait Greetable\n    *greet() returns String\n\ntype Dog\n    name as String\n\nimpl Greetable for Dog\n    *greet() returns String\n        \"Woof from \" + self.name\n\n*say_hello(x)\n    x.greet()\n\n*main()\n    d is Dog(name is \"Rex\")\n    log(say_hello(d))\n",
         "Woof from Rex",
@@ -7007,8 +6150,6 @@ fn b_r41_trait_guided_single_implementor() {
 
 #[test]
 fn b_value_restriction_non_value_monomorphic() {
-    // Value restriction: result of function call is monomorphic, not generalized.
-    // r = wrap(42) binds r: i64; passing to process_str(String) -> String fails.
     let _err = expect_compile_fail(
         "*wrap(x)\n    x\n\n*process_int(n as i64) returns i64\n    n + 1\n\n*process_str(s as String) returns String\n    s + \"!\"\n\n*main()\n    r is wrap(42)\n    log(process_int(r))\n    log(process_str(r))\n",
     );
@@ -7016,7 +6157,6 @@ fn b_value_restriction_non_value_monomorphic() {
 
 #[test]
 fn b_value_restriction_lambda_is_poly() {
-    // Value restriction: let-bound lambda IS a syntactic value, so it can be polymorphic
     expect(
         "*main()\n    id is |x| x\n    log(id(42))\n    log(id(\"hello\"))\n",
         "42\nhello",
@@ -7025,7 +6165,6 @@ fn b_value_restriction_lambda_is_poly() {
 
 #[test]
 fn b_struct_field_inference_from_constructor() {
-    // Constructor-driven struct field inference: unannotated fields inferred from usage
     expect(
         "type Point\n    x\n    y\n\n*main()\n    p is Point(x is 3, y is 4)\n    log(p.x + p.y)\n",
         "7",
@@ -7034,7 +6173,6 @@ fn b_struct_field_inference_from_constructor() {
 
 #[test]
 fn b_struct_field_inference_mixed_types() {
-    // Constructor-driven: mixed String and i64 fields inferred correctly
     expect(
         "type Person\n    name\n    age\n\n*main()\n    p is Person(name is \"Alice\", age is 30)\n    log(p.name)\n    log(p.age)\n",
         "Alice\n30",
@@ -7043,7 +6181,6 @@ fn b_struct_field_inference_mixed_types() {
 
 #[test]
 fn b_width_propagation_param() {
-    // Width propagation: i32 param type propagates to untyped arg
     expect(
         "*add_i32(a as i32, b as i32) returns i32\n    a + b\n\n*main()\n    x is 10\n    y is 20\n    log(add_i32(x, y))\n",
         "30",
@@ -7052,7 +6189,6 @@ fn b_width_propagation_param() {
 
 #[test]
 fn b_width_propagation_return() {
-    // Width propagation: return type propagates to body literal
     expect(
         "*make_u8() returns u8\n    42\n\n*main()\n    log(make_u8())\n",
         "42",
@@ -7061,7 +6197,6 @@ fn b_width_propagation_return() {
 
 #[test]
 fn b_f32_struct_field_store_load() {
-    // f32 struct fields store and load correctly
     expect(
         "type Sensor\n    reading as f32\n    count as u16\n\n*main()\n    s is Sensor(reading is 3.14, count is 100)\n    log(s.reading)\n    log(s.count)\n",
         "3.140000\n100",
@@ -7070,20 +6205,14 @@ fn b_f32_struct_field_store_load() {
 
 #[test]
 fn b_f32_function_roundtrip() {
-    // f32 param and return type work correctly
     expect(
         "*compute(x as f32) returns f32\n    x * 2.0\n\n*main()\n    log(compute(3.14))\n",
         "6.280000",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.1 String Parameter Inference
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_string_param_inferred_from_contains() {
-    // Parameter type inferred: String from .contains() call
     expect(
         "*check(s)\n    s.contains('world')\n\n*main()\n    log(check('hello world'))\n",
         "1",
@@ -7140,20 +6269,14 @@ fn b_string_param_inferred_from_split() {
 
 #[test]
 fn b_string_param_inferred_from_concat() {
-    // When one side of + is known String, the other should be inferred: String
     expect(
         "*greet(name)\n    'Hello, ' + name\n\n*main()\n    log(greet('world'))\n",
         "Hello, world",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.2 Trait Constraint Enforcement
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_trait_constraint_inferred_single_candidate() {
-    // When only one struct implements a trait method, unannotated param resolves correctly
     expect(
         "trait Describable\n    *describe() returns String\n\ntype Widget\n    label as String\n\nimpl Describable for Widget\n    *describe()\n        self.label\n\n*show(x)\n    log(x.describe())\n\n*main()\n    show(Widget(label is 'hello'))\n",
         "hello",
@@ -7162,17 +6285,11 @@ fn b_trait_constraint_inferred_single_candidate() {
 
 #[test]
 fn b_trait_constraint_narrowing() {
-    // When multiple structs have same method but only one implements the required trait,
-    // trait constraint narrows candidates correctly
     expect(
         "trait Printable\n    *to_text() returns String\n\ntype Alpha\n    val as i64\n\ntype Beta\n    val as i64\n\nimpl Printable for Alpha\n    *to_text()\n        'alpha'\n\nimpl Printable for Beta\n    *to_text()\n        'beta'\n\n*main()\n    a is Alpha(val is 1)\n    b is Beta(val is 2)\n    log(a.to_text())\n    log(b.to_text())\n",
         "alpha\nbeta",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.3 Empty Collection Inference
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_empty_vec_inferred_from_push_int() {
@@ -7194,10 +6311,6 @@ fn b_empty_vec_inferred_from_push_string() {
 fn b_empty_vec_no_context_compiles() {
     expect("*main()\n    v is vec()\n    log(v.len())\n", "0");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.4 Curried Function Inference
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_curried_add() {
@@ -7223,13 +6336,8 @@ fn b_curried_lambda() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.5 Conditional Chain Propagation
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_deep_elif_return_inference() {
-    // 5-branch elif chain, return type inferred without annotations
     expect(
         "*pick(n)\n    if n < 0\n        'negative'\n    elif n < 10\n        'small'\n    elif n < 100\n        'medium'\n    elif n < 1000\n        'large'\n    else\n        'huge'\n\n*main()\n    log(pick(-5))\n    log(pick(7))\n    log(pick(50))\n    log(pick(500))\n    log(pick(9999))\n",
         "negative\nsmall\nmedium\nlarge\nhuge",
@@ -7238,30 +6346,20 @@ fn b_deep_elif_return_inference() {
 
 #[test]
 fn b_if_expr_elif_unified() {
-    // If-expression: all branches unified to same type
     expect(
         "*main()\n    n is 42\n    result is if n < 0\n        'neg'\n    elif n < 10\n        'small'\n    else\n        'other'\n    log(result)\n",
         "other",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.6 Improved Diagnostics for Unsolved Type Variables
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_strict_unconstrained_field_diagnostic() {
-    // Strict mode still catches unconstrained struct fields
     let err = expect_strict_fail("type Bag\n    mystery\n\n*main()\n    log(1)\n");
     assert!(
         err.contains("has no type annotation and was never constrained"),
         "expected strict error about unconstrained field, got: {err}"
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BATCH: 12.7 Struct Type Parameters
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_struct_type_params_basic() {
@@ -7273,20 +6371,14 @@ fn b_struct_type_params_basic() {
 
 #[test]
 fn b_struct_type_params_generic() {
-    // Generic struct instantiated with different types in different calls
     expect(
         "type Wrapper\n    val\n\n*main()\n    a is Wrapper(42)\n    log(a.val)\n",
         "42",
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BUG FIX: Closure capture of non-integer types (Addable constraint)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_curried_string_concat() {
-    // Curried function that captures a String — previously caused LLVM IR type mismatch
     expect(
         "*concat(a as String)\n    |b as String| returns String a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
         "hello world",
@@ -7295,7 +6387,6 @@ fn b_curried_string_concat() {
 
 #[test]
 fn b_curried_string_concat_inferred() {
-    // Same but with fully inferred types (the core bug)
     expect(
         "*concat(a)\n    |b| a + b\n\n*main()\n    f is concat(\"hello \")\n    log(f(\"world\"))\n",
         "hello world",
@@ -7304,16 +6395,11 @@ fn b_curried_string_concat_inferred() {
 
 #[test]
 fn b_addable_still_works_numeric() {
-    // Ensure + with integers still works after Addable constraint
     expect(
         "*add(a)\n    |b| a + b\n\n*main()\n    log(add(3)(4))\n",
         "7",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BUG FIX: Chained field access on rvalues
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_chained_field_access_two_deep() {
@@ -7339,10 +6425,6 @@ fn b_chained_field_assignment() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BUG FIX: Mixed-type generic struct monomorphization
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_struct_mono_int_and_string() {
     expect(
@@ -7361,16 +6443,11 @@ fn b_struct_mono_int_string_float() {
 
 #[test]
 fn b_struct_mono_single_type_no_mangle() {
-    // Single-type usage should not require monomorphization
     expect(
         "type Box\n    val\n\n*main()\n    a is Box(10)\n    b is Box(20)\n    log(a.val + b.val)\n",
         "30",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Unsigned shift right (>>>)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_ushr_positive() {
@@ -7379,7 +6456,6 @@ fn b_ushr_positive() {
 
 #[test]
 fn b_ushr_negative() {
-    // Unsigned shift of -1 should treat as all-ones unsigned
     expect("*main()\n    x is -1 >>> 63\n    log(x)\n", "1");
 }
 
@@ -7390,7 +6466,6 @@ fn b_ushr_zero_shift() {
 
 #[test]
 fn b_ushr_vs_shr_positive() {
-    // For positive numbers, >>> and >> should be identical
     expect(
         "*main()\n    a is 1024 >> 3\n    b is 1024 >>> 3\n    log(a)\n    log(b)\n",
         "128\n128",
@@ -7401,10 +6476,6 @@ fn b_ushr_vs_shr_positive() {
 fn b_ushr_augmented_assign() {
     expect("*main()\n    x is 256\n    x >>>= 4\n    log(x)\n", "16");
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Shebang line skipping
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_shebang_skipped() {
@@ -7419,22 +6490,13 @@ fn b_shebang_with_args() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TOML stringify
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_toml_round_trip() {
-    // Use Jinn single-quoted strings (support \n escapes)
     expect(
         "use toml\n\n*main()\n    src is '[settings]\\ncount = 42\\nenabled = true'\n    t is toml.parse(src)\n    s is toml.stringify(t)\n    log(s.contains('count'))\n    log(s.contains('42'))\n",
         "1\n1",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CSV streaming Reader
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_csv_reader_basic() {
@@ -7443,10 +6505,6 @@ fn b_csv_reader_basic() {
         "3",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Binary big-endian
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_binary_big_endian_roundtrip() {
@@ -7458,16 +6516,11 @@ fn b_binary_big_endian_roundtrip() {
 
 #[test]
 fn b_binary_endian_difference() {
-    // Write LE, read BE should give different result (byte-swap)
     expect(
         "use binary\n\n*main()\n    buf is binary.new(64)\n    buf.write_i16(0x0102)\n    buf.seek(0)\n    le is buf.read_i16()\n    buf.seek(0)\n    be is buf.read_i16_be()\n    log(le equals be)\n",
         "0",
     );
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// BigInt pow / modpow / gcd
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[test]
 fn b_bigint_pow() {
@@ -7493,13 +6546,8 @@ fn b_bigint_gcd() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Decimal rounding modes
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 #[test]
 fn b_decimal_round_half_even() {
-    // Banker's rounding: 2.5 rounds to 2 (even), 3.5 rounds to 4 (even)
     expect(
         "use decimal\n\n*main()\n    a is decimal.parse(\"2.5000\")\n    r is decimal.round_with(a, 0, decimal.ROUND_HALF_EVEN)\n    log(decimal.format(r))\n",
         "2.0000",
@@ -7514,11 +6562,6 @@ fn b_decimal_round_truncate() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// Access semantics (P1–P3): copy / ref / mut / take + @resource / @atomic
-// See docs/access-semantics.md.
-// ══════════════════════════════════════════════════════════════════════
-
 #[test]
 fn access_mod_copy_on_bind_runs() {
     expect("*main()\n    x is 5\n    y is copy x\n    log(y)\n", "5");
@@ -7526,7 +6569,6 @@ fn access_mod_copy_on_bind_runs() {
 
 #[test]
 fn access_mod_auto_alias_on_bind_runs() {
-    // `ref`/`mut` keywords are gone — the compiler auto-aliases.
     expect(
         "*main()\n    v is [10, 20, 30]\n    a is v\n    log(a.len())\n",
         "3",
@@ -7543,7 +6585,6 @@ fn access_mod_take_on_bind_runs() {
 
 #[test]
 fn access_mod_for_loop_parses() {
-    // for-loop bindings auto-alias by default.
     expect(
         "*main()\n    v is [1, 2, 3]\n    sum is 0\n    for x in v\n        sum is sum + x\n    log(sum)\n",
         "6",
@@ -7552,8 +6593,6 @@ fn access_mod_for_loop_parses() {
 
 #[test]
 fn access_mod_field_parses() {
-    // Field declarations no longer accept `ref`/`mut` — aliasing is
-    // determined by usage, not declared on the field.
     expect(
         "type Holder\n    items as Vec of i64\n\n*main()\n    log(1)\n",
         "1",
@@ -7562,7 +6601,6 @@ fn access_mod_field_parses() {
 
 #[test]
 fn resource_annotation_rejects_copy() {
-    // `copy` on a @resource type is a hard error (P3 enforcement).
     let err = expect_compile_fail(
         "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 42)\n    h2 is copy h\n    log(h2.fd)\n",
     );
@@ -7574,7 +6612,6 @@ fn resource_annotation_rejects_copy() {
 
 #[test]
 fn resource_annotation_allows_take() {
-    // `take` on a @resource is fine (it's a move, not a copy).
     expect(
         "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 7)\n    h2 is take h\n    log(h2.fd)\n",
         "7",
@@ -7583,11 +6620,6 @@ fn resource_annotation_allows_take() {
 
 #[test]
 fn field_take_persistent_parent_runs() {
-    // P4 §5.2 partial-move: `take p.a` moves the field out, but the parent
-    // `p` is still live and dropped at scope exit. Without the field
-    // tombstone, the parent's drop would double-free the moved Vec. With
-    // FieldTombstone zeroing the slot, the per-field drop is a no-op for
-    // moved fields and the still-owned field `p.b` drops normally.
     expect(
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    log taken.len()\n    log p.b.len()\n",
         "3\n3",
@@ -7596,8 +6628,6 @@ fn field_take_persistent_parent_runs() {
 
 #[test]
 fn field_take_string_persistent_parent_runs() {
-    // Same as above but with a heap String field, which exercises the
-    // SSO / large-string branch of drop_string null-safety.
     expect(
         "type Box\n    name as String\n    n as i64\n\n*main\n    b is Box(name is 'this-is-a-fairly-long-string-to-force-heap-allocation', n is 42)\n    s is take b.name\n    log s.len()\n    log b.n\n",
         "53\n42",
@@ -7606,8 +6636,6 @@ fn field_take_string_persistent_parent_runs() {
 
 #[test]
 fn field_take_use_after_move_errors() {
-    // P4 §5.2 Option 2: typer-level use-after-partial-move tracking.
-    // Reading `p.a` after `take p.a` must be a compile error.
     let err = expect_compile_fail(
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    log p.a.len()\n",
     );
@@ -7619,8 +6647,6 @@ fn field_take_use_after_move_errors() {
 
 #[test]
 fn field_take_reassign_then_read_ok() {
-    // After `take p.a` the field is poisoned, but reassigning `p.a is …`
-    // clears the poison and a subsequent read is legal.
     expect(
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    p.a is [9, 9]\n    log p.a.len()\n",
         "2",
@@ -7629,8 +6655,6 @@ fn field_take_reassign_then_read_ok() {
 
 #[test]
 fn field_take_both_branches_then_read_errors() {
-    // If both arms of an `if` take `p.a`, the join state has `p.a` moved
-    // and the post-if read must be rejected.
     let err = expect_compile_fail(
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    if p.b.len() > 0\n        t1 is take p.a\n    else\n        t2 is take p.a\n    log p.a.len()\n",
     );
@@ -7642,9 +6666,6 @@ fn field_take_both_branches_then_read_errors() {
 
 #[test]
 fn field_take_one_branch_only_errors() {
-    // Conservative union: if only one branch takes `p.a`, the post-if
-    // state must still consider it moved (we can't prove the branch
-    // wasn't taken).
     let err = expect_compile_fail(
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    if p.b.len() > 0\n        t1 is take p.a\n    log p.a.len()\n",
     );
@@ -7656,27 +6677,14 @@ fn field_take_one_branch_only_errors() {
 
 #[test]
 fn field_take_loop_no_leak_post_loop_read_ok() {
-    // In-body partial-moves must not leak past the loop: snapshot before,
-    // restore after. The body re-establishes the field every iteration
-    // via reassignment, so the post-loop read is legal.
     expect(
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    i is 0\n    while i < 2\n        t is take p.a\n        p.a is [7, 7, 7, 7]\n        i is i + 1\n    log p.a.len()\n",
         "4",
     );
 }
 
-// ---------------------------------------------------------------------------
-// P5 — Row<T> acceptance tests (access-semantics-sprint.md §6).
-// `store where ...`, `store.first`, and `store.get` now return `Row<store>`,
-// a write-through handle whose underlying record layout is the store's
-// auto-generated `__store_{name}` struct. Field reads on the row are
-// transparent. `.snapshot()` converts a row to an owned copy of the record.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn store_row_field_read_works() {
-    // P5.b: bare field-read on a Row<store> looks up via the store's
-    // schema and yields the field's declared type.
     expect(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    r is data where key equals 2\n    log(r.val)\n",
         "200",
@@ -7685,8 +6693,6 @@ fn store_row_field_read_works() {
 
 #[test]
 fn store_row_snapshot_yields_struct() {
-    // P5.b: `.snapshot()` rewraps the Row<store> as an owned record
-    // whose fields can be read just like any other struct.
     expect(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 7, 777\n    r is data where key equals 7\n    s is r.snapshot()\n    log(s.val)\n",
         "777",
@@ -7695,8 +6701,6 @@ fn store_row_snapshot_yields_struct() {
 
 #[test]
 fn store_first_returns_row() {
-    // P5.b: `store.first(filter)` also returns Row<store>; the field
-    // access path on the row works identically to `where`.
     expect(
         "store nums\n    id as i64\n    score as i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is first nums where score > 40\n    log(r.id)\n",
         "1",
@@ -7705,7 +6709,6 @@ fn store_first_returns_row() {
 
 #[test]
 fn store_row_snapshot_no_args() {
-    // P5.b: `.snapshot()` takes zero arguments; passing any is an error.
     let err = expect_compile_fail(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 10\n    r is data where key equals 1\n    s is r.snapshot(42)\n    log(s.val)\n",
     );
@@ -7717,10 +6720,6 @@ fn store_row_snapshot_no_args() {
 
 #[test]
 fn store_snapshot_is_copy() {
-    // P5.e (spec §6.3): `s is r.snapshot()` materializes an owned `T`.
-    // Mutating `s.field` is a struct-local write — it MUST NOT touch
-    // the underlying store. Re-querying must observe the original
-    // persisted value.
     expect(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    r is data where key equals 1\n    s is r.snapshot()\n    s.val is 999\n    t is data where key equals 1\n    log(t.val)\n",
         "100",
@@ -7729,8 +6728,6 @@ fn store_snapshot_is_copy() {
 
 #[test]
 fn store_row_copy_rejected() {
-    // P5.d: `Row<T>` is `@resource`; binding with `copy` is a hard
-    // semantic error (per docs/access-semantics-sprint.md §6.1).
     let err = expect_compile_fail(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    r is data where key equals 1\n    s is copy r\n    log(s.val)\n",
     );
@@ -7742,10 +6739,6 @@ fn store_row_copy_rejected() {
 
 #[test]
 fn store_row_write_through_via_field() {
-    // P5.c: `row.field = value` is sugar for a write-through update.
-    // After mutating through the row handle, re-querying the store must
-    // observe the new value (snapshots do not — but field reads on the
-    // row see the persisted value via the underlying record).
     expect(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    r is data where key equals 2\n    r.val is 999\n    s is data where key equals 2\n    log(s.val)\n",
         "999",
@@ -7754,8 +6747,6 @@ fn store_row_write_through_via_field() {
 
 #[test]
 fn store_row_write_through_preserves_others() {
-    // P5.c: write-through only affects the targeted row's field; other
-    // rows and other fields remain untouched.
     expect(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    r.val is 42\n    a is data where key equals 1\n    b is data where key equals 3\n    log(a.val + b.val)\n",
         "400",
@@ -7764,9 +6755,6 @@ fn store_row_write_through_preserves_others() {
 
 #[test]
 fn resource_annotation_allows_ref() {
-    // `ref` is no longer a surface modifier under "heap tax" semantics
-    // (AccessMod::Ref/Mut were removed). Plain heap aliasing is the
-    // default; resource semantics only forbid copy.
     expect(
         "type Handle @resource\n    fd as i32\n\n*main()\n    h is Handle(fd is 9)\n    log(h.fd)\n",
         "9",
@@ -7775,9 +6763,6 @@ fn resource_annotation_allows_ref() {
 
 #[test]
 fn resource_drop_runs_at_scope_exit() {
-    // A `*drop` method defined on a `@resource` type must be auto-invoked
-    // when the owning binding's scope ends. The "dropped" log proves the
-    // codegen path in drop_struct_fields fires the user-supplied cleanup.
     expect(
         "type Logger @resource\n    n as i64\n\n    *drop\n        log(\"dropped\")\n\n*main()\n    l is Logger(n is 1)\n    log(\"before\")\n",
         "before\ndropped",
@@ -7786,8 +6771,6 @@ fn resource_drop_runs_at_scope_exit() {
 
 #[test]
 fn non_resource_drop_method_not_auto_called() {
-    // Negative control: the *exact* same type without `@resource` must NOT
-    // have its `*drop` auto-invoked. Only `before` should appear.
     expect(
         "type Logger\n    n as i64\n\n    *drop\n        log(\"dropped\")\n\n*main()\n    l is Logger(n is 1)\n    log(\"before\")\n",
         "before",
@@ -7796,8 +6779,6 @@ fn non_resource_drop_method_not_auto_called() {
 
 #[test]
 fn resource_cross_thread_channel_rejected() {
-    // Sending a @resource value on a channel must be a compile error:
-    // resources cannot cross thread boundaries.
     let err = expect_compile_fail(
         "type Handle @resource\n    fd as i64\n\n*main()\n    ch is channel(1)\n    h is Handle(fd is 3)\n    send ch, h\n",
     );
@@ -7809,7 +6790,6 @@ fn resource_cross_thread_channel_rejected() {
 
 #[test]
 fn resource_cross_thread_actor_rejected() {
-    // Sending a @resource value to an actor handler must error too.
     let err = expect_compile_fail(
         "type Handle @resource\n    fd as i64\n\nactor Sink\n    n as i64\n    @take h as Handle\n        n is h.fd\n\n*main()\n    s is spawn Sink\n    h is Handle(fd is 7)\n    s.take(h)\n",
     );
@@ -7821,10 +6801,6 @@ fn resource_cross_thread_actor_rejected() {
 
 #[test]
 fn file_drop_auto_flushes_writes() {
-    // R1.1: `File` is `@resource` and has a `*drop` that calls `*shut`
-    // (which fcloses the FILE* and flushes libc buffers). Without the
-    // auto-drop, the buffered write below would not reach disk before
-    // the subsequent read, and `read_file` would observe an empty string.
     expect(
         "use std/io\n\n*write_then_drop()\n    f is io.open(\"drop_test.txt\", \"w\")\n    f.write(\"hello-from-drop\")\n\n*main()\n    write_then_drop()\n    log io.read_file(\"drop_test.txt\")\n",
         "hello-from-drop",
@@ -7833,9 +6809,6 @@ fn file_drop_auto_flushes_writes() {
 
 #[test]
 fn file_drop_idempotent_after_explicit_shut() {
-    // R1.1: a `@resource` whose `*shut` was called explicitly must not
-    // crash when `*drop` runs at scope exit. The idempotency guard
-    // (handle null-check + zero-out) is what makes this safe.
     expect(
         "use std/io\n\n*open_shut_then_drop()\n    f is io.open(\"idem_test.txt\", \"w\")\n    f.write(\"x\")\n    f.shut()\n    # f goes out of scope here; *drop must be a no-op since f.handle was zeroed.\n\n*main()\n    open_shut_then_drop()\n    log \"ok\"\n",
         "ok",
@@ -7844,11 +6817,6 @@ fn file_drop_idempotent_after_explicit_shut() {
 
 #[test]
 fn store_row_field_access_in_coroutine_body() {
-    // R1.2: Row<T> field access in HIR-direct codegen (coroutine bodies).
-    // Coroutines don't capture outer scope yet, but a Row produced inside
-    // the coroutine body must still support `.field` reads and writes.
-    // Regression test for the missing Type::Row arm in
-    // src/codegen/expr/access.rs `compile_field` / `compile_lvalue_ptr`.
     expect(
         "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    foo is dispatch reader\n        r is data where key equals 2\n        r.val is 777\n        yield 0\n    reader.next()\n    s is data where key equals 2\n    log(s.val)\n",
         "777",
@@ -7859,20 +6827,11 @@ fn store_row_field_access_in_coroutine_body() {
 #[ignore = "weak()/weak_upgrade() on heap nominals requires the heap-tax \
             inference (struct-literal → RcNew with {strong,weak,payload} \
             layout) to be wired up. Tracked under Phase-7 circle-back."]
-fn weak_roundtrip_recovers_value_removed() {
-    // Weak / weak() / weak_upgrade() were removed in Phase 4.5
-    // (heap-tax cleanup). Cycle-breaking is now expressed via
-    // ActorRef, raw Ptr<T>, or arena+index patterns. A future
-    // incremental cycle collector may revive a weak primitive.
-}
+fn weak_roundtrip_recovers_value_removed() {}
 
 #[test]
 fn const_binding_rejects_rebind() {
-    // P5: `is const X` makes the binding immutable; any subsequent
-    // `name is ...` for the same name in the same scope is rejected.
-    let err = expect_compile_fail(
-        "*main()\n    x is const 42\n    x is 99\n    log(x)\n",
-    );
+    let err = expect_compile_fail("*main()\n    x is const 42\n    x is 99\n    log(x)\n");
     assert!(
         err.contains("const") && err.contains("rebind"),
         "expected const-rebind diagnostic, got: {err}"
@@ -7881,9 +6840,5 @@ fn const_binding_rejects_rebind() {
 
 #[test]
 fn const_binding_reads_normally() {
-    // P5: `const` is a rebind ban only; reads work normally.
-    expect(
-        "*main()\n    x is const 42\n    log(x)\n",
-        "42",
-    );
+    expect("*main()\n    x is const 42\n    log(x)\n", "42");
 }

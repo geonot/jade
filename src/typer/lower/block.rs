@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};
@@ -50,11 +48,6 @@ impl Typer {
         Ok(stmts)
     }
 
-    /// Finalize the scope-exit drop emission for a block whose statements
-    /// have already been lowered with `lower_block_no_scope`. Encapsulates
-    /// the tail-expression / jump handling that `lower_block` does so it
-    /// can be reused by `lower_fn_deferred` (and other sites where params
-    /// must live in the body's scope to receive proper drop emission).
     pub(in crate::typer) fn finalize_block_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
         let ends_with_jump = stmts.last().map_or(false, |s| {
             matches!(
@@ -64,19 +57,12 @@ impl Typer {
         });
         if ends_with_jump {
             let jump = stmts.pop().unwrap();
-            // Collect variable IDs referenced in the jump expression so we
-            // don't drop them before they're consumed by the return/break.
+
             let mut jump_refs = std::collections::HashSet::new();
             Self::collect_hir_var_ids_stmt(&jump, &mut jump_refs);
             self.emit_scope_drops_excluding(stmts, &jump_refs);
             stmts.push(jump);
         } else if let Some(hir::Stmt::Expr(_)) = stmts.last() {
-            // Implicit return: emit drops AFTER the tail evaluates, excluding
-            // any var that was *moved* into the tail (struct ctor / tuple /
-            // bare var). Vars merely referenced (via field access, method
-            // call, etc.) still need to be dropped, but the drop must happen
-            // AFTER the tail has read them. Emitting before-tail would free
-            // storage the tail still needs.
             let tail = stmts.pop().unwrap();
             let mut tail_moves = std::collections::HashSet::new();
             if let hir::Stmt::Expr(te) = &tail {
@@ -93,12 +79,6 @@ impl Typer {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
 
-    /// Collect variable IDs that have been moved (consumed) by a statement-
-    /// level expression earlier in the same block. Currently we recognise
-    /// container "consume on push" methods: pushing/inserting a heap-typed
-    /// bare variable into a Vec/Set/Map/PQ moves the value into the container,
-    /// so it must not be dropped at scope exit (the container owns the
-    /// underlying storage now).
     fn collect_block_consumed_ids(
         &mut self,
         stmts: &[hir::Stmt],
@@ -107,14 +87,7 @@ impl Typer {
         for s in stmts {
             match s {
                 hir::Stmt::Expr(e) => self.collect_consumed_in_expr(e, out),
-                // `x is y` (Assign) and `let x = y` (Bind) where `y` is a
-                // bare variable of heap-managed type *moves* y into x. The
-                // sole owner becomes x; y must not be dropped at scope exit.
-                // Without this, both x and y get dropped and the underlying
-                // buffer is freed twice (or x is left dangling if y's drop
-                // runs first inside a loop body). Resolve any inference
-                // variables before checking — the RHS type at this point may
-                // still be a TypeVar that resolves to a heap type.
+
                 hir::Stmt::Assign(_target, value, _) => {
                     let resolved = self.infer_ctx.resolve(&value.ty);
                     if Self::expr_type_needs_drop(&resolved) {
@@ -170,13 +143,7 @@ impl Typer {
                     }
                 }
             }
-            // Stage B: callee-sig aware consume tracking. For each call
-            // argument whose corresponding callee parameter is `take`,
-            // mark the bare-Var argument as consumed so the caller's
-            // scope-exit drop is suppressed. This implements the move
-            // semantics required by `docs/access-semantics.md` §4.3 / §4.6
-            // for explicit-`take` parameters, without breaking the (still
-            // borrow-by-default) behavior for unannotated heap params.
+
             hir::ExprKind::Call(_, name, args) => {
                 let access = self.fn_param_access.get(name).cloned();
                 if let Some(access) = access {
@@ -191,24 +158,17 @@ impl Typer {
                         }
                     }
                 }
-                // Walk into nested call args (e.g. f(g(x))). For a nested
-                // call's bare-Var arg, `g(x)` already handles `x` via its
-                // own callee-sig check; the outer call sees `g(x)` as the
-                // arg expression (not a Var), so no double-handling.
+
                 for a in args {
                     self.collect_consumed_in_expr(a, out);
                 }
             }
-            // Method dispatch on a struct/trait method: look up the
-            // mangled `Type_method` signature in `fns` (which is the same
-            // form `declare_method_sig_impl` registers under).
+
             hir::ExprKind::Method(recv, ty_name, m_name, args) => {
                 let mangled: crate::intern::Symbol =
                     format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
                 let access = self.fn_param_access.get(&mangled).cloned();
                 if let Some(access) = access {
-                    // access[0] corresponds to the synthetic `self` param.
-                    // User-supplied args start at index 1.
                     for (i, a) in args.iter().enumerate() {
                         if matches!(access.get(i + 1), Some(Some(crate::ast::AccessMod::Take)))
                             && let hir::ExprKind::Var(id, _) = &a.kind
@@ -232,11 +192,7 @@ impl Typer {
     fn expr_type_needs_drop(ty: &Type) -> bool {
         matches!(
             ty,
-            Type::Vec(_)
-                | Type::Map(_, _)
-                | Type::String
-                | Type::Struct(_, _)
-                | Type::Enum(_)
+            Type::Vec(_) | Type::Map(_, _) | Type::String | Type::Struct(_, _) | Type::Enum(_)
         )
     }
 
@@ -245,30 +201,18 @@ impl Typer {
         stmts: &mut Vec<hir::Stmt>,
         exclude: &std::collections::HashSet<crate::hir::DefId>,
     ) {
-        // Snapshot scope entries up-front so we can take &mut self for resolve.
         let scope_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo)> =
             match self.scopes.last() {
                 Some(s) => s.iter().map(|(n, v)| (n.clone(), v.clone())).collect(),
                 None => return,
             };
-        // In addition to the caller-supplied exclusion set (e.g. tail-expr
-        // moves), also exclude any scope variable that was already moved into
-        // a container by a prior stmt-level call (e.g. `g.push(row)`).
+
         let mut consumed: std::collections::HashSet<crate::hir::DefId> = exclude.clone();
         self.collect_block_consumed_ids(stmts, &mut consumed);
-        // Resolve any inference variables so that needs_drop sees the concrete
-        // type (e.g. Vec(_) rather than TypeVar). Without this, owned heap
-        // locals whose Bind site introduced a fresh TyVar would be skipped by
-        // needs_drop and silently leak. Pre-resolve all entries up-front to
-        // satisfy the borrow checker (resolve needs &mut self.infer_ctx).
+
         let mut resolved_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo, Type)> =
             Vec::with_capacity(scope_entries.len());
-        // Drop-emission resolves binding types only to decide which need a
-        // matching `Drop` stmt. Unsolved type variables here are not a
-        // diagnostic concern of this pass — they belong to inferable-fn
-        // bodies that will either get fully solved by the post-lowering
-        // resolver or replaced wholesale by monomorphization. Silence
-        // strict-mode emissions for the duration of these resolves.
+
         let was_strict = self.infer_ctx.is_strict();
         self.infer_ctx.set_strict(false);
         for (name, info) in scope_entries {
@@ -298,9 +242,6 @@ impl Typer {
         }
     }
 
-    /// Collect variable IDs that are *moved* (consumed) by an expression.
-    /// Only struct constructors, tuple literals, and bare variable references
-    /// count as moves. Method calls, field accesses, etc. borrow their receiver.
     pub(in crate::typer) fn collect_moved_var_ids(
         expr: &hir::Expr,
         out: &mut std::collections::HashSet<crate::hir::DefId>,
@@ -451,18 +392,11 @@ impl Typer {
         self.needs_drop_inner(ty, &mut visiting)
     }
 
-    /// Recursive implementation of `needs_drop` with cycle protection.
-    /// A `visiting` set carries the names of struct/enum types currently on
-    /// the inspection stack — a self- or mutually-referential type is treated
-    /// as not needing a drop *at the cycle point* (the heap edge is usually
-    /// an `Rc`/`Weak`/box which is itself in the base-case heap-owning set).
     fn needs_drop_inner(
         &self,
         ty: &Type,
         visiting: &mut std::collections::HashSet<crate::intern::Symbol>,
     ) -> bool {
-        // Base-case heap-owning types: their owned bindings always require
-        // scope-exit drop.
         if matches!(
             ty,
             Type::String
@@ -475,21 +409,6 @@ impl Typer {
             return true;
         }
         match ty {
-            // A user-defined struct needs drop when:
-            //   * it is `@resource` (auto `*drop` fires at scope exit), OR
-            //   * any of its fields recursively needs drop (so the heap
-            //     storage carried by those fields is reclaimed).
-            //
-            // This is the canonical Stage-C recursion: combined with
-            // Stage-A's borrow-by-default for unannotated heap params and
-            // Stage-B's `take`-aware call-arg consume tracking, the caller
-            // becomes the sole drop site for the aggregate's heap edges,
-            // so recursing here no longer double-frees.
-            //
-            // Cycle protection: a self- or mutually-referential struct is
-            // treated as not-needing-drop *at the cycle point*. Real heap
-            // edges in such graphs go through `Rc`/`Weak`/`Box`, which are
-            // base-case heap types handled above.
             Type::Struct(name, args) => {
                 if self
                     .struct_attrs
@@ -502,10 +421,7 @@ impl Typer {
                 if !visiting.insert(name.clone()) {
                     return false;
                 }
-                // Look up the struct's field types. Substitute generic
-                // type args if any. `structs` stores the canonical field
-                // shape; if a generic instantiation, also try a mangled
-                // mono name.
+
                 let result = self
                     .struct_field_types(name, args)
                     .into_iter()
@@ -529,8 +445,7 @@ impl Typer {
             }
             Type::Tuple(elts) => elts.iter().any(|t| self.needs_drop_inner(t, visiting)),
             Type::Array(elem, _) => self.needs_drop_inner(elem, visiting),
-            // Alias/Newtype are transparent wrappers — preserve the
-            // underlying type's drop classification.
+
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.needs_drop_inner(inner, visiting)
             }
@@ -538,18 +453,12 @@ impl Typer {
         }
     }
 
-    /// Resolve a struct name (+ optional type args) to its field types,
-    /// substituting the type args into any generic field. Returns an
-    /// empty Vec for unknown structs (safe under-approximation: caller
-    /// treats no fields as no drop edges).
     fn struct_field_types(&self, name: &crate::intern::Symbol, args: &[Type]) -> Vec<Type> {
         if let Some(fields) = self.structs.get(name) {
-            // If the stored shape has no generic params, return as-is.
             if args.is_empty() {
                 return fields.iter().map(|(_, ty)| ty.clone()).collect();
             }
-            // Otherwise, substitute generic type params using the stored
-            // generic def's param order.
+
             if let Some(generic_def) = self.generic_types.get(name) {
                 let params = &generic_def.type_params;
                 if params.len() == args.len() {
@@ -569,7 +478,6 @@ impl Typer {
         Vec::new()
     }
 
-    /// Substitute generic type parameters in `ty` using `subs`.
     fn subst_type(
         ty: &Type,
         subs: &std::collections::HashMap<crate::intern::Symbol, Type>,

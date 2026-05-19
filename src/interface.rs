@@ -1,20 +1,8 @@
-//! `.jni` — Jinn Interface File Format
-//!
-//! After type inference resolves all types, function signatures, type/enum/trait
-//! definitions can be serialized to `.jni` files. When a module is imported
-//! via `use`, the compiler can load the `.jni` file instead of re-parsing and
-//! re-typing the source, enabling separate compilation.
-
 use crate::intern::Symbol;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Current interface file format version.
 const INTERFACE_VERSION: u32 = 1;
-
-// ────────────────────────────────────────────────────────────────────────
-// Serializable type representation (mirrors crate::types::Type)
-// ────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum IType {
@@ -44,10 +32,6 @@ pub enum IType {
     Coroutine(Box<IType>),
     Channel(Box<IType>),
 }
-
-// ────────────────────────────────────────────────────────────────────────
-// Interface file data structures
-// ────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterfaceFile {
@@ -113,10 +97,6 @@ pub struct ImplSig {
     pub type_name: String,
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Conversion: Type ↔ IType
-// ────────────────────────────────────────────────────────────────────────
-
 impl From<&crate::types::Type> for IType {
     fn from(ty: &crate::types::Type) -> Self {
         use crate::types::Type;
@@ -151,12 +131,11 @@ impl From<&crate::types::Type> for IType {
             Type::ActorRef(n) => IType::ActorRef(n.to_string()),
             Type::Coroutine(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
             Type::Channel(inner) => IType::Channel(Box::new(inner.as_ref().into())),
-            Type::TypeVar(_) => IType::I64, // unsolved vars default to i64
+            Type::TypeVar(_) => IType::I64,
             Type::Alias(_, inner) => inner.as_ref().into(),
             Type::Newtype(_, inner) => inner.as_ref().into(),
             Type::Generator(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
-            // Row<T> is opaque at the interface boundary; expose as i64
-            // (cross-module Row values are not yet supported).
+
             Type::Row(_) => IType::I64,
         }
     }
@@ -200,12 +179,7 @@ impl From<&IType> for crate::types::Type {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Building an InterfaceFile from AST declarations
-// ────────────────────────────────────────────────────────────────────────
-
 impl InterfaceFile {
-    /// Create a new empty interface file for the given module name.
     pub fn new(module: &str) -> Self {
         InterfaceFile {
             version: INTERFACE_VERSION,
@@ -218,8 +192,6 @@ impl InterfaceFile {
         }
     }
 
-    /// Build an interface file from AST declarations.
-    /// Types should already be resolved (via inference) before calling this.
     pub fn from_decls(module: &str, decls: &[crate::ast::Decl]) -> Self {
         let mut iface = Self::new(module);
         for decl in decls {
@@ -298,17 +270,12 @@ impl InterfaceFile {
                         });
                     }
                 }
-                _ => {} // Use, Extern, Test, Actor, Store, Const, ErrDef
+                _ => {}
             }
         }
         iface
     }
 
-    // ────────────────────────────────────────────────────────────────────
-    // Serialization / Deserialization
-    // ────────────────────────────────────────────────────────────────────
-
-    /// Serialize to JSON and write to the given path.
     pub fn write_to(&self, path: &Path) -> Result<(), String> {
         use std::fs::File;
         use std::io::Write;
@@ -331,7 +298,6 @@ impl InterfaceFile {
         Ok(())
     }
 
-    /// Read and deserialize from the given path.
     pub fn read_from(path: &Path) -> Result<Self, String> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
@@ -348,7 +314,6 @@ impl InterfaceFile {
         Ok(iface)
     }
 
-    /// Convert this interface back to AST declarations for merging into a program.
     pub fn to_decls(&self) -> Vec<crate::ast::Decl> {
         use crate::ast::*;
         let dummy = Span::dummy();
@@ -430,11 +395,6 @@ impl InterfaceFile {
                 span: dummy,
             }));
         }
-
-        // Note: Function bodies are not included in interface files.
-        // Only extern-style declarations could be synthesized, but for now
-        // we rely on the fact that imported functions are already compiled
-        // in a separate object file and linked at the LLVM level.
 
         decls
     }

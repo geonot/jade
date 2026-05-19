@@ -1,5 +1,3 @@
-//! AST → HIR lowering after type inference completes.
-
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -49,13 +47,7 @@ impl Typer {
                         self.generic_fns.insert(f.name.clone(), normalized);
                     }
                     self.declare_fn_sig(f);
-                    // For inferable fns the param/return typevars are bound by
-                    // the implicit `forall` of the function's scheme. Mark them
-                    // quantified immediately so that intermediate passes (e.g.
-                    // drop-emission's `resolve` calls during body lowering) do
-                    // not flag them as "unsolved type variables" in strict mode.
-                    // The post-lowering `build_fn_scheme` re-marks the same
-                    // roots via `generalize`, which is a no-op here.
+
                     if has_untyped_params {
                         if let Some((_, ptys, ret)) = self.fns.get(&f.name).cloned() {
                             let mut ftvs = std::collections::HashSet::new();
@@ -93,7 +85,6 @@ impl Typer {
                     self.declare_extern_sig(ef);
                 }
                 ast::Decl::Use(u) => {
-                    // Track module name (or alias) for module-qualified dispatch
                     let mod_name = u
                         .alias
                         .clone()
@@ -115,7 +106,7 @@ impl Typer {
                         .iter()
                         .any(|d| *d == ast::StoreDecorator::Simple);
                     let mut fields: Vec<(Symbol, Type)> = Vec::new();
-                    // Inject built-in fields unless @simple
+
                     if !is_simple {
                         fields.push(("sid".into(), Type::I64));
                         fields.push(("uuid".into(), Type::String));
@@ -148,7 +139,6 @@ impl Typer {
                     self.globals.insert(name.clone(), (expr.clone(), *span));
                 }
                 ast::Decl::Supervisor(sup) => {
-                    // Validate supervisor: check children are known actor names
                     for child in &sup.children {
                         if !self.fns.contains_key(child) && !self.actors.contains_key(child) {
                             self.type_errors.push(format!(
@@ -157,9 +147,7 @@ impl Typer {
                             ));
                         }
                     }
-                    // Register the supervisor's codegen-emitted entry points
-                    // (`<Sup>_start()` and `<Sup>_restart_count()`) so the
-                    // typer can resolve calls to them from user code.
+
                     let sup_name = sup.name.as_str();
                     let start_name = Symbol::intern(&format!("{}_start", sup_name));
                     if !self.fns.contains_key(&start_name) {
@@ -173,7 +161,6 @@ impl Typer {
                     }
                 }
                 ast::Decl::TypeAlias(name, ty, _span) => {
-                    // Direct cycle detection
                     if type_references_name(ty, *name) {
                         self.type_errors.push(format!(
                             "type alias '{}' is cyclic (references itself)",
@@ -192,7 +179,6 @@ impl Typer {
             }
         }
 
-        // Detect indirect type alias cycles (A -> B -> A)
         for name in alias_map.keys() {
             let mut visited = std::collections::HashSet::new();
             let mut cur = name.clone();
@@ -206,7 +192,7 @@ impl Typer {
                     ));
                     break;
                 }
-                // Find the next alias name referenced by this type
+
                 let mut next = None;
                 for other in alias_map.keys() {
                     if other != &cur && type_references_name(ty, *other) {
@@ -227,17 +213,8 @@ impl Typer {
             }
         }
 
-        // Sync trait_impls to InferCtx for constraint enforcement during unification
         self.infer_ctx.set_trait_impls(self.trait_impls.clone());
 
-        // Late normalisation: any `Type::Struct(name, [])` where `name` is a
-        // registered actor must be reinterpreted as `Type::ActorRef(name)`.
-        // The parser cannot make this distinction at parse time because actor
-        // declarations may appear after the function that names them, and use
-        // sites span module boundaries. Without this pass, parameters declared
-        // as `sys as Kernel` (where `Kernel` is an actor) leave the typer
-        // unable to resolve `sys.handler(...)` to a Send and the return type
-        // collapses to a fresh, ambiguous type variable.
         let actor_names: std::collections::HashSet<Symbol> = self.actors.keys().cloned().collect();
         if !actor_names.is_empty() {
             let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
@@ -251,7 +228,7 @@ impl Typer {
                     self.fns.insert(k, (id, ptys, ret));
                 }
             }
-            // Actor handler parameter types may also reference other actors.
+
             let actor_keys: Vec<Symbol> = self.actors.keys().cloned().collect();
             for k in actor_keys {
                 if let Some((id, fields, handlers)) = self.actors.remove(&k) {
@@ -413,7 +390,6 @@ impl Typer {
                     hir_enums.push(hed);
                 }
                 ast::Decl::Extern(ef) => {
-                    // Deduplicate externs by C symbol name
                     if !hir_externs
                         .iter()
                         .any(|e: &hir::ExternFn| e.name == ef.name)
@@ -506,7 +482,6 @@ impl Typer {
             globals: Vec::new(),
         };
 
-        // Lower globals
         let global_entries: Vec<_> = self.globals.clone().into_iter().collect();
         for (name, (ast_expr, span)) in global_entries {
             let hir_expr = self.lower_expr(&ast_expr)?;
@@ -519,7 +494,6 @@ impl Typer {
             });
         }
 
-        // Collect migration defs (pass through as AST — no HIR lowering needed)
         for d in &prog.decls {
             if let ast::Decl::Migration(m) = d {
                 program.migrations.push(m.clone());
@@ -549,8 +523,7 @@ impl Typer {
             }
         }
         self.resolve_all_types(&mut program);
-        // Monomorphized functions created during resolve (e.g. FnRef resolution)
-        // need to be resolved and added to the program.
+
         if !self.mono_fns.is_empty() {
             let mut new_fns: Vec<hir::Fn> = self.mono_fns.drain(..).collect();
             for f in &mut new_fns {

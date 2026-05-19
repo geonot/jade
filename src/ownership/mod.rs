@@ -1,5 +1,3 @@
-//! Ownership and borrow checking pass operating on HIR.
-
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -214,7 +212,6 @@ impl OwnershipVerifier {
         }
     }
 
-    /// Extract the root variable from an expression (follows field access and index chains).
     fn extract_root_var(expr: &Expr) -> Option<(DefId, String)> {
         match &expr.kind {
             ExprKind::Var(def_id, name) => Some((*def_id, name.as_str())),

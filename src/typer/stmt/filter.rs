@@ -1,5 +1,3 @@
-//! Per-statement typing rules.
-
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
 use crate::intern::Symbol;
@@ -50,9 +48,6 @@ impl Typer {
         })
     }
 
-    /// Convert a general expression (from a query-block `where` clause) into an
-    /// `ast::StoreFilter`.  The expression must be a tree of comparisons joined
-    /// by `and` / `or`.
     pub(crate) fn expr_to_store_filter(
         expr: &ast::Expr,
         span: ast::Span,
@@ -123,8 +118,6 @@ impl Typer {
         }
     }
 
-    /// Merge multiple where-clause expressions (which AND together) into a
-    /// single `ast::StoreFilter`.
     pub(crate) fn merge_where_clauses(
         exprs: &[(ast::Expr, ast::Span)],
     ) -> Result<ast::StoreFilter, String> {
@@ -134,7 +127,7 @@ impl Typer {
         let mut filter = Self::expr_to_store_filter(&exprs[0].0, exprs[0].1)?;
         for (expr, span) in &exprs[1..] {
             let additional = Self::expr_to_store_filter(expr, *span)?;
-            // Append as AND conditions
+
             filter.extra.push((
                 ast::LogicalOp::And,
                 ast::StoreFilterCond {

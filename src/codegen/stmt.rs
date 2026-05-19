@@ -1,6 +1,3 @@
-//! Statement codegen helpers (block/if/assign/asm/pattern bind). Reached transitively
-//! from `mir_codegen` via actor/coroutine/closure entry points which still walk HIR.
-
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::BasicValueEnum;
@@ -75,7 +72,7 @@ impl<'ctx> Compiler<'ctx> {
                 if bind.atomic {
                     self.atomic_vars.insert(bind.name.clone());
                 }
-                // Detect atomic augmented assignment: `x is x + val` or `x is x - val`
+
                 if bind.atomic || self.atomic_vars.contains(&bind.name) {
                     if let Some((ptr, _)) = self.find_var(&bind.name.as_str()).cloned() {
                         if let hir::ExprKind::BinOp(lhs, op, rhs) = &bind.value.kind {
@@ -103,7 +100,7 @@ impl<'ctx> Compiler<'ctx> {
                                 }
                             }
                         }
-                        // Generic atomic store for non-augmented reassignment
+
                         let val = self.compile_expr(&bind.value)?;
                         let store = b!(self.bld.build_store(ptr, val));
                         store
@@ -175,7 +172,7 @@ impl<'ctx> Compiler<'ctx> {
             hir::Stmt::Ret(v, _ty, _) => {
                 if let Some(e) = v {
                     let mut val = self.compile_expr(e)?;
-                    // If returning an array, load from pointer to get the array value
+
                     if val.is_pointer_value() {
                         if let Some(rt) = self.current_fn().get_type().get_return_type() {
                             if rt.is_array_type() {
@@ -219,8 +216,7 @@ impl<'ctx> Compiler<'ctx> {
                 if self.hints.elide_drops.contains(def_id) {
                     return Ok(None);
                 }
-                // Perceus reuse: instead of dropping, save the heap pointer
-                // as a reuse token for the next compatible allocation.
+
                 if self.hints.reuse_candidates.contains_key(def_id)
                     || self.hints.speculative_reuse.contains_key(def_id)
                 {
@@ -246,8 +242,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(None)
             }
             hir::Stmt::Defer(_, _) => {
-                // The legacy direct HIR→LLVM codegen path does not implement
-                // `defer`. Lowering goes through MIR which handles this.
                 Err("`defer` is not supported on the legacy direct codegen path".to_string())
             }
             hir::Stmt::StoreInsert(store_name, values, _) => {
@@ -309,7 +303,6 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(None)
             }
             hir::Stmt::SimFor(f, _) => {
-                // sim for: spawn each iteration as a coroutine on the scheduler
                 self.compile_sim_for(f)?;
                 Ok(None)
             }

@@ -1,7 +1,3 @@
-//! High-level store operation lowerings (insert/query/update/delete/count/all/set).
-//! `store_load_records` and `store_read_count` are MIR-live; the higher-level wrappers
-//! are reached through HIR expression lowering.
-
 use inkwell::IntPredicate;
 use inkwell::values::BasicValueEnum;
 

@@ -1,5 +1,3 @@
-//! Store destroy, restore, and save MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -8,11 +6,9 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Physical removal — same as what delete used to do
         self.emit_store_hard_delete(encoded_name, args)
     }
 
-    // ── StoreRestore: clear the deleted timestamp on soft-deleted records ──
     pub(in crate::codegen) fn emit_store_restore(
         &mut self,
         encoded_name: &str,
@@ -40,7 +36,6 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
-        // Find the 'deleted' field index
         let deleted_idx = sd
             .fields
             .iter()
@@ -80,7 +75,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "restore.rec"))
         };
 
-        // Only consider records that are actually soft-deleted
         let del_check_gep =
             b!(self
                 .bld
@@ -125,12 +119,12 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cond, update_bb, next_bb));
 
         self.bld.position_at_end(update_bb);
-        // Set 'deleted' field to 0
+
         let del_gep = b!(self
             .bld
             .build_struct_gep(st, rec_ptr, deleted_idx as u32, "restore.del"));
         b!(self.bld.build_store(del_gep, i64t.const_int(0, false)));
-        // WAL: log the restore as an update
+
         self.wal_write_update(store_name, rec_ptr, rec_size)?;
         b!(self.bld.build_unconditional_branch(next_bb));
 
@@ -142,7 +136,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(done_bb);
-        // Write records back
+
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,
@@ -175,7 +169,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    // ── StoreSave: flush the store file ──
     pub(in crate::codegen) fn emit_store_save(
         &mut self,
         store_name: &str,
@@ -183,7 +176,7 @@ impl<'ctx> Compiler<'ctx> {
         let (_sd, _st, _rec_size, fp) = self.setup_store_access(store_name)?;
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
-        // Checkpoint WAL on save
+
         self.wal_checkpoint(store_name)?;
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }

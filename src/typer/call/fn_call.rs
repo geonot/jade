@@ -1,5 +1,3 @@
-//! Extracted call-typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::HashMap;
@@ -18,7 +16,6 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Result<hir::Expr, String> {
-        // Expand spread arguments (...arr) into individual element args
         let spread_expanded;
         let args = if let Some(expanded) = self.expand_spread_args(callee, args, span) {
             spread_expanded = expanded;
@@ -26,7 +23,7 @@ impl Typer {
         } else {
             args
         };
-        // Strip NamedArg wrappers if the callee is a known function
+
         let resolved;
         let args = if args.iter().any(|a| matches!(a, Expr::NamedArg(..))) {
             if let ast::Expr::Ident(name, _) = callee {
@@ -160,7 +157,7 @@ impl Typer {
                     let expected = param_tys.get(i);
                     hargs.push(self.lower_expr_expected(arg, expected)?);
                 }
-                // Fill in defaults for missing arguments
+
                 if hargs.len() < param_tys.len() {
                     if let Some(defaults) = self.fn_defaults.get(name).cloned() {
                         for i in hargs.len()..param_tys.len() {
@@ -374,9 +371,6 @@ impl Typer {
                 }
             }
 
-            // Fall back to externs declared via `extern *name(...) returns T`
-            // — these can be invoked unqualified when the user names them
-            // directly (used for low-level helpers shipped with std/*.jn).
             if let Some((id, ptys, ret)) = self.externs.get(name).cloned() {
                 let mut hargs = Vec::new();
                 for arg in args.iter() {

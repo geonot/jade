@@ -1,5 +1,3 @@
-//! Constant value lattice + constant-folding pass.
-
 use super::super::*;
 use crate::types::Type;
 use std::collections::HashMap;
@@ -20,12 +18,10 @@ impl ConstVal {
     }
 }
 
-/// Fold instructions with constant operands.
 pub fn constant_fold(func: &mut Function) -> bool {
     let mut changed = false;
     let mut consts: HashMap<ValueId, ConstVal> = HashMap::new();
 
-    // Seed from existing constants
     for bb in &func.blocks {
         for inst in &bb.insts {
             if let Some(d) = inst.dest {
@@ -64,7 +60,6 @@ pub fn constant_fold(func: &mut Function) -> bool {
             }
         }
 
-        // Fold branches with known conditions
         if let Terminator::Branch(c, t, f) = &bb.terminator {
             if let Some(ConstVal::Bool(b)) = consts.get(c) {
                 bb.terminator = Terminator::Goto(if *b { *t } else { *f });

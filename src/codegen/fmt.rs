@@ -1,5 +1,3 @@
-//! Codegen for string formatting builtins (`fmt_float`, `fmt_hex`, etc.).
-
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};

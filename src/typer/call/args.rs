@@ -1,5 +1,3 @@
-//! Extracted call-typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::HashMap;
@@ -58,7 +56,6 @@ pub(super) fn resolve_named_args<'a>(
         }
     }
 
-    // Check all required slots filled
     let mut ordered = Vec::new();
     for (i, slot) in result.into_iter().enumerate() {
         match slot {
@@ -89,11 +86,9 @@ impl Typer {
         };
 
         if has_spread {
-            // Explicit spread: expand ...arr into individual elements
             let mut expanded = Vec::new();
             for arg in args {
                 if let ast::Expr::Spread(inner, sp) = arg {
-                    // Lower the inner expression to determine its type
                     let inner_lowered = self.lower_expr(inner).ok()?;
                     let resolved_ty = self.infer_ctx.resolve(&inner_lowered.ty);
                     match &resolved_ty {
@@ -116,8 +111,6 @@ impl Typer {
                             }
                         }
                         _ => {
-                            // For Vec/other types, we can't expand at compile time
-                            // Just pass the inner expression as-is
                             expanded.push((**inner).clone());
                         }
                     }
@@ -128,7 +121,6 @@ impl Typer {
             return Some(expanded);
         }
 
-        // Implicit spreading: single array arg for multi-param function
         if args.len() == 1 && !has_spread {
             if let Some(expected) = expected_param_count {
                 if expected > 1 {

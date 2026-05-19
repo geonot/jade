@@ -1,16 +1,11 @@
-//! Store index hashing, version helpers, migrations, and field sizing.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Compute the hash of a field value for index operations.
-    /// Returns i64 hash value.
     pub(crate) fn idx_hash_field(
         &mut self,
         field_val: inkwell::values::BasicValueEnum<'ctx>,
         field_ty: &Type,
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
-        // Normalize Struct("I64", []) → I64, etc.
         let resolved = match field_ty {
             Type::Struct(name, params) if params.is_empty() => match &*name.as_str() {
                 "I8" => Type::I8,
@@ -72,7 +67,6 @@ impl<'ctx> Compiler<'ctx> {
                     .into_int_value()
             }
             Type::String => {
-                // Use SSO-aware helpers to get data pointer and length
                 let str_data = self.string_data(field_val)?;
                 let str_len = self.string_len(field_val)?;
                 let hash_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_hash_str");
@@ -83,22 +77,15 @@ impl<'ctx> Compiler<'ctx> {
                 )))
                 .into_int_value()
             }
-            _ => {
-                // Fallback: hash as i64(0)
-                self.ctx.i64_type().const_int(0, false)
-            }
+            _ => self.ctx.i64_type().const_int(0, false),
         })
     }
 
-    /// Hash a field value loaded from a store record on disk.
-    /// For strings: store records use fixed 256-byte buffers [8B len][248B data].
-    /// For numerics: load the value and hash it.
     pub(crate) fn hash_store_field_from_gep(
         &mut self,
         field_gep: inkwell::values::PointerValue<'ctx>,
         field_ty: &Type,
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
-        // Normalize Struct("I64", []) → I64, etc.
         let resolved = match field_ty {
             Type::Struct(name, params) if params.is_empty() => match &*name.as_str() {
                 "I8" => Type::I8,
@@ -141,7 +128,6 @@ impl<'ctx> Compiler<'ctx> {
                     .into_int_value()
             }
             Type::String => {
-                // Store records use fixed 256B: [8B len][248B data]
                 let len = b!(self.bld.build_load(i64t, field_gep, "dist.slen")).into_int_value();
                 let i8t = self.ctx.i8_type();
                 let data_ptr = unsafe {
@@ -164,15 +150,12 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Check if a store has the @versioned decorator
     pub(crate) fn store_is_versioned(sd: &hir::StoreDef) -> bool {
         sd.decorators
             .iter()
             .any(|d| *d == crate::ast::StoreDecorator::Versioned)
     }
 
-    /// Lazily open the version file for a @versioned store.
-    /// Global: __store_{name}_ver
     pub(crate) fn load_store_ver(
         &mut self,
         store_name: &str,
@@ -216,8 +199,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    /// Generate a migration function that checks & applies a migration at startup.
-    /// Returns the function value so it can be called from main.
     pub(crate) fn gen_migration(
         &mut self,
         mig: &crate::ast::MigrationDef,
@@ -242,8 +223,6 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
-        // Determine the log file path from the first alter op's store name
-        // (or use a generic name based on migration name)
         let log_path = if let Some(op) = mig.up.first() {
             format!("{}.migrations.log\0", op.store_name)
         } else {
@@ -251,7 +230,6 @@ impl<'ctx> Compiler<'ctx> {
         };
         let log_str = b!(self.bld.build_global_string_ptr(&log_path, "mig.path"));
 
-        // Open migration log
         let log_open = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_open");
         let log_fp = self
             .call_result(b!(self.bld.build_call(
@@ -261,7 +239,6 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_pointer_value();
 
-        // Check if already applied
         let log_applied = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_applied");
         let applied = self
             .call_result(b!(self.bld.build_call(
@@ -284,12 +261,8 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_applied, done_bb, apply_bb));
 
-        // Apply migration
         self.bld.position_at_end(apply_bb);
 
-        // For each alter op, check if the store file exists. If it doesn't,
-        // this is a fresh install — the store will be created with the new
-        // schema, so we skip the migration body and just record it as applied.
         let record_bb = self.ctx.append_basic_block(fv, "record");
 
         for op in &mig.up {
@@ -300,7 +273,6 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_global_string_ptr(&store_path_lit, "mig.spath"));
 
-            // Check if store file exists: fopen(path, "rb")
             let fopen_fn = crate::codegen::fn_or_die(&self.module, "fopen");
             let rb_str = b!(self.bld.build_global_string_ptr("rb\0", "mig.rb"));
             let test_fp = self
@@ -321,12 +293,10 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_conditional_branch(is_null, record_bb, exists_bb));
 
-            // Store exists — close the test handle, open via ensure, then apply
             self.bld.position_at_end(exists_bb);
             let fclose_fn = crate::codegen::fn_or_die(&self.module, "fclose");
             b!(self.bld.build_call(fclose_fn, &[test_fp.into()], ""));
 
-            // Ensure the store is open (sets the global FILE*)
             let ensure_fn_name = format!("__store_ensure_{store_name}");
             if let Some(ensure_fn) = self.module.get_function(&ensure_fn_name) {
                 b!(self.bld.build_call(ensure_fn, &[], ""));
@@ -348,7 +318,7 @@ impl<'ctx> Compiler<'ctx> {
                                     .bld
                                     .build_load(ptr_ty, fp_g.as_pointer_value(), "mig.fp"))
                                 .into_pointer_value();
-                            // Read current rec_size from header offset 16
+
                             let fseek = crate::codegen::fn_or_die(&self.module, "fseek");
                             b!(self.bld.build_call(
                                 fseek,
@@ -424,9 +394,7 @@ impl<'ctx> Compiler<'ctx> {
                             }
                         }
                     }
-                    crate::ast::AlterAction::Rename { .. } => {
-                        // Rename is a compile-time operation — no runtime action needed
-                    }
+                    crate::ast::AlterAction::Rename { .. } => {}
                 }
             }
 
@@ -434,10 +402,8 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(next_bb);
         }
 
-        // Fall through to record
         b!(self.bld.build_unconditional_branch(record_bb));
 
-        // Record the migration as applied
         self.bld.position_at_end(record_bb);
         let log_record = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_record");
         b!(self.bld.build_call(
@@ -445,7 +411,7 @@ impl<'ctx> Compiler<'ctx> {
             &[
                 log_fp.into(),
                 i64t.const_int(mig.version as u64, false).into(),
-                i64t.const_int(1, false).into(), // direction = up
+                i64t.const_int(1, false).into(),
             ],
             ""
         ));
@@ -454,7 +420,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(log_close, &[log_fp.into()], ""));
         b!(self.bld.build_return(None));
 
-        // Done (skip path — migration was already applied)
         self.bld.position_at_end(done_bb);
         b!(self.bld.build_call(log_close, &[log_fp.into()], ""));
         b!(self.bld.build_return(None));
@@ -463,14 +428,13 @@ impl<'ctx> Compiler<'ctx> {
         Ok(fv)
     }
 
-    /// Get the byte size of a store field type.
     pub(in crate::codegen) fn field_byte_size(&self, ty: &Type) -> u64 {
         match ty {
             Type::I8 | Type::U8 | Type::Bool => 1,
             Type::I16 | Type::U16 => 2,
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::String => 256, // fixed-size store string buffer
+            Type::String => 256,
             Type::Struct(name, _) => match &*name.as_str() {
                 "I8" | "U8" | "Bool" => 1,
                 "I16" | "U16" => 2,

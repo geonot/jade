@@ -1,5 +1,3 @@
-//! Codegen for channel send/recv/select operations.
-
 use inkwell::AddressSpace;
 use inkwell::values::BasicValueEnum;
 

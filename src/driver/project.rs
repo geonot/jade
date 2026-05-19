@@ -52,7 +52,7 @@ impl ProjectConfig {
                         Stmt::Assign(Expr::Ident(name, _), val, _) => {
                             Self::set_field(&mut cfg, &name.as_str(), val);
                         }
-                        // require 'name' 'url' 'version'
+
                         Stmt::Expr(Expr::Call(callee, args, _))
                             if matches!(callee.as_ref(), Expr::Ident(n, _) if n == "require")
                                 && args.len() == 3 =>
@@ -74,7 +74,7 @@ impl ProjectConfig {
                 }
             }
         }
-        // Also check top-level const bindings: `name is 'foo'`
+
         for decl in &prog.decls {
             if let Decl::Const(name, val, _) = decl {
                 Self::set_field(&mut cfg, &name.as_str(), val);

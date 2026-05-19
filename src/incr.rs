@@ -1,9 +1,3 @@
-//! Incremental and parallel compilation.
-//!
-//! Hash each function's HIR and cache generated object code.
-//! On recompile, skip unchanged functions by loading cached artifacts.
-//! Parallel codegen partitions functions across threads.
-
 use crate::intern::Symbol;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -12,13 +6,10 @@ use std::path::PathBuf;
 use crate::hir;
 use crate::types::Type;
 
-// ── Cache Key / HIR Hashing ──
-
-/// Compute a stable 64-bit hash of a function's HIR plus dependency signatures.
 pub fn function_cache_key(func: &hir::Fn, dep_sigs: &HashMap<Symbol, u64>) -> u64 {
     let mut hasher = StableHasher::new();
     hash_function(func, &mut hasher);
-    // Include dependency signatures so callee type changes invalidate callers.
+
     let mut deps: Vec<_> = dep_sigs.iter().collect();
     deps.sort_by_key(|(k, _)| *k);
     for (name, sig) in deps {
@@ -28,7 +19,6 @@ pub fn function_cache_key(func: &hir::Fn, dep_sigs: &HashMap<Symbol, u64>) -> u6
     hasher.finish()
 }
 
-/// Compute a signature hash for a function (name + param types + return type).
 pub fn function_signature(func: &hir::Fn) -> u64 {
     let mut hasher = StableHasher::new();
     func.name.hash(&mut hasher);
@@ -115,7 +105,6 @@ fn hash_stmt(stmt: &hir::Stmt, h: &mut StableHasher) {
     format!("{:?}", stmt).hash(h);
 }
 
-/// FNV-1a hasher for stable, deterministic hashing.
 struct StableHasher {
     state: u64,
 }
@@ -123,7 +112,7 @@ struct StableHasher {
 impl StableHasher {
     fn new() -> Self {
         StableHasher {
-            state: 0xcbf29ce484222325, // FNV offset basis
+            state: 0xcbf29ce484222325,
         }
     }
 }
@@ -132,7 +121,7 @@ impl Hasher for StableHasher {
     fn write(&mut self, bytes: &[u8]) {
         for &b in bytes {
             self.state ^= b as u64;
-            self.state = self.state.wrapping_mul(0x100000001b3); // FNV prime
+            self.state = self.state.wrapping_mul(0x100000001b3);
         }
     }
 
@@ -141,51 +130,42 @@ impl Hasher for StableHasher {
     }
 }
 
-// ── Artifact Cache ──
-
-/// Manages cached compilation artifacts on disk.
 pub struct ArtifactCache {
     cache_dir: PathBuf,
 }
 
 impl ArtifactCache {
-    /// Create a new artifact cache at `~/.cache/jinn/artifacts/`.
     pub fn new() -> Self {
         let cache_dir = cache_root().join("jinn").join("artifacts");
         ArtifactCache { cache_dir }
     }
 
-    /// Create a new cache at a custom directory (for testing).
     pub fn with_dir(dir: PathBuf) -> Self {
         ArtifactCache { cache_dir: dir }
     }
 
-    /// Look up a cached bitcode file. Returns `Some(path)` if valid.
     pub fn lookup(&self, func_name: &str, key: u64) -> Option<PathBuf> {
         let path = self.artifact_path(func_name, key);
         if path.exists() { Some(path) } else { None }
     }
 
-    /// Store a bitcode artifact for the given function.
     pub fn store(&self, func_name: &str, key: u64, data: &[u8]) -> std::io::Result<()> {
         let path = self.artifact_path(func_name, key);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, data)?;
-        // Clean up old versions of this function
+
         self.gc_old(func_name, key);
         Ok(())
     }
 
     fn artifact_path(&self, func_name: &str, key: u64) -> PathBuf {
-        // Use a subdirectory per function to keep things organized
         self.cache_dir
             .join(sanitize_name(func_name))
             .join(format!("{:016x}.bc", key))
     }
 
-    /// Remove old cached versions (keep only current key).
     fn gc_old(&self, func_name: &str, current_key: u64) {
         let dir = self.cache_dir.join(sanitize_name(func_name));
         let current_name = format!("{:016x}.bc", current_key);
@@ -199,7 +179,6 @@ impl ArtifactCache {
         }
     }
 
-    /// Remove all cached artifacts.
     pub fn clear(&self) -> std::io::Result<()> {
         if self.cache_dir.exists() {
             std::fs::remove_dir_all(&self.cache_dir)?;
@@ -228,21 +207,15 @@ fn cache_root() -> PathBuf {
     }
 }
 
-// ── Incremental Build Logic ──
-
-/// Determine which functions need recompilation.
-/// Returns a list of function indices that have changed since the last build.
 pub fn compute_dirty_set(
     program: &hir::Program,
     cache: &ArtifactCache,
 ) -> (Vec<usize>, HashMap<Symbol, u64>) {
-    // 1. Compute signatures for all functions
     let mut signatures: HashMap<Symbol, u64> = HashMap::new();
     for f in &program.fns {
         signatures.insert(f.name.clone(), function_signature(f));
     }
 
-    // 2. Compute cache keys and check which are dirty
     let mut dirty = Vec::new();
     let mut keys: HashMap<Symbol, u64> = HashMap::new();
     for (i, f) in program.fns.iter().enumerate() {
@@ -256,9 +229,6 @@ pub fn compute_dirty_set(
     (dirty, keys)
 }
 
-// ── Parallel Codegen ──
-
-/// Partition function indices into N roughly-equal chunks for parallel codegen.
 pub fn partition_work(total: usize, num_threads: usize) -> Vec<std::ops::Range<usize>> {
     if total == 0 || num_threads == 0 {
         return vec![];
@@ -277,7 +247,6 @@ pub fn partition_work(total: usize, num_threads: usize) -> Vec<std::ops::Range<u
     ranges
 }
 
-/// Get the number of threads for parallel codegen (CPU cores, capped at 16).
 pub fn codegen_threads() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get().min(16))

@@ -1,5 +1,3 @@
-//! Hindley-Milner-style type inference for expressions and patterns.
-
 use crate::ast;
 use crate::hir::{self, CoercionKind};
 use crate::types::Type;

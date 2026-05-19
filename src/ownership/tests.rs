@@ -30,13 +30,12 @@ fn test_simple_program_no_errors() {
 
 #[test]
 fn test_rc_binding_no_errors() {
-    // Surface `rc()` was removed under the "heap tax" model.
-    // Heap nominals are intrinsically refcounted; a struct literal
-    // binding is the equivalent test surface.
-    let diags = verify(
-        "type Foo\n    x as i64\n\n*main()\n    f is Foo(x is 42)\n    log(f.x)\n",
+    let diags = verify("type Foo\n    x as i64\n\n*main()\n    f is Foo(x is 42)\n    log(f.x)\n");
+    assert!(
+        diags.is_empty(),
+        "expected no ownership errors, got: {:?}",
+        diags
     );
-    assert!(diags.is_empty(), "expected no ownership errors, got: {:?}", diags);
 }
 
 #[test]

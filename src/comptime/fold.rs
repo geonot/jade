@@ -1,5 +1,3 @@
-//! Bottom-up constant folder over the HIR.
-
 use super::eval::try_eval_pure_call;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
@@ -101,10 +99,8 @@ pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir
 }
 
 pub(super) fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
-    // First recurse into sub-expressions
     fold_expr(expr);
 
-    // Then try pure function call evaluation
     if let ExprKind::Call(_, name, args) = &expr.kind {
         if args.iter().all(|a| {
             matches!(
@@ -422,7 +418,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
                 fold_stmt(s);
             }
         }
-        // KV / specialized store ops – fold inner exprs
+
         ExprKind::KvGet(_, e) | ExprKind::KvHas(_, e) | ExprKind::KvDel(_, e) => fold_expr(e),
         ExprKind::KvSet(_, k, v) | ExprKind::KvIncr(_, k, v) => {
             fold_expr(k);

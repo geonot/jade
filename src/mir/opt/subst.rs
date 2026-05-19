@@ -1,5 +1,3 @@
-//! Substitution helpers (renaming ValueIds in instructions/terminators).
-
 use super::super::*;
 use std::collections::HashMap;
 
@@ -94,7 +92,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         InstKind::GlobalStore(_, v) => {
             sub!(v);
         }
-        // Collections
+
         InstKind::VecNew(args) => {
             for a in args {
                 sub!(a);
@@ -104,12 +102,10 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
             sub!(vec);
             sub!(val);
         }
-        InstKind::VecLen(v)
-        | InstKind::ChanRecv(v)
-        | InstKind::Log(v) => {
+        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::Log(v) => {
             sub!(v);
         }
-        // Closures
+
         InstKind::ClosureCreate(_, captures) | InstKind::SelectArm(captures, _) => {
             for a in captures {
                 sub!(a);
@@ -152,7 +148,6 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
     hit
 }
 
-/// Apply a value→value substitution map to a terminator.
 pub(super) fn subst_term(term: &mut Terminator, map: &HashMap<ValueId, ValueId>) -> bool {
     match term {
         Terminator::Branch(c, _, _) => {

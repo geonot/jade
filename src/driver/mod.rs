@@ -1,5 +1,3 @@
-//! Compiler driver: CLI dispatch and pipeline orchestration.
-
 mod cli;
 mod cmd_init;
 mod cmd_pkg;
@@ -94,10 +92,7 @@ pub fn run() {
                     }
                     None => find_project_entry(),
                 };
-                // Cache compiled binaries by a hash of the source bytes
-                // PLUS a fingerprint of the compiler itself, so that rebuilding
-                // jinnc invalidates all cached binaries (otherwise stale
-                // binaries silently mask compiler fixes — see CONTRIBUTING).
+
                 let src_bytes = fs::read(&entry).unwrap_or_default();
                 let compiler_fp: (u64, u64) = std::env::current_exe()
                     .ok()
@@ -208,7 +203,6 @@ pub fn run() {
             }
             Cmd::Fmt { files } => {
                 let targets: Vec<PathBuf> = if files.is_empty() {
-                    // Find all .jn files in current directory recursively
                     fn collect_jinn_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
                         if let Ok(entries) = fs::read_dir(dir) {
                             for entry in entries.flatten() {
@@ -283,12 +277,11 @@ pub fn run() {
 
     let base_dir = input.parent().unwrap_or_else(|| std::path::Path::new("."));
     let mut loaded = HashSet::new();
-    // Prevent auto-import from re-importing the entry file itself
+
     if let Ok(canon) = input.canonicalize() {
         loaded.insert(Symbol::intern(&canon.to_string_lossy()));
     }
 
-    // Load project.jn if present
     let project_jinn = base_dir.join("project.jn");
     let project_config = if project_jinn.exists() {
         Some(
@@ -305,7 +298,6 @@ pub fn run() {
     let entity_index = EntityIndex::build(base_dir, &packages);
     resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
-    // P0-9: enforce that an executable program has a `*main` entry point.
     if !cli.lib && !cli.test && !cli.standalone {
         let has_main = prog
             .decls
@@ -371,11 +363,6 @@ pub fn run() {
 
     crate::comptime::fold_program(&mut hir_prog);
 
-    // ── R11: HIR-level Perceus has been retired; the MIR-level Perceus
-    // pipeline below is now the sole source of refcount transformations and
-    // statistics. `--debug-perceus` prints the MIR-level stats line, which
-    // is emitted unconditionally when the flag is set (see below).
-
     let mut verifier = OwnershipVerifier::new();
     let diags = verifier.verify(&hir_prog);
     let mut has_hard_error = false;
@@ -409,7 +396,6 @@ pub fn run() {
         die("compilation aborted due to ownership errors");
     }
 
-    // ── MIR pass: HIR → MIR → optimize → (optional print) ──
     let mir_opt_level = match cli.opt {
         0 => crate::mir::opt::OptLevel::None,
         1 => crate::mir::opt::OptLevel::Basic,
@@ -420,7 +406,6 @@ pub fn run() {
         crate::mir::opt::optimize(func, mir_opt_level);
     }
 
-    // ── Strict-types: reject FnRef to polymorphic functions that aren't called ──
     if cli.strict_types {
         use crate::mir::{InstKind, Terminator};
         let _fn_names: std::collections::HashSet<Symbol> =
@@ -429,10 +414,7 @@ pub fn run() {
             for bb in &func.blocks {
                 for inst in &bb.insts {
                     if let InstKind::FnRef(ref name) = inst.kind {
-                        // If main returns a bare FnRef, its type won't match the expected i32 return.
-                        // Check if the function return type is not compatible with FnRef usage.
                         if let Some(dest) = inst.dest {
-                            // Check if this FnRef is used as a return value from main
                             if func.name == "main" {
                                 if matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest)
                                 {
@@ -453,7 +435,6 @@ pub fn run() {
         return;
     }
 
-    // ── Incremental compilation: check cache status ──
     if cli.incremental {
         let incr_cache = crate::incr::ArtifactCache::new();
         let (dirty, _keys) = crate::incr::compute_dirty_set(&hir_prog, &incr_cache);
@@ -613,11 +594,10 @@ pub fn run() {
     if cli.debug {
         cc.arg("-g");
     }
-    // Cross-compilation: use appropriate linker for target
+
     if let Some(ref triple) = comp.target_triple {
         cc.arg(&format!("--target={triple}"));
         if triple.contains("wasm") {
-            // WASM targets: emit .wasm, use clang with wasm target or wasm-ld
             cc = Command::new("clang");
             cc.arg(&format!("--target={triple}"));
             cc.arg(&obj).arg("-o").arg(&cli.output);

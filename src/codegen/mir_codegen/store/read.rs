@@ -1,9 +1,6 @@
-//! Store/view read-all MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Emit a view all: iterate source store, collect all records matching filter.
     pub(in crate::codegen) fn emit_view_all(
         &mut self,
         encoded_name: &str,
@@ -84,7 +81,6 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
 
-        // Allocate max-capacity output buffer (worst case all records match)
         let one = i64t.const_int(1, false);
         let jinn_total =
             b!(self
@@ -142,7 +138,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "va.rptr"))
         };
 
-        // Skip soft-deleted records
         if let Some(del_idx) = sd.fields.iter().position(|f| f.name == "deleted") {
             let del_gep = b!(self
                 .bld
@@ -161,7 +156,6 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(filter_bb);
         }
 
-        // Apply filter
         let extras: Vec<(
             crate::ast::LogicalOp,
             usize,
@@ -188,7 +182,6 @@ impl<'ctx> Compiler<'ctx> {
         )?;
         b!(self.bld.build_conditional_branch(cond, copy_bb, next_bb));
 
-        // Copy matching record
         self.bld.position_at_end(copy_bb);
         let out_idx = b!(self.bld.build_load(i64t, out_ptr, "va.oi")).into_int_value();
         let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, &sd)?;
@@ -220,7 +213,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(free_fn, &[raw_buf.into()], ""));
         let final_count = b!(self.bld.build_load(i64t, out_ptr, "va.count")).into_int_value();
 
-        // Build vec header: {ptr, len, cap}
         let vec_ty = self.ctx.struct_type(
             &[
                 self.ctx.ptr_type(inkwell::AddressSpace::default()).into(),
@@ -308,12 +300,10 @@ impl<'ctx> Compiler<'ctx> {
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
         if has_strings || deleted_idx.is_some() {
-            // Need a loop: either for string conversion or soft-delete filtering (or both)
             let fv = self.cur_fn.expect("ICE: cur_fn not set");
             let idx_ptr = self.entry_alloca(i64t.into(), "all.idx");
             b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
-            // Separate output counter for soft-delete filtering
             let out_ptr = self.entry_alloca(i64t.into(), "all.out");
             b!(self.bld.build_store(out_ptr, i64t.const_int(0, false)));
 
@@ -343,7 +333,6 @@ impl<'ctx> Compiler<'ctx> {
                     .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "all.rptr"))
             };
 
-            // Skip soft-deleted records
             if let Some(del_idx) = deleted_idx {
                 let del_gep =
                     b!(self
@@ -428,7 +417,6 @@ impl<'ctx> Compiler<'ctx> {
 
             self.bld.position_at_end(done_bb);
         } else {
-            // Simple store, no strings, no deleted field: memcpy
             let total =
                 b!(self
                     .bld

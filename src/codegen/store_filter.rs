@@ -1,6 +1,3 @@
-//! Store WHERE-clause evaluator, record loader, and field-comparison helpers used
-//! by `mir_codegen/store.rs`.
-
 use inkwell::IntPredicate;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 
@@ -13,9 +10,6 @@ use super::b;
 
 use super::stores::STRING_BUF_SIZE;
 
-/// Normalize store field types: the parser produces `Type::Struct("I64", [])`
-/// for uppercase type names like `I64`, `F64`, etc. Map them to the
-/// canonical primitive types so filter/agg code can match uniformly.
 pub(crate) fn normalize_store_field_type(ty: &Type) -> Type {
     match ty {
         Type::Struct(name, args) if args.is_empty() => match &*name.as_str() {
@@ -67,7 +61,6 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_int_compare(IntPredicate::UGT, len, max_data, "str.clamp"));
 
-        // Emit a runtime stderr warning when truncation occurs.
         let cur_fn = self.bld.get_insert_block().unwrap().get_parent().unwrap();
         let trunc_bb = self.ctx.append_basic_block(cur_fn, "str.trunc_warn");
         let cont_bb = self.ctx.append_basic_block(cur_fn, "str.cont");

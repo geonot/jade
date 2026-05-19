@@ -1,5 +1,3 @@
-//! Codegen for actor spawn/send/become/supervisor operations.
-
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::BasicValueEnum;
@@ -325,7 +323,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         self.bld.position_at_end(exit_bb);
-        // Clean up: destroy the mailbox (frees channel + mailbox memory)
+
         if let Some(destroy_fn) = self.module.get_function("jinn_actor_destroy") {
             b!(self.bld.build_call(destroy_fn, &[mb_ptr.into()], ""));
         }
@@ -342,11 +340,6 @@ impl<'ctx> Compiler<'ctx> {
         self.compile_spawn_with_inits(actor_name, &[])
     }
 
-    /// Synthesize the initial value for an actor state field. Honors the
-    /// declared default if any; otherwise returns an empty container for
-    /// collection types (Vec/Map/Set/PriorityQueue/Deque) so they aren't
-    /// left as null pointers from the mailbox memset. Scalars and other
-    /// types return None — they remain zero-initialized.
     pub(crate) fn synthesize_field_init(
         &mut self,
         field: &crate::hir::Field,
@@ -361,9 +354,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Spawn an actor and apply user-provided field-init overrides
-    /// (`spawn Foo(field is val, ...)`). Defaults from the actor declaration
-    /// are written first; any user inits then override them.
     pub(crate) fn compile_spawn_with_inits(
         &mut self,
         actor_name: &str,
@@ -443,7 +433,6 @@ impl<'ctx> Compiler<'ctx> {
         let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
 
-        // Initialize actor state fields with default values (if any)
         if let Some(ad) = self.actor_defs.get(actor_name).cloned() {
             let state_name = format!("{actor_name}_state");
             if let Some(state_st) = self.module.get_struct_type(&state_name) {
@@ -462,7 +451,7 @@ impl<'ctx> Compiler<'ctx> {
                         b!(self.bld.build_store(field_ptr, v));
                     }
                 }
-                // Apply user-provided spawn-init overrides
+
                 for (uname, uval) in inits {
                     let fi = ad
                         .fields
@@ -506,11 +495,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(mb_ptr_v.into())
     }
 
-    /// Emit (lazily) a per-actor factory function:
-    ///   void *<actor>_create_mb(void)
-    /// Allocates and initialises a fresh mailbox (channel + alive flag +
-    /// state defaults). Used by the supervisor runtime to (re)spawn this
-    /// actor without compile-time knowledge of its layout.
     pub(crate) fn ensure_actor_factory(
         &mut self,
         actor_name: &str,

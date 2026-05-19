@@ -1,5 +1,3 @@
-//! Bit, wrapping, saturating, checked, signal, assert, and f64 builtin helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -399,7 +397,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(fail_bb);
         let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let line = cond_expr.span.line;
-        // Use the descriptive message if provided
+
         let desc = if args.len() > 1 {
             if let hir::ExprKind::Str(ref s) = args[1].kind {
                 s.clone()

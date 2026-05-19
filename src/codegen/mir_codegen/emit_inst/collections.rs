@@ -1,5 +1,3 @@
-//! MIR ownership, drop, copy, slice, and collection instruction emission.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -11,9 +9,7 @@ impl<'ctx> Compiler<'ctx> {
             (match &inst.kind {
                 mir::InstKind::Drop(val, ty) => {
                     let v = self.val(*val);
-                    // Perceus Vec reuse: deep-drop elements, then stash the
-                    // header (with its data buffer attached) for the matching
-                    // empty `VecNew` to pick up.
+
                     if let Type::Vec(elem) = ty {
                         if v.is_pointer_value()
                             && self
@@ -32,11 +28,6 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
                 mir::InstKind::DropMany(items) => {
-                    // Fused drop run: emit the per-value drops back-to-back so
-                    // LLVM sees an unbroken sequence of free() calls and can
-                    // batch them. We do NOT save reuse slots inside a fused
-                    // run (the perceus pass excludes save-slot drops from
-                    // fusion runs by construction).
                     for (val, ty) in items {
                         let v = self.val(*val);
                         self.drop_value(v, ty)?;
@@ -44,10 +35,8 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
 
-                // ── Copy ──
                 mir::InstKind::Copy(val) => Ok(self.val(*val)),
 
-                // ── Clone (deep heap clone for auto-copy / explicit copy modifier) ──
                 mir::InstKind::Clone(val, ty) => {
                     let v = self.val(*val);
                     if !Self::is_value_clonable(ty) || ty.is_trivially_droppable() {
@@ -57,10 +46,8 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
 
-                // ── Slice ──
                 mir::InstKind::Slice(base, lo, hi) => self.emit_slice(*base, *lo, *hi, &inst.ty),
 
-                // ── Collections ──
                 mir::InstKind::VecNew(elems) => {
                     self.current_alloc_dest = inst.dest;
                     let r = self.emit_vec_new(elems, &inst.ty);
@@ -85,10 +72,8 @@ impl<'ctx> Compiler<'ctx> {
                     let i64t = self.ctx.i64_type();
                     let vec_ty = self.value_types.get(vec);
                     if matches!(vec_ty, Some(Type::String)) || vec_val.is_struct_value() {
-                        // String: struct { ptr, len, cap }; len is field 1.
                         self.string_len(vec_val)
                     } else if vec_val.is_pointer_value() {
-                        // Vec (heap-allocated): ptr to {ptr, i64, i64}; len is field 1.
                         let header_ty = self.vec_header_type();
                         let header_ptr = vec_val.into_pointer_value();
                         let len_gep = b!(self
@@ -96,7 +81,6 @@ impl<'ctx> Compiler<'ctx> {
                             .build_struct_gep(header_ty, header_ptr, 1, "vl.len"));
                         Ok(b!(self.bld.build_load(i64t, len_gep, "vl.v")))
                     } else if vec_val.is_array_value() {
-                        // Fixed-size array: length is known at compile time.
                         let arr_len = vec_val.into_array_value().get_type().len();
                         Ok(i64t.const_int(arr_len as u64, false).into())
                     } else {
@@ -105,7 +89,6 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::MapInit => self.compile_map_new(),
 
-                // ── Closures ──,
                 _ => return Ok(None),
             })?,
         ))

@@ -1,5 +1,3 @@
-//! Core MIR instruction emission for constants, arithmetic, calls, variables, and globals.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -27,22 +25,19 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::StringConst(s) => self.emit_string_const(s),
                 mir::InstKind::Void => Ok(self.ctx.i8_type().const_int(0, false).into()),
 
-                // ── Arithmetic ──
                 mir::InstKind::BinOp(op, lhs, rhs) => self.emit_binop(*op, *lhs, *rhs, &inst.ty),
                 mir::InstKind::UnaryOp(op, val) => self.emit_unary(*op, *val, &inst.ty),
                 mir::InstKind::Cmp(op, lhs, rhs, operand_ty) => {
                     self.emit_cmp(*op, *lhs, *rhs, operand_ty)
                 }
 
-                // ── Calls ──
                 mir::InstKind::Call(name, args) => {
-                    // Check for magic call names first (coroutines, actors, stores)
                     if let Some(result) =
                         self.try_handle_magic_call(&name.as_str(), args, &inst.ty)?
                     {
                         return Ok(Some(result));
                     }
-                    // Handle overflow builtins that MIR lowered as __builtin_* calls
+
                     if let Some(result) = self.try_handle_overflow_builtin(&name.as_str(), args)? {
                         return Ok(Some(result));
                     }
@@ -54,14 +49,12 @@ impl<'ctx> Compiler<'ctx> {
                         let csv = b!(self.bld.build_call(fv, &md, "call"));
                         Ok(self.call_result(csv))
                     } else {
-                        // Try looking up as a module-level function.
                         if let Some(fv) = self.module.get_function(&name.as_str()) {
                             let ptypes = fv.get_type().get_param_types();
                             let md = self.coerce_call_args(&arg_vals, args, &ptypes);
                             let csv = b!(self.bld.build_call(fv, &md, "call"));
                             Ok(self.call_result(csv))
                         } else {
-                            // libm fallback: declare and call directly.
                             const LIBM_UNARY_F64: &[&str] = &[
                                 "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos",
                                 "tan", "asin", "acos", "atan", "log", "log10", "log2", "exp",
@@ -93,10 +86,9 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::MethodCall(recv, method, args, borrow) => {
                     let borrow = *borrow;
-                    // Try vec/array methods first (these are inline, not compiled functions)
+
                     let recv_ty = self.value_types.get(recv).cloned();
 
-                    // String methods
                     if matches!(&recv_ty, Some(Type::String)) {
                         let recv_val = self.val(*recv);
                         match &*method.as_str() {
@@ -181,7 +173,7 @@ impl<'ctx> Compiler<'ctx> {
                                 ));
                                 return Ok(Some(cmp.into()));
                             }
-                            _ => {} // fall through to function lookup
+                            _ => {}
                         }
                     }
 
@@ -194,7 +186,7 @@ impl<'ctx> Compiler<'ctx> {
                             Some(Type::Array(et, _)) => *et.clone(),
                             _ => Type::I64,
                         };
-                        // Fixed-size array: len returns constant, contains is inline scan
+
                         if let Some(Type::Array(_, arr_len)) = recv_ty {
                             match &*method.as_str() {
                                 "len" => {
@@ -418,7 +410,7 @@ impl<'ctx> Compiler<'ctx> {
                                     &other_elem_ty,
                                 )?));
                             }
-                            _ => {} // fall through to function lookup
+                            _ => {}
                         }
                     }
                     let is_map = matches!(&recv_ty, Some(Type::Map(_, _)))
@@ -467,13 +459,12 @@ impl<'ctx> Compiler<'ctx> {
                                 return Err("map.remove() requires a key".into());
                             }
                             "clear" => return Ok(Some((self.map_clear(header_ptr))?)),
-                            _ => {} // fall through
+                            _ => {}
                         }
                     }
 
                     let recv_val = self.val(*recv);
                     if let Some((fv, _, _)) = self.fns.get(method).cloned() {
-                        // Check if the method expects self by pointer (first param is ptr type)
                         let first_param_is_ptr = fv
                             .get_type()
                             .get_param_types()
@@ -482,22 +473,11 @@ impl<'ctx> Compiler<'ctx> {
                             .unwrap_or(false);
                         let self_arg: BasicValueEnum<'ctx> =
                             if first_param_is_ptr && !recv_val.is_pointer_value() {
-                                // Struct value but method expects pointer: alloca + store.
-                                // Cache the alloca so mutations from the method persist across calls
-                                // (e.g. iterator .next() mutating self.n in a loop).
                                 if let Some(cached) = self.self_allocs.get(recv) {
                                     (*cached).into()
                                 } else {
                                     let tmp = self.entry_alloca(recv_val.get_type(), "self.tmp");
-                                    // Store the initial value into the alloca.  We must place
-                                    // this store in the entry block so it only runs once —
-                                    // otherwise a loop would re-init the alloca every iteration,
-                                    // clobbering mutations made by the method.
-                                    //
-                                    // If recv_val was produced in a later block (e.g. via
-                                    // insertvalue in a branch), it won't dominate the entry
-                                    // block.  In that case, fall back to storing at the
-                                    // current position — this is correct for non-loop cases.
+
                                     let cur_fn = self.cur_fn.expect("ICE: cur_fn not set");
                                     let entry_bb = cur_fn
                                         .get_first_basic_block()
@@ -510,7 +490,7 @@ impl<'ctx> Compiler<'ctx> {
                                         if let Some(inst) = recv_val.as_instruction_value() {
                                             inst.get_parent().map_or(false, |bb| bb == entry_bb)
                                         } else {
-                                            true // constants dominate everything
+                                            true
                                         };
                                     if recv_in_entry {
                                         let entry_bld = self.ctx.create_builder();
@@ -530,8 +510,7 @@ impl<'ctx> Compiler<'ctx> {
                             } else {
                                 recv_val
                             };
-                        // Coerce remaining args: structs by-value → ptr when the
-                        // callee param expects ptr (consistent with declare_mir_fn).
+
                         let arg_vals: Vec<BasicValueEnum<'ctx>> =
                             args.iter().map(|a| self.val(*a)).collect();
                         let ptypes_full = fv.get_type().get_param_types();
@@ -542,12 +521,7 @@ impl<'ctx> Compiler<'ctx> {
                             vec![self_arg.into()];
                         all_args.extend(coerced);
                         let csv = b!(self.bld.build_call(fv, &all_args, "mcall"));
-                        // After a method call that may have mutated self through the alloca pointer,
-                        // update the value map to point to the alloca pointer.
-                        // FieldGet/FieldSet already handle pointer values via GEP,
-                        // and subsequent method calls will pass the pointer directly.
-                        // We avoid reloading the struct here because the reload would be
-                        // placed in the current block and may not dominate later uses.
+
                         if let Some(alloca_ptr) = self.self_allocs.get(recv).copied() {
                             self.value_map.insert(*recv, alloca_ptr.into());
                         }
@@ -558,7 +532,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::IndirectCall(callee, args) => {
                     let callee_val = self.val(*callee);
-                    // Closure call: callee is a {fn_ptr, env_ptr} struct.
+
                     let _closure_ty = self.closure_type();
                     let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
                     let fn_ptr = b!(self.bld.build_extract_value(
@@ -577,7 +551,7 @@ impl<'ctx> Compiler<'ctx> {
                     for a in args {
                         call_args.push(self.val(*a).into());
                     }
-                    // Build function type for the indirect call.
+
                     let ret_llvm = self.llvm_ty(&inst.ty);
                     let mut param_tys: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
                     for a in args {
@@ -590,11 +564,7 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.call_result(csv))
                 }
 
-                // ── Variables ──
                 mir::InstKind::FnRef(name) => {
-                    // Create a closure struct {fn_ptr, null_env} wrapping the named function.
-                    // A wrapper is needed because closures expect (env_ptr, ...params) calling convention,
-                    // but top-level functions only expect (...params).
                     if let Some(fv) = self.module.get_function(&name.as_str()) {
                         let wrapper = self.fn_ref_wrapper(fv);
                         let null_env = self
@@ -614,9 +584,7 @@ impl<'ctx> Compiler<'ctx> {
                             let tbaa_name = Compiler::tbaa_type_name(&ty);
                             self.set_tbaa(inst_v, tbaa_name);
                         }
-                        // For Struct/Tuple loads, remember the source alloca so
-                        // a subsequent Call can pass the pointer (preserving
-                        // mutation visibility through reference semantics).
+
                         if matches!(ty, Type::Struct(_, _) | Type::Tuple(_)) {
                             if let Some(dest) = inst.dest {
                                 self.self_allocs.insert(dest, ptr);
@@ -625,7 +593,6 @@ impl<'ctx> Compiler<'ctx> {
                         }
                         Ok(val)
                     } else {
-                        // Fall back to Compiler's var lookup.
                         if let Some((ptr, ty)) = self.find_var(&name.as_str()).cloned() {
                             let lt = self.llvm_ty(&ty);
                             let val = b!(self.bld.build_load(lt, ptr, &name.as_str()));
@@ -640,18 +607,6 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
                 mir::InstKind::Store(name, val) => {
-                    // Reference-semantics for struct/tuple locals: when the
-                    // source value is a struct/tuple already backed by an
-                    // alloca (function param, struct_init, or a previous
-                    // Load), alias the local `name` to the same alloca so
-                    // that subsequent FieldStores via `name` mutate the
-                    // original. Without this, the local alloca + store
-                    // would silently shadow the source and break call-site
-                    // mutation visibility.
-                    // Peel Type::Ptr(Struct/Tuple/Enum) to its inner type:
-                    // trait/by-ptr methods produce demote-to-mem Stores with
-                    // the param's declared Ptr(Struct) type. The aliasing
-                    // semantics are identical to Struct.
                     let effective_ty = match &inst.ty {
                         Type::Ptr(inner)
                             if matches!(
@@ -680,7 +635,6 @@ impl<'ctx> Compiler<'ctx> {
                         let tbaa_name = Compiler::tbaa_type_name(&ty);
                         self.set_tbaa(store_inst, tbaa_name);
                     } else {
-                        // First store → create alloca.
                         let lt = v.get_type();
                         let ty = inst.ty.clone();
                         let ptr = self.entry_alloca(lt, &name.as_str());
@@ -693,7 +647,6 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
 
-                // ── Globals ──
                 mir::InstKind::GlobalLoad(name) => {
                     if let Some((gv, ty)) = self.globals.get(name).cloned() {
                         let lt = self.llvm_ty(&ty);
@@ -714,16 +667,6 @@ impl<'ctx> Compiler<'ctx> {
         ))
     }
 
-    /// Coerce MIR call arguments to the LLVM parameter types expected by the
-    /// callee. Currently handles two coercions:
-    ///
-    /// 1. String → ptr: pass the underlying char buffer when the callee
-    ///    expects a pointer.
-    /// 2. Struct/Tuple value → ptr: when the callee expects a pointer (which
-    ///    is now the standard ABI for struct/tuple parameters — see
-    ///    `declare_mir_fn`), pass the alloca pointer of the source local if
-    ///    we know it (so callee mutations are visible to caller). Otherwise
-    ///    spill the value to a fresh alloca and pass the pointer.
     pub(in crate::codegen) fn coerce_call_args(
         &mut self,
         arg_vals: &[BasicValueEnum<'ctx>],
@@ -741,25 +684,23 @@ impl<'ctx> Compiler<'ctx> {
                 if !pt.is_pointer_type() {
                     return (*v).into();
                 }
-                // String → char*
+
                 if v.get_type() == st.into() {
                     return self.string_data(*v).unwrap_or(*v).into();
                 }
-                // Struct/Tuple value → ptr (reference semantics)
+
                 if v.is_struct_value() {
                     if let Some(arg_id) = args.get(i) {
                         if let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
                             return src_ptr.into();
                         }
                     }
-                    // Spill to a fresh alloca.
+
                     let alloca = self.entry_alloca(v.get_type(), "struct.arg");
                     let _ = self.bld.build_store(alloca, *v);
                     return alloca.into();
                 }
-                // Already a pointer (e.g. struct_init dest, or struct param):
-                // pass through. The self_allocs path may have routed val() to
-                // the pointer when the underlying type is a struct/tuple.
+
                 if v.is_pointer_value() {
                     if let Some(arg_id) = args.get(i) {
                         if let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {

@@ -1,24 +1,12 @@
-//! Module/path resolution: maps qualified names to defining items.
-
 use crate::ast::{self, Decl, Expr, Stmt};
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
-/// Prefix a declaration's function/const name with a module name for qualified access.
-/// ONLY the prefixed version is emitted — bare names are NOT registered.
-/// Module functions are accessed exclusively via `module.fn()` syntax.
-/// Externs are kept as-is (accessed via `extern.fn()` syntax).
-/// Types, Enums, ErrDefs, Impls are NOT prefixed — they use structural names.
-/// Prefix an entire module's declarations: rename functions/constants to
-/// `module_name` and rewrite all intra-module references in bodies so that
-/// recursive and sibling calls resolve to the prefixed names.
 pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
-    // 1. Collect all renameable names (functions + constants) defined in the module
     let mut rename_map: HashMap<Symbol, String> = HashMap::new();
     for d in &decls {
         match d {
             Decl::Fn(f) => {
-                // Skip methods (TypeName_method) — they're already mangled
                 if f.name.contains_str("_") && f.name.as_str().starts_with(char::is_uppercase) {
                     continue;
                 }
@@ -31,7 +19,6 @@ pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
         }
     }
 
-    // 2. Rewrite each declaration
     decls
         .into_iter()
         .map(|d| match d {
@@ -39,14 +26,13 @@ pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
                 if let Some(new) = rename_map.get(&f.name) {
                     f.name = Symbol::intern(new);
                 }
-                // Exclude parameter names from renaming to avoid
-                // shadowing params with sibling function names
+
                 let mut fn_renames = rename_map.clone();
                 for p in &f.params {
                     fn_renames.remove(&p.name);
                 }
                 rewrite_block(&mut f.body, &fn_renames);
-                // Also rewrite bodies of default param exprs
+
                 for p in &mut f.params {
                     if let Some(ref mut def) = p.default {
                         rewrite_expr(def, &fn_renames);
@@ -218,11 +204,6 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
             }
         }
         Expr::Struct(name, fields, span) => {
-            // The parser routes any `Uppercase(args)` to Expr::Struct via the
-            // uppercase-prefix heuristic. If the name resolves to a renamed
-            // top-level (function) declaration, it's actually a function call
-            // disguised as a struct literal. Rewrite to a Call so the typer
-            // and codegen treat it consistently as a function invocation.
             if let Some(new) = renames.get(name) {
                 let renamed = Symbol::intern(new);
                 let mut args: Vec<Expr> = Vec::with_capacity(fields.len());
@@ -309,7 +290,7 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
                 rewrite_block(&mut arm.body, renames);
             }
         }
-        // Literals and leaf nodes — nothing to rewrite
+
         Expr::None(_)
         | Expr::Void(_)
         | Expr::Int(_, _)

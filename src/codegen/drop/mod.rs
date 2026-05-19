@@ -1,5 +1,3 @@
-//! Codegen for destructor / drop-glue insertion.
-
 use inkwell::AddressSpace;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;
@@ -13,15 +11,6 @@ mod aggregates;
 mod containers;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Unified drop dispatcher. Emits code to release all resources owned by a
-    /// value of the given type. For types that are trivially droppable (scalars,
-    /// bools, pointers-as-raw), this is a no-op. For heap-owning types, this
-    /// recursively frees inner allocations before releasing the outer container.
-    ///
-    /// This produces a deterministic, zero-overhead destruction sequence with
-    /// no dynamic dispatch and no RTTI. Each drop path is monomorphized at
-    /// compile time — the generated code is a flat, branchless (per-type)
-    /// sequence of frees. No GC, no finalizer queues.
     pub(crate) fn drop_value(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -35,10 +24,6 @@ impl<'ctx> Compiler<'ctx> {
                 self.drop_string(val)?;
             }
             Type::Vec(elem) => {
-                // Vec: free element storage if elements need dropping, then
-                // free the data buffer and header. The element loop runs only
-                // for non-trivially-droppable element types. For POD vecs this
-                // collapses to two frees.
                 self.drop_vec_deep(val, elem)?;
             }
             Type::Map(kt, vt) => {
@@ -64,18 +49,15 @@ impl<'ctx> Compiler<'ctx> {
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.drop_value(val, inner)?;
             }
-            // Coroutine — needs jinn_gen_destroy to free both coroutine stack and gen block
+
             Type::Coroutine(_) => {
                 self.drop_generator(val)?;
             }
-            // Channel — ptr-based, free the allocation if non-null.
+
             Type::Channel(_) => {
                 self.drop_ptr_allocated(val)?;
             }
-            _ => {
-                // Scalars, bools, raw ptrs, ActorRef — no-op.
-                // is_trivially_droppable should have caught these above.
-            }
+            _ => {}
         }
         Ok(())
     }

@@ -1,5 +1,3 @@
-//! High-level store read, insert, count, query, and all HIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -124,7 +122,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Read current count for sid assignment
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         let count_buf = self.entry_alloca(i64t.into(), "ins.count");
@@ -152,7 +149,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_add(old_count, i64t.const_int(1, false), "new.sid"));
 
-        // Get current time via time(NULL)
         self.ensure_time_fn();
         let time_fn = crate::codegen::fn_or_die(&self.module, "time");
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -164,7 +160,6 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_int_value();
 
-        // Determine which fields are built-in vs user-defined
         let builtin_names = [
             "sid",
             "uuid",
@@ -181,18 +176,15 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_struct_gep(st, rec_ptr, i as u32, &field_def.name.as_str()));
             if builtin_names.contains(&&*field_def.name.as_str()) {
-                // Auto-populate built-in fields
                 match &*field_def.name.as_str() {
                     "sid" => {
                         b!(self.bld.build_store(gep, new_sid));
                     }
                     "uuid" => {
-                        // Generate a simple UUID-like string from sid + time
                         let uuid_str = self.gen_store_uuid(new_sid, now)?;
                         self.copy_string_to_fixed_buf(uuid_str, gep)?;
                     }
                     "hash" => {
-                        // Placeholder empty hash — will be recomputed after all fields set
                         let empty = self.compile_str_literal("")?;
                         self.copy_string_to_fixed_buf(empty, gep)?;
                     }
@@ -205,7 +197,6 @@ impl<'ctx> Compiler<'ctx> {
                     _ => {}
                 }
             } else {
-                // User-defined field
                 if user_val_idx < values.len() {
                     match &field_def.ty {
                         Type::String => {
@@ -222,11 +213,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // R13: amortize file growth in 64KiB chunks via posix ftruncate.
-        // ftruncate may extend the file beyond the logical end (count*rec_size
-        // + header), so we must seek to the *logical* end based on old_count
-        // rather than SEEK_END which would land in the zero-padded reserved
-        // region after a prior reserve.
         let reserve_fn = self
             .module
             .get_function("jinn_store_reserve")
@@ -250,7 +236,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Seek to logical end = 8 + old_count * rec_size.
         let logical_end_off = b!(self.bld.build_int_nsw_mul(
             old_count,
             i64t.const_int(rec_size, false),
@@ -293,7 +278,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         let count_buf = self.entry_alloca(i64t.into(), "count.buf");
-        b!(self.bld.build_store(count_buf, new_sid)); // new_sid = old_count + 1 = new count
+        b!(self.bld.build_store(count_buf, new_sid));
         let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
 
         b!(self.bld.build_call(
@@ -359,7 +344,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let count = self.store_read_count(fp)?;
 
-        // Seek past header to first record
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
             fseek_fn,
@@ -371,7 +355,6 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        // Allocate a single-record buffer for streaming reads
         let malloc_fn = self.ensure_malloc();
         let rec_buf = self
             .call_result(b!(self.bld.build_call(
@@ -413,7 +396,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
-        // Read one record from file (fread advances file position)
+
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
         b!(self.bld.build_call(
             fread_fn,

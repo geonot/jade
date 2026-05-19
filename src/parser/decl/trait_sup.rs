@@ -101,11 +101,6 @@ impl Parser {
         })
     }
 
-    /// Auto-inject an untyped `self` parameter at index 0 if the user did not
-    /// write one. Type/impl/trait methods always have an implicit receiver;
-    /// this lets users write `*foo bar as i64` instead of being forced to
-    /// type out `*foo self, bar as i64`. The typer's method-signature
-    /// declaration prepends the receiver type and binds it to this slot.
     pub(in crate::parser) fn ensure_implicit_self(params: &mut Vec<Param>, span: Span) {
         if params.first().map_or(true, |p| p.name.as_str() != "self") {
             params.insert(

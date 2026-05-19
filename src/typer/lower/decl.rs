@@ -1,5 +1,3 @@
-//! Extracted lowering steps.
-
 #![allow(unused_imports, unused_variables)]
 
 use std::collections::{HashMap, HashSet};
@@ -149,7 +147,7 @@ impl Typer {
         let dummy_span = ast::Span::dummy();
 
         let mut fields: Vec<hir::StoreField> = Vec::new();
-        // Inject built-in fields unless @simple
+
         if !is_simple {
             let builtin = |name: &str, ty: Type| hir::StoreField {
                 name: name.into(),
@@ -167,7 +165,7 @@ impl Typer {
             fields.push(builtin("updated", Type::I64));
             fields.push(builtin("deleted", Type::I64));
         }
-        // Add __version field for @versioned stores
+
         let is_versioned = sd
             .decorators
             .iter()
@@ -265,21 +263,12 @@ impl Typer {
                 hfn.ret = self.infer_ctx.resolve(&hfn.ret);
             }
         }
-        // R3.2: escape-analysis post-pass.  Records the inferred tier for
-        // every binding `DefId` defined in this function so later passes
-        // (R3.3 codegen) can decide between T1 raw-borrow and T2+ owned
-        // codegen without re-deriving the heuristic per binding.
+
         let einfo = crate::escape::analyze_fn(&hfn);
         for (id, t) in einfo.iter() {
             self.escape_tiers.insert(*id, *t);
         }
-        // R3.3: mutate the freshly-lowered HIR in place to demote `Owned`
-        // bindings of `Field`/`Index` reads whose escape tier is `T1`
-        // (short-lived borrows of a clonable heap value).  The matching
-        // `Stmt::Drop` is removed in the same pass; the MIR lowerer pairs
-        // this by skipping the auto-clone for `Borrowed` Field/Index
-        // bindings (see `src/mir/lower/stmt.rs`).  Net effect: no alloc,
-        // no copy, no free on the hot field-access path.
+
         let _demoted = crate::escape::apply_demotions(&mut hfn, &einfo);
         Ok(hfn)
     }
@@ -291,14 +280,6 @@ impl Typer {
             .ok_or_else(|| format!("undeclared function: {}", f.name))?
             .clone();
 
-        // Push the function body scope and define parameters *inside* it
-        // (rather than in a separate outer scope). This is the Stage-A
-        // refactor that lets `emit_scope_drops_excluding` see parameters
-        // and emit per-param drops at function body end for params whose
-        // ownership is `Owned` (notably explicit-`take` params). Borrowed
-        // params (the new default for heap-managed types) are skipped by
-        // the drop filter, preserving the long-standing "caller still owns
-        // the value across the call" semantics for unannotated parameters.
         self.push_scope();
         let mut params = Vec::new();
         for (i, p) in f.params.iter().enumerate() {
@@ -332,14 +313,12 @@ impl Typer {
             });
         }
         let prev_fn_ret = self.current_fn_ret_ty.replace(ret.clone());
-        // Snapshot & reset per-function error-tracking state.
+
         let prev_inferred = std::mem::take(&mut self.current_fn_error_types);
         let prev_declared = std::mem::take(&mut self.current_fn_declared_errors);
-        // Seed declared error-union from the AST signature.
+
         let mut declared_err_names: Vec<Symbol> = Vec::new();
         for et in &f.error_types {
-            // The parser may emit Param/Enum/Struct/UserDefined for an
-            // identifier in type position; resolve to the err-enum name.
             let name = match et {
                 Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => Some(n.clone()),
                 _ => None,
@@ -363,12 +342,10 @@ impl Typer {
             }
         }
         self.current_fn_declared_errors = declared_err_names.clone();
-        // Inline the body of `lower_block` so parameters (defined in the
-        // current scope above) are seen by `finalize_block_drops` and get
-        // per-param drop emission alongside body locals.
+
         let mut body = self.lower_block_no_scope(&f.body, &ret)?;
         self.finalize_block_drops(&mut body);
-        // Final error union: union of declared + inferred.
+
         let mut error_types: Vec<Type> = Vec::new();
         let mut seen: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
         for n in declared_err_names
@@ -379,7 +356,7 @@ impl Typer {
                 error_types.push(Type::Enum(n));
             }
         }
-        // Restore.
+
         self.current_fn_ret_ty = prev_fn_ret;
         self.current_fn_error_types = prev_inferred;
         self.current_fn_declared_errors = prev_declared;
@@ -396,40 +373,34 @@ impl Typer {
             }
         }
 
+        let final_body = if f.is_generator && f.name != "main" {
+            let body_span = f.span;
+            let captures: Vec<(Symbol, Type)> = params
+                .iter()
+                .map(|p| (p.name.clone(), p.ty.clone()))
+                .collect();
+            let gen_expr = hir::Expr {
+                kind: hir::ExprKind::GeneratorCreate(
+                    id,
+                    f.name.clone(),
+                    std::mem::take(&mut body),
+                    captures,
+                ),
+                ty: ret.clone(),
+                span: body_span,
+            };
+            vec![hir::Stmt::Ret(Some(gen_expr), ret.clone(), body_span)]
+        } else {
+            body
+        };
+
         Ok(hir::Fn {
             def_id: id,
             name: f.name.clone(),
             params,
             ret: ret.clone(),
             error_types,
-            body: if f.is_generator && f.name != "main" {
-                // P0-3: a generator function's body is the *coroutine*
-                // body, not the function body. The function itself
-                // constructs and returns the generator handle. Wrap the
-                // lowered body in a single `Ret(Some(GeneratorCreate(…)))`
-                // so the MIR return type (`Type::Generator(_)` → ptr)
-                // matches the returned value. Without this wrap, codegen
-                // would lower the for/yield inline and emit a trailing
-                // `ret i64 0` against a `ptr`-returning function.
-                let body_span = f.span;
-                let captures: Vec<(Symbol, Type)> = params
-                    .iter()
-                    .map(|p| (p.name.clone(), p.ty.clone()))
-                    .collect();
-                let gen_expr = hir::Expr {
-                    kind: hir::ExprKind::GeneratorCreate(
-                        id,
-                        f.name.clone(),
-                        std::mem::take(&mut body),
-                        captures,
-                    ),
-                    ty: ret.clone(),
-                    span: body_span,
-                };
-                vec![hir::Stmt::Ret(Some(gen_expr), ret.clone(), body_span)]
-            } else {
-                body
-            },
+            body: final_body,
             span: f.span,
             generic_origin: None,
             is_generator: f.is_generator,
@@ -671,14 +642,6 @@ impl Typer {
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
-            // Do NOT resolve here. Methods on different types are lowered in
-            // source order, but their return-type variables may be unified
-            // through cross-method calls (e.g. type A's method tail-calls type
-            // B's method whose body has not yet been lowered). Resolving now
-            // would default A's ret-var to i64 before B's body unifies B's
-            // ret-var with its true type. The global `resolve_fn` pass at the
-            // end of `lower_program` runs after all bodies, so it sees the
-            // fully-constrained type.
         }
 
         Ok(hir::Fn {

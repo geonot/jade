@@ -1,21 +1,3 @@
-//! MIR → LLVM IR code generation.
-//!
-//! This module walks a `mir::Program` in SSA form and emits LLVM IR via
-//! inkwell.  It reuses the existing `Compiler` infrastructure (type mapping,
-//! RC helpers, drop dispatcher, etc.) but reads MIR instructions instead of
-//! HIR expressions.
-//!
-//! Architecture:
-//!   - `value_map`:  MIR `ValueId` → LLVM `BasicValueEnum`
-//!   - `block_map`:  MIR `BlockId` → LLVM `BasicBlock`
-//!   - `fn_map`:     function name  → LLVM `FunctionValue`
-//!
-//! The overall flow per function is:
-//!   1. Create the LLVM function and all basic blocks up-front.
-//!   2. Wire parameters into `value_map`.
-//!   3. Walk blocks in order — emit phi placeholders, instructions, terminator.
-//!   4. Back-patch phi incoming edges once all blocks are materialised.
-
 mod emit_inst;
 mod helpers;
 mod intrinsics;
@@ -42,10 +24,6 @@ use super::Compiler;
 use super::PendingPhi;
 use super::b;
 
-/// Backwards-compatible alias for the merged code-generator. Prior to the
-/// C.1 cleanup `MirCodegen` was a distinct struct that borrowed `Compiler`;
-/// the two have since been collapsed into one type. New code should use
-/// [`Compiler`] directly.
 pub type MirCodegen<'ctx> = Compiler<'ctx>;
 
 impl<'ctx> Compiler<'ctx> {
@@ -81,9 +59,6 @@ impl<'ctx> Compiler<'ctx> {
         floors
     }
 
-    // ── public entry point ─────────────────────────────────────────
-
-    /// Compile a full MIR program into the LLVM module owned by `self`.
     pub fn compile_program(
         &mut self,
         prog: &mir::Program,
@@ -94,12 +69,6 @@ impl<'ctx> Compiler<'ctx> {
         self.setup_target()?;
         self.declare_builtins();
 
-        // Register struct types from MIR type defs.
-        // Two-pass: create all opaque struct types first so that mutually-
-        // referencing or out-of-order field types resolve correctly. If we
-        // computed bodies in a single pass, `llvm_ty(Struct(other))` would
-        // fall back to `i64` when `other` had not yet been registered,
-        // producing invalid `insertvalue`/`extractvalue` IR.
         for td in &prog.types {
             self.ctx.opaque_struct_type(&td.name.as_str());
         }
@@ -119,7 +88,6 @@ impl<'ctx> Compiler<'ctx> {
             self.structs.insert(td.name, fields);
         }
 
-        // Populate struct_defaults from HIR type definitions.
         for td in &hir_prog.types {
             let defaults: indexmap::IndexMap<Symbol, hir::Expr> = td
                 .fields
@@ -129,28 +97,24 @@ impl<'ctx> Compiler<'ctx> {
             if !defaults.is_empty() {
                 self.struct_defaults.insert(td.name.clone(), defaults);
             }
-            // Also register struct_layouts for alignment info.
+
             self.struct_layouts
                 .insert(td.name.clone(), td.layout.clone());
         }
 
-        // Register HIR enum definitions (MIR doesn't carry enum info yet).
         for ed in &hir_prog.enums {
             let _ = self.declare_enum(ed);
         }
 
-        // Register error definitions (tagged unions like enums).
         for ed in &hir_prog.err_defs {
             self.declare_err_def(ed)?;
         }
 
-        // Register extern declarations.
         for ext in &prog.externs {
             let ptys: Vec<BasicMetadataTypeEnum<'ctx>> = ext
                 .params
                 .iter()
                 .map(|t| {
-                    // Extern functions use C ABI: String → ptr (char*)
                     if matches!(t, Type::String) {
                         self.ctx.ptr_type(inkwell::AddressSpace::default()).into()
                     } else {
@@ -170,8 +134,6 @@ impl<'ctx> Compiler<'ctx> {
             self.fns.insert(ext.name, (fv, param_tys, ext.ret.clone()));
         }
 
-        // ── Detect runtime needs from MIR (BEFORE declaring functions so
-        //    main wrapper can find scheduler symbols) ──
         let needs_runtime = prog.functions.iter().any(|f| {
             f.blocks.iter().any(|bb| {
                 bb.insts.iter().any(|i| match &i.kind {
@@ -181,8 +143,7 @@ impl<'ctx> Compiler<'ctx> {
                     | mir::InstKind::ChanRecv(..)
                     | mir::InstKind::SelectArm(..)
                     | mir::InstKind::Slice(..) => true,
-                    // Vec/array methods may emit calls to runtime helpers
-                    // (jinn_sort_i64, __jinn_vec_slice, etc.).
+
                     mir::InstKind::MethodCall(_, method, _, _) => matches!(
                         &*method.as_str(),
                         "sort"
@@ -237,7 +198,6 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_jinn_runtime();
         }
 
-        // ── Detect TLS / crypto usage (requires OpenSSL) ──
         let needs_ssl = prog.externs.iter().any(|e| {
             e.name.starts_with("jinn_tls_")
                 || e.name.starts_with("jinn_sha")
@@ -248,14 +208,12 @@ impl<'ctx> Compiler<'ctx> {
         });
         self.needs_ssl = needs_ssl;
 
-        // ── Detect SQLite usage ──
         let needs_sqlite = prog
             .externs
             .iter()
             .any(|e| e.name.starts_with("jinn_sqlite_"));
         self.needs_sqlite = needs_sqlite;
 
-        // ── Also detect coroutine/generator usage and declare gen runtime ──
         let uses_coro = prog.functions.iter().any(|f| {
             f.blocks.iter().any(|bb| {
                 bb.insts.iter().any(|i| match &i.kind {
@@ -271,20 +229,18 @@ impl<'ctx> Compiler<'ctx> {
             })
         });
         if uses_coro {
-            self.declare_actor_runtime(); // malloc, memset, free
-            self.declare_gen_runtime(); // jinn_gen_resume/suspend/destroy
+            self.declare_actor_runtime();
+            self.declare_gen_runtime();
         }
 
-        // ── Declare HIR actors (just declarations, no body compilation yet) ──
         if !hir_prog.actors.is_empty() {
-            self.declare_actor_runtime(); // malloc, memset, free
+            self.declare_actor_runtime();
             for ad in &hir_prog.actors {
                 self.declare_actor(ad)?;
                 self.actor_defs.insert(ad.name.clone(), ad.clone());
             }
         }
 
-        // ── Process HIR stores ──
         if !hir_prog.stores.is_empty() {
             self.declare_store_runtime();
             for sd in &hir_prog.stores {
@@ -293,7 +249,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // ── Generate migration functions ──
         if !hir_prog.migrations.is_empty() {
             if hir_prog.stores.is_empty() {
                 self.declare_store_runtime();
@@ -304,14 +259,12 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // ── Extract coroutine/generator bodies from HIR ──
-        Self::extract_coro_bodies_from_program(hir_prog, &mut self.coro_bodies);
+        Self::extract_coro_bodies_from_program(
+            hir_prog,
+            &mut self.coro_bodies,
+            &mut self.coro_captures,
+        );
 
-        // ── Declare all MIR functions (forward-declare so calls resolve) ──
-        // NOTE: This must be AFTER runtime declarations so main wrapper
-        // can find jinn_sched_init/run/shutdown.
-
-        // ── Declare global mutable variables ──
         for gdef in &prog.globals {
             let llvm_ty = self.llvm_ty(&gdef.ty);
             let gv = self
@@ -322,7 +275,6 @@ impl<'ctx> Compiler<'ctx> {
             self.globals.insert(gdef.name, (gv, gdef.ty.clone()));
         }
 
-        // ── Declare global initializer function (called from main wrapper) ──
         if !hir_prog.globals.is_empty() {
             let void_ty = self.ctx.void_type().fn_type(&[], false);
             let init_fn = self
@@ -343,7 +295,6 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_mir_fn(func)?;
         }
 
-        // ── Declare trait impl methods not already declared via MIR fns ──
         for ti in &hir_prog.trait_impls {
             for m in &ti.methods {
                 if !self.fns.contains_key(&m.name) {
@@ -352,23 +303,18 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // ── Generate vtables for dynamic dispatch ──
         self.generate_vtables(&hir_prog.trait_impls)?;
 
-        // ── Compile actor loop bodies (after MIR fn declarations so
-        //    functions like fib are available for actor handlers) ──
         if !hir_prog.actors.is_empty() {
             for ad in &hir_prog.actors {
                 self.compile_actor_loop(ad)?;
             }
         }
 
-        // ── Supervisor trees ──
         for sup in &hir_prog.supervisors {
             self.compile_supervisor(sup)?;
         }
 
-        // ── Compile each MIR function body ──
         for func in &prog.functions {
             self.compile_mir_fn(func)?;
         }
@@ -380,17 +326,10 @@ impl<'ctx> Compiler<'ctx> {
         self.module.verify().map_err(|e| e.to_string())
     }
 
-    // ── function declaration ───────────────────────────────────────
-
     fn declare_mir_fn(&mut self, func: &mir::Function) -> Result<(), String> {
         let ptys: Vec<Type> = func.params.iter().map(|p| p.ty.clone()).collect();
         let ret = func.ret_ty.clone();
 
-        // Build LLVM parameter types. Struct/Tuple parameters are passed as
-        // pointers (reference semantics) so that callee mutations to fields
-        // are visible to the caller. This matches user expectations for
-        // non-trivial aggregate types (consistent with Vec/Map/etc., which
-        // are already pointer-typed).
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> = ptys
             .iter()
@@ -402,7 +341,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let is_main = func.name == "main";
         if is_main && !self.lib_mode {
-            // Create __jinn_user_main + wrapper main that initialises runtime.
             let ft = self.mk_fn_type(&ret, &lp, false);
             let user_fv = self.module.add_function("__jinn_user_main", ft, None);
             self.tag_fn(user_fv);
@@ -410,7 +348,6 @@ impl<'ctx> Compiler<'ctx> {
             user_fv.set_linkage(Linkage::Internal);
             self.fns.insert(func.name, (user_fv, ptys, ret));
 
-            // Build main wrapper (same logic as decl.rs).
             let i32t = self.ctx.i32_type();
             let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
             let main_ft = i32t.fn_type(&[i32t.into(), ptr_ty.into()], false);
@@ -437,11 +374,11 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_call(sched_init, &[i32t.const_int(0, false).into()], ""));
             }
-            // Initialize globals before user code
+
             if let Some(init_fn) = &self.global_init_fn {
                 b!(self.bld.build_call(*init_fn, &[], ""));
             }
-            // Run migrations before user code
+
             for mig_fn in &self.migration_fns {
                 b!(self.bld.build_call(*mig_fn, &[], ""));
             }
@@ -477,8 +414,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    // ── apply @inline / @noinline / @cold / @hot attributes ────────
-
     fn apply_fn_attrs(
         &self,
         fv: inkwell::values::FunctionValue<'ctx>,
@@ -498,8 +433,6 @@ impl<'ctx> Compiler<'ctx> {
             fv.add_attribute(AttributeLoc::Function, self.attr("hot"));
         }
     }
-
-    // ── function body compilation ──────────────────────────────────
 
     fn compile_mir_fn(&mut self, func: &mir::Function) -> Result<(), String> {
         let (fv, _, _) = self
@@ -524,34 +457,16 @@ impl<'ctx> Compiler<'ctx> {
         self.var_shadows.clear();
         self.var_scope_markers.clear();
 
-        // R15: DI subprogram pushing intentionally deferred. Without
-        // per-MIR-instruction `set_current_debug_location` calls, the
-        // verifier rejects any call instruction inside a DI-bearing fn
-        // ("inlinable function call must have a !dbg location"). The
-        // `attach_dbg_declare` helper and DICompileUnit are in place;
-        // wiring location emission across every MIR opcode handler is
-        // tracked as follow-up work after the M1 release.
-
-        // 1. Create all LLVM basic blocks up-front.
         for bb in &func.blocks {
             let llvm_bb = self.ctx.append_basic_block(fv, &bb.label.as_str());
             self.block_map.insert(bb.id, llvm_bb);
         }
 
-        // 2. Wire function parameters into value_map.
         for (i, param) in func.params.iter().enumerate() {
             let llvm_val = fv.get_nth_param(i as u32).unwrap();
             self.value_map.insert(param.value, llvm_val);
             self.value_types.insert(param.value, param.ty.clone());
-            // Struct/Tuple params are pointers (see declare_mir_fn). Register
-            // them in self_allocs so FieldGet/FieldSet take the GEP path
-            // (mutating in place, visible to caller). val() will reload the
-            // struct value lazily for non-field uses.
-            // Peel a single Type::Ptr wrapper: trait/by-ptr methods declare
-            // self as Type::Ptr(Struct(_)) at the typer level, but the LLVM
-            // ABI is identical to Type::Struct(_) (always passed as ptr).
-            // Treat both forms uniformly so FieldGet/FieldSet take the
-            // in-place GEP path.
+
             let effective_ty = match &param.ty {
                 Type::Ptr(inner)
                     if matches!(
@@ -572,19 +487,15 @@ impl<'ctx> Compiler<'ctx> {
                 let lt = self.llvm_ty(&effective_ty);
                 self.self_allocs.insert(param.value, ptr);
                 self.self_alloc_types.insert(param.value, lt);
-                // Override value_types so downstream lookups see the inner
-                // struct/tuple/enum type (needed by val()'s reload logic
-                // and by emit_field_get's struct_name detection).
+
                 self.value_types.insert(param.value, effective_ty);
             }
         }
 
-        // 3. Emit each basic block.
         for bb in &func.blocks {
             let llvm_bb = self.block_map[&bb.id];
             self.bld.position_at_end(llvm_bb);
 
-            // 3a. Emit phi nodes.
             for phi in &bb.phis {
                 let llvm_ty = self.llvm_ty(&phi.ty);
                 let phi_val = b!(self.bld.build_phi(llvm_ty, &format!("v{}", phi.dest.0)));
@@ -595,7 +506,6 @@ impl<'ctx> Compiler<'ctx> {
                 });
             }
 
-            // 3b. Emit instructions.
             for inst in &bb.insts {
                 if std::env::var("JINN_DEBUG_MIR_CODEGEN").is_ok() {
                     eprintln!(
@@ -610,33 +520,29 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
 
-            // Record actual exit block (helpers like string_concat may have
-            // repositioned the builder to intermediate LLVM blocks).
             let exit_bb = self
                 .bld
                 .get_insert_block()
                 .expect("ICE: builder has no insert block");
             self.block_exit_map.insert(bb.id, exit_bb);
 
-            // 3c. Emit terminator.
             self.emit_terminator(&bb.terminator, &func.ret_ty)?;
         }
 
-        // 4. Back-patch phi incoming edges.
         for pp in &self.pending_phis {
             let phi_ty = pp.phi.as_basic_value().get_type();
             let incoming: Vec<(BasicValueEnum<'ctx>, LLVMBlock<'ctx>)> = pp
                 .incoming
                 .iter()
                 .filter_map(|(block_id, val_id)| {
-                    // Use exit block (may differ from entry block if helpers
-                    // like string_concat created intermediate LLVM blocks).
+
+
                     let llvm_bb = self
                         .block_exit_map
                         .get(block_id)
                         .or_else(|| self.block_map.get(block_id))?;
                     let llvm_val = self.value_map.get(val_id)?;
-                    // Coerce void sentinel (i8 0) to the phi's actual type.
+
                     let v = if llvm_val.get_type() != phi_ty {
                         let is_void_sentinel = llvm_val.get_type().is_int_type()
                             && llvm_val.get_type().into_int_type().get_bit_width() == 8;
@@ -678,13 +584,10 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        // R15: pop the DI scope pushed at the top of compile_mir_fn.
         self.pop_debug_scope();
 
         Ok(())
     }
-
-    // ── instruction emission ───────────────────────────────────────
 
     fn emit_inst(&mut self, inst: &mir::Instruction) -> Result<BasicValueEnum<'ctx>, String> {
         if let Some(v) = self.emit_core_inst(inst)? {
@@ -702,8 +605,6 @@ impl<'ctx> Compiler<'ctx> {
         Err(format!("unsupported MIR instruction: {:?}", inst.kind))
     }
 
-    // ── terminator emission ────────────────────────────────────────
-
     fn emit_terminator(&mut self, term: &mir::Terminator, ret_ty: &Type) -> Result<(), String> {
         match term {
             mir::Terminator::Goto(target) => {
@@ -712,7 +613,7 @@ impl<'ctx> Compiler<'ctx> {
             }
             mir::Terminator::Branch(cond, then_bb, else_bb) => {
                 let cond_val = self.val(*cond).into_int_value();
-                // Ensure condition is i1 — coerce wider integers with != 0.
+
                 let cond_i1 = if cond_val.get_type().get_bit_width() != 1 {
                     b!(self.bld.build_int_compare(
                         inkwell::IntPredicate::NE,
@@ -735,13 +636,11 @@ impl<'ctx> Compiler<'ctx> {
                     if v.get_type() == expected {
                         b!(self.bld.build_return(Some(&v)));
                     } else if matches!(ret_ty, Type::Tuple(_)) && v.is_array_value() {
-                        // Tuple return: coerce array → struct via alloca bitcast.
                         let alloca = self.entry_alloca(v.get_type(), "tup.coerce");
                         b!(self.bld.build_store(alloca, v));
                         let coerced = b!(self.bld.build_load(expected, alloca, "tup.ret"));
                         b!(self.bld.build_return(Some(&coerced)));
                     } else {
-                        // Type mismatch (e.g. void-valued last expr in non-void fn).
                         let default = self.default_val(ret_ty);
                         b!(self.bld.build_return(Some(&default)));
                     }
@@ -771,11 +670,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    // ── helpers ────────────────────────────────────────────────────
-
-    /// Look up an MIR ValueId in the value map.
-    /// If the value corresponds to a self_allocs entry (struct stored in an alloca
-    /// for method call mutation), reload from the alloca to get the current value.
     fn val(&mut self, id: mir::ValueId) -> BasicValueEnum<'ctx> {
         let v = self.value_map.get(&id).copied().unwrap_or_else(|| {
             eprintln!("MIR codegen: missing value for {:?}", id);
@@ -788,10 +682,7 @@ impl<'ctx> Compiler<'ctx> {
                 id
             );
         });
-        // If this ValueId has a self_allocs entry AND the value in the map is the
-        // alloca pointer itself, reload the struct value from the alloca.
-        // This avoids LLVM domination issues when a reload placed in one branch
-        // is used in another.
+
         if let Some(alloca_ptr) = self.self_allocs.get(&id).copied() {
             if v.is_pointer_value() && v.into_pointer_value() == alloca_ptr {
                 if let Some(orig_ty) = self.self_alloc_types.get(&id).copied() {

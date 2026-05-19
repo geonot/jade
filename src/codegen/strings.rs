@@ -1,6 +1,3 @@
-//! String value helpers on `Compiler<'ctx>`: SSO layout, build, length/data accessors,
-//! and snprintf-to-string. Consumed by both `mir_codegen` and sibling helper files.
-
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 

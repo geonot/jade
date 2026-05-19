@@ -1,5 +1,3 @@
-//! Codegen for top-level declarations: functions, globals, type metadata.
-
 use inkwell::attributes::AttributeLoc;
 use inkwell::module::Linkage;
 use inkwell::types::BasicMetadataTypeEnum;
@@ -103,12 +101,9 @@ impl<'ctx> Compiler<'ctx> {
             let payload_idx = variants.iter().position(|(_, fs, _)| fs.len() == 1);
             if let (Some(_ei), Some(pi)) = (empty_idx, payload_idx) {
                 let field_ty = &variants[pi].1[0];
-                let is_ptr_like = matches!(
-                    field_ty,
-                    Type::String
-                        | Type::Fn(_, _)
-                ) || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))
-                    && !Self::is_recursive_field(field_ty, name);
+                let is_ptr_like = matches!(field_ty, Type::String | Type::Fn(_, _))
+                    || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))
+                        && !Self::is_recursive_field(field_ty, name);
                 if is_ptr_like {
                     let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
                     let st = self.ctx.opaque_struct_type(name);

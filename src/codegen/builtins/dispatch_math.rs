@@ -1,5 +1,3 @@
-//! Builtin dispatch plus constant-time equality, matrix, and base einsum helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -146,13 +144,11 @@ impl<'ctx> Compiler<'ctx> {
             )),
             hir::BuiltinFn::ConstantTimeEq => self.compile_constant_time_eq(args),
             hir::BuiltinFn::VecWithAlloc | hir::BuiltinFn::MapWithAlloc => {
-                // Allocator-aware collection: allocate {ptr, len, cap, alloc_ptr}
-                // For now, create the collection normally and store the allocator ref
                 let _alloc = self.compile_expr(&args[0])?;
                 let ptr_t = self.ctx.ptr_type(AddressSpace::default());
                 let i64t = self.ctx.i64_type();
                 let malloc = self.ensure_malloc();
-                let size = i64t.const_int(32, false); // 32 bytes: {ptr, len, cap, alloc}
+                let size = i64t.const_int(32, false);
                 let ptr = b!(self.bld.build_call(malloc, &[size.into()], "alloc_col"))
                     .try_as_basic_value()
                     .basic()
@@ -221,14 +217,10 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Constant-time equality comparison using XOR accumulation
-        // For strings: XOR each byte, accumulate result, compare to zero
-        // For integers: single XOR + compare to zero
         let a = self.compile_expr(&args[0])?;
         let b = self.compile_expr(&args[1])?;
 
         if args[0].ty == Type::String {
-            // Call runtime stub for string constant-time comparison
             let ptr_t = self.ctx.ptr_type(AddressSpace::default());
             let bool_t = self.ctx.bool_type();
             let fn_type = bool_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
@@ -242,7 +234,6 @@ impl<'ctx> Compiler<'ctx> {
             let result = b!(self.bld.build_call(func, &[a.into(), b.into()], "ct.eq"));
             Ok(self.call_result(result))
         } else {
-            // Integer constant-time: XOR then compare to zero
             let i64t = self.ctx.i64_type();
             let av = a.into_int_value();
             let bv = b.into_int_value();
@@ -265,13 +256,12 @@ impl<'ctx> Compiler<'ctx> {
         let _b_ptr = self.compile_expr(&args[1])?;
         Err("matmul: NDArray type removed".into())
     }
-    /// Einsum codegen: parse notation, dispatch to known patterns or generic loop nest
+
     pub(crate) fn compile_einsum(
         &mut self,
         notation: &str,
         args: &[hir::Expr],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Parse notation: "ij,jk->ik" → inputs=["ij","jk"], output="ik"
         let parts: Vec<&str> = notation.split("->").collect();
         let (inp_str, out_str) = match parts.as_slice() {
             [inp, out] => (*inp, *out),
@@ -279,21 +269,20 @@ impl<'ctx> Compiler<'ctx> {
         };
         let inputs: Vec<&str> = inp_str.split(',').collect();
 
-        // Matmul: ij,jk->ik
         if inputs.len() == 2 && args.len() == 2 {
             if inputs[0] == "ij" && inputs[1] == "jk" && out_str == "ik" {
                 return self.compile_matmul(args);
             }
-            // Dot product: i,i->
+
             if inputs[0] == "i" && inputs[1] == "i" && out_str.is_empty() {
                 return self.compile_einsum_dot(args);
             }
         }
-        // Trace: ii->
+
         if inputs.len() == 1 && args.len() == 1 && inputs[0] == "ii" && out_str.is_empty() {
             return self.compile_einsum_trace(args);
         }
-        // Transpose: ij->ji
+
         if inputs.len() == 1 && args.len() == 1 && inputs[0] == "ij" && out_str == "ji" {
             return self.compile_einsum_transpose(args);
         }

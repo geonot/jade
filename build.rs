@@ -3,7 +3,6 @@ use std::env;
 fn main() {
     let out = env::var("OUT_DIR").unwrap();
 
-    // Detect target architecture
     let target = env::var("TARGET").unwrap_or_default();
     let asm_file = if target.contains("aarch64") {
         "runtime/context_aarch64.S"
@@ -54,7 +53,6 @@ fn main() {
     println!("cargo:rustc-link-lib=pthread");
     println!("cargo:rustc-env=JINN_RT_DIR={out}");
 
-    // ── Optional: compile TLS + crypto modules if OpenSSL is available ──
     let has_openssl = std::process::Command::new("pkg-config")
         .args(["--exists", "openssl"])
         .status()
@@ -94,7 +92,6 @@ fn main() {
         println!("cargo:warning=OpenSSL not found; std.tls and std.crypto will not be available");
     }
 
-    // ── Optional: compile SQLite module if sqlite3 is available ──
     let has_sqlite = std::process::Command::new("pkg-config")
         .args(["--exists", "sqlite3"])
         .status()

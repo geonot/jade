@@ -1,5 +1,3 @@
-//! Distinct, aggregate, and version-count store MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -22,9 +20,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(count.into())
     }
 
-    /// Emit distinct(field) — returns count of distinct values for a field.
-    /// Uses a simple hash-set approach: hash each field value, track in a
-    /// dynamically allocated bitset/array, and count unique hashes.
     pub(in crate::codegen) fn emit_store_distinct(
         &mut self,
         rest: &str,
@@ -74,9 +69,6 @@ impl<'ctx> Compiler<'ctx> {
         let total_count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
 
-        // Allocate a hash table: open-addressing with linear probing.
-        // Capacity = total_count * 4 + 16 (low load factor for O(1) amortized probe).
-        // Sentinel: 0 = empty slot. We store (hash | 1) to avoid storing 0.
         let calloc_fn = self.ensure_calloc();
         let cap = b!(self.bld.build_int_add(
             b!(self
@@ -107,7 +99,6 @@ impl<'ctx> Compiler<'ctx> {
 
         b!(self.bld.build_unconditional_branch(loop_bb));
 
-        // Loop condition
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "dist.i")).into_int_value();
         let cmp = b!(self.bld.build_int_compare(
@@ -118,7 +109,6 @@ impl<'ctx> Compiler<'ctx> {
         ));
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
-        // Body: skip deleted, compute hash
         self.bld.position_at_end(body_bb);
         let offset = b!(self
             .bld
@@ -143,22 +133,17 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unconditional_branch(check_bb));
         }
 
-        // Check: hash the field value, see if we've seen it
         self.bld.position_at_end(check_bb);
         let field_gep = b!(self
             .bld
             .build_struct_gep(st, rec_ptr, field_idx as u32, "dist.fld"));
 
-        // Load field and compute hash
         let hash = self.hash_store_field_from_gep(field_gep, &field_ty)?;
 
-        // Open-addressing hash table probe: O(1) amortized dedup check.
-        // marked_h = hash | 1  (ensure non-zero; 0 is the empty sentinel)
         let marked_h = b!(self
             .bld
             .build_or(hash, i64t.const_int(1, false), "dist.marked"));
 
-        // initial slot = marked_h % cap  (unsigned remainder)
         let slot_ptr = self.entry_alloca(i64t.into(), "dist.slot");
         let init_slot = b!(self.bld.build_int_unsigned_rem(marked_h, cap, "dist.islot"));
         b!(self.bld.build_store(slot_ptr, init_slot));
@@ -168,13 +153,11 @@ impl<'ctx> Compiler<'ctx> {
 
         b!(self.bld.build_unconditional_branch(probe_bb));
 
-        // Probe loop: check table[slot]
         self.bld.position_at_end(probe_bb);
         let slot = b!(self.bld.build_load(i64t, slot_ptr, "dist.s")).into_int_value();
         let entry_ptr = unsafe { b!(self.bld.build_gep(i64t, hash_tbl, &[slot], "dist.ep")) };
         let entry_val = b!(self.bld.build_load(i64t, entry_ptr, "dist.ev")).into_int_value();
 
-        // If slot is empty (0), this hash is new → add it
         let is_empty = b!(self.bld.build_int_compare(
             inkwell::IntPredicate::EQ,
             entry_val,
@@ -186,7 +169,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_empty, add_bb, match_bb));
 
-        // Check if existing entry matches our hash → duplicate, skip
         self.bld.position_at_end(match_bb);
         let is_dup = b!(self.bld.build_int_compare(
             inkwell::IntPredicate::EQ,
@@ -199,7 +181,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_dup, next_bb, advance_bb));
 
-        // Collision: advance to next slot = (slot + 1) % cap
         self.bld.position_at_end(advance_bb);
         let next_slot = b!(self
             .bld
@@ -208,9 +189,8 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(slot_ptr, wrapped));
         b!(self.bld.build_unconditional_branch(probe_bb));
 
-        // Add new unique hash: store marked_h in table[slot], increment count
         self.bld.position_at_end(add_bb);
-        // Reload slot (it's in slot_ptr, still valid from probe_bb → add_bb path)
+
         let add_slot = b!(self.bld.build_load(i64t, slot_ptr, "dist.as")).into_int_value();
         let add_entry = unsafe { b!(self.bld.build_gep(i64t, hash_tbl, &[add_slot], "dist.ae")) };
         b!(self.bld.build_store(add_entry, marked_h));
@@ -221,7 +201,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(uniq_ptr, new_uc));
         b!(self.bld.build_unconditional_branch(next_bb));
 
-        // Next
         self.bld.position_at_end(next_bb);
         let next_idx = b!(self
             .bld
@@ -229,7 +208,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(idx_ptr, next_idx));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
-        // Done
         self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
@@ -239,8 +217,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result.into())
     }
 
-    /// Emit aggregation: sum, avg, min, max over a numeric field.
-    /// `rest` is "{store_name}__{field_name}", `op` is "sum"|"avg"|"min"|"max".
     pub(in crate::codegen) fn emit_store_agg(
         &mut self,
         rest: &str,
@@ -259,7 +235,6 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("unknown store '{store_name}'"))?
             .clone();
 
-        // @column fast path: use column files for vectorized aggregation on i64
         let is_column = sd
             .decorators
             .iter()
@@ -304,7 +279,6 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: struct type not declared");
         let rec_size = self.store_record_size(&sd);
 
-        // Determine field index and whether field is float
         let (field_idx, is_float) = sd
             .fields
             .iter()
@@ -326,7 +300,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
 
-        // Accumulators — use f64 for float fields, i64 for integer fields
         let acc_ptr = if is_float {
             self.entry_alloca(f64t.into(), "agg.acc")
         } else {
@@ -336,7 +309,7 @@ impl<'ctx> Compiler<'ctx> {
         let idx_ptr = self.entry_alloca(i64t.into(), "agg.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
         b!(self.bld.build_store(cnt_ptr, i64t.const_int(0, false)));
-        // Initialize acc based on op and type
+
         if is_float {
             let init_acc = match op {
                 "sum" | "avg" => f64t.const_float(0.0),
@@ -363,7 +336,6 @@ impl<'ctx> Compiler<'ctx> {
 
         b!(self.bld.build_unconditional_branch(loop_bb));
 
-        // Loop condition
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "agg.i")).into_int_value();
         let cmp =
@@ -372,7 +344,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_int_compare(inkwell::IntPredicate::ULT, idx, total_count, "agg.cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
-        // Body: check deleted, load field
         self.bld.position_at_end(body_bb);
         let offset = b!(self
             .bld
@@ -383,7 +354,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), buf, &[offset], "agg.rec"))
         };
 
-        // Skip deleted records
         if let Some(del_idx) = deleted_idx {
             let del_gep = b!(self
                 .bld
@@ -402,7 +372,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unconditional_branch(accum_bb));
         }
 
-        // Accumulate
         self.bld.position_at_end(accum_bb);
         let field_gep = b!(self
             .bld
@@ -484,7 +453,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_store(acc_ptr, new_acc));
         }
 
-        // Increment count for avg
         if op == "avg" {
             let cur_cnt = b!(self.bld.build_load(i64t, cnt_ptr, "agg.ccnt")).into_int_value();
             let new_cnt = b!(self
@@ -495,7 +463,6 @@ impl<'ctx> Compiler<'ctx> {
 
         b!(self.bld.build_unconditional_branch(next_bb));
 
-        // Next iteration
         self.bld.position_at_end(next_bb);
         let next_idx = b!(self
             .bld
@@ -503,7 +470,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(idx_ptr, next_idx));
         b!(self.bld.build_unconditional_branch(loop_bb));
 
-        // Done
         self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
@@ -532,7 +498,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Emit version_count(sid) for a @versioned store.
     pub(in crate::codegen) fn emit_store_version_count(
         &mut self,
         store_name: &str,
@@ -558,17 +523,14 @@ impl<'ctx> Compiler<'ctx> {
                 "ver.cnt"
             )))
             .into_int_value();
-        // Add 1 for the current version in the main store
-        let _ = sd; // used for setup_store_access
+
+        let _ = sd;
         let total = b!(self
             .bld
             .build_int_add(count, i64t.const_int(1, false), "ver.total"));
         Ok(total.into())
     }
 
-    /// Emit at_version(sid, version) for a @versioned store.
-    /// Returns 1 if found, 0 if not. Side effect: prints/logs the record.
-    /// For now: returns 1/0 (found/not-found) as i64.
     pub(in crate::codegen) fn emit_store_at_version(
         &mut self,
         store_name: &str,
@@ -585,7 +547,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let ver_fp = self.load_store_ver(store_name)?;
 
-        // Allocate buffer for the record
         let malloc_fn = self.ensure_malloc();
         let out_buf = self
             .call_result(b!(self.bld.build_call(

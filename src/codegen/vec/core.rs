@@ -1,5 +1,3 @@
-//! Vector allocation, element access, mutation, bounds, and runtime allocation helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -104,7 +102,6 @@ impl<'ctx> Compiler<'ctx> {
             _ => Type::I64,
         };
 
-        // Fixed-size array: inline linear scan for contains, len returns constant
         if let Type::Array(_, arr_len) = &obj.ty {
             let arr_len = *arr_len;
             match method {
@@ -184,7 +181,7 @@ impl<'ctx> Compiler<'ctx> {
             "reverse" => self.vec_reverse(header_ptr, &elem_ty),
             "sort" => self.vec_sort(header_ptr, &elem_ty),
             "join" => self.vec_join(header_ptr, args),
-            "collect" => Ok(obj_val), // collect is identity on Vec
+            "collect" => Ok(obj_val),
             _ => Err(format!("no method '{method}' on Vec")),
         }
     }
@@ -333,7 +330,6 @@ impl<'ctx> Compiler<'ctx> {
             .build_struct_gep(header_ty, header_ptr, 1, "vpop.lenp"));
         let len = b!(self.bld.build_load(i64t, len_gep, "vpop.len")).into_int_value();
 
-        // Bounds check: trap if len == 0
         let fv = self.current_fn();
         let is_nonzero = b!(self.bld.build_int_compare(
             IntPredicate::SGT,
@@ -392,10 +388,6 @@ impl<'ctx> Compiler<'ctx> {
         self.vec_get_idx_borrow(header_ptr, elem_ty, idx, false)
     }
 
-    /// As `vec_get_idx`, but when `borrow` is true returns the raw aliased
-    /// element without deep-copying. Only sound when the caller binds the
-    /// result with `Ownership::Borrowed` (so no scope-exit drop is emitted)
-    /// and the binding does not outlive the underlying Vec storage.
     pub(crate) fn vec_get_idx_borrow(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -426,19 +418,9 @@ impl<'ctx> Compiler<'ctx> {
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vg.egep")) };
         let raw = b!(self.bld.build_load(lty, elem_gep, "vg.v"));
 
-        // For heap-managed element types we MUST return an independently-owned
-        // copy. The raw load returns a value that aliases storage owned by the
-        // Vec; if the caller later drops it (or the Vec drops), we get a
-        // double-free. clone_value emits the right deep-copy / RC-bump for
-        // each supported type. Trivially-droppable types short-circuit to
-        // identity inside clone_value (no overhead).
         if !borrow && Self::is_value_clonable(elem_ty) {
             self.clone_value(raw, elem_ty)
         } else {
-            // Type system should have prevented this binding from being
-            // marked Owned; the typer leaves it Borrowed (no scope drop)
-            // and rejects consuming uses. Returning the raw alias is safe
-            // as long as the binding is treated as a borrow.
             Ok(raw)
         }
     }
@@ -615,7 +597,6 @@ impl<'ctx> Compiler<'ctx> {
         self.module.add_function("llvm.trap", ft, None)
     }
 
-    /// Helper: load vec data_ptr and len from header
     pub(in crate::codegen) fn vec_data_and_len(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -640,7 +621,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok((data_ptr, len))
     }
 
-    /// Helper: allocate a new empty vec header, returns header_ptr
     pub(in crate::codegen) fn vec_alloc_empty(
         &mut self,
     ) -> Result<inkwell::values::PointerValue<'ctx>, String> {

@@ -1,5 +1,3 @@
-//! Core HIR expression dispatch, scalar operations, aggregates, and variants.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -188,7 +186,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_map_method(obj, &method.as_str(), args)
             }
             hir::ExprKind::CoroutineCreate(name, body) => {
-                self.compile_coroutine_create(&name.as_str(), body)
+                self.compile_coroutine_create(&name.as_str(), body, &[], &[])
             }
             hir::ExprKind::CoroutineNext(coro) => self.compile_coroutine_next(coro, &expr.ty),
             hir::ExprKind::Yield(_inner) => {
@@ -216,7 +214,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_unconditional_branch(unreachable_bb));
                 self.bld.position_at_end(unreachable_bb);
                 b!(self.bld.build_unreachable());
-                // Return a dummy value — this code is never reached
+
                 Ok(self.ctx.i64_type().const_zero().into())
             }
             hir::ExprKind::StrictCast(inner, target_ty) => {
@@ -240,7 +238,6 @@ impl<'ctx> Compiler<'ctx> {
             hir::ExprKind::Grad(inner) => self.compile_grad(inner),
             hir::ExprKind::Einsum(notation, args) => self.compile_einsum(&notation.as_str(), args),
             hir::ExprKind::Builder(name, fields) => {
-                // Desugar builder to struct init
                 let inits: Vec<hir::FieldInit> = fields
                     .iter()
                     .map(|(fname, expr)| hir::FieldInit {
@@ -251,12 +248,27 @@ impl<'ctx> Compiler<'ctx> {
                 self.compile_struct(&name.as_str(), &inits)
             }
             hir::ExprKind::GeneratorCreate(_, name, body, captures) => {
-                self.compile_coroutine_create(&name.as_str(), body, captures)
+                // The HIR-direct path constructs the generator with the
+                // captures already resolved to runtime values by walking
+                // their Var refs in the current frame. This path is rarely
+                // taken (the MIR path handles most generator construction);
+                // a thorough capture lowering happens in `try_handle_magic_call`.
+                let mut cap_vals = Vec::with_capacity(captures.len());
+                for (cap_name, cap_ty) in captures {
+                    let (ptr_v, _) = self
+                        .find_var(&cap_name.as_str())
+                        .cloned()
+                        .ok_or_else(|| format!("undefined capture: {}", cap_name.as_str()))?;
+                    let llvm_ty = self.llvm_ty(cap_ty);
+                    let v = b!(self.bld.build_load(llvm_ty, ptr_v, &cap_name.as_str()));
+                    cap_vals.push(v);
+                }
+                self.compile_coroutine_create(&name.as_str(), body, captures, &cap_vals)
             }
             hir::ExprKind::GeneratorNext(gen_expr) => {
                 self.compile_coroutine_next(gen_expr, &expr.ty)
             }
-            // KV / specialized store ops are lowered through MIR magic calls; never reached here.
+
             hir::ExprKind::KvGet(..)
             | hir::ExprKind::KvHas(..)
             | hir::ExprKind::KvCount(..)
@@ -534,10 +546,7 @@ impl<'ctx> Compiler<'ctx> {
             let val = inits
                 .iter()
                 .find(|fi| fi.name.map_or(false, |n| n == fname.as_str()))
-                .or_else(|| {
-                    // Only use positional fallback for unnamed (positional) inits
-                    inits.get(i).filter(|fi| fi.name.is_none())
-                })
+                .or_else(|| inits.get(i).filter(|fi| fi.name.is_none()))
                 .map(|fi| self.compile_expr(&fi.value))
                 .or_else(|| {
                     defaults

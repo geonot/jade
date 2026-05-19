@@ -1,5 +1,3 @@
-//! CFG passes: GVN, branch threading, LICM, block merging, dead-block removal.
-
 use super::subst::{subst_inst, subst_term};
 use super::uses::{collect_inst_operands, is_pure};
 
@@ -14,7 +12,6 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
     for bb in &func.blocks {
         let mut expr_map: HashMap<Symbol, ValueId> = HashMap::new();
         for inst in &bb.insts {
-            // Invalidate cached FieldGet/Index entries on mutation.
             match &inst.kind {
                 InstKind::FieldSet(_, _, _)
                 | InstKind::FieldStore(_, _, _)
@@ -25,7 +22,6 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
                     expr_map.retain(|k, _| !k.starts_with("ix:"));
                 }
                 InstKind::Call(..) | InstKind::MethodCall(..) => {
-                    // Calls may mutate anything; invalidate all field/index entries.
                     expr_map.retain(|k, _| !k.starts_with("fg:") && !k.starts_with("ix:"));
                 }
                 _ => {}
@@ -64,7 +60,6 @@ pub fn global_value_numbering(func: &mut Function) -> bool {
     true
 }
 
-/// Canonical string key for an expression. Commutative ops have normalized operand order.
 fn gvn_key(kind: &InstKind) -> Option<String> {
     match kind {
         InstKind::BinOp(op, l, r) => {
@@ -107,15 +102,9 @@ fn is_commutative(op: BinOp) -> bool {
     )
 }
 
-// ━━━━━━━━━━━━━━━━ Branch Threading ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// If a block ends with a branch whose condition is determined by a phi,
-/// and a predecessor supplies a constant for that phi, thread the edge
-/// directly to the known successor.
 pub fn branch_threading(func: &mut Function) -> bool {
     let mut changed = false;
 
-    // Collect phi → condition mappings for branches
     let mut phi_vals: HashMap<(BlockId, ValueId), Vec<(BlockId, ValueId)>> = HashMap::new();
     for bb in &func.blocks {
         for phi in &bb.phis {
@@ -123,7 +112,6 @@ pub fn branch_threading(func: &mut Function) -> bool {
         }
     }
 
-    // Find constants across the function
     let mut consts: HashMap<ValueId, bool> = HashMap::new();
     for bb in &func.blocks {
         for inst in &bb.insts {
@@ -133,7 +121,6 @@ pub fn branch_threading(func: &mut Function) -> bool {
         }
     }
 
-    // For each branch on a phi value, check if any predecessor provides a constant
     let blocks_snapshot: Vec<(BlockId, Terminator)> = func
         .blocks
         .iter()
@@ -147,12 +134,9 @@ pub fn branch_threading(func: &mut Function) -> bool {
                     if let Some(&b) = consts.get(val) {
                         let target = if b { *then_bb } else { *else_bb };
                         if target == *bb_id {
-                            // Redirecting to self would be a no-op or worse.
                             continue;
                         }
-                        // Capture, for every phi at bb_id, the value that
-                        // pred_id was providing — so we can forward those
-                        // bindings to `target`'s phis below.
+
                         let forwarded: Vec<(ValueId, ValueId)> = func
                             .block(*bb_id)
                             .phis
@@ -165,39 +149,23 @@ pub fn branch_threading(func: &mut Function) -> bool {
                             })
                             .collect();
 
-                        // Redirect predecessor's terminator from bb_id to target
                         func.block_mut(*pred_id)
                             .terminator
                             .replace_successor(*bb_id, target);
 
-                        // Phi maintenance:
-                        //  (a) Remove pred_id's incoming entry from each phi at
-                        //      bb_id — pred_id no longer flows in here.
-                        //  (b) For each phi at `target`, add an incoming entry
-                        //      for pred_id. The value is whatever bb_id's phi
-                        //      with the same dest was carrying (when target's
-                        //      phi references a phi defined at bb_id), otherwise
-                        //      reuse the value bb_id was already supplying for
-                        //      its incoming edge to target.
                         {
                             let bb = func.block_mut(*bb_id);
                             let pred_still_referenced = match &bb.terminator {
                                 Terminator::Branch(_, t, e) => *t == *bb_id || *e == *bb_id,
                                 _ => false,
                             };
-                            // pred_still_referenced is unused here; left for clarity.
+
                             let _ = pred_still_referenced;
                             for phi in &mut bb.phis {
                                 phi.incoming.retain(|(p, _)| p != pred_id);
                             }
                         }
 
-                        // Determine what each phi at `target` should receive
-                        // from pred_id. The natural choice is the value that
-                        // `bb_id` itself contributes to `target` for that phi,
-                        // unless that value is one of bb_id's own phis — in
-                        // which case forward the value pred_id was supplying
-                        // to that phi.
                         let target_phi_updates: Vec<(ValueId, ValueId)> = func
                             .block(target)
                             .phis
@@ -221,7 +189,6 @@ pub fn branch_threading(func: &mut Function) -> bool {
 
                         let target_block = func.block_mut(target);
                         for phi in &mut target_block.phis {
-                            // Avoid duplicate entries.
                             if phi.incoming.iter().any(|(p, _)| p == pred_id) {
                                 continue;
                             }
@@ -241,15 +208,9 @@ pub fn branch_threading(func: &mut Function) -> bool {
     changed
 }
 
-// ━━━━━━━━━━━━━━ Loop-Invariant Code Motion ━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Hoist loop-invariant pure instructions to the loop preheader.
-/// A loop is detected by finding back-edges (edges to a block with a
-/// lower/equal index in the block list).
 pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
     let mut changed = false;
 
-    // Build block index map.
     let block_ids: Vec<BlockId> = func.blocks.iter().map(|b| b.id).collect();
     let block_index: HashMap<BlockId, usize> = block_ids
         .iter()
@@ -257,32 +218,21 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
         .map(|(i, id)| (*id, i))
         .collect();
 
-    // Find back-edges: (from, to) where to <= from in block order.
-    // NOTE: This assumes blocks are roughly in topological order. After
-    // DCE/merging passes, verify the back-edge really forms a natural loop
-    // by checking the header dominates all body blocks (approximated by
-    // ensuring the header has a successor inside the body range).
-    let mut loops: Vec<(BlockId, HashSet<usize>)> = Vec::new(); // (header, body block indices)
+    let mut loops: Vec<(BlockId, HashSet<usize>)> = Vec::new();
 
     for (i, bb) in func.blocks.iter().enumerate() {
         for succ in bb.terminator.successors() {
             if let Some(&succ_idx) = block_index.get(&succ) {
                 if succ_idx <= i {
-                    // Back-edge from block i to block succ_idx.
-                    // Loop body = blocks [succ_idx..=i].
                     let body: HashSet<usize> = (succ_idx..=i).collect();
-                    // Verify this is a real loop: the header must have at least
-                    // one successor inside the loop body. A merge block (e.g.
-                    // match.merge with return) has no body successors and is
-                    // not a loop header.
+
                     let header_has_body_succ = func
                         .block(succ)
                         .terminator
                         .successors()
                         .iter()
                         .any(|s| block_index.get(s).map_or(false, |&si| body.contains(&si)));
-                    // Additional check: verify all body blocks are reachable from
-                    // the header within the body (validates natural loop structure).
+
                     let header_has_exit = func
                         .block(succ)
                         .terminator
@@ -301,11 +251,10 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
         return false;
     }
 
-    // Collect all definitions (which block index defines each value).
     let mut def_block: HashMap<ValueId, usize> = HashMap::new();
     for (i, bb) in func.blocks.iter().enumerate() {
         for p in &func.params {
-            def_block.entry(p.value).or_insert(0); // params are "defined" in entry
+            def_block.entry(p.value).or_insert(0);
         }
         for phi in &bb.phis {
             def_block.insert(phi.dest, i);
@@ -323,7 +272,6 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
             None => continue,
         };
 
-        // Find or identify the single predecessor outside the loop as preheader.
         let pred_map = func.predecessors();
         let header_preds = pred_map.get(header).cloned().unwrap_or_default();
         let preheader_preds: Vec<BlockId> = header_preds
@@ -335,15 +283,13 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
             .collect();
 
         if preheader_preds.len() != 1 {
-            continue; // Multiple entries or no clear preheader — skip.
+            continue;
         }
         let preheader_id = preheader_preds[0];
 
-        // Collect instructions to hoist: pure, all operands defined outside the loop.
         let mut to_hoist: Vec<Instruction> = Vec::new();
         let mut hoisted_defs: HashSet<ValueId> = HashSet::new();
 
-        // Iterate blocks in the loop body.
         for &bi in body {
             let bb = &func.blocks[bi];
             for inst in &bb.insts {
@@ -354,7 +300,6 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
                     continue;
                 };
 
-                // Check all operands are defined outside the loop (or already hoisted).
                 let operands = collect_inst_operands(&inst.kind);
                 let all_outside = operands.iter().all(|op| {
                     hoisted_defs.contains(op) || {
@@ -374,7 +319,6 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
             continue;
         }
 
-        // Remove hoisted instructions from their original blocks.
         let hoisted_ids: HashSet<ValueId> = to_hoist.iter().filter_map(|i| i.dest).collect();
         for &bi in body {
             func.blocks[bi]
@@ -382,7 +326,6 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
                 .retain(|i| i.dest.map_or(true, |d| !hoisted_ids.contains(&d)));
         }
 
-        // Insert hoisted instructions at the end of preheader (before terminator).
         let ph_block = func.block_mut(preheader_id);
         for inst in to_hoist {
             ph_block.insts.push(inst);
@@ -393,7 +336,6 @@ pub fn loop_invariant_code_motion(func: &mut Function) -> bool {
     changed
 }
 
-/// Collect all operand ValueIds from an instruction kind.
 pub fn merge_linear_blocks(func: &mut Function) -> bool {
     let mut changed = false;
 
@@ -413,22 +355,16 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
             }
             let pred_id = pred_list[0];
 
-            // Check pred ends with Goto to this block
             if !matches!(func.block(pred_id).terminator, Terminator::Goto(t) if t == bb_id) {
                 continue;
             }
 
-            // Merge: append B's instructions and terminator to A, remove B.
-            // Convert any phi nodes in B to Copy instructions (safe because
-            // B has exactly one predecessor, so each phi has one incoming value).
             let b_phis = func.block(bb_id).phis.clone();
             let b_insts = func.block(bb_id).insts.clone();
             let b_term = func.block(bb_id).terminator.clone();
 
             let pred_block = func.block_mut(pred_id);
             for phi in b_phis {
-                // Pick the incoming value from the actual predecessor, not just .first(),
-                // because branch_threading may leave stale phi entries from dead predecessors.
                 let val = phi
                     .incoming
                     .iter()
@@ -448,8 +384,6 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
             pred_block.insts.extend(b_insts);
             pred_block.terminator = b_term;
 
-            // Update phi incoming edges in other blocks that reference the
-            // removed block — remap to the predecessor that absorbed it.
             for other_bb in &mut func.blocks {
                 if other_bb.id == bb_id {
                     continue;
@@ -466,7 +400,7 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
             func.blocks.retain(|b| b.id != bb_id);
             merged_any = true;
             changed = true;
-            break; // restart since indices changed
+            break;
         }
         if !merged_any {
             break;
@@ -475,9 +409,6 @@ pub fn merge_linear_blocks(func: &mut Function) -> bool {
     changed
 }
 
-// ━━━━━━━━━━━━━━ Unreachable Block Removal ━━━━━━━━━━━━━━━━━━━━━━━━
-
-/// Remove blocks not reachable from the entry via BFS.
 pub fn remove_unreachable_blocks(func: &mut Function) -> bool {
     let mut reachable = HashSet::new();
     let mut queue = VecDeque::new();
@@ -493,7 +424,7 @@ pub fn remove_unreachable_blocks(func: &mut Function) -> bool {
     let before = func.blocks.len();
     func.blocks.retain(|b| reachable.contains(&b.id));
     let changed = func.blocks.len() != before;
-    // Clean up phi incoming edges that reference removed blocks.
+
     if changed {
         for bb in &mut func.blocks {
             for phi in &mut bb.phis {

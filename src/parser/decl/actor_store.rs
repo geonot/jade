@@ -64,7 +64,6 @@ impl Parser {
                 loop_sleep_ms = Some(self.parse_expr()?);
             }
         } else {
-            // Allow `*name returns T` with no params (no parens, no params before `returns`).
             while !self.check(Token::Newline)
                 && !self.check(Token::Is)
                 && !self.check(Token::Returns)
@@ -92,7 +91,6 @@ impl Parser {
         self.expect(Token::Store)?;
         let name = self.ident()?;
 
-        // Parse store-level decorators: @simple, @mem, @transient, @versioned, @graph, @kv, @vector(N), @timeseries(field)
         let mut decorators = Vec::new();
         while self.check(Token::At) {
             self.advance();
@@ -188,7 +186,6 @@ impl Parser {
     ) -> Result<crate::ast::StoreField, ParseError> {
         let sp = self.span();
 
-        // Check for relationship prefix: &
         let is_relation = if self.check(Token::Ampersand) {
             self.advance();
             true
@@ -199,7 +196,7 @@ impl Parser {
         let name = self.ident()?;
         let (ty, is_has_many) = if self.check(Token::As) {
             self.advance();
-            // Check for [Type] (has-many relation)
+
             if self.check(Token::LBracket) {
                 self.advance();
                 let inner = self.parse_type()?;
@@ -212,8 +209,6 @@ impl Parser {
             (None, false)
         };
 
-        // Parse field-level decorators: @index, @unique, @sorted, @transient, @increment, @required, @versioned, @default(val)
-        // Also relation decorators: @cascade, @lazy
         let mut field_decorators = Vec::new();
         while self.check(Token::At) {
             self.advance();
@@ -242,7 +237,7 @@ impl Parser {
                 field_decorators.push(crate::ast::FieldDecorator::Search);
             } else if attr == "default" {
                 self.expect(Token::LParen)?;
-                // Read the default value as a string token
+
                 let val = match self.peek() {
                     Token::Str(s) => {
                         let v = s.clone();
@@ -294,7 +289,6 @@ impl Parser {
         })
     }
 
-    /// Parse `migration 'name' version N` block with indented up/down containing alter ops.
     pub(in crate::parser) fn parse_migration_def(
         &mut self,
     ) -> Result<crate::ast::MigrationDef, ParseError> {
@@ -302,7 +296,6 @@ impl Parser {
         let sp = self.span();
         self.expect(Token::Migration)?;
 
-        // migration 'name' version N
         let name = match self.peek() {
             Token::Str(s) => {
                 let n = Symbol::intern(s);
@@ -312,7 +305,6 @@ impl Parser {
             _ => return Err(self.error("expected migration name string")),
         };
 
-        // expect 'version' identifier
         match self.peek() {
             Token::Ident(s) if s == "version" => {
                 self.advance();
@@ -367,7 +359,6 @@ impl Parser {
         })
     }
 
-    /// Parse `view Name from source_store\n    where ...\n    ...`
     pub(in crate::parser) fn parse_view_def(&mut self) -> Result<crate::ast::ViewDef, ParseError> {
         let sp = self.span();
         self.expect(Token::View)?;
@@ -390,10 +381,9 @@ impl Parser {
         })
     }
 
-    /// Parse `alter <store_name>` with indented add/drop/rename actions.
     pub(in crate::parser) fn parse_alter_op(&mut self) -> Result<crate::ast::AlterOp, ParseError> {
         use crate::ast::{AlterAction, AlterOp};
-        // expect 'alter' identifier
+
         match self.peek() {
             Token::Ident(s) if s == "alter" => {
                 self.advance();
@@ -411,7 +401,7 @@ impl Parser {
                     let field_name = p.ident()?;
                     p.expect(Token::As)?;
                     let ty = p.parse_type()?;
-                    // optional: default <value>
+
                     let default = if p.check(Token::Default) {
                         p.advance();
                         Some(p.parse_expr()?)

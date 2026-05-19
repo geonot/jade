@@ -1,5 +1,3 @@
-//! Codegen dispatch for `hir::BuiltinFn` variants. Maps each builtin to LLVM IR or runtime call.
-
 use inkwell::module::Linkage;
 use inkwell::values::{BasicValue, BasicValueEnum};
 use inkwell::{AddressSpace, IntPredicate};

@@ -1,5 +1,3 @@
-//! Semantic analysis adapters: hover, signature help, diagnostics.
-
 use std::collections::HashMap;
 
 use crate::ast::{self, Span};
@@ -290,8 +288,6 @@ pub fn completions_for_context() -> Vec<(String, &'static str)> {
     ]
 }
 
-// ── Reference finding ──────────────────────────────────────────
-
 pub struct IdentRef {
     pub line: u32,
     pub col: u32,
@@ -318,8 +314,6 @@ pub fn find_references(src: &str, name: &str) -> Vec<IdentRef> {
     refs
 }
 
-// ── Semantic tokens ────────────────────────────────────────────
-
 pub struct SemanticToken {
     pub delta_line: u32,
     pub delta_start: u32,
@@ -328,7 +322,6 @@ pub struct SemanticToken {
     pub token_modifiers: u32,
 }
 
-// Token type indices matching the legend in protocol.rs
 pub const ST_KEYWORD: u32 = 0;
 pub const ST_FUNCTION: u32 = 1;
 pub const ST_VARIABLE: u32 = 2;
@@ -345,7 +338,6 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
         Err(_) => return Vec::new(),
     };
 
-    // Parse to find which identifiers are function names vs types vs variables
     let analysis = analyze(src);
     let mut fn_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut type_names: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -368,7 +360,6 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
     for sp in &tokens {
         let span = &sp.span;
         let (token_type, length) = match &sp.token {
-            // Keywords
             Token::If
             | Token::Elif
             | Token::Else
@@ -429,13 +420,13 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
             Token::True | Token::False | Token::None => {
                 (ST_KEYWORD, (span.end - span.start) as u32)
             }
-            // Strings
+
             Token::Str(_) => (ST_STRING, (span.end - span.start) as u32),
-            // Numbers
+
             Token::Int(_) | Token::Float(_) | Token::CharLit(_) => {
                 (ST_NUMBER, (span.end - span.start) as u32)
             }
-            // Identifiers — classify based on analysis
+
             Token::Ident(name) => {
                 let ty = if fn_names.contains(&name.to_string()) {
                     ST_FUNCTION
@@ -446,9 +437,9 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
                 };
                 (ty, name.len() as u32)
             }
-            // Built-in call keywords
+
             Token::Log => (ST_FUNCTION, 3),
-            // Operators
+
             Token::Plus
             | Token::Minus
             | Token::Star
@@ -466,7 +457,7 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
             | Token::StarStar
             | Token::Bang => (ST_OPERATOR, (span.end - span.start) as u32),
             Token::At | Token::AtKw => (ST_OPERATOR, (span.end - span.start) as u32),
-            // Skip whitespace/structural tokens
+
             _ => continue,
         };
 
@@ -499,8 +490,6 @@ pub fn semantic_tokens(src: &str) -> Vec<SemanticToken> {
     result
 }
 
-// ── Signature help ─────────────────────────────────────────────
-
 pub struct SignatureInfo {
     pub label: String,
     pub params: Vec<String>,
@@ -512,7 +501,6 @@ pub fn signature_at(src: &str, line: u32, col: u32) -> Option<SignatureInfo> {
     let target_line = src.lines().nth((line.saturating_sub(1)) as usize)?;
     let col0 = (col.saturating_sub(1)) as usize;
 
-    // Walk backwards from cursor to find the function name before '('
     let bytes = target_line.as_bytes();
     let mut depth = 0i32;
     let mut comma_count = 0u32;
@@ -535,7 +523,7 @@ pub fn signature_at(src: &str, line: u32, col: u32) -> Option<SignatureInfo> {
     }
 
     let paren = paren_pos?;
-    // Find function name before the '('
+
     let mut end = paren;
     while end > 0 && bytes[end - 1] == b' ' {
         end -= 1;
@@ -549,7 +537,6 @@ pub fn signature_at(src: &str, line: u32, col: u32) -> Option<SignatureInfo> {
     }
     let fn_name = &target_line[start..end];
 
-    // Look up the function signature
     let (sig, _) = analysis.defs.get(fn_name)?;
     let params = extract_params_from_sig(sig);
 
@@ -624,7 +611,7 @@ mod tests {
     fn test_find_references() {
         let src = "*main()\n    x is 42\n    log(x)\n    y is x + 1\n";
         let refs = find_references(src, "x");
-        assert_eq!(refs.len(), 3); // binding + log(x) + y is x
+        assert_eq!(refs.len(), 3);
     }
 
     #[test]
@@ -639,7 +626,7 @@ mod tests {
         let src = "*main()\n    x is 42\n";
         let toks = semantic_tokens(src);
         assert!(!toks.is_empty());
-        // Should contain at least: function name, keyword (is), number (42)
+
         let has_keyword = toks.iter().any(|t| t.token_type == ST_KEYWORD);
         let has_number = toks.iter().any(|t| t.token_type == ST_NUMBER);
         assert!(has_keyword);
@@ -657,13 +644,13 @@ mod tests {
     #[test]
     fn test_signature_at() {
         let src = "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    add(1, 2)\n";
-        // Cursor inside add(1, |2)
+
         let info = signature_at(src, 5, 12);
         assert!(info.is_some());
         let info = info.unwrap();
         assert!(info.label.contains("add"));
         assert_eq!(info.params.len(), 2);
-        assert_eq!(info.active_param, 1); // after the comma
+        assert_eq!(info.active_param, 1);
     }
 
     #[test]

@@ -1,5 +1,3 @@
-//! Use-set collectors and purity tests.
-
 use super::super::*;
 use std::collections::HashSet;
 
@@ -101,7 +99,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::GlobalStore(_, v) => {
             s.insert(*v);
         }
-        // Collections
+
         InstKind::VecNew(args) => {
             for a in args {
                 s.insert(*a);
@@ -111,9 +109,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             s.insert(*vec);
             s.insert(*val);
         }
-        InstKind::VecLen(v)
-        | InstKind::ChanRecv(v)
-        | InstKind::Log(v) => {
+        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::Log(v) => {
             s.insert(*v);
         }
         InstKind::ClosureCreate(_, captures) | InstKind::SelectArm(captures, _) => {
@@ -169,8 +165,6 @@ fn collect_term_uses(term: &Terminator, s: &mut HashSet<ValueId>) {
     }
 }
 
-/// Returns `true` if an instruction is side-effect-free and can be eliminated
-/// by DCE if its result is unused.
 pub(super) fn is_pure(kind: &InstKind) -> bool {
     matches!(
         kind,
@@ -191,10 +185,6 @@ pub(super) fn is_pure(kind: &InstKind) -> bool {
             | InstKind::VariantInit(..)
             | InstKind::MapInit
     )
-    // NOTE: FieldGet is NOT pure — when the object is behind a pointer,
-    // it reads mutable state that may be changed by FieldSet in a loop.
-    // NOTE: VecLen and Index are NOT pure — they read from memory (vec
-    // header length field / data buffer) which can change via push/pop.
 }
 
 pub(super) fn collect_inst_operands(kind: &InstKind) -> Vec<ValueId> {

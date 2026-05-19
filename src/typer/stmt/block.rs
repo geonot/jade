@@ -1,5 +1,3 @@
-//! Per-statement typing rules.
-
 use crate::ast;
 use crate::hir::{self, DefId, Ownership};
 use crate::intern::Symbol;
@@ -38,11 +36,7 @@ impl Typer {
 
     pub(crate) fn lower_if(&mut self, i: &ast::If, ret_ty: &Type) -> Result<hir::If, String> {
         let cond = self.lower_expr_expected(&i.cond, Some(&Type::Bool))?;
-        // P4 §5.2: snapshot moved-fields state, lower each branch from the
-        // pre-if state, collect each branch's resulting state, then union
-        // them (conservative: a field moved on ANY branch is moved at the
-        // join). Without this, the first branch's moves would leak into
-        // the others' analysis.
+
         let pre_if = self.snapshot_moved_fields();
         let then = self.lower_block(&i.then, ret_ty)?;
         let then_end = self.snapshot_moved_fields();
@@ -64,14 +58,10 @@ impl Typer {
         if els.is_some() {
             branch_ends.push(self.snapshot_moved_fields());
         }
-        // If there's no else, the "no-branch-taken" path keeps `pre_if`,
-        // which is already what `self.moved_fields` is set to at this
-        // point — merging the branch ends in adds any new moves.
+
         self.restore_moved_fields(pre_if);
         self.merge_moved_fields_union(&branch_ends);
 
-        // Promote variables defined in ALL branches to the outer scope so they
-        // are visible after the if/else.
         if let Some(ref else_block) = els {
             let mut common = Self::collect_block_new_binds(&then);
             for (_, elif_block) in &elifs {
@@ -104,7 +94,6 @@ impl Typer {
         })
     }
 
-    /// Collect variables first-defined (via Bind) in a block.
     fn collect_block_new_binds(
         block: &hir::Block,
     ) -> std::collections::HashMap<Symbol, (DefId, Type, Ownership)> {
@@ -128,7 +117,7 @@ impl Typer {
         let subj_ty = subject.ty.clone();
         let mut arms = Vec::new();
         let mut first_arm_ty: Option<Type> = None;
-        // P4 §5.2: snapshot per match (see lower_if for rationale).
+
         let pre_match = self.snapshot_moved_fields();
         let mut arm_ends: Vec<_> = Vec::new();
         for a in &m.arms {
@@ -162,8 +151,7 @@ impl Typer {
                 span: a.span,
             });
         }
-        // Merge: exhaustive match has no fall-through, but `merge_*_union`
-        // is still safe (we restore to pre_match, then union all arm ends).
+
         self.restore_moved_fields(pre_match);
         self.merge_moved_fields_union(&arm_ends);
         let resolved_subj_ty = self.infer_ctx.resolve(&subj_ty);

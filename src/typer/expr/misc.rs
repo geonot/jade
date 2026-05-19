@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -60,7 +58,6 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::OfCall(func, arg, span) => {
-                // Comptime reflection: `fields of X`, `size of X`, `type of X`
                 if let ast::Expr::Ident(name, _) = func.as_ref() {
                     match &*name.as_str() {
                         "fields" => {
@@ -142,10 +139,9 @@ impl Typer {
                         _ => {}
                     }
                 }
-                // `type of expr` — return type name as string
+
                 if let ast::Expr::Ident(name, _) = func.as_ref() {
                     if name == "type" {
-                        // Try to resolve via variable info first (for bound variables)
                         if let ast::Expr::Ident(vname, _) = arg.as_ref() {
                             if let Some(ty) = self.find_var(&vname.as_str()).map(|i| i.ty.clone()) {
                                 let resolved = self.infer_ctx.resolve(&ty);
@@ -167,7 +163,7 @@ impl Typer {
                         });
                     }
                 }
-                // `foo of bar` desugars to `foo(bar)`
+
                 let hfunc = self.lower_expr(func)?;
                 let harg = self.lower_expr(arg)?;
                 let ret_ty = self.infer_ctx.fresh_var();

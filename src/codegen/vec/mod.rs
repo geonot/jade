@@ -1,6 +1,3 @@
-//! Vector helpers on `Compiler<'ctx>`: header layout, growth, push/pop, slicing,
-//! and HOF lowerings. Consumed by both `mir_codegen` and sibling helper files.
-
 use inkwell::module::Linkage;
 use inkwell::types::BasicType;
 use inkwell::values::BasicValueEnum;

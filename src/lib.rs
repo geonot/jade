@@ -1,5 +1,3 @@
-//! Library facade for the Jinn compiler. Re-exports the pipeline modules so the CLI driver and LSP can share types.
-
 pub mod ast;
 pub mod bind;
 pub mod cache;

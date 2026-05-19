@@ -1,5 +1,3 @@
-//! While, for, indexed iteration, coroutine, string, and loop HIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -230,8 +228,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(None)
     }
 
-    /// for x in gen — iterate over a generator/dispatch using direct context swap.
-    /// Calls jinn_gen_resume to get each value, breaks when done.
     pub(in crate::codegen) fn compile_for_coroutine(
         &mut self,
         f: &hir::For,
@@ -250,11 +246,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
         self.bld.position_at_end(loop_bb);
 
-        // Resume the generator
         let gen_resume = crate::codegen::fn_or_die(&self.module, "jinn_gen_resume");
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
-        // Check if done
         let done_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_DONE_OFF, "forgen.done")?;
         let done_val = b!(self.bld.build_load(i8t, done_ptr, "done")).into_int_value();
         let is_done = b!(self.bld.build_int_compare(
@@ -265,16 +259,13 @@ impl<'ctx> Compiler<'ctx> {
         ));
         b!(self.bld.build_conditional_branch(is_done, end_bb, body_bb));
 
-        // Read the yielded value and bind it
         self.bld.position_at_end(body_bb);
         let value_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_VALUE_OFF, "forgen.val")?;
         let value = b!(self.bld.build_load(i64t, value_ptr, "yielded"));
 
-        // Clear has_value
         let hv_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_HAS_VALUE_OFF, "forgen.hv")?;
         b!(self.bld.build_store(hv_ptr, i8t.const_int(0, false)));
 
-        // Bind the loop variable
         let a = self.entry_alloca(i64t.into(), &f.bind.as_str());
         b!(self.bld.build_store(a, value));
         self.set_var(&f.bind.as_str(), a, f.bind_ty.clone());

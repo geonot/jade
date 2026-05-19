@@ -1,5 +1,3 @@
-//! On-disk caching of compiled artifacts (HIR, MIR, object files) for incremental builds.
-
 use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

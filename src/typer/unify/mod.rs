@@ -1,5 +1,3 @@
-//! Type unification with occurs check and row/effect handling.
-
 use crate::ast::Span;
 use crate::intern::Symbol;
 use crate::types::Type;
@@ -17,7 +15,7 @@ pub(crate) struct ConstraintOrigin {
 pub(crate) enum TypeConstraint {
     None,
     Numeric,
-    /// Numeric OR String — used for `+` which supports both arithmetic and concatenation.
+
     Addable,
     Integer,
     Float,
@@ -30,7 +28,7 @@ pub(crate) struct InferCtx {
     types: Vec<Option<Type>>,
     origins: Vec<Option<ConstraintOrigin>>,
     constraints: Vec<TypeConstraint>,
-    /// All locations where each TypeVar was mentioned/constrained.
+
     usage_sites: Vec<Vec<(Span, &'static str)>>,
     pub(crate) debug: bool,
     collect_default_warnings: bool,
@@ -39,8 +37,7 @@ pub(crate) struct InferCtx {
     strict_errors: Vec<String>,
     pedantic: bool,
     quantified_vars: std::collections::HashSet<u32>,
-    /// Maps type_name -> list of trait names it implements.
-    /// Used to enforce Trait constraints during unification.
+
     trait_impls: IndexMap<Symbol, Vec<String>>,
 }
 
@@ -64,7 +61,6 @@ impl InferCtx {
         }
     }
 
-    /// Update the trait implementation map (called from Typer after trait registration).
     pub(crate) fn set_trait_impls(&mut self, impls: IndexMap<Symbol, Vec<String>>) {
         self.trait_impls = impls;
     }
@@ -144,9 +140,6 @@ impl InferCtx {
         self.fresh_var_with(TypeConstraint::None)
     }
 
-    /// Mint a fresh type variable and immediately tag it with an origin
-    /// (so unresolved-ambiguity diagnostics can point at the source site
-    /// where the variable was introduced — e.g. an empty `vec()` literal).
     pub(crate) fn fresh_var_at(&mut self, span: Span, reason: &'static str) -> Type {
         let v = self.fresh_var_with(TypeConstraint::None);
         if let Type::TypeVar(id) = v {
@@ -205,7 +198,7 @@ impl InferCtx {
                 }
                 Ok(TypeConstraint::Trait(merged))
             }
-            // Addable + Numeric/Integer/Float narrows to the stricter constraint
+
             (TypeConstraint::Addable, TypeConstraint::Numeric)
             | (TypeConstraint::Numeric, TypeConstraint::Addable) => Ok(TypeConstraint::Numeric),
             (TypeConstraint::Addable, TypeConstraint::Integer)
@@ -213,7 +206,7 @@ impl InferCtx {
             (TypeConstraint::Addable, TypeConstraint::Float)
             | (TypeConstraint::Float, TypeConstraint::Addable) => Ok(TypeConstraint::Float),
             (TypeConstraint::Addable, TypeConstraint::Addable) => Ok(TypeConstraint::Addable),
-            // Numeric + Integer/Float narrows to the stricter constraint
+
             (TypeConstraint::Numeric, TypeConstraint::Integer)
             | (TypeConstraint::Integer, TypeConstraint::Numeric) => Ok(TypeConstraint::Integer),
             (TypeConstraint::Numeric, TypeConstraint::Float)
@@ -224,12 +217,10 @@ impl InferCtx {
         }
     }
 
-    /// Check if two constraints are fundamentally incompatible (would fail merge).
     pub(crate) fn constraints_conflict(a: &TypeConstraint, b: &TypeConstraint) -> bool {
         Self::merge_constraints(a, b).is_err()
     }
 
-    /// Record that a TypeVar was used at the given span/reason.
     fn record_usage(&mut self, ty: &Type, span: Span, reason: &'static str) {
         if let Type::TypeVar(v) = self.shallow_resolve(ty) {
             let root = self.find(v) as usize;

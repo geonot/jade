@@ -51,7 +51,7 @@ impl Parser {
         let mut layout = crate::ast::LayoutAttrs::default();
         while self.check(Token::At) {
             self.advance();
-            // Handle keywords that are also layout attribute names.
+
             if self.check(Token::Strict) {
                 self.advance();
                 layout.strict = true;
@@ -76,8 +76,6 @@ impl Parser {
                 }
                 layout.align = Some(n);
             } else if attr == "resource" {
-                // `@resource` — linear type: never copies, auto-`*drop` at scope exit.
-                // See `docs/access-semantics.md` §3.
                 layout.resource = true;
             } else {
                 return Err(self.error(&format!("unknown layout attribute: @{attr}")));
@@ -184,7 +182,7 @@ impl Parser {
             self.advance();
             path.push(self.ident()?);
         }
-        // Selective imports: `use foo bar` or `use foo [bar, baz]`
+
         let imports = if self.check(Token::LBracket) {
             self.advance();
             let mut names = Vec::new();
@@ -206,7 +204,7 @@ impl Parser {
         } else {
             None
         };
-        // Import alias: `use long_module as lmn`
+
         let alias = if self.check(Token::As) {
             self.advance();
             Some(self.ident()?)

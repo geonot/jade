@@ -1,5 +1,3 @@
-//! Compiler construction, tuning, metadata, debug setup, IR emission, optimization, and vtables.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -52,6 +50,7 @@ impl<'ctx> Compiler<'ctx> {
             var_allocs: std::collections::HashMap::new(),
             value_types: std::collections::HashMap::new(),
             coro_bodies: std::collections::HashMap::new(),
+            coro_captures: std::collections::HashMap::new(),
             select_data_bufs: std::collections::HashMap::new(),
             self_allocs: std::collections::HashMap::new(),
             self_alloc_types: std::collections::HashMap::new(),
@@ -67,21 +66,10 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub fn set_empty_vec_growth_floor(&mut self, cap: u64) {
-        // Keep this small and power-of-two for allocator friendliness.
         let clamped = cap.clamp(16, 128);
         self.empty_vec_growth_floor = clamped.next_power_of_two();
     }
 
-    /// Infer a per-program empty-vec initial growth floor from MIR.
-    ///
-    /// We analyze empty `VecNew([])` sites and count static `VecPush` uses on
-    /// those vectors. Then we choose a conservative floor:
-    /// - max/p90 >= 32 -> 64
-    /// - max/p90 >= 16 -> 32
-    /// - otherwise     -> 16
-    ///
-    /// This remains robust for outlier-heavy programs (e.g. alloc churn loops)
-    /// while avoiding over-allocation in tiny push-only scripts.
     pub fn tune_empty_vec_growth_floor_from_mir(&mut self, prog: &mir::Program) {
         use std::collections::HashMap;
 
@@ -129,21 +117,19 @@ impl<'ctx> Compiler<'ctx> {
         self.set_empty_vec_growth_floor(floor);
     }
 
-    /// Initialize the TBAA metadata tree.  Must be called after `new()`.
     pub fn init_tbaa(&mut self) {
         let root_name = self.ctx.metadata_string("Jinn TBAA");
         let root = self.ctx.metadata_node(&[root_name.into()]);
         self.tbaa_root = Some(root);
     }
 
-    /// Create a TBAA type descriptor node for a named type (scalar/pointer).
     pub(crate) fn tbaa_type_node(
         &self,
         name: &str,
     ) -> Option<inkwell::values::MetadataValue<'ctx>> {
         let root = self.tbaa_root.as_ref()?;
         let name_md = self.ctx.metadata_string(name);
-        // TBAA type descriptor: {name, parent, constant_flag=0}
+
         let zero = self.ctx.i64_type().const_int(0, false);
         Some(
             self.ctx
@@ -151,11 +137,10 @@ impl<'ctx> Compiler<'ctx> {
         )
     }
 
-    /// Create a TBAA access tag for a load/store and attach it to the instruction.
     pub(crate) fn set_tbaa(&self, inst: inkwell::values::InstructionValue<'ctx>, type_name: &str) {
         if let Some(type_node) = self.tbaa_type_node(type_name) {
             let zero = self.ctx.i64_type().const_int(0, false);
-            // TBAA access tag: {base_type, access_type, offset}
+
             let access_tag =
                 self.ctx
                     .metadata_node(&[type_node.into(), type_node.into(), zero.into()]);
@@ -163,7 +148,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Map a Jinn type to a TBAA type name for alias analysis.
     pub(crate) fn tbaa_type_name(ty: &Type) -> &'static str {
         match ty {
             Type::I8 | Type::U8 => "i8",
@@ -186,12 +170,9 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Return the known dereferenceable byte count for a pointer-represented type,
-    /// or None if the size is unknown at compile time.
     pub(crate) fn dereferenceable_bytes(&self, ty: &Type) -> Option<u64> {
         match ty {
             Type::Struct(name, _) => {
-                // Use LLVM's struct type to compute size if registered
                 let st = self.module.get_struct_type(&name.as_str())?;
                 let dl_str = self.module.get_data_layout();
                 let td = inkwell::targets::TargetData::create(dl_str.as_str().to_str().ok()?);
@@ -209,25 +190,18 @@ impl<'ctx> Compiler<'ctx> {
         self.lib_mode = true;
     }
 
-    /// Enable fast-math flags on all floating-point instructions.
-    /// Flags: nnan | ninf | nsz | arcp | contract | afn | reassoc
     pub fn set_fast_math(&mut self, enable: bool) {
         if enable {
-            // LLVMFastMathAll = 0x7F (all 7 flags)
             self.fast_math_flags = 0x7F;
         } else {
             self.fast_math_flags = 0;
         }
     }
 
-    /// Enable deterministic FP mode — disables all fast-math reordering.
-    /// This is the default (flags = 0), but calling this explicitly after
-    /// set_fast_math will override back to strict IEEE 754 compliance.
     pub fn set_deterministic_fp(&mut self) {
         self.fast_math_flags = 0;
     }
 
-    /// Tag a float instruction with the current fast-math flags.
     pub(crate) fn tag_fast_math(&self, val: BasicValueEnum<'ctx>) {
         if self.fast_math_flags != 0 {
             if let Some(inst) = val.as_instruction_value() {
@@ -349,9 +323,7 @@ impl<'ctx> Compiler<'ctx> {
                         let thunk_fn = self.module.add_function(&thunk_name, thunk_fn_ty, None);
                         let entry = self.ctx.append_basic_block(thunk_fn, "entry");
                         self.bld.position_at_end(entry);
-                        // Set cur_fn so entry_alloca-style helpers (used when
-                        // spilling struct args to match the callee's ptr ABI)
-                        // can locate the thunk's entry block.
+
                         let prev_fn = self.cur_fn;
                         self.cur_fn = Some(thunk_fn);
                         let self_ptr = ice!(
@@ -374,10 +346,7 @@ impl<'ctx> Compiler<'ctx> {
                             vec![first_arg.into()];
                         for i in 1..thunk_fn.count_params() {
                             let raw = ice!(thunk_fn.get_nth_param(i), "vtable thunk missing param");
-                            // Match the callee's ABI: if it expects a pointer
-                            // for this slot but we received a struct value via
-                            // the thunk's signature, spill to an alloca and
-                            // pass the pointer.
+
                             let param_ty_idx = i as usize;
                             let callee_param_is_ptr = fv
                                 .get_type()

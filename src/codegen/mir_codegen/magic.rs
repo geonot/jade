@@ -1,5 +1,3 @@
-//! Magic call handling for MIR codegen: coroutines, generators, actors, and select.
-
 use super::super::Compiler;
 use super::super::b;
 use crate::intern::Symbol;
@@ -9,30 +7,26 @@ use inkwell::AddressSpace;
 use inkwell::values::{BasicValue, BasicValueEnum};
 
 impl<'ctx> Compiler<'ctx> {
-    /// Handle "magic" call names emitted by MIR lowering that need special
-    /// codegen treatment (coroutines, generators, actors, stores).
-    /// Returns Some(value) if handled, None if it's a normal call.
     pub(super) fn try_handle_magic_call(
         &mut self,
         name: &str,
         args: &[mir::ValueId],
         _result_ty: &Type,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        // ── Coroutine create ──
         if let Some(coro_name) = name.strip_prefix("__coro_create_") {
-            return self.emit_coro_create(coro_name).map(Some);
+            return self.emit_coro_create(coro_name, args).map(Some);
         }
-        // ── Generator create (same impl as coroutine) ──
+
         if let Some(gen_name) = name.strip_prefix("__gen_create_") {
-            return self.emit_coro_create(gen_name).map(Some);
+            return self.emit_coro_create(gen_name, args).map(Some);
         }
-        // ── Coroutine/generator next ──
+
         if name == "__coro_next" || name == "__gen_next" {
             if let Some(&gen_val) = args.first() {
                 return self.emit_coro_next(gen_val).map(Some);
             }
         }
-        // ── Generator resume (for-in loop) ──
+
         if name == "__gen_resume" {
             if let Some(&gen_val) = args.first() {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
@@ -44,7 +38,7 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
             }
         }
-        // ── Generator done check (for-in loop) ──
+
         if name == "__gen_done" {
             if let Some(&gen_val) = args.first() {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
@@ -61,7 +55,7 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(Some(done_bool.into()));
             }
         }
-        // ── Generator read yielded value (for-in loop) ──
+
         if name == "__gen_next_val" {
             if let Some(&gen_val) = args.first() {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
@@ -70,20 +64,20 @@ impl<'ctx> Compiler<'ctx> {
                 let value_ptr =
                     self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.val.ptr")?;
                 let result = b!(self.bld.build_load(i64t, value_ptr, "gen.val"));
-                // Clear has_value
+
                 let has_val_ptr =
                     self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.hv.ptr")?;
                 b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
                 return Ok(Some(result));
             }
         }
-        // ── Yield (inside coroutine body) ──
+
         if name == "__yield" {
             if let Some(&val) = args.first() {
                 return self.emit_coro_yield(val).map(Some);
             }
         }
-        // ── Select recv (reads from select data buffer, not jinn_chan_recv) ──
+
         if name == "__select_recv" {
             if args.len() >= 2 {
                 let select_vid = args[0];
@@ -96,15 +90,15 @@ impl<'ctx> Compiler<'ctx> {
                         return Ok(Some(val));
                     }
                 }
-                // Fallback: return 0
+
                 return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
             }
         }
-        // ── Actor send ──
+
         if let Some(rest) = name.strip_prefix("__send_") {
             return self.emit_actor_send(rest, args).map(Some);
         }
-        // ── Store operations ──
+
         if let Some(store_name) = name.strip_prefix("__store_insert_") {
             return self.emit_store_insert(store_name, args).map(Some);
         }
@@ -171,7 +165,7 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(store_name) = name.strip_prefix("__store_at_version_") {
             return self.emit_store_at_version(store_name, args).map(Some);
         }
-        // ── @kv store operations ──
+
         if let Some(store_name) = name.strip_prefix("__kv_set_") {
             return self.emit_kv_set(store_name, args).map(Some);
         }
@@ -190,18 +184,18 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(store_name) = name.strip_prefix("__kv_count_") {
             return self.emit_kv_count(store_name).map(Some);
         }
-        // ── @graph store operations ──
+
         if let Some(store_name) = name.strip_prefix("__graph_from_") {
             return self.emit_graph_query(store_name, "from", args).map(Some);
         }
         if let Some(store_name) = name.strip_prefix("__graph_to_") {
             return self.emit_graph_query(store_name, "to", args).map(Some);
         }
-        // ── @timeseries operations ──
+
         if let Some(store_name) = name.strip_prefix("__ts_latest_") {
             return self.emit_ts_latest(store_name).map(Some);
         }
-        // ── @vector operations ──
+
         if let Some(store_name) = name.strip_prefix("__vec_nearest_") {
             return self.emit_vec_nearest(store_name, args).map(Some);
         }
@@ -211,22 +205,22 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(store_name) = name.strip_prefix("__vec_count_") {
             return self.emit_vec_count(store_name).map(Some);
         }
-        // ── @bloom filter operations ──
+
         if let Some(rest) = name.strip_prefix("__bloom_test_") {
             return self.emit_bloom_test(rest, args).map(Some);
         }
-        // ── @fts operations ──
+
         if let Some(rest) = name.strip_prefix("__fts_search_") {
             return self.emit_fts_search(rest, args).map(Some);
         }
         if let Some(rest) = name.strip_prefix("__fts_count_") {
             return self.emit_fts_count(rest).map(Some);
         }
-        // ── Transaction begin/commit (no-op at LLVM level) ──
+
         if name == "__txn_begin" || name == "__txn_commit" {
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
-        // ── Channel close ──
+
         if name == "__chan_close" {
             if let Some(&ch_val) = args.first() {
                 let ch_ptr = self.val(ch_val).into_pointer_value();
@@ -238,7 +232,7 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
         }
-        // ── Actor stop (close the actor's internal channel) ──
+
         if name == "__stop" {
             if let Some(&actor_val) = args.first() {
                 let actor_ptr = self.val(actor_val).into_pointer_value();
@@ -253,7 +247,7 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
         }
-        // ── Atomic operations ──
+
         if name == "__atomic_load" {
             if let Some(&ptr_val) = args.first() {
                 let ptr = self.val(ptr_val).into_pointer_value();
@@ -319,30 +313,29 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(Some(old));
             }
         }
-        // ── COW operations removed (Type::Cow eliminated) ──
+
         Ok(None)
     }
 
-    // ── Coroutine/Generator codegen ──────────────────────────────
-
-    /// Create a coroutine/generator: builds __coro_{name} function,
-    /// allocates 32-byte gen control block, creates coro via jinn_coro_create.
-    pub(super) fn emit_coro_create(&mut self, name: &str) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(super) fn emit_coro_create(
+        &mut self,
+        name: &str,
+        args: &[mir::ValueId],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let _i64t = self.ctx.i64_type();
 
-        // Try to find the body in extracted HIR coroutine bodies
-        if let Some(body) = self.coro_bodies.get(&Symbol::intern(name)).cloned() {
-            // Delegate to the HIR coroutine codegen which handles everything:
-            // creating the __coro_{name} function, building the gen control block, etc.
-            return self.compile_coroutine_create(name, &body);
+        let sym = Symbol::intern(name);
+        if let Some(body) = self.coro_bodies.get(&sym).cloned() {
+            let captures = self.coro_captures.get(&sym).cloned().unwrap_or_default();
+            let arg_vals: Vec<BasicValueEnum<'ctx>> =
+                args.iter().map(|vid| self.val(*vid)).collect();
+            return self.compile_coroutine_create(name, &body, &captures, &arg_vals);
         }
 
-        // Fallback: no body found — return null pointer
         Ok(ptr.const_null().into())
     }
 
-    /// Resume a coroutine/generator and read the yielded value.
     pub(super) fn emit_coro_next(
         &mut self,
         gen_val_id: mir::ValueId,
@@ -351,35 +344,25 @@ impl<'ctx> Compiler<'ctx> {
         let i8t = self.ctx.i8_type();
         let i64t = self.ctx.i64_type();
 
-        // Resume the producer coroutine (direct context swap)
         let gen_resume = self
             .module
             .get_function("jinn_gen_resume")
             .ok_or("jinn_gen_resume not declared")?;
         b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
 
-        // Read the yielded value
         let value_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.n.val")?;
         let result = b!(self.bld.build_load(i64t, value_ptr, "gen.result"));
 
-        // Clear has_value
         let has_val_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.n.hv")?;
         b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
 
         Ok(result)
     }
 
-    /// Yield a value from inside a coroutine body.
-    /// When called from the parent function (no __coro_ctx), this is an inlined
-    /// artifact from MIR lowering — the real yield is compiled by compile_coroutine_create
-    /// from the extracted HIR body. Just return a dummy value.
     pub(super) fn emit_coro_yield(
         &mut self,
         val_id: mir::ValueId,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // If __coro_ctx doesn't exist, we're in the parent function —
-        // this yield was inlined by MIR lowering and will be handled
-        // by compile_coroutine_create from the HIR body.
         if self.find_var("__coro_ctx").is_none() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
@@ -391,16 +374,13 @@ impl<'ctx> Compiler<'ctx> {
         let (gen_alloca, _) = self.find_var("__coro_ctx").cloned().unwrap();
         let gen_ptr = b!(self.bld.build_load(ptr, gen_alloca, "gen.ctx")).into_pointer_value();
 
-        // Write value to gen block
         let value_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.y.val")?;
         let i64_val = self.coerce_to_i64(val);
         b!(self.bld.build_store(value_ptr, i64_val));
 
-        // Set has_value = 1
         let has_val_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.y.hv")?;
         b!(self.bld.build_store(has_val_ptr, i8t.const_int(1, false)));
 
-        // Suspend back to caller
         let gen_suspend = self
             .module
             .get_function("jinn_gen_suspend")
@@ -410,19 +390,13 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    // ── Actor codegen ────────────────────────────────────────────
-
-    /// Spawn an actor: malloc mailbox, create channel, create coro, schedule it.
     pub(super) fn emit_spawn_actor(
         &mut self,
         actor_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        // Delegate to the existing HIR actor codegen
         self.compile_spawn(actor_name)
     }
 
-    /// Spawn an actor with field-init overrides — the MIR equivalent of
-    /// `compile_spawn_with_init_vals` on the HIR side.
     pub(super) fn emit_spawn_actor_with_inits(
         &mut self,
         actor_name: &str,
@@ -431,9 +405,6 @@ impl<'ctx> Compiler<'ctx> {
         self.compile_spawn_with_init_vals(actor_name, inits)
     }
 
-    /// Send a message to an actor. The MIR lowering emits:
-    ///   Call("__send_{actor}.{handler}", [target, arg0, arg1, ...])
-    /// We need to find the actor name and tag from the encoded name.
     pub(super) fn emit_actor_send(
         &mut self,
         encoded: &str,
@@ -443,14 +414,11 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
 
-        // Parse "{actor}.{handler}" — fall back to legacy name-only lookup
-        // if the separator is missing (defensive).
         let (actor_hint, handler_name) = match encoded.split_once('.') {
             Some((a, h)) => (Some(a), h),
             None => (None, encoded),
         };
 
-        // Find which actor owns this handler
         let (actor_name, tag, handler_params) = {
             let mut found = None;
             for (aname, ad) in &self.actor_defs {
@@ -488,14 +456,11 @@ impl<'ctx> Compiler<'ctx> {
             .get_struct_type(&msg_name)
             .ok_or_else(|| format!("message type '{msg_name}' not found"))?;
 
-        // First arg is the target (mailbox pointer)
         let mb_ptr = self.val(args[0]).into_pointer_value();
 
-        // Load channel pointer from mailbox
         let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
         let ch_ptr = b!(self.bld.build_load(ptr_ty, ch_ptr_ptr, "ch_ptr"));
 
-        // Build message: {tag, payload}
         let msg_alloca = self.entry_alloca(msg_st.into(), "send_msg");
 
         let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
@@ -507,7 +472,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_struct_gep(msg_st, msg_alloca, 1, "payload_ptr"));
 
-        // Store arguments into payload
         let mut arg_offset: u64 = 0;
         for (i, param_ty) in handler_params.iter().enumerate() {
             if i + 1 >= args.len() {
@@ -529,7 +493,6 @@ impl<'ctx> Compiler<'ctx> {
             arg_offset += psize;
         }
 
-        // Send message
         let chan_send = self
             .module
             .get_function("jinn_chan_send")
@@ -541,9 +504,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(i64t.const_int(0, false).into())
     }
 
-    // ── Select codegen ──────────────────────────────────────────
-
-    /// Build jinn_select call: construct case array, call jinn_select(), return index.
     pub(super) fn emit_select(
         &mut self,
         channels: &[mir::ValueId],
@@ -555,7 +515,6 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let n = channels.len();
 
-        // jinn_select_case_t = { chan: ptr, data: ptr, is_send: i32 }
         let case_struct_ty = self
             .ctx
             .struct_type(&[ptr_ty.into(), ptr_ty.into(), i32t.into()], false);
@@ -566,7 +525,6 @@ impl<'ctx> Compiler<'ctx> {
         for (i, ch_vid) in channels.iter().enumerate() {
             let ch_val = self.val(*ch_vid).into_pointer_value();
 
-            // Allocate recv buffer for each channel
             let data_alloca = self.entry_alloca(i64t.into(), &format!("select.data.{i}"));
             data_bufs.push(data_alloca);
 
@@ -581,21 +539,18 @@ impl<'ctx> Compiler<'ctx> {
                 ))
             };
 
-            // case.chan = ch_val
             let chan_field =
                 b!(self
                     .bld
                     .build_struct_gep(case_struct_ty, case_ptr, 0, "case.chan"));
             b!(self.bld.build_store(chan_field, ch_val));
 
-            // case.data = data_alloca
             let data_field =
                 b!(self
                     .bld
                     .build_struct_gep(case_struct_ty, case_ptr, 1, "case.data"));
             b!(self.bld.build_store(data_field, data_alloca));
 
-            // case.is_send = 0 (recv)
             let is_send_field =
                 b!(self
                     .bld
@@ -605,7 +560,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_store(is_send_field, i32t.const_int(0, false)));
         }
 
-        // Store data buffers for __select_recv to use
         self.select_data_bufs.insert(dest, data_bufs);
 
         let select_fn = self

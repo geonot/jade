@@ -1,5 +1,3 @@
-//! Sim-for and sim-block HIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -7,23 +5,12 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         f: &hir::For,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        // sim for: spawn each iteration as a coroutine, wait for all to finish.
-        //
-        // Layout of per-iteration arg struct passed to each coroutine:
-        //   offset 0: iter_val  (i64)   — the loop variable value
-        //   offset 8: counter   (*i64)  — pointer to shared atomic counter
-        // Total: 16 bytes
-        //
-        // Counter is decremented (atomically) by each coroutine on completion.
-        // Main code spins/yields until counter reaches 0.
-
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         let _i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
         let void = self.ctx.void_type();
         let fv = self.current_fn();
 
-        // Compute range bounds
         let start_val = if f.end.is_some() {
             self.compile_expr(&f.iter)?.into_int_value()
         } else {
@@ -40,7 +27,6 @@ impl<'ctx> Compiler<'ctx> {
             i64t.const_int(1, false)
         };
 
-        // Build iteration body function: void __sim_iter_N(void *arg)
         static SIM_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let sim_id = SIM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let iter_fn_name = format!("__sim_iter_{sim_id}");
@@ -65,11 +51,9 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: function has no first param")
             .into_pointer_value();
 
-        // Load iter_val from arg[0]
-        let iter_val_ptr = arg_ptr; // offset 0
+        let iter_val_ptr = arg_ptr;
         let iter_val = b!(self.bld.build_load(i64t, iter_val_ptr, "iter_val"));
 
-        // Load counter ptr from arg[8]
         let counter_ptr_ptr = unsafe {
             b!(self.bld.build_gep(
                 self.ctx.i8_type(),
@@ -81,15 +65,12 @@ impl<'ctx> Compiler<'ctx> {
         let counter_ptr =
             b!(self.bld.build_load(ptr, counter_ptr_ptr, "counter_ptr")).into_pointer_value();
 
-        // Set up the loop variable
         let lvar = self.entry_alloca(i64t.into(), &f.bind.as_str());
         b!(self.bld.build_store(lvar, iter_val));
         self.set_var(&f.bind.as_str(), lvar, Type::I64);
 
-        // Compile the loop body
         self.compile_block(&f.body)?;
 
-        // Atomically decrement counter
         if self.no_term() {
             b!(self.bld.build_atomicrmw(
                 inkwell::AtomicRMWBinOp::Sub,
@@ -97,13 +78,12 @@ impl<'ctx> Compiler<'ctx> {
                 i64t.const_int(1, false),
                 inkwell::AtomicOrdering::AcquireRelease,
             ));
-            // Free the arg struct
+
             let free_fn = crate::codegen::fn_or_die(&self.module, "free");
             b!(self.bld.build_call(free_fn, &[arg_ptr.into()], ""));
             b!(self.bld.build_return(None));
         }
 
-        // Restore caller context
         self.cur_fn = saved_fn;
         self.vars = saved_vars;
         self.var_shadows = saved_shadows;
@@ -113,7 +93,6 @@ impl<'ctx> Compiler<'ctx> {
         let bb = saved_bb.unwrap_or_else(|| self.ctx.append_basic_block(fv, "sim.after"));
         self.bld.position_at_end(bb);
 
-        // Allocate atomic counter
         let counter_alloca = self.entry_alloca(i64t.into(), "sim.counter");
         b!(self
             .bld
@@ -123,7 +102,6 @@ impl<'ctx> Compiler<'ctx> {
         let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
         let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
 
-        // Spawn loop: for i in start..end step step
         let spawn_var = self.entry_alloca(i64t.into(), "sim.i");
         b!(self.bld.build_store(spawn_var, start_val));
 
@@ -144,7 +122,6 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(spawn_body);
 
-        // Increment counter atomically
         b!(self.bld.build_atomicrmw(
             inkwell::AtomicRMWBinOp::Add,
             counter_alloca,
@@ -152,7 +129,6 @@ impl<'ctx> Compiler<'ctx> {
             inkwell::AtomicOrdering::AcquireRelease,
         ));
 
-        // Allocate arg struct (16 bytes: i64 iter_val, ptr counter)
         let arg_mem =
             b!(self
                 .bld
@@ -162,9 +138,8 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: call returned void")
             .into_pointer_value();
 
-        // Store iter_val at offset 0
         b!(self.bld.build_store(arg_mem, cur_i));
-        // Store counter_ptr at offset 8
+
         let counter_field = unsafe {
             b!(self.bld.build_gep(
                 self.ctx.i8_type(),
@@ -175,7 +150,6 @@ impl<'ctx> Compiler<'ctx> {
         };
         b!(self.bld.build_store(counter_field, counter_alloca));
 
-        // Create and spawn coroutine
         let coro = b!(self.bld.build_call(
             coro_create,
             &[
@@ -196,7 +170,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(spawn_var, next_i));
         b!(self.bld.build_unconditional_branch(spawn_cond));
 
-        // Wait for all iterations to complete
         self.bld.position_at_end(spawn_done);
         let wait_cond = self.ctx.append_basic_block(fv, "sim.wait");
         let wait_done = self.ctx.append_basic_block(fv, "sim.done");
@@ -228,11 +201,6 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         stmts: &[hir::Stmt],
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        // sim block: spawn each statement as a coroutine, wait for all to finish.
-        //
-        // Each statement gets its own void(void*) wrapper function.
-        // A shared atomic counter tracks how many are still running.
-
         if stmts.is_empty() {
             return Ok(None);
         }
@@ -246,7 +214,6 @@ impl<'ctx> Compiler<'ctx> {
             std::sync::atomic::AtomicUsize::new(0);
         let blk_id = SIM_BLK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-        // Build one wrapper function per statement
         let mut stmt_fns = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let fn_name = format!("__sim_blk_{blk_id}_s{i}");
@@ -271,14 +238,11 @@ impl<'ctx> Compiler<'ctx> {
                 .expect("ICE: function has no first param")
                 .into_pointer_value();
 
-            // arg_ptr points to a single ptr: the counter
             let counter_ptr =
                 b!(self.bld.build_load(ptr, arg_ptr, "counter_ptr")).into_pointer_value();
 
-            // Compile the statement
             self.compile_stmt(stmt)?;
 
-            // Atomically decrement counter
             if self.no_term() {
                 b!(self.bld.build_atomicrmw(
                     inkwell::AtomicRMWBinOp::Sub,
@@ -303,7 +267,6 @@ impl<'ctx> Compiler<'ctx> {
             stmt_fns.push(wrapper);
         }
 
-        // Back in the caller: allocate atomic counter, spawn all, wait
         let counter_alloca = self.entry_alloca(i64t.into(), "simb.counter");
         let n = stmts.len() as u64;
         b!(self
@@ -315,7 +278,6 @@ impl<'ctx> Compiler<'ctx> {
         let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
 
         for wrapper in &stmt_fns {
-            // Allocate arg struct (8 bytes: just a pointer to counter)
             let arg_mem =
                 b!(self
                     .bld
@@ -325,10 +287,8 @@ impl<'ctx> Compiler<'ctx> {
                 .expect("ICE: call returned void")
                 .into_pointer_value();
 
-            // Store counter_ptr
             b!(self.bld.build_store(arg_mem, counter_alloca));
 
-            // Create and spawn
             let coro = b!(self.bld.build_call(
                 coro_create,
                 &[
@@ -343,7 +303,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
         }
 
-        // Wait for all statements to complete
         let wait_cond = self.ctx.append_basic_block(fv, "simb.wait");
         let wait_done = self.ctx.append_basic_block(fv, "simb.done");
         b!(self.bld.build_unconditional_branch(wait_cond));

@@ -1,5 +1,3 @@
-//! Compile-time evaluation of `comptime` expressions.
-
 use crate::ast::Span;
 use crate::hir::{self, Expr, ExprKind};
 use crate::intern::Symbol;
@@ -14,7 +12,6 @@ use fold::{fold_block_with_fns, fold_expr_with_fns};
 use purity::is_pure_fn;
 
 pub fn fold_program(prog: &mut hir::Program) {
-    // Build a map of pure functions for comptime evaluation
     let pure_fns: HashMap<Symbol, hir::Fn> = prog
         .fns
         .iter()

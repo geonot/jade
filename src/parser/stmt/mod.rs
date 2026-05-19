@@ -1,5 +1,3 @@
-//! Parser arms for statements and blocks.
-
 use crate::ast::*;
 use crate::lexer::Token;
 
@@ -11,8 +9,6 @@ use super::{ParseError, Parser};
 
 impl Parser {
     pub(in crate::parser) fn parse_block(&mut self) -> Result<Block, ParseError> {
-        // Custom inlined version of parse_indented that drains the pending
-        // statement queues populated by Layer-2 sugar desugaring.
         self.expect(Token::Indent)?;
         let mut items: Block = Vec::new();
         while !self.check(Token::Dedent) && !self.eof() {
@@ -21,7 +17,7 @@ impl Parser {
                 break;
             }
             let stmt = self.parse_stmt()?;
-            // Drain any pre-statements queued during this parse_stmt call.
+
             for pre in self.pending_pre_stmts.drain(..).collect::<Vec<_>>() {
                 items.push(pre);
             }

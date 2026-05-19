@@ -1,5 +1,3 @@
-//! Purity detector — determines if a function/expression has no side effects.
-
 use crate::hir::{self, Expr, ExprKind, Stmt};
 
 pub(super) fn is_pure_fn(f: &hir::Fn) -> bool {

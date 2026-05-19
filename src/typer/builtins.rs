@@ -1,12 +1,9 @@
-//! Type signatures for `hir::BuiltinFn` variants.
-
 use crate::ast::{self, Span};
 use crate::hir;
 use crate::intern::Symbol;
 use crate::types::Type;
 
 use super::Typer;
-
 
 impl Typer {
     pub(crate) fn try_lower_builtin_call(
@@ -24,7 +21,7 @@ impl Typer {
                     Ok(e) => e,
                     Err(e) => return Some(Err(e)),
                 };
-                // Generate a descriptive message from the assert expression
+
                 let expr_desc = Self::describe_assert_expr(&args[0]);
                 let msg_expr = hir::Expr {
                     kind: hir::ExprKind::Str(expr_desc),
@@ -308,7 +305,7 @@ impl Typer {
                     span,
                 }))
             }
-            // Constant-time operations (prevents timing side-channel attacks)
+
             "constant_time_eq" if args.len() == 2 && !self.fns.contains_key(name) => {
                 let ha = match self.lower_expr(&args[0]) {
                     Ok(e) => e,
@@ -324,9 +321,8 @@ impl Typer {
                     span,
                 }))
             }
-            // Comptime reflection builtins
+
             "fields_of" if args.len() == 1 && !self.fns.contains_key(name) => {
-                // fields_of('StructName') → Vec of field name strings at compile time
                 let type_name = match &args[0] {
                     ast::Expr::Str(s, _) => s.clone(),
                     ast::Expr::Ident(s, _) => s.as_str(),
@@ -349,7 +345,6 @@ impl Typer {
                 }))
             }
             "type_of" if args.len() == 1 && !self.fns.contains_key(name) => {
-                // type_of(expr) → string representation of the type at compile time
                 let harg = match self.lower_expr(&args[0]) {
                     Ok(e) => e,
                     Err(e) => return Some(Err(e)),
@@ -362,7 +357,6 @@ impl Typer {
                 }))
             }
             "size_of" if args.len() == 1 && !self.fns.contains_key(name) => {
-                // size_of('StructName') or size_of(expr) → byte size as i64
                 let size = match &args[0] {
                     ast::Expr::Str(s, _) => {
                         if let Some(fields) = self.structs.get(&Symbol::intern(s)) {
@@ -403,7 +397,7 @@ impl Typer {
                             Type::I32 | Type::U32 | Type::F32 => 4,
                             Type::I64 | Type::U64 | Type::F64 => 8,
                             Type::String => 24,
-                            _ => 8, // pointer-sized default
+                            _ => 8,
                         }
                     }
                 };

@@ -1,30 +1,3 @@
-//! Perceus reference-counting optimization on MIR.
-//!
-//! This module implements Perceus as a sequence of **transformation passes**
-//! over MIR (not advisory hints). Each pass mutates the program directly and
-//! updates `PerceusStats` for `--debug-perceus` reporting. Codegen consumes
-//! the post-transform IR plus the per-function `mir::PerceusMeta` side-table
-//! for slot-keyed reuse.
-//!
-//! Pass pipeline (per function, in order):
-//!   1. **count_uses**     — exact SSA use-counting (`Drop` is *not*
-//!                            counted as a semantic use).
-//!   2. **drop_sinking**   — move each `Drop` to immediately after the last
-//!                            semantic use of its operand within the same
-//!                            basic block.
-//!   3. **drop_elision**   — physically delete `Drop(v, ty)` when
-//!                            `ty.is_trivially_droppable()`.
-//!   4. **vec_reuse_pairing** — pair `Drop(Vec(T))` with the next empty
-//!                            `VecNew` of `Vec(T)` in the same block (or
-//!                            loop body) via a slot id stored in
-//!                            `func.perceus`. Recycles header + data buffer.
-//!   5. **drop_fusion**    — coalesce runs of >=2 consecutive `Drop`s into
-//!                            a single `InstKind::DropMany`.
-//!
-//! All passes preserve SSA: drop sinking only moves drops backward inside a
-//! single block; drop elision and fusion only delete or coalesce Drop
-//! instructions, which have no SSA dest.
-
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::Span;
@@ -33,17 +6,10 @@ use crate::types::Type;
 
 use super::{PerceusHints, PerceusPass};
 
-// ── Public entry points ──────────────────────────────────────────
-
-/// Backward-compatible entry. Now takes `&mut` because Perceus rewrites the
-/// IR in place; the old `&` shape leaked an immutable borrow that callers
-/// have all been migrated away from.
 pub fn analyze_mir_program(prog: &mut mir::Program) -> PerceusHints {
     run(prog)
 }
 
-/// Run the Perceus transform pipeline. Returns aggregate stats; per-function
-/// reuse metadata is stored on `Function::perceus`.
 pub fn run(prog: &mut mir::Program) -> PerceusHints {
     let mut hints = PerceusHints::default();
     let mut next_slot: u32 = 0;
@@ -67,23 +33,19 @@ fn run_on_function(func: &mut mir::Function, hints: &mut PerceusHints, next_slot
     drop_fusion(func, hints);
 }
 
-// ── Use info ─────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 struct UseInfo {
     use_count: u32,
     escapes: bool,
     captured: bool,
     ty: Type,
-    /// (block_index, instruction_index) of the last *semantic* use.
-    /// `instruction_index == bb.insts.len()` means "the terminator".
+
     last_use: Option<(usize, usize)>,
 }
 
 fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
     let mut uses: HashMap<ValueId, UseInfo> = HashMap::new();
 
-    // Pass 1: register definitions (params, phi dests, instruction dests).
     for p in &func.params {
         uses.insert(
             p.value,
@@ -119,7 +81,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
         }
     }
 
-    // Pass 2: count semantic uses.
     for (bi, bb) in func.blocks.iter().enumerate() {
         for phi in &bb.phis {
             for (_, vid) in &phi.incoming {
@@ -129,8 +90,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
             }
         }
         for (ii, inst) in bb.insts.iter().enumerate() {
-            // Refcount/drop ops are NOT semantic uses. Their operands are
-            // tracked by the dedicated reuse / fusion passes.
             match &inst.kind {
                 InstKind::Drop(_, _) | InstKind::DropMany(_) => {}
                 _ => {
@@ -143,8 +102,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
                 }
             }
 
-            // Escape tracking — a value escapes when we cannot prove the
-            // callee/peer/storage cannot stash it.
             match &inst.kind {
                 InstKind::Call(_, args)
                 | InstKind::IndirectCall(_, args)
@@ -229,8 +186,7 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
                 _ => {}
             }
         }
-        // Terminator operand contributions; they are the last "instruction"
-        // of the block, indexed at bb.insts.len().
+
         let term_idx = bb.insts.len();
         match &bb.terminator {
             Terminator::Branch(c, _, _) => {
@@ -333,25 +289,12 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
     }
 }
 
-// ── Pass: drop sinking ───────────────────────────────────────────
-
-/// Move each `Drop(v)` instruction backward to immediately after the last
-/// semantic use of `v` within the same basic block. If the last use is in a
-/// different block (or the value has no semantic use), the drop is left in
-/// place. Returns the number of drops actually relocated.
-///
-/// Soundness: we never move a drop *across* a use of the same value (the
-/// destination is `last_use_idx + 1`, after every use). We never move a drop
-/// out of its block. We never reorder relative to other drops of the same
-/// value (each drop is processed independently against its own last-use).
 fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u32 {
     let mut sunk = 0u32;
     for bi in 0..func.blocks.len() {
         let orig: Vec<Instruction> = std::mem::take(&mut func.blocks[bi].insts);
         let mut new_insts: Vec<Instruction> = Vec::with_capacity(orig.len());
-        // (anchor_orig_idx, drop_inst). When we have just appended the
-        // instruction that lived at `anchor_orig_idx` in `orig`, we flush all
-        // deferred drops with that anchor.
+
         let mut deferred: Vec<(usize, Instruction)> = Vec::new();
 
         for (i, inst) in orig.into_iter().enumerate() {
@@ -370,7 +313,7 @@ fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u
             if !deferred_this_drop {
                 new_insts.push(inst);
             }
-            // Flush any deferred drops anchored at i.
+
             let mut k = 0;
             while k < deferred.len() {
                 if deferred[k].0 == i {
@@ -380,9 +323,7 @@ fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u
                 }
             }
         }
-        // Drops anchored beyond the last instruction (e.g. last use was the
-        // terminator) get appended at the very end of the block, just before
-        // the terminator runs.
+
         for (_, inst) in deferred.drain(..) {
             new_insts.push(inst);
         }
@@ -391,9 +332,6 @@ fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u
     sunk
 }
 
-// ── Pass: drop elision ───────────────────────────────────────────
-
-/// Physically delete `Drop(v, ty)` whenever `ty.is_trivially_droppable()`.
 fn drop_elision(func: &mut mir::Function, hints: &mut PerceusHints) {
     let mut elided = 0u32;
     for bb in &mut func.blocks {
@@ -408,14 +346,6 @@ fn drop_elision(func: &mut mir::Function, hints: &mut PerceusHints) {
     hints.stats.drops_elided += elided;
 }
 
-// ── Loop body helpers (used by vec_reuse_pairing) ──────────────
-
-/// Collect each loop body in the function as a Vec of block indices. A loop
-/// body is a maximal SCC reachable from a back-edge target. We use a simple
-/// rule: for each block H that is a back-edge target (i.e., some block B has
-/// H as a successor and H ≤ B in RPO or there is a back-path from H's
-/// successors to H), the body is { blocks reachable from H that can reach H }.
-/// Bodies may overlap; we deduplicate identical bodies.
 fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
     let n = func.blocks.len();
     let succs = |b: usize| -> Vec<usize> {
@@ -430,7 +360,7 @@ fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
             _ => vec![],
         }
     };
-    // Reverse adjacency.
+
     let mut preds: Vec<Vec<usize>> = vec![Vec::new(); n];
     for b in 0..n {
         for s in succs(b) {
@@ -442,12 +372,10 @@ fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
     let mut bodies: Vec<Vec<usize>> = Vec::new();
     let mut seen: HashSet<Vec<usize>> = HashSet::new();
     for h in 0..n {
-        // Header iff some pred is reachable from h's successors (i.e., back-edge into h).
         if !block_is_loop_body(func, h) {
             continue;
         }
-        // Body = { b : b reachable from h AND h reachable from b }.
-        // Forward reachable from h.
+
         let mut fwd = vec![false; n];
         let mut stack = vec![h];
         while let Some(b) = stack.pop() {
@@ -459,7 +387,7 @@ fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
                 stack.push(s);
             }
         }
-        // Backward reachable from h (uses preds).
+
         let mut bwd = vec![false; n];
         let mut stack = vec![h];
         while let Some(b) = stack.pop() {
@@ -480,8 +408,6 @@ fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
     bodies
 }
 
-/// Block `bi` is a loop body iff there is a path from any successor of `bi`
-/// back to `bi`. Implemented with a forward DFS from each successor.
 fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
     let n = func.blocks.len();
     let succs = |b: usize| -> Vec<usize> {
@@ -516,30 +442,6 @@ fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
     false
 }
 
-// ── Pass: vec reuse pairing ──────────────────────────────────────
-
-/// Pair `Drop(Vec(T))` with the next `VecNew([])` of `Vec(T)` (same element
-/// type) so that the dropped vector's *header + data buffer* is recycled
-/// instead of freed and re-malloc'd. The save path deep-drops elements
-/// (necessary to release element-owned heap), then stashes the header
-/// pointer; the consume path resets `len = 0`, leaving the data buffer's
-/// capacity intact for the next push run.
-///
-/// Wins relative to baseline:
-///   * 1 fewer `malloc(24)` per loop iteration (header)
-///   * 1 fewer `malloc(cap*sizeof(T))` per loop iteration (data buffer)
-///   * Eliminates capacity ramp-up on every iteration
-///
-/// Soundness restrictions:
-///   * `v_old` must be `Type::Vec(T)`, `use_count == 1`, `!escapes`,
-///     `!captured`.
-///   * The matching alloc must be `VecNew(empty)` of `Vec(T)` with the
-///     SAME inner type T (so the buffer's element layout is reusable).
-///   * Same-block, same-block-loop-back-edge, and cross-block-loop-body
-///     patterns are all supported via the unified strategy below.
-///   * Loop-body cross-block pairing requires the loop body to be
-///     escape-free (any Call / IndirectCall / MethodCall / ClosureCall /
-///     ChanSend / SpawnActor invalidates the slot).
 fn vec_reuse_pairing(
     func: &mut mir::Function,
     uses: &HashMap<ValueId, UseInfo>,
@@ -548,7 +450,6 @@ fn vec_reuse_pairing(
 ) {
     let mut pairs = 0u32;
 
-    // Per-block strategies (1 forward, 2 back-edge).
     for bi in 0..func.blocks.len() {
         struct DropSite {
             inst_idx: usize,
@@ -566,10 +467,6 @@ fn vec_reuse_pairing(
         for (ii, inst) in func.blocks[bi].insts.iter().enumerate() {
             match &inst.kind {
                 InstKind::Drop(v, Type::Vec(elem)) if !func.perceus.reuse_save.contains_key(v) => {
-                    // The Drop instruction itself proves uniqueness at
-                    // this program point — even if `push`/`get` are seen as
-                    // escapes by the conservative use analysis, ownership
-                    // semantics guarantee no live alias remains.
                     drops.push(DropSite {
                         inst_idx: ii,
                         value: *v,
@@ -603,7 +500,6 @@ fn vec_reuse_pairing(
         let mut used_a = vec![false; allocs.len()];
         let mut decisions: Vec<(ValueId, ValueId, u32)> = Vec::new();
 
-        // Strategy 1: forward pair (Drop@i → VecNew@j>i with no kill in [i,j]).
         for (di, d) in drops.iter().enumerate() {
             if used_d[di] {
                 continue;
@@ -628,7 +524,6 @@ fn vec_reuse_pairing(
             }
         }
 
-        // Strategy 2: back-edge same-block (Drop@end → VecNew@start of next iter).
         if is_loop {
             for (di, d) in drops.iter().enumerate() {
                 if used_d[di] {
@@ -665,7 +560,6 @@ fn vec_reuse_pairing(
         }
     }
 
-    // Strategy 3: cross-block loop-body pairing.
     let loops = collect_loop_bodies(func);
     for body in loops {
         let has_escape = body.iter().any(|&bi| {
@@ -726,11 +620,6 @@ fn vec_reuse_pairing(
     hints.stats.reuse_sites += pairs;
 }
 
-// ── Pass: drop fusion ────────────────────────────────────────────
-
-/// Replace runs of >=2 consecutive `Drop` instructions with a single
-/// `InstKind::DropMany`. Drops tagged for reuse-save are excluded so codegen
-/// can still stash their pointers individually.
 fn drop_fusion(func: &mut mir::Function, hints: &mut PerceusHints) {
     let mut fused = 0u32;
     for bb in &mut func.blocks {

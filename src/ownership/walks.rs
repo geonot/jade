@@ -1,5 +1,3 @@
-//! Variable-id collectors used by capture analysis.
-
 use super::OwnershipVerifier;
 use crate::hir::*;
 

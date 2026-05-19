@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -30,12 +28,11 @@ impl Typer {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Exp => {
                         let resolved_l = self.infer_ctx.shallow_resolve(&hl.ty);
                         let resolved_r = self.infer_ctx.shallow_resolve(&hr.ty);
-                        // For Add: if either side is String, this is string concatenation
+
                         let is_string_concat = matches!(op, BinOp::Add)
                             && (matches!(resolved_l, Type::String)
                                 || matches!(resolved_r, Type::String));
                         if is_string_concat {
-                            // Constrain the other side to String too
                             if matches!(resolved_l, Type::TypeVar(_)) {
                                 let _ = self.infer_ctx.unify_at(
                                     &hl.ty,
@@ -53,8 +50,6 @@ impl Typer {
                                 );
                             }
                         } else {
-                            // For Add with unresolved operands, use Addable (numeric + String)
-                            // For all other arithmetic ops, use Numeric
                             let arith_constraint = if matches!(op, BinOp::Add) {
                                 super::unify::TypeConstraint::Addable
                             } else {
@@ -113,10 +108,6 @@ impl Typer {
 
                 let (hl, hr) = self.coerce_binop_operands(hl, hr);
 
-                // ── R8: arithmetic operand validation (concrete types) ──
-                // Reject Bool/Char/Void/etc. on arithmetic ops where both sides
-                // are already concrete; previously these slipped through to the
-                // codegen and produced surprising bit-twiddling results.
                 if matches!(
                     op,
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Exp
@@ -128,10 +119,7 @@ impl Typer {
                             Type::TypeVar(_) | Type::Ptr(_) => true,
                             t if t.is_num() => true,
                             Type::String if allow_string => true,
-                            // Struct overloads are dispatched in codegen via
-                            // `<Struct>_{add,sub,mul,div}`; allow them here and
-                            // surface a clearer "no such method" diagnostic
-                            // later if missing.
+
                             Type::Struct(_, _) => true,
                             _ => false,
                         }

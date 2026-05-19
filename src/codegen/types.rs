@@ -1,5 +1,3 @@
-//! Codegen for type metadata and runtime type information.
-
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue};
 use inkwell::{AddressSpace, IntPredicate};
@@ -42,10 +40,9 @@ impl<'ctx> Compiler<'ctx> {
                 )
                 .into(),
             Type::Fn(_, _) => self.closure_type().into(),
-            Type::Ptr(_)
-            | Type::ActorRef(_)
-            | Type::Coroutine(_)
-            | Type::Channel(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Ptr(_) | Type::ActorRef(_) | Type::Coroutine(_) | Type::Channel(_) => {
+                self.ctx.ptr_type(AddressSpace::default()).into()
+            }
             Type::Param(name) => {
                 panic!(
                     "ICE: unresolved type parameter '{name}' reached codegen — this indicates a monomorphization bug in the typer"
@@ -53,11 +50,7 @@ impl<'ctx> Compiler<'ctx> {
             }
             Type::Generator(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.llvm_ty(inner),
-            // Row<T> v1: represented identically to the underlying
-            // store row struct `__store_{name}`. The implicit `sid`
-            // used by `.update`/field-write sugar is tracked at the
-            // typer/MIR layer, not in the LLVM value. See
-            // docs/access-semantics-sprint.md §6.
+
             Type::Row(name) => {
                 let sname = format!("__store_{}", name.as_str());
                 self.module
@@ -83,13 +76,11 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Closure fat-pointer: { fn_ptr: ptr, env_ptr: ptr }
     pub(crate) fn closure_type(&self) -> inkwell::types::StructType<'ctx> {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         self.ctx.struct_type(&[ptr.into(), ptr.into()], false)
     }
 
-    /// Arena struct: { base: ptr, cap: i64, offset: i64 }
     pub(crate) fn arena_type(&self) -> inkwell::types::StructType<'ctx> {
         self.module.get_struct_type("Arena").unwrap_or_else(|| {
             let st = self.ctx.opaque_struct_type("Arena");
@@ -427,9 +418,6 @@ impl<'ctx> Compiler<'ctx> {
             ))
             .into()),
             hir::CoercionKind::ArrayToVec { elem_ty, len } => {
-                // Promote a stack `[N x T]` array value into a heap-allocated
-                // Vec by malloc'ing a header + buffer, copying the elements,
-                // and returning the header pointer.
                 let i64t = self.ctx.i64_type();
                 let header_ty = self.vec_header_type();
                 let lty = self.llvm_ty(elem_ty);
@@ -455,9 +443,6 @@ impl<'ctx> Compiler<'ctx> {
                         .expect("ICE: call returned void")
                         .into_pointer_value();
 
-                    // The array value is an LLVM aggregate `[N x T]`. Spill it
-                    // to a temporary alloca so we can GEP element-by-element
-                    // and copy into the heap buffer.
                     let arr_llty = lty.array_type(n as u32);
                     let tmp = self.entry_alloca(arr_llty.into(), "a2v.tmp");
                     b!(self.bld.build_store(tmp, val));

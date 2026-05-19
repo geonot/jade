@@ -1,5 +1,3 @@
-//! Strongly-connected-component analysis for mutually recursive let-groups.
-
 use crate::ast;
 use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet};
@@ -29,8 +27,6 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<Symbol>) {
             collect_calls_expr(e, calls);
         }
         ast::Expr::Method(recv, method, args, _) | ast::Expr::Send(recv, method, args, _) => {
-            // For module-qualified calls like math.factorial(x),
-            // add "math_factorial" as a call dependency
             if let ast::Expr::Ident(name, _) = recv.as_ref() {
                 calls.insert(Symbol::intern(&format!("{}_{}", name, method)));
             }

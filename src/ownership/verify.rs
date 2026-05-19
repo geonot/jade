@@ -1,5 +1,3 @@
-//! Tree walks for `verify_*` and `verify_pat`.
-
 use super::{DiagKind, OwnershipDiag, OwnershipVerifier, VarState};
 use crate::hir::*;
 
@@ -229,9 +227,6 @@ impl OwnershipVerifier {
                 for a in args {
                     if let ExprKind::Var(def_id, name) = &a.kind {
                         self.check_use(*def_id, &name.as_str(), a.span);
-                        // Implicit borrow: Perceus RC handles copies at runtime.
-                        // Only record a borrow, not a move, so the variable
-                        // can be reused in subsequent expressions.
                     } else {
                         self.verify_expr(a);
                     }
@@ -329,7 +324,6 @@ impl OwnershipVerifier {
             }
 
             ExprKind::Lambda(params, body) => {
-                // Track captures from outer scope as moves
                 let mut captured_ids = std::collections::HashSet::new();
                 Self::collect_var_ids_block(body, &mut captured_ids);
                 let param_ids: std::collections::HashSet<DefId> =
@@ -346,7 +340,6 @@ impl OwnershipVerifier {
                                 message: "lambda captures already-moved value".into(),
                             });
                         } else if state.ownership == Ownership::Owned {
-                            // Capturing an owned variable constitutes a move
                             self.record_move(*cap_id, expr.span);
                         }
                     }
@@ -365,7 +358,7 @@ impl OwnershipVerifier {
                         },
                     );
                 }
-                // Define captured variables as available in the lambda scope
+
                 for cap_id in &captured_ids {
                     if param_ids.contains(cap_id) || *cap_id == DefId::BUILTIN {
                         continue;
@@ -469,7 +462,7 @@ impl OwnershipVerifier {
             ExprKind::ChannelSend(ch, val) => {
                 self.verify_expr(ch);
                 self.verify_expr(val);
-                // Sending through a channel constitutes a move
+
                 if let ExprKind::Var(def_id, _name) = &val.kind {
                     self.record_move(*def_id, val.span);
                 } else if let Some((root_id, _)) = Self::extract_root_var(val) {

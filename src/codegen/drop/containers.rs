@@ -1,10 +1,6 @@
-//! Container and runtime-object drop helpers.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Drop a Vec, recursively destroying elements if they are non-trivially
-    /// droppable. O(n) in element count, O(1) for POD elements.
     pub(in crate::codegen::drop) fn drop_vec_deep(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -13,10 +9,6 @@ impl<'ctx> Compiler<'ctx> {
         self.drop_vec_impl(val, elem, true)
     }
 
-    /// Drop only the *elements* of a Vec — frees per-element heap if elements
-    /// are non-trivially-droppable, but **leaves the data buffer and header
-    /// allocations intact** so they can be recycled by Perceus reuse pairing.
-    /// The caller is responsible for stashing or freeing the header pointer.
     pub(crate) fn drop_vec_elements_only(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -37,7 +29,6 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.current_fn();
         let free = self.ensure_free();
 
-        // val is the header pointer itself (already loaded from alloca)
         let header_ptr = val.into_pointer_value();
 
         let null = ptr_ty.const_null();
@@ -50,7 +41,6 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
         self.bld.position_at_end(drop_bb);
 
-        // If elements need dropping, iterate and drop each
         if !elem.is_trivially_droppable() {
             let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
             let data_ptr =
@@ -61,7 +51,6 @@ impl<'ctx> Compiler<'ctx> {
             let elem_llvm = self.llvm_ty(elem);
             let elem_size = elem_llvm.size_of().expect("ICE: type has no size");
 
-            // Loop: for i in 0..len { drop_value(data[i]) }
             let loop_bb = self.ctx.append_basic_block(fv, "dvd.loop");
             let body_bb = self.ctx.append_basic_block(fv, "dvd.body");
             let post_bb = self.ctx.append_basic_block(fv, "dvd.post");
@@ -86,9 +75,7 @@ impl<'ctx> Compiler<'ctx> {
             };
             let elem_val = b!(self.bld.build_load(elem_llvm, elem_ptr, "dvd.ev"));
             self.drop_value(elem_val, elem)?;
-            // After drop_value, the builder may be in a different BB (e.g., if
-            // the element type has its own control flow). Use the actual current
-            // block for the phi incoming edge.
+
             let after_drop_bb = self.current_bb();
             let next = b!(self
                 .bld
@@ -97,7 +84,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unconditional_branch(loop_bb));
 
             self.bld.position_at_end(post_bb);
-            // Free data buffer and header
+
             if free_storage {
                 let data_gep2 = b!(self
                     .bld
@@ -107,7 +94,6 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(free, &[header_ptr.into()], ""));
             }
         } else {
-            // POD elements: just free buffer and header
             if free_storage {
                 let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
                 let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf"));
@@ -121,9 +107,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop a Map, recursively destroying keys and values if they are non-trivially
-    /// droppable. Iterates all capacity slots, checking the occupancy marker at
-    /// bucket offset 40. Bucket layout: [8B hash][24B key][8B value][1B occ][7B pad].
     pub(in crate::codegen::drop) fn drop_map_deep(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -175,7 +158,6 @@ impl<'ctx> Compiler<'ctx> {
             .build_int_compare(inkwell::IntPredicate::ULT, i, cap, "dmd.cmp"));
         b!(self.bld.build_conditional_branch(cond, check_bb, post_bb));
 
-        // Check occupancy marker at bucket offset 40
         self.bld.position_at_end(check_bb);
         let offset = b!(self.bld.build_int_mul(i, bucket_size, "dmd.off"));
         let _entry_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[offset], "dmd.ep")) };
@@ -194,7 +176,6 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_occupied, body_bb, inc_bb));
 
-        // Drop key (at offset 8) and value (at offset 32) if non-trivially-droppable
         self.bld.position_at_end(body_bb);
         if !kt.is_trivially_droppable() {
             let key_off = b!(self
@@ -236,9 +217,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop a Set, recursively destroying elements if they are non-trivially
-    /// droppable. Same bucket layout as Map: 48-byte entries, occupancy at offset 40,
-    /// element at offset 8.
     pub(in crate::codegen::drop) fn drop_set_deep(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -336,7 +314,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Free a container with {ptr, len, cap} header: free data, free header.
     pub(in crate::codegen::drop) fn drop_container_simple(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -347,7 +324,6 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.current_fn();
         let null = ptr_ty.const_null();
 
-        // val is the header pointer itself (already loaded from alloca)
         let header_ptr = val.into_pointer_value();
 
         let is_null =
@@ -371,7 +347,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop containers with the same {ptr, len, cap} header (Deque, PriorityQueue).
     pub(in crate::codegen::drop) fn drop_container_header(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -380,7 +355,6 @@ impl<'ctx> Compiler<'ctx> {
         self.drop_container_simple(val)
     }
 
-    /// Drop Arena: free the base pointer.
     pub(in crate::codegen::drop) fn drop_arena(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -395,7 +369,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop NDArray: free the data buffer (raw malloc'd).
     pub(in crate::codegen::drop) fn drop_ndarray(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -403,8 +376,6 @@ impl<'ctx> Compiler<'ctx> {
         self.drop_ptr_allocated(val)
     }
 
-    /// Free a pointer-allocated value (generator, coroutine, channel, etc.)
-    /// Null-check, then free.
     pub(in crate::codegen::drop) fn drop_ptr_allocated(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -436,7 +407,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Drop a generator: calls jinn_gen_destroy to free coroutine stack + gen block.
     pub(in crate::codegen::drop) fn drop_generator(
         &mut self,
         val: BasicValueEnum<'ctx>,

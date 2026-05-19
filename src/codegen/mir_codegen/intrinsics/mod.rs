@@ -1,5 +1,3 @@
-//! Builtin and intrinsic codegen: overflow arithmetic, bit operations, string formatting, and sleep.
-
 use super::super::Compiler;
 use super::super::b;
 use crate::mir;

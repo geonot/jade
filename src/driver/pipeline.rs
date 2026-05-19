@@ -54,22 +54,18 @@ pub(super) fn compile_and_link(
         .parse_program()
         .unwrap_or_else(|e| die(&format!("{e}")));
 
-    // Multi-file project: merge all .jn files from the source directory
     let base_dir = input.parent().unwrap_or(std::path::Path::new("."));
     let input_canon = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
     let merged = merge_source_files(&mut prog, base_dir, &input_canon);
 
     let mut loaded: HashSet<Symbol> = merged;
-    // Prevent auto-import from re-importing the entry file itself
+
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let packages = load_packages(base_dir);
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
     let entity_index = EntityIndex::build(base_dir, &packages);
     resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
-    // P0-9: enforce that an executable program has a `*main` entry point.
-    // Library/test/standalone builds are exempt — they either provide their
-    // own entry (test runner / freestanding) or have no entry at all.
     if !standalone && !test_mode {
         let has_main = prog
             .decls
@@ -131,7 +127,6 @@ pub(super) fn compile_and_link(
         die("compilation aborted due to ownership errors");
     }
 
-    // ── MIR pass: HIR → MIR → optimize → (optional print) ──
     let mir_opt_level = match opt_level {
         0 => crate::mir::opt::OptLevel::None,
         1 => crate::mir::opt::OptLevel::Basic,
@@ -145,7 +140,6 @@ pub(super) fn compile_and_link(
         print!("{}", crate::mir::printer::print_program(&mir_prog));
     }
 
-    // ── Incremental compilation: check and report cache status ──
     if incremental {
         let incr_cache = crate::incr::ArtifactCache::new();
         let (dirty, _keys) = crate::incr::compute_dirty_set(&hir_prog, &incr_cache);

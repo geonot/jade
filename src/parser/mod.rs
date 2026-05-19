@@ -1,5 +1,3 @@
-//! Recursive-descent parser. Tokens → AST.
-
 use crate::ast::*;
 use crate::lexer::{Spanned, Token};
 
@@ -14,25 +12,15 @@ pub struct Parser {
     pos: usize,
     errors: Vec<ParseError>,
     suppress_by: bool,
-    /// When set, `parse_ternary` will not consume a trailing `! else_expr`
-    /// as the ternary-else form. Used by statement-level parsers (e.g. the
-    /// `is` binding) so they can recognize `a is x() ! Variant` as the
-    /// guard-form sugar instead of as a ternary.
+
     suppress_bang_else: bool,
-    /// Queue of statements that desugaring inside `parse_stmt` wants to
-    /// splice into the enclosing block *before* the statement actually
-    /// returned from `parse_stmt`. Used by Layer-2 sugar (`a is x() ! V`)
-    /// where one source statement expands into several. `parse_block`
-    /// drains this queue between statements.
+
     pending_pre_stmts: Vec<Stmt>,
-    /// Same, but spliced *after* the returned statement.
+
     pending_post_stmts: Vec<Stmt>,
     gensym_counter: u32,
     depth: u32,
-    /// Active loop labels in scope; used so `break LABEL` / `continue LABEL`
-    /// in `parse_break`/`parse_continue` can recognize the label and emit a
-    /// magic placeholder expression instead of a bare identifier (which
-    /// would otherwise be looked up as a variable).
+
     label_stack: Vec<crate::intern::Symbol>,
 }
 
@@ -94,9 +82,6 @@ impl Parser {
             }
         }
         if !self.errors.is_empty() {
-            // Render only the first error's location; collapse remaining
-            // errors into the message body so we don't print a useless
-            // `line 0:0:` wrapper above the real diagnostic.
             let msgs: Vec<String> = self.errors.iter().map(|e| e.to_string()).collect();
             let (line, col) = match &self.errors[0] {
                 ParseError::Error { line, col, .. } => (*line, *col),
@@ -106,8 +91,7 @@ impl Parser {
             } else {
                 msgs.join("\n")
             };
-            // Strip the redundant `line N:M:` prefix from the head message
-            // since the outer ParseError already carries it.
+
             let body = body
                 .strip_prefix(&format!("line {line}:{col}: "))
                 .map(|s| s.to_string())
@@ -119,7 +103,7 @@ impl Parser {
             });
         }
         let mut prog = Program { decls };
-        // If there are top-level statements and no explicit *main, wrap them into an implicit *main
+
         let has_explicit_main = prog
             .decls
             .iter()
@@ -141,8 +125,6 @@ impl Parser {
                         body_stmts.push(stmt);
                     }
                     Decl::Const(name, val, sp) => {
-                        // Keep constants as top-level Decl::Const so the typer
-                        // registers them in self.consts (visible to type methods).
                         if main_span.line == 0 {
                             main_span = sp;
                         }
@@ -171,14 +153,12 @@ impl Parser {
         Ok(prog)
     }
 
-    /// Skip tokens until the next likely declaration boundary.
     fn synchronize(&mut self) {
         loop {
             if self.eof() {
                 break;
             }
             match self.peek() {
-                // Declaration-starting tokens
                 Token::Star
                 | Token::Type
                 | Token::Enum
@@ -194,7 +174,7 @@ impl Parser {
                 | Token::Alias => break,
                 Token::Newline => {
                     self.advance();
-                    // After newline, check if next token starts a declaration
+
                     if self.eof() {
                         break;
                     }
@@ -271,7 +251,6 @@ impl Parser {
         }
     }
 
-    /// Skip newlines, indents, and dedents inside parenthesized/bracketed contexts.
     fn skip_ws(&mut self) {
         while self.check(Token::Newline) || self.check(Token::Indent) || self.check(Token::Dedent) {
             self.advance();
@@ -320,20 +299,12 @@ impl Parser {
                     self.advance();
                     return Ok("insert".into());
                 }
-                // `log` is a builtin call keyword but is also a perfectly
-                // valid method/field name on user types (e.g. `obj.log()`,
-                // which the typer dispatches to a user `log` method or to
-                // the default `log(self)` formatter). Accept it here so
-                // method-position parsing succeeds.
+
                 Token::Log => {
                     self.advance();
                     return Ok("log".into());
                 }
-                // Logical/bitwise keyword operators are also valid as
-                // function/method/field names (e.g. `*xor(...)`,
-                // `obj.xor(...)`, `stream.and(...)`). At an
-                // identifier-expected position there is no ambiguity with
-                // the operator form.
+
                 Token::Xor => {
                     self.advance();
                     return Ok("xor".into());
@@ -395,27 +366,6 @@ impl Parser {
         }
     }
 
-    // ── Access-modifier parsing helpers ────────────────────────────────
-    //
-    // The four access modifiers (`copy`, `ref`, `mut`, `take`) are
-    // contextual keywords: the lexer emits them as plain `Ident` tokens
-    // and the parser disambiguates them by position. They appear in
-    // three grammatical slots:
-    //
-    //   1. After `is` in a bind:    `x is ref users.get(0)`
-    //   2. After `as` in a typed
-    //      parameter/field position: `f(items as ref Vec(Row))`
-    //   3. Immediately after `for`
-    //      before the binder:        `for ref user in users`
-    //
-    // To avoid breaking expressions whose head happens to be an
-    // identifier named `copy`/`ref`/`mut`/`take`, the lookahead requires
-    // the modifier to be followed by something that *cannot* be the
-    // start of a call/index/method chain on the modifier itself.
-    //
-    // See `docs/access-semantics.md` \u00a72 for the full rationale.
-
-    /// True if `name` is one of the four access-modifier keywords.
     fn is_access_mod_keyword(name: &str) -> bool {
         matches!(name, "copy" | "take" | "const")
     }
@@ -429,10 +379,6 @@ impl Parser {
         }
     }
 
-    /// Try to consume an access modifier appearing immediately after `is`
-    /// in a bind. The lookahead requires the next-next token to be a
-    /// plausible expression-start that does NOT chain off the modifier
-    /// itself (i.e. NOT `(`, `.`, `[`, etc.).
     pub(in crate::parser) fn try_parse_access_mod_after_is(
         &mut self,
     ) -> Option<crate::ast::AccessMod> {
@@ -440,7 +386,7 @@ impl Parser {
             Token::Ident(n) if Self::is_access_mod_keyword(&n.as_str()) => n.as_str().to_string(),
             _ => return None,
         };
-        // Disambiguate `x is copy(foo)` (call) from `x is copy foo` (modifier).
+
         match self.peek_at(1) {
             Token::LParen
             | Token::Dot
@@ -456,11 +402,6 @@ impl Parser {
         Some(am)
     }
 
-    /// Try to consume an access modifier appearing at a type-annotation
-    /// position (after `as`, before a Type). Slightly different
-    /// disambiguation: a Type must follow, so `ref(...)` is NOT a Type
-    /// and we accept the modifier whenever the next-next token can start
-    /// a Type identifier or a builtin type keyword.
     pub(in crate::parser) fn try_parse_access_mod_at_type_pos(
         &mut self,
     ) -> Option<crate::ast::AccessMod> {
@@ -468,10 +409,10 @@ impl Parser {
             Token::Ident(n) if Self::is_access_mod_keyword(&n.as_str()) => n.as_str().to_string(),
             _ => return None,
         };
-        // Next must look like the start of a Type.
+
         match self.peek_at(1) {
             Token::Ident(_) => {}
-            // Builtin/keyword types that may follow.
+
             _ => return None,
         }
         let am = Self::ident_to_access_mod(&name)?;
@@ -479,9 +420,6 @@ impl Parser {
         Some(am)
     }
 
-    /// Try to consume an access modifier at the for-loop binder slot:
-    /// `for copy/ref/mut/take BINDER in EXPR`. The next-next token must
-    /// be the binder name (an Ident).
     pub(in crate::parser) fn try_parse_access_mod_at_binder_pos(
         &mut self,
     ) -> Option<crate::ast::AccessMod> {

@@ -1,5 +1,3 @@
-//! Codegen for map literal/operation builtins.
-
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -398,18 +396,16 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.map_collect(header_ptr, 8) // key offset = 8
+        self.map_collect(header_ptr, 8)
     }
 
     fn map_values(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.map_collect(header_ptr, 32) // value offset = 32
+        self.map_collect(header_ptr, 32)
     }
 
-    /// Iterate all occupied entries in the map and collect the field at
-    /// `field_offset` bytes into each entry into a new Vec.
     fn map_collect(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -420,7 +416,6 @@ impl<'ctx> Compiler<'ctx> {
         let header_ty = self.vec_header_type();
         let fv = self.current_fn();
 
-        // Read map capacity and entries pointer
         let cap_gep = b!(self
             .bld
             .build_struct_gep(header_ty, header_ptr, 2, "mk.capp"));
@@ -435,17 +430,14 @@ impl<'ctx> Compiler<'ctx> {
         ))
         .into_pointer_value();
 
-        // Read map length (number of occupied entries)
         let len_gep = b!(self
             .bld
             .build_struct_gep(header_ty, header_ptr, 1, "mk.lenp"));
         let map_len = b!(self.bld.build_load(i64t, len_gep, "mk.len")).into_int_value();
 
-        // Allocate result Vec header
         let result_hdr = self.compile_vec_new(&[])?;
         let result_ptr = result_hdr.into_pointer_value();
 
-        // Pre-allocate buffer for result vec
         let elem_size = i64t.const_int(8, false);
         let buf_bytes = b!(self.bld.build_int_nsw_mul(map_len, elem_size, "mk.bufsz"));
         let malloc = self.ensure_malloc();
@@ -463,7 +455,6 @@ impl<'ctx> Compiler<'ctx> {
             .build_struct_gep(header_ty, result_ptr, 2, "mk.rcapp"));
         b!(self.bld.build_store(r_cap_gep, map_len));
 
-        // Loop through all entries
         let entry_size = i64t.const_int(48, false);
         let idx_alloca = self.entry_alloca(i64t.into(), "mk.idx");
         b!(self.bld.build_store(idx_alloca, i64t.const_int(0, false)));
@@ -509,9 +500,8 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_gep(i8t, ep, &[i64t.const_int(field_offset, false)], "mk.fp"))
         };
-        // For keys (offset 8), load 24 bytes (String SSO). For values (offset 32), load i64.
+
         let field_val = if field_offset == 8 {
-            // Key is a String (24 bytes SSO) — copy into result vec as String
             let st = self.string_type();
             b!(self.bld.build_load(st, field_ptr, "mk.key"))
         } else {
@@ -549,7 +539,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(done_bb);
-        // Set result vec length
+
         let r_len_gep = b!(self
             .bld
             .build_struct_gep(header_ty, result_ptr, 1, "mk.rlenp"));

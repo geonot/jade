@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -81,7 +79,6 @@ impl Typer {
                     return self.lower_expr(&const_expr);
                 }
                 if let Some((_expr, _span)) = self.globals.get(name).cloned() {
-                    // Emit a load from the global variable
                     let init_expr = self.lower_expr(&_expr)?;
                     let ty = init_expr.ty.clone();
                     return Ok(hir::Expr {
@@ -118,7 +115,7 @@ impl Typer {
                         span: *span,
                     });
                 }
-                // Implicit self.field resolution inside method bodies
+
                 if let Some(ref type_name) = self.current_method_type.clone() {
                     let is_field = self
                         .structs
@@ -149,7 +146,6 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::QualifiedIdent(type_name, variant_name, span) => {
-                // Handle ErrorType:Variant or EnumType:Variant
                 if let Some(variants) = self.enums.get(type_name) {
                     if let Some((tag, (_, _))) = variants
                         .iter()

@@ -1,5 +1,3 @@
-//! MIR closure, actor, channel, builtin, dynamic dispatch, and inline-asm emission.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
@@ -13,7 +11,6 @@ impl<'ctx> Compiler<'ctx> {
                     self.emit_closure_create(&fn_name.as_str(), captures, &inst.ty)
                 }
                 mir::InstKind::ClosureCall(callee, args) => {
-                    // Same as IndirectCall for closures.
                     let callee_val = self.val(*callee);
                     let closure_st = callee_val.into_struct_value();
                     let fn_ptr = b!(self.bld.build_extract_value(closure_st, 0, "fn_ptr"))
@@ -37,7 +34,6 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.call_result(csv))
                 }
 
-                // ── Actors / Channels ──
                 mir::InstKind::SpawnActor(name, inits) => {
                     let init_vals: Vec<(crate::intern::Symbol, inkwell::values::BasicValueEnum)> =
                         inits
@@ -52,13 +48,11 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::ChanSend(ch, val) => self.emit_chan_send(*ch, *val),
                 mir::InstKind::ChanRecv(ch) => self.emit_chan_recv(*ch, &inst.ty),
                 mir::InstKind::SelectArm(channels, has_default) => {
-                    // Select: build case array, call jinn_select, return index.
                     let ch_vids: Vec<mir::ValueId> = channels.clone();
                     let dest = inst.dest.unwrap();
                     self.emit_select(&ch_vids, dest, *has_default)
                 }
 
-                // ── Builtins ──
                 mir::InstKind::Log(val) => {
                     let v = self.val(*val);
                     self.emit_log(v, &inst.ty)?;
@@ -72,7 +66,7 @@ impl<'ctx> Compiler<'ctx> {
                     let fail_bb = self.ctx.append_basic_block(fv, "assert.fail");
                     b!(self.bld.build_conditional_branch(cond, pass_bb, fail_bb));
                     self.bld.position_at_end(fail_bb);
-                    // Print assertion message and abort.
+
                     if let Some(printf) = self.module.get_function("printf") {
                         let fmt_str = format!("assertion failed: {msg}\n\0");
                         let gv = self
@@ -83,7 +77,7 @@ impl<'ctx> Compiler<'ctx> {
                             .bld
                             .build_call(printf, &[gv.as_pointer_value().into()], ""));
                     }
-                    // Call abort.
+
                     let abort = self.module.get_function("abort").unwrap_or_else(|| {
                         let ft = self.ctx.void_type().fn_type(&[], false);
                         self.module
@@ -95,7 +89,6 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
 
-                // ── Dynamic dispatch ──
                 mir::InstKind::InlineAsm(template, args) => {
                     let arg_vals: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                         args.iter().map(|a| self.val(*a).into()).collect();
@@ -118,11 +111,11 @@ impl<'ctx> Compiler<'ctx> {
                     let asm = self.ctx.create_inline_asm(
                         ft,
                         template.clone(),
-                        String::new(), // constraints
-                        true,          // has side effects
-                        false,         // needs aligned stack
-                        None,          // dialect
-                        false,         // can throw
+                        String::new(),
+                        true,
+                        false,
+                        None,
+                        false,
                     );
                     b!(self.bld.build_indirect_call(ft, asm, &arg_vals, ""));
                     Ok(self.ctx.i8_type().const_int(0, false).into())

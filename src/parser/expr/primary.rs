@@ -1,5 +1,3 @@
-//! Primary expression parsing — literals, idents, calls, types, interpolation.
-
 use super::{ParseError, Parser};
 use crate::ast::*;
 use crate::lexer::Token;
@@ -54,7 +52,7 @@ impl Parser {
 
     pub(crate) fn parse_query_clause(&mut self) -> Result<QueryClause, ParseError> {
         let sp = self.span();
-        // Handle 'delete' keyword token directly since the lexer maps it to Token::Delete
+
         if self.check(Token::Delete) {
             self.advance();
             return Ok(QueryClause::Delete(sp));

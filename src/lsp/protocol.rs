@@ -1,5 +1,3 @@
-//! LSP protocol type definitions (request/response/notification payloads).
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -231,8 +229,6 @@ pub const CK_KEYWORD: i32 = 14;
 pub const CK_STRUCT: i32 = 22;
 pub const CK_ENUM_MEMBER: i32 = 20;
 
-// ── References / Rename ────────────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct ReferenceParams {
     #[serde(rename = "textDocument")]
@@ -261,8 +257,6 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
-// ── Semantic tokens ────────────────────────────────────────────
-
 #[derive(Serialize)]
 pub struct SemanticTokensOptions {
     pub legend: SemanticTokensLegend,
@@ -281,8 +275,6 @@ pub struct SemanticTokensLegend {
 pub struct SemanticTokensResult {
     pub data: Vec<u32>,
 }
-
-// ── Signature help ─────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct SignatureHelp {

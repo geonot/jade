@@ -1,5 +1,3 @@
-//! Constant-evaluator over pure functions.
-
 use super::ConstVal;
 use super::fold::{fold_float_op, fold_int_op};
 use crate::ast::{BinOp, Span, UnaryOp};
@@ -14,10 +12,10 @@ pub(super) fn try_eval_pure_call(
     depth: u32,
 ) -> Option<Expr> {
     if depth > 100 {
-        return None; // prevent infinite recursion
+        return None;
     }
     let func = pure_fns.get(&Symbol::intern(name))?;
-    // All args must be constants
+
     let const_args: Vec<_> = args
         .iter()
         .map(|a| match &a.kind {
@@ -28,7 +26,6 @@ pub(super) fn try_eval_pure_call(
         })
         .collect::<Option<Vec<_>>>()?;
 
-    // Build environment: param name → value
     let mut env: HashMap<hir::DefId, ConstVal> = HashMap::new();
     for (param, val) in func.params.iter().zip(const_args.iter()) {
         env.insert(param.def_id, val.clone());

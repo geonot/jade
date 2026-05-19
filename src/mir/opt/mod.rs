@@ -1,8 +1,3 @@
-//! MIR optimization passes — public API and driver.
-//!
-//! Each pass takes `&mut Function` and returns `true` if it changed anything.
-//! The driver runs passes in a fixed-point loop until convergence.
-
 use super::*;
 
 mod cfg_passes;
@@ -26,7 +21,6 @@ pub use scalar_passes::{
     copy_propagation, dead_code_elimination, simplify_phis, strength_reduction,
 };
 
-/// Optimization level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptLevel {
     None,
@@ -34,7 +28,6 @@ pub enum OptLevel {
     Full,
 }
 
-/// Run all optimization passes until a fixed point.
 pub fn optimize(func: &mut Function, level: OptLevel) {
     if level == OptLevel::None {
         return;

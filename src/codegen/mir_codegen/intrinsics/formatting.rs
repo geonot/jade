@@ -1,9 +1,6 @@
-//! Bit, string formatting, and sleep intrinsic MIR codegen.
-
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    /// Handle bit intrinsics: bswap, popcount, clz, ctz, rotate_left, rotate_right.
     pub(in crate::codegen) fn try_handle_bit_builtin(
         &mut self,
         name: &str,
@@ -116,7 +113,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Convert a value to a String, matching the sibling `compile_to_string` helper.
     pub(in crate::codegen) fn emit_to_string(
         &mut self,
         val: BasicValueEnum<'ctx>,

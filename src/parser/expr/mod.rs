@@ -1,5 +1,3 @@
-//! Parser arms for expressions including precedence climbing.
-
 use crate::ast::*;
 use crate::lexer::Token;
 

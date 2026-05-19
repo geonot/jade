@@ -1,5 +1,3 @@
-//! Source → token stream. The KEYWORDS table is the single source of truth for reserved words; see `docs/lexer/keywords.md`.
-
 use crate::ast::Span;
 use crate::intern::Symbol;
 use std::collections::HashMap;
@@ -31,10 +29,7 @@ pub struct Lexer<'s> {
     sol: bool,
     nl: bool,
     file: Option<crate::intern::Symbol>,
-    /// True iff the most recently emitted significant token was `Dot`.
-    /// When set, the next identifier is lexed as a plain `Ident` without
-    /// keyword promotion — so e.g. `ch.send(x)`, `xs.take()`, `m.match()`
-    /// see the method name as an identifier and not as the language keyword.
+
     after_dot: bool,
 }
 
@@ -153,9 +148,6 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    /// Tag every span this lexer produces with `file`. Use this when the
-    /// source comes from a known on-disk file so diagnostics include the
-    /// filename — essential for multi-file projects.
     pub fn with_file(mut self, file: crate::intern::Symbol) -> Self {
         self.file = Some(file);
         self
@@ -164,13 +156,11 @@ impl<'s> Lexer<'s> {
     pub fn tokenize(&mut self) -> Result<Vec<Spanned>, LexError> {
         let mut out = Vec::new();
 
-        // Skip shebang line (e.g. #!/usr/bin/env jinnc run)
         if self.pos == 0 && self.src.len() >= 2 && self.src[0] == b'#' && self.src[1] == b'!' {
             while self.pos < self.src.len() && self.src[self.pos] != b'\n' {
                 self.advance();
             }
             if self.pos < self.src.len() {
-                // consume the newline
                 self.line += 1;
                 self.col = 0;
                 self.pos += 1;
@@ -221,9 +211,7 @@ impl<'s> Lexer<'s> {
             }
             self.nl = false;
             let tok = self.lex_token()?;
-            // P0-10: after a `Dot`, the next identifier is a member/method
-            // name and must NOT be promoted to a language keyword. The
-            // promotion is suppressed inside `lex_ident` via `after_dot`.
+
             self.after_dot = matches!(tok.token, Token::Dot);
             out.push(tok);
         }
@@ -333,7 +321,6 @@ impl<'s> Lexer<'s> {
             return self.lex_ident();
         }
 
-        // Four-character tokens
         if self.pos + 3 < self.src.len() {
             if let (b'>', b'>', b'>', b'=') = (
                 ch,
@@ -433,7 +420,6 @@ impl<'s> Lexer<'s> {
                 if self.pos + 1 < self.src.len() {
                     let next = self.src[self.pos + 1];
                     if next == b'\\' {
-                        // Escape sequence char literal :  \n \t \r \\ \0
                         if self.pos + 2 < self.src.len() {
                             let esc = self.src[self.pos + 2];
                             let val = match esc {
@@ -445,9 +431,9 @@ impl<'s> Lexer<'s> {
                                 _ => None,
                             };
                             if let Some(v) = val {
-                                self.advance(); // skip :
-                                self.advance(); // skip \\
-                                self.advance(); // skip escape char
+                                self.advance();
+                                self.advance();
+                                self.advance();
                                 return Ok(Spanned {
                                     token: Token::CharLit(v),
                                     span: Span::new(start, self.pos, self.line, sc),
@@ -455,12 +441,10 @@ impl<'s> Lexer<'s> {
                             }
                         }
                     } else if next != b' ' && next != b'\n' && next != b'\r' {
-                        // Check for single-char literal: char after next must be
-                        // whitespace, punctuation, or EOF
                         let after = if self.pos + 2 < self.src.len() {
                             self.src[self.pos + 2]
                         } else {
-                            b' ' // treat EOF as whitespace
+                            b' '
                         };
                         let is_boundary = after == b' '
                             || after == b'\n'
@@ -478,8 +462,8 @@ impl<'s> Lexer<'s> {
                             || self.pos + 2 >= self.src.len();
                         if is_boundary {
                             let val = next as i64;
-                            self.advance(); // skip :
-                            self.advance(); // skip char
+                            self.advance();
+                            self.advance();
                             return Ok(Spanned {
                                 token: Token::CharLit(val),
                                 span: Span::new(start, self.pos, self.line, sc),
@@ -512,7 +496,6 @@ impl<'s> Lexer<'s> {
     }
 
     fn advance(&mut self) {
-        // Only count column for non-continuation UTF-8 bytes
         if self.pos < self.src.len() && (self.src[self.pos] & 0xC0) != 0x80 {
             self.col += 1;
         }

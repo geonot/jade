@@ -1,5 +1,3 @@
-//! Extracted typing rules.
-
 #![allow(unused_imports, unused_variables)]
 
 use super::super::unify;
@@ -19,10 +17,6 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Call(callee, args, span) => {
-                // Generic struct/variant constructor: `T of TypeArg(args)` —
-                // The parser shapes this as `Call(OfCall(Ident, type_expr), args)`.
-                // Reroute to lower_struct_or_variant with explicit type bindings
-                // so monomorphization does not have to infer from arg types.
                 if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref() {
                     if let ast::Expr::Ident(ctor_name, _) = inner.as_ref() {
                         let is_struct_ctor = self.generic_types.contains_key(ctor_name)
@@ -51,11 +45,7 @@ impl Typer {
                         }
                     }
                 }
-                // Positional struct constructor: `Box(7)` for a known
-                // (possibly generic) struct, no `is`-named fields. The parser
-                // routes Uppercase-Ident + `(` directly to Expr::Struct, but
-                // when the caller wrote it after a postfix path (e.g. parens
-                // following another postfix) it can also reach here.
+
                 if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
                     let is_struct = self.generic_types.contains_key(ctor_name)
                         || self.structs.contains_key(ctor_name);
@@ -80,7 +70,7 @@ impl Typer {
                         return Ok(result);
                     }
                 }
-                // Partial application: if any arg is $, wrap in a lambda
+
                 let has_placeholder = args.iter().any(|a| matches!(a, ast::Expr::Placeholder(_)));
                 if has_placeholder {
                     let param = ast::Param {
@@ -124,14 +114,10 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Method(obj, method, args, span) => {
-                // Module-qualified dispatch: module.fn(args) → module_fn(args)
-                // Only if the name is NOT a local variable (variables shadow modules)
                 if let ast::Expr::Ident(ref name, _) = **obj {
                     if self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
-                        // Rewrite module.fn(args) to a prefixed function call
                         let qualified_name = Symbol::intern(&format!("{}_{}", name, method));
-                        // If the qualified name is a known extern called from within
-                        // the module, dispatch via the extern path
+
                         if !self.fns.contains_key(&qualified_name)
                             && !self.inferable_fns.contains_key(&qualified_name)
                             && !self.generic_fns.contains_key(&qualified_name)
@@ -166,7 +152,7 @@ impl Typer {
                         }
                         return Ok(result);
                     }
-                    // extern.fn(args) → call extern function directly by bare name
+
                     if name == "extern" {
                         if let Some((id, ptys, ret)) = self.externs.get(method).cloned() {
                             let mut hargs = Vec::new();
@@ -186,7 +172,7 @@ impl Typer {
                                 span: *span,
                             });
                         }
-                        // Fall through — maybe it's a regular function named "extern_method"
+
                         let callee = ast::Expr::Ident(method.clone(), *span);
                         let result = self.lower_call(&callee, args, *span)?;
                         if let Some(exp) = expected {
@@ -213,7 +199,6 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Field(obj, field, span) => {
-                // Module-qualified constant access: module.CONST → module_CONST
                 if let ast::Expr::Ident(ref name, _) = **obj {
                     if self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
                         let qualified_name = Symbol::intern(&format!("{}_{}", name, field));
@@ -222,12 +207,7 @@ impl Typer {
                     }
                 }
                 let hobj = self.lower_expr(obj)?;
-                // P4 §5.2 use-after-partial-move check. If `obj` is a bare
-                // var whose field `field` was previously moved out via
-                // `take` in this scope (and not reassigned), reading or
-                // borrowing the field is a compile error. Without this
-                // check the user would silently observe a zero/null value
-                // from the tombstone slot instead of an error.
+
                 if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind {
                     if self.suppress_moved_field_check == 0 {
                         if let Some(moved) = self.moved_fields.get(parent_id) {
@@ -246,10 +226,7 @@ impl Typer {
                     }
                 }
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
-                // Actor message send-with-no-args sugar: `t.show` where `t :
-                // ActorRef(Tally)` is desugared to a method call so the actor
-                // dispatch path runs (otherwise we attempt a struct field load
-                // on the actor handle, which has no such field).
+
                 if let Type::ActorRef(actor_name) = &resolved_ty {
                     if let Some((_, _, handlers)) = self.actors.get(actor_name) {
                         if handlers.iter().any(|(n, _, _)| n == field) {
@@ -259,16 +236,11 @@ impl Typer {
                         }
                     }
                 }
-                // R3.4.d.1 auto-deref: heap nominals are intrinsically
-                // refcounted; no surface wrapper to peel \u2014 field access on
-                // the value already resolves to the struct's fields.
+
                 let peeled_ty = resolved_ty.clone();
                 let struct_name = match &peeled_ty {
                     Type::Struct(name, _) => Some(name.clone()),
-                    // P5 §6: `Row<store>` is a write-through handle whose
-                    // inner record layout is the store's auto-generated
-                    // `__store_{store}` struct. Field reads on the row
-                    // see the underlying struct's fields transparently.
+
                     Type::Row(store) => Some(Symbol::intern(&format!("__store_{store}"))),
                     Type::Ptr(inner) => match inner.as_ref() {
                         Type::Struct(name, _) => Some(name.clone()),
@@ -283,9 +255,6 @@ impl Typer {
                         {
                             (self.infer_ctx.shallow_resolve(fty), i)
                         } else {
-                            // Improve diagnostic for store-query result types:
-                            // surface the user-visible store name and suggest
-                            // `count <store> where …` for `.length`/`.len`.
                             let raw = name.as_str();
                             let display: String =
                                 if let Some(stripped) = raw.strip_prefix("__store_") {
@@ -436,9 +405,7 @@ impl Typer {
             ast::Expr::Index(arr, idx, span) => {
                 let harr = self.lower_expr(arr)?;
                 let hidx = self.lower_expr(idx)?;
-                // R3.4.d.1 auto-deref: peer through one layer of
-                // Heap nominals are intrinsically refcounted; no surface
-                // Rc wrapper to peel.
+
                 let peeled_ty = harr.ty.clone();
                 let elem_ty = match &peeled_ty {
                     Type::Array(et, _) => *et.clone(),

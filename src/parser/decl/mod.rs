@@ -1,5 +1,3 @@
-//! Parser arms for top-level declarations (fn, type, store, actor, import).
-
 use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
@@ -11,17 +9,8 @@ pub(super) enum Either<A, B> {
     Method(B),
 }
 
-/// Returns true if `e` is a *pure value expression* with no observable
-/// effect. We reject these at top level (P0-8) because they cannot
-/// possibly do anything useful — they are almost always typos like
-/// `42` or `x + 1` that the programmer meant to bind or print.
-///
-/// Side-effecting forms (`Call`, `Method`, `Spawn`, channel ops, etc.)
-/// are intentionally permitted: Jinn supports script-style files where
-/// top-level statements are wrapped in an implicit `*main`.
 fn is_useless_top_expr(e: &Expr) -> bool {
     match e {
-        // Pure literals / value constructors / arithmetic — useless if discarded.
         Expr::None(_)
         | Expr::Void(_)
         | Expr::Int(..)
@@ -61,7 +50,7 @@ fn is_useless_top_expr(e: &Expr) -> bool {
         | Expr::Builder(..)
         | Expr::QualifiedIdent(..)
         | Expr::Query(..) => true,
-        // Side-effecting or control-flow forms — permitted.
+
         Expr::Call(..)
         | Expr::Method(..)
         | Expr::Pipe(..)
@@ -88,7 +77,6 @@ impl Parser {
         match self.peek() {
             Token::Star => Ok(Decl::Fn(self.parse_fn()?)),
             Token::At => {
-                // Function annotations: @inline, @noinline, @cold, @hot
                 let attrs = self.parse_fn_attrs()?;
                 self.skip_nl();
                 if self.check(Token::Star) {
@@ -114,7 +102,7 @@ impl Parser {
             Token::Supervisor => Ok(Decl::Supervisor(self.parse_supervisor_def()?)),
             Token::Global => {
                 let sp = self.span();
-                self.advance(); // consume 'global'
+                self.advance();
                 let name = self.ident()?;
                 self.expect(Token::Is)?;
                 let val = self.parse_expr()?;
@@ -133,16 +121,14 @@ impl Parser {
             }
             Token::Ident(_) => {
                 let sp = self.span();
-                // Top-level `const NAME is VALUE` — `const` is a contextual
-                // keyword (lexed as Ident); consume it and parse as a
-                // normal binding declaration.
+
                 if let Token::Ident(first) = self.peek() {
                     if first.as_str() == "const"
                         && self.pos + 2 < self.tok.len()
                         && matches!(self.tok[self.pos + 1].token, Token::Ident(_))
                         && matches!(self.tok[self.pos + 2].token, Token::Is)
                     {
-                        self.advance(); // consume `const`
+                        self.advance();
                         let name = self.ident()?;
                         self.expect(Token::Is)?;
                         let val = self.parse_expr()?;
@@ -152,8 +138,7 @@ impl Parser {
                         return Ok(Decl::Const(name, val, sp));
                     }
                 }
-                // Look ahead: if next token is `Is` and the one after the ident is directly `Is`,
-                // this is a const/binding. Otherwise it's a top-level statement (expr, method call, etc.)
+
                 if self.pos + 1 < self.tok.len()
                     && matches!(self.tok[self.pos + 1].token, Token::Is)
                 {
@@ -165,7 +150,6 @@ impl Parser {
                     }
                     Ok(Decl::Const(name, val, sp))
                 } else {
-                    // Top-level statement: expression statement, method call, assignment, etc.
                     let stmt = self.parse_stmt()?;
                     if let Stmt::Expr(e) = &stmt {
                         if is_useless_top_expr(e) {
@@ -181,8 +165,6 @@ impl Parser {
                 }
             }
             _ => {
-                // Try to parse as a top-level expression/statement
-                // This handles keywords like `log`, `print`, `assert`, and literals
                 let save = self.pos;
                 match self.parse_stmt() {
                     Ok(stmt) => {

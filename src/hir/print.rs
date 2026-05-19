@@ -1,5 +1,3 @@
-//! HIR pretty-printer used by `--emit-hir`.
-
 use super::*;
 
 pub fn pretty_print(prog: &Program) -> String {

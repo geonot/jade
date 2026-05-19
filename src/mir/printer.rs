@@ -1,9 +1,6 @@
-//! Pretty-printer for MIR.
-
 use super::*;
 use std::fmt::Write;
 
-/// Format a comma-separated list of displayable values.
 fn fmt_args(args: &[impl std::fmt::Display]) -> String {
     args.iter()
         .map(|a| a.to_string())
@@ -11,7 +8,6 @@ fn fmt_args(args: &[impl std::fmt::Display]) -> String {
         .join(", ")
 }
 
-/// Print the entire MIR program.
 pub fn print_program(prog: &Program) -> String {
     let mut out = String::new();
 
@@ -42,7 +38,6 @@ pub fn print_program(prog: &Program) -> String {
     out
 }
 
-/// Print a single MIR function.
 pub fn print_function(func: &Function) -> String {
     let mut out = String::new();
 
@@ -154,19 +149,16 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::Clone(v, ty) => format!("clone {v} {ty:?}"),
         InstKind::Slice(a, s, e) => format!("slice {a}[{s}..{e}]"),
 
-        // Collections
         InstKind::VecNew(vals) => format!("vec_new [{}]", fmt_args(vals)),
         InstKind::VecPush(vec, val) => format!("vec_push {vec} {val}"),
         InstKind::VecLen(v) => format!("vec_len {v}"),
         InstKind::MapInit => "map_init".into(),
 
-        // Closures
         InstKind::ClosureCreate(name, captures) => {
             format!("closure_create {name}({})", fmt_args(captures))
         }
         InstKind::ClosureCall(f, args) => format!("closure_call {f}({})", fmt_args(args)),
 
-        // Actors/channels
         InstKind::SpawnActor(name, args) => format!(
             "spawn_actor {name}({})",
             args.iter()
@@ -179,11 +171,9 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::ChanRecv(ch) => format!("chan_recv {ch}"),
         InstKind::SelectArm(arms, _) => format!("select [{}]", fmt_args(arms)),
 
-        // Builtins
         InstKind::Log(v) => format!("log {v}"),
         InstKind::Assert(v, msg) => format!("assert {v} {msg:?}"),
 
-        // Dynamic dispatch
         InstKind::InlineAsm(template, args) => {
             format!("asm {:?} ({})", template, fmt_args(args))
         }

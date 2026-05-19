@@ -1,10 +1,3 @@
-//! Integration test for the MIR-Perceus pass pipeline reporting via
-//! `--debug-perceus`.
-//!
-//! The previous HIR-level analyzer (`perceus: ...` line) has been retired;
-//! the only stats line emitted today is `mir-perceus: ...`. Tests focus on
-//! the passes that the current MIR lowering reliably exercises.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -62,8 +55,7 @@ fn compile(src: &str) -> (Option<MirSummary>, String) {
         .expect("jinnc failed to start");
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    // Linker errors are fine for these tests — we only care about the
-    // perceus stats line that the compiler prints before linking.
+
     let summary = stderr
         .lines()
         .find(|l| l.starts_with("mir-perceus: "))
@@ -102,8 +94,6 @@ fn drop_fusion_coalesces_consecutive_rc_drops() {
 
 #[test]
 fn perceus_stats_are_nondestructive_for_trivial_main() {
-    // Pure scalar main: nothing should explode, drops_fused stays at 0
-    // because i32 lowering never emits Drop instructions for trivials.
     let src = "*main() returns i32\n    a is 1\n    b is 2\n    log(a + b)\n    0\n";
     let (summary, stderr) = compile(src);
     let s = require(summary, &stderr);
