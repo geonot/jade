@@ -1,0 +1,6 @@
+*bad() returns %i64
+    x is 42
+    return %x
+
+*main()
+    log("unreachable")

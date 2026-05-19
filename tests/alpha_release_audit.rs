@@ -136,6 +136,10 @@ fn alpha_audit_negative_compile_cases() {
         &["type mismatch", "i64", "string"],
     );
     expect_compile_fail("negative_generic_empty_enum.jn", &["FieldGet", "__tag"]);
+    expect_compile_fail(
+        "negative_return_of_borrowed.jn",
+        &["returning reference to local variable", "`x`"],
+    );
 }
 
 #[test]
