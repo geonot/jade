@@ -126,11 +126,62 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
         lowerer.func.block(lowerer.current_block).terminator,
         Terminator::Unreachable
     ) {
-        lowerer.lower_deferred_in_reverse();
-        if matches!(f.ret, Type::Void) {
-            lowerer.set_terminator(Terminator::Return(None));
+        // If the trailing open block is actually unreachable (e.g. it's a
+        // dead block created after an explicit `Ret`/`ErrReturn`), leave it
+        // as `Unreachable` — synthesizing a return here would emit a value
+        // of the wrong type and confuse downstream passes.
+        let preds = lowerer.func.predecessors();
+        let cur = lowerer.current_block;
+        // Forward-BFS reachability from entry. A block can have non-empty
+        // `preds` yet still be unreachable: e.g. the `after.ret` dead block
+        // gets a Goto(merge_bb) terminator set unconditionally by the if-stmt
+        // lowering even when the body ended with an explicit `return`.
+        // Those dead blocks register as predecessors of `merge_bb` but have
+        // no predecessors themselves, so they are not reachable from entry.
+        let is_reachable = {
+            let entry = lowerer.func.entry;
+            let mut visited = std::collections::HashSet::new();
+            let mut stack = vec![entry];
+            while let Some(b) = stack.pop() {
+                if !visited.insert(b) { continue; }
+                if b == cur { break; }
+                for s in lowerer.func.block(b).terminator.successors() {
+                    if !visited.contains(&s) { stack.push(s); }
+                }
+            }
+            visited.contains(&cur)
+        };
+        let _ = preds; // currently unused; kept for future heuristics
+
+        if !is_reachable {
+            // Already Unreachable — nothing to do.
         } else {
-            lowerer.set_terminator(Terminator::Return(Some(last)));
+            lowerer.lower_deferred_in_reverse();
+            if matches!(f.ret, Type::Void) {
+                lowerer.set_terminator(Terminator::Return(None));
+            } else {
+                // Special case: `main` is declared `-> i32` (exit code) but
+                // the user is not required to explicitly `return 0`. When
+                // the body falls through without producing an i32,
+                // synthesize one.
+                let last_ty = lowerer
+                    .func
+                    .blocks
+                    .iter()
+                    .flat_map(|b| b.insts.iter())
+                    .find(|i| i.dest == Some(last))
+                    .map(|i| i.ty.clone())
+                    .unwrap_or(Type::Void);
+                let ret_val = if f.name.as_str() == "main"
+                    && matches!(f.ret, Type::I32)
+                    && !matches!(last_ty, Type::I32)
+                {
+                    lowerer.emit(InstKind::IntConst(0), Type::I32, f.span)
+                } else {
+                    last
+                };
+                lowerer.set_terminator(Terminator::Return(Some(ret_val)));
+            }
         }
     }
 

@@ -41,6 +41,7 @@ impl InferCtx {
             | Type::Vec(inner)
             | Type::Ptr(inner)
             | Type::Coroutine(inner)
+            | Type::Generator(inner)
             | Type::Channel(inner) => self.occurs_in(v, inner),
             Type::Map(k, val) => self.occurs_in(v, k) || self.occurs_in(v, val),
             Type::Tuple(tys) => tys.iter().any(|t| self.occurs_in(v, t)),
@@ -76,6 +77,7 @@ impl InferCtx {
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.canonicalize_type(inner))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.canonicalize_type(inner))),
+            Type::Generator(inner) => Type::Generator(Box::new(self.canonicalize_type(inner))),
             Type::Channel(inner) => Type::Channel(Box::new(self.canonicalize_type(inner))),
             _ => ty.clone(),
         }
@@ -277,6 +279,9 @@ impl InferCtx {
             Type::Coroutine(inner) => {
                 Type::Coroutine(Box::new(self.resolve_core(inner, warn_only)))
             }
+            Type::Generator(inner) => {
+                Type::Generator(Box::new(self.resolve_core(inner, warn_only)))
+            }
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_core(inner, warn_only))),
             _ => ty.clone(),
         }
@@ -344,6 +349,7 @@ impl InferCtx {
             ),
             Type::Ptr(inner) => Type::Ptr(Box::new(self.substitute(inner, subst))),
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.substitute(inner, subst))),
+            Type::Generator(inner) => Type::Generator(Box::new(self.substitute(inner, subst))),
             Type::Channel(inner) => Type::Channel(Box::new(self.substitute(inner, subst))),
             _ => ty.clone(),
         }

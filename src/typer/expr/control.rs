@@ -22,7 +22,16 @@ impl Typer {
                     .unwrap_or_else(|| self.infer_ctx.fresh_var());
                 let hi = self.lower_if(i, &result_ty)?;
                 let ty = match hi.then.last() {
-                    Some(hir::Stmt::Expr(e)) => e.ty.clone(),
+                    Some(hir::Stmt::Expr(e)) => {
+                        let r = self.infer_ctx.unify_at(
+                            &result_ty,
+                            &e.ty,
+                            i.span,
+                            "if-expression then branch",
+                        );
+                        self.collect_unify_error(r);
+                        e.ty.clone()
+                    }
                     _ => Type::Void,
                 };
                 if let Some(ref els) = hi.els {

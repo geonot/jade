@@ -41,8 +41,17 @@ impl Typer {
         block: &ast::Block,
         ret_ty: &Type,
     ) -> Result<hir::Block, String> {
+        self.lower_block_with_tail(block, ret_ty, None)
+    }
+
+    pub(in crate::typer) fn lower_block_with_tail(
+        &mut self,
+        block: &ast::Block,
+        ret_ty: &Type,
+        tail_expected: Option<&Type>,
+    ) -> Result<hir::Block, String> {
         self.push_scope();
-        let mut stmts = self.lower_block_no_scope(block, ret_ty)?;
+        let mut stmts = self.lower_block_no_scope_with_tail(block, ret_ty, tail_expected)?;
         self.finalize_block_drops(&mut stmts);
         self.pop_scope();
         Ok(stmts)

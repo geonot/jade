@@ -79,7 +79,7 @@ impl Typer {
             }
         });
 
-        let hbody = self.lower_block_no_scope(body, &ret_ty)?;
+        let hbody = self.lower_block_no_scope_with_tail(body, &ret_ty, Some(&ret_ty))?;
         self.pop_scope();
 
         if let Some(hir::Stmt::Expr(e)) = hbody.last() {

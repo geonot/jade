@@ -258,11 +258,12 @@ impl Typer {
 
     pub(in crate::typer) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let mut hfn = self.lower_fn_deferred(f)?;
-        if f.ret.is_none() && f.name != "main" {
-            if !self.inferable_fns.contains_key(&f.name) {
-                hfn.ret = self.infer_ctx.resolve(&hfn.ret);
-            }
-        }
+        // NOTE: hfn.ret may still be an unresolved TypeVar here for fns with
+        // an inferred return type. Resolution is deferred to a final pass in
+        // lower_program() — after all method bodies have been lowered — so
+        // that ret types that ultimately unify with the return of a method
+        // (whose body is lowered later) do not get prematurely defaulted to
+        // i64.
 
         let einfo = crate::escape::analyze_fn(&hfn);
         for (id, t) in einfo.iter() {
@@ -343,7 +344,7 @@ impl Typer {
         }
         self.current_fn_declared_errors = declared_err_names.clone();
 
-        let mut body = self.lower_block_no_scope(&f.body, &ret)?;
+        let mut body = self.lower_block_no_scope_with_tail(&f.body, &ret, Some(&ret))?;
         self.finalize_block_drops(&mut body);
 
         let mut error_types: Vec<Type> = Vec::new();
@@ -626,7 +627,7 @@ impl Typer {
             });
         }
 
-        let body = self.lower_block(&m.body, &ret)?;
+        let body = self.lower_block_with_tail(&m.body, &ret, Some(&ret))?;
         self.pop_scope();
         self.current_method_type = prev_method_type;
 

@@ -277,7 +277,7 @@ impl Typer {
                                 });
                             }
 
-                            let hbody = self.lower_block_no_scope(&lbody, &resolved_ret)?;
+                            let hbody = self.lower_block_no_scope_with_tail(&lbody, &resolved_ret, Some(&resolved_ret))?;
                             self.pop_scope();
 
                             let final_ret = if lret.is_some() {

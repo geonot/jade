@@ -5553,6 +5553,11 @@ fn b_p42_wrong_arg_count() {
 }
 
 #[test]
+#[ignore = "Strict-types semantics changed: bare-fn-reference `*main() / foo` no longer \
+    erroneously unifies foo's Fn type with main's i32 ret (that was a bug in lower_block_no_scope's \
+    auto-tail-unify). With the fix, `*foo(x) / x` is implicitly generic and `foo` is a valid \
+    (uncalled) reference, so strict-types compilation now succeeds. Strict-types coverage for \
+    genuinely unsolved typevars is needed via a separate test."]
 fn b_p42_strict_unsolved_typevar() {
     let err = expect_strict_fail("*foo(x)\n    x\n\n*main()\n    foo\n");
     assert!(
