@@ -138,13 +138,8 @@ impl<'ctx> Compiler<'ctx> {
                 // Borrowed values don't escape
                 fv.add_attribute(loc, self.attr("nocapture"));
             }
-            // Rc/RcMut/Arc/ArcMut are shared-ownership — aliased by design.
             // Raw is user-managed — we make no assumptions.
-            hir::Ownership::Rc
-            | hir::Ownership::RcMut
-            | hir::Ownership::Arc
-            | hir::Ownership::ArcMut
-            | hir::Ownership::Raw => {}
+            hir::Ownership::Raw => {}
         }
         // Add dereferenceable(N) for known struct sizes
         if let Some(size) = self.dereferenceable_bytes(ty) {
@@ -393,108 +388,6 @@ impl<'ctx> Compiler<'ctx> {
         }
         self.current_reuse_alloca_slots.insert(slot, alloca);
         alloca
-    }
-
-    /// Try to consume a Perceus reuse slot for the allocation site currently
-    /// being emitted. Returns the saved heap pointer on hit; clears the slot
-    /// (writes NULL) so the same pointer cannot be consumed twice.
-    ///
-    /// First checks the SSA-scoped fast path (`current_reuse_slots`) for
-    /// forward-pairing within a basic block; falls back to a runtime load
-    /// from the slot's stack alloca for back-edge (loop) reuse. Returns
-    /// `None` when neither has a pointer, signalling the caller to malloc.
-    pub(crate) fn try_consume_reuse_token(
-        &mut self,
-        _needed_size: u64,
-    ) -> Option<PointerValue<'ctx>> {
-        let dest = self.current_alloc_dest?;
-        let slot = *self.current_perceus_meta.reuse_consume.get(&dest)?;
-        // Vec slots are owned by `try_consume_vec_slot` — bail.
-        if self.current_perceus_meta.vec_slots.contains(&slot) {
-            return None;
-        }
-        // SSA fast path.
-        if let Some(p) = self.current_reuse_slots.remove(&slot) {
-            return Some(p);
-        }
-        // Runtime alloca path: load slot, branch on null.
-        let alloca = self.get_or_create_reuse_alloca(slot);
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let cur = self
-            .bld
-            .build_load(ptr_ty, alloca, "perceus.slot.load")
-            .ok()?
-            .into_pointer_value();
-        let is_null = self.bld.build_is_null(cur, "perceus.slot.isnull").ok()?;
-        let fv = self.current_fn();
-        let then_bb = self.ctx.append_basic_block(fv, "perceus.consume.miss");
-        let else_bb = self.ctx.append_basic_block(fv, "perceus.consume.hit");
-        let cont_bb = self.ctx.append_basic_block(fv, "perceus.consume.cont");
-        let _ = self.bld.build_conditional_branch(is_null, then_bb, else_bb);
-        // miss: leave NULL, the caller will detect None and malloc.
-        // hit: clear the slot and pass the pointer through a phi.
-        self.bld.position_at_end(else_bb);
-        let null = ptr_ty.const_null();
-        let _ = self.bld.build_store(alloca, null);
-        let _ = self.bld.build_unconditional_branch(cont_bb);
-        // miss path: the caller needs to allocate a fresh block. We model
-        // that by returning None up to the caller (which invokes the
-        // malloc path), and let the caller branch back into cont_bb after
-        // it stores its result. To keep the IR linear we instead inline a
-        // phi over (NULL on miss, hit-ptr on hit) and let the caller
-        // null-check the returned pointer.
-        self.bld.position_at_end(then_bb);
-        let _ = self.bld.build_unconditional_branch(cont_bb);
-        self.bld.position_at_end(cont_bb);
-        let phi = self.bld.build_phi(ptr_ty, "perceus.slot.phi").ok()?;
-        phi.add_incoming(&[(&null, then_bb), (&cur, else_bb)]);
-        let result = phi.as_basic_value().into_pointer_value();
-        // Caller treats NULL as "no reuse, please malloc". To avoid the
-        // double-branch we'd need to thread control flow through the
-        // allocator; instead, expose a simple null-check helper at the
-        // call site by returning Some(result) and letting `rc_alloc`
-        // null-check. Update `rc_alloc` accordingly.
-        Some(result)
-    }
-
-    /// Save a heap pointer into a Perceus reuse slot keyed by the dropped
-    /// value's MIR ValueId. Records both the SSA fast-path entry and stores
-    /// the pointer into the slot's runtime alloca (freeing whatever was
-    /// previously stashed there to maintain the "at most one live pointer
-    /// per slot" invariant).
-    pub(crate) fn try_save_reuse_slot(
-        &mut self,
-        dropped: mir::ValueId,
-        ptr: PointerValue<'ctx>,
-    ) -> bool {
-        let slot = match self.current_perceus_meta.reuse_save.get(&dropped).copied() {
-            Some(s) if !self.current_perceus_meta.vec_slots.contains(&s) => s,
-            _ => return false,
-        };
-        // SSA fast-path snapshot for forward-pairing within the block.
-        self.current_reuse_slots.insert(slot, ptr);
-        // Runtime alloca: free any previously-saved pointer first to maintain
-        // the slot-holds-≤1-live-ptr invariant, then store this one.
-        let alloca = self.get_or_create_reuse_alloca(slot);
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        if let Ok(prev) = self.bld.build_load(ptr_ty, alloca, "perceus.save.prev") {
-            let prev_ptr = prev.into_pointer_value();
-            if let Ok(is_null) = self.bld.build_is_null(prev_ptr, "perceus.save.prev.null") {
-                let fv = self.current_fn();
-                let free_bb = self.ctx.append_basic_block(fv, "perceus.save.free");
-                let cont_bb = self.ctx.append_basic_block(fv, "perceus.save.cont");
-                let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
-                self.bld.position_at_end(free_bb);
-                let free_fn = self.ensure_free();
-                let _ = self
-                    .bld
-                    .build_call(free_fn, &[prev_ptr.into()], "perceus.free.prev");
-                let _ = self.bld.build_unconditional_branch(cont_bb);
-                self.bld.position_at_end(cont_bb);
-            }
-        }
-        let _ = self.bld.build_store(alloca, ptr);
-        true
     }
 
     /// Free any pointers still resident in this function's reuse slots.

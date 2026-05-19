@@ -23,7 +23,6 @@ pub struct PerceusHints {
     /// for backward compatibility; the IR no longer contains those drops.
     pub elide_drops: std::collections::HashSet<DefId>,
     pub reuse_candidates: HashMap<DefId, ReuseInfo>,
-    pub borrow_to_move: std::collections::HashSet<DefId>,
     pub speculative_reuse: HashMap<DefId, ReuseInfo>,
     pub last_use: HashMap<DefId, Span>,
     pub drop_fusions: Vec<DropFusion>,
@@ -73,7 +72,6 @@ pub struct PoolHint {
 pub struct PerceusStats {
     pub drops_elided: u32,
     pub reuse_sites: u32,
-    pub borrows_promoted: u32,
     pub speculative_reuse_sites: u32,
     pub fbip_sites: u32,
     pub tail_reuse_sites: u32,

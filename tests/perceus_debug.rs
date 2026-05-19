@@ -14,7 +14,6 @@ struct MirSummary {
     drops_sunk: u32,
     drops_fused: u32,
     reuse_pairs: u32,
-    borrows_promoted: u32,
     bindings: u32,
 }
 
@@ -36,7 +35,7 @@ fn parse_bindings(part: &str) -> Option<u32> {
 fn parse_mir_summary(line: &str) -> Option<MirSummary> {
     let payload = line.strip_prefix("mir-perceus: ")?.trim();
     let parts: Vec<&str> = payload.split(", ").collect();
-    if parts.len() != 5 {
+    if parts.len() != 4 {
         return None;
     }
     Some(MirSummary {
@@ -44,8 +43,7 @@ fn parse_mir_summary(line: &str) -> Option<MirSummary> {
         drops_sunk: leading_u32(parts[1])?,
         drops_fused: leading_u32(parts[2])?,
         reuse_pairs: leading_u32(parts[3])?,
-        borrows_promoted: leading_u32(parts[4])?,
-        bindings: parse_bindings(parts[4])?,
+        bindings: parse_bindings(parts[3])?,
     })
 }
 

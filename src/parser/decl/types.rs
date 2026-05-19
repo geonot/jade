@@ -57,11 +57,6 @@ impl Parser {
                 layout.strict = true;
                 continue;
             }
-            if self.check(Token::Atomic) {
-                self.advance();
-                layout.atomic = true;
-                continue;
-            }
             let attr = self.ident()?;
             if attr == "packed" {
                 layout.packed = true;
@@ -87,12 +82,6 @@ impl Parser {
             } else {
                 return Err(self.error(&format!("unknown layout attribute: @{attr}")));
             }
-        }
-        // Validate combinations.
-        if layout.resource && layout.atomic {
-            return Err(self.error(
-                "@resource and @atomic are mutually exclusive: a linear type cannot be cross-thread shared",
-            ));
         }
         Ok(layout)
     }

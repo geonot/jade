@@ -263,10 +263,19 @@ impl Typer {
         // satisfy the borrow checker (resolve needs &mut self.infer_ctx).
         let mut resolved_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo, Type)> =
             Vec::with_capacity(scope_entries.len());
+        // Drop-emission resolves binding types only to decide which need a
+        // matching `Drop` stmt. Unsolved type variables here are not a
+        // diagnostic concern of this pass — they belong to inferable-fn
+        // bodies that will either get fully solved by the post-lowering
+        // resolver or replaced wholesale by monomorphization. Silence
+        // strict-mode emissions for the duration of these resolves.
+        let was_strict = self.infer_ctx.is_strict();
+        self.infer_ctx.set_strict(false);
         for (name, info) in scope_entries {
             let resolved = self.infer_ctx.resolve(&info.ty);
             resolved_entries.push((name, info, resolved));
         }
+        self.infer_ctx.set_strict(was_strict);
         let mut drops: Vec<_> = resolved_entries
             .into_iter()
             .filter(|(_, info, resolved)| {

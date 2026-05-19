@@ -231,9 +231,6 @@ impl<'ctx> Compiler<'ctx> {
                     }
                     return Ok(None);
                 }
-                if self.hints.borrow_to_move.contains(def_id) {
-                    return Ok(None);
-                }
                 if !ty.is_trivially_droppable() {
                     if let Some((ptr, _)) = self.find_var(&name.as_str()).cloned() {
                         let llty = self.llvm_ty(ty);

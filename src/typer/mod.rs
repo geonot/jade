@@ -45,7 +45,7 @@ pub struct Typer {
     pub(crate) fns: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     pub(crate) structs: IndexMap<Symbol, Vec<(Symbol, Type)>>,
     /// Per-struct layout/annotation attributes (`@packed`, `@strict`,
-    /// `@align`, `@resource`, `@atomic`). Populated when the
+    /// `@align`, `@resource`). Populated when the
     /// declaration is registered; consulted by access-mode inference
     /// (§3 of `docs/access-semantics.md`) and codegen.
     pub(crate) struct_attrs: IndexMap<Symbol, crate::ast::LayoutAttrs>,
@@ -402,26 +402,21 @@ impl Typer {
     }
 
     /// Compute the HIR `Ownership` tier for a binding/param/field, honoring
-    /// any explicit access modifier (`copy`/`ref`/`mut`/`take`) and any
-    /// type-level annotations (`@atomic` promotes to Arc tier;
-    /// `@resource` rejects `copy`).
+    /// any explicit access modifier (`copy`/`take`/`const`) and any
+    /// type-level annotations (`@resource` rejects `copy`).
     ///
     /// Returns `Err` only when a hard semantic rule is violated (e.g. `copy`
     /// of a `@resource`). When no modifier is present, falls back to the
-    /// structural default produced by `ownership_for_type` then promoted
-    /// to Arc if the underlying struct is `@atomic`.
+    /// structural default produced by `ownership_for_type`.
     pub(crate) fn ownership_with_mod(
         &self,
         ty: &Type,
         access_mod: Option<crate::ast::AccessMod>,
     ) -> Result<Ownership, String> {
         use crate::ast::AccessMod::*;
-        let atomic = self.type_has_atomic_annotation(ty);
         let resource = self.type_has_resource_annotation(ty);
         let promote_owned = || -> Ownership {
-            if atomic {
-                Ownership::Arc
-            } else if matches!(ty, Type::Ptr(_)) {
+            if matches!(ty, Type::Ptr(_)) {
                 Ownership::Raw
             } else {
                 Ownership::Owned
@@ -479,15 +474,9 @@ impl Typer {
 
     /// Does an unannotated function parameter of this type default to a
     /// borrow? True for compound heap-managed types whose drop semantics
-    /// would otherwise consume the caller's storage. False for POD,
-    /// pointers, Rc handles (already shared), and `@atomic` types (which
-    /// have their own Arc lowering path).
+    /// would otherwise consume the caller's storage. False for POD and
+    /// pointers.
     fn type_param_default_borrows(&self, ty: &Type) -> bool {
-        // Atomic types route through Arc, not raw borrow — keep them on
-        // the existing promotion path inside `ownership_with_mod`.
-        if self.type_has_atomic_annotation(ty) {
-            return false;
-        }
         match ty {
             // Heap-leaf container/value types: bare-Var pass-through aliases
             // the caller's storage; default to borrow.
@@ -506,8 +495,7 @@ impl Typer {
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.type_param_default_borrows(inner)
             }
-            // Rc handles are already share-by-default (clone bumps refcount);
-            // Channel/ActorRef are atomic (handled above). Pointers and POD
+            // Channel/ActorRef are atomic by construction. Pointers and POD
             // are bit-copyable.
             _ => false,
         }
@@ -542,34 +530,10 @@ impl Typer {
         }
     }
 
-    /// True iff `ty` is a struct annotated with `@atomic`, requiring
-    /// tier-3 (Arc / Arc<Mutex>) lowering for shared bindings.
-    /// See `docs/access-semantics.md` \u00a73.
-    ///
-    /// Built-in cross-thread types (`Channel`, `ActorRef`) are atomic by
-    /// construction \u2014 they already carry an atomic refcount header.
-    pub(crate) fn type_has_atomic_annotation(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Struct(name, _) => self
-                .struct_attrs
-                .get(name)
-                .map(|a| a.atomic)
-                .unwrap_or(false),
-            // Built-in cross-thread atomic types.
-            Type::Channel(_) | Type::ActorRef(_) => true,
-            Type::Newtype(_, inner) | Type::Alias(_, inner) => {
-                self.type_has_atomic_annotation(inner)
-            }
-            _ => false,
-        }
-    }
-
-    /// Enforce the `@resource` cross-thread safety rule
-    /// (`docs/access-semantics.md` \u00a74.1 final bullet).
-    ///
-    /// A `@resource` type may cross a thread boundary only when it is also
-    /// annotated `@atomic`. The boundary is any value sent on a channel,
-    /// passed to an actor handler, or supplied as an actor-spawn init.
+    /// Enforce the `@resource` cross-thread safety rule. A `@resource` type
+    /// may not cross a thread boundary. The boundary is any value sent on a
+    /// channel, passed to an actor handler, or supplied as an actor-spawn
+    /// init.
     ///
     /// `context` is a short label inserted into the diagnostic
     /// (e.g. `"channel send"`, `"actor handler argument"`,
@@ -580,9 +544,9 @@ impl Typer {
         span: crate::ast::Span,
         context: &str,
     ) -> Result<(), String> {
-        if self.type_has_resource_annotation(ty) && !self.type_has_atomic_annotation(ty) {
+        if self.type_has_resource_annotation(ty) {
             return Err(format!(
-                "{}: resource type `{}` is not `@atomic`; cannot send across threads ({})",
+                "{}: resource type `{}` cannot cross thread boundaries ({})",
                 span.loc(),
                 ty,
                 context

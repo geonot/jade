@@ -8,7 +8,7 @@
 //!   container, captured by a non-spawning closure). Must be lowered to a
 //!   single-threaded refcount (`Rc<T>` / `Rc<Cell<T>>`).
 //! - `T3` — escapes across threads (sent on a `Channel`, sent to an
-//!   `ActorRef`, captured by `spawn`, OR sourced from an `@atomic` type).
+//!   `ActorRef`, captured by `spawn`).
 //!   Must be lowered to an atomic refcount (`Arc<T>` / `Arc<Mutex<T>>`).
 //!
 //! `Tier::Auto` is the sentinel for bindings that have not been visited yet.
@@ -29,8 +29,6 @@
 //!      spawned, sent) → at least T2.  Conservatively: any capture by a
 //!      `Lambda` that is itself bound to a variable or returned upgrades to
 //!      at least T2.
-//!    * Source type carries `@atomic` (via `ownership == Arc/ArcMut`) →
-//!      T3.
 //! 3. Tier escalation is monotonic: `T1 → T2 → T3`.  Once a binding hits
 //!    T3 it stays T3.
 //!

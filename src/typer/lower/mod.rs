@@ -49,6 +49,24 @@ impl Typer {
                         self.generic_fns.insert(f.name.clone(), normalized);
                     }
                     self.declare_fn_sig(f);
+                    // For inferable fns the param/return typevars are bound by
+                    // the implicit `forall` of the function's scheme. Mark them
+                    // quantified immediately so that intermediate passes (e.g.
+                    // drop-emission's `resolve` calls during body lowering) do
+                    // not flag them as "unsolved type variables" in strict mode.
+                    // The post-lowering `build_fn_scheme` re-marks the same
+                    // roots via `generalize`, which is a no-op here.
+                    if has_untyped_params {
+                        if let Some((_, ptys, ret)) = self.fns.get(&f.name).cloned() {
+                            let mut ftvs = std::collections::HashSet::new();
+                            for pt in &ptys {
+                                pt.free_type_vars(&mut ftvs);
+                            }
+                            ret.free_type_vars(&mut ftvs);
+                            let roots: Vec<u32> = ftvs.into_iter().collect();
+                            self.infer_ctx.mark_quantified(&roots);
+                        }
+                    }
                 }
                 ast::Decl::Type(td) if !td.type_params.is_empty() => {
                     self.generic_types.insert(td.name.clone(), td.clone());

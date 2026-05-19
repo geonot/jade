@@ -24,8 +24,6 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         | InstKind::Ref(v)
         | InstKind::Deref(v)
         | InstKind::Copy(v)
-        | InstKind::RcInc(v)
-        | InstKind::RcDec(v)
         | InstKind::Alloc(v) => {
             sub!(v);
         }
@@ -108,11 +106,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         }
         InstKind::VecLen(v)
         | InstKind::ChanRecv(v)
-        | InstKind::RcClone(v)
         | InstKind::Log(v) => {
-            sub!(v);
-        }
-        InstKind::RcNew(v, _) => {
             sub!(v);
         }
         // Closures

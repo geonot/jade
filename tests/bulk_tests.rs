@@ -7774,26 +7774,6 @@ fn resource_annotation_allows_ref() {
 }
 
 #[test]
-fn atomic_annotation_parses() {
-    // @atomic struct just needs to type-check; semantic Arc promotion is
-    // an internal ownership-tier choice and not directly observable here.
-    expect(
-        "type Counter @atomic\n    n as i64\n\n*main()\n    c is Counter(n is 41)\n    log(c.n + 1)\n",
-        "42",
-    );
-}
-
-#[test]
-fn atomic_and_resource_mutually_exclusive() {
-    let err =
-        expect_compile_fail("type Bad @atomic @resource\n    x as i64\n\n*main()\n    log(1)\n");
-    assert!(
-        err.contains("mutually exclusive") || err.contains("@resource") || err.contains("@atomic"),
-        "expected mutual-exclusion diagnostic, got: {err}"
-    );
-}
-
-#[test]
 fn resource_drop_runs_at_scope_exit() {
     // A `*drop` method defined on a `@resource` type must be auto-invoked
     // when the owning binding's scope ends. The "dropped" log proves the
@@ -7816,13 +7796,13 @@ fn non_resource_drop_method_not_auto_called() {
 
 #[test]
 fn resource_cross_thread_channel_rejected() {
-    // Sending a @resource value (that is NOT @atomic) on a channel must be
-    // a compile error per access-semantics.md §4.1.
+    // Sending a @resource value on a channel must be a compile error:
+    // resources cannot cross thread boundaries.
     let err = expect_compile_fail(
         "type Handle @resource\n    fd as i64\n\n*main()\n    ch is channel(1)\n    h is Handle(fd is 3)\n    send ch, h\n",
     );
     assert!(
-        err.contains("resource") && err.contains("@atomic"),
+        err.contains("resource") && err.contains("thread"),
         "expected resource cross-thread diagnostic, got: {err}"
     );
 }
@@ -7834,7 +7814,7 @@ fn resource_cross_thread_actor_rejected() {
         "type Handle @resource\n    fd as i64\n\nactor Sink\n    n as i64\n    @take h as Handle\n        n is h.fd\n\n*main()\n    s is spawn Sink\n    h is Handle(fd is 7)\n    s.take(h)\n",
     );
     assert!(
-        err.contains("resource") && err.contains("@atomic"),
+        err.contains("resource") && err.contains("thread"),
         "expected resource actor-send diagnostic, got: {err}"
     );
 }

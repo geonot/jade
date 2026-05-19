@@ -71,10 +71,6 @@ pub struct PerceusMeta {
     /// Allocation sites that occur inside a loop body and would benefit from a
     /// pool. Currently informational only — wired into stats reporting.
     pub pool_allocs: HashSet<ValueId>,
-    /// RcInc instructions whose operand is single-use, non-escaping, and so
-    /// can be promoted to a move (delete the inc, the matching dec is also
-    /// dropped by the elision pass).
-    pub borrow_to_move: HashSet<ValueId>,
     /// Slot ids that should use *Vec semantics* instead of the default Rc
     /// semantics. For Vec slots, the Drop save path deep-drops elements but
     /// preserves the {data, len, cap} header (and its data buffer); the
@@ -93,7 +89,6 @@ pub struct PerceusStats {
     pub drops_sunk: u32,
     pub drops_fused: u32,
     pub reuse_pairs: u32,
-    pub borrows_promoted: u32,
     pub fbip_sites: u32,
     pub tail_reuse_sites: u32,
     pub pool_hints: u32,
@@ -244,8 +239,6 @@ pub enum InstKind {
     /// drop-fusion pass. Codegen emits a single batched runtime call rather
     /// than N individual drop sequences.
     DropMany(Vec<(ValueId, Type)>),
-    RcInc(ValueId),
-    RcDec(ValueId),
 
     /// Copy/move — eliminated by copy propagation.
     Copy(ValueId),
@@ -272,10 +265,6 @@ pub enum InstKind {
     // ── Closures (needed for escape analysis) ──
     ClosureCreate(Symbol, Vec<ValueId>),
     ClosureCall(ValueId, Vec<ValueId>),
-
-    // ── RC (needed for Perceus on MIR) ──
-    RcNew(ValueId, Type),
-    RcClone(ValueId),
 
     // ── Actors/channels (needed for actor optimization pass) ──
     SpawnActor(Symbol, Vec<(Symbol, ValueId)>),

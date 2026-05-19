@@ -132,9 +132,9 @@ impl Typer {
                     ownership = Ownership::Borrowed;
                 }
                 // P2: explicit access modifier overrides the default heuristic.
-                // P3: also handles `@atomic` (promotes to Arc) and rejects
-                //     `copy` on `@resource` types. See `docs/access-semantics.md`.
-                if b.access_mod.is_some() || self.type_has_atomic_annotation(&ty) {
+                // Also rejects `copy` on `@resource` types.
+                // See `docs/access-semantics.md`.
+                if b.access_mod.is_some() {
                     ownership = self.ownership_with_mod(&ty, b.access_mod)?;
                 }
                 // P4 §5.2: detect `x is take y.field` so we can poison

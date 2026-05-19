@@ -410,9 +410,9 @@ pub struct Param {
 
 /// Type-decl attributes parsed from `@`-prefixed annotations:
 /// `@packed`, `@strict`, `@align(N)` (layout), plus the access-semantics
-/// annotations `@resource`, `@atomic`. Lives on `TypeDef`,
-/// `StoreDef`, `ActorDef`, etc. as a single bundle so each call site
-/// can ask the same struct for any annotation.
+/// annotation `@resource`. Lives on `TypeDef`, `StoreDef`, `ActorDef`,
+/// etc. as a single bundle so each call site can ask the same struct for
+/// any annotation.
 #[derive(Debug, Clone, Default)]
 pub struct LayoutAttrs {
     pub packed: bool,
@@ -420,8 +420,6 @@ pub struct LayoutAttrs {
     pub align: Option<u32>,
     /// `@resource` — linear type: never copies, auto-`*drop` at scope end.
     pub resource: bool,
-    /// `@atomic` — sharing always uses Arc; mutations use Arc<Mutex>.
-    pub atomic: bool,
 }
 
 #[derive(Debug, Clone)]

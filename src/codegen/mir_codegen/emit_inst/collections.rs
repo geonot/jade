@@ -11,19 +11,6 @@ impl<'ctx> Compiler<'ctx> {
             (match &inst.kind {
                 mir::InstKind::Drop(val, ty) => {
                     let v = self.val(*val);
-                    // Perceus reuse: stash the heap pointer for the matching
-                    // alloc site to pick up via `current_reuse_slots`.
-                    if ty.is_ptr_represented()
-                        && !matches!(
-                            ty,
-                            Type::Ptr(_) | Type::ActorRef(_) | Type::Channel(_) | Type::Vec(_)
-                        )
-                        && v.is_pointer_value()
-                    {
-                        if self.try_save_reuse_slot(*val, v.into_pointer_value()) {
-                            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
-                        }
-                    }
                     // Perceus Vec reuse: deep-drop elements, then stash the
                     // header (with its data buffer attached) for the matching
                     // empty `VecNew` to pick up.
@@ -55,24 +42,6 @@ impl<'ctx> Compiler<'ctx> {
                         self.drop_value(v, ty)?;
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
-                }
-                mir::InstKind::RcInc(val) => {
-                    let _ = self.val(*val);
-                    Ok(self.ctx.i8_type().const_int(0, false).into())
-                }
-                mir::InstKind::RcDec(val) => {
-                    let _ = self.val(*val);
-                    Ok(self.ctx.i8_type().const_int(0, false).into())
-                }
-                mir::InstKind::RcNew(val, inner_ty) => {
-                    let v = self.val(*val);
-                    self.current_alloc_dest = inst.dest;
-                    let r = self.rc_alloc(inner_ty, v);
-                    self.current_alloc_dest = None;
-                    r
-                }
-                mir::InstKind::RcClone(val) => {
-                    Ok(self.val(*val))
                 }
 
                 // ── Copy ──

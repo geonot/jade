@@ -495,17 +495,15 @@ pub fn run() {
         if cli.debug_perceus
             || mir_hints.stats.drops_elided > 0
             || mir_hints.stats.reuse_sites > 0
-            || mir_hints.stats.borrows_promoted > 0
             || mir_hints.stats.drops_fused > 0
             || mir_hints.stats.last_use_tracked > 0
         {
             eprintln!(
-                "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs, {} borrows promoted ({} bindings)",
+                "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",
                 mir_hints.stats.drops_elided,
                 mir_hints.stats.last_use_tracked,
                 mir_hints.stats.drops_fused,
                 mir_hints.stats.reuse_sites,
-                mir_hints.stats.borrows_promoted,
                 mir_hints.stats.total_bindings_analyzed,
             );
         }

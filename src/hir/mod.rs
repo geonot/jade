@@ -19,15 +19,6 @@ pub enum Ownership {
     Borrowed,
     /// T1 exclusive mutable borrow — raw mut pointer, no refcount, no drop.
     BorrowMut,
-    /// T2 single-threaded shared refcount.
-    Rc,
-    /// T2 single-threaded mutable refcount cell (`Rc<Cell<T>>`-equivalent).
-    /// Currently lowered as Rc; cell semantics enforced by the typer.
-    RcMut,
-    /// T3 cross-thread atomic shared refcount.
-    Arc,
-    /// T3 cross-thread atomic refcount + mutex (`Arc<Mutex<T>>`-equivalent).
-    ArcMut,
     /// Raw user-managed pointer.
     Raw,
 }
@@ -41,31 +32,14 @@ impl Default for Ownership {
 impl Ownership {
     /// True if this ownership variant means the binding is an *alias* of
     /// storage owned elsewhere — i.e. drop glue must NOT release the
-    /// underlying memory at scope exit. Covers T1 borrows only; Rc/Arc
-    /// own their own refcount slot and have their own drop semantics.
+    /// underlying memory at scope exit.
     pub fn is_borrow(self) -> bool {
         matches!(self, Ownership::Borrowed | Ownership::BorrowMut)
     }
 
-    /// True for any refcounted variant (Rc, RcMut, Arc, ArcMut).
-    pub fn is_refcounted(self) -> bool {
-        matches!(
-            self,
-            Ownership::Rc | Ownership::RcMut | Ownership::Arc | Ownership::ArcMut
-        )
-    }
-
-    /// True for the cross-thread (T3) variants.
-    pub fn is_atomic(self) -> bool {
-        matches!(self, Ownership::Arc | Ownership::ArcMut)
-    }
-
-    /// True for the mutable-alias variants (T1 BorrowMut, T2 RcMut, T3 ArcMut).
+    /// True for the mutable-alias variants (currently just T1 BorrowMut).
     pub fn is_mutable_alias(self) -> bool {
-        matches!(
-            self,
-            Ownership::BorrowMut | Ownership::RcMut | Ownership::ArcMut
-        )
+        matches!(self, Ownership::BorrowMut)
     }
 }
 
@@ -75,10 +49,6 @@ impl std::fmt::Display for Ownership {
             Ownership::Owned => f.write_str("owned"),
             Ownership::Borrowed => f.write_str("&"),
             Ownership::BorrowMut => f.write_str("&mut"),
-            Ownership::Rc => f.write_str("rc"),
-            Ownership::RcMut => f.write_str("rc<mut>"),
-            Ownership::Arc => f.write_str("arc"),
-            Ownership::ArcMut => f.write_str("arc<mut>"),
             Ownership::Raw => f.write_str("*raw"),
         }
     }

@@ -150,8 +150,6 @@ fn format_inst_kind(kind: &InstKind) -> String {
             let parts: Vec<String> = items.iter().map(|(v, ty)| format!("{v}:{ty:?}")).collect();
             format!("drop_many [{}]", parts.join(", "))
         }
-        InstKind::RcInc(v) => format!("rc_inc {v}"),
-        InstKind::RcDec(v) => format!("rc_dec {v}"),
         InstKind::Copy(v) => format!("copy {v}"),
         InstKind::Clone(v, ty) => format!("clone {v} {ty:?}"),
         InstKind::Slice(a, s, e) => format!("slice {a}[{s}..{e}]"),
@@ -167,10 +165,6 @@ fn format_inst_kind(kind: &InstKind) -> String {
             format!("closure_create {name}({})", fmt_args(captures))
         }
         InstKind::ClosureCall(f, args) => format!("closure_call {f}({})", fmt_args(args)),
-
-        // RC
-        InstKind::RcNew(v, ty) => format!("rc_new {v} {ty:?}"),
-        InstKind::RcClone(v) => format!("rc_clone {v}"),
 
         // Actors/channels
         InstKind::SpawnActor(name, args) => format!(

@@ -31,8 +31,6 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         | InstKind::Ref(v)
         | InstKind::Deref(v)
         | InstKind::Copy(v)
-        | InstKind::RcInc(v)
-        | InstKind::RcDec(v)
         | InstKind::Alloc(v) => {
             s.insert(*v);
         }
@@ -115,11 +113,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         }
         InstKind::VecLen(v)
         | InstKind::ChanRecv(v)
-        | InstKind::RcClone(v)
         | InstKind::Log(v) => {
-            s.insert(*v);
-        }
-        InstKind::RcNew(v, _) => {
             s.insert(*v);
         }
         InstKind::ClosureCreate(_, captures) | InstKind::SelectArm(captures, _) => {
