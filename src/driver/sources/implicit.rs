@@ -11,9 +11,7 @@ pub(in crate::driver) fn resolve_implicit_imports(
     if module_refs.is_empty() {
         return;
     }
-    if std::env::var("JINN_DEBUG_IMPORTS").is_ok() {
-        eprintln!("[auto-import] qualified module refs: {:?}", module_refs);
-    }
+    tracing::debug!(target: "jinnc::import", "qualified module refs: {:?}", module_refs);
 
     let explicit_modules: HashSet<Symbol> = prog
         .decls
@@ -50,21 +48,19 @@ pub(in crate::driver) fn resolve_implicit_imports(
             .unwrap_or_else(|_| file_path.clone());
         let key = file_canon.to_string_lossy().to_string();
         if loaded.contains(&Symbol::intern(&key)) {
-            if std::env::var("JINN_DEBUG_IMPORTS").is_ok() {
-                eprintln!(
-                    "[auto-import] SKIP (already loaded): {}",
-                    file_path.display()
-                );
-            }
+            tracing::debug!(
+                target: "jinnc::import",
+                "SKIP (already loaded): {}",
+                file_path.display()
+            );
             continue;
         }
-        if std::env::var("JINN_DEBUG_IMPORTS").is_ok() {
-            eprintln!(
-                "[auto-import] IMPORTING: {} for {:?}",
-                file_path.display(),
-                _symbols
-            );
-        }
+        tracing::debug!(
+            target: "jinnc::import",
+            "IMPORTING: {} for {:?}",
+            file_path.display(),
+            _symbols
+        );
         loaded.insert(Symbol::intern(&key));
 
         let src = match fs::read_to_string(file_path) {

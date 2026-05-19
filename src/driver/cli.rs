@@ -36,6 +36,8 @@ pub(super) struct Cli {
     pub(super) debug_types: bool,
     #[arg(long)]
     pub(super) debug_perceus: bool,
+    #[arg(short = 'v', long)]
+    pub(super) verbose: bool,
     #[arg(long, default_value_t = true)]
     pub(super) warn_inferred_defaults: bool,
     #[arg(long)]

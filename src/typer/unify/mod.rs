@@ -298,8 +298,9 @@ impl InferCtx {
             let ra = self.shallow_resolve(a);
             let rb = self.shallow_resolve(b);
             if ra != rb {
-                eprintln!(
-                    "[type:unify] {} ~ {} (line {}, {})",
+                tracing::trace!(
+                    target: "jinnc::type::unify",
+                    "{} ~ {} (line {}, {})",
                     ra, rb, span.line, reason
                 );
             }

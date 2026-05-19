@@ -237,20 +237,19 @@ impl Typer {
         if scheme.is_poly() {
             self.infer_ctx.mark_quantified(&scheme.quantified);
         }
-        if self.debug_types {
-            if scheme.is_poly() {
-                eprintln!(
-                    "[type:scheme] {} :: ∀{:?}. ({}) -> {}",
-                    name,
-                    scheme.quantified,
-                    param_tys
-                        .iter()
-                        .map(|t| format!("{t}"))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    ret_ty
-                );
-            }
+        if self.debug_types && scheme.is_poly() {
+            tracing::debug!(
+                target: "jinnc::type",
+                "scheme {} :: ∀{:?}. ({}) -> {}",
+                name,
+                scheme.quantified,
+                param_tys
+                    .iter()
+                    .map(|t| format!("{t}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                ret_ty
+            );
         }
         self.fn_schemes
             .insert(name, (scheme.quantified, param_tys, ret_ty));

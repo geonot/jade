@@ -18,7 +18,7 @@ mod resolve;
 impl Typer {
     pub fn lower_program(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
         if self.debug_types {
-            eprintln!("[type:pipeline] starting type inference and HIR lowering");
+            tracing::debug!(target: "jinnc::type", "starting type inference and HIR lowering");
         }
         self.register_prelude_types();
 
@@ -253,12 +253,12 @@ impl Typer {
         }
 
         if self.debug_types {
-            eprintln!("[type:pipeline] running bidirectional parameter inference");
+            tracing::debug!(target: "jinnc::type", "running bidirectional parameter inference");
         }
         self.infer_param_types(prog);
 
         if self.debug_types {
-            eprintln!("[type:pipeline] lowering declarations to HIR");
+            tracing::debug!(target: "jinnc::type", "lowering declarations to HIR");
         }
         let mut hir_fns = Vec::new();
         let mut hir_types = Vec::new();
@@ -588,8 +588,9 @@ impl Typer {
             eprintln!("warning: {w}");
         }
         if self.debug_types {
-            eprintln!(
-                "[type:pipeline] complete: {} fns, {} types, {} enums",
+            tracing::debug!(
+                target: "jinnc::type",
+                "complete: {} fns, {} types, {} enums",
                 program.fns.len(),
                 program.types.len(),
                 program.enums.len()

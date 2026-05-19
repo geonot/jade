@@ -507,12 +507,11 @@ impl<'ctx> Compiler<'ctx> {
             }
 
             for inst in &bb.insts {
-                if std::env::var("JINN_DEBUG_MIR_CODEGEN").is_ok() {
-                    eprintln!(
-                        "  emit {:?} dest={:?} kind={:?}",
-                        inst.dest, inst.dest, inst.kind
-                    );
-                }
+                tracing::trace!(
+                    target: "jinnc::codegen::mir",
+                    "  emit {:?} dest={:?} kind={:?}",
+                    inst.dest, inst.dest, inst.kind
+                );
                 let val = self.emit_inst(inst)?;
                 if let Some(dest) = inst.dest {
                     self.value_map.insert(dest, val);
@@ -672,13 +671,14 @@ impl<'ctx> Compiler<'ctx> {
 
     fn val(&mut self, id: mir::ValueId) -> BasicValueEnum<'ctx> {
         let v = self.value_map.get(&id).copied().unwrap_or_else(|| {
-            eprintln!("MIR codegen: missing value for {:?}", id);
-            eprintln!(
+            tracing::error!(target: "jinnc::codegen::mir", "missing value for {:?}", id);
+            tracing::error!(
+                target: "jinnc::codegen::mir",
                 "  available values: {:?}",
                 self.value_map.keys().collect::<Vec<_>>()
             );
             panic!(
-                "MIR codegen: missing value for {:?} — this is a compiler bug",
+                "MIR codegen: missing value for {:?} \u{2014} this is a compiler bug",
                 id
             );
         });

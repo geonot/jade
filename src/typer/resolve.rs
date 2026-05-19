@@ -90,8 +90,9 @@ impl Typer {
         };
         let id = self.fresh_id();
         if self.debug_types {
-            eprintln!(
-                "[type:sig] {} :: ({}) -> {}",
+            tracing::debug!(
+                target: "jinnc::type",
+                "sig {} :: ({}) -> {}",
                 f.name,
                 ptys.iter()
                     .map(|t| format!("{t}"))
@@ -384,12 +385,13 @@ impl Typer {
         }
 
         if self.debug_types {
-            eprintln!("[type:resolved] final signatures:");
+            tracing::debug!(target: "jinnc::type", "resolved final signatures:");
             let mut names: Vec<Symbol> = self.fns.keys().cloned().collect();
             names.sort();
             for name in &names {
                 let (_, ptys, ret) = &self.fns[name];
-                eprintln!(
+                tracing::debug!(
+                    target: "jinnc::type",
                     "  {} :: ({}) -> {}",
                     name,
                     ptys.iter()

@@ -31,8 +31,50 @@ use sources::{
     resolve_implicit_imports, resolve_modules,
 };
 
+/// Initialize the `tracing` subscriber based on CLI verbosity flags.
+///
+/// Filter levels:
+/// - default: WARN (silent)
+/// - `--verbose`: INFO
+/// - `--debug`: DEBUG for all `jinnc::*` targets
+/// - `--debug-types`: TRACE for `jinnc::type`
+/// - `--debug-perceus`: TRACE for `jinnc::perceus`
+///
+/// Output goes to stderr without timestamps to keep diagnostics terse.
+fn init_tracing(cli: &Cli) {
+    use tracing_subscriber::EnvFilter;
+
+    let mut filter = if cli.debug {
+        EnvFilter::new("jinnc=debug")
+    } else if cli.verbose {
+        EnvFilter::new("jinnc=info")
+    } else {
+        EnvFilter::new("warn")
+    };
+    if cli.debug_types {
+        filter = filter.add_directive("jinnc::type=trace".parse().unwrap());
+    }
+    if cli.debug_perceus {
+        filter = filter.add_directive("jinnc::perceus=trace".parse().unwrap());
+    }
+    if let Ok(env) = std::env::var("JINN_LOG") {
+        if let Ok(extra) = EnvFilter::try_new(env) {
+            filter = extra;
+        }
+    }
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .without_time()
+        .with_level(false)
+        .try_init();
+}
+
 pub fn run() {
     let cli = Cli::parse();
+    init_tracing(&cli);
 
     if let Some(cmd) = cli.command {
         match cmd {
@@ -454,10 +496,11 @@ pub fn run() {
         let incr_cache = crate::incr::ArtifactCache::new();
         let (dirty, _keys) = crate::incr::compute_dirty_set(&hir_prog, &incr_cache);
         if dirty.is_empty() {
-            eprintln!("incr: all functions up to date");
+            tracing::info!(target: "jinnc::incr", "all functions up to date");
         } else {
-            eprintln!(
-                "incr: {} of {} functions need recompilation",
+            tracing::info!(
+                target: "jinnc::incr",
+                "{} of {} functions need recompilation",
                 dirty.len(),
                 hir_prog.fns.len()
             );

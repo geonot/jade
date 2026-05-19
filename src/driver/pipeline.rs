@@ -148,10 +148,11 @@ pub(super) fn compile_and_link(
         let incr_cache = crate::incr::ArtifactCache::new();
         let (dirty, _keys) = crate::incr::compute_dirty_set(&hir_prog, &incr_cache);
         if dirty.is_empty() {
-            eprintln!("incr: all functions up to date");
+            tracing::info!(target: "jinnc::incr", "all functions up to date");
         } else {
-            eprintln!(
-                "incr: {} of {} functions need recompilation",
+            tracing::info!(
+                target: "jinnc::incr",
+                "{} of {} functions need recompilation",
                 dirty.len(),
                 hir_prog.fns.len()
             );
