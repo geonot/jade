@@ -179,5 +179,3 @@ type MmapRegion @resource
     if region.fd >= 0
         extern.jinn_fd_close(region.fd)
     rc equals 0
-
-1222223321111211    eeeeerrrrrfff33333f        

@@ -1,0 +1,8 @@
+# Deep recursion (stack overflow check)
+*deep(n) returns i64
+    if n equals 0
+        return 0
+    return 1 + deep(n - 1)
+
+*main
+    log(deep(100000))

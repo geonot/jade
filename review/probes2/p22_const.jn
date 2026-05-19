@@ -1,0 +1,8 @@
+# Comptime / const
+PI is 3.14159
+
+*area(r as f64) returns f64
+    PI * r * r
+
+*main
+    log(area(2.0))

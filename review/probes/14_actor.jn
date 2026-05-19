@@ -1,0 +1,16 @@
+# Actor basics: spawn, send, receive.
+actor Counter
+    count as i64 is 0
+
+    *inc()
+        count is count + 1
+
+    *get() returns i64
+        return count
+
+*main
+    c is spawn Counter
+    send c.inc()
+    send c.inc()
+    send c.inc()
+    log("done")

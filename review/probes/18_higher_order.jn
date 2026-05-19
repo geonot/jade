@@ -1,0 +1,8 @@
+# Higher-order: map/filter/reduce.
+*main
+    v is [1, 2, 3, 4, 5]
+    doubled is map(v, $ * 2)
+    log(doubled[0])
+    log(doubled[4])
+    sq is [x * x for x in v]
+    log(sq[3])

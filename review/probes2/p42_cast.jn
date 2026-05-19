@@ -1,0 +1,8 @@
+# Cast — wrap or saturate?
+*main
+    big is 300
+    small as i8 is big as i8
+    log(small)
+    log(-1 as u32)
+    log(3.7 as i64)
+    log(-3.7 as i64)

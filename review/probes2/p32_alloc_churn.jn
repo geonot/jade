@@ -1,0 +1,8 @@
+# Many small heap allocations — test for leaks / perf
+*main
+    sum is 0
+    for i from 0 to 100000
+        v is vec()
+        v.push(i)
+        sum is sum + v[0]
+    log(sum)

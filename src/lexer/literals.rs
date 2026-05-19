@@ -305,7 +305,16 @@ impl<'s> Lexer<'s> {
             self.advance();
         }
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        let tok = keyword(text).unwrap_or_else(|| Token::Ident(Symbol::intern(text)));
+        // P0-10: when the immediately preceding token was `.`, this
+        // identifier is a member/method name. Don't promote it to a
+        // language keyword \u2014 otherwise `ch.send(x)`, `xs.take()`, `obj.match`
+        // etc. would tokenize a keyword in identifier position and the
+        // parser would reject them.
+        let tok = if self.after_dot {
+            Token::Ident(Symbol::intern(text))
+        } else {
+            keyword(text).unwrap_or_else(|| Token::Ident(Symbol::intern(text)))
+        };
         Ok(Spanned {
             token: tok,
             span: Span::new(start, self.pos, self.line, sc),

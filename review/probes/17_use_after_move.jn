@@ -1,0 +1,12 @@
+# Use-after-move detection.
+*take(v) returns i64
+    return v[0]
+
+*main
+    v is vec()
+    v.push(1)
+    v.push(2)
+    a is take(v)
+    b is take(v)
+    log(a)
+    log(b)

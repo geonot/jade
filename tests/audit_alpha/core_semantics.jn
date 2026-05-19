@@ -1,0 +1,29 @@
+*fact(n as i64) returns i64
+    if n <= 1
+        1
+    else
+        n * fact(n - 1)
+
+*mix(a as i64, b as i64) returns i64
+    a * b + (a - b)
+
+*main() returns i32
+    a as i64 is 7
+    b as i64 is 5
+    log(mix(a, b))
+    log(0xF0 | 0x0F)
+    log((1 << 12) >> 6)
+    log(2 pow 10)
+    f as f64 is 10.0 / 4.0
+    log(f)
+    s is 'alpha'
+    t is s + '-audit'
+    log(t)
+    i as i64 is 0
+    sum as i64 is 0
+    while i < 5
+        sum is sum + i
+        i is i + 1
+    log(sum)
+    log(fact(6))
+    0

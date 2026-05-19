@@ -246,7 +246,13 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    fn checked_divmod(
+    /// Lower `l / r` or `l % r` with a runtime zero-divisor check and, for
+    /// signed division, an `INT_MIN / -1` overflow check. Both bad cases
+    /// abort the program with a clear diagnostic via `__jinn_trap` rather
+    /// than executing undefined LLVM `sdiv`/`udiv`/`srem`/`urem`.
+    ///
+    /// Reachable from both the HIR-direct and MIR codegen paths.
+    pub(crate) fn checked_divmod(
         &mut self,
         l: inkwell::values::IntValue<'ctx>,
         r: inkwell::values::IntValue<'ctx>,
@@ -261,11 +267,48 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_int_compare(IntPredicate::EQ, r, zero, &format!("{prefix}.z")));
         let trap_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.trap"));
-        let ok_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.ok"));
-        b!(self.bld.build_conditional_branch(is_zero, trap_bb, ok_bb));
+        let chk_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.chk"));
+        b!(self.bld.build_conditional_branch(is_zero, trap_bb, chk_bb));
         self.bld.position_at_end(trap_bb);
-        self.emit_trap("division by zero");
-        self.bld.position_at_end(ok_bb);
+        self.emit_trap(if is_div {
+            "integer division by zero"
+        } else {
+            "integer remainder by zero"
+        });
+
+        // Signed division/remainder also has UB at INT_MIN / -1 (overflow).
+        // Guard against it explicitly for `is_div` cases; for signed `srem`
+        // the same combination is technically UB but produces 0, so we trap
+        // for symmetry and predictability.
+        self.bld.position_at_end(chk_bb);
+        if signed {
+            let bits = r.get_type().get_bit_width();
+            let int_min = r.get_type().const_int(1u64 << (bits - 1), false);
+            let minus_one = r.get_type().const_all_ones();
+            let r_is_neg1 = b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                r,
+                minus_one,
+                &format!("{prefix}.neg1")
+            ));
+            let l_is_min = b!(self.bld.build_int_compare(
+                IntPredicate::EQ,
+                l,
+                int_min,
+                &format!("{prefix}.min")
+            ));
+            let ov = b!(self.bld.build_and(r_is_neg1, l_is_min, &format!("{prefix}.ov")));
+            let ov_trap_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.ov.trap"));
+            let ok_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.ok"));
+            b!(self.bld.build_conditional_branch(ov, ov_trap_bb, ok_bb));
+            self.bld.position_at_end(ov_trap_bb);
+            self.emit_trap(if is_div {
+                "signed integer overflow in division (INT_MIN / -1)"
+            } else {
+                "signed integer overflow in remainder (INT_MIN % -1)"
+            });
+            self.bld.position_at_end(ok_bb);
+        }
         Ok(match (is_div, signed) {
             (true, true) => b!(self.bld.build_int_signed_div(l, r, "sdiv")).into(),
             (true, false) => b!(self.bld.build_int_unsigned_div(l, r, "udiv")).into(),

@@ -1,0 +1,22 @@
+# Vec, map, set basics.
+*main
+    v is vec()
+    v.push(1)
+    v.push(2)
+    v.push(3)
+    log(v[0])
+    log(v[1])
+    log(v[2])
+    log(v.length())
+    // map
+    m is map()
+    m["a"] is 1
+    m["b"] is 2
+    log(m["a"])
+    log(m["b"])
+    // set
+    s is set()
+    s.add(1)
+    s.add(2)
+    s.add(1)
+    log(s.length())

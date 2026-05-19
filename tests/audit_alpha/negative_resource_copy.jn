@@ -1,0 +1,7 @@
+type Handle @resource
+    fd as i32
+
+*main()
+    h is Handle(fd is 42)
+    h2 is copy h
+    log(h2.fd)

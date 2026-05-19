@@ -1,0 +1,6 @@
+# Negative index: panic, wrap, or UB?
+*main
+    v is vec()
+    v.push(10)
+    v.push(20)
+    log(v[-1])

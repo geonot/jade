@@ -1,0 +1,8 @@
+type Pair
+    a as Vec of i64
+    b as Vec of i64
+
+*main()
+    p is Pair(a is [1, 2, 3], b is [4, 5, 6])
+    taken is take p.a
+    log(p.a.len())

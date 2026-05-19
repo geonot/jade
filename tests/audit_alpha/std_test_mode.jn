@@ -1,0 +1,16 @@
+use std/math
+
+*triple(n as i64) returns i64
+    n * 3
+
+test 'math and assertions'
+    assert math.ipow(2, 10) equals 1024
+    assert triple(14) equals 42
+
+test 'float guardrails'
+    x is math.sqrt(81.0)
+    assert x > 8.99
+    assert x < 9.01
+
+*main()
+    log('main-should-not-run')

@@ -1,0 +1,9 @@
+# Channel produce/consume.
+*main
+    ch is channel of i64 (4)
+    ch.send(1)
+    ch.send(2)
+    ch.send(3)
+    log(ch.recv())
+    log(ch.recv())
+    log(ch.recv())

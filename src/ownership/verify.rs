@@ -527,7 +527,7 @@ impl OwnershipVerifier {
                     self.verify_expr(v);
                 }
             }
-            ExprKind::GeneratorCreate(_, _, stmts) => {
+            ExprKind::GeneratorCreate(_, _, stmts, _) => {
                 self.verify_block(stmts);
             }
             ExprKind::KvGet(_, e) | ExprKind::KvHas(_, e) | ExprKind::KvDel(_, e) => {

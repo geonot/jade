@@ -1,0 +1,17 @@
+# err enums + try/propagation
+err DivErr
+    DivByZero
+
+*safe_div(a as i64, b as i64) returns i64
+    if b equals 0
+        return ! DivByZero
+    return a / b
+
+*compute() returns i64
+    x is safe_div(100, 5)
+    y is safe_div(x, 0)
+    return y
+
+*main
+    r is compute()
+    log(r)

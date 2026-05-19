@@ -250,8 +250,8 @@ impl<'ctx> Compiler<'ctx> {
                     .collect();
                 self.compile_struct(&name.as_str(), &inits)
             }
-            hir::ExprKind::GeneratorCreate(_, name, body) => {
-                self.compile_coroutine_create(&name.as_str(), body)
+            hir::ExprKind::GeneratorCreate(_, name, body, captures) => {
+                self.compile_coroutine_create(&name.as_str(), body, captures)
             }
             hir::ExprKind::GeneratorNext(gen_expr) => {
                 self.compile_coroutine_next(gen_expr, &expr.ty)

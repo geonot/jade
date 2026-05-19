@@ -723,7 +723,7 @@ impl Typer {
                     self.resolve_expr(v);
                 }
             }
-            hir::ExprKind::GeneratorCreate(_, _, stmts) => {
+            hir::ExprKind::GeneratorCreate(_, _, stmts, _) => {
                 for s in stmts {
                     self.resolve_stmt(s);
                 }

@@ -122,20 +122,8 @@ impl<'ctx> Compiler<'ctx> {
                 mir::BinOp::Add => b!(self.bld.build_int_add(li, ri, "add")),
                 mir::BinOp::Sub => b!(self.bld.build_int_sub(li, ri, "sub")),
                 mir::BinOp::Mul => b!(self.bld.build_int_mul(li, ri, "mul")),
-                mir::BinOp::Div => {
-                    if result_ty.is_signed() {
-                        b!(self.bld.build_int_signed_div(li, ri, "sdiv"))
-                    } else {
-                        b!(self.bld.build_int_unsigned_div(li, ri, "udiv"))
-                    }
-                }
-                mir::BinOp::Mod => {
-                    if result_ty.is_signed() {
-                        b!(self.bld.build_int_signed_rem(li, ri, "srem"))
-                    } else {
-                        b!(self.bld.build_int_unsigned_rem(li, ri, "urem"))
-                    }
-                }
+                mir::BinOp::Div => self.checked_divmod(li, ri, result_ty.is_signed(), true)?.into_int_value(),
+                mir::BinOp::Mod => self.checked_divmod(li, ri, result_ty.is_signed(), false)?.into_int_value(),
                 mir::BinOp::BitAnd => b!(self.bld.build_and(li, ri, "and")),
                 mir::BinOp::BitOr => b!(self.bld.build_or(li, ri, "or")),
                 mir::BinOp::BitXor => b!(self.bld.build_xor(li, ri, "xor")),

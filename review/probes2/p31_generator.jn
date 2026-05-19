@@ -1,0 +1,8 @@
+# Coroutines / generators
+*counts(n as i64)
+    for i from 0 to n
+        yield i
+
+*main
+    for v in counts(5)
+        log(v)

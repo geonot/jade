@@ -1,0 +1,7 @@
+type Handle @resource
+    fd as i64
+
+*main()
+    ch is channel(1)
+    h is Handle(fd is 3)
+    send ch, h

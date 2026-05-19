@@ -1,0 +1,13 @@
+enum Maybe of T
+    Some(T)
+    Empty
+
+*unwrap_or(m as Maybe of i64, fallback as i64) returns i64
+    match m
+        Some(v) ? v
+        Empty ? fallback
+
+*main() returns i32
+    log(unwrap_or(Some(9), 0))
+    log(unwrap_or(Empty, 7))
+    0

@@ -1,0 +1,37 @@
+enum MaybeI64
+    SomeI64(i64)
+    EmptyI64
+
+type Buffer
+    name as String
+    values as Vec of i64
+
+type AuditResource @resource
+    id as i64
+
+    *drop
+        log('resource-dropped')
+
+*unwrap_or(m as MaybeI64, fallback as i64) returns i64
+    match m
+        SomeI64(v) ? v
+        EmptyI64 ? fallback
+
+*sum_vec(v as Vec of i64) returns i64
+    total as i64 is 0
+    for x in v
+        total is total + x
+    total
+
+*main() returns i32
+    b is Buffer(name is 'abcdef', values is [4, 5, 6])
+    moved is take b.name
+    log(moved.len())
+    b.name is 'restored'
+    log(b.name)
+    log(sum_vec(b.values))
+    log(unwrap_or(SomeI64(9), 0))
+    log(unwrap_or(EmptyI64, 7))
+    r is AuditResource(id is 1)
+    log('scope-end')
+    0

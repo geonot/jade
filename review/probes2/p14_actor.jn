@@ -1,0 +1,16 @@
+# Actor: real syntax
+actor Counter
+    count as i64
+
+    @inc
+        count is count + 1
+
+    @show
+        log(count)
+
+*main
+    c is spawn Counter
+    c.inc()
+    c.inc()
+    c.inc()
+    c.show()

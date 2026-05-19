@@ -1,0 +1,6 @@
+# Integer division by zero — does compiler trap, UB, or silent garbage?
+*main
+    a is 10
+    b is 0
+    c is a / b
+    log(c)

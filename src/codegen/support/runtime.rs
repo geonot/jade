@@ -97,14 +97,35 @@ impl<'ctx> Compiler<'ctx> {
         self.tag_fn_inner(fv, true);
     }
 
-    pub(in crate::codegen) fn tag_fn_inner(&self, fv: FunctionValue<'ctx>, will_return: bool) {
-        for a in ["nounwind", "nosync", "nofree", "mustprogress"] {
-            fv.add_attribute(AttributeLoc::Function, self.attr(a));
-        }
-        if will_return {
-            fv.add_attribute(AttributeLoc::Function, self.attr("willreturn"));
-            fv.add_attribute(AttributeLoc::Function, self.attr("norecurse"));
-        }
+    /// Apply function attributes that hold for all Jinn-emitted functions.
+    ///
+    /// IMPORTANT: We intentionally apply ONLY `nounwind` here. Jinn has no
+    /// exception unwinding (panics abort the process via `__jinn_trap`), so
+    /// `nounwind` is a true language-level invariant.
+    ///
+    /// Other attributes that look tempting (`willreturn`, `norecurse`,
+    /// `mustprogress`, `nosync`, `nofree`) are UNSOUND for arbitrary user
+    /// code:
+    /// - `willreturn`  — false for any function that calls `__jinn_trap`,
+    ///                   `abort`, `exit`, or an infinite loop.
+    /// - `norecurse`   — false for any recursive user function.
+    /// - `mustprogress`— false for daemons, infinite event/actor loops.
+    /// - `nosync`      — false for actors/channels that synchronize via
+    ///                   shared memory.
+    /// - `nofree`      — false for any function that drops heap memory or
+    ///                   calls `free`.
+    ///
+    /// Marking a function `willreturn` when it can in fact trap is a
+    /// soundness bug: LLVM uses `willreturn` to assume the only reachable
+    /// paths are those that return, and it will delete trap paths (and
+    /// the entire function body that leads to them) at -O2 and above.
+    /// This previously caused vec-OOB and div-by-zero traps to be silently
+    /// erased from release builds. See alpha P0 fixes.
+    ///
+    /// These attributes should be re-introduced per-function by a future
+    /// static-analysis pass that proves them, not blanket-applied here.
+    pub(in crate::codegen) fn tag_fn_inner(&self, fv: FunctionValue<'ctx>, _will_return: bool) {
+        fv.add_attribute(AttributeLoc::Function, self.attr("nounwind"));
     }
 
     /// Emit LLVM parameter attributes based on Jinn's ownership model.

@@ -1,0 +1,4 @@
+*main() returns i32
+    v is [1, 2, 3]
+    log(v[99])
+    0

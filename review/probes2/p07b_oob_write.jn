@@ -1,0 +1,6 @@
+# Vec OOB write
+*main
+    v is vec()
+    v.push(1)
+    v[100] is 999
+    log(v[100])

@@ -1,0 +1,6 @@
+# Vec OOB read — does runtime guard?
+*main
+    v is vec()
+    v.push(10)
+    v.push(20)
+    log(v[5])

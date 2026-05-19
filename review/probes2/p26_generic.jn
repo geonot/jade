@@ -1,0 +1,7 @@
+# Generic function (untyped param)
+*idfn(x) is x
+
+*main
+    log(idfn(42))
+    log(idfn('hi'))
+    log(idfn(3.14))

@@ -445,7 +445,14 @@ pub enum ExprKind {
     Grad(Box<Expr>),
     Einsum(Symbol, Vec<Expr>),
     Builder(Symbol, Vec<(Symbol, Expr)>),
-    GeneratorCreate(DefId, Symbol, Vec<Stmt>),
+    /// Construct a generator handle.
+    ///
+    /// Fields: `(def_id, name, body, captures)`. `captures` lists the
+    /// enclosing function's parameters that the generator body refers to,
+    /// in declaration order, as `(name, type)`. The lowerer stores them in
+    /// the generator control block at create-time and rehydrates them as
+    /// locals when the coroutine body begins running.
+    GeneratorCreate(DefId, Symbol, Vec<Stmt>, Vec<(Symbol, Type)>),
     GeneratorNext(Box<Expr>),
     /// Unwrap an Option/Result enum — extract inner value or abort.
     /// Fields: (expr, enum_name, success_tag)

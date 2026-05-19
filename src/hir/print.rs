@@ -714,7 +714,7 @@ impl PrettyPrinter {
                     .collect();
                 format!("builder {name} {{ {} }}", fs.join(", "))
             }
-            ExprKind::GeneratorCreate(_, name, _) => format!("generator {name}"),
+            ExprKind::GeneratorCreate(_, name, _, _) => format!("generator {name}"),
             ExprKind::GeneratorNext(e) => format!("{}.next()", self.expr_str(e)),
             ExprKind::EnumUnwrap(e, _, _) => format!("{}.unwrap()", self.expr_str(e)),
             ExprKind::EnumIs(e, tag) => format!("{}.is_tag({})", self.expr_str(e), tag),

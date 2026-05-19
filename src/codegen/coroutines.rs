@@ -57,11 +57,27 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    /// Compile a coroutine/generator constructor.
+    ///
+    /// `name` becomes the symbol suffix of the internal body function
+    /// (`__coro_<name>`). `body` is the HIR statements that execute inside
+    /// the coroutine. `captures` lists enclosing-fn parameters that the
+    /// body references; their runtime values are passed in `capture_vals`
+    /// in the same order. The captured values are stored in the generator
+    /// control block immediately after the 32-byte header and re-hydrated
+    /// as locals when the coroutine begins executing.
     pub(crate) fn compile_coroutine_create(
         &mut self,
         name: &str,
         body: &[hir::Stmt],
+        captures: &[(crate::intern::Symbol, Type)],
+        capture_vals: &[BasicValueEnum<'ctx>],
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        debug_assert_eq!(
+            captures.len(),
+            capture_vals.len(),
+            "generator capture/value arity mismatch for `{name}`"
+        );
         self.declare_actor_runtime();
         self.declare_gen_runtime();
 
@@ -98,6 +114,22 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(gen_ptr_alloca, gen_ptr_param));
 
         self.set_var("__coro_ctx", gen_ptr_alloca, Type::Ptr(Box::new(Type::I64)));
+
+        // Re-hydrate captured enclosing-fn parameters from the generator
+        // control block.  Each capture occupies an 8-byte slot starting at
+        // `GEN_SIZE`.  The slots are populated by the create-site after
+        // allocation; here we load them back into entry-block allocas and
+        // register them as named locals so the body can reference them
+        // exactly as it did inside the original function body.
+        for (i, (cap_name, cap_ty)) in captures.iter().enumerate() {
+            let off = Self::GEN_SIZE + (i as u64) * 8;
+            let slot_ptr = self.gen_field_ptr(gen_ptr_param, off, "cap.slot")?;
+            let llvm_ty = self.llvm_ty(cap_ty);
+            let loaded = b!(self.bld.build_load(llvm_ty, slot_ptr, &cap_name.as_str()));
+            let local = self.entry_alloca(llvm_ty, &cap_name.as_str());
+            b!(self.bld.build_store(local, loaded));
+            self.set_var(&cap_name.as_str(), local, cap_ty.clone());
+        }
 
         self.compile_coroutine_body(body)?;
 

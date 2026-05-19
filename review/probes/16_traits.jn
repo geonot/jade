@@ -1,0 +1,23 @@
+# Traits + impl + dispatch
+trait Greet
+    *hi() returns string
+
+type Dog
+    name as string
+
+impl Greet for Dog
+    *hi() returns string
+        return "woof: " + self.name
+
+type Cat
+    name as string
+
+impl Greet for Cat
+    *hi() returns string
+        return "meow: " + self.name
+
+*main
+    d is Dog("rex")
+    c is Cat("mia")
+    log(d.hi())
+    log(c.hi())

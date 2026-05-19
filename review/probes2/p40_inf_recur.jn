@@ -1,0 +1,6 @@
+# Infinite recursion without TCO — should stack overflow
+*loop_forever(n as i64) returns i64
+    return loop_forever(n + 1)
+
+*main
+    log(loop_forever(0))

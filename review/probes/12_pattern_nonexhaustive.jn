@@ -1,0 +1,13 @@
+# Non-exhaustive match — should be compile error or runtime trap.
+enum Color
+    Red
+    Green
+    Blue
+
+*name(c as Color) returns string
+    match c
+        Red ? "red"
+        Green ? "green"
+
+*main
+    log(name(Blue))

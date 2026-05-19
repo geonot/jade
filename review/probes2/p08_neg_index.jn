@@ -1,0 +1,6 @@
+# Negative index — semantics?
+*main
+    v is [10, 20, 30]
+    log(v[-1])
+    log(v[-2])
+    log(v[-100])

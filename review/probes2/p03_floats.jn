@@ -1,0 +1,7 @@
+# Float specials
+*main
+    z is 0.0
+    log(1.0 / z)
+    log(-1.0 / z)
+    log(z / z)
+    log(1.0e300 * 1.0e300)

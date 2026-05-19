@@ -400,9 +400,36 @@ impl Typer {
             def_id: id,
             name: f.name.clone(),
             params,
-            ret,
+            ret: ret.clone(),
             error_types,
-            body,
+            body: if f.is_generator && f.name != "main" {
+                // P0-3: a generator function's body is the *coroutine*
+                // body, not the function body. The function itself
+                // constructs and returns the generator handle. Wrap the
+                // lowered body in a single `Ret(Some(GeneratorCreate(…)))`
+                // so the MIR return type (`Type::Generator(_)` → ptr)
+                // matches the returned value. Without this wrap, codegen
+                // would lower the for/yield inline and emit a trailing
+                // `ret i64 0` against a `ptr`-returning function.
+                let body_span = f.span;
+                let captures: Vec<(Symbol, Type)> = params
+                    .iter()
+                    .map(|p| (p.name.clone(), p.ty.clone()))
+                    .collect();
+                let gen_expr = hir::Expr {
+                    kind: hir::ExprKind::GeneratorCreate(
+                        id,
+                        f.name.clone(),
+                        std::mem::take(&mut body),
+                        captures,
+                    ),
+                    ty: ret.clone(),
+                    span: body_span,
+                };
+                vec![hir::Stmt::Ret(Some(gen_expr), ret.clone(), body_span)]
+            } else {
+                body
+            },
             span: f.span,
             generic_origin: None,
             is_generator: f.is_generator,

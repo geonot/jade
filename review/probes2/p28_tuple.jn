@@ -1,0 +1,8 @@
+# Tuple destructure
+*pair() returns (i64, i64)
+    (1, 2)
+
+*main
+    (a, b) is pair()
+    log(a)
+    log(b)

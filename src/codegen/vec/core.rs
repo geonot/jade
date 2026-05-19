@@ -554,9 +554,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(ok, ok_bb, fail_bb));
 
         self.bld.position_at_end(fail_bb);
-        let trap = self.get_or_declare_trap();
-        b!(self.bld.build_call(trap, &[], ""));
-        b!(self.bld.build_unreachable());
+        self.emit_trap("vec index out of bounds");
 
         self.bld.position_at_end(ok_bb);
         Ok(())

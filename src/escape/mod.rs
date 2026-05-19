@@ -429,7 +429,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
                 seed_binds_in_expr(e, info);
             }
         }
-        CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts) => {
+        CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts, _) => {
             for s in stmts {
                 seed_binds_in_stmt(s, info);
             }
@@ -760,7 +760,7 @@ impl<'a> EscapeWalk<'a> {
             Field(e, _, _) | ChannelRecv(e) | CoroutineNext(e) | GeneratorNext(e) | Yield(e) => {
                 self.walk_expr_consumer(e, BindContext::LocalRead);
             }
-            CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts) => {
+            CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts, _) => {
                 // Coroutine bodies execute later — anything they capture
                 // outlives the current scope.  Treat them like spawn for
                 // safety (cross-task even if single-thread).

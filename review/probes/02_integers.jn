@@ -1,0 +1,19 @@
+# Integer width semantics and overflow.
+*main
+    x is 0x7fffffff
+    y is x + 1
+    log(x)
+    log(y)
+    // unsigned hex parse
+    big is 0xffffffff
+    log(big)
+    // negative
+    n is -42
+    log(n)
+    // shifts
+    log(1 << 8)
+    log(256 >> 1)
+    // bitwise
+    log(0xff & 0x0f)
+    log(0xf0 | 0x0f)
+    log(0xff ^ 0xaa)

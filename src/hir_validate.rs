@@ -466,7 +466,7 @@ impl HirValidator {
                     self.validate_expr(v);
                 }
             }
-            hir::ExprKind::GeneratorCreate(_, _, stmts) => {
+            hir::ExprKind::GeneratorCreate(_, _, stmts, _) => {
                 self.validate_block(stmts);
             }
             // KV / specialized store ops

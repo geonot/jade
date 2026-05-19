@@ -1,0 +1,12 @@
+# Persistent store basics.
+store User
+    id as i64
+    name as string
+    age as i64
+
+*main
+    insert User(id is 1, name is "alice", age is 30)
+    insert User(id is 2, name is "bob",   age is 25)
+    n is query User
+        count
+    log(n)

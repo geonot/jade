@@ -1,0 +1,16 @@
+# Pattern matching, exhaustiveness.
+enum Shape
+    Circle(f64)
+    Rect(f64, f64)
+    Point
+
+*area(s as Shape) returns f64
+    match s
+        Circle(r) ? 3.14159 * r * r
+        Rect(w, h) ? w * h
+        Point ? 0.0
+
+*main
+    log(area(Circle(2.0)))
+    log(area(Rect(3.0, 4.0)))
+    log(area(Point))

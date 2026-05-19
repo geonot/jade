@@ -417,7 +417,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
                 fold_expr(v);
             }
         }
-        ExprKind::GeneratorCreate(_, _, stmts) => {
+        ExprKind::GeneratorCreate(_, _, stmts, _) => {
             for s in stmts {
                 fold_stmt(s);
             }

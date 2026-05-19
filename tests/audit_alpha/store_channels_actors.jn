@@ -1,0 +1,40 @@
+extern *usleep(us as i32) returns i32
+
+store accounts
+    id as i64
+    balance as i64
+
+actor Accumulator
+    total as i64
+    @add n as i64
+        total is total + n
+    @show
+        log(total)
+
+*main() returns i32
+    insert accounts 1, 100
+    insert accounts 2, 250
+    insert accounts 3, 300
+
+    r is accounts where id equals 2
+    log(r.balance)
+    r.balance is 333
+    s is accounts where id equals 2
+    log(s.balance)
+    snap is s.snapshot()
+    snap.balance is 1
+    again is accounts where id equals 2
+    log(again.balance)
+
+    ch is channel of i64(4)
+    send ch, 11
+    received is receive ch
+    log(received)
+
+    acc is spawn Accumulator
+    acc.add(40)
+    acc.add(2)
+    extern.usleep(100000)
+    acc.show()
+    extern.usleep(100000)
+    0

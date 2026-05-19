@@ -1,0 +1,10 @@
+# Functions: definitions, expression-bodied, generics, recursion.
+*fib(n) is if n < 2 ? n ! fib(n - 1) + fib(n - 2)
+*add(a, b) is a + b
+*identity(x) is x
+
+*main
+    log(fib(10))
+    log(add(40, 2))
+    log(identity(42))
+    log(identity("string-too"))

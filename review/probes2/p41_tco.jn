@@ -1,0 +1,8 @@
+# Tail-call optimization?
+*tco(n as i64, acc as i64) returns i64
+    if n equals 0
+        return acc
+    return tco(n - 1, acc + 1)
+
+*main
+    log(tco(10000000, 0))

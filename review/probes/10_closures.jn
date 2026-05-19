@@ -1,0 +1,15 @@
+# Closures: capture by ref/value, escape, recursion.
+*make_counter()
+    n is 0
+    return || (n is n + 1) ~ n
+
+*main
+    inc is make_counter()
+    log(inc())
+    log(inc())
+    log(inc())
+    // capture local in lambda
+    x is 10
+    f is |y| x + y
+    log(f(5))
+    log(f(7))

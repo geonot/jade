@@ -1,0 +1,15 @@
+# Floating point semantics: NaN, infinity, precision.
+*main
+    a is 1.5
+    b is 2.5
+    log(a + b)
+    log(a / b)
+    log(0.1 + 0.2)
+    // very small / large
+    log(1.0e-300)
+    log(1.0e300)
+    // division by zero (float)
+    z is 0.0
+    log(1.0 / z)
+    log(-1.0 / z)
+    log(z / z)

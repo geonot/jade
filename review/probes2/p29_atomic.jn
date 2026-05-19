@@ -1,0 +1,6 @@
+# Atomic var
+*main
+    atomic counter is 0
+    counter is counter + 1
+    counter is counter + 1
+    log(counter)

@@ -67,6 +67,22 @@ pub(super) fn compile_and_link(
     let entity_index = EntityIndex::build(base_dir, &packages);
     resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
+    // P0-9: enforce that an executable program has a `*main` entry point.
+    // Library/test/standalone builds are exempt — they either provide their
+    // own entry (test runner / freestanding) or have no entry at all.
+    if !standalone && !test_mode {
+        let has_main = prog
+            .decls
+            .iter()
+            .any(|d| matches!(d, crate::ast::Decl::Fn(f) if f.name == "main"));
+        if !has_main {
+            die(&format!(
+                "{}: program has no `*main` function (use `--lib` to compile as a library or `--standalone` for freestanding mode)",
+                input.display()
+            ));
+        }
+    }
+
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
     if test_mode {

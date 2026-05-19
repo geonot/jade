@@ -1,0 +1,6 @@
+# Out-of-bounds index: does Jinn panic or silently read garbage?
+*main
+    v is vec()
+    v.push(10)
+    v.push(20)
+    log(v[5])

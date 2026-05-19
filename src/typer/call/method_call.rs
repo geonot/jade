@@ -104,6 +104,67 @@ impl Typer {
             });
         }
 
+        // ── Channel methods: `.send(x)`, `.recv()`, `.close()` ────────
+        // Surface sugar for ChannelSend/ChannelRecv/ChannelClose; the
+        // underlying HIR nodes are identical to those produced by the
+        // `ch <~ x` / `<~ ch` operators. Cross-thread @resource safety
+        // is enforced on send just like the operator form.
+        if let Type::Channel(elem_ty) = &obj_ty {
+            let elem_ty = (**elem_ty).clone();
+            match method {
+                "send" => {
+                    if args.len() != 1 {
+                        return Err(format!(
+                            "{}: channel `.send()` takes exactly 1 argument, got {}",
+                            span.loc(),
+                            args.len()
+                        ));
+                    }
+                    let hval = self.lower_expr_expected(&args[0], Some(&elem_ty))?;
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&elem_ty, &hval.ty, span, "channel .send()");
+                    let hval = self.maybe_coerce_to(hval, &elem_ty);
+                    let resolved_elem = self.infer_ctx.shallow_resolve(&elem_ty);
+                    self.enforce_cross_thread_safe(&resolved_elem, span, "channel .send()")?;
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::ChannelSend(Box::new(hobj), Box::new(hval)),
+                        ty: Type::Void,
+                        span,
+                    });
+                }
+                "recv" => {
+                    if !args.is_empty() {
+                        return Err(format!(
+                            "{}: channel `.recv()` takes no arguments",
+                            span.loc()
+                        ));
+                    }
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::ChannelRecv(Box::new(hobj)),
+                        ty: elem_ty,
+                        span,
+                    });
+                }
+                "close" => {
+                    // `close` is a statement (`close ch`), not an expression.
+                    // We could synthesize a Void-typed wrapper, but the dedicated
+                    // statement form is the canonical surface; keep things simple
+                    // and direct users to it.
+                    return Err(format!(
+                        "{}: channel close is the statement `close {{ch}}`, not a method; use `close {{ch}}` instead of `.close()`",
+                        span.loc()
+                    ));
+                }
+                _ => {
+                    return Err(format!(
+                        "{}: no method `.{method}()` on channel; available: `.send(v)`, `.recv()`, `.close()`",
+                        span.loc()
+                    ));
+                }
+            }
+        }
+
         if matches!(obj_ty, Type::String) {
             let hargs: Vec<hir::Expr> = args
                 .iter()

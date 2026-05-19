@@ -1,0 +1,19 @@
+# Basic types, arithmetic, control flow.
+*main
+    a is 1 + 2
+    b is 10 mod 3
+    c is 2 pow 10
+    log(a)
+    log(b)
+    log(c)
+    log(true and false)
+    log(true or false)
+    log(not true)
+    log(5 < 10)
+    log(5 equals 5)
+    if a > 0
+        log("positive")
+    elif a equals 0
+        log("zero")
+    else
+        log("negative")

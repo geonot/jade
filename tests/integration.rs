@@ -2141,25 +2141,8 @@ fn operator_overload_display() {
     );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Dynamic dispatch (dyn Trait)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-#[test]
-fn dyn_trait_basic() {
-    expect(
-        "type Dog\n    x as i64\n\ntrait Animal\n    *speak() returns i64\n\nimpl Animal for Dog\n    *speak() returns i64\n        self.x\n\n*call_speak(a as dyn Animal) returns i64\n    a.speak()\n\n*main() returns i32\n    d is Dog(x is 42)\n    log(call_speak(d))\n    0\n",
-        "42",
-    );
-}
-
-#[test]
-fn dyn_trait_multiple_types() {
-    expect(
-        "type Cat\n    lives as i64\n\ntype Dog\n    age as i64\n\ntrait Animal\n    *value() returns i64\n\nimpl Animal for Cat\n    *value() returns i64\n        self.lives\n\nimpl Animal for Dog\n    *value() returns i64\n        self.age\n\n*get_val(a as dyn Animal) returns i64\n    a.value()\n\n*main() returns i32\n    c is Cat(lives is 9)\n    d is Dog(age is 5)\n    log(get_val(c))\n    log(get_val(d))\n    0\n",
-        "9\n5",
-    );
-}
+// dyn Trait tests removed — Type::DynTrait was deleted in commit 62f893a
+// ("remove 8 deprecated types end-to-end"). See /memories/repo/type_removal_map.md.
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Fieldless enum zero-cost (tag-only)
@@ -2323,25 +2306,9 @@ fn fbip_match_transform_variant() {
     );
 }
 
-// ── Pool Allocator ─────────────────────────────────────────────────
-
-#[test]
-fn pool_create_alloc_free() {
-    // Create a pool, allocate from it, free back, allocate again
-    expect(
-        "*main()\n    p is Pool(8, 16)\n    slot is p.alloc()\n    p.free(slot)\n    slot2 is p.alloc()\n    log(42)\n    p.destroy()\n",
-        "42",
-    );
-}
-
-#[test]
-fn pool_multiple_allocs() {
-    // Allocate multiple slots and verify pool works
-    expect(
-        "*main()\n    p is Pool(8, 64)\n    a is p.alloc()\n    b is p.alloc()\n    c is p.alloc()\n    p.free(b)\n    d is p.alloc()\n    log(100)\n    p.destroy()\n",
-        "100",
-    );
-}
+// Pool allocator tests removed — Type::Pool and runtime/pool.c were deleted
+// in commit 62f893a ("remove 8 deprecated types end-to-end").
+// See /memories/repo/type_removal_map.md.
 
 // ── Tail Reuse ─────────────────────────────────────────────────────
 

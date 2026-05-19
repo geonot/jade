@@ -109,7 +109,7 @@ impl OwnershipVerifier {
             }
             ExprKind::Lambda(_, body)
             | ExprKind::CoroutineCreate(_, body)
-            | ExprKind::GeneratorCreate(_, _, body) => {
+            | ExprKind::GeneratorCreate(_, _, body, _) => {
                 Self::collect_var_ids_block(body, out);
             }
             ExprKind::Block(b) => Self::collect_var_ids_block(b, out),

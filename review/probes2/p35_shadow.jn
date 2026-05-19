@@ -1,0 +1,8 @@
+# Shadowing and scope
+*main
+    x is 1
+    log(x)
+    if true
+        x is 'shadow'
+        log(x)
+    log(x)

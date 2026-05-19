@@ -1,0 +1,12 @@
+# Strings: literal, interpolation, length, concat, indexing.
+*main
+    s is "hello"
+    t is 'world {1 + 2}'
+    log(s)
+    log(t)
+    log(s.length())
+    log(s + " " + t)
+    // unicode
+    u is "héllo 世界 🌍"
+    log(u)
+    log(u.length())

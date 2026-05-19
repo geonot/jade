@@ -1,0 +1,14 @@
+# Trait + dispatch — does `dispatch` keyword work?
+trait Greet
+    *hi() returns String
+
+type Dog
+    name as String
+
+impl Greet for Dog
+    *hi() returns String
+        return 'woof: ' + self.name
+
+*main
+    d is Dog('rex')
+    log(d.hi())

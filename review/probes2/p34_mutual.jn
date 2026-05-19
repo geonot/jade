@@ -1,0 +1,14 @@
+# Mutual recursion
+*even(n as i64) returns bool
+    if n equals 0
+        return true
+    return odd(n - 1)
+
+*odd(n as i64) returns bool
+    if n equals 0
+        return false
+    return even(n - 1)
+
+*main
+    log(even(10))
+    log(odd(7))

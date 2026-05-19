@@ -1,0 +1,6 @@
+# Tight integer loop perf
+*main
+    sum is 0
+    for i from 0 to 100000000
+        sum is sum + i
+    log(sum)

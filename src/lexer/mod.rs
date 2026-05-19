@@ -31,6 +31,11 @@ pub struct Lexer<'s> {
     sol: bool,
     nl: bool,
     file: Option<crate::intern::Symbol>,
+    /// True iff the most recently emitted significant token was `Dot`.
+    /// When set, the next identifier is lexed as a plain `Ident` without
+    /// keyword promotion — so e.g. `ch.send(x)`, `xs.take()`, `m.match()`
+    /// see the method name as an identifier and not as the language keyword.
+    after_dot: bool,
 }
 
 static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
@@ -144,6 +149,7 @@ impl<'s> Lexer<'s> {
             sol: true,
             nl: false,
             file: None,
+            after_dot: false,
         }
     }
 
@@ -214,7 +220,12 @@ impl<'s> Lexer<'s> {
                 _ => {}
             }
             self.nl = false;
-            out.push(self.lex_token()?);
+            let tok = self.lex_token()?;
+            // P0-10: after a `Dot`, the next identifier is a member/method
+            // name and must NOT be promoted to a language keyword. The
+            // promotion is suppressed inside `lex_ident` via `after_dot`.
+            self.after_dot = matches!(tok.token, Token::Dot);
+            out.push(tok);
         }
 
         if !self.nl && !out.is_empty() {

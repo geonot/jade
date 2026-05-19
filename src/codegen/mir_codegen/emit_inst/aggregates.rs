@@ -602,10 +602,7 @@ impl<'ctx> Compiler<'ctx> {
                         let trap_bb = self.ctx.append_basic_block(cur_fn, "strict.trap");
                         b!(self.bld.build_conditional_branch(eq, ok_bb, trap_bb));
                         self.bld.position_at_end(trap_bb);
-                        if let Some(trap) = self.module.get_function("llvm.trap") {
-                            b!(self.bld.build_call(trap, &[], ""));
-                        }
-                        b!(self.bld.build_unreachable());
+                        self.emit_trap("strict cast lost information");
                         self.bld.position_at_end(ok_bb);
                     }
                     Ok(casted)

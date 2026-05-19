@@ -1,0 +1,10 @@
+# Take/move/copy semantics — does `take` correctly transfer ownership?
+*consume(v) returns i64
+    v[0]
+
+*main
+    v is [1, 2, 3]
+    a is consume(take v)
+    log(a)
+    # using v after take should error
+    log(v[0])

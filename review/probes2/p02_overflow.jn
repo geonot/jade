@@ -1,0 +1,10 @@
+# Integer overflow: signed wrap, unsigned semantics
+*main
+    a is 0x7fffffff
+    b is a + 1
+    log(a)
+    log(b)
+    c is 0x7fffffffffffffff
+    d is c + 1
+    log(c)
+    log(d)

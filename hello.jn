@@ -1,7 +1,0 @@
-*main
-    x is vec()
-    x.push(1)
-    x.push(2)
-    x.push(3)
-    y is map(x, $ * 2)
-    log(y[1])

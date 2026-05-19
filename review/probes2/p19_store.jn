@@ -1,0 +1,10 @@
+# Store: positional insert + count
+store users
+    name as String
+    age as i64
+
+*main
+    insert users 'alice', 30
+    insert users 'bob', 25
+    n is count users
+    log(n)

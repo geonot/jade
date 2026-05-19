@@ -1,0 +1,8 @@
+# Unicode in strings, escape handling
+*main
+    log('plain')
+    log('newline\n in middle')
+    log('tab\there')
+    log('quote\'inside')
+    log('emoji 🎉 here')
+    log('zero\\0byte?')

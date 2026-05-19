@@ -1,0 +1,6 @@
+# String interpolation deep
+*main
+    name is 'jinn'
+    n is 42
+    s is 'hello {name}, num {n}, expr {n * 2}'
+    log(s)

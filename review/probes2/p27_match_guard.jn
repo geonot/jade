@@ -1,0 +1,13 @@
+# Match with guards
+*classify(n as i64) returns String
+    match n
+        x if x < 0 ? 'neg'
+        0 ? 'zero'
+        x if x < 10 ? 'small'
+        _ ? 'big'
+
+*main
+    log(classify(-5))
+    log(classify(0))
+    log(classify(7))
+    log(classify(1000))
