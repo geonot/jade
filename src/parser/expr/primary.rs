@@ -205,11 +205,15 @@ impl Parser {
                 self.expect(Token::RParen)?;
                 if self.check(Token::Returns) {
                     self.advance();
-                } else {
-                    self.expect(Token::Returns)?;
+                    let ret = self.parse_type()?;
+                    return Ok(Type::Fn(params, Box::new(ret)));
                 }
-                let ret = self.parse_type()?;
-                Ok(Type::Fn(params, Box::new(ret)))
+                // No `returns` ⇒ tuple / parenthesised / unit type.
+                Ok(match params.len() {
+                    0 => Type::Void,
+                    1 => params.into_iter().next().unwrap(),
+                    _ => Type::Tuple(params),
+                })
             }
             _ => Err(self.error("expected type")),
         }

@@ -134,7 +134,7 @@ impl Parser {
     pub(in crate::parser) fn parse_arm(&mut self) -> Result<Arm, ParseError> {
         let sp = self.span();
         let pat = self.parse_pat()?;
-        let guard = if self.check(Token::When) {
+        let guard = if self.check(Token::When) || self.check(Token::If) {
             self.advance();
             Some(self.parse_pipeline()?)
         } else {

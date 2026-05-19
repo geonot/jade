@@ -463,31 +463,66 @@ impl Parser {
     }
 
     pub(in crate::parser) fn is_tuple_bind(&self) -> bool {
-        if !matches!(self.peek(), Token::Ident(_)) {
-            return false;
-        }
-        let mut i = self.pos + 1;
-        loop {
-            if i >= self.tok.len() || !matches!(self.tok[i].token, Token::Comma) {
-                return false;
+        // Form 1: bare `a, b, c is …`
+        if matches!(self.peek(), Token::Ident(_)) {
+            let mut i = self.pos + 1;
+            loop {
+                if i >= self.tok.len() || !matches!(self.tok[i].token, Token::Comma) {
+                    break;
+                }
+                i += 1;
+                if i >= self.tok.len() || !matches!(self.tok[i].token, Token::Ident(_)) {
+                    break;
+                }
+                i += 1;
+                if i < self.tok.len() && matches!(self.tok[i].token, Token::Is) {
+                    return true;
+                }
             }
-            i += 1;
+        }
+        // Form 2: parenthesised `(a, b, c) is …`
+        if matches!(self.peek(), Token::LParen) {
+            let mut i = self.pos + 1;
             if i >= self.tok.len() || !matches!(self.tok[i].token, Token::Ident(_)) {
                 return false;
             }
             i += 1;
-            if i < self.tok.len() && matches!(self.tok[i].token, Token::Is) {
-                return true;
+            loop {
+                if i >= self.tok.len() {
+                    return false;
+                }
+                match &self.tok[i].token {
+                    Token::Comma => {
+                        i += 1;
+                        if i >= self.tok.len() || !matches!(self.tok[i].token, Token::Ident(_)) {
+                            return false;
+                        }
+                        i += 1;
+                    }
+                    Token::RParen => {
+                        i += 1;
+                        return i < self.tok.len() && matches!(self.tok[i].token, Token::Is);
+                    }
+                    _ => return false,
+                }
             }
         }
+        false
     }
 
     pub(in crate::parser) fn parse_tuple_bind(&mut self) -> Result<Stmt, ParseError> {
         let sp = self.span();
+        let parenthesised = self.check(Token::LParen);
+        if parenthesised {
+            self.advance();
+        }
         let mut names = vec![self.ident()?];
         while self.check(Token::Comma) {
             self.advance();
             names.push(self.ident()?);
+        }
+        if parenthesised {
+            self.expect(Token::RParen)?;
         }
         self.expect(Token::Is)?;
         let value = self.parse_expr()?;
