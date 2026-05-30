@@ -112,6 +112,40 @@ jobs:
           done
           exit "$fail"
 
+  wal-property:
+    # WAL crash-consistency property tests (P1-14). Drives the C runtime
+    # WAL through randomized op sequences and randomized crash points
+    # (torn-tail truncation, mid-entry truncation, CRC corruption) and
+    # asserts the prefix invariant: replay always returns a byte-exact
+    # prefix of the written entries — never a partial entry, never
+    # reordered, never corrupted. PROPTEST_CASES is raised well above the
+    # 256-case default to give a ~5-minute randomized soak per the roadmap.
+    runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_210_PREFIX: /usr/lib/llvm-21
+      RUSTFLAGS: "-D warnings"
+      PROPTEST_CASES: "100000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 21 + build deps
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo apt-key add llvm-snapshot.gpg.key
+          sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-21 llvm-21-dev clang-21 lld-21 pkg-config libssl-dev libsqlite3-dev
+
+      - name: WAL property tests
+        run: cargo test --release --test wal_property
+
   fuzz-smoke:
     # Coverage-guided fuzz harnesses (P0-11). Requires nightly for
     # cargo-fuzz. Runs each target for a short window — long enough
