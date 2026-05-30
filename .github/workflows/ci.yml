@@ -85,35 +85,32 @@ jobs:
       - name: Install tree-sitter CLI
         run: npm install -g tree-sitter-cli@^0.24.0
 
-      - name: Generate tree-sitter parser (advisory)
-        id: ts-generate
-        continue-on-error: true
+      - name: Generate tree-sitter parser
         working-directory: tree-sitter-jinn
         run: tree-sitter generate
 
-      # The tree-sitter grammar is editor-tooling and is NOT yet in full
-      # conformance with the reference parser (it carries speculative rules
-      # and a few unresolved GLR conflicts). Bringing it into lockstep is a
-      # tracked Phase-C task; until then this corpus check is advisory so it
-      # cannot block CI. The authoritative drift gate is the Rust test above
-      # (`tests/ebnf_roundtrip.rs`), which exercises the reference parser.
-      - name: EBNF corpus ↔ tree-sitter drift (advisory)
-        if: steps.ts-generate.outcome == 'success'
-        continue-on-error: true
+      - name: tree-sitter grammar corpus tests
+        working-directory: tree-sitter-jinn
+        run: tree-sitter test
+
+      # The tree-sitter grammar is editor tooling kept in lockstep with the
+      # reference parser. The SAME `tests/ebnf_corpus/` snippets that the Rust
+      # gate feeds through the reference parser are fed through the grammar
+      # here; any ERROR node means a construct the parser accepts but the
+      # grammar rejects (or vice versa), i.e. genuine drift — and fails CI.
+      - name: EBNF corpus ↔ tree-sitter drift
+        working-directory: tree-sitter-jinn
         run: |
           set -uo pipefail
           fail=0
-          for f in tests/ebnf_corpus/*.jn; do
+          for f in ../tests/ebnf_corpus/*.jn; do
             echo "tree-sitter parse: $f"
-            if ! tree-sitter parse --quiet "$PWD/$f" \
-                 --config-path tree-sitter-jinn/tree-sitter.json 2>/dev/null; then
-              echo "::warning file=$f::tree-sitter rejected a corpus snippet the reference parser accepts (grammar drift; tracked Phase-C task)"
+            if ! tree-sitter parse --quiet "$f"; then
+              echo "::error file=$f::tree-sitter rejected a corpus snippet the reference parser accepts (grammar drift)"
               fail=1
             fi
           done
-          if [ "$fail" -ne 0 ]; then
-            echo "::warning::tree-sitter grammar has known drift from the reference parser (advisory)"
-          fi
+          exit "$fail"
 
   fuzz-smoke:
     # Coverage-guided fuzz harnesses (P0-11). Requires nightly for

@@ -8,37 +8,78 @@
   "if"
   "elif"
   "else"
+  "unless"
   "while"
+  "until"
   "for"
   "in"
   "loop"
+  "sim"
   "match"
   "when"
   "return"
   "break"
   "continue"
-  "do"
-  "end"
+  "defer"
+  "stop"
+  "close"
+  "nop"
 ] @keyword
 
 [
   "type"
   "enum"
-  "pub"
+  "err"
+  "trait"
+  "impl"
+  "actor"
+  "store"
+  "view"
+  "migration"
   "extern"
-  "fn"
+  "pub"
+  "use"
+  "test"
+  "const"
+  "global"
+  "alias"
+  "of"
   "as"
   "to"
   "by"
+  "from"
 ] @keyword.type
 
 [
+  "spawn"
+  "send"
+  "receive"
+  "channel"
+  "yield"
+  "dispatch"
+  "select"
+  "atomic"
+] @keyword
+
+[
   "is"
-  "isnt"
-  "equals"
   "and"
   "or"
+  "xor"
   "not"
+  "equals"
+  "eq"
+  "neq"
+  "lt"
+  "gt"
+  "lte"
+  "gte"
+  "nlt"
+  "ngt"
+  "nlte"
+  "ngte"
+  "mod"
+  "pow"
 ] @keyword.operator
 
 ; ── Literals ──────────────────────────────────────────────────
@@ -50,35 +91,38 @@
 (string_content) @string
 (escape_sequence) @string.escape
 
-(true) @constant.builtin
-(false) @constant.builtin
+(boolean) @constant.builtin
 (none) @constant.builtin
+(unreachable) @constant.builtin
 
 (placeholder) @variable.builtin
 
 ; ── Operators ─────────────────────────────────────────────────
-(operator) @operator
+(binary_expression
+  operator: _ @operator)
+
+(unary_expression
+  operator: _ @operator)
 
 [
   "~"
   "?"
   "!"
+  "=>"
+  "%"
 ] @operator
 
 ; ── Punctuation ───────────────────────────────────────────────
 ["(" ")"] @punctuation.bracket
 ["[" "]"] @punctuation.bracket
+["<" ">"] @punctuation.bracket
 [","] @punctuation.delimiter
 ["."] @punctuation.delimiter
-[":"] @punctuation.delimiter
 
 ; ── Functions ─────────────────────────────────────────────────
 (function_definition
   "*" @keyword.function
   name: (identifier) @function)
-
-(lambda_expression
-  "|" @keyword.function)
 
 (call_expression
   function: (identifier) @function.call)
@@ -89,8 +133,28 @@
 (log_expression
   "log" @function.builtin)
 
+(grad_expression
+  "grad" @function.builtin)
+
+(einsum_expression
+  "einsum" @function.builtin)
+
+(syscall_expression
+  "syscall" @function.builtin)
+
 (parameter
   name: (identifier) @variable.parameter)
+
+(handler_parameter
+  name: (identifier) @variable.parameter)
+
+; ── Attributes ────────────────────────────────────────────────
+(attribute
+  "@" @attribute
+  name: (identifier) @attribute)
+
+(message_handler
+  name: (identifier) @function)
 
 ; ── Type definitions ──────────────────────────────────────────
 (type_definition
@@ -99,12 +163,23 @@
 (enum_definition
   name: (identifier) @type)
 
+(error_definition
+  name: (identifier) @type)
+
+(trait_definition
+  name: (identifier) @type)
+
+(actor_definition
+  name: (identifier) @type)
+
+(store_definition
+  name: (identifier) @type)
+
 (variant_definition
-  name: (identifier) @type.enummember)
+  name: (identifier) @type.enum)
 
-(type_annotation) @type
-
-(function_type) @type
+(named_type
+  name: (identifier) @type)
 
 ; ── Patterns ──────────────────────────────────────────────────
 (constructor_pattern
@@ -124,6 +199,3 @@
 
 (member_expression
   property: (identifier) @property)
-
-(cast_expression
-  "as" @keyword.operator)

@@ -3,19 +3,19 @@ Hello world
 ================================================================================
 
 *main()
-    log('hello')
+    log("hello")
 
 --------------------------------------------------------------------------------
 
 (source_file
   (function_definition
-    name: (identifier)
-    body: (block
+    (identifier)
+    (parameter_list)
+    (block
       (expression_statement
-        (call_expression
-          function: (log_expression
-            value: (string
-              (string_content))))))))
+        (log_expression
+          (argument
+            (raw_string)))))))
 
 ================================================================================
 Binding
@@ -28,20 +28,21 @@ Binding
 
 (source_file
   (function_definition
-    name: (identifier)
-    body: (block
+    (identifier)
+    (parameter_list)
+    (block
       (binding
-        name: (identifier)
-        value: (integer)))))
+        (identifier)
+        (integer)))))
 
 ================================================================================
 If elif else
 ================================================================================
 
 *main()
-    if x > 0
+    if x gt 0
         log(1)
-    elif x < 0
+    elif x lt 0
         log(2)
     else
         log(0)
@@ -50,79 +51,105 @@ If elif else
 
 (source_file
   (function_definition
-    name: (identifier)
-    body: (block
+    (identifier)
+    (parameter_list)
+    (block
       (if_statement
-        condition: (binary_expression
-          left: (identifier)
-          operator: (operator)
-          right: (integer))
-        body: (block
+        (binary_expression
+          (identifier)
+          (integer))
+        (block
           (expression_statement
-            (call_expression
-              function: (log_expression
-                value: (integer)))))
+            (log_expression
+              (argument
+                (integer)))))
         (elif_clause
-          condition: (binary_expression
-            left: (identifier)
-            operator: (operator)
-            right: (integer))
-          body: (block
+          (binary_expression
+            (identifier)
+            (integer))
+          (block
             (expression_statement
-              (call_expression
-                function: (log_expression
-                  value: (integer))))))
+              (log_expression
+                (argument
+                  (integer))))))
         (else_clause
-          body: (block
+          (block
             (expression_statement
-              (call_expression
-                function: (log_expression
-                  value: (integer))))))))))
+              (log_expression
+                (argument
+                  (integer))))))))))
+
+================================================================================
+While loop
+================================================================================
+
+*main()
+    while n gt 0
+        n is n - 1
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (block
+      (while_statement
+        (binary_expression
+          (identifier)
+          (integer))
+        (block
+          (binding
+            (identifier)
+            (binary_expression
+              (identifier)
+              (integer))))))))
 
 ================================================================================
 For loop
 ================================================================================
 
 *main()
-    for i in 10
+    for i in xs
         log(i)
 
 --------------------------------------------------------------------------------
 
 (source_file
   (function_definition
-    name: (identifier)
-    body: (block
+    (identifier)
+    (parameter_list)
+    (block
       (for_statement
-        variable: (identifier)
-        iterable: (integer)
-        body: (block
+        (identifier)
+        (identifier)
+        (block
           (expression_statement
-            (call_expression
-              function: (log_expression
-                value: (identifier)))))))))
+            (log_expression
+              (argument
+                (identifier)))))))))
 
 ================================================================================
 Type definition
 ================================================================================
 
 type Point
-    x: i64
-    y: i64
+    x as i64
+    y as i64
 
 --------------------------------------------------------------------------------
 
 (source_file
   (type_definition
-    name: (identifier)
-    body: (type_body
+    (identifier)
+    (type_body
       (field_definition
-        name: (identifier)
-        type: (type_annotation
+        (identifier)
+        (named_type
           (identifier)))
       (field_definition
-        name: (identifier)
-        type: (type_annotation
+        (identifier)
+        (named_type
           (identifier))))))
 
 ================================================================================
@@ -139,13 +166,111 @@ enum Direction
 
 (source_file
   (enum_definition
-    name: (identifier)
-    body: (enum_body
-      (variant_definition
-        name: (identifier))
-      (variant_definition
-        name: (identifier))
-      (variant_definition
-        name: (identifier))
-      (variant_definition
-        name: (identifier)))))
+    (identifier)
+    (variant_definition
+      (identifier))
+    (variant_definition
+      (identifier))
+    (variant_definition
+      (identifier))
+    (variant_definition
+      (identifier))))
+
+================================================================================
+Match statement
+================================================================================
+
+*area(s as Shape) returns i64
+    match s
+        Circle(r) ? r
+        Rect(w, h) ? w
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (named_type
+          (identifier))))
+    (named_type
+      (identifier))
+    (block
+      (match_statement
+        (identifier)
+        (match_arm
+          (constructor_pattern
+            (identifier)
+            (identifier_pattern
+              (identifier)))
+          (expression_statement
+            (identifier)))
+        (match_arm
+          (constructor_pattern
+            (identifier)
+            (identifier_pattern
+              (identifier))
+            (identifier_pattern
+              (identifier)))
+          (expression_statement
+            (identifier)))))))
+
+================================================================================
+Function with parameters and return
+================================================================================
+
+*add(a as i64, b as i64) returns i64
+    return a + b
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (named_type
+          (identifier)))
+      (parameter
+        (identifier)
+        (named_type
+          (identifier))))
+    (named_type
+      (identifier))
+    (block
+      (return_statement
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Actor with handler
+================================================================================
+
+actor Worker
+    count
+
+    @work n
+        count is count + n
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (actor_definition
+    (identifier)
+    (field_definition
+      (identifier))
+    (message_handler
+      (identifier)
+      (handler_parameters
+        (handler_parameter
+          (identifier)))
+      (block
+        (binding
+          (identifier)
+          (binary_expression
+            (identifier)
+            (identifier)))))))
