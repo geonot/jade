@@ -236,10 +236,7 @@ impl Parser {
                 // future P0-5 extension may add Expr::Take for richer moves
                 // like `take v.field`).
                 if name.with_str(|s| s == "take")
-                    && matches!(
-                        self.peek(),
-                        Token::Ident(_) | Token::LParen | Token::Star
-                    )
+                    && matches!(self.peek(), Token::Ident(_) | Token::LParen | Token::Star)
                 {
                     return self.parse_unary();
                 }

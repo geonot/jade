@@ -222,9 +222,7 @@ impl Type {
     ///   - Composites recurse into their components.
     pub fn canonical(&self) -> Type {
         match self {
-            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => {
-                Type::String
-            }
+            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => Type::String,
             Type::Alias(_, inner) => inner.canonical(),
             Type::Array(inner, n) => Type::Array(Box::new(inner.canonical()), *n),
             Type::Vec(inner) => Type::Vec(Box::new(inner.canonical())),

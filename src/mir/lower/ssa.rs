@@ -26,10 +26,7 @@ impl Lowerer {
     pub(super) fn write_var(&mut self, name: Symbol, block: BlockId, val: ValueId) {
         let ty = self.value_type(val);
         self.var_types.insert(name.clone(), ty);
-        self.current_def
-            .entry(block)
-            .or_default()
-            .insert(name, val);
+        self.current_def.entry(block).or_default().insert(name, val);
     }
 
     /// Read the value of `name` as observed at `block`.
@@ -43,21 +40,14 @@ impl Lowerer {
         ty: Type,
         span: Span,
     ) -> ValueId {
-        if let Some(&v) = self
-            .current_def
-            .get(&block)
-            .and_then(|m| m.get(&name))
-        {
+        if let Some(&v) = self.current_def.get(&block).and_then(|m| m.get(&name)) {
             return v;
         }
 
         // Braun recursive case.
         let v = self.read_var_recursive(name.clone(), block, ty.clone(), span);
         let v = self.resolve(v);
-        self.current_def
-            .entry(block)
-            .or_default()
-            .insert(name, v);
+        self.current_def.entry(block).or_default().insert(name, v);
         v
     }
 
@@ -139,7 +129,9 @@ impl Lowerer {
                     .or_default()
                     .insert(name.clone(), phi_dest);
                 self.add_phi_operands(name, block, phi_dest, ty, span);
-                let r = self.try_remove_trivial_phi(block, phi_dest).unwrap_or(phi_dest);
+                let r = self
+                    .try_remove_trivial_phi(block, phi_dest)
+                    .unwrap_or(phi_dest);
                 self.resolve(r)
             }
         }
@@ -197,7 +189,10 @@ impl Lowerer {
         };
 
         // Remove the phi from the block.
-        self.func.block_mut(block).phis.retain(|p| p.dest != phi_dest);
+        self.func
+            .block_mut(block)
+            .phis
+            .retain(|p| p.dest != phi_dest);
 
         // Replace all uses of `phi_dest` with `same` throughout the function.
         // Also update current_def cache entries.

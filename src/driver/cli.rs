@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Parser as ClapParser, Subcommand};
 
-
 #[derive(ClapParser)]
 #[command(name = "jinnc", version = "0.0.0", about = "The Jinn compiler")]
 pub(super) struct Cli {

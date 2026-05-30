@@ -1,5 +1,5 @@
-use inkwell::attributes::AttributeLoc;
 use inkwell::AddressSpace;
+use inkwell::attributes::AttributeLoc;
 
 use crate::hir;
 use crate::types::Type;

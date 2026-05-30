@@ -4269,4 +4269,3 @@ fn ssa_if_expr_elif_else_value() {
         "11\n22\n33\n99",
     );
 }
-

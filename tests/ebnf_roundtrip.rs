@@ -92,8 +92,18 @@ fn strip_comments(src: &str) -> String {
 /// right-hand side without a `rule = ...` definition.
 fn known_terminals() -> HashSet<&'static str> {
     [
-        "NEWLINE", "INDENT", "DEDENT", // off-side rule tokens
-        "identifier", "letter", "digit", "literal", "integer", "float", "string", "char", "bool",
+        "NEWLINE",
+        "INDENT",
+        "DEDENT", // off-side rule tokens
+        "identifier",
+        "letter",
+        "digit",
+        "literal",
+        "integer",
+        "float",
+        "string",
+        "char",
+        "bool",
         "string_char", // lexical terminals (defined or self-evident)
     ]
     .into_iter()
@@ -113,11 +123,7 @@ fn ebnf_has_no_dangling_rule_references() {
         if let Some(eq) = trimmed.find('=') {
             let lhs = trimmed[..eq].trim();
             // LHS must be a single lowercase identifier (rule name).
-            if !lhs.is_empty()
-                && lhs
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c == '_')
-            {
+            if !lhs.is_empty() && lhs.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
                 defined.insert(lhs.to_string());
             }
         }
@@ -202,10 +208,7 @@ fn ebnf_keyword_terminals(src: &str) -> HashSet<String> {
                 j += 1;
             }
             let lit = &src[start..j];
-            if !lit.is_empty()
-                && lit.chars().all(|c| c.is_ascii_lowercase())
-                && lit.len() > 1
-            {
+            if !lit.is_empty() && lit.chars().all(|c| c.is_ascii_lowercase()) && lit.len() > 1 {
                 out.insert(lit.to_string());
             }
             i = j + 1;
@@ -240,8 +243,8 @@ fn ebnf_keywords_are_reserved_in_lexer() {
     // they are primitive type names handled as identifiers by the lexer
     // and resolved later, or contextual words.
     let non_keyword_allow: HashSet<&str> = [
-        "i64", "i32", "u64", "u32", "f64", "f32", "bool", "string", "char", "void",
-        "self", "block",
+        "i64", "i32", "u64", "u32", "f64", "f32", "bool", "string", "char", "void", "self",
+        "block",
         // Contextual keywords: lexed as identifiers, recognised by the
         // parser only in specific positions.
         "on", "vec",

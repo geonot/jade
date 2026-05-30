@@ -296,14 +296,9 @@ impl<'ctx> Compiler<'ctx> {
                         format!("ICE: FieldClear: struct type {name} not in module")
                     })?;
                     let field_idx = self.field_index(&name, &field.as_str());
-                    let field_ty =
-                        st.get_field_type_at_index(field_idx).ok_or_else(|| {
-                            format!(
-                                "ICE: field {} not found in struct {}",
-                                field.as_str(),
-                                name
-                            )
-                        })?;
+                    let field_ty = st.get_field_type_at_index(field_idx).ok_or_else(|| {
+                        format!("ICE: field {} not found in struct {}", field.as_str(), name)
+                    })?;
                     let zero = field_ty.const_zero();
                     if obj_val.is_pointer_value() {
                         let gep = b!(self.bld.build_struct_gep(
@@ -316,12 +311,10 @@ impl<'ctx> Compiler<'ctx> {
                         return Ok(Some(obj_val));
                     } else if obj_val.is_struct_value() {
                         let sv = obj_val.into_struct_value();
-                        let updated = b!(self.bld.build_insert_value(
-                            sv,
-                            zero,
-                            field_idx,
-                            &field.as_str()
-                        ));
+                        let updated =
+                            b!(self
+                                .bld
+                                .build_insert_value(sv, zero, field_idx, &field.as_str()));
                         return Ok(Some(updated.into_struct_value().into()));
                     }
                     Err(format!(

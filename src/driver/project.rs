@@ -5,7 +5,6 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::pkg::{Dependency, SemVer};
 
-
 #[derive(Debug, Default)]
 pub(super) struct ProjectConfig {
     pub(super) name: Option<String>,

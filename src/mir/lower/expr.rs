@@ -24,11 +24,7 @@ impl Lowerer {
                 // shadow fields by DefId, so `field_lookup` correctly misses.
                 if let Some((field_sym, field_ty)) = self.field_lookup(*def_id) {
                     let self_state = self.field_self();
-                    return self.emit(
-                        InstKind::FieldGet(self_state, field_sym),
-                        field_ty,
-                        span,
-                    );
+                    return self.emit(InstKind::FieldGet(self_state, field_sym), field_ty, span);
                 }
                 self.read_var(name.clone(), self.current_block, ty, span)
             }

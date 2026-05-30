@@ -78,5 +78,4 @@ impl<'ctx> Compiler<'ctx> {
         }
         wrapper_fv.as_global_value().as_pointer_value()
     }
-
 }

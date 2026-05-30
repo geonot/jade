@@ -6,11 +6,11 @@
 //! no stdio process is needed.
 
 use jinnc::lsp::handlers::{
-    handle_completion, handle_definition, handle_did_change, handle_did_close, handle_did_open,
-    handle_document_symbols, handle_hover, handle_initialize, handle_references, handle_rename,
-    handle_semantic_tokens, handle_signature_help, ServerState,
+    ServerState, handle_completion, handle_definition, handle_did_change, handle_did_close,
+    handle_did_open, handle_document_symbols, handle_hover, handle_initialize, handle_references,
+    handle_rename, handle_semantic_tokens, handle_signature_help,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const URI: &str = "file:///tmp/jinn_lsp_smoke.jn";
 
@@ -87,15 +87,9 @@ fn lsp_did_change_replaces_content_and_returns_diagnostics() {
 fn lsp_document_symbols_lists_top_level_defs() {
     let mut state = ServerState::new();
     open(&mut state, SRC);
-    let syms = handle_document_symbols(
-        &state,
-        json!({ "textDocument": { "uri": URI } }),
-    );
+    let syms = handle_document_symbols(&state, json!({ "textDocument": { "uri": URI } }));
     let arr = syms.as_array().expect("array of symbols");
-    let names: Vec<&str> = arr
-        .iter()
-        .filter_map(|s| s["name"].as_str())
-        .collect();
+    let names: Vec<&str> = arr.iter().filter_map(|s| s["name"].as_str()).collect();
     assert!(names.contains(&"greet"), "names={:?}", names);
     assert!(names.contains(&"main"), "names={:?}", names);
 }
@@ -191,12 +185,13 @@ fn lsp_signature_help_handles_no_active_call_gracefully() {
 fn lsp_did_close_drops_state() {
     let mut state = ServerState::new();
     open(&mut state, SRC);
-    handle_did_close(
-        &mut state,
-        json!({ "textDocument": { "uri": URI } }),
-    );
+    handle_did_close(&mut state, json!({ "textDocument": { "uri": URI } }));
     // After close, document symbols for the URI must be empty.
     let syms = handle_document_symbols(&state, json!({ "textDocument": { "uri": URI } }));
     let arr = syms.as_array().expect("symbols array");
-    assert!(arr.is_empty(), "expected no symbols after close, got {:?}", arr);
+    assert!(
+        arr.is_empty(),
+        "expected no symbols after close, got {:?}",
+        arr
+    );
 }

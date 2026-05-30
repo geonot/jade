@@ -435,11 +435,7 @@ fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
     false
 }
 
-fn vec_reuse_pairing(
-    func: &mut mir::Function,
-    hints: &mut PerceusHints,
-    next_slot: &mut u32,
-) {
+fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_slot: &mut u32) {
     let mut pairs = 0u32;
 
     for bi in 0..func.blocks.len() {

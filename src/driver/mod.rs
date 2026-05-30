@@ -27,8 +27,8 @@ use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{
-    EntityIndex, find_project_entry, load_packages, merge_source_files,
-    resolve_implicit_imports, resolve_modules,
+    EntityIndex, find_project_entry, load_packages, merge_source_files, resolve_implicit_imports,
+    resolve_modules,
 };
 
 /// Initialize the `tracing` subscriber based on CLI verbosity flags.

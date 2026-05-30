@@ -721,8 +721,7 @@ impl<'ctx> Compiler<'ctx> {
                         .ok_or("internal: no __coro_ctx in coroutine body")?;
                     let gen_ptr =
                         b!(self.bld.build_load(ptr, gen_alloca, "gen.ctx")).into_pointer_value();
-                    let done_ptr =
-                        self.gen_field_ptr(gen_ptr, Self::GEN_DONE_OFF, "gen.done")?;
+                    let done_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_DONE_OFF, "gen.done")?;
                     b!(self.bld.build_store(done_ptr, i8t.const_int(1, false)));
                     let gen_suspend = self
                         .module

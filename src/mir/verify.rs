@@ -46,7 +46,11 @@ pub fn verify_program(prog: &Program) -> Result<(), Vec<String>> {
             }
         }
     }
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Verify a single MIR function. Returns one diagnostic per violation.
@@ -66,10 +70,10 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
 
     let mut value_ty: HashMap<ValueId, Type> = HashMap::new();
     let redef = |v: ValueId,
-                     ty: &Type,
-                     site: &str,
-                     value_ty: &mut HashMap<ValueId, Type>,
-                     errors: &mut Vec<String>| {
+                 ty: &Type,
+                 site: &str,
+                 value_ty: &mut HashMap<ValueId, Type>,
+                 errors: &mut Vec<String>| {
         if value_ty.insert(v, ty.clone()).is_some() {
             errors.push(format!("{} multiply defined ({})", v, site));
         }
@@ -97,14 +101,12 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
         }
     };
 
-    let check_val = |v: ValueId,
-                     ctx: &str,
-                     value_ty: &HashMap<ValueId, Type>,
-                     errors: &mut Vec<String>| {
-        if !value_ty.contains_key(&v) {
-            errors.push(format!("{} uses undefined value {}", ctx, v));
-        }
-    };
+    let check_val =
+        |v: ValueId, ctx: &str, value_ty: &HashMap<ValueId, Type>, errors: &mut Vec<String>| {
+            if !value_ty.contains_key(&v) {
+                errors.push(format!("{} uses undefined value {}", ctx, v));
+            }
+        };
 
     for bb in &f.blocks {
         let bb_label = bb.id;
@@ -149,7 +151,12 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
                 check_block(*b, &format!("goto in {}", bb_label), &mut errors);
             }
             Terminator::Branch(cond, t, fl) => {
-                check_val(*cond, &format!("branch cond in {}", bb_label), &value_ty, &mut errors);
+                check_val(
+                    *cond,
+                    &format!("branch cond in {}", bb_label),
+                    &value_ty,
+                    &mut errors,
+                );
                 // Jinn has truthy semantics: codegen's compile_ternary / if applies
                 // `to_bool(...)` which coerces any int (and pointers/options) to i1.
                 // So MIR-level Branch cond is legitimately any int-like type, not just Bool.
@@ -166,15 +173,29 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
                 check_block(*fl, &format!("branch false in {}", bb_label), &mut errors);
             }
             Terminator::Switch(scr, cases, default) => {
-                check_val(*scr, &format!("switch scrutinee in {}", bb_label), &value_ty, &mut errors);
+                check_val(
+                    *scr,
+                    &format!("switch scrutinee in {}", bb_label),
+                    &value_ty,
+                    &mut errors,
+                );
                 for (_, b) in cases {
                     check_block(*b, &format!("switch case in {}", bb_label), &mut errors);
                 }
-                check_block(*default, &format!("switch default in {}", bb_label), &mut errors);
+                check_block(
+                    *default,
+                    &format!("switch default in {}", bb_label),
+                    &mut errors,
+                );
             }
             Terminator::Return(opt) => match opt {
                 Some(v) => {
-                    check_val(*v, &format!("return in {}", bb_label), &value_ty, &mut errors);
+                    check_val(
+                        *v,
+                        &format!("return in {}", bb_label),
+                        &value_ty,
+                        &mut errors,
+                    );
                     if let Some(ty) = value_ty.get(v)
                         && !ty_compatible(ty, &f.ret_ty)
                     {
@@ -197,7 +218,11 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
         }
     }
 
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Type equality with relaxations for not-yet-canonical Type variants
@@ -246,8 +271,18 @@ fn is_truthy_compatible(t: &Type) -> bool {
     let t = unwrap_transparent(t);
     matches!(
         t,
-        Bool | I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64
-            | Ptr(_) | String | Enum(_) | Struct(_, _)
+        Bool | I8
+            | I16
+            | I32
+            | I64
+            | U8
+            | U16
+            | U32
+            | U64
+            | Ptr(_)
+            | String
+            | Enum(_)
+            | Struct(_, _)
     )
 }
 

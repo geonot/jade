@@ -11,7 +11,8 @@ impl Lowerer {
             hir::Stmt::StoreInsert(store_name, exprs, span) => {
                 let vals: Vec<_> = exprs.iter().map(|e| self.lower_expr(e)).collect();
                 self.emit(
-                    InstKind::RuntimeOp(Symbol::intern(&format!("__store_insert_{store_name}")),
+                    InstKind::RuntimeOp(
+                        Symbol::intern(&format!("__store_insert_{store_name}")),
                         vals,
                     ),
                     Type::Void,
@@ -139,7 +140,8 @@ impl Lowerer {
                 )
             }
             hir::Stmt::StoreSave(store_name, span) => self.emit(
-                InstKind::RuntimeOp(Symbol::intern(&format!("__store_save_{store_name}")),
+                InstKind::RuntimeOp(
+                    Symbol::intern(&format!("__store_save_{store_name}")),
                     vec![],
                 ),
                 Type::Void,

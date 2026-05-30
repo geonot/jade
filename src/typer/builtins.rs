@@ -261,9 +261,7 @@ impl Typer {
                     };
                     let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
                     if matches!(probe_ty, Type::Vec(_) | Type::Array(_, _)) {
-                        return Some(
-                            self.lower_method_call(&args[0], "map", &args[1..], span),
-                        );
+                        return Some(self.lower_method_call(&args[0], "map", &args[1..], span));
                     }
                 }
                 Some(Ok(hir::Expr {

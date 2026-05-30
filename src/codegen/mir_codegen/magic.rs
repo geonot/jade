@@ -341,8 +341,7 @@ impl<'ctx> Compiler<'ctx> {
             .get_function(&coro_fn_name)
             .ok_or_else(|| format!("coroutine body fn `{coro_fn_name}` not declared"))?;
 
-        let arg_vals: Vec<BasicValueEnum<'ctx>> =
-            args.iter().map(|vid| self.val(*vid)).collect();
+        let arg_vals: Vec<BasicValueEnum<'ctx>> = args.iter().map(|vid| self.val(*vid)).collect();
 
         let total_size = Compiler::GEN_SIZE + (arg_vals.len() as u64) * 8;
         let malloc_fn = self.ensure_malloc();

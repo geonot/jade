@@ -5,10 +5,7 @@ use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn compile_str_literal(
-        &mut self,
-        s: &str,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_str_literal(&mut self, s: &str) -> Result<BasicValueEnum<'ctx>, String> {
         if s.len() <= 23 {
             let st = self.string_type();
             let i8t = self.ctx.i8_type();

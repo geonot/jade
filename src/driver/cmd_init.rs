@@ -1,8 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-
-
 use super::cli::*;
 
 pub(super) fn cmd_init(name: Option<String>) {

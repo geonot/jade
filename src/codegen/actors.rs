@@ -131,10 +131,9 @@ impl<'ctx> Compiler<'ctx> {
             // persistent state pointer. Field access inside the body is
             // resolved against that pointer by MIR lowering.
             let loop_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), loop_h);
-            let loop_fv = self
-                .module
-                .get_function(&loop_fn_name)
-                .unwrap_or_else(|| panic!("ICE: actor loop handler fn not lowered: {loop_fn_name}"));
+            let loop_fv = self.module.get_function(&loop_fn_name).unwrap_or_else(|| {
+                panic!("ICE: actor loop handler fn not lowered: {loop_fn_name}")
+            });
             b!(self.bld.build_call(loop_fv, &[state_ptr.into()], ""));
 
             let sched_yield = crate::codegen::fn_or_die(&self.module, "jinn_sched_yield");
@@ -145,14 +144,17 @@ impl<'ctx> Compiler<'ctx> {
                 // passing the actor's persistent state pointer, so the sleep
                 // duration can reference actor fields without the HIR walker.
                 let sleep_fn_name = crate::mir::actor_sleep_fn_name(ad.name.clone());
-                let sleep_fv = self.module.get_function(&sleep_fn_name).unwrap_or_else(|| {
-                    panic!("ICE: actor sleep fn not lowered: {sleep_fn_name}")
-                });
-                let sleep_ms = b!(self.bld.build_call(sleep_fv, &[state_ptr.into()], "sleep_ms"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: sleep fn returned void")
-                    .into_int_value();
+                let sleep_fv = self
+                    .module
+                    .get_function(&sleep_fn_name)
+                    .unwrap_or_else(|| panic!("ICE: actor sleep fn not lowered: {sleep_fn_name}"));
+                let sleep_ms = b!(self
+                    .bld
+                    .build_call(sleep_fv, &[state_ptr.into()], "sleep_ms"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: sleep fn returned void")
+                .into_int_value();
                 let should_sleep = b!(self.bld.build_int_compare(
                     IntPredicate::SGT,
                     sleep_ms,
@@ -274,10 +276,7 @@ impl<'ctx> Compiler<'ctx> {
                 // For the explicit-self form (`@h self, ...`), the leading
                 // `self` param is the state pointer, not a sent argument, so
                 // it is excluded from payload unpacking.
-                let has_self = h
-                    .params
-                    .first()
-                    .is_some_and(|p| p.name.as_str() == "self");
+                let has_self = h.params.first().is_some_and(|p| p.name.as_str() == "self");
                 let msg_params: &[hir::Param] = if has_self {
                     &h.params[1..]
                 } else {
@@ -307,18 +306,19 @@ impl<'ctx> Compiler<'ctx> {
                     if matches!(p.ty, Type::Struct(..) | Type::Tuple(..) | Type::Enum(..)) {
                         call_args.push(param_ptr.into());
                     } else {
-                        let param_val =
-                            b!(self.bld.build_load(pty, param_ptr, &p.name.as_str()));
+                        let param_val = b!(self.bld.build_load(pty, param_ptr, &p.name.as_str()));
                         call_args.push(param_val.into());
                     }
                     param_offset += psize;
                 }
 
-                let handler_fn_name =
-                    crate::mir::actor_handler_fn_name(ad.name.clone(), h);
-                let handler_fv = self.module.get_function(&handler_fn_name).unwrap_or_else(
-                    || panic!("ICE: actor handler fn not lowered: {handler_fn_name}"),
-                );
+                let handler_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), h);
+                let handler_fv = self
+                    .module
+                    .get_function(&handler_fn_name)
+                    .unwrap_or_else(|| {
+                        panic!("ICE: actor handler fn not lowered: {handler_fn_name}")
+                    });
                 b!(self.bld.build_call(handler_fv, &call_args, ""));
 
                 if self.no_term() {

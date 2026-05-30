@@ -1,6 +1,6 @@
+use inkwell::AddressSpace;
 use inkwell::module::Linkage;
 use inkwell::values::BasicValueEnum;
-use inkwell::AddressSpace;
 
 use super::Compiler;
 use super::b;

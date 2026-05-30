@@ -17,7 +17,11 @@ impl Lowerer {
             }
             hir::Stmt::Stop(expr, span) => {
                 let v = self.lower_expr(expr);
-                self.emit(InstKind::RuntimeOp("__stop".into(), vec![v]), Type::Void, *span)
+                self.emit(
+                    InstKind::RuntimeOp("__stop".into(), vec![v]),
+                    Type::Void,
+                    *span,
+                )
             }
             hir::Stmt::Asm(asm) => {
                 let input_vals: Vec<_> =

@@ -11,7 +11,11 @@ impl Lowerer {
         match &expr.kind {
             ExprKind::AtomicLoad(p) => {
                 let v = self.lower_expr(p);
-                self.emit(InstKind::RuntimeOp("__atomic_load".into(), vec![v]), ty, span)
+                self.emit(
+                    InstKind::RuntimeOp("__atomic_load".into(), vec![v]),
+                    ty,
+                    span,
+                )
             }
             ExprKind::AtomicStore(p, val) => {
                 let args = vec![self.lower_expr(p), self.lower_expr(val)];
