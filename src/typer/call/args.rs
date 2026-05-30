@@ -1,12 +1,5 @@
-#![allow(unused_imports, unused_variables)]
-
-use std::collections::HashMap;
-
-use super::super::unify;
-use super::super::{DeferredField, Typer, VarInfo};
+use super::super::Typer;
 use crate::ast::{self, Expr, Span};
-use crate::hir::{self, ExprKind};
-use crate::intern::Symbol;
 use crate::types::Type;
 
 pub(super) fn resolve_named_args<'a>(

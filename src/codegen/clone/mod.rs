@@ -1,6 +1,6 @@
 use inkwell::AddressSpace;
 use inkwell::types::BasicType;
-use inkwell::values::{BasicValueEnum, PointerValue};
+use inkwell::values::BasicValueEnum;
 
 use crate::types::Type;
 
@@ -396,8 +396,4 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    #[allow(dead_code)]
-    fn null_ptr(&self) -> PointerValue<'ctx> {
-        self.ctx.ptr_type(AddressSpace::default()).const_null()
-    }
 }

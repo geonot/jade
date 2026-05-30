@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_int, c_uchar};
+use std::os::raw::{c_char, c_uchar};
 
 #[repr(C)]
 pub struct CFile {
@@ -35,5 +35,3 @@ pub fn force_link_wal() -> [usize; 7] {
     ]
 }
 
-#[allow(dead_code)]
-fn _force_use(_: c_int) {}

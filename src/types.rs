@@ -222,8 +222,7 @@ impl Type {
     ///   - Composites recurse into their components.
     pub fn canonical(&self) -> Type {
         match self {
-            Type::Struct(n, args) if n.as_str() == "String" || n.as_str() == "string" => {
-                let _ = args;
+            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => {
                 Type::String
             }
             Type::Alias(_, inner) => inner.canonical(),

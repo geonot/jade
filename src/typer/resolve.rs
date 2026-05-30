@@ -116,11 +116,6 @@ impl Typer {
         );
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn declare_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
-        self.declare_method_sig_impl(type_name, m, false);
-    }
-
     pub(crate) fn declare_method_sig_by_ptr(&mut self, type_name: &str, m: &ast::Fn) {
         self.declare_method_sig_impl(type_name, m, true);
     }

@@ -1,12 +1,7 @@
-#![allow(unused_imports, unused_variables)]
-
-use super::super::unify;
-use super::super::{Typer, VarInfo};
-use crate::ast::{self, BinOp, Span, UnaryOp};
-use crate::hir::{self, CoercionKind, DefId, Ownership};
-use crate::intern::Symbol;
+use super::super::Typer;
+use crate::ast::{self, BinOp, UnaryOp};
+use crate::hir;
 use crate::types::Type;
-use std::path::PathBuf;
 
 impl Typer {
     pub(in crate::typer) fn lower_expr_bin_op(

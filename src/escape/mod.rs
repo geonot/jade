@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::hir::{self, BuiltinFn, DefId, Expr, ExprKind, Stmt};
+use crate::hir::{self, DefId, Expr, ExprKind, Stmt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Tier {
@@ -752,9 +752,6 @@ fn lvalue_store_context(lhs: &Expr) -> BindContext {
         _ => BindContext::StoredInContainer,
     }
 }
-
-#[allow(dead_code)]
-fn _builtin_kept_for_future_use(_b: BuiltinFn) {}
 
 #[cfg(test)]
 mod tests {

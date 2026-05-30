@@ -1,12 +1,8 @@
-#![allow(unused_imports, unused_variables)]
-
 use std::collections::HashMap;
 
-use super::super::unify;
-use super::super::{DeferredField, Typer, VarInfo};
-use crate::ast::{self, Expr, Span};
-use crate::hir::{self, ExprKind};
-use crate::intern::Symbol;
+use super::super::Typer;
+use crate::ast::{self, Span};
+use crate::hir;
 use crate::types::Type;
 
 impl Typer {

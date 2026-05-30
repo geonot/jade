@@ -89,15 +89,6 @@ impl<'ctx> Compiler<'ctx> {
 
 
 
-    #[allow(dead_code)]
-    pub(crate) fn arc_retain(
-        &mut self,
-        ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<(), String> {
-        self.rc_retain_impl(ptr, inner, true)
-    }
-
     fn rc_retain_impl(
         &mut self,
         ptr: BasicValueEnum<'ctx>,
@@ -134,15 +125,6 @@ impl<'ctx> Compiler<'ctx> {
         self.rc_release_impl(ptr, inner, inner.needs_atomic_rc())
     }
 
-
-    #[allow(dead_code)]
-    pub(crate) fn arc_release(
-        &mut self,
-        ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<(), String> {
-        self.rc_release_impl(ptr, inner, true)
-    }
 
     fn rc_release_impl(
         &mut self,
@@ -237,27 +219,6 @@ impl<'ctx> Compiler<'ctx> {
 
 
 
-    #[allow(dead_code)]
-    pub(crate) fn arc_alloc(
-        &mut self,
-        inner: &Type,
-        val: BasicValueEnum<'ctx>,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.rc_alloc(inner, val)
-    }
-
-
-
-
-
-    #[allow(dead_code)]
-    pub(crate) fn arc_deref(
-        &mut self,
-        ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        self.rc_deref(ptr, inner)
-    }
 
 
 
@@ -267,129 +228,23 @@ impl<'ctx> Compiler<'ctx> {
 
 
 
-    #[allow(dead_code)]
-    pub(crate) fn arc_mutex_layout_ty(&self, inner: &Type) -> inkwell::types::StructType<'ctx> {
-        let name = format!("ArcMutex_{inner}");
-        self.module.get_struct_type(&name).unwrap_or_else(|| {
-            let st = self.ctx.opaque_struct_type(&name);
-            let mutex_slot = self.ctx.i8_type().array_type(64);
-            st.set_body(
-                &[
-                    self.ctx.i64_type().into(),
-                    mutex_slot.into(),
-                    self.llvm_ty(inner),
-                ],
-                false,
-            );
-            st
-        })
-    }
 
 
 
-    #[allow(dead_code)]
-    pub(crate) fn ensure_pthread_mutex_init(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        self.module
-            .get_function("pthread_mutex_init")
-            .unwrap_or_else(|| {
-                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-                let i32t = self.ctx.i32_type();
-                let ft = i32t.fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
-                self.module.add_function(
-                    "pthread_mutex_init",
-                    ft,
-                    Some(inkwell::module::Linkage::External),
-                )
-            })
-    }
-
-
-    #[allow(dead_code)]
-    pub(crate) fn ensure_pthread_mutex_lock(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        self.module
-            .get_function("pthread_mutex_lock")
-            .unwrap_or_else(|| {
-                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-                let i32t = self.ctx.i32_type();
-                let ft = i32t.fn_type(&[ptr_ty.into()], false);
-                self.module.add_function(
-                    "pthread_mutex_lock",
-                    ft,
-                    Some(inkwell::module::Linkage::External),
-                )
-            })
-    }
-
-
-    #[allow(dead_code)]
-    pub(crate) fn ensure_pthread_mutex_unlock(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        self.module
-            .get_function("pthread_mutex_unlock")
-            .unwrap_or_else(|| {
-                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-                let i32t = self.ctx.i32_type();
-                let ft = i32t.fn_type(&[ptr_ty.into()], false);
-                self.module.add_function(
-                    "pthread_mutex_unlock",
-                    ft,
-                    Some(inkwell::module::Linkage::External),
-                )
-            })
-    }
-
-
-    #[allow(dead_code)]
-    pub(crate) fn ensure_pthread_mutex_destroy(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        self.module
-            .get_function("pthread_mutex_destroy")
-            .unwrap_or_else(|| {
-                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-                let i32t = self.ctx.i32_type();
-                let ft = i32t.fn_type(&[ptr_ty.into()], false);
-                self.module.add_function(
-                    "pthread_mutex_destroy",
-                    ft,
-                    Some(inkwell::module::Linkage::External),
-                )
-            })
-    }
 
 
 
-    #[allow(dead_code)]
-    pub(crate) fn mutex_lock(
-        &mut self,
-        arc_ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<(), String> {
-        let layout = self.arc_mutex_layout_ty(inner);
-        let heap_ptr = arc_ptr.into_pointer_value();
-        let lock_gep = b!(self
-            .bld
-            .build_struct_gep(layout, heap_ptr, 1, "arc.mutex.lock"));
-        let lock_fn = self.ensure_pthread_mutex_lock();
-        b!(self
-            .bld
-            .build_call(lock_fn, &[lock_gep.into()], "mutex.lock"));
-        Ok(())
-    }
 
 
-    #[allow(dead_code)]
-    pub(crate) fn mutex_unlock(
-        &mut self,
-        arc_ptr: BasicValueEnum<'ctx>,
-        inner: &Type,
-    ) -> Result<(), String> {
-        let layout = self.arc_mutex_layout_ty(inner);
-        let heap_ptr = arc_ptr.into_pointer_value();
-        let lock_gep = b!(self
-            .bld
-            .build_struct_gep(layout, heap_ptr, 1, "arc.mutex.lock"));
-        let unlock_fn = self.ensure_pthread_mutex_unlock();
-        b!(self
-            .bld
-            .build_call(unlock_fn, &[lock_gep.into()], "mutex.unlock"));
-        Ok(())
-    }
+
+
+
+
+
+
+
+
+
+
+
 }

@@ -1,11 +1,6 @@
-#![allow(unused_imports, unused_variables)]
-
-use std::collections::{HashMap, HashSet};
-
-use super::super::unify;
-use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
+use super::super::{Typer, VarInfo};
 use crate::ast::{self, Span};
-use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use crate::hir::{self, DefId, Ownership};
 use crate::intern::Symbol;
 use crate::types::Type;
 
@@ -543,15 +538,6 @@ impl Typer {
             layout: td.layout.clone(),
             span: td.span,
         })
-    }
-
-    #[allow(dead_code)]
-    pub(in crate::typer) fn lower_method(
-        &mut self,
-        type_name: &str,
-        m: &ast::Fn,
-    ) -> Result<hir::Fn, String> {
-        self.lower_method_impl(type_name, m, false)
     }
 
     pub(in crate::typer) fn lower_method_by_ptr(

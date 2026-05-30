@@ -11,8 +11,7 @@ impl Typer {
                 return ty;
             }
         }
-        if let Some(hir::Stmt::Ret(Some(e), ty, _)) = body.last() {
-            let _ = e;
+        if let Some(hir::Stmt::Ret(Some(_), ty, _)) = body.last() {
             return ty.clone();
         }
         Type::I64

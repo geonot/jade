@@ -147,7 +147,6 @@ impl InferCtx {
         v
     }
 
-    #[allow(dead_code)]
     pub(crate) fn fresh_numeric_var(&mut self) -> Type {
         self.fresh_var_with(TypeConstraint::Numeric)
     }

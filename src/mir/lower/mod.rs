@@ -176,7 +176,6 @@ fn finish_body(
         // dead block created after an explicit `Ret`/`ErrReturn`), leave it
         // as `Unreachable` — synthesizing a return here would emit a value
         // of the wrong type and confuse downstream passes.
-        let preds = lowerer.func.predecessors();
         let cur = lowerer.current_block;
         // Forward-BFS reachability from entry. A block can have non-empty
         // `preds` yet still be unreachable: e.g. the `after.ret` dead block
@@ -197,7 +196,6 @@ fn finish_body(
             }
             visited.contains(&cur)
         };
-        let _ = preds; // currently unused; kept for future heuristics
 
         if !is_reachable {
             // Already Unreachable — nothing to do.

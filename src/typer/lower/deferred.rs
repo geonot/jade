@@ -1,11 +1,6 @@
-#![allow(unused_imports, unused_variables)]
+use std::collections::HashMap;
 
-use std::collections::{HashMap, HashSet};
-
-use super::super::unify;
-use super::super::{DeferredField, DeferredMethod, Typer, VarInfo};
-use crate::ast::{self, Span};
-use crate::hir::{self, CoercionKind, DefId, ExprKind, Ownership};
+use super::super::Typer;
 use crate::intern::Symbol;
 use crate::types::Type;
 
