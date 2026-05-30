@@ -24,8 +24,8 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             s.insert(*b);
         }
         InstKind::UnaryOp(_, v)
-        | InstKind::Cast(v, _)
-        | InstKind::StrictCast(v, _)
+        | InstKind::Cast(v, _, _)
+        | InstKind::StrictCast(v, _, _)
         | InstKind::Ref(v)
         | InstKind::Deref(v)
         | InstKind::Copy(v)
@@ -41,6 +41,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             }
         }
         InstKind::Call(_, args)
+        | InstKind::RuntimeOp(_, args)
         | InstKind::ArrayInit(args)
         | InstKind::VariantInit(_, _, _, args) => {
             for a in args {
@@ -69,7 +70,9 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         InstKind::FieldStore(_, _, v) => {
             s.insert(*v);
         }
-        InstKind::FieldTombstone(_, _) => {}
+        InstKind::FieldClear(o, _) => {
+            s.insert(*o);
+        }
         InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
             s.insert(*a);
             s.insert(*i);
@@ -185,10 +188,4 @@ pub(super) fn is_pure(kind: &InstKind) -> bool {
             | InstKind::VariantInit(..)
             | InstKind::MapInit
     )
-}
-
-pub(super) fn collect_inst_operands(kind: &InstKind) -> Vec<ValueId> {
-    let mut s = HashSet::new();
-    collect_inst_uses(kind, &mut s);
-    s.into_iter().collect()
 }

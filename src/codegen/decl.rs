@@ -1,7 +1,4 @@
 use inkwell::attributes::AttributeLoc;
-use inkwell::module::Linkage;
-use inkwell::types::BasicMetadataTypeEnum;
-
 use inkwell::AddressSpace;
 
 use crate::hir;
@@ -23,25 +20,6 @@ impl<'ctx> Compiler<'ctx> {
             .add_function("putchar", i32t.fn_type(&[i32t.into()], false), None);
         pc.add_attribute(AttributeLoc::Function, self.attr("nounwind"));
         pc.add_attribute(AttributeLoc::Function, self.attr("nofree"));
-    }
-
-    pub(crate) fn declare_method(&mut self, _type_name: &str, m: &hir::Fn) -> Result<(), String> {
-        let method_name = m.name.clone();
-        let ptys: Vec<Type> = m.params.iter().map(|p| p.ty.clone()).collect();
-        let ret = m.ret.clone();
-        let lp: Vec<BasicMetadataTypeEnum<'ctx>> =
-            ptys.iter().map(|t| self.llvm_ty(t).into()).collect();
-        let ft = self.mk_fn_type(&ret, &lp, false);
-        let fv = self.module.add_function(&method_name.as_str(), ft, None);
-        self.tag_fn(fv);
-        fv.set_linkage(Linkage::Internal);
-        for (i, p) in m.params.iter().enumerate() {
-            let loc = AttributeLoc::Param(i as u32);
-            fv.add_attribute(loc, self.attr("noundef"));
-            self.tag_param_ownership(fv, loc, &p.ownership, &p.ty);
-        }
-        self.fns.insert(method_name, (fv, ptys, ret));
-        Ok(())
     }
 
     pub(crate) fn declare_enum(&mut self, ed: &hir::EnumDef) -> Result<(), String> {

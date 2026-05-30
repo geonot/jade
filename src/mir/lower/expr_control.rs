@@ -2,9 +2,7 @@ use super::super::*;
 use super::Lowerer;
 use crate::ast::{self, Span};
 use crate::hir::{self, ExprKind};
-use crate::intern::Symbol;
 use crate::types::Type;
-use std::collections::HashSet;
 
 impl Lowerer {
     pub(super) fn lower_expr_control(&mut self, expr: &hir::Expr) -> ValueId {
@@ -20,10 +18,12 @@ impl Lowerer {
                     let cur_bb = self.current_block;
                     self.set_terminator(Terminator::Branch(l, rhs_bb, merge_bb));
                     self.switch_to(rhs_bb);
+                    self.seal_block(rhs_bb);
                     let r = self.lower_expr(rhs);
                     let rhs_end = self.current_block;
                     self.set_terminator(Terminator::Goto(merge_bb));
                     self.switch_to(merge_bb);
+                    self.seal_block(merge_bb);
                     let phi = self.func.new_value();
                     self.func.block_mut(merge_bb).phis.push(crate::mir::Phi {
                         dest: phi,
@@ -39,10 +39,12 @@ impl Lowerer {
                     let cur_bb = self.current_block;
                     self.set_terminator(Terminator::Branch(l, merge_bb, rhs_bb));
                     self.switch_to(rhs_bb);
+                    self.seal_block(rhs_bb);
                     let r = self.lower_expr(rhs);
                     let rhs_end = self.current_block;
                     self.set_terminator(Terminator::Goto(merge_bb));
                     self.switch_to(merge_bb);
+                    self.seal_block(merge_bb);
                     let phi = self.func.new_value();
                     self.func.block_mut(merge_bb).phis.push(crate::mir::Phi {
                         dest: phi,
@@ -57,38 +59,8 @@ impl Lowerer {
 
             ExprKind::Block(stmts) => self.lower_block_expr(stmts),
             ExprKind::IfExpr(if_expr) => {
-                let mut assigned = HashSet::new();
-                Self::collect_assigned_vars(&if_expr.then, &mut assigned);
-                for (_, elif_body) in &if_expr.elifs {
-                    Self::collect_assigned_vars(elif_body, &mut assigned);
-                }
-                if let Some(els) = &if_expr.els {
-                    Self::collect_assigned_vars(els, &mut assigned);
-                }
-                let pre_existing: HashSet<Symbol> = assigned
-                    .iter()
-                    .filter(|n| self.var_map.contains_key(*n))
-                    .cloned()
-                    .collect();
-                self.demote_vars_to_memory(&pre_existing, span);
-
-                if if_expr.els.is_some() || !if_expr.elifs.is_empty() {
-                    let mut then_binds = HashSet::new();
-                    Self::collect_new_binds(&if_expr.then, &mut then_binds);
-                    let mut other_binds = HashSet::new();
-                    for (_, elif_body) in &if_expr.elifs {
-                        Self::collect_new_binds(elif_body, &mut other_binds);
-                    }
-                    if let Some(els) = &if_expr.els {
-                        Self::collect_new_binds(els, &mut other_binds);
-                    }
-                    for name in then_binds.intersection(&other_binds) {
-                        if !self.var_map.contains_key(name) && !self.mem_vars.contains(name) {
-                            self.mem_vars.insert(name.clone());
-                        }
-                    }
-                }
-
+                // Pure Braun SSA: branches write into their per-block
+                // `current_def`; reads after the merge build phis on demand.
                 let cond_val = self.lower_expr(&if_expr.cond);
                 let then_bb = self.new_block("if.then");
                 let merge_bb = self.new_block("if.merge");
@@ -106,7 +78,14 @@ impl Lowerer {
 
                 self.set_terminator(Terminator::Branch(cond_val, then_bb, else_bb));
 
+                // Each branch block has a single predecessor (recorded by the
+                // Branch terminator above / the per-elif Branch below) so it is
+                // safe to seal immediately. Sealing BEFORE lowering the body is
+                // required: reads in an unsealed block insert incomplete phis
+                // that are only filled at seal time — if the block is never
+                // sealed those phis stay empty and LLVM rejects them.
                 self.switch_to(then_bb);
+                self.seal_block(then_bb);
                 let then_val = self.lower_block_expr(&if_expr.then);
                 let then_end = self.current_block;
                 self.set_terminator(Terminator::Goto(merge_bb));
@@ -129,6 +108,7 @@ impl Lowerer {
                     };
 
                     self.switch_to(elif_test);
+                    self.seal_block(elif_test);
                     let c = self.lower_expr(elif_cond);
                     self.set_terminator(Terminator::Branch(
                         c,
@@ -137,6 +117,7 @@ impl Lowerer {
                     ));
 
                     self.switch_to(elif_body_bb);
+                    self.seal_block(elif_body_bb);
                     let elif_val = self.lower_block_expr(elif_body);
                     let elif_end = self.current_block;
                     self.set_terminator(Terminator::Goto(merge_bb));
@@ -148,6 +129,7 @@ impl Lowerer {
                 let else_val_info = if let Some(els) = &if_expr.els {
                     let else_target = prev_false_bb.unwrap_or(else_bb);
                     self.switch_to(else_target);
+                    self.seal_block(else_target);
                     let else_val = self.lower_block_expr(els);
                     let else_end = self.current_block;
                     self.set_terminator(Terminator::Goto(merge_bb));
@@ -157,6 +139,8 @@ impl Lowerer {
                 };
 
                 self.switch_to(merge_bb);
+                self.seal_block(merge_bb);
+                // Reads after the merge build phis lazily via `read_var`.
                 if !matches!(ty, Type::Void) && (else_val_info.is_some() || !elif_vals.is_empty()) {
                     let mut incoming = vec![(then_end, then_val)];
                     for &(bb, v) in &elif_vals {
@@ -166,14 +150,21 @@ impl Lowerer {
                         incoming.push((eb, ev));
                     }
 
-                    if else_val_info.is_none() && elif_vals.is_empty() {}
-                    let result = self.new_value();
-                    self.func.block_mut(merge_bb).phis.push(Phi {
-                        dest: result,
-                        ty: ty.clone(),
-                        incoming,
-                    });
-                    result
+                    // Branches that diverged (return/break/continue) end in a
+                    // dead `after.*` block not wired into merge_bb; drop them so
+                    // the result phi only references real predecessors.
+                    incoming.retain(|(bb, _)| !self.unreachable_blocks.contains(bb));
+                    if incoming.is_empty() {
+                        self.emit(InstKind::Void, Type::Void, span)
+                    } else {
+                        let result = self.new_value();
+                        self.func.block_mut(merge_bb).phis.push(Phi {
+                            dest: result,
+                            ty: ty.clone(),
+                            incoming,
+                        });
+                        result
+                    }
                 } else if !matches!(ty, Type::Void) {
                     let void_val = self.emit(InstKind::Void, Type::Void, span);
                     let result = self.new_value();
@@ -196,16 +187,19 @@ impl Lowerer {
                 self.set_terminator(Terminator::Branch(cond_val, then_bb, else_bb));
 
                 self.switch_to(then_bb);
+                self.seal_block(then_bb);
                 let then_val = self.lower_expr(then_expr);
                 let then_end = self.current_block;
                 self.set_terminator(Terminator::Goto(merge_bb));
 
                 self.switch_to(else_bb);
+                self.seal_block(else_bb);
                 let else_val = self.lower_expr(else_expr);
                 let else_end = self.current_block;
                 self.set_terminator(Terminator::Goto(merge_bb));
 
                 self.switch_to(merge_bb);
+                self.seal_block(merge_bb);
                 let result = self.new_value();
                 self.func.block_mut(merge_bb).phis.push(Phi {
                     dest: result,

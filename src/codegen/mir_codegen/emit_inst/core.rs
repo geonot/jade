@@ -31,7 +31,7 @@ impl<'ctx> Compiler<'ctx> {
                     self.emit_cmp(*op, *lhs, *rhs, operand_ty)
                 }
 
-                mir::InstKind::Call(name, args) => {
+                mir::InstKind::Call(name, args) | mir::InstKind::RuntimeOp(name, args) => {
                     if let Some(result) =
                         self.try_handle_magic_call(&name.as_str(), args, &inst.ty)?
                     {

@@ -2,20 +2,15 @@ mod actors;
 mod arith;
 mod builtins;
 mod call;
-mod channels;
 mod clone;
 mod conversions;
 mod coroutines;
 mod decl;
 mod drop;
-mod expr;
 mod fmt;
 mod lambda;
-mod loops;
 mod map;
 pub mod mir_codegen;
-mod pattern_match;
-mod stmt;
 mod store_filter;
 mod store_ops;
 mod stores;
@@ -27,7 +22,6 @@ mod vec;
 
 use crate::intern::Symbol;
 use indexmap::IndexMap;
-use std::collections::HashSet;
 use std::path::Path;
 
 use inkwell::basic_block::BasicBlock;
@@ -45,8 +39,7 @@ use inkwell::{AddressSpace, OptimizationLevel};
 use inkwell::attributes::{Attribute, AttributeLoc};
 
 use inkwell::debug_info::{
-    DICompileUnit, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind, DWARFSourceLanguage,
-    DebugInfoBuilder,
+    DICompileUnit, DIScope, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
 };
 
 use crate::hir;
@@ -102,7 +95,6 @@ pub struct Compiler<'ctx> {
     pub(crate) struct_layouts: IndexMap<Symbol, crate::ast::LayoutAttrs>,
     pub(crate) enums: IndexMap<Symbol, Vec<(String, Vec<Type>)>>,
     pub(crate) variant_tags: IndexMap<Symbol, (String, u32)>,
-    pub(crate) loop_stack: Vec<LoopCtx<'ctx>>,
     pub(crate) source: String,
     pub(crate) hints: PerceusHints,
     pub(crate) lib_mode: bool,
@@ -123,11 +115,7 @@ pub struct Compiler<'ctx> {
     pub(crate) globals: IndexMap<Symbol, (inkwell::values::GlobalValue<'ctx>, Type)>,
     pub(crate) fast_math_flags: u32,
 
-    pub(crate) reuse_tokens: IndexMap<hir::DefId, PointerValue<'ctx>>,
-
     pub(crate) alloca_bld: Builder<'ctx>,
-
-    pub(crate) atomic_vars: HashSet<Symbol>,
 
     pub target_triple: Option<String>,
 
@@ -153,10 +141,6 @@ pub struct Compiler<'ctx> {
 
     pub(crate) value_types: std::collections::HashMap<mir::ValueId, Type>,
 
-    pub(crate) coro_bodies: std::collections::HashMap<Symbol, Vec<hir::Stmt>>,
-
-    pub(crate) coro_captures: std::collections::HashMap<Symbol, Vec<(Symbol, Type)>>,
-
     pub(crate) select_data_bufs: std::collections::HashMap<mir::ValueId, Vec<PointerValue<'ctx>>>,
 
     pub(crate) self_allocs: std::collections::HashMap<mir::ValueId, PointerValue<'ctx>>,
@@ -178,16 +162,17 @@ pub struct Compiler<'ctx> {
     pub(crate) current_reuse_alloca_slots: std::collections::HashMap<u32, PointerValue<'ctx>>,
 
     pub(crate) current_alloc_dest: Option<mir::ValueId>,
+
+    /// True while `compile_mir_fn` is emitting a coroutine body (a MIR
+    /// `Function` with `is_coroutine == true`). Consulted by `emit_terminator`
+    /// so a `Return` marks the generator done and suspends instead of emitting
+    /// a normal LLVM `ret`.
+    pub(crate) cur_fn_is_coroutine: bool,
 }
 
 pub(crate) struct PendingPhi<'ctx> {
     pub phi: inkwell::values::PhiValue<'ctx>,
     pub incoming: Vec<(mir::BlockId, mir::ValueId)>,
-}
-
-pub(crate) struct LoopCtx<'ctx> {
-    pub continue_bb: BasicBlock<'ctx>,
-    pub break_bb: BasicBlock<'ctx>,
 }
 
 mod debug;

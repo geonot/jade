@@ -17,7 +17,6 @@ impl<'ctx> Compiler<'ctx> {
             struct_layouts: IndexMap::new(),
             enums: IndexMap::new(),
             variant_tags: IndexMap::new(),
-            loop_stack: Vec::new(),
             source: String::new(),
             hints: PerceusHints::default(),
             lib_mode: false,
@@ -35,8 +34,6 @@ impl<'ctx> Compiler<'ctx> {
             needs_sqlite: false,
             globals: IndexMap::new(),
             fast_math_flags: 0,
-            reuse_tokens: IndexMap::new(),
-            atomic_vars: HashSet::new(),
             target_triple: None,
             target_cpu: None,
             target_features: None,
@@ -49,8 +46,6 @@ impl<'ctx> Compiler<'ctx> {
             pending_phis: Vec::new(),
             var_allocs: std::collections::HashMap::new(),
             value_types: std::collections::HashMap::new(),
-            coro_bodies: std::collections::HashMap::new(),
-            coro_captures: std::collections::HashMap::new(),
             select_data_bufs: std::collections::HashMap::new(),
             self_allocs: std::collections::HashMap::new(),
             self_alloc_types: std::collections::HashMap::new(),
@@ -62,6 +57,7 @@ impl<'ctx> Compiler<'ctx> {
             current_reuse_slots: std::collections::HashMap::new(),
             current_reuse_alloca_slots: std::collections::HashMap::new(),
             current_alloc_dest: None,
+            cur_fn_is_coroutine: false,
         }
     }
 
@@ -170,18 +166,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    pub(crate) fn dereferenceable_bytes(&self, ty: &Type) -> Option<u64> {
-        match ty {
-            Type::Struct(name, _) => {
-                let st = self.module.get_struct_type(&name.as_str())?;
-                let dl_str = self.module.get_data_layout();
-                let td = inkwell::targets::TargetData::create(dl_str.as_str().to_str().ok()?);
-                Some(td.get_abi_size(&st))
-            }
-            _ => None,
-        }
-    }
-
     pub fn set_source(&mut self, src: &str) {
         self.source = src.to_string();
     }
@@ -200,14 +184,6 @@ impl<'ctx> Compiler<'ctx> {
 
     pub fn set_deterministic_fp(&mut self) {
         self.fast_math_flags = 0;
-    }
-
-    pub(crate) fn tag_fast_math(&self, val: BasicValueEnum<'ctx>) {
-        if self.fast_math_flags != 0 {
-            if let Some(inst) = val.as_instruction_value() {
-                inst.set_fast_math_flags(self.fast_math_flags);
-            }
-        }
     }
 
     pub fn enable_debug(&mut self, filename: &str) {

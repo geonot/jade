@@ -55,10 +55,22 @@ impl<'ctx> Compiler<'ctx> {
             None => return Ok(()),
         };
 
+        // The MIR value may already be a *pointer* to the struct (e.g. the
+        // result of an in-place `FieldSet`/`FieldClear`, which returns the
+        // backing alloca pointer) or a by-value struct aggregate. Drop in
+        // place through the pointer when we have one; otherwise spill the
+        // value to a scratch alloca. Storing a pointer into a struct-typed
+        // slot would be a type confusion that the optimizer miscompiles.
+        let struct_ptr = if val.is_pointer_value() {
+            val.into_pointer_value()
+        } else {
+            let p = self.entry_alloca(st.into(), "ds.tmp");
+            b!(self.bld.build_store(p, val));
+            p
+        };
+
         if let Some(udf) = user_drop_fn {
-            let ptr = self.entry_alloca(st.into(), "ds.udrop.tmp");
-            b!(self.bld.build_store(ptr, val));
-            b!(self.bld.build_call(udf, &[ptr.into()], ""));
+            b!(self.bld.build_call(udf, &[struct_ptr.into()], ""));
             if !any_needs_drop {
                 return Ok(());
             }
@@ -67,9 +79,7 @@ impl<'ctx> Compiler<'ctx> {
         let drop_fn_name = format!("__drop_{}", name);
 
         if let Some(dfn) = self.module.get_function(&drop_fn_name) {
-            let ptr = self.entry_alloca(st.into(), "ds.tmp");
-            b!(self.bld.build_store(ptr, val));
-            b!(self.bld.build_call(dfn, &[ptr.into()], ""));
+            b!(self.bld.build_call(dfn, &[struct_ptr.into()], ""));
             return Ok(());
         }
 
@@ -78,8 +88,7 @@ impl<'ctx> Compiler<'ctx> {
             .any(|(_, ty)| Self::type_references_struct(ty, name));
 
         if !is_recursive {
-            let ptr = self.entry_alloca(st.into(), "ds.tmp");
-            b!(self.bld.build_store(ptr, val));
+            let ptr = struct_ptr;
             for (i, (_, ty)) in fields.iter().enumerate() {
                 if ty.is_trivially_droppable() {
                     continue;
@@ -121,9 +130,7 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(bb);
         }
 
-        let ptr = self.entry_alloca(st.into(), "ds.tmp");
-        b!(self.bld.build_store(ptr, val));
-        b!(self.bld.build_call(dfn, &[ptr.into()], ""));
+        b!(self.bld.build_call(dfn, &[struct_ptr.into()], ""));
         Ok(())
     }
 

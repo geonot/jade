@@ -29,26 +29,57 @@ impl Lowerer {
 
                 if matches!(b.access_mod, Some(AccessMod::Take)) {
                     if let ExprKind::Field(obj, field, _) = &b.value.kind {
-                        if let ExprKind::Var(_, parent_name) = &obj.kind {
+                        if let ExprKind::Var(parent_did, parent_name) = &obj.kind {
                             if !b.value.ty.is_trivially_droppable() {
-                                if !self.mem_vars.contains(parent_name) {
-                                    let mut set = std::collections::HashSet::new();
-                                    set.insert(parent_name.clone());
-                                    self.demote_vars_to_memory(&set, b.span);
+                                let parent_ty = obj.ty.clone();
+                                // If the parent struct is itself an actor field,
+                                // read it from / write it back to the state
+                                // struct; otherwise use the SSA local.
+                                if let Some((parent_field_sym, parent_field_ty)) =
+                                    self.field_lookup(*parent_did)
+                                {
+                                    let self_state = self.field_self();
+                                    let state_ty = self.field_state_ty();
+                                    let parent_val = self.emit(
+                                        InstKind::FieldGet(self_state, parent_field_sym),
+                                        parent_field_ty,
+                                        b.span,
+                                    );
+                                    let cleared = self.emit(
+                                        InstKind::FieldClear(parent_val, field.clone()),
+                                        parent_ty,
+                                        b.span,
+                                    );
+                                    self.emit_void_typed(
+                                        InstKind::FieldSet(self_state, parent_field_sym, cleared),
+                                        state_ty,
+                                        b.span,
+                                    );
+                                } else {
+                                    // SSA-form field tombstone: read the parent's
+                                    // current SSA value, emit `FieldClear` to
+                                    // produce a new struct value with the field
+                                    // zeroed, and write the new value back as the
+                                    // parent's definition. No memory demotion
+                                    // needed — Perceus + drop see the cleared
+                                    // field on the new SSA value.
+                                    let parent_val = self.read_var(
+                                        parent_name.clone(),
+                                        self.current_block,
+                                        parent_ty.clone(),
+                                        b.span,
+                                    );
+                                    let cleared = self.emit(
+                                        InstKind::FieldClear(parent_val, field.clone()),
+                                        parent_ty,
+                                        b.span,
+                                    );
+                                    self.write_var(
+                                        parent_name.clone(),
+                                        self.current_block,
+                                        cleared,
+                                    );
                                 }
-                                self.func
-                                    .block_mut(self.current_block)
-                                    .insts
-                                    .push(Instruction {
-                                        dest: None,
-                                        kind: InstKind::FieldTombstone(
-                                            parent_name.clone(),
-                                            field.clone(),
-                                        ),
-                                        ty: Type::Void,
-                                        span: b.span,
-                                        def_id: None,
-                                    });
                             }
                         }
                     }
@@ -64,85 +95,68 @@ impl Lowerer {
                 {
                     inst.def_id = Some(b.def_id);
                 }
-                if self.mem_vars.contains(&b.name) {
-                    self.func
-                        .block_mut(self.current_block)
-                        .insts
-                        .push(Instruction {
-                            dest: None,
-                            kind: InstKind::Store(b.name.clone(), val),
-                            ty: b.ty.clone(),
-                            span: b.span,
-                            def_id: None,
-                        });
+                // In an actor handler, `field is expr` desugars to a `Bind`
+                // that re-uses the field's canonical DefId. Such a rebinding
+                // is a write to the persistent state struct, not a fresh SSA
+                // local — store through `self_state`. Subsequent bare reads of
+                // the field re-load from the struct (see `lower_expr_value`),
+                // so no SSA rebinding is needed.
+                if let Some((field_sym, _)) = self.field_lookup(b.def_id) {
+                    let self_state = self.field_self();
+                    let state_ty = self.field_state_ty();
+                    self.emit_void_typed(
+                        InstKind::FieldSet(self_state, field_sym, val),
+                        state_ty,
+                        b.span,
+                    );
                 } else {
-                    self.var_map.insert(b.name.clone(), val);
+                    self.write_var(b.name.clone(), self.current_block, val);
                 }
                 val
             }
             hir::Stmt::Assign(target, value, _span) => {
                 let val = self.lower_expr_owned(value);
                 match &target.kind {
-                    ExprKind::Var(_, name) => {
-                        if self.mem_vars.contains(name) {
-                            self.func
-                                .block_mut(self.current_block)
-                                .insts
-                                .push(Instruction {
-                                    dest: None,
-                                    kind: InstKind::Store(name.clone(), val),
-                                    ty: value.ty.clone(),
-                                    span: target.span,
-                                    def_id: None,
-                                });
+                    ExprKind::Var(def_id, name) => {
+                        // Bare assignment to an actor field stores through the
+                        // persistent state struct rather than rebinding an SSA
+                        // local.
+                        if let Some((field_sym, _)) = self.field_lookup(*def_id) {
+                            let self_state = self.field_self();
+                            let state_ty = self.field_state_ty();
+                            self.emit_void_typed(
+                                InstKind::FieldSet(self_state, field_sym, val),
+                                state_ty,
+                                target.span,
+                            );
                         } else {
-                            self.var_map.insert(name.clone(), val);
+                            self.write_var(name.clone(), self.current_block, val);
                         }
                     }
                     ExprKind::Field(obj, field, _) => {
-                        if let ExprKind::Var(_, name) = &obj.kind {
-                            if self.mem_vars.contains(name) {
-                                let obj_ty = obj.ty.clone();
-                                self.func
-                                    .block_mut(self.current_block)
-                                    .insts
-                                    .push(Instruction {
-                                        dest: None,
-                                        kind: InstKind::FieldStore(*name, *field, val),
-                                        ty: obj_ty,
-                                        span: target.span,
-                                        def_id: None,
-                                    });
-                                return val;
-                            }
-                        }
-
                         self.lower_field_assign(obj, &field.as_str(), val, target.span);
                     }
                     ExprKind::Index(arr, idx) => {
-                        if let ExprKind::Var(_, name) = &arr.kind {
-                            if self.mem_vars.contains(name) {
-                                let i = self.lower_expr(idx);
-                                let arr_ty = arr.ty.clone();
-                                self.func
-                                    .block_mut(self.current_block)
-                                    .insts
-                                    .push(Instruction {
-                                        dest: None,
-                                        kind: InstKind::IndexStore(name.clone(), i, val),
-                                        ty: arr_ty,
-                                        span: target.span,
-                                        def_id: None,
-                                    });
-                                return val;
-                            }
-
+                        if let ExprKind::Var(def_id, name) = &arr.kind {
                             let a = self.lower_expr(arr);
                             let i = self.lower_expr(idx);
                             let arr_ty = arr.ty.clone();
                             let updated =
                                 self.emit(InstKind::IndexSet(a, i, val), arr_ty, target.span);
-                            self.var_map.insert(name.clone(), updated);
+                            // If the indexed array is itself an actor field,
+                            // write the updated array back into the state
+                            // struct; otherwise rebind the SSA local.
+                            if let Some((field_sym, _)) = self.field_lookup(*def_id) {
+                                let self_state = self.field_self();
+                                let state_ty = self.field_state_ty();
+                                self.emit_void_typed(
+                                    InstKind::FieldSet(self_state, field_sym, updated),
+                                    state_ty,
+                                    target.span,
+                                );
+                            } else {
+                                self.write_var(name.clone(), self.current_block, updated);
+                            }
                             return val;
                         }
                         let a = self.lower_expr(arr);
@@ -155,7 +169,8 @@ impl Lowerer {
             }
             hir::Stmt::Expr(e) => self.lower_expr(e),
             hir::Stmt::Drop(_, name, ty, span) => {
-                if let Some(&val) = self.var_map.get(name) {
+                if self.var_types.contains_key(name) {
+                    let val = self.read_var(name.clone(), self.current_block, ty.clone(), *span);
                     self.emit_void(InstKind::Drop(val, ty.clone()), *span);
                 }
                 self.emit(InstKind::Void, Type::Void, *span)
@@ -165,15 +180,7 @@ impl Lowerer {
                 for (i, (_id, name, bind_ty)) in bindings.iter().enumerate() {
                     let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, Span::dummy());
                     let elem = self.emit(InstKind::Index(val, idx), bind_ty.clone(), Span::dummy());
-                    if self.mem_vars.contains(name) {
-                        self.emit(
-                            InstKind::Store(name.clone(), elem),
-                            Type::Void,
-                            Span::dummy(),
-                        );
-                    } else {
-                        self.var_map.insert(name.clone(), elem);
-                    }
+                    self.write_var(name.clone(), self.current_block, elem);
                 }
                 val
             }

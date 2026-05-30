@@ -109,27 +109,15 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         fv.add_attribute(loc, self.attr("nonnull"));
+        // LLVM 21 deprecates `nocapture` (use `captures(none)`) and `readonly`
+        // (use `memory(read)`). The string-attribute forms required for those
+        // aren't worth threading in until we have a measurable optimizer win.
+        // `noalias` remains a valid enum attribute on params.
         match ownership {
-            hir::Ownership::Owned | hir::Ownership::BorrowMut => {
+            hir::Ownership::Owned | hir::Ownership::BorrowMut | hir::Ownership::Borrowed => {
                 fv.add_attribute(loc, self.attr("noalias"));
-
-                fv.add_attribute(loc, self.attr("nocapture"));
             }
-            hir::Ownership::Borrowed => {
-                fv.add_attribute(loc, self.attr("noalias"));
-                fv.add_attribute(loc, self.attr("readonly"));
-
-                fv.add_attribute(loc, self.attr("nocapture"));
-            }
-
             hir::Ownership::Raw => {}
-        }
-
-        if let Some(size) = self.dereferenceable_bytes(ty) {
-            let deref_attr = self
-                .ctx
-                .create_enum_attribute(Attribute::get_named_enum_kind_id("dereferenceable"), size);
-            fv.add_attribute(loc, deref_attr);
         }
     }
 
@@ -142,50 +130,6 @@ impl<'ctx> Compiler<'ctx> {
         self.vars.get(name)
     }
 
-    pub(crate) fn push_var_scope(&mut self) {
-        self.var_scope_markers.push(self.var_shadows.len());
-    }
-
-    pub(crate) fn pop_var_scope(&mut self) {
-        let marker = self.var_scope_markers.pop().expect("no scope to pop");
-        while self.var_shadows.len() > marker {
-            let (name, prev) = self.var_shadows.pop().unwrap();
-            let sym: Symbol = name.into();
-            match prev {
-                Some(val) => {
-                    self.vars.insert(sym, val);
-                }
-                None => {
-                    self.vars.swap_remove(&sym);
-                }
-            }
-        }
-    }
-
-    pub(crate) fn load_var(&mut self, name: &str) -> Result<BasicValueEnum<'ctx>, String> {
-        if let Some((ptr, ty)) = self.find_var(name).cloned() {
-            let load = b!(self.bld.build_load(self.llvm_ty(&ty), ptr, name));
-            if self.atomic_vars.contains(&Symbol::intern(name)) {
-                ice!(
-                    load.as_instruction_value(),
-                    "atomic load produced non-instruction"
-                )
-                .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
-                .map_err(|_| "failed to set atomic ordering")?;
-            }
-            return Ok(load);
-        }
-        if let Some(fv) = self.module.get_function(name) {
-            let wrapper = self.fn_ref_wrapper(fv);
-            let null_env = self
-                .ctx
-                .ptr_type(inkwell::AddressSpace::default())
-                .const_null();
-            return self.make_closure(wrapper, null_env);
-        }
-        Err(format!("undefined: {name}"))
-    }
-
     pub(crate) fn entry_alloca(&self, ty: BasicTypeEnum<'ctx>, name: &str) -> PointerValue<'ctx> {
         let fv = self.current_fn();
         let entry = ice!(fv.get_first_basic_block(), "function has no entry block");
@@ -194,40 +138,6 @@ impl<'ctx> Compiler<'ctx> {
             None => self.alloca_bld.position_at_end(entry),
         }
         self.alloca_bld.build_alloca(ty, name).unwrap()
-    }
-
-    pub(crate) fn entry_alloca_aligned(
-        &self,
-        ty: BasicTypeEnum<'ctx>,
-        name: &str,
-        align: u32,
-    ) -> PointerValue<'ctx> {
-        let ptr = self.entry_alloca(ty, name);
-        ice!(
-            ptr.as_instruction_value(),
-            "alloca produced non-instruction"
-        )
-        .set_alignment(align)
-        .expect("failed to set alignment");
-        ptr
-    }
-
-    pub(crate) fn alloca_for_type(
-        &self,
-        llvm_ty: BasicTypeEnum<'ctx>,
-        name: &str,
-        jinn_ty: &Type,
-    ) -> PointerValue<'ctx> {
-        let align = if let Type::Struct(sname, _) = jinn_ty {
-            self.struct_layouts.get(sname).and_then(|l| l.align)
-        } else {
-            None
-        };
-        if let Some(a) = align {
-            self.entry_alloca_aligned(llvm_ty, name, a)
-        } else {
-            self.entry_alloca(llvm_ty, name)
-        }
     }
 
     pub(crate) fn no_term(&self) -> bool {

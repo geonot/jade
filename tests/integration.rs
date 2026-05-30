@@ -4102,3 +4102,171 @@ fn access_field_auto_copy_escape() {
 fn access_field_short_lived_borrow() {
     expect_file("tests/programs/field_short_lived_borrow.jn", "zero\n0\nhi");
 }
+
+// ---------------------------------------------------------------------------
+// MIR SSA construction edge cases (Braun et al. 2013 incremental SSA).
+//
+// These programs stress the variable model in `src/mir/lower/ssa.rs` and the
+// lazy phi insertion that replaced the legacy `var_map` + branch-snapshot
+// scaffolding. Each is compiled and run at every optimization level so that
+// any divergence between the unoptimized form and the phi-collapsed /
+// DCE'd / store-load-forwarded form is caught. A miscompiled phi (missing
+// operand, wrong predecessor value, or a spuriously materialized value)
+// changes the program output at one opt level but not another.
+// ---------------------------------------------------------------------------
+
+/// Compile `src` at every opt level (0..=3) and assert each run prints
+/// `expected`. Divergence across opt levels indicates an SSA/phi bug.
+fn expect_all_opts(src: &str, expected: &str) {
+    for opt in ["0", "1", "2", "3"] {
+        let dir = tempfile::tempdir().unwrap();
+        let jinn = dir.path().join("test.jn");
+        let out = dir.path().join("test_bin");
+        std::fs::write(&jinn, src).unwrap();
+        let status = Command::new(jinnc())
+            .arg(&jinn)
+            .arg("--opt")
+            .arg(opt)
+            .arg("-o")
+            .arg(&out)
+            .status()
+            .expect("jinnc failed to start");
+        assert!(status.success(), "jinnc --opt {opt} failed for:\n{src}");
+        let output = Command::new(&out)
+            .output()
+            .expect("compiled binary failed to start");
+        assert!(
+            output.status.success(),
+            "binary (--opt {opt}) exited with {:?}\nstderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let got = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(
+            got.trim(),
+            expected.trim(),
+            "opt level {opt} diverged for source:\n{src}"
+        );
+    }
+}
+
+/// A variable assigned in only the `then` branch must, at the merge, phi the
+/// branch value against the pre-`if` value flowing through the implicit
+/// else-path. Reads after the merge must observe the correct phi.
+#[test]
+fn ssa_var_assigned_in_one_branch_only() {
+    expect_all_opts(
+        "*main()\n    x is 10\n    if 1 > 0\n        x is 20\n    log(x)\n    if 0 > 1\n        x is 30\n    log(x)\n",
+        "20\n20",
+    );
+}
+
+/// A variable assigned in BOTH arms of an if/else: the merge phi has a real
+/// operand from each predecessor; the pre-`if` value must not leak through.
+#[test]
+fn ssa_var_assigned_in_both_branches() {
+    expect_all_opts(
+        "*main()\n    cond is 1\n    x is 0\n    if cond equals 1\n        x is 5\n    else\n        x is 9\n    log(x)\n",
+        "5",
+    );
+}
+
+/// Classic loop-carried accumulator: `sum` is read and rewritten each
+/// iteration. The header phi must merge the pre-loop seed with the
+/// back-edge value.
+#[test]
+fn ssa_loop_carried_accumulator() {
+    expect_all_opts(
+        "*main()\n    sum is 0\n    for i in 0 to 100\n        sum is sum + i\n    log(sum)\n",
+        "4950",
+    );
+}
+
+/// A pre-existing variable WRITTEN inside the loop body but never read there.
+/// After the loop, the read must phi the seed (zero iterations) against the
+/// body value (>=1 iteration). Here the loop always runs, so the body value
+/// wins.
+#[test]
+fn ssa_loop_writes_var_without_reading() {
+    expect_all_opts(
+        "*main()\n    x is 1\n    for i in 0 to 3\n        x is 7\n    log(x)\n",
+        "7",
+    );
+}
+
+/// A conditional reassignment INSIDE a loop body: the back-edge phi at the
+/// loop header interacts with the merge phi of the inner if. `acc` doubles
+/// only on even iterations.
+#[test]
+fn ssa_conditional_reassign_in_loop() {
+    expect_all_opts(
+        "*main()\n    acc is 1\n    for i in 0 to 6\n        if i % 2 equals 0\n            acc is acc + i\n    log(acc)\n",
+        "7",
+    );
+}
+
+/// Nested loop mutating an outer-scope accumulator: both the inner and outer
+/// header phis carry `total`, and the inner loop's exit value flows back into
+/// the outer back-edge.
+#[test]
+fn ssa_nested_loop_outer_accumulator() {
+    expect_all_opts(
+        "*main()\n    total is 0\n    for i in 0 to 4\n        for j in 0 to 3\n            total is total + 1\n    log(total)\n",
+        "12",
+    );
+}
+
+/// `break` out of a loop: the exit block has two predecessors (the break edge
+/// and the cond-false edge). The post-loop read of `sum` must phi correctly
+/// across both.
+#[test]
+fn ssa_break_two_exit_predecessors() {
+    expect_all_opts(
+        "*main()\n    sum is 0\n    for i in 0 to 100\n        if i equals 5\n            break\n        sum is sum + i\n    log(sum)\n",
+        "10",
+    );
+}
+
+/// `continue`: the increment block gains an extra predecessor (the continue
+/// edge). A loop-carried var skipped on some iterations must still phi
+/// correctly.
+#[test]
+fn ssa_continue_extra_inc_predecessor() {
+    expect_all_opts(
+        "*main()\n    i is 0\n    sum is 0\n    while i < 10\n        i is i + 1\n        if i % 2 equals 0\n            continue\n        sum is sum + i\n    log(sum)\n",
+        "25",
+    );
+}
+
+/// Match arms each binding the same-named variable, whose value is consumed
+/// inside the arm. Exercises the `Pat::Bind` write into per-arm `current_def`.
+#[test]
+fn ssa_match_arms_bind_same_name() {
+    expect_all_opts(
+        "enum E\n    A(i64)\n    B(i64)\n\n*classify(e as E) returns i64\n    match e\n        A(v) ?\n            v + 1\n        B(v) ?\n            v + 100\n\n*main()\n    log(classify(A(5)))\n    log(classify(B(5)))\n",
+        "6\n105",
+    );
+}
+
+/// A ternary value (`cond ? a ! b`) bound and accumulated inside a loop. The
+/// ternary's merge phi must select the taken branch's value; the loop adds a
+/// header phi for the accumulator.
+#[test]
+fn ssa_ternary_value_in_loop() {
+    expect_all_opts(
+        "*main()\n    acc is 0\n    for i in 0 to 5\n        step is i % 2 equals 0 ? 10 ! 1\n        acc is acc + step\n    log(acc)\n",
+        "32",
+    );
+}
+
+/// A block if/elif/else USED AS AN EXPRESSION (each branch's tail is the
+/// value, returned directly as the function result). Exercises the IfExpr
+/// MIR lowering path and its result-value phi at the merge block.
+#[test]
+fn ssa_if_expr_elif_else_value() {
+    expect_all_opts(
+        "*pick(n as i64) returns i64\n    if n equals 1\n        11\n    elif n equals 2\n        22\n    elif n equals 3\n        33\n    else\n        99\n\n*main()\n    log(pick(1))\n    log(pick(2))\n    log(pick(3))\n    log(pick(7))\n",
+        "11\n22\n33\n99",
+    );
+}
+

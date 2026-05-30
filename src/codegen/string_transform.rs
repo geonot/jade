@@ -500,8 +500,7 @@ impl<'ctx> Compiler<'ctx> {
         let dlen = self.string_len(delim)?.into_int_value();
         let memcmp = self.ensure_memcmp();
 
-        let vec = self.compile_vec_new(&[])?;
-        let vec_ptr = vec.into_pointer_value();
+        let vec_ptr = self.vec_alloc_empty()?;
 
         let cond_bb = self.ctx.append_basic_block(fv, "spl.cond");
         let match_bb = self.ctx.append_basic_block(fv, "spl.match");

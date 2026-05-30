@@ -10,14 +10,14 @@ impl Lowerer {
             hir::Stmt::ChannelClose(ch, span) => {
                 let c = self.lower_expr(ch);
                 self.emit(
-                    InstKind::Call("__chan_close".into(), vec![c]),
+                    InstKind::RuntimeOp("__chan_close".into(), vec![c]),
                     Type::Void,
                     *span,
                 )
             }
             hir::Stmt::Stop(expr, span) => {
                 let v = self.lower_expr(expr);
-                self.emit(InstKind::Call("__stop".into(), vec![v]), Type::Void, *span)
+                self.emit(InstKind::RuntimeOp("__stop".into(), vec![v]), Type::Void, *span)
             }
             hir::Stmt::Asm(asm) => {
                 let input_vals: Vec<_> =

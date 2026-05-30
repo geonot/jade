@@ -1,9 +1,9 @@
 use super::super::Compiler;
 use super::super::b;
-use crate::intern::Symbol;
 use crate::mir;
 use crate::types::Type;
 use inkwell::AddressSpace;
+use inkwell::module::Linkage;
 use inkwell::values::{BasicValue, BasicValueEnum};
 
 impl<'ctx> Compiler<'ctx> {
@@ -322,18 +322,88 @@ impl<'ctx> Compiler<'ctx> {
         name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let ptr = self.ctx.ptr_type(AddressSpace::default());
-        let _i64t = self.ctx.i64_type();
+        self.declare_actor_runtime();
+        self.declare_gen_runtime();
 
-        let sym = Symbol::intern(name);
-        if let Some(body) = self.coro_bodies.get(&sym).cloned() {
-            let captures = self.coro_captures.get(&sym).cloned().unwrap_or_default();
-            let arg_vals: Vec<BasicValueEnum<'ctx>> =
-                args.iter().map(|vid| self.val(*vid)).collect();
-            return self.compile_coroutine_create(name, &body, &captures, &arg_vals);
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+
+        // The coroutine/generator body was lowered to a standalone MIR
+        // function `__coro_{name}` (declared by `declare_mir_fn` with the
+        // `void(ptr)` coroutine ABI). Here we only allocate and initialize the
+        // generator struct, store the captures (= call args) into it, and wire
+        // up the real coroutine via `jinn_coro_create`. The body reloads the
+        // captures from the struct in its own prologue.
+        let coro_fn_name = format!("__coro_{name}");
+        let coro_fn = self
+            .module
+            .get_function(&coro_fn_name)
+            .ok_or_else(|| format!("coroutine body fn `{coro_fn_name}` not declared"))?;
+
+        let arg_vals: Vec<BasicValueEnum<'ctx>> =
+            args.iter().map(|vid| self.val(*vid)).collect();
+
+        let total_size = Compiler::GEN_SIZE + (arg_vals.len() as u64) * 8;
+        let malloc_fn = self.ensure_malloc();
+        let gen_mem = b!(self.bld.build_call(
+            malloc_fn,
+            &[i64t.const_int(total_size, false).into()],
+            "gen.mem"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: malloc returned void")
+        .into_pointer_value();
+
+        let memset_fn = self.module.get_function("memset").unwrap_or_else(|| {
+            let ft = ptr.fn_type(&[ptr.into(), i32t.into(), i64t.into()], false);
+            self.module
+                .add_function("memset", ft, Some(Linkage::External))
+        });
+        b!(self.bld.build_call(
+            memset_fn,
+            &[
+                gen_mem.into(),
+                i32t.const_int(0, false).into(),
+                i64t.const_int(total_size, false).into()
+            ],
+            ""
+        ));
+
+        for (i, val) in arg_vals.iter().enumerate() {
+            let off = Compiler::GEN_SIZE + (i as u64) * 8;
+            let slot_ptr = self.gen_field_ptr(gen_mem, off, "cap.slot")?;
+            b!(self.bld.build_store(slot_ptr, *val));
         }
 
-        Ok(ptr.const_null().into())
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
+        let coro = b!(self.bld.build_call(
+            coro_create,
+            &[
+                coro_fn.as_global_value().as_pointer_value().into(),
+                gen_mem.into(),
+            ],
+            "gen.coro"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: jinn_coro_create returned void");
+
+        let coro_ptr_field =
+            self.gen_field_ptr(gen_mem, Compiler::GEN_CORO_PTR_OFF, "gen.coro_ptr")?;
+        b!(self.bld.build_store(coro_ptr_field, coro));
+
+        // Bind the coroutine's source name (e.g. `producer`) so a later
+        // `producer.next()` (lowered to `load producer` + `__coro_next`)
+        // resolves to this generator struct. Anonymous coroutines skip this.
+        if name != "__anon" {
+            let name_alloca = self.entry_alloca(ptr.into(), name);
+            b!(self.bld.build_store(name_alloca, gen_mem));
+            self.set_var(name, name_alloca, Type::Coroutine(Box::new(Type::I64)));
+        }
+
+        Ok(gen_mem.into())
     }
 
     pub(super) fn emit_coro_next(

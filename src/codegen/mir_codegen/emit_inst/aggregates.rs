@@ -255,32 +255,79 @@ impl<'ctx> Compiler<'ctx> {
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
-                mir::InstKind::FieldTombstone(var_name, field) => {
-                    if let Some((alloca, ty)) = self.var_allocs.get(var_name).cloned() {
-                        let struct_name = self.struct_name_from_type(&ty);
-                        if let Some(name) = &struct_name {
-                            if let Some(st) = self.module.get_struct_type(name) {
-                                let field_idx = self.field_index(name, &field.as_str());
-                                let field_ty =
-                                    st.get_field_type_at_index(field_idx).ok_or_else(|| {
-                                        format!(
-                                            "ICE: field {} not found in struct {}",
-                                            field.as_str(),
-                                            name
-                                        )
-                                    })?;
-                                let gep = b!(self.bld.build_struct_gep(
-                                    st,
-                                    alloca,
-                                    field_idx,
-                                    &field.as_str()
-                                ));
-                                let zero = field_ty.const_zero();
-                                b!(self.bld.build_store(gep, zero));
-                            }
+                mir::InstKind::FieldClear(obj, field) => {
+                    // SSA-form field zeroing. Mirrors FieldSet's two cases
+                    // (pointer-backed self_alloc OR struct SSA value) but
+                    // substitutes the zero value of the field's type.
+                    let obj_val = if let Some(alloca_ptr) = self.self_allocs.get(obj).copied() {
+                        alloca_ptr.into()
+                    } else {
+                        self.val(*obj)
+                    };
+                    let struct_name = self.struct_name_from_type(&inst.ty).or_else(|| {
+                        if obj_val.is_pointer_value() {
+                            self.var_allocs
+                                .values()
+                                .find(|(ptr, _)| *ptr == obj_val.into_pointer_value())
+                                .and_then(|(_, ty)| match ty {
+                                    Type::Struct(name, _) => Some(name.as_str()),
+                                    _ => None,
+                                })
+                        } else if obj_val.is_struct_value() {
+                            obj_val
+                                .into_struct_value()
+                                .get_type()
+                                .get_name()
+                                .map(|n| n.to_str().unwrap_or("").to_string())
+                        } else {
+                            None
                         }
+                    });
+                    let name = match struct_name.as_ref() {
+                        Some(n) => n.clone(),
+                        None => {
+                            return Err(format!(
+                                "ICE: FieldClear could not determine struct name for type {:?}",
+                                inst.ty
+                            ));
+                        }
+                    };
+                    let st = self.module.get_struct_type(&name).ok_or_else(|| {
+                        format!("ICE: FieldClear: struct type {name} not in module")
+                    })?;
+                    let field_idx = self.field_index(&name, &field.as_str());
+                    let field_ty =
+                        st.get_field_type_at_index(field_idx).ok_or_else(|| {
+                            format!(
+                                "ICE: field {} not found in struct {}",
+                                field.as_str(),
+                                name
+                            )
+                        })?;
+                    let zero = field_ty.const_zero();
+                    if obj_val.is_pointer_value() {
+                        let gep = b!(self.bld.build_struct_gep(
+                            st,
+                            obj_val.into_pointer_value(),
+                            field_idx,
+                            &field.as_str()
+                        ));
+                        b!(self.bld.build_store(gep, zero));
+                        return Ok(Some(obj_val));
+                    } else if obj_val.is_struct_value() {
+                        let sv = obj_val.into_struct_value();
+                        let updated = b!(self.bld.build_insert_value(
+                            sv,
+                            zero,
+                            field_idx,
+                            &field.as_str()
+                        ));
+                        return Ok(Some(updated.into_struct_value().into()));
                     }
-                    Ok(self.ctx.i8_type().const_int(0, false).into())
+                    Err(format!(
+                        "ICE: FieldClear: obj is neither pointer nor struct ({:?})",
+                        obj_val.get_type()
+                    ))
                 }
 
                 mir::InstKind::Index(base, idx) | mir::InstKind::IndexUnchecked(base, idx) => {
@@ -540,19 +587,19 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
 
-                mir::InstKind::Cast(val, target_ty) => {
+                mir::InstKind::Cast(val, src_ty, target_ty) => {
                     let v = self.val(*val);
                     let target_llvm = self.llvm_ty(target_ty);
-                    self.emit_cast(v, &inst.ty, target_ty, target_llvm)
+                    self.emit_cast(v, src_ty, target_ty, target_llvm)
                 }
-                mir::InstKind::StrictCast(val, target_ty) => {
+                mir::InstKind::StrictCast(val, src_ty, target_ty) => {
                     let v = self.val(*val);
                     let target_llvm = self.llvm_ty(target_ty);
-                    let casted = self.emit_cast(v, &inst.ty, target_ty, target_llvm)?;
+                    let casted = self.emit_cast(v, src_ty, target_ty, target_llvm)?;
 
                     let source_llvm = v.get_type();
                     if v.is_int_value() && casted.is_int_value() {
-                        let back = self.emit_cast(casted, target_ty, &inst.ty, source_llvm)?;
+                        let back = self.emit_cast(casted, target_ty, src_ty, source_llvm)?;
                         let eq = b!(self.bld.build_int_compare(
                             inkwell::IntPredicate::EQ,
                             v.into_int_value(),

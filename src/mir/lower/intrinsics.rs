@@ -11,19 +11,19 @@ impl Lowerer {
         match &expr.kind {
             ExprKind::AtomicLoad(p) => {
                 let v = self.lower_expr(p);
-                self.emit(InstKind::Call("__atomic_load".into(), vec![v]), ty, span)
+                self.emit(InstKind::RuntimeOp("__atomic_load".into(), vec![v]), ty, span)
             }
             ExprKind::AtomicStore(p, val) => {
                 let args = vec![self.lower_expr(p), self.lower_expr(val)];
-                self.emit(InstKind::Call("__atomic_store".into(), args), ty, span)
+                self.emit(InstKind::RuntimeOp("__atomic_store".into(), args), ty, span)
             }
             ExprKind::AtomicAdd(p, val) => {
                 let args = vec![self.lower_expr(p), self.lower_expr(val)];
-                self.emit(InstKind::Call("__atomic_add".into(), args), ty, span)
+                self.emit(InstKind::RuntimeOp("__atomic_add".into(), args), ty, span)
             }
             ExprKind::AtomicSub(p, val) => {
                 let args = vec![self.lower_expr(p), self.lower_expr(val)];
-                self.emit(InstKind::Call("__atomic_sub".into(), args), ty, span)
+                self.emit(InstKind::RuntimeOp("__atomic_sub".into(), args), ty, span)
             }
             ExprKind::AtomicCas(p, expected, desired) => {
                 let args = vec![
@@ -31,7 +31,7 @@ impl Lowerer {
                     self.lower_expr(expected),
                     self.lower_expr(desired),
                 ];
-                self.emit(InstKind::Call("__atomic_cas".into(), args), ty, span)
+                self.emit(InstKind::RuntimeOp("__atomic_cas".into(), args), ty, span)
             }
 
             ExprKind::Builtin(builtin, args) => {
@@ -91,12 +91,12 @@ impl Lowerer {
 
             ExprKind::Syscall(args) => {
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::Call("__syscall".into(), vals), ty, span)
+                self.emit(InstKind::RuntimeOp("__syscall".into(), vals), ty, span)
             }
 
             ExprKind::Grad(inner) => {
                 let v = self.lower_expr(inner);
-                self.emit(InstKind::Call("__grad".into(), vec![v]), ty, span)
+                self.emit(InstKind::RuntimeOp("__grad".into(), vec![v]), ty, span)
             }
             ExprKind::Einsum(_pattern, args) => {
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();

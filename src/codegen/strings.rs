@@ -1,163 +1,46 @@
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
-use crate::hir;
-
 use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn compile_string_method(
+    pub(crate) fn compile_str_literal(
         &mut self,
-        obj: &hir::Expr,
-        m: &str,
-        args: &[hir::Expr],
+        s: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let sv = self.compile_expr(obj)?;
-        match m {
-            "contains" | "starts_with" | "ends_with" | "char_at" => {
-                if args.len() != 1 {
-                    return Err(format!("{m}() takes 1 argument"));
-                }
-                let a = self.compile_expr(&args[0])?;
-                match m {
-                    "contains" => self.string_contains(sv, a),
-                    "starts_with" => self.string_starts_with(sv, a),
-                    "ends_with" => self.string_ends_with(sv, a),
-                    _ => self.string_char_at(sv, a),
-                }
-            }
-            "slice" => {
-                if args.len() != 2 {
-                    return Err("slice() takes 2 arguments (start, end)".into());
-                }
-                let start = self.compile_expr(&args[0])?;
-                let end = self.compile_expr(&args[1])?;
-                self.string_slice(sv, start, end)
-            }
-            "length" | "len" => self.string_len(sv),
-            "find" => {
-                if args.len() != 1 {
-                    return Err("find() takes 1 argument".into());
-                }
-                let a = self.compile_expr(&args[0])?;
-                self.string_find(sv, a)
-            }
-            "trim" => self.string_trim(sv, true, true),
-            "trim_left" => self.string_trim(sv, true, false),
-            "trim_right" => self.string_trim(sv, false, true),
-            "to_upper" => self.string_case(sv, true),
-            "to_lower" => self.string_case(sv, false),
-            "replace" => {
-                if args.len() != 2 {
-                    return Err("replace() takes 2 arguments (old, new)".into());
-                }
-                let old = self.compile_expr(&args[0])?;
-                let new = self.compile_expr(&args[1])?;
-                self.string_replace(sv, old, new)
-            }
-            "split" => {
-                if args.len() != 1 {
-                    return Err("split() takes 1 argument".into());
-                }
-                let delim = self.compile_expr(&args[0])?;
-                self.string_split(sv, delim)
-            }
-            "lines" => {
-                let newline = self.compile_str_literal("\n")?;
-                self.string_split(sv, newline)
-            }
-            "repeat" => {
-                if args.len() != 1 {
-                    return Err("repeat() takes 1 argument".into());
-                }
-                let count = self.compile_expr(&args[0])?;
-                self.string_repeat(sv, count)
-            }
-            "is_empty" => {
-                let len = self.string_len(sv)?.into_int_value();
-                let i64t = self.ctx.i64_type();
-                let cmp = b!(self.bld.build_int_compare(
-                    IntPredicate::EQ,
-                    len,
-                    i64t.const_int(0, false),
-                    "isempty"
-                ));
-                let i1t = self.ctx.bool_type();
-                let ext = b!(self.bld.build_int_z_extend(cmp, i1t, "isempty.ext"));
-                Ok(ext.into())
-            }
-            "matches" => {
-                if args.len() != 1 {
-                    return Err("matches() takes 1 argument (pattern)".into());
-                }
-                let pattern = self.compile_expr(&args[0])?;
-                let sv_data = self.string_data(sv)?.into_pointer_value();
-                let pat_data = self.string_data(pattern)?.into_pointer_value();
-                let ptr_t = self.ctx.ptr_type(AddressSpace::default());
-                let bool_t = self.ctx.bool_type();
-                let fn_type = bool_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
-                let func = self
-                    .module
-                    .get_function("__jinn_regex_match")
-                    .unwrap_or_else(|| {
-                        self.module
-                            .add_function("__jinn_regex_match", fn_type, None)
-                    });
-                let result =
+        if s.len() <= 23 {
+            let st = self.string_type();
+            let i8t = self.ctx.i8_type();
+            let i64t = self.ctx.i64_type();
+            let out = self.entry_alloca(st.into(), "slit");
+            b!(self.bld.build_store(out, st.const_zero()));
+            for (i, byte) in s.bytes().enumerate() {
+                let bp = unsafe {
                     b!(self
                         .bld
-                        .build_call(func, &[sv_data.into(), pat_data.into()], "re.match"));
-                Ok(self.call_result(result))
+                        .build_gep(i8t, out, &[i64t.const_int(i as u64, false)], "sso.b"))
+                };
+                b!(self.bld.build_store(bp, i8t.const_int(byte as u64, false)));
             }
-            "find_all" => {
-                if args.len() != 1 {
-                    return Err("find_all() takes 1 argument (pattern)".into());
-                }
-                let pattern = self.compile_expr(&args[0])?;
-                let sv_data = self.string_data(sv)?.into_pointer_value();
-                let pat_data = self.string_data(pattern)?.into_pointer_value();
-                let ptr_t = self.ctx.ptr_type(AddressSpace::default());
-                let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into()], false);
-                let func = self
-                    .module
-                    .get_function("__jinn_regex_find_all")
-                    .unwrap_or_else(|| {
-                        self.module
-                            .add_function("__jinn_regex_find_all", fn_type, None)
-                    });
-                let result =
-                    b!(self
-                        .bld
-                        .build_call(func, &[sv_data.into(), pat_data.into()], "re.findall"));
-                Ok(self.call_result(result))
-            }
-            "replace_re" => {
-                if args.len() != 2 {
-                    return Err("replace_re() takes 2 arguments (pattern, replacement)".into());
-                }
-                let pattern = self.compile_expr(&args[0])?;
-                let replacement = self.compile_expr(&args[1])?;
-                let sv_data = self.string_data(sv)?.into_pointer_value();
-                let pat_data = self.string_data(pattern)?.into_pointer_value();
-                let rep_data = self.string_data(replacement)?.into_pointer_value();
-                let ptr_t = self.ctx.ptr_type(AddressSpace::default());
-                let fn_type = ptr_t.fn_type(&[ptr_t.into(), ptr_t.into(), ptr_t.into()], false);
-                let func = self
-                    .module
-                    .get_function("__jinn_regex_replace")
-                    .unwrap_or_else(|| {
-                        self.module
-                            .add_function("__jinn_regex_replace", fn_type, None)
-                    });
-                let result = b!(self.bld.build_call(
-                    func,
-                    &[sv_data.into(), pat_data.into(), rep_data.into()],
-                    "re.replace"
-                ));
-                Ok(self.call_result(result))
-            }
-            _ => Err(format!("no method '{m}' on String")),
+            let tag_ptr = unsafe {
+                b!(self
+                    .bld
+                    .build_gep(i8t, out, &[i64t.const_int(23, false)], "sso.tag"))
+            };
+            b!(self
+                .bld
+                .build_store(tag_ptr, i8t.const_int(0x80 | s.len() as u64, false)));
+            Ok(b!(self.bld.build_load(st, out, "slit")))
+        } else {
+            let gstr = b!(self.bld.build_global_string_ptr(s, "str"));
+            let i64t = self.ctx.i64_type();
+            self.build_string(
+                gstr.as_pointer_value(),
+                i64t.const_int(s.len() as u64, false),
+                i64t.const_int(0, false),
+                "slit",
+            )
         }
     }
 

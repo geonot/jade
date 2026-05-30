@@ -48,10 +48,15 @@ impl Typer {
             .collect();
 
         let mut hir_handlers = Vec::new();
+        // Allocate ONE canonical DefId per field, reused in every handler
+        // scope below. Without this, each handler would re-define fields with
+        // a fresh id, making a field's `Var` def_id non-correlatable across
+        // handlers (and impossible to map back to the field for MIR lowering).
+        let field_def_ids: Vec<crate::hir::DefId> =
+            fields.iter().map(|_| self.fresh_id()).collect();
         for (i, h) in ad.handlers.iter().enumerate() {
             self.push_scope();
-            for f in &fields {
-                let fid = self.fresh_id();
+            for (f, &fid) in fields.iter().zip(field_def_ids.iter()) {
                 self.define_var(
                     &f.name.as_str(),
                     VarInfo {
@@ -130,6 +135,7 @@ impl Typer {
             def_id: id,
             name: ad.name.clone(),
             fields,
+            field_def_ids,
             handlers: hir_handlers,
             span: ad.span,
         })

@@ -60,9 +60,9 @@ impl Lowerer {
 
                 if end.is_none() {
                     let elem = self.emit(InstKind::Index(iter_val, idx), ty.clone(), span);
-                    self.var_map.insert(Symbol::intern(bind), elem);
+                    self.write_var(Symbol::intern(bind), self.current_block, elem);
                 } else {
-                    self.var_map.insert(Symbol::intern(bind), idx);
+                    self.write_var(Symbol::intern(bind), self.current_block, idx);
                 }
                 let elem_val = self.lower_expr(body_expr);
                 if let Some(c) = cond {
@@ -94,7 +94,8 @@ impl Lowerer {
             }
 
             ExprKind::IterNext(iter_var, type_name, method_name) => {
-                if let Some(&v) = self.var_map.get(iter_var) {
+                if let Some(vty) = self.var_types.get(iter_var).cloned() {
+                    let v = self.read_var(iter_var.clone(), self.current_block, vty, span);
                     self.emit(
                         InstKind::MethodCall(
                             v,

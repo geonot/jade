@@ -22,8 +22,8 @@ impl Lowerer {
         let mut capture_info: Vec<(Symbol, ValueId, Type)> = Vec::new();
         for name in &refs {
             if !param_names.contains(name) {
-                if let Some(&val) = self.var_map.get(name) {
-                    let cap_ty = self.value_type(val);
+                if let Some(cap_ty) = self.var_types.get(name).cloned() {
+                    let val = self.read_var(*name, self.current_block, cap_ty.clone(), span);
                     capture_info.push((*name, val, cap_ty));
                 }
             }
@@ -45,8 +45,15 @@ impl Lowerer {
                 value: val,
                 name: *cap_name,
                 ty: cap_ty.clone(),
+                ownership: hir::Ownership::Owned,
             });
-            lambda_lowerer.var_map.insert(*cap_name, val);
+            lambda_lowerer.var_types.insert(*cap_name, cap_ty.clone());
+            let entry = lambda_lowerer.func.entry;
+            lambda_lowerer
+                .current_def
+                .entry(entry)
+                .or_default()
+                .insert(*cap_name, val);
         }
 
         for p in params {
@@ -55,8 +62,15 @@ impl Lowerer {
                 value: val,
                 name: p.name,
                 ty: p.ty.clone(),
+                ownership: p.ownership,
             });
-            lambda_lowerer.var_map.insert(p.name, val);
+            lambda_lowerer.var_types.insert(p.name, p.ty.clone());
+            let entry = lambda_lowerer.func.entry;
+            lambda_lowerer
+                .current_def
+                .entry(entry)
+                .or_default()
+                .insert(p.name, val);
         }
 
         let tail_idx: Option<usize> = body

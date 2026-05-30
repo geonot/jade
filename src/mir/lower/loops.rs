@@ -3,48 +3,62 @@ use super::Lowerer;
 use crate::hir;
 use crate::intern::Symbol;
 use crate::types::Type;
-use std::collections::HashSet;
 
 impl Lowerer {
     pub(super) fn lower_stmt_loops(&mut self, stmt: &hir::Stmt) -> ValueId {
         match stmt {
             hir::Stmt::While(w) => {
-                let mut assigned = HashSet::new();
-                Self::collect_assigned_vars(&w.body, &mut assigned);
-
-                self.demote_vars_to_memory(&assigned, w.span);
-
-                let pre_loop_vars: HashSet<Symbol> = self.var_map.keys().cloned().collect();
-
+                // Pure Braun SSA construction for `while`:
+                //   entry --> cond_bb (UNSEALED; body's back-edge pending)
+                //   cond_bb --branch(cond)--> body_bb | exit_bb
+                //   body_bb (sealed early; pred = cond_bb) --> ... --> cond_bb
+                //
+                // Loop-carried vars need no pre-seeding: a read inside the
+                // (unsealed) loop header inserts an incomplete phi whose
+                // operands are filled when cond_bb is sealed after the
+                // back-edge from the body is installed.
                 let cond_bb = self.new_block("while.cond");
                 let body_bb = self.new_block("while.body");
                 let exit_bb = self.new_block("while.exit");
 
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
+
                 let cond = self.lower_expr(&w.cond);
                 self.set_terminator(Terminator::Branch(cond, body_bb, exit_bb));
 
-                self.loop_stack.push((cond_bb, exit_bb));
+                // Body: single pred (cond_bb) so safe to seal immediately.
                 self.switch_to(body_bb);
+                self.seal_block(body_bb);
+
+                self.loop_stack.push((cond_bb, exit_bb));
                 self.lower_block_stmts(&w.body);
                 if !self.current_block_has_terminator() {
                     self.set_terminator(Terminator::Goto(cond_bb));
                 }
                 self.loop_stack.pop();
 
-                self.var_map.retain(|k, _| pre_loop_vars.contains(k));
+                // Back-edge installed; seal cond_bb (fills its incomplete phis).
+                self.seal_block(cond_bb);
 
                 self.switch_to(exit_bb);
+                self.seal_block(exit_bb);
+
                 self.emit(InstKind::Void, Type::Void, w.span)
             }
             hir::Stmt::For(f) => {
-                let mut assigned = HashSet::new();
-                Self::collect_assigned_vars(&f.body, &mut assigned);
-                self.demote_vars_to_memory(&assigned, f.span);
-
-                let pre_loop_vars: HashSet<Symbol> = self.var_map.keys().cloned().collect();
-
+                // Pure Braun SSA for `for`:
+                //   - cond_bb: UNSEALED (preds = entry + inc_bb back-edge);
+                //     seal AFTER inc_bb terminates Goto(cond_bb).
+                //   - body_bb: sealed immediately (single pred cond_bb).
+                //   - inc_bb: UNSEALED until body completes (continues land
+                //     here as additional preds); seal AFTER body lowering.
+                //   - exit_bb: UNSEALED until body completes (breaks land
+                //     here as additional preds); seal AFTER body lowering.
+                //
+                // The bind / bind2 / __for_idx counters remain on Load/Store
+                // (they are loop-internal, not user variables). User-assigned
+                // vars in the body are Braun-managed via incomplete phis.
                 let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("for.cond");
                 let body_bb = self.new_block("for.body");
@@ -62,13 +76,12 @@ impl Lowerer {
                     } else {
                         self.emit(InstKind::IntConst(1), Type::I64, f.span)
                     };
-
                     self.emit_void_typed(
                         InstKind::Store(f.bind.clone(), iter_val),
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.var_map.insert(f.bind.clone(), iter_val);
+                    self.write_var(f.bind.clone(), self.current_block, iter_val);
 
                     if let Some(ref b2) = f.bind2 {
                         let zero = self.emit(InstKind::IntConst(0), Type::I64, f.span);
@@ -88,12 +101,13 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
+                    self.seal_block(body_bb);
 
-                    self.var_map.insert(f.bind.clone(), counter);
+                    self.write_var(f.bind.clone(), self.current_block, counter);
 
                     if let Some(ref b2) = f.bind2 {
                         let idx = self.emit(InstKind::Load(b2.clone()), Type::I64, f.span);
-                        self.var_map.insert(b2.clone(), idx);
+                        self.write_var(b2.clone(), self.current_block, idx);
                     }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
@@ -136,7 +150,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.var_map.insert(f.bind.clone(), zero);
+                    self.write_var(f.bind.clone(), self.current_block, zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
@@ -151,7 +165,8 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
-                    self.var_map.insert(f.bind.clone(), counter);
+                    self.seal_block(body_bb);
+                    self.write_var(f.bind.clone(), self.current_block, counter);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -175,7 +190,6 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-
                     let _resume = self.emit(
                         InstKind::Call("__gen_resume".into(), vec![iter_val]),
                         Type::Void,
@@ -192,12 +206,13 @@ impl Lowerer {
 
                     self.loop_stack.push((cond_bb, exit_bb));
                     self.switch_to(body_bb);
+                    self.seal_block(body_bb);
                     let val = self.emit(
                         InstKind::Call("__gen_next_val".into(), vec![iter_val]),
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.var_map.insert(f.bind.clone(), val);
+                    self.write_var(f.bind.clone(), self.current_block, val);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(cond_bb));
@@ -222,15 +237,16 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
+                    self.seal_block(body_bb);
                     let elem = self.emit(
                         InstKind::IndexUnchecked(iter_val, idx),
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.var_map.insert(f.bind.clone(), elem);
+                    self.write_var(f.bind.clone(), self.current_block, elem);
 
                     if let Some(ref b2) = f.bind2 {
-                        self.var_map.insert(b2.clone(), idx);
+                        self.write_var(b2.clone(), self.current_block, idx);
                     }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
@@ -246,47 +262,49 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
                 }
 
-                self.var_map.retain(|k, _| pre_loop_vars.contains(k));
+                // All loop edges installed. Seal in order: inc_bb (preds:
+                // body + continues), cond_bb (preds: entry + inc back-edge),
+                // exit_bb (preds: cond false + breaks). seal_block on a
+                // block with no incomplete phis is a no-op.
+                self.seal_block(inc_bb);
+                self.seal_block(cond_bb);
 
                 if f.label.is_some() {
                     self.label_stack.pop();
                 }
 
                 self.switch_to(exit_bb);
+                self.seal_block(exit_bb);
 
-                self.var_map.remove(&f.bind);
-                self.mem_vars.insert(f.bind.clone());
                 self.emit(InstKind::Void, Type::Void, f.span)
             }
             hir::Stmt::Loop(l) => {
-                let mut assigned = HashSet::new();
-                Self::collect_assigned_vars(&l.body, &mut assigned);
-                self.demote_vars_to_memory(&assigned, l.span);
-
-                let pre_loop_vars: HashSet<Symbol> = self.var_map.keys().cloned().collect();
-
+                // Pure Braun SSA for `loop { ... }`:
+                //   entry --> body_bb (UNSEALED; back-edge from body pending)
+                //   body_bb --> body_bb (back-edge)
+                //   body_bb --break--> exit_bb (via Terminator::Goto from break)
                 let body_bb = self.new_block("loop.body");
                 let exit_bb = self.new_block("loop.exit");
 
                 self.set_terminator(Terminator::Goto(body_bb));
-                self.loop_stack.push((body_bb, exit_bb));
+
                 self.switch_to(body_bb);
+
+                self.loop_stack.push((body_bb, exit_bb));
                 self.lower_block_stmts(&l.body);
                 if !self.current_block_has_terminator() {
                     self.set_terminator(Terminator::Goto(body_bb));
                 }
                 self.loop_stack.pop();
 
-                self.var_map.retain(|k, _| pre_loop_vars.contains(k));
-
+                // All back-edges + break edges installed; seal both blocks.
+                self.seal_block(body_bb);
                 self.switch_to(exit_bb);
+                self.seal_block(exit_bb);
+
                 self.emit(InstKind::Void, Type::Void, l.span)
             }
             hir::Stmt::SimFor(f, span) => {
-                let mut assigned = HashSet::new();
-                Self::collect_assigned_vars(&f.body, &mut assigned);
-                self.demote_vars_to_memory(&assigned, *span);
-
                 let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("simfor.cond");
                 let body_bb = self.new_block("simfor.body");
@@ -305,7 +323,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.var_map.insert(f.bind.clone(), iter_val);
+                    self.write_var(f.bind.clone(), self.current_block, iter_val);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
@@ -320,7 +338,8 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
-                    self.var_map.insert(f.bind.clone(), counter);
+                    self.seal_block(body_bb);
+                    self.write_var(f.bind.clone(), self.current_block, counter);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -350,7 +369,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.var_map.insert(f.bind.clone(), zero);
+                    self.write_var(f.bind.clone(), self.current_block, zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
@@ -365,7 +384,8 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
-                    self.var_map.insert(f.bind.clone(), counter);
+                    self.seal_block(body_bb);
+                    self.write_var(f.bind.clone(), self.current_block, counter);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -404,15 +424,16 @@ impl Lowerer {
 
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
+                    self.seal_block(body_bb);
                     let elem = self.emit(
                         InstKind::IndexUnchecked(iter_val, idx),
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.var_map.insert(f.bind.clone(), elem);
+                    self.write_var(f.bind.clone(), self.current_block, elem);
 
                     if let Some(ref b2) = f.bind2 {
-                        self.var_map.insert(b2.clone(), idx);
+                        self.write_var(b2.clone(), self.current_block, idx);
                     }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
@@ -428,7 +449,12 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
                 }
 
+                self.seal_block(inc_bb);
+                self.seal_block(cond_bb);
+
                 self.switch_to(exit_bb);
+                self.seal_block(exit_bb);
+
                 self.emit(InstKind::Void, Type::Void, *span)
             }
             _ => unreachable!("statement dispatched to wrong MIR lowering module"),

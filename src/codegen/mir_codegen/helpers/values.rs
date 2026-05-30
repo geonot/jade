@@ -264,7 +264,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(in crate::codegen) fn emit_cast(
         &mut self,
         val: BasicValueEnum<'ctx>,
-        _src_ty: &Type,
+        src_ty: &Type,
         target_ty: &Type,
         target_llvm: BasicTypeEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
@@ -273,7 +273,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         if val.is_int_value() && target_ty.is_float() {
-            return if !_src_ty.is_signed() {
+            return if !src_ty.is_signed() {
                 Ok(b!(self.bld.build_unsigned_int_to_float(
                     val.into_int_value(),
                     target_llvm.into_float_type(),
@@ -312,7 +312,9 @@ impl<'ctx> Compiler<'ctx> {
             let src_bits = val.into_int_value().get_type().get_bit_width();
             let dst_bits = target_llvm.into_int_type().get_bit_width();
             return if dst_bits > src_bits {
-                if !_src_ty.is_signed() {
+                // Bool (i1) must always zero-extend: sext would map true (1) to -1.
+                // Otherwise widen according to the *source* signedness.
+                if matches!(src_ty, Type::Bool) || !src_ty.is_signed() {
                     Ok(b!(self.bld.build_int_z_extend(
                         val.into_int_value(),
                         target_llvm.into_int_type(),

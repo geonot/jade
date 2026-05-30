@@ -17,12 +17,20 @@ impl Lowerer {
             ExprKind::Void => self.emit(InstKind::Void, Type::Void, span),
             ExprKind::None => self.emit(InstKind::IntConst(0), ty, span),
 
-            ExprKind::Var(_, name) => {
-                if let Some(&val) = self.var_map.get(name) {
-                    val
-                } else {
-                    self.emit(InstKind::Load(name.clone()), ty, span)
+            ExprKind::Var(def_id, name) => {
+                // In an actor handler, bare references to actor fields are
+                // `Var`s carrying the field's canonical DefId. Redirect them
+                // to a load from the persistent state struct. Params/locals
+                // shadow fields by DefId, so `field_lookup` correctly misses.
+                if let Some((field_sym, field_ty)) = self.field_lookup(*def_id) {
+                    let self_state = self.field_self();
+                    return self.emit(
+                        InstKind::FieldGet(self_state, field_sym),
+                        field_ty,
+                        span,
+                    );
                 }
+                self.read_var(name.clone(), self.current_block, ty, span)
             }
 
             ExprKind::BinOp(lhs, op, rhs) => {
@@ -128,12 +136,14 @@ impl Lowerer {
             }
 
             ExprKind::Cast(inner, target_ty) => {
+                let src_ty = inner.ty.clone();
                 let v = self.lower_expr(inner);
-                self.emit(InstKind::Cast(v, target_ty.clone()), ty, span)
+                self.emit(InstKind::Cast(v, src_ty, target_ty.clone()), ty, span)
             }
             ExprKind::StrictCast(inner, target_ty) => {
+                let src_ty = inner.ty.clone();
                 let v = self.lower_expr(inner);
-                self.emit(InstKind::StrictCast(v, target_ty.clone()), ty, span)
+                self.emit(InstKind::StrictCast(v, src_ty, target_ty.clone()), ty, span)
             }
             ExprKind::Ref(inner) => {
                 let v = self.lower_expr(inner);

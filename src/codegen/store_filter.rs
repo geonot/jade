@@ -186,48 +186,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(jinn_st, jinn_ptr, "jinn.result")))
     }
 
-    pub(crate) fn precompile_filter_values(
-        &mut self,
-        filter: &hir::StoreFilter,
-        sd: &hir::StoreDef,
-    ) -> Result<
-        (
-            usize,
-            Type,
-            BasicValueEnum<'ctx>,
-            Vec<(
-                crate::ast::LogicalOp,
-                usize,
-                Type,
-                BinOp,
-                BasicValueEnum<'ctx>,
-            )>,
-        ),
-        String,
-    > {
-        let (field_idx, field_ty) = sd
-            .fields
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.name == filter.field)
-            .map(|(i, f)| (i, f.ty.clone()))
-            .unwrap();
-        let filter_val = self.compile_expr(&filter.value)?;
-        let mut extras = Vec::new();
-        for (lop, cond) in &filter.extra {
-            let (ci, ct) = sd
-                .fields
-                .iter()
-                .enumerate()
-                .find(|(_, f)| f.name == cond.field)
-                .map(|(i, f)| (i, f.ty.clone()))
-                .unwrap();
-            let cv = self.compile_expr(&cond.value)?;
-            extras.push((*lop, ci, ct, cond.op, cv));
-        }
-        Ok((field_idx, field_ty, filter_val, extras))
-    }
-
     pub(crate) fn eval_store_filter(
         &mut self,
         rec_ptr: PointerValue<'ctx>,

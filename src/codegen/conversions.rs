@@ -1,39 +1,12 @@
 use inkwell::IntPredicate;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum};
 
-use crate::hir;
 use crate::types::Type;
 
 use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn compile_log(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.is_empty() {
-            return Err("log() requires an argument".into());
-        }
-        let val = self.compile_expr(&args[0])?;
-        let ty = &args[0].ty;
-        self.emit_log(val, ty)?;
-        Ok(self.ctx.i64_type().const_int(0, false).into())
-    }
-
-    pub(crate) fn compile_print(
-        &mut self,
-        args: &[hir::Expr],
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        if args.is_empty() {
-            return Err("print() requires an argument".into());
-        }
-        let val = self.compile_expr(&args[0])?;
-        let ty = &args[0].ty;
-        self.emit_print(val, ty)?;
-        Ok(self.ctx.i64_type().const_int(0, false).into())
-    }
-
     pub(crate) fn emit_log(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -325,47 +298,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Bool => "%d",
             Type::String => "%.*s",
             _ => "%ld",
-        }
-    }
-
-    pub(crate) fn compile_to_string(
-        &mut self,
-        expr: &hir::Expr,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
-        let val = self.compile_expr(expr)?;
-        let ty = self.resolve_ty(expr.ty.clone());
-        match &ty {
-            Type::String => Ok(val),
-            Type::I64 | Type::I32 | Type::I16 | Type::I8 => self.int_to_string(val, false),
-            Type::U64 | Type::U32 | Type::U16 | Type::U8 => self.int_to_string(val, true),
-            Type::F64 | Type::F32 => self.float_to_string(val),
-            Type::Bool => self.bool_to_string(val),
-            Type::Struct(name, _) => {
-                let fn_name = format!("{name}_display");
-                if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
-                    let first_param_is_ptr = fv
-                        .get_type()
-                        .get_param_types()
-                        .first()
-                        .map(|t| t.is_pointer_type())
-                        .unwrap_or(false);
-                    let self_arg: BasicValueEnum = if first_param_is_ptr {
-                        let tmp = self.entry_alloca(self.llvm_ty(&ty), "display.self");
-                        b!(self.bld.build_store(tmp, val));
-                        tmp.into()
-                    } else {
-                        val
-                    };
-                    let result = b!(self.bld.build_call(fv, &[self_arg.into()], "display.call"))
-                        .try_as_basic_value()
-                        .basic()
-                        .expect("ICE: call returned void");
-                    Ok(result)
-                } else {
-                    self.int_to_string(val, false)
-                }
-            }
-            _ => self.int_to_string(val, false),
         }
     }
 

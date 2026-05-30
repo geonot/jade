@@ -1,5 +1,20 @@
+//! Memory-access cleanup passes.
+//!
+//! Per `/memories/jinn_arch.md`: MIR opt only contains passes that LLVM does
+//! NOT already perform. This module keeps only:
+//!   * `store_load_forwarding` — cleans up the "demote-to-memory" workaround
+//!     used by the current SSA construction (see `mir/lower/analysis.rs`).
+//!     Once `lower/control.rs` is rewritten to use Braun-style SSA construction
+//!     directly (see `/memories/session/option_a_roadmap.md` Item 7), this
+//!     pass can also be deleted.
+//!
+//! Removed (LLVM duplicates):
+//!   * `redundant_store_elimination`  — handled by LLVM DSE
+//!   * `constant_branch_elimination`  — subset of constant_fold; LLVM does it
+
 use super::super::*;
 use super::subst::{subst_inst, subst_term};
+use crate::intern::Symbol;
 use std::collections::{HashMap, HashSet};
 
 pub fn store_load_forwarding(func: &mut Function) -> bool {
@@ -39,9 +54,6 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                 InstKind::FieldStore(var_name, _, _) => {
                     known.remove(var_name);
                 }
-                InstKind::FieldTombstone(var_name, _) => {
-                    known.remove(var_name);
-                }
                 InstKind::IndexStore(var_name, _, _) => {
                     known.remove(var_name);
                 }
@@ -71,68 +83,4 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
             .retain(|inst| !inst.dest.map_or(false, |d| dead_loads.contains(&d)));
     }
     true
-}
-
-pub fn redundant_store_elimination(func: &mut Function) -> bool {
-    let mut changed = false;
-
-    for bb in &mut func.blocks {
-        let mut to_remove: HashSet<usize> = HashSet::new();
-
-        let mut last_store_idx: HashMap<Symbol, usize> = HashMap::new();
-
-        for (i, inst) in bb.insts.iter().enumerate() {
-            match &inst.kind {
-                InstKind::Store(name, _) => {
-                    if let Some(prev_idx) = last_store_idx.insert(*name, i) {
-                        to_remove.insert(prev_idx);
-                    }
-                }
-                InstKind::Load(name) => {
-                    last_store_idx.remove(name);
-                }
-                InstKind::Call(..)
-                | InstKind::ChanSend(..)
-                | InstKind::ChanRecv(..)
-                | InstKind::SelectArm(..)
-                | InstKind::Log(..) => {
-                    last_store_idx.clear();
-                }
-                _ => {}
-            }
-        }
-
-        if !to_remove.is_empty() {
-            let mut idx = 0;
-            bb.insts.retain(|_| {
-                let keep = !to_remove.contains(&idx);
-                idx += 1;
-                keep
-            });
-            changed = true;
-        }
-    }
-    changed
-}
-
-pub fn constant_branch_elimination(func: &mut Function) -> bool {
-    let mut consts: HashMap<ValueId, bool> = HashMap::new();
-    for bb in &func.blocks {
-        for inst in &bb.insts {
-            if let (Some(d), InstKind::BoolConst(b)) = (inst.dest, &inst.kind) {
-                consts.insert(d, *b);
-            }
-        }
-    }
-    let mut changed = false;
-    for bb in &mut func.blocks {
-        if let Terminator::Branch(cond, then_bb, else_bb) = &bb.terminator {
-            if let Some(&b) = consts.get(cond) {
-                let target = if b { *then_bb } else { *else_bb };
-                bb.terminator = Terminator::Goto(target);
-                changed = true;
-            }
-        }
-    }
-    changed
 }

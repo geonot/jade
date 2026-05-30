@@ -262,14 +262,15 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
         | StringConst(_)
         | Void
         | Load(_)
-        | FieldTombstone(_, _)
         | FnRef(_)
+        // note: FieldClear has an operand; handled below.
         | MapInit
         | GlobalLoad(_) => Vec::new(),
 
         BinOp(_, a, b) | Cmp(_, a, b, _) => vec![*a, *b],
         UnaryOp(_, a) => vec![*a],
         Call(_, args) => args.clone(),
+        RuntimeOp(_, args) => args.clone(),
         MethodCall(recv, _, args, _) => {
             let mut v = vec![*recv];
             v.extend(args.iter().copied());
@@ -284,13 +285,14 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
         FieldGet(r, _) => vec![*r],
         FieldSet(r, _, v) => vec![*r, *v],
         FieldStore(_, _, v) => vec![*v],
+        FieldClear(o, _) => vec![*o],
         Index(a, b) | IndexUnchecked(a, b) => vec![*a, *b],
         IndexSet(a, b, c) => vec![*a, *b, *c],
         IndexStore(_, a, b) => vec![*a, *b],
         StructInit(_, fields) => fields.iter().map(|(_, v)| *v).collect(),
         VariantInit(_, _, _, args) => args.clone(),
         ArrayInit(args) => args.clone(),
-        Cast(v, _) | StrictCast(v, _) | Ref(v) | Deref(v) | Alloc(v) => vec![*v],
+        Cast(v, _, _) | StrictCast(v, _, _) | Ref(v) | Deref(v) | Alloc(v) => vec![*v],
         Drop(v, _) => vec![*v],
         DropMany(vs) => vs.iter().map(|(v, _)| *v).collect(),
         Copy(v) | Clone(v, _) => vec![*v],
@@ -328,6 +330,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
         UnaryOp(..) => "UnaryOp",
         Cmp(..) => "Cmp",
         Call(..) => "Call",
+        RuntimeOp(..) => "RuntimeOp",
         MethodCall(..) => "MethodCall",
         IndirectCall(..) => "IndirectCall",
         Load(_) => "Load",
@@ -335,7 +338,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
         FieldGet(..) => "FieldGet",
         FieldSet(..) => "FieldSet",
         FieldStore(..) => "FieldStore",
-        FieldTombstone(..) => "FieldTombstone",
+        FieldClear(..) => "FieldClear",
         Index(..) => "Index",
         IndexUnchecked(..) => "IndexUnchecked",
         IndexSet(..) => "IndexSet",

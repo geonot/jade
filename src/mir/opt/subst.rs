@@ -1,7 +1,7 @@
 use super::super::*;
 use std::collections::HashMap;
 
-pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
+pub(crate) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>) -> bool {
     let mut hit = false;
     macro_rules! sub {
         ($v:expr) => {
@@ -17,8 +17,8 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
             sub!(b);
         }
         InstKind::UnaryOp(_, v)
-        | InstKind::Cast(v, _)
-        | InstKind::StrictCast(v, _)
+        | InstKind::Cast(v, _, _)
+        | InstKind::StrictCast(v, _, _)
         | InstKind::Ref(v)
         | InstKind::Deref(v)
         | InstKind::Copy(v)
@@ -34,6 +34,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
             }
         }
         InstKind::Call(_, args)
+        | InstKind::RuntimeOp(_, args)
         | InstKind::ArrayInit(args)
         | InstKind::VariantInit(_, _, _, args) => {
             for a in args {
@@ -62,7 +63,9 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         InstKind::FieldStore(_, _, v) => {
             sub!(v);
         }
-        InstKind::FieldTombstone(_, _) => {}
+        InstKind::FieldClear(o, _) => {
+            sub!(o);
+        }
         InstKind::Index(a, i) | InstKind::IndexUnchecked(a, i) => {
             sub!(a);
             sub!(i);
@@ -148,7 +151,7 @@ pub(super) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
     hit
 }
 
-pub(super) fn subst_term(term: &mut Terminator, map: &HashMap<ValueId, ValueId>) -> bool {
+pub(crate) fn subst_term(term: &mut Terminator, map: &HashMap<ValueId, ValueId>) -> bool {
     match term {
         Terminator::Branch(c, _, _) => {
             if let Some(&v) = map.get(c) {
