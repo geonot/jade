@@ -33,7 +33,6 @@ impl<'ctx> Compiler<'ctx> {
             needs_ssl: false,
             needs_sqlite: false,
             globals: IndexMap::new(),
-            fast_math_flags: 0,
             target_triple: None,
             target_cpu: None,
             target_features: None,
@@ -172,18 +171,6 @@ impl<'ctx> Compiler<'ctx> {
 
     pub fn set_lib_mode(&mut self) {
         self.lib_mode = true;
-    }
-
-    pub fn set_fast_math(&mut self, enable: bool) {
-        if enable {
-            self.fast_math_flags = 0x7F;
-        } else {
-            self.fast_math_flags = 0;
-        }
-    }
-
-    pub fn set_deterministic_fp(&mut self) {
-        self.fast_math_flags = 0;
     }
 
     pub fn enable_debug(&mut self, filename: &str) {

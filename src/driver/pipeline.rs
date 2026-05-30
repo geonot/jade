@@ -25,8 +25,6 @@ pub(super) fn compile_and_link(
     lto: bool,
     test_mode: bool,
     _bench: bool,
-    fast_math: bool,
-    deterministic_fp: bool,
     emit_mir: bool,
     incremental: bool,
     target: Option<&str>,
@@ -167,12 +165,6 @@ pub(super) fn compile_and_link(
     let mut comp = Compiler::new(&ctx, &name);
     comp.init_tbaa();
     comp.set_source(&src);
-    if fast_math {
-        comp.set_fast_math(true);
-    }
-    if deterministic_fp {
-        comp.set_deterministic_fp();
-    }
     if let Some(t) = target {
         comp.target_triple = Some(t.to_string());
     }

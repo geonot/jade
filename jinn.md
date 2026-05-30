@@ -1123,7 +1123,7 @@ Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST
 ### CLI
 
 ```
-jinnc <INPUT> [-o OUTPUT] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [--debug] [--hir-codegen] [--fast-math] [--deterministic-fp] [--threads N]
+jinnc <INPUT> [-o OUTPUT] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [--debug] [--threads N]
 ```
 
 Subcommands:
@@ -1149,9 +1149,6 @@ jinn bind header.h         # generate extern declarations from C header
 - `--opt` — optimization level (default: 3)
 - `--lto` — link-time optimization
 - `--debug` — emit DWARF debug info (for lldb/gdb)
-- `--hir-codegen` — use legacy HIR-based backend instead of default MIR-based
-- `--fast-math` — enable fast-math optimizations (nnan, ninf, nsz, arcp, contract, afn, reassoc)
-- `--deterministic-fp` — guarantee deterministic floating-point results
 - `--threads N` — parallel codegen threads (0 = auto-detect)
 
 Cross compilation and embedded/OS-style builds:

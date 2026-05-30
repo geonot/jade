@@ -57,12 +57,6 @@ pub(super) struct Cli {
     #[arg(long)]
     pub(super) dump_ast: bool,
 
-    #[arg(long)]
-    pub(super) fast_math: bool,
-
-    #[arg(long)]
-    pub(super) deterministic_fp: bool,
-
     #[arg(long, hide = true)]
     pub(super) incremental: bool,
 

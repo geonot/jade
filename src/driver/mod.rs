@@ -103,8 +103,6 @@ pub fn run() {
                     lto,
                     false,
                     false,
-                    cli.fast_math,
-                    cli.deterministic_fp,
                     cli.emit_mir,
                     cli.incremental,
                     chosen_target,
@@ -164,8 +162,6 @@ pub fn run() {
                         false,
                         false,
                         false,
-                        cli.fast_math,
-                        cli.deterministic_fp,
                         false,
                         cli.incremental,
                         cli.target.as_deref(),
@@ -189,8 +185,6 @@ pub fn run() {
                     false,
                     true,
                     false,
-                    cli.fast_math,
-                    cli.deterministic_fp,
                     false,
                     cli.incremental,
                     cli.target.as_deref(),
@@ -521,12 +515,6 @@ pub fn run() {
     if cli.debug {
         let filename = input.to_string_lossy().to_string();
         comp.enable_debug(&filename);
-    }
-    if cli.fast_math {
-        comp.set_fast_math(true);
-    }
-    if cli.deterministic_fp {
-        comp.set_deterministic_fp();
     }
     if let Some(ref target) = cli.target {
         comp.target_triple = Some(target.clone());

@@ -113,7 +113,6 @@ pub struct Compiler<'ctx> {
 
     pub needs_sqlite: bool,
     pub(crate) globals: IndexMap<Symbol, (inkwell::values::GlobalValue<'ctx>, Type)>,
-    pub(crate) fast_math_flags: u32,
 
     pub(crate) alloca_bld: Builder<'ctx>,
 
