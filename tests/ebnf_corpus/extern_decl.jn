@@ -1,0 +1,4 @@
+extern *puts(s as string) returns i32
+
+*main()
+    puts("hi")

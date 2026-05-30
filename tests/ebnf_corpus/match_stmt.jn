@@ -1,0 +1,10 @@
+enum Shape
+    Circle(i64)
+    Rect(i64, i64)
+    Empty
+
+*describe(s as Shape) returns i64
+    match s
+        Circle(r) ? r
+        Rect(w, h) ? w * h
+        Empty ? 0

@@ -1,0 +1,4 @@
+*countdown(n as i64)
+    while n gt 0
+        log(n)
+        n is n - 1

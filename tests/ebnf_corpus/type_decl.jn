@@ -1,0 +1,6 @@
+type Point
+    x as i64
+    y as i64
+
+    *dist(self) returns i64
+        return self.x + self.y

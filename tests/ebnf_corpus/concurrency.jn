@@ -1,0 +1,16 @@
+*fib(n as i64) returns i64
+    if n < 2
+        n
+    else
+        fib(n - 1) + fib(n - 2)
+
+actor Worker
+    sum
+
+    @work n
+        sum is sum + fib(n)
+
+*main
+    w is spawn Worker
+    w.work(10)
+    log("done")

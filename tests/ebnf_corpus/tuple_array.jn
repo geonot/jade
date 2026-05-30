@@ -1,0 +1,7 @@
+*make() returns (i64, i64)
+    return (1, 2)
+
+*main()
+    pair is make()
+    arr is [1, 2, 3]
+    log(arr[0])

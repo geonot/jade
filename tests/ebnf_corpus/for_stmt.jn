@@ -1,0 +1,5 @@
+*sum(xs as vec of i64) returns i64
+    total is 0
+    for x in xs
+        total is total + x
+    return total

@@ -1,0 +1,243 @@
+(*
+ * Jinn Surface Grammar — EBNF v0.1
+ *
+ * This document is the canonical description of Jinn's surface syntax,
+ * paired with the Rust parser at `src/parser/` and the tree-sitter
+ * grammar at `tree-sitter-jinn/grammar.js`. Drift between this file
+ * and those two implementations is detected by the corpus tests in
+ * `tests/ebnf_roundtrip.rs`; do not edit one without updating the
+ * others.
+ *
+ * Notation
+ *   rule_name = production .
+ *   "literal"          terminal lexeme (case-sensitive)
+ *   <Token::Foo>       lexer token, listed for clarity
+ *   { x }              zero or more of x
+ *   [ x ]              optional x
+ *   x | y              alternation
+ *   x , y              sequence
+ *   INDENT / DEDENT / NEWLINE  produced by the lexer's off-side rule
+ *
+ * Jinn is whitespace-significant. Tabs in source are a hard error
+ * (see `runtime`'s "tabs are not allowed; use spaces" diagnostic).
+ *)
+
+(* ===== top level ===== *)
+
+program       = { NEWLINE | decl } .
+
+decl          = fn_decl
+              | type_decl
+              | enum_decl
+              | trait_decl
+              | impl_decl
+              | actor_decl
+              | store_decl
+              | view_decl
+              | migration_decl
+              | extern_decl
+              | use_decl
+              | err_decl
+              | test_decl
+              | const_decl
+              | annotated_fn_decl .
+
+(* ===== functions ===== *)
+
+annotated_fn_decl = fn_attr { fn_attr } fn_decl .
+fn_attr           = "@" identifier [ "(" arg_list ")" ] .
+
+fn_decl       = "*" identifier "(" [ param_list ] ")" [ "returns" type_expr ]
+                NEWLINE block .
+
+param_list    = param { "," param } .
+param         = identifier "as" type_expr [ "is" expr ] .
+
+(* ===== type, enum, trait, impl ===== *)
+
+type_decl     = [ "pub" ] "type" identifier [ generic_params ] [ "@" identifier ]
+                NEWLINE INDENT { type_member NEWLINE } DEDENT .
+type_member   = field_def | method_def .
+(* The type annotation is optional; an omitted `as type_expr` is
+   inferred from the field's default initialiser. *)
+field_def     = identifier [ "as" type_expr ] [ "is" expr ] .
+method_def    = fn_decl .
+
+enum_decl     = "enum" identifier [ generic_params ]
+                NEWLINE INDENT { variant_def NEWLINE } DEDENT .
+variant_def   = identifier [ "(" type_expr { "," type_expr } ")" ] .
+
+trait_decl    = "trait" identifier [ generic_params ]
+                NEWLINE INDENT { trait_member NEWLINE } DEDENT .
+trait_member  = fn_decl | fn_sig .
+fn_sig        = "*" identifier "(" [ param_list ] ")" [ "returns" type_expr ] .
+
+impl_decl     = "impl" [ identifier "for" ] type_expr
+                NEWLINE INDENT { fn_decl NEWLINE } DEDENT .
+
+generic_params = "<" identifier { "," identifier } ">" .
+
+(* ===== actors, stores, views, migrations ===== *)
+
+actor_decl    = "actor" identifier
+                NEWLINE INDENT { actor_member NEWLINE } DEDENT .
+actor_member  = field_def | handler_def .
+(* Message handlers are introduced by `@name` (async handler) or
+   `*name` (synchronous, request/response). A single `*loop` handler
+   may run a background loop with an optional sleep interval. Handler
+   parameters are untyped or typed and are not parenthesised. *)
+handler_def   = ( "@" identifier | "*" identifier ) { param }
+                [ "returns" type_expr ] NEWLINE block
+              | "*" "loop" [ expr ] NEWLINE block .
+
+store_decl    = "store" identifier
+                NEWLINE INDENT { field_def NEWLINE } DEDENT .
+
+view_decl     = "view" identifier "of" identifier NEWLINE block .
+
+migration_decl = "migration" identifier NEWLINE block .
+
+(* ===== misc declarations ===== *)
+
+extern_decl   = "extern" "*" identifier "(" [ param_list ] ")"
+                [ "returns" type_expr ] .
+
+use_decl      = "use" use_path [ "as" identifier ] .
+use_path      = identifier { "." identifier } .
+
+err_decl      = "err" identifier
+                NEWLINE INDENT { variant_def NEWLINE } DEDENT .
+
+test_decl     = "test" string NEWLINE block .
+
+const_decl    = identifier "is" const_expr .
+const_expr    = expr . (* constant-folded by the typer *)
+
+(* ===== types ===== *)
+
+type_expr     = primitive_type
+              | "vec" "of" type_expr
+              | "channel" "of" type_expr
+              | "%" type_expr                  (* pointer / borrow *)
+              | "(" type_expr { "," type_expr } ")"   (* tuple type *)
+              | identifier [ generic_args ] .
+
+generic_args  = "<" type_expr { "," type_expr } ">" .
+
+primitive_type = "i64" | "i32" | "u64" | "u32" | "f64" | "f32"
+               | "bool" | "string" | "char" | "void" | "none" .
+
+(* ===== statements ===== *)
+
+block         = INDENT { stmt NEWLINE } DEDENT .
+
+stmt          = binding
+              | assignment
+              | if_stmt
+              | while_stmt
+              | until_stmt
+              | unless_stmt
+              | for_stmt
+              | loop_stmt
+              | match_stmt
+              | dispatch_stmt
+              | return_stmt
+              | break_stmt
+              | continue_stmt
+              | log_stmt
+              | expr_stmt .
+
+binding       = identifier "is" expr .
+(* Reassigning a bare variable uses the same `is` form as binding. The
+   `assignment` rule additionally covers compound-augmented updates and
+   field / index lvalues. There is no plain `=` operator in Jinn. *)
+assignment    = lvalue ( "is" | aug_op ) expr .
+aug_op        = "+=" | "-=" | "*=" | "/=" | "&=" | "|=" | "^="
+              | "<<=" | ">>=" | ">>>=" .
+lvalue        = identifier { ( "." identifier | "[" expr "]" ) } .
+
+if_stmt       = "if" expr NEWLINE block
+                { "elif" expr NEWLINE block }
+                [ "else" NEWLINE block ] .
+unless_stmt   = "unless" expr NEWLINE block [ "else" NEWLINE block ] .
+while_stmt    = "while" expr NEWLINE block .
+until_stmt    = "until" expr NEWLINE block .
+for_stmt      = "for" identifier "in" expr NEWLINE block .
+loop_stmt     = "loop" NEWLINE block .
+
+match_stmt    = "match" expr NEWLINE INDENT { match_arm } DEDENT .
+(* Match arms are expression-style: `pattern ? body`, where body is
+   either a single inline statement or an indented block. *)
+match_arm     = pattern [ ( "when" | "if" ) expr ] "?" ( stmt | NEWLINE block ) .
+pattern       = literal
+              | identifier
+              | identifier "(" pattern { "," pattern } ")"
+              | "_" .
+
+dispatch_stmt = "dispatch" NEWLINE INDENT { dispatch_arm } DEDENT .
+dispatch_arm  = pattern NEWLINE block .
+
+return_stmt   = "return" [ expr ] .
+break_stmt    = "break" [ expr ] .
+continue_stmt = "continue" .
+log_stmt      = "log" "(" arg_list ")" .
+
+expr_stmt     = expr . (* must have a side-effect; see is_useless_top_expr *)
+
+(* ===== expressions ===== *)
+
+expr          = pipe_expr .
+pipe_expr     = ternary_expr { "|>" primary } .   (* pipe target is a call/primary *)
+ternary_expr  = or_expr [ "?" expr ":" expr ] .
+or_expr       = and_expr { "or" and_expr } .
+and_expr      = not_expr { "and" not_expr } .
+not_expr      = [ "not" ] cmp_expr .
+cmp_expr      = add_expr { cmp_op add_expr } .
+cmp_op        = "==" | "!=" | "<" | "<=" | ">" | ">="
+              | "equals" | "neq" | "eq" | "lt" | "gt" | "lte" | "gte" .
+add_expr      = mul_expr { ( "+" | "-" ) mul_expr } .
+mul_expr      = unary_expr { ( "*" | "/" | "%" | "mod" ) unary_expr } .
+unary_expr    = [ "-" | "%" ] primary .   (* unary "%" is reference/borrow *)
+primary       = literal
+              | identifier
+              | "self"
+              | "(" expr { "," expr } ")"         (* tuple or grouping *)
+              | "[" [ expr { "," expr } ] "]"     (* array literal *)
+              | primary "." identifier
+              | primary "[" expr "]"
+              | primary "(" [ arg_list ] ")"
+              | "spawn" expr
+              | "send" expr "to" expr
+              | "receive" "from" expr
+              | "yield" [ expr ]
+              | "select" NEWLINE block
+              | block_expr
+              | lambda_expr
+              | string_interp .
+
+arg_list      = arg { "," arg } .
+arg           = [ identifier "is" ] expr .
+
+block_expr    = "block" NEWLINE block .
+lambda_expr   = "(" [ param_list ] ")" "=>" expr .
+string_interp = string .  (* "${expr}" segments handled by the lexer *)
+
+(* ===== literals ===== *)
+
+literal       = integer | float | string | char | bool | "none" .
+integer       = digit { digit | "_" } [ "i32" | "i64" | "u32" | "u64" ] .
+float         = digit { digit } "." digit { digit } [ "f32" | "f64" ] .
+string        = "\"" { string_char } "\"" | "'" { string_char } "'" .
+char          = "'" string_char "'" .
+bool          = "true" | "false" .
+
+(* ===== terminals ===== *)
+
+identifier    = letter { letter | digit | "_" } .
+letter        = "A".."Z" | "a".."z" | "_" .
+digit         = "0".."9" .
+string_char   = ? any UTF-8 codepoint except the closing quote ?
+              | "\\" ( "n" | "t" | "r" | "\\" | "'" | "\"" )
+              | "${" expr "}" .
+
+(* ===== end ===== *)

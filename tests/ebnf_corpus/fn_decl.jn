@@ -1,0 +1,2 @@
+*add(a as i64, b as i64) returns i64
+    return a + b

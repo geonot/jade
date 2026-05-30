@@ -1,0 +1,3 @@
+@inline
+*hot(x as i64) returns i64
+    return x * 2

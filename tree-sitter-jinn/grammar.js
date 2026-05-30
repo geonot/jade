@@ -6,6 +6,18 @@
 // Jinn is indentation-sensitive. The external scanner handles
 // NEWLINE, INDENT, DEDENT tokens. Inside (...) and [...], newlines
 // are treated as whitespace via _ws_newline in extras.
+//
+// KNOWN DRIFT (tracked Phase-C tooling task — see tests/ebnf_roundtrip.rs
+// and the `ebnf-roundtrip` CI job, which gate the *reference* parser, not
+// this grammar). This editor grammar is NOT yet in full conformance with
+// the reference parser. Outstanding gaps observed against tests/ebnf_corpus:
+//   * function/decl annotations  `@inline` etc. (annotated_fn.jn rejected)
+//   * actor message handlers      `@name params` / `*name` / `*loop`
+//     and `x is spawn Actor` / `target.handler(args)` (concurrency.jn)
+//   * tuple return types + array literals in some positions (tuple_array.jn)
+//   * residual GLR conflicts from speculative rules (einsum/grad/deque/loop)
+// Until these are closed, the tree-sitter half of the corpus check is
+// advisory (continue-on-error) and only emits CI warnings.
 
 const PREC = {
   PIPELINE: 1,
@@ -47,6 +59,9 @@ module.exports = grammar({
   conflicts: ($) => [
     [$.method_expression, $.member_expression],
     [$.if_statement, $.if_expression],
+    // `( einsum "spec", e, e )` is ambiguous with a tuple whose first
+    // element is an einsum_expression until the closing paren is seen.
+    [$.einsum_expression, $.tuple_expression],
   ],
 
   rules: {
@@ -722,7 +737,7 @@ module.exports = grammar({
       seq("grad", "(", field("function", $._expression), ")"),
 
     einsum_expression: ($) =>
-      seq("einsum", field("spec", $.string), ",", commaSep1($._expression)),
+      prec.right(seq("einsum", field("spec", $.string), ",", commaSep1($._expression))),
 
     yield_expression: ($) =>
       seq("yield", field("value", $._expression)),

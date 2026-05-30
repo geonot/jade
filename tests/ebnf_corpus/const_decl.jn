@@ -1,0 +1,4 @@
+MAX is 100
+
+*main()
+    log(MAX)
