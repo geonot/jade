@@ -533,12 +533,7 @@ pub fn run() {
         use crate::perceus::mir_perceus;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::run(&mut mir_prog);
-        if cli.debug_perceus
-            || mir_hints.stats.drops_elided > 0
-            || mir_hints.stats.reuse_sites > 0
-            || mir_hints.stats.drops_fused > 0
-            || mir_hints.stats.last_use_tracked > 0
-        {
+        if cli.debug_perceus {
             eprintln!(
                 "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",
                 mir_hints.stats.drops_elided,
@@ -597,7 +592,7 @@ pub fn run() {
 
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(&cli.output);
-    if comp.needs_runtime {
+    if comp.needs_runtime || !comp.standalone {
         let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
     }

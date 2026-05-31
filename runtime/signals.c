@@ -28,6 +28,12 @@
 #define JINN_SIGSTACK_SIZE (64 * 1024)
 
 static _Atomic int g_handlers_installed = 0;
+/* Weak fallback definition so this translation unit can be linked into
+ * programs that never pull in the scheduler (sched.o). When sched.o is
+ * present its strong definition wins; otherwise tl_worker resolves to NULL
+ * and coroutine-overflow detection degrades to the generic SIGSEGV path. */
+__attribute__((weak)) _Thread_local jinn_worker_t *tl_worker = NULL;
+
 static pthread_key_t g_altstack_key;
 static pthread_once_t g_altstack_key_once = PTHREAD_ONCE_INIT;
 

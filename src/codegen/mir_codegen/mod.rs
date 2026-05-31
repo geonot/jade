@@ -375,6 +375,21 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_store(argv_global.as_pointer_value(), argv_param));
 
+            if !self.standalone {
+                let install_crash = self
+                    .module
+                    .get_function("jinn_install_crash_handlers")
+                    .unwrap_or_else(|| {
+                        let ft = self.ctx.void_type().fn_type(&[], false);
+                        self.module.add_function(
+                            "jinn_install_crash_handlers",
+                            ft,
+                            Some(Linkage::External),
+                        )
+                    });
+                b!(self.bld.build_call(install_crash, &[], ""));
+            }
+
             if let Some(sched_init) = self.module.get_function("jinn_sched_init") {
                 b!(self
                     .bld

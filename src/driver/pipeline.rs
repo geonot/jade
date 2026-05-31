@@ -202,7 +202,7 @@ pub(super) fn compile_and_link(
 
     let mut cc = Command::new("cc");
     cc.arg(&obj).arg("-o").arg(output);
-    if comp.needs_runtime {
+    if comp.needs_runtime || !comp.standalone {
         let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
     }
