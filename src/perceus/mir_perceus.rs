@@ -275,7 +275,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::ChanRecv(ch) => vec![*ch],
         InstKind::SelectArm(channels, _) => channels.clone(),
 
-        InstKind::Log(v) => vec![*v],
+        InstKind::Log(v) | InstKind::Eprint(v) => vec![*v],
         InstKind::Assert(v, _) => vec![*v],
 
         InstKind::InlineAsm(_, args) => args.clone(),

@@ -24,7 +24,7 @@ use crate::typer::Typer;
 use cli::{Cli, Cmd, die, dirs_cache, strip_codegen_prefix};
 use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
-use pipeline::compile_and_link;
+use pipeline::{LinkSpec, compile_and_link, link_object};
 use project::ProjectConfig;
 use sources::{
     EntityIndex, find_project_entry, load_packages, merge_source_files, resolve_implicit_imports,
@@ -578,74 +578,22 @@ pub fn run() {
         die(&format!("emit: {e}"));
     }
 
-    let mut cc = Command::new("cc");
-    cc.arg(&obj).arg("-o").arg(&cli.output);
-    if comp.needs_runtime || !comp.standalone {
-        let rt_dir = env!("JINN_RT_DIR");
-        cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
-    }
-    if comp.needs_ssl {
-        if env!("JINN_HAS_SSL") != "1" {
-            die(
-                "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
-            );
-        }
-        let rt_dir = env!("JINN_RT_DIR");
-        cc.arg("-L")
-            .arg(rt_dir)
-            .arg("-ljinn_ssl")
-            .arg("-lssl")
-            .arg("-lcrypto");
-    }
-    if comp.needs_sqlite {
-        if env!("JINN_HAS_SQLITE") != "1" {
-            die(
-                "program uses std.sqlite but SQLite3 was not available when the compiler was built",
-            );
-        }
-        let rt_dir = env!("JINN_RT_DIR");
-        cc.arg("-L")
-            .arg(rt_dir)
-            .arg("-ljinn_sqlite")
-            .arg("-lsqlite3");
-    }
-    cc.arg("-lm");
-    for extra in &cli.link {
-        cc.arg(extra);
-    }
     let use_lto = project_config
         .as_ref()
         .and_then(|p| p.lto)
         .unwrap_or(cli.lto);
-    if use_lto {
-        cc.arg("-flto");
-    }
-    if cli.debug {
-        cc.arg("-g");
-    }
-
-    if let Some(ref triple) = comp.target_triple {
-        cc.arg(&format!("--target={triple}"));
-        if triple.contains("wasm") {
-            cc = Command::new("clang");
-            cc.arg(&format!("--target={triple}"));
-            cc.arg(&obj).arg("-o").arg(&cli.output);
-            if !comp.standalone {
-                cc.arg("-lc");
-            } else {
-                cc.arg("-nostdlib")
-                    .arg("-Wl,--no-entry")
-                    .arg("-Wl,--export-all");
-            }
-        }
-    }
-    let status = cc.status();
-    let _ = fs::remove_file(&obj);
-    match status {
-        Ok(s) if s.success() => {}
-        Ok(s) => die(&format!("linker failed: {}", s.code().unwrap_or(-1))),
-        Err(e) => die(&format!("linker: {e}")),
-    }
+    link_object(&LinkSpec {
+        obj: &obj,
+        output: &cli.output,
+        needs_runtime: comp.needs_runtime,
+        standalone: comp.standalone,
+        needs_ssl: comp.needs_ssl,
+        needs_sqlite: comp.needs_sqlite,
+        lto: use_lto,
+        debug: cli.debug,
+        target: comp.target_triple.as_deref(),
+        extra_links: &cli.link,
+    });
 }
 
 fn resolve_project_input(input: PathBuf) -> PathBuf {

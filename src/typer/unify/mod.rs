@@ -404,6 +404,21 @@ impl InferCtx {
         let a = self.shallow_resolve(&a);
         let b = self.shallow_resolve(&b);
 
+        // Invariant: string types must reach unification in their canonical
+        // `Type::String` form, never as `Struct("String"|"string")`. Every
+        // name->Type resolution site (parser/typer `ident_to_type`, iterator
+        // element inference) normalizes them at birth. `canonical()` below is
+        // a safety net, but a non-canonical type here means a birth site was
+        // missed and a `==`/`matches!` check elsewhere could mis-compare.
+        debug_assert!(
+            !a.has_string_struct(),
+            "non-canonical string type reached unify (lhs): {a}"
+        );
+        debug_assert!(
+            !b.has_string_struct(),
+            "non-canonical string type reached unify (rhs): {b}"
+        );
+
         let a = a.canonical();
         let b = b.canonical();
 

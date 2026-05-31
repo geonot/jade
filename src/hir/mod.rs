@@ -446,6 +446,7 @@ pub enum ExprKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuiltinFn {
     Log,
+    Eprint,
     Print,
     ToString,
     VolatileLoad,
@@ -475,6 +476,7 @@ pub enum BuiltinFn {
     ActorSend,
     StringFromRaw,
     StringFromPtr,
+    Chr,
     GetArgs,
     Ln,
     Log2,

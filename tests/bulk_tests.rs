@@ -5553,21 +5553,19 @@ fn b_p42_wrong_arg_count() {
 }
 
 #[test]
-#[ignore = "Strict-types semantics changed: bare-fn-reference `*main() / foo` no longer \
-    erroneously unifies foo's Fn type with main's i32 ret (that was a bug in lower_block_no_scope's \
-    auto-tail-unify). With the fix, `*foo(x) / x` is implicitly generic and `foo` is a valid \
-    (uncalled) reference, so strict-types compilation now succeeds. Strict-types coverage for \
-    genuinely unsolved typevars is needed via a separate test."]
-fn b_p42_strict_unsolved_typevar() {
-    let err = expect_strict_fail("*foo(x)\n    x\n\n*main()\n    foo\n");
+fn b_strict_unsolved_field_among_annotated() {
+    // A genuinely-unsolved type variable: the `payload` field carries no
+    // annotation and is never constrained by construction or use, so the type
+    // checker cannot assign it a concrete type. The annotated `id` field must
+    // not be implicated — checking pinpoints the offending field by name.
+    let err = expect_strict_fail("type Record\n    id as i64\n    payload\n\n*main()\n    log(1)\n");
     assert!(
-        err.contains("ambiguous")
-            || err.contains("unsolved")
-            || err.contains("infer")
-            || err.contains("undefined")
-            || err.contains("return type")
-            || err.contains("codegen"),
-        "expected type/codegen error, got: {err}"
+        err.contains("payload") && err.contains("never constrained"),
+        "expected unsolved-field error naming `payload`, got: {err}"
+    );
+    assert!(
+        !err.contains("field `id`"),
+        "annotated field `id` must not be reported as unsolved, got: {err}"
     );
 }
 
@@ -6354,15 +6352,6 @@ fn b_if_expr_elif_unified() {
     expect(
         "*main()\n    n is 42\n    result is if n < 0\n        'neg'\n    elif n < 10\n        'small'\n    else\n        'other'\n    log(result)\n",
         "other",
-    );
-}
-
-#[test]
-fn b_strict_unconstrained_field_diagnostic() {
-    let err = expect_strict_fail("type Bag\n    mystery\n\n*main()\n    log(1)\n");
-    assert!(
-        err.contains("has no type annotation and was never constrained"),
-        "expected strict error about unconstrained field, got: {err}"
     );
 }
 

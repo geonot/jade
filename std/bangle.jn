@@ -284,7 +284,7 @@ type App
         client is server.accept_client()
         __handle_connection(app, client)
 
-*__handle_connection(app as App, client as net.TcpStream)
+*__handle_connection(app as App, client as TcpStream)
     raw is client.read(65536)
     if raw.length equals 0
         client.shut()

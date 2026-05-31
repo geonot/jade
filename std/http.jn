@@ -10,6 +10,7 @@
 use net
 use tls
 use strings
+use convert
 
 # ── Types ────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ type ParsedUrl
         the_port is 443
     if colon_pos >= 0
         the_host is host_part.slice(0, colon_pos)
-        the_port is parse_int(host_part.slice(colon_pos + 1, host_part.length))
+        the_port is convert.parse_int(host_part.slice(colon_pos + 1, host_part.length))
     ParsedUrl(scheme is scheme, host is the_host, port is the_port, path is the_path)
 
 # ── Core request ─────────────────────────────────────────────
@@ -141,7 +142,7 @@ type ParsedUrl
     if sp2 < 0
         sp2 is rest.length
     status_str is rest.slice(0, sp2)
-    status_code is parse_int(status_str)
+    status_code is convert.parse_int(status_str)
 
     headers is vec()
     loop lines

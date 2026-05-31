@@ -113,7 +113,7 @@ impl Typer {
             "float" | "f64" => Type::F64,
             "bool" => Type::Bool,
             "void" => Type::Void,
-            "str" | "String" => Type::String,
+            "str" | "String" | "string" => Type::String,
             s if s.len() == 1 && s.chars().next().is_some_and(char::is_uppercase) => {
                 Type::Param(Symbol::intern(s))
             }

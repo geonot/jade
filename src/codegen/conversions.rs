@@ -82,6 +82,81 @@ impl<'ctx> Compiler<'ctx> {
         Ok(val)
     }
 
+    /// Emit a write of `val` to stderr (the `eprint` builtin), with a trailing
+    /// newline, mirroring [`Self::emit_log`] but targeting `stderr` via `fprintf`.
+    ///
+    /// Supports `String` and scalar types (the common diagnostic-logging case).
+    /// Vec/Struct values are not supported here — callers format to a `String`
+    /// first (as the `logging` std module does).
+    pub(crate) fn emit_eprint(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if matches!(ty, Type::Vec(_) | Type::Struct(..)) {
+            return Err(format!(
+                "eprint() supports String and scalar types, not {ty}; \
+                 format the value to a String first"
+            ));
+        }
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let fprintf = self.module.get_function("fprintf").unwrap_or_else(|| {
+            let ft = i32t.fn_type(&[ptr_ty.into(), ptr_ty.into()], true);
+            self.module
+                .add_function("fprintf", ft, Some(inkwell::module::Linkage::External))
+        });
+        let stderr_g = self.module.get_global("stderr").unwrap_or_else(|| {
+            let g = self.module.add_global(ptr_ty, None, "stderr");
+            g.set_linkage(inkwell::module::Linkage::External);
+            g
+        });
+        let stderr_val = b!(self
+            .bld
+            .build_load(ptr_ty, stderr_g.as_pointer_value(), "stderr.v"));
+        let fmt = self.fmt_for_ty(ty);
+        let fs = b!(self.bld.build_global_string_ptr(fmt, "efmt"));
+        if matches!(ty, Type::String) {
+            let len = self.string_len(val)?.into_int_value();
+            let len_i32 = b!(self
+                .bld
+                .build_int_truncate(len, self.ctx.i32_type(), "slen32"));
+            let data = self.string_data(val)?;
+            b!(self.bld.build_call(
+                fprintf,
+                &[
+                    stderr_val.into(),
+                    fs.as_pointer_value().into(),
+                    len_i32.into(),
+                    data.into()
+                ],
+                "eprint"
+            ));
+        } else {
+            let print_val: BasicMetadataValueEnum<'ctx> = if matches!(ty, Type::Bool) {
+                let iv = val.into_int_value();
+                let ext = if iv.get_type().get_bit_width() == 1 {
+                    b!(self.bld.build_int_z_extend(iv, self.ctx.i32_type(), "bext"))
+                } else {
+                    iv
+                };
+                ext.into()
+            } else if matches!(ty, Type::F32) {
+                let fv = val.into_float_value();
+                let f64t = self.ctx.f64_type();
+                b!(self.bld.build_float_ext(fv, f64t, "fpext")).into()
+            } else {
+                val.into()
+            };
+            b!(self.bld.build_call(
+                fprintf,
+                &[stderr_val.into(), fs.as_pointer_value().into(), print_val],
+                "eprint"
+            ));
+        }
+        Ok(val)
+    }
+
     pub(crate) fn emit_print(
         &mut self,
         val: BasicValueEnum<'ctx>,

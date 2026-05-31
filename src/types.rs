@@ -242,6 +242,37 @@ impl Type {
     pub fn is_string(&self) -> bool {
         matches!(self.canonical(), Type::String)
     }
+
+    /// Debug-only invariant check: returns `true` if any nested type is a
+    /// `Struct("String"|"string")`, i.e. a non-canonical spelling of
+    /// [`Type::String`] that should have been normalized at the resolution
+    /// boundary (parser `ident_to_type`, typer `ident_to_type`, iterator
+    /// element inference). Such a type is canonicalized away by
+    /// [`Type::canonical`], but its presence means a birth site forgot to
+    /// canonicalize, so equality/`matches!` checks that bypass `canonical`
+    /// could silently mis-compare. Used by the `debug_assert!` at the
+    /// unification entry to catch regressions.
+    pub(crate) fn has_string_struct(&self) -> bool {
+        match self {
+            Type::Struct(n, args) => {
+                n.as_str() == "String"
+                    || n.as_str() == "string"
+                    || args.iter().any(Type::has_string_struct)
+            }
+            Type::Array(inner, _)
+            | Type::Vec(inner)
+            | Type::Ptr(inner)
+            | Type::Coroutine(inner)
+            | Type::Channel(inner)
+            | Type::Generator(inner)
+            | Type::Alias(_, inner)
+            | Type::Newtype(_, inner) => inner.has_string_struct(),
+            Type::Map(k, v) => k.has_string_struct() || v.has_string_struct(),
+            Type::Tuple(ts) => ts.iter().any(Type::has_string_struct),
+            Type::Fn(ps, r) => ps.iter().any(Type::has_string_struct) || r.has_string_struct(),
+            _ => false,
+        }
+    }
 }
 
 impl Type {

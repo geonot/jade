@@ -31,6 +31,10 @@ pub struct Lexer<'s> {
     file: Option<crate::intern::Symbol>,
 
     after_dot: bool,
+    /// Nesting depth of `(` / `[`. While > 0, newlines and indentation are
+    /// suppressed (implicit line-joining), so call arguments and list literals
+    /// may span multiple lines.
+    bracket_depth: u32,
 }
 
 static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
@@ -145,6 +149,7 @@ impl<'s> Lexer<'s> {
             nl: false,
             file: None,
             after_dot: false,
+            bracket_depth: 0,
         }
     }
 
@@ -197,6 +202,15 @@ impl<'s> Lexer<'s> {
                 }
                 b'\t' => return self.err("tabs are not allowed; use spaces"),
                 b'\n' => {
+                    // Implicit line-joining: inside `(`/`[` a newline is just
+                    // whitespace, so multi-line call argument lists and list
+                    // literals parse as a single logical line.
+                    if self.bracket_depth > 0 {
+                        self.advance();
+                        self.line += 1;
+                        self.col = 1;
+                        continue;
+                    }
                     if !self.nl {
                         out.push(self.spanned(Token::Newline));
                         self.nl = true;
@@ -212,6 +226,13 @@ impl<'s> Lexer<'s> {
             self.nl = false;
             let tok = self.lex_token()?;
 
+            match tok.token {
+                Token::LParen | Token::LBracket => self.bracket_depth += 1,
+                Token::RParen | Token::RBracket => {
+                    self.bracket_depth = self.bracket_depth.saturating_sub(1);
+                }
+                _ => {}
+            }
             self.after_dot = matches!(tok.token, Token::Dot);
             out.push(tok);
         }

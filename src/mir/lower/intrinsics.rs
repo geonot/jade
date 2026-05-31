@@ -51,6 +51,15 @@ impl Lowerer {
 
                         self.emit(InstKind::Log(v), arg_ty, span)
                     }
+                    BuiltinFn::Eprint => {
+                        let arg_ty = args.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
+                        let v = vals
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
+
+                        self.emit(InstKind::Eprint(v), arg_ty, span)
+                    }
                     BuiltinFn::Print => {
                         let name = Symbol::intern("__builtin_Print");
                         self.emit(InstKind::Call(name, vals), ty, span)

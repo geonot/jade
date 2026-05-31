@@ -312,7 +312,7 @@ type LruCache
             for i in 1 to self.order.length
                 new_order.push(self.order.get(i))
             self.order is new_order
-            self.map.delete(evicted)
+            self.map.remove(evicted)
 
     *has(key as String) returns bool
         self.map.has(key)

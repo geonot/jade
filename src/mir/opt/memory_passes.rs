@@ -34,7 +34,8 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                 | InstKind::ChanSend(..)
                 | InstKind::ChanRecv(..)
                 | InstKind::SelectArm(..)
-                | InstKind::Log(..) => {
+                | InstKind::Log(..)
+                | InstKind::Eprint(..) => {
                     known.clear();
                 }
                 InstKind::FieldStore(var_name, _, _) => {

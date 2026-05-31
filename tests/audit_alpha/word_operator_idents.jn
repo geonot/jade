@@ -1,0 +1,35 @@
+# Regression: the word-operator aliases (`eq`/`equals` -> `==`, `neq` -> `!=`,
+# `lt`/`gt`/`lte`/`gte` -> comparisons, `pow` -> `**`) are intentional operator
+# spellings, but they must ALSO be usable as plain identifiers wherever an
+# identifier is expected: as function names (`*equals`, `*pow`), as parameter
+# names, and as bare variables in expression-atom position (`if eq < 0`,
+# `total + neq`). Their operator role only fires in infix position, which the
+# operator loop consumes before the prefix atom parser is reached, so a
+# word-operator that reaches an atom slot is always a genuine name use.
+# (`mod` is the sole exception: its token `%` is the address-of prefix operator,
+# so `mod` works as a name only through declaration/param positions, never as a
+# bare prefix-atom variable — not exercised here.)
+
+*equals(a as i64, b as i64) returns bool
+    a equals b
+
+*pow(base as i64, n as i64) returns i64
+    result is 1 as i64
+    i is 0 as i64
+    while i < n
+        result is result * base
+        i is i + 1
+    result
+
+*main
+    eq is 5 as i64
+    neq is 3 as i64
+    total is 0 as i64
+    if eq < 0
+        total is total + 1
+    else
+        total is total + eq
+    total is total + neq
+    if equals(eq, 5)
+        total is total + 100
+    log(total + pow(2, 3))

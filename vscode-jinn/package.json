@@ -1,13 +1,15 @@
 {
   "name": "jinn-lang",
   "displayName": "Jinn Language",
-  "description": "Syntax highlighting and language support for the Jinn programming language",
-  "version": "0.1.0",
+  "description": "Syntax highlighting and language server support for the Jinn programming language",
+  "version": "0.2.0",
   "publisher": "jinn",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": ["Programming Languages"],
+  "main": "./out/extension.js",
+  "activationEvents": ["onLanguage:jinn-lang"],
   "contributes": {
     "languages": [
       {
@@ -23,6 +25,40 @@
         "scopeName": "source.jn-lang",
         "path": "./syntaxes/jinn.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "jinn.lsp.restart",
+        "title": "Jinn: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Jinn",
+      "properties": {
+        "jinn.lsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the Jinn language server (jinnc-lsp) for diagnostics, hover, go-to-definition, completion, references, rename, semantic tokens, and signature help. When disabled, syntax highlighting still works."
+        },
+        "jinn.lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the jinnc-lsp executable. Absolute, or relative to a workspace folder. When empty, the extension looks for target/release/jinnc-lsp then target/debug/jinnc-lsp in each workspace folder, then falls back to 'jinnc-lsp' on PATH."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.0"
   }
 }

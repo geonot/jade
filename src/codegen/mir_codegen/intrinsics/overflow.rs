@@ -260,6 +260,41 @@ impl<'ctx> Compiler<'ctx> {
                     .build_call(memcpy, &[buf.into(), ptr.into(), size.into()], ""));
                 return Ok(Some(self.build_string(buf, len, size, "sfp")?));
             }
+            "Chr" => {
+                if args.is_empty() {
+                    return Ok(None);
+                }
+                let code = self.val(args[0]).into_int_value();
+                let i8t = self.ctx.i8_type();
+                let i64t = self.ctx.i64_type();
+                // Narrow the code to a single byte (inverse of `String.char_at`).
+                let byte = if code.get_type().get_bit_width() > 8 {
+                    b!(self.bld.build_int_truncate(code, i8t, "chr.byte"))
+                } else {
+                    code
+                };
+                // Heap buffer: one data byte plus a trailing NUL for C interop.
+                let size = i64t.const_int(2, false);
+                let malloc = self.ensure_malloc();
+                let buf = b!(self.bld.build_call(malloc, &[size.into()], "chr.buf"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void");
+                let bufp = buf.into_pointer_value();
+                b!(self.bld.build_store(bufp, byte));
+                let p1 = unsafe {
+                    b!(self
+                        .bld
+                        .build_gep(i8t, bufp, &[i64t.const_int(1, false)], "chr.p1"))
+                };
+                b!(self.bld.build_store(p1, i8t.const_zero()));
+                return Ok(Some(self.build_string(
+                    buf,
+                    i64t.const_int(1, false),
+                    size,
+                    "chr",
+                )?));
+            }
             "VolatileLoad" => {
                 if args.is_empty() {
                     return Ok(None);

@@ -1,0 +1,30 @@
+# Regression: a recursive generic enum whose variant carries the enum applied
+# to its own type parameter (`Branch(Tree of T, Tree of T)`). The unnamed
+# variant field must parse as a full type (`Tree of T`), and monomorphizing
+# `Tree of i64` must canonicalize the recursive field to the same instantiation
+# without infinite recursion.
+
+enum Tree of T
+    Leaf(T)
+    Branch(Tree of T, Tree of T)
+
+*sum(t as Tree of i64)
+    match t
+        Leaf(n) ? n
+        Branch(left, right) ? sum(left) + sum(right)
+
+*depth(t as Tree of i64)
+    match t
+        Leaf(_) ? 1
+        Branch(left, right) ?
+            l is depth(left)
+            r is depth(right)
+            1 + (l > r ? l ! r)
+
+*main
+    tree is Branch(
+        Branch(Leaf(1), Leaf(2)),
+        Branch(Leaf(3), Branch(Leaf(4), Leaf(5)))
+    )
+    log(sum(tree))
+    log(depth(tree))

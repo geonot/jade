@@ -3,7 +3,7 @@
 
 *main
     total is 0
-    for i in 0 to 1500000000
+    for i in 0 to 50000000
         arr is [i xor total, i + 1, i + 2, i + 3, i + 4]
         total is total + arr[0] + arr[1] + arr[2] + arr[3] + arr[4]
     log(total)

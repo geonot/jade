@@ -1,0 +1,4 @@
+# rule: type_decl
+type Point
+    x as i64
+    y as i64

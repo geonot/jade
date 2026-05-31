@@ -68,11 +68,11 @@
         },
         {
           "name": "keyword.operator.word.jn",
-          "match": "\\b(is|neq|eq|and|or|not|xor|as|equals|mod|returns|lt|gt|lte|gte|nlt|ngt|ngte|nlte|in|strict)\\b"
+          "match": "\\b(is|neq|eq|and|or|not|xor|as|equals|mod|pow|returns|lt|gt|lte|gte|nlt|ngt|ngte|nlte|in|strict)\\b"
         },
         {
           "name": "keyword.declaration.jn",
-          "match": "\\b(type|enum|pub|fn|trait|impl|actor|store|extern|err|use|channel|alias|rc|weak)\\b"
+          "match": "\\b(type|enum|pub|fn|trait|impl|actor|store|extern|err|use|channel|alias)\\b"
         },
         {
           "name": "support.function.builtin.jn",
@@ -146,7 +146,7 @@
       "patterns": [
         {
           "name": "constant.character.escape.jn",
-          "match": "\\\\[nrt0\\\\']"
+          "match": "\\\\([nrt0\\\\'\"{}]|x[0-9a-fA-F]{2})"
         },
         {
           "name": "meta.embedded.line.jn",

@@ -1,0 +1,10 @@
+type Box of T
+    value as T
+
+*unwrap(b as Box of i64) returns i64
+    b.value
+
+*main() returns i32
+    b is Box of i64(42)
+    log(unwrap(b))
+    0

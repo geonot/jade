@@ -115,7 +115,7 @@ pub(super) fn eval_expr(
         ExprKind::UnaryOp(op, e) => {
             let v = eval_expr(e, env, pure_fns, depth)?;
             match (op, v) {
-                (UnaryOp::Neg, ConstVal::Int(n)) => Some(ConstVal::Int(-n)),
+                (UnaryOp::Neg, ConstVal::Int(n)) => Some(ConstVal::Int(n.wrapping_neg())),
                 (UnaryOp::Neg, ConstVal::Float(n)) => Some(ConstVal::Float(-n)),
                 (UnaryOp::Not, ConstVal::Bool(b)) => Some(ConstVal::Bool(!b)),
                 _ => None,

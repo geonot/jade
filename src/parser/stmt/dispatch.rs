@@ -8,6 +8,19 @@ use crate::lexer::Token;
 
 impl Parser {
     pub(in crate::parser) fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        // A statement that leads with a soft (contextual/command) keyword
+        // immediately followed by a bind operator — `close is x`, `view += 1`,
+        // `set is v` — is a variable binding, not a command. Every command form
+        // (`close <chan>`, `set <lval> is <v>`, `send <chan>, <v>`, `log <msg>`)
+        // places its operand, never a bind operator, directly after the leading
+        // keyword, so this guard only fires for genuine name uses (a local
+        // variable that happens to be spelled like a soft keyword). Plain
+        // identifiers already route correctly through the `_` arm and the
+        // tuple-bind logic, so restrict the guard to soft-keyword tokens to keep
+        // their handling untouched.
+        if !matches!(self.peek(), Token::Ident(_)) && self.is_bind() {
+            return self.parse_bind();
+        }
         match self.peek() {
             Token::If => {
                 let sp = self.span();
@@ -426,7 +439,7 @@ impl Parser {
     }
 
     pub(in crate::parser) fn is_bind(&self) -> bool {
-        if !matches!(self.peek(), Token::Ident(_)) {
+        if !self.is_ident_like(self.peek()) {
             return false;
         }
         if self.pos + 1 >= self.tok.len() {

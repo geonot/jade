@@ -4,4 +4,16 @@ __pycache__
 
 *.log
 ok
-benchmarks/_build/a.outa.out
+
+# Compiled program output (jinnc default binary name)
+a.out
+**/a.out
+
+# Store/WAL runtime artifacts produced by running programs and benchmarks
+*.store
+*.wal
+
+# Benchmark run outputs (timings are reproduced by run_benchmarks.py)
+benchmarks/_build/
+benchmarks/results.csv
+benchmarks/results*.json

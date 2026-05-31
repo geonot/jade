@@ -35,8 +35,189 @@ impl Typer {
             Type::Coroutine(inner) => {
                 Type::Coroutine(Box::new(Self::substitute_type(inner, type_map)))
             }
+            Type::Generator(inner) => {
+                Type::Generator(Box::new(Self::substitute_type(inner, type_map)))
+            }
+            // Generic applications such as `Tree of T` are carried as
+            // `Struct(name, args)` until the typer canonicalizes them; substitute
+            // through the arguments so a recursive variant field like
+            // `Branch(Tree of T, Tree of T)` becomes `Tree of i64` under the map.
+            Type::Struct(name, args) => Type::Struct(
+                name.clone(),
+                args.iter()
+                    .map(|a| Self::substitute_type(a, type_map))
+                    .collect(),
+            ),
             _ => ty.clone(),
         }
+    }
+
+    /// True when `ty` contains no free type parameters or unresolved type
+    /// variables, i.e. it is fully concrete and safe to monomorphize.
+    pub(crate) fn is_concrete_type(ty: &Type) -> bool {
+        match ty {
+            Type::Param(_) | Type::TypeVar(_) => false,
+            Type::Array(inner, _)
+            | Type::Vec(inner)
+            | Type::Ptr(inner)
+            | Type::Channel(inner)
+            | Type::Coroutine(inner)
+            | Type::Generator(inner) => Self::is_concrete_type(inner),
+            Type::Map(k, v) => Self::is_concrete_type(k) && Self::is_concrete_type(v),
+            Type::Tuple(tys) => tys.iter().all(Self::is_concrete_type),
+            Type::Struct(_, args) => args.iter().all(Self::is_concrete_type),
+            Type::Fn(ptys, ret) => {
+                ptys.iter().all(Self::is_concrete_type) && Self::is_concrete_type(ret)
+            }
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => Self::is_concrete_type(inner),
+            _ => true,
+        }
+    }
+
+    /// Rewrite generic type applications written as annotations into their
+    /// concrete monomorphic representation.
+    ///
+    /// The parser cannot distinguish a generic enum from a generic struct, so it
+    /// emits `Type::Struct(name, args)` for any `Name of Args` annotation. This
+    /// pass resolves such applications once all declarations are known: a generic
+    /// enum application becomes `Type::Enum(mangled)` and a generic struct
+    /// application becomes `Type::Struct(mangled, [])`, registering the
+    /// corresponding monomorphic definition as a side effect so codegen can find
+    /// its layout. Applications that still contain type parameters or unresolved
+    /// type variables are left untouched; those are resolved later, per
+    /// instantiation, by generic-function monomorphization.
+    pub(in crate::typer) fn monomorphize_named_annotation(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::Struct(name, args) => {
+                let nargs: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.monomorphize_named_annotation(a))
+                    .collect();
+                if !nargs.is_empty() && nargs.iter().all(Self::is_concrete_type) {
+                    if let Some(ge) = self.generic_enums.get(name).cloned() {
+                        if ge.type_params.len() == nargs.len() {
+                            let type_map: HashMap<Symbol, Type> = ge
+                                .type_params
+                                .iter()
+                                .cloned()
+                                .zip(nargs.iter().cloned())
+                                .collect();
+                            if let Ok(mangled) = self.monomorphize_enum(&name.as_str(), &type_map) {
+                                return Type::Enum(mangled);
+                            }
+                        }
+                    } else if let Some(mangled) =
+                        self.monomorphize_generic_struct_annotation(&name.as_str(), &nargs)
+                    {
+                        return Type::Struct(mangled, vec![]);
+                    }
+                }
+                Type::Struct(name.clone(), nargs)
+            }
+            Type::Array(inner, n) => {
+                Type::Array(Box::new(self.monomorphize_named_annotation(inner)), *n)
+            }
+            Type::Vec(inner) => Type::Vec(Box::new(self.monomorphize_named_annotation(inner))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.monomorphize_named_annotation(k)),
+                Box::new(self.monomorphize_named_annotation(v)),
+            ),
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .iter()
+                    .map(|e| self.monomorphize_named_annotation(e))
+                    .collect(),
+            ),
+            Type::Fn(ptys, ret) => Type::Fn(
+                ptys.iter()
+                    .map(|p| self.monomorphize_named_annotation(p))
+                    .collect(),
+                Box::new(self.monomorphize_named_annotation(ret)),
+            ),
+            Type::Ptr(inner) => Type::Ptr(Box::new(self.monomorphize_named_annotation(inner))),
+            Type::Channel(inner) => {
+                Type::Channel(Box::new(self.monomorphize_named_annotation(inner)))
+            }
+            Type::Coroutine(inner) => {
+                Type::Coroutine(Box::new(self.monomorphize_named_annotation(inner)))
+            }
+            Type::Generator(inner) => {
+                Type::Generator(Box::new(self.monomorphize_named_annotation(inner)))
+            }
+            _ => ty.clone(),
+        }
+    }
+
+    /// Monomorphize a generic struct named by a type annotation, substituting
+    /// its declared field types through a type-parameter map built from the
+    /// supplied type arguments. Unlike [`Self::monomorphize_struct`] (whose
+    /// `arg_tys` are field *value* types from a construction site, in field
+    /// order), this resolves an annotation such as `Box of i64` where the
+    /// arguments correspond to the struct's type parameters in declaration
+    /// order. Returns the mangled name, registering the monomorphic definition
+    /// the first time it is seen so that codegen has a layout for it.
+    pub(in crate::typer) fn monomorphize_generic_struct_annotation(
+        &mut self,
+        base_name: &str,
+        type_args: &[Type],
+    ) -> Option<Symbol> {
+        use crate::hir;
+
+        let gtd = self.generic_types.get(base_name).cloned()?;
+        if gtd.type_params.len() != type_args.len() {
+            return None;
+        }
+
+        let ty_suffix = type_args
+            .iter()
+            .map(|t| format!("{t}"))
+            .collect::<Vec<_>>()
+            .join("_");
+        let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
+        if self.structs.contains_key(&mangled) {
+            return Some(mangled);
+        }
+
+        let type_map: HashMap<Symbol, Type> = gtd
+            .type_params
+            .iter()
+            .cloned()
+            .zip(type_args.iter().cloned())
+            .collect();
+
+        let new_fields: Vec<(Symbol, Type)> = gtd
+            .fields
+            .iter()
+            .map(|f| {
+                let declared = f.ty.clone().unwrap_or(Type::I64);
+                (f.name, Self::substitute_type(&declared, &type_map))
+            })
+            .collect();
+
+        self.structs.insert(mangled, new_fields.clone());
+
+        let hir_fields: Vec<hir::Field> = new_fields
+            .iter()
+            .map(|(fname, fty)| hir::Field {
+                name: *fname,
+                ty: fty.clone(),
+                default: None,
+                access_mod: None,
+                span: gtd.span,
+            })
+            .collect();
+
+        let htd = hir::TypeDef {
+            def_id: self.fresh_id(),
+            name: mangled,
+            fields: hir_fields,
+            methods: Vec::new(),
+            layout: gtd.layout.clone(),
+            span: gtd.span,
+        };
+        self.mono_types.push(htd);
+
+        Some(mangled)
     }
 
     pub(crate) fn mangle_generic(
@@ -370,15 +551,25 @@ impl Typer {
         if self.enums.contains_key(&mangled) {
             return Ok(mangled);
         }
+        // Reserve the mangled name before processing variant fields so that a
+        // recursive reference inside a field (e.g. `Branch(Tree of T, Tree of T)`
+        // in `Tree of i64`, or mutual recursion between two generic enums)
+        // resolves to this same instantiation instead of recursing forever. The
+        // placeholder is replaced with the real variants once they are built.
+        self.enums.insert(mangled, Vec::new());
+
         let mut variants = Vec::new();
         let mut hir_variants = Vec::new();
         for (tag, v) in ge.variants.iter().enumerate() {
-            let ftys: Vec<Type> = v
-                .fields
-                .iter()
-                .map(|f| Self::substitute_type(&f.ty, type_map))
-                .collect();
             self.variant_tags.insert(v.name, (mangled, tag as u32));
+            let mut ftys: Vec<Type> = Vec::with_capacity(v.fields.len());
+            for f in &v.fields {
+                // Substitute the enum's type parameters, then canonicalize any
+                // nested generic application (including the recursive self
+                // reference) to its concrete monomorphic type.
+                let substituted = Self::substitute_type(&f.ty, type_map);
+                ftys.push(self.monomorphize_named_annotation(&substituted));
+            }
             let hv = hir::Variant {
                 name: v.name.clone(),
                 fields: ftys

@@ -1,0 +1,6 @@
+# rule: while_stmt
+*main()
+    i is 0
+    while i < 5
+        log(i)
+        i = i + 1

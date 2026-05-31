@@ -281,7 +281,7 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
         ChanSend(a, b) => vec![*a, *b],
         ChanRecv(v) => vec![*v],
         SelectArm(args, _) => args.clone(),
-        Log(v) | Assert(v, _) => vec![*v],
+        Log(v) | Eprint(v) | Assert(v, _) => vec![*v],
         InlineAsm(_, args) => args.clone(),
         GlobalStore(_, v) => vec![*v],
     }
@@ -338,6 +338,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
         ChanRecv(_) => "ChanRecv",
         SelectArm(..) => "SelectArm",
         Log(_) => "Log",
+        Eprint(_) => "Eprint",
         Assert(..) => "Assert",
         InlineAsm(..) => "InlineAsm",
         GlobalLoad(_) => "GlobalLoad",

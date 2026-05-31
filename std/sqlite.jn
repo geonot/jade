@@ -143,34 +143,34 @@ type Db @resource
             j is 0
             while j < ncols
                 cname is extern.jinn_sqlite_column_name(stmt, j)
-                names is names + [__string_from_ptr(cname)]
+                names.push(__string_from_ptr(cname))
 
                 ctype is extern.jinn_sqlite_column_type(stmt, j)
-                type_tags is type_tags + [ctype]
+                type_tags.push(ctype)
 
                 if ctype equals 1
-                    int_vals is int_vals + [extern.jinn_sqlite_column_int(stmt, j)]
-                    float_vals is float_vals + [0.0]
-                    text_vals is text_vals + [""]
+                    int_vals.push(extern.jinn_sqlite_column_int(stmt, j))
+                    float_vals.push(0.0)
+                    text_vals.push("")
                 elif ctype equals 2
-                    int_vals is int_vals + [0]
-                    float_vals is float_vals + [extern.jinn_sqlite_column_float(stmt, j)]
-                    text_vals is text_vals + [""]
+                    int_vals.push(0)
+                    float_vals.push(extern.jinn_sqlite_column_float(stmt, j))
+                    text_vals.push("")
                 elif ctype equals 3
                     txt_ptr is extern.jinn_sqlite_column_text(stmt, j)
                     txt_len is extern.jinn_sqlite_column_text_len(stmt, j)
-                    int_vals is int_vals + [0]
-                    float_vals is float_vals + [0.0]
-                    text_vals is text_vals + [__string_from_ptr(txt_ptr)]
+                    int_vals.push(0)
+                    float_vals.push(0.0)
+                    text_vals.push(__string_from_ptr(txt_ptr))
                 else
-                    int_vals is int_vals + [0]
-                    float_vals is float_vals + [0.0]
-                    text_vals is text_vals + [""]
+                    int_vals.push(0)
+                    float_vals.push(0.0)
+                    text_vals.push("")
 
                 j is j + 1
 
-            row is Row { names is names, int_vals is int_vals, float_vals is float_vals, text_vals is text_vals, type_tags is type_tags }
-            rows is rows + [row]
+            row is Row(names is names, int_vals is int_vals, float_vals is float_vals, text_vals is text_vals, type_tags is type_tags)
+            rows.push(row)
 
         extern.jinn_sqlite_finalize(stmt)
         rows
@@ -223,7 +223,7 @@ type Db @resource
 # Open a database file. Creates the file if it does not exist.
 *open(path as String) returns Db
     handle is extern.jinn_sqlite_open(%path)
-    Db { handle is handle }
+    Db(handle is handle)
 
 # Open an in-memory database.
 *memory returns Db

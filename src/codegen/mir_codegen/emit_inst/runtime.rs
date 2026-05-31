@@ -58,6 +58,11 @@ impl<'ctx> Compiler<'ctx> {
                     self.emit_log(v, &inst.ty)?;
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
+                mir::InstKind::Eprint(val) => {
+                    let v = self.val(*val);
+                    self.emit_eprint(v, &inst.ty)?;
+                    Ok(self.ctx.i8_type().const_int(0, false).into())
+                }
                 mir::InstKind::Assert(val, msg) => {
                     let v = self.val(*val);
                     let fv = self.cur_fn.expect("ICE: cur_fn not set");

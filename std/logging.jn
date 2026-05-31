@@ -142,15 +142,15 @@ type Logger
 
 *__level_color(lvl as i64) returns String
     if lvl equals TRACE
-        return "\x1b[90m"
+        return '\x1b[90m'
     if lvl equals DEBUG
-        return "\x1b[36m"
+        return '\x1b[36m'
     if lvl equals INFO
-        return "\x1b[32m"
+        return '\x1b[32m'
     if lvl equals WARN
-        return "\x1b[33m"
+        return '\x1b[33m'
     if lvl equals ERROR
-        return "\x1b[31;1m"
+        return '\x1b[31;1m'
     ""
 
 *__format_text(lvl as i64, name as String, msg as String, fields as Map of String) returns String
@@ -158,7 +158,7 @@ type Logger
     if _state.show_time
         out is out + __timestamp() + " "
     if _state.use_color
-        out is out + __level_color(lvl) + level_name(lvl) + "\x1b[0m"
+        out is out + __level_color(lvl) + level_name(lvl) + '\x1b[0m'
     else
         out is out + level_name(lvl)
     if name.length > 0
@@ -176,14 +176,14 @@ type Logger
 *__format_json(lvl as i64, name as String, msg as String, fields as Map of String) returns String
     out is "{"
     if _state.show_time
-        out is out + "\"ts\":\"" + __timestamp() + "\","
-    out is out + "\"level\":\"" + level_name(lvl) + "\""
+        out is out + '"ts":"' + __timestamp() + '",'
+    out is out + '"level":"' + level_name(lvl) + '"'
     if name.length > 0
-        out is out + ",\"logger\":\"" + __json_escape(name) + "\""
-    out is out + ",\"msg\":\"" + __json_escape(msg) + "\""
+        out is out + ',"logger":"' + __json_escape(name) + '"'
+    out is out + ',"msg":"' + __json_escape(msg) + '"'
     keys is fields.keys()
     loop keys
-        out is out + ",\"" + __json_escape($) + "\":\"" + __json_escape(fields.get($)) + "\""
+        out is out + ',"' + __json_escape($) + '":"' + __json_escape(fields.get($)) + '"'
     out + "}"
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -207,7 +207,7 @@ type Logger
             needs is true
         i is i + 1
     if needs
-        return "\"" + __escape_quotes(s) + "\""
+        return '"' + __escape_quotes(s) + '"'
     s
 
 *__escape_quotes(s as String) returns String
@@ -216,7 +216,7 @@ type Logger
     while i < s.length
         c is s.char_at(i)
         if c equals 34
-            out is out + "\\\""
+            out is out + '\\"'
         else
             out is out + s.slice(i, i + 1)
         i is i + 1
@@ -228,15 +228,15 @@ type Logger
     while i < s.length
         c is s.char_at(i)
         if c equals 34
-            out is out + "\\\""
+            out is out + '\\"'
         elif c equals 92
-            out is out + "\\\\"
+            out is out + '\\\\'
         elif c equals 10
-            out is out + "\\n"
+            out is out + '\\n'
         elif c equals 13
-            out is out + "\\r"
+            out is out + '\\r'
         elif c equals 9
-            out is out + "\\t"
+            out is out + '\\t'
         elif c < 32
             out is out + " "
         else
@@ -244,9 +244,10 @@ type Logger
         i is i + 1
     out
 
+extern *time(t as %i8) returns i64
+
 # ISO-8601 UTC timestamp from current epoch seconds.
 *__timestamp returns String
-    extern *time(t as %i8) returns i64
     t is extern.time(0 as %i8)
     days is t / 86400
     secs is t mod 86400

@@ -54,8 +54,8 @@ type GcmHex
         extern.free(ct_buf)
         extern.free(tag_buf)
         return GcmResult(ciphertext is "", tag is "", ok is false)
-    ct_str is __string_from_ptr_len(ct_buf, ct_len)
-    tag_str is __string_from_ptr_len(tag_buf, 16)
+    ct_str is __string_from_raw(ct_buf, ct_len)
+    tag_str is __string_from_raw(tag_buf, 16)
     extern.free(ct_buf)
     extern.free(tag_buf)
     GcmResult(ciphertext is ct_str, tag is tag_str, ok is true)
@@ -69,7 +69,7 @@ type GcmHex
     if pt_len < 0
         extern.free(pt_buf)
         return ""
-    result is __string_from_ptr_len(pt_buf, pt_len)
+    result is __string_from_raw(pt_buf, pt_len)
     extern.free(pt_buf)
     result
 
@@ -96,7 +96,7 @@ type GcmHex
     if n < 0
         extern.free(out_buf)
         return ""
-    result is __string_from_ptr_len(out_buf, n)
+    result is __string_from_raw(out_buf, n)
     extern.free(out_buf)
     result
 
@@ -108,7 +108,7 @@ type GcmHex
     if n < 0
         extern.free(out_buf)
         return ""
-    result is __string_from_ptr_len(out_buf, n)
+    result is __string_from_raw(out_buf, n)
     extern.free(out_buf)
     result
 
@@ -134,6 +134,6 @@ type GcmHex
     if rc < 0
         extern.free(buf)
         return ""
-    result is __string_from_ptr_len(buf, n)
+    result is __string_from_raw(buf, n)
     extern.free(buf)
     result

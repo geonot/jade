@@ -148,8 +148,35 @@ impl Parser {
                 ))
             }
             Token::Log => {
-                self.advance();
-                self.parse_builtin_call("log", sp)
+                // `log` is a builtin command (`log msg` / `log(msg)`), but it is
+                // also a natural variable or field name (e.g. a replicated/audit
+                // log). When the following token cannot begin a command argument
+                // — a closing delimiter, separator, newline, member access, or a
+                // bind operator — `log` is a bare value reference, so emit a plain
+                // identifier and let the postfix/operator parser take over. Every
+                // genuine command form is followed by an argument-starting token
+                // (a literal, identifier, `(`, prefix operator, …) and is
+                // therefore unaffected.
+                let bare = matches!(
+                    self.tok.get(self.pos + 1).map(|t| &t.token),
+                    Some(
+                        Token::RParen
+                            | Token::RBracket
+                            | Token::Comma
+                            | Token::Newline
+                            | Token::Dedent
+                            | Token::Eof
+                            | Token::Dot
+                            | Token::Is
+                    )
+                );
+                if bare {
+                    self.advance();
+                    Ok(Expr::Ident("log".into(), sp))
+                } else {
+                    self.advance();
+                    self.parse_builtin_call("log", sp)
+                }
             }
             Token::If => Ok(Expr::IfExpr(Box::new(self.parse_if()?))),
             Token::Assert => {
@@ -223,6 +250,46 @@ impl Parser {
                     })?;
                     Ok(Expr::Builder(name, fields, sp))
                 }
+            }
+            // Range / slice / index keywords (`from`, `to`, `by`, `at`) and the
+            // other contextual nouns (`default`, `end`, `query`, `view`,
+            // `set`, `insert`, `delete`, `close`, `xor`) plus the word-operator
+            // aliases that have no prefix-operator meaning (`eq`/`equals`,
+            // `neq`, `lt`/`gt`/`lte`/`gte`, `pow`) are soft keywords: in
+            // expression-atom (prefix) position they name a plain variable.
+            // Their infix roles (`a equals b`, `x pow 2`) are consumed by the
+            // operator loop before this prefix position is reached, so only
+            // genuine name uses arrive here. `mod` is intentionally absent: its
+            // token (`%`) is the address-of/ref prefix operator (`%expr`),
+            // which wins in atom position — `mod` remains usable as a function
+            // or field name through `ident()`, just not as a bare variable in
+            // expression prefix position. `build`/`send`/`log`/`assert` are
+            // excluded — they have dedicated atom/command arms above. The
+            // logical operators `and`/`or`/`not` are likewise excluded.
+            Token::From
+            | Token::To
+            | Token::By
+            | Token::AtKw
+            | Token::Default
+            | Token::End
+            | Token::Query
+            | Token::View
+            | Token::Set
+            | Token::Insert
+            | Token::Delete
+            | Token::Close
+            | Token::Xor
+            | Token::Equals
+            | Token::Neq
+            | Token::Lt
+            | Token::Gt
+            | Token::LtEq
+            | Token::GtEq
+            | Token::StarStar => {
+                let name = Self::soft_keyword_ident(self.peek())
+                    .expect("contextual keyword is a soft keyword");
+                self.advance();
+                Ok(Expr::Ident(name.into(), sp))
             }
             Token::Ident(name) => {
                 let name = name.clone();

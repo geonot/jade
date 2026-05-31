@@ -82,11 +82,18 @@ impl<'s> Lexer<'s> {
                 span: sp,
             })
         } else {
+            // Reinterpret the decimal digits through u64 then bit-cast to i64,
+            // matching the based-literal path (`lex_based`). This lets the magic
+            // constant 9223372036854775808 (2^63) lex to the i64::MIN bit
+            // pattern so `-9223372036854775808` (a common sign-bit mask) and
+            // unsuffixed full-range u64 masks are expressible, rather than
+            // being rejected by a signed-only `i64::from_str`.
+            let val = text
+                .parse::<u64>()
+                .map(|u| u as i64)
+                .map_err(|_| self.mkerr(&format!("bad int: {text}")))?;
             Ok(Spanned {
-                token: Token::Int(
-                    text.parse()
-                        .map_err(|_| self.mkerr(&format!("bad int: {text}")))?,
-                ),
+                token: Token::Int(val),
                 span: sp,
             })
         }
@@ -264,6 +271,30 @@ impl<'s> Lexer<'s> {
                     b'0' => val.push('\0'),
                     b'{' => val.push('{'),
                     b'}' => val.push('}'),
+                    b'x' => {
+                        // `\xHH` — exactly two hex digits → a single byte. Used
+                        // for control characters such as ESC (`\x1b`) in ANSI
+                        // escape sequences.
+                        let hi = self
+                            .src
+                            .get(self.pos + 1)
+                            .and_then(|c| (*c as char).to_digit(16));
+                        let lo = self
+                            .src
+                            .get(self.pos + 2)
+                            .and_then(|c| (*c as char).to_digit(16));
+                        match (hi, lo) {
+                            (Some(h), Some(l)) => {
+                                val.push(char::from((h * 16 + l) as u8));
+                                self.advance();
+                                self.advance();
+                            }
+                            _ => {
+                                return self
+                                    .err("invalid \\x escape: expected two hex digits");
+                            }
+                        }
+                    }
                     o => return self.err(&format!("unknown escape: \\{}", o as char)),
                 }
                 self.advance();

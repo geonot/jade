@@ -24,7 +24,7 @@ impl Typer {
                         "i64" => Type::I64,
                         "f64" => Type::F64,
                         "bool" => Type::Bool,
-                        "String" => Type::String,
+                        "str" | "String" | "string" => Type::String,
                         other => Type::Struct(other.into(), vec![]),
                     };
                 }

@@ -1,0 +1,9 @@
+# rule: if_stmt
+*main()
+    x is 1
+    if x > 0
+        log(1)
+    elif x < 0
+        log(2)
+    else
+        log(0)

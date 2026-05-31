@@ -230,6 +230,7 @@ pub enum InstKind {
     SelectArm(Vec<ValueId>, bool),
 
     Log(ValueId),
+    Eprint(ValueId),
     Assert(ValueId, String),
 
     InlineAsm(String, Vec<ValueId>),

@@ -193,23 +193,33 @@ Either value-pass or pointer-pass structs consistently, encode the choice in
 HIR/MIR function types, verify it before LLVM, and add the alpha demo as a
 regression test.
 
-### P0-5: Generic enum with empty variant fails in codegen
+### P0-5: Generic enum with empty variant fails in codegen — ✅ FIXED
 
-Fixture: `tests/audit_alpha/negative_generic_empty_enum.jn`.
+Fixture: `tests/audit_alpha/generic_empty_enum.jn` (formerly the negative
+`negative_generic_empty_enum.jn`).
 
-Observed error:
+Previously observed error:
 
 ```text
 FieldGet on pointer to unknown struct type for field `__tag`
 ```
 
-This program should be valid: `Maybe of i64` with `Some(i64)` and `Empty`, then
-matching both cases. The bug appears when generic enum layout, empty variants,
-and match/tag access meet in lowering/codegen.
+This program is valid: `Maybe of i64` with `Some(i64)` and `Empty`, then
+matching both cases.
 
-Required fix: make enum representation explicit in MIR. Generic instantiation
-must produce a concrete enum layout before field/tag lowering. Empty variants
-should not go through an unknown struct pointer path.
+**Actual root cause (not a MIR layout hole):** the parser pre-mangled a generic
+type annotation `Maybe of i64` into `Type::Struct("Maybe_i64", [])` using the
+scheme `Name_arg`, whereas enum monomorphization names instantiations with the
+scheme `Name__G_arg`. The mismatch meant the parameter was typed as an
+undeclared, unregistered struct, so `__tag` access in codegen hit an unknown
+struct pointer.
+
+**Fix:** the parser now preserves the type argument (`Type::Struct(name,[arg])`)
+and the typer canonicalizes generic annotations in a function-signature pass
+(`monomorphize_named_annotation` → `monomorphize_enum` for enums,
+`monomorphize_generic_struct_annotation` for structs). Regression tests:
+`alpha_audit_generic_empty_enum` and `alpha_audit_generic_struct_param` in
+`tests/alpha_release_audit.rs` (both non-ignored, green).
 
 ### P0-6: Bounds failure exits silently
 

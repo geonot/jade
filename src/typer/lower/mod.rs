@@ -252,12 +252,31 @@ impl Typer {
             }
         }
 
+        // Resolve generic type applications written as annotations (e.g.
+        // `Maybe of i64`, which the parser emits as `Struct("Maybe", [i64])`)
+        // into their concrete monomorphic forms now that every declaration is
+        // registered. This binds function parameters and return values to the
+        // mangled enum/struct types codegen actually declares a layout for.
+        {
+            let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
+            for k in &fn_keys {
+                if let Some((id, ptys, ret)) = self.fns.get(k).cloned() {
+                    let ptys: Vec<Type> = ptys
+                        .iter()
+                        .map(|t| self.monomorphize_named_annotation(t))
+                        .collect();
+                    let ret = self.monomorphize_named_annotation(&ret);
+                    if let Some(slot) = self.fns.get_mut(k) {
+                        *slot = (id, ptys, ret);
+                    }
+                }
+            }
+        }
+
         if self.debug_types {
             tracing::debug!(target: "jinnc::type", "running bidirectional parameter inference");
         }
-        self.infer_param_types(prog);
-
-        if self.debug_types {
+        self.infer_param_types(prog);        if self.debug_types {
             tracing::debug!(target: "jinnc::type", "lowering declarations to HIR");
         }
         let mut hir_fns = Vec::new();

@@ -116,7 +116,9 @@ type ProcessResult
     buf is extern.malloc(buf_size)
     exit_code is 0
     # Build a single Vec with prog prepended to args for the C ABI
-    argv is vec(prog) + args
+    argv is [prog]
+    loop args
+        argv.push($)
     n is extern.jinn_spawn_capture(%argv, buf, buf_size, %exit_code as %i32)
     if n < 0
         extern.free(buf)
@@ -131,7 +133,9 @@ type ProcessResult
 # Returns the exit code. Does NOT invoke a shell.
 *spawn_exec(prog as String, args as Vec of String) returns i32
     exit_code is 0
-    argv is vec(prog) + args
+    argv is [prog]
+    loop args
+        argv.push($)
     extern.jinn_spawn_exec(%argv, %exit_code as %i32)
     exit_code
 

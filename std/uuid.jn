@@ -57,7 +57,7 @@ type Uuid
     if rc neq 0
         extern.free(buf)
         return ""
-    raw is __string_from_ptr_len(buf, 16)
+    raw is __string_from_raw(buf, 16)
     extern.free(buf)
     raw is __set_byte(raw, 6, (raw.char_at(6) & 15) | 64)        # version 4
     raw is __set_byte(raw, 8, (raw.char_at(8) & 63) | 128)       # variant 10
@@ -74,7 +74,7 @@ type Uuid
     if rc neq 0
         extern.free(rand_buf)
         return ""
-    rand is __string_from_ptr_len(rand_buf, 10)
+    rand is __string_from_raw(rand_buf, 10)
     extern.free(rand_buf)
     raw is __build_v7_bytes(ms, rand)
     format(Uuid(bytes is raw))
@@ -165,7 +165,7 @@ MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
     if rc < 0
         extern.free(buf)
         return ""
-    result is __string_from_ptr_len(buf, n)
+    result is __string_from_raw(buf, n)
     extern.free(buf)
     result
 

@@ -37,7 +37,7 @@ extern *free(ptr as %i8)
     if n < 0
         extern.free(out_buf)
         return ""
-    result is __string_from_ptr_len(out_buf, n)
+    result is __string_from_raw(out_buf, n)
     extern.free(out_buf)
     result
 

@@ -1,0 +1,8 @@
+# Regression: the `chr(code)` builtin turns an integer character code into a
+# one-byte string. It is a first-class char<->code primitive (the inverse of
+# `String.char_at`), used pervasively in libjn/strings. `chr(65)+chr(66)+chr(67)`
+# builds "ABC"; `chr(48 + 7)` builds "7".
+
+*main
+    log(chr(65) + chr(66) + chr(67))
+    log(chr(48 + 7))

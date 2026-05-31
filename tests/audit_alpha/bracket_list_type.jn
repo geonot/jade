@@ -1,0 +1,28 @@
+# Regression (MAJOR-2): `[T]` list-type syntax (the symmetric counterpart of the
+# `[...]` list literal) must parse as a type everywhere a type is expected —
+# struct fields, parameters, return types, and `as` casts. Equivalent to
+# `Vec of T`.
+
+type Bag
+    items as [i64]
+
+    *total() returns i64
+        sum is 0
+        loop self.items
+            sum is sum + $
+        sum
+
+*make(xs as [i64]) returns Bag
+    Bag(items is xs)
+
+*first_two(xs as [i64]) returns [i64]
+    out is [] as [i64]
+    out.push(xs[0])
+    out.push(xs[1])
+    out
+
+*main
+    b is make([10, 20, 30])
+    log(b.total())
+    pair is first_two([7, 8, 9])
+    log(pair[0] + pair[1])

@@ -1,0 +1,19 @@
+# Regression: reserved-but-contextual keywords (`from`, `to`, `by`, `at`) used
+# as parameter names and as plain variables in expression position. These lex as
+# keywords (for range loops `a to b by c`, slicing `e from a to b`, indexing
+# `e at i`) but must parse as identifiers everywhere an identifier is expected.
+
+*window(from as i64, to as i64, by as i64) returns i64
+    total is 0
+    i is from
+    while i < to
+        total is total + i
+        i is i + by
+    total
+
+*at_index(at as i64) returns i64
+    at + 100
+
+*main
+    log(window(0, 10, 2))
+    log(at_index(5))

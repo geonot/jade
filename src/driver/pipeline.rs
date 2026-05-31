@@ -200,13 +200,61 @@ pub(super) fn compile_and_link(
         die(&format!("emit object: {e}"));
     }
 
+    link_object(&LinkSpec {
+        obj: &obj,
+        output,
+        needs_runtime: comp.needs_runtime,
+        standalone,
+        needs_ssl: comp.needs_ssl,
+        needs_sqlite: comp.needs_sqlite,
+        lto,
+        debug: false,
+        target,
+        extra_links: &[],
+    });
+}
+
+/// Parameters for the final link step. Built by both compile entry points so
+/// the runtime-link flag set has a single source of truth.
+pub(super) struct LinkSpec<'a> {
+    pub obj: &'a std::path::Path,
+    pub output: &'a std::path::Path,
+    pub needs_runtime: bool,
+    pub standalone: bool,
+    pub needs_ssl: bool,
+    pub needs_sqlite: bool,
+    pub lto: bool,
+    pub debug: bool,
+    pub target: Option<&'a str>,
+    pub extra_links: &'a [std::path::PathBuf],
+}
+
+/// Single source of truth for linking a compiled object into the final binary.
+/// Both the bare-file driver (`driver::run`) and the project pipeline
+/// (`compile_and_link`) funnel through here so the runtime/ssl/sqlite link
+/// flags can never drift between the two paths (the original cause of the
+/// "patched identically for the runtime-link fix" hazard).
+pub(super) fn link_object(spec: &LinkSpec) {
+    let LinkSpec {
+        obj,
+        output,
+        needs_runtime,
+        standalone,
+        needs_ssl,
+        needs_sqlite,
+        lto,
+        debug,
+        target,
+        extra_links,
+    } = *spec;
+
     let mut cc = Command::new("cc");
-    cc.arg(&obj).arg("-o").arg(output);
-    if comp.needs_runtime || !comp.standalone {
+    cc.arg(obj).arg("-o").arg(output);
+    if needs_runtime || !standalone {
         let rt_dir = env!("JINN_RT_DIR");
         cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
     }
-    if comp.needs_ssl {
+    if needs_ssl {
         if env!("JINN_HAS_SSL") != "1" {
             die(
                 "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
@@ -219,7 +267,7 @@ pub(super) fn compile_and_link(
             .arg("-lssl")
             .arg("-lcrypto");
     }
-    if comp.needs_sqlite {
+    if needs_sqlite {
         if env!("JINN_HAS_SQLITE") != "1" {
             die(
                 "program uses std.sqlite but SQLite3 was not available when the compiler was built",
@@ -232,15 +280,21 @@ pub(super) fn compile_and_link(
             .arg("-lsqlite3");
     }
     cc.arg("-lm");
+    for extra in extra_links {
+        cc.arg(extra);
+    }
     if lto {
         cc.arg("-flto");
+    }
+    if debug {
+        cc.arg("-g");
     }
     if let Some(triple) = target {
         cc.arg(format!("--target={triple}"));
         if triple.contains("wasm") {
             cc = Command::new("clang");
             cc.arg(format!("--target={triple}"));
-            cc.arg(&obj).arg("-o").arg(output);
+            cc.arg(obj).arg("-o").arg(output);
             if !standalone {
                 cc.arg("-lc");
             } else {
@@ -251,10 +305,11 @@ pub(super) fn compile_and_link(
         }
     }
     let status = cc.status();
-    let _ = fs::remove_file(&obj);
+    let _ = fs::remove_file(obj);
     match status {
         Ok(s) if s.success() => {}
-        Ok(s) => die(&format!("linker failed with {s}")),
-        Err(e) => die(&format!("cc: {e}")),
+        Ok(s) => die(&format!("linker failed: {}", s.code().unwrap_or(-1))),
+        Err(e) => die(&format!("linker: {e}")),
     }
 }
+

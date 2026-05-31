@@ -519,7 +519,7 @@ pub(super) fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
 
 pub(super) fn fold_unary(op: UnaryOp, e: &Expr, ty: Type, span: Span) -> Option<Expr> {
     match (op, &e.kind) {
-        (UnaryOp::Neg, ExprKind::Int(n)) => Some(make(ExprKind::Int(-n), ty, span)),
+        (UnaryOp::Neg, ExprKind::Int(n)) => Some(make(ExprKind::Int(n.wrapping_neg()), ty, span)),
         (UnaryOp::Neg, ExprKind::Float(f)) => Some(make(ExprKind::Float(-f), ty, span)),
         (UnaryOp::Not, ExprKind::Bool(b)) => Some(make(ExprKind::Bool(!b), ty, span)),
         (UnaryOp::BitNot, ExprKind::Int(n)) => Some(make(ExprKind::Int(!n), ty, span)),

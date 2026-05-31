@@ -313,6 +313,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
         rows_for_sort = []
 
         for name in benchmarks:
+            print(f"[bench] O{opt} start {name}", file=sys.stderr, flush=True)
             entry = {}
             raw_entry = {}
             medians = {}

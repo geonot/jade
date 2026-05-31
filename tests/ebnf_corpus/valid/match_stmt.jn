@@ -1,0 +1,15 @@
+# rule: match_stmt
+enum Color
+    Red
+    Green
+    Blue
+
+*main()
+    c is Color.Red
+    match c
+        Color.Red
+            log("red")
+        Color.Green
+            log("green")
+        _
+            log("other")

@@ -1,0 +1,4 @@
+# rule: for_stmt
+*main()
+    for i in 5
+        log(i)

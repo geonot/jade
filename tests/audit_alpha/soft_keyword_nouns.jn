@@ -1,0 +1,20 @@
+# Regression: the contextual-noun soft keywords `default`, `end`, `query` and
+# `view` must parse as plain identifiers in every identifier position — as
+# struct field names in a `type` declaration, as field names in a field-init
+# construction (`Cfg(query is 3, view is 4)`), as field access after `.`, as
+# parameter names, and as bare variables in expression-atom position
+# (`end - default`). They lex as keywords for their statement/clause roles
+# (`query ... view ...`, `do ... end`, default-clause) but must never shadow an
+# identifier where one is expected.
+
+type Cfg
+    query as i64
+    view as i64
+
+*span(default as i64, end as i64) returns i64
+    end - default
+
+*main
+    c is Cfg(query is 3, view is 4)
+    log(c.query + c.view)
+    log(span(2, 10))

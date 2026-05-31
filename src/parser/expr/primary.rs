@@ -123,15 +123,22 @@ impl Parser {
     }
 
     pub(in crate::parser) fn is_field_init(&self) -> bool {
-        matches!(self.peek(), Token::Ident(_))
+        self.is_ident_like(self.peek())
             && self.pos + 1 < self.tok.len()
             && matches!(self.tok[self.pos + 1].token, Token::Is)
     }
 
     pub(in crate::parser) fn is_named_arg(&self) -> bool {
-        matches!(self.peek(), Token::Ident(_))
+        self.is_ident_like(self.peek())
             && self.pos + 1 < self.tok.len()
             && matches!(self.tok[self.pos + 1].token, Token::Is)
+    }
+
+    /// True for tokens that may stand in for an identifier: a real identifier or
+    /// a soft keyword (one that lexes specially but is accepted as a name in
+    /// identifier position, e.g. `query`, `default`, `end`).
+    pub(in crate::parser) fn is_ident_like(&self, tok: &Token) -> bool {
+        matches!(tok, Token::Ident(_)) || Self::soft_keyword_ident(tok).is_some()
     }
 
     pub(in crate::parser) fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -184,8 +191,13 @@ impl Parser {
                         if name == "Map" {
                             return Ok(Type::Map(Box::new(Type::String), Box::new(arg)));
                         }
-                        let mangled = format!("{name}_{arg}");
-                        Ok(Type::Struct(mangled.into(), vec![]))
+                        // Preserve the generic application as-is. The typer
+                        // canonicalizes it to the concrete monomorphic type
+                        // (`Type::Enum`/`Type::Struct` with a mangled name) once
+                        // all declarations are known, so that the enum and struct
+                        // monomorphization schemes stay the single source of truth
+                        // instead of being duplicated here.
+                        Ok(Type::Struct(name, vec![arg]))
                     } else {
                         Ok(t)
                     }
@@ -215,6 +227,16 @@ impl Parser {
                     _ => Type::Tuple(params),
                 })
             }
+            // `[T]` is list-type sugar, the symmetric counterpart of the `[...]`
+            // list literal. It is exactly equivalent to `Vec of T`. In type
+            // position a leading `[` is otherwise always an error, so this arm is
+            // unambiguous.
+            Token::LBracket => {
+                self.advance();
+                let inner = self.parse_type()?;
+                self.expect(Token::RBracket)?;
+                Ok(Type::Vec(Box::new(inner)))
+            }
             _ => Err(self.error("expected type")),
         }
     }
@@ -233,7 +255,7 @@ impl Parser {
             "float" | "f64" => Type::F64,
             "bool" => Type::Bool,
             "void" => Type::Void,
-            "str" | "String" => Type::String,
+            "str" | "String" | "string" => Type::String,
             s if s.len() == 1 && s.chars().next().map_or(false, |c| c.is_uppercase()) => {
                 Type::Param(s.into())
             }

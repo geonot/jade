@@ -273,78 +273,69 @@ impl Parser {
 
     fn ident(&mut self) -> Result<Symbol, ParseError> {
         if self.pos < self.tok.len() {
-            match &self.tok[self.pos].token {
-                Token::Ident(n) => {
-                    let name = n.clone();
-                    self.advance();
-                    return Ok(name);
-                }
-                Token::Set => {
-                    self.advance();
-                    return Ok("set".into());
-                }
-                Token::Build => {
-                    self.advance();
-                    return Ok("build".into());
-                }
-                Token::From => {
-                    self.advance();
-                    return Ok("from".into());
-                }
-                Token::To => {
-                    self.advance();
-                    return Ok("to".into());
-                }
-                Token::Insert => {
-                    self.advance();
-                    return Ok("insert".into());
-                }
-                Token::Query => {
-                    self.advance();
-                    return Ok("query".into());
-                }
-                Token::Delete => {
-                    self.advance();
-                    return Ok("delete".into());
-                }
-                Token::View => {
-                    self.advance();
-                    return Ok("view".into());
-                }
-                Token::Send => {
-                    self.advance();
-                    return Ok("send".into());
-                }
-                Token::Close => {
-                    self.advance();
-                    return Ok("close".into());
-                }
-
-                Token::Log => {
-                    self.advance();
-                    return Ok("log".into());
-                }
-
-                Token::Xor => {
-                    self.advance();
-                    return Ok("xor".into());
-                }
-                Token::And => {
-                    self.advance();
-                    return Ok("and".into());
-                }
-                Token::Or => {
-                    self.advance();
-                    return Ok("or".into());
-                }
-                Token::Not => {
-                    self.advance();
-                    return Ok("not".into());
-                }
-                _ => {}
+            if let Token::Ident(n) = &self.tok[self.pos].token {
+                let name = n.clone();
+                self.advance();
+                return Ok(name);
+            }
+            if let Some(s) = Self::soft_keyword_ident(&self.tok[self.pos].token) {
+                self.advance();
+                return Ok(s.into());
             }
         }
         Err(self.error(&format!("expected identifier, got {}", self.peek())))
+    }
+
+    /// Keywords that may also be used as plain identifiers (declaration names,
+    /// parameter names, field names). These are "soft" keywords: they carry
+    /// special meaning only in their grammar context (store DSL, range loops,
+    /// indexing) and lex back to their spelling everywhere an identifier is
+    /// expected. Returning a name here is the single source of truth shared by
+    /// `ident()` and the expression-atom fallback in `parse_primary`.
+    pub(in crate::parser) fn soft_keyword_ident(tok: &Token) -> Option<&'static str> {
+        Some(match tok {
+            Token::Set => "set",
+            Token::Build => "build",
+            Token::From => "from",
+            Token::To => "to",
+            Token::By => "by",
+            Token::AtKw => "at",
+            Token::Insert => "insert",
+            Token::Query => "query",
+            Token::Delete => "delete",
+            Token::View => "view",
+            Token::Select => "select",
+            Token::Send => "send",
+            Token::Close => "close",
+            Token::Log => "log",
+            Token::Xor => "xor",
+            Token::And => "and",
+            Token::Or => "or",
+            Token::Not => "not",
+            Token::Default => "default",
+            Token::End => "end",
+            // `test` introduces a test block at declaration level (matched there
+            // before `ident()` is consulted), but is otherwise an ordinary name:
+            // a function named `*test`, a parameter, field, or variable.
+            Token::Test => "test",
+            // Word-operator aliases (`eq`/`equals`, `neq`, `lt`/`gt`/`lte`/
+            // `gte`, `mod`, `pow`) are contextual: they are infix operators
+            // after an operand but plain identifiers in any name position
+            // (function/method/field/parameter names, or a bare variable in
+            // prefix position). The infix-operator parsers consume these tokens
+            // before this fallback is ever reached for a valid binary
+            // expression, so only genuine name uses arrive here. Each maps to
+            // its canonical word spelling (`==` and `eq` both name "equals").
+            Token::Equals => "equals",
+            Token::Neq => "neq",
+            Token::Lt => "lt",
+            Token::Gt => "gt",
+            Token::LtEq => "lte",
+            Token::GtEq => "gte",
+            Token::Percent => "mod",
+            Token::StarStar => "pow",
+            _ => return None,
+        })
     }
 
     fn parse_body(&mut self) -> Result<Block, ParseError> {

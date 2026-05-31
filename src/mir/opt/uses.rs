@@ -112,7 +112,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             s.insert(*vec);
             s.insert(*val);
         }
-        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::Log(v) => {
+        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::Log(v) | InstKind::Eprint(v) => {
             s.insert(*v);
         }
         InstKind::ClosureCreate(_, captures) | InstKind::SelectArm(captures, _) => {

@@ -42,7 +42,7 @@ extern *free(ptr as %i8)
     if rc neq 0
         extern.free(buf)
         return ""
-    result is __string_from_ptr_len(buf, n)
+    result is __string_from_raw(buf, n)
     extern.free(buf)
     result
 
@@ -79,7 +79,7 @@ extern *free(ptr as %i8)
     if n < 0
         extern.free(out)
         return ""
-    result is __string_from_ptr_len(out, n)
+    result is __string_from_raw(out, n)
     extern.free(out)
     result
 
@@ -123,8 +123,8 @@ type AeadResult
         extern.free(ct_buf)
         extern.free(tag_buf)
         return AeadResult(ciphertext is "", tag is "", ok is false)
-    ct is __string_from_ptr_len(ct_buf, n)
-    tag is __string_from_ptr_len(tag_buf, 16)
+    ct is __string_from_raw(ct_buf, n)
+    tag is __string_from_raw(tag_buf, 16)
     extern.free(ct_buf)
     extern.free(tag_buf)
     AeadResult(ciphertext is ct, tag is tag, ok is true)
@@ -137,7 +137,7 @@ type AeadResult
     if n < 0
         extern.free(pt_buf)
         return ""
-    result is __string_from_ptr_len(pt_buf, n)
+    result is __string_from_raw(pt_buf, n)
     extern.free(pt_buf)
     result
 
@@ -151,7 +151,7 @@ type AeadResult
     if rc neq 0
         extern.free(out)
         return ""
-    result is __string_from_ptr_len(out, dklen)
+    result is __string_from_raw(out, dklen)
     extern.free(out)
     result
 
@@ -171,7 +171,7 @@ type AeadResult
     if rc neq 0
         extern.free(out)
         return ""
-    result is __string_from_ptr_len(out, dklen)
+    result is __string_from_raw(out, dklen)
     extern.free(out)
     result
 
@@ -216,6 +216,6 @@ type AeadResult
     if rc < 0
         extern.free(buf)
         return ""
-    result is __string_from_ptr_len(buf, n)
+    result is __string_from_raw(buf, n)
     extern.free(buf)
     result

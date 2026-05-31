@@ -1,0 +1,5 @@
+# rule: assignment
+*main()
+    x is 1
+    x = x + 1
+    log(x)

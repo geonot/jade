@@ -16,7 +16,7 @@
 #   date.diff_days(d, d2)                   # 10
 #   when is date.from_iso("2025-11-18T13:45:00Z")
 
-import std.time
+use time
 
 # ── Date value (calendar day, no time-of-day) ────────────────
 

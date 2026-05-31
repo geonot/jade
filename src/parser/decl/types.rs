@@ -158,9 +158,16 @@ impl Parser {
     }
 
     pub(in crate::parser) fn parse_vfield(&mut self) -> Result<VField, ParseError> {
-        let n = self.ident()?;
-        if self.check(Token::As) {
-            self.advance();
+        // A named field is written `name as Type`; an unnamed field is just a
+        // type. Disambiguate by lookahead so the unnamed case can parse a full
+        // type (generic application like `Tree of T`, pointer, tuple, fn), not
+        // just a bare identifier.
+        let named = matches!(self.peek(), Token::Ident(_))
+            && self.pos + 1 < self.tok.len()
+            && matches!(self.tok[self.pos + 1].token, Token::As);
+        if named {
+            let n = self.ident()?;
+            self.expect(Token::As)?;
             Ok(VField {
                 name: Some(n),
                 ty: self.parse_type()?,
@@ -168,7 +175,7 @@ impl Parser {
         } else {
             Ok(VField {
                 name: None,
-                ty: self.ident_to_type(&n.as_str()),
+                ty: self.parse_type()?,
             })
         }
     }

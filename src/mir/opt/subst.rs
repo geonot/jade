@@ -105,7 +105,7 @@ pub(crate) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
             sub!(vec);
             sub!(val);
         }
-        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::Log(v) => {
+        InstKind::VecLen(v) | InstKind::ChanRecv(v) | InstKind::Log(v) | InstKind::Eprint(v) => {
             sub!(v);
         }
 

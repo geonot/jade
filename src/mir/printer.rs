@@ -173,6 +173,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::SelectArm(arms, _) => format!("select [{}]", fmt_args(arms)),
 
         InstKind::Log(v) => format!("log {v}"),
+        InstKind::Eprint(v) => format!("eprint {v}"),
         InstKind::Assert(v, msg) => format!("assert {v} {msg:?}"),
 
         InstKind::InlineAsm(template, args) => {
