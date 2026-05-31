@@ -137,12 +137,14 @@ impl Typer {
             self.restore_moved_fields(pre_match.clone());
             self.push_scope();
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
+            let mut pat_binds = std::collections::HashSet::new();
+            Self::collect_pat_bind_ids(&pat, &mut pat_binds);
             let guard = a
                 .guard
                 .as_ref()
                 .map(|g| self.lower_expr_expected(g, Some(&Type::Bool)))
                 .transpose()?;
-            let body = self.lower_block_no_scope(&a.body, ret_ty)?;
+            let mut body = self.lower_block_no_scope(&a.body, ret_ty)?;
             if let Some(hir::Stmt::Expr(tail_expr)) = body.last() {
                 if let Some(ref first_ty) = first_arm_ty {
                     let _ = self.infer_ctx.unify_at(
@@ -155,6 +157,7 @@ impl Typer {
                     first_arm_ty = Some(tail_expr.ty.clone());
                 }
             }
+            self.finalize_block_drops_excluding(&mut body, &pat_binds);
             self.pop_scope();
             arm_ends.push(self.snapshot_moved_fields());
             arms.push(hir::Arm {

@@ -204,9 +204,35 @@ impl Lowerer {
 
 impl Lowerer {
     pub(super) fn lower_block_expr(&mut self, stmts: &[hir::Stmt]) -> ValueId {
+        let tail_idx: Option<usize> = stmts
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, s)| {
+                !matches!(
+                    s,
+                    hir::Stmt::Drop(..)
+                        | hir::Stmt::Ret(..)
+                        | hir::Stmt::Break(..)
+                        | hir::Stmt::Continue(..)
+                        | hir::Stmt::ErrReturn(..)
+                )
+            })
+            .map(|(i, _)| i);
         let mut last = self.emit(InstKind::Void, Type::Void, Span::dummy());
-        for stmt in stmts {
-            last = self.lower_stmt(stmt);
+        for (idx, stmt) in stmts.iter().enumerate() {
+            let v = if Some(idx) == tail_idx {
+                if let hir::Stmt::Expr(e) = stmt {
+                    self.lower_expr_owned(e)
+                } else {
+                    self.lower_stmt(stmt)
+                }
+            } else {
+                self.lower_stmt(stmt)
+            };
+            if !matches!(stmt, hir::Stmt::Drop(..)) {
+                last = v;
+            }
         }
         last
     }

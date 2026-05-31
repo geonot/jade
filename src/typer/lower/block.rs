@@ -78,6 +78,56 @@ impl Typer {
         }
     }
 
+    pub(in crate::typer) fn finalize_block_drops_excluding(
+        &mut self,
+        stmts: &mut Vec<hir::Stmt>,
+        extra: &std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        let ends_with_jump = stmts.last().map_or(false, |s| {
+            matches!(
+                s,
+                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
+            )
+        });
+        if ends_with_jump {
+            let jump = stmts.pop().unwrap();
+            let mut excl = extra.clone();
+            Self::collect_hir_var_ids_stmt(&jump, &mut excl);
+            self.emit_scope_drops_excluding(stmts, &excl);
+            stmts.push(jump);
+        } else if let Some(hir::Stmt::Expr(_)) = stmts.last() {
+            let tail = stmts.pop().unwrap();
+            let mut excl = extra.clone();
+            if let hir::Stmt::Expr(te) = &tail {
+                Self::collect_moved_var_ids(te, &mut excl);
+            }
+            stmts.push(tail);
+            self.emit_scope_drops_excluding(stmts, &excl);
+        } else {
+            self.emit_scope_drops_excluding(stmts, extra);
+        }
+    }
+
+    pub(in crate::typer) fn collect_pat_bind_ids(
+        pat: &hir::Pat,
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        match pat {
+            hir::Pat::Bind(id, _, _, _) => {
+                out.insert(*id);
+            }
+            hir::Pat::Ctor(_, _, sub, _)
+            | hir::Pat::Or(sub, _)
+            | hir::Pat::Tuple(sub, _)
+            | hir::Pat::Array(sub, _) => {
+                for p in sub {
+                    Self::collect_pat_bind_ids(p, out);
+                }
+            }
+            hir::Pat::Wild(_) | hir::Pat::Lit(_) | hir::Pat::Range(..) => {}
+        }
+    }
+
     pub(in crate::typer) fn emit_scope_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
