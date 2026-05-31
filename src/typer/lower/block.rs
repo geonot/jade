@@ -100,10 +100,15 @@ impl Typer {
                     }
                 }
                 hir::Stmt::Bind(b) => {
-                    let resolved = self.infer_ctx.resolve(&b.value.ty);
-                    if Self::expr_type_needs_drop(&resolved) {
-                        if let hir::ExprKind::Var(id, _) = &b.value.kind {
-                            out.insert(*id);
+                    // A `copy` binding deep-clones its source (see MIR
+                    // `lower_stmt_core`): the source var is NOT consumed and
+                    // must still be dropped by its owning scope.
+                    if !matches!(b.access_mod, Some(crate::ast::AccessMod::Copy)) {
+                        let resolved = self.infer_ctx.resolve(&b.value.ty);
+                        if Self::expr_type_needs_drop(&resolved) {
+                            if let hir::ExprKind::Var(id, _) = &b.value.kind {
+                                out.insert(*id);
+                            }
                         }
                     }
                 }
@@ -197,6 +202,131 @@ impl Typer {
             ty,
             Type::Vec(_) | Type::Map(_, _) | Type::String | Type::Struct(_, _) | Type::Enum(_)
         )
+    }
+
+    /// Record whole-variable move tombstones produced by a single statement.
+    ///
+    /// A whole `Var` is tombstoned (via [`Typer::mark_var_moved`]) when it is
+    /// moved out by an explicit `take` — either bound with `x is take y`, or
+    /// passed to a `take` parameter of a call/method. Subsequent reads of the
+    /// variable are then rejected by the read-check in `lower_expr_ident`.
+    ///
+    /// This runs *after* the statement has been fully lowered (so the move's
+    /// own argument read is not flagged) and is intentionally conservative:
+    /// it only ever tombstones a variable that is verifiably consumed by an
+    /// explicit `take`, so it can never produce a false positive. Moves buried
+    /// inside nested blocks / `if`-expressions / lambdas are handled when those
+    /// sub-blocks are lowered through their own statement loop.
+    pub(in crate::typer) fn record_take_moves_in_stmt(&mut self, s: &hir::Stmt) {
+        match s {
+            hir::Stmt::Bind(b) => {
+                if matches!(b.access_mod, Some(crate::ast::AccessMod::Take))
+                    && let hir::ExprKind::Var(id, _) = &b.value.kind
+                {
+                    let resolved = self.infer_ctx.resolve(&b.value.ty);
+                    if Self::expr_type_needs_drop(&resolved) {
+                        self.mark_var_moved(*id);
+                    }
+                }
+                self.record_take_moves_in_expr(&b.value);
+            }
+            hir::Stmt::Expr(e)
+            | hir::Stmt::Ret(Some(e), _, _)
+            | hir::Stmt::ErrReturn(e, _, _)
+            | hir::Stmt::Break(Some(e), _) => {
+                self.record_take_moves_in_expr(e);
+            }
+            hir::Stmt::Assign(target, value, _) => {
+                self.record_take_moves_in_expr(value);
+                self.record_take_moves_in_expr(target);
+            }
+            // Control-flow statements own nested blocks that are lowered
+            // through their own statement loop, where this hook already runs.
+            _ => {}
+        }
+    }
+
+    fn record_take_moves_in_expr(&mut self, expr: &hir::Expr) {
+        match &expr.kind {
+            hir::ExprKind::Call(_, name, args) => {
+                if let Some(access) = self.fn_param_access.get(name).cloned() {
+                    for (i, a) in args.iter().enumerate() {
+                        if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
+                            && let hir::ExprKind::Var(id, _) = &a.kind
+                        {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            if Self::expr_type_needs_drop(&resolved) {
+                                self.mark_var_moved(*id);
+                            }
+                        }
+                    }
+                }
+                for a in args {
+                    self.record_take_moves_in_expr(a);
+                }
+            }
+            hir::ExprKind::Method(recv, ty_name, m_name, args) => {
+                let mangled: crate::intern::Symbol =
+                    format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
+                if let Some(access) = self.fn_param_access.get(&mangled).cloned() {
+                    if matches!(access.first(), Some(Some(crate::ast::AccessMod::Take)))
+                        && let hir::ExprKind::Var(id, _) = &recv.kind
+                    {
+                        let resolved = self.infer_ctx.resolve(&recv.ty);
+                        if Self::expr_type_needs_drop(&resolved) {
+                            self.mark_var_moved(*id);
+                        }
+                    }
+                    for (i, a) in args.iter().enumerate() {
+                        if matches!(access.get(i + 1), Some(Some(crate::ast::AccessMod::Take)))
+                            && let hir::ExprKind::Var(id, _) = &a.kind
+                        {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            if Self::expr_type_needs_drop(&resolved) {
+                                self.mark_var_moved(*id);
+                            }
+                        }
+                    }
+                }
+                self.record_take_moves_in_expr(recv);
+                for a in args {
+                    self.record_take_moves_in_expr(a);
+                }
+            }
+            hir::ExprKind::IndirectCall(callee, args) => {
+                self.record_take_moves_in_expr(callee);
+                for a in args {
+                    self.record_take_moves_in_expr(a);
+                }
+            }
+            hir::ExprKind::BinOp(l, _, r) | hir::ExprKind::Index(l, r) => {
+                self.record_take_moves_in_expr(l);
+                self.record_take_moves_in_expr(r);
+            }
+            hir::ExprKind::UnaryOp(_, x)
+            | hir::ExprKind::Field(x, _, _)
+            | hir::ExprKind::Cast(x, _)
+            | hir::ExprKind::StrictCast(x, _)
+            | hir::ExprKind::Coerce(x, _)
+            | hir::ExprKind::Ref(x)
+            | hir::ExprKind::Deref(x) => {
+                self.record_take_moves_in_expr(x);
+            }
+            hir::ExprKind::Ternary(c, t, e) => {
+                self.record_take_moves_in_expr(c);
+                self.record_take_moves_in_expr(t);
+                self.record_take_moves_in_expr(e);
+            }
+            hir::ExprKind::Tuple(xs)
+            | hir::ExprKind::Array(xs)
+            | hir::ExprKind::VecNew(xs)
+            | hir::ExprKind::Builtin(_, xs) => {
+                for x in xs {
+                    self.record_take_moves_in_expr(x);
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(in crate::typer) fn emit_scope_drops_excluding(

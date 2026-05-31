@@ -55,6 +55,15 @@ impl Typer {
                     let def_id = v.def_id;
                     let mono_ty = v.ty.clone();
                     let scheme_clone = v.scheme.clone();
+                    if self.suppress_moved_field_check == 0 && self.moved_vars.contains(&def_id) {
+                        return Err(format!(
+                            "{}: `{}` was moved out by an earlier `take`; \
+                             reassign `{}` before reading it",
+                            span.loc(),
+                            name,
+                            name,
+                        ));
+                    }
                     let ty = match (&scheme_clone, expected) {
                         (Some(scheme), Some(exp)) if scheme.is_poly() => {
                             let inst = self.infer_ctx.instantiate(scheme);

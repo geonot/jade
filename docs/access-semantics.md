@@ -13,7 +13,7 @@ Jinn is **value-semantics first**. The default user mental model is:
 
 The compiler then proves which copies are unobservable and turns them into
 borrows, in-place mutation, or zero-cost moves. There is **no `Rc`, no
-`Arc`, no `Box`, and no `&` lifetime syntax** in the surface language. The
+`Arc`, no `Box`, and     no `&` lifetime syntax** in the surface language. The
 runtime has **no garbage collector**. Heap management is explicit and
 deterministic: every owned value has exactly one drop site, decided by
 escape analysis and Perceus-style use counting.
@@ -121,8 +121,14 @@ The selection logic lives in
   `Owned` binding goes out of scope. Explicit `.shut()` calls are
   idempotent (the handle is zeroed after first close).
 - `take` ends the source binding's scope early — the source must not be
-  read after the move; the typer enforces this with a per-scope
-  field-tombstone check.
+  read after the move. The typer enforces this with a per-scope **move
+  tombstone**: an explicit `take` (a `take` binding, or passing a value to
+  a `take` parameter) tombstones the source for the rest of the scope, and
+  any later read is a compile error. Tombstones are tracked at two
+  granularities — whole variables (`moved_vars`) and individual struct
+  fields (`moved_fields`) — and both flow through `if`/`match`/loop
+  branches via the shared snapshot/restore/union dataflow. Reassigning the
+  variable (or field) clears its tombstone and makes it live again.
 
 ## 5. Cross-thread access
 
@@ -163,7 +169,7 @@ mutation is safe.
 ### 6.1 Copy-on-pass for a vector
 
 ```jinn
-*push_one(v as Vec<i32>)
+*push_one(v as Vec of i64)
     v.push(1)        # ok: parameter is BorrowMut by default
 
 *main()
@@ -194,15 +200,23 @@ type File @resource
 
 ### 6.3 Explicit `take` to give up ownership
 
+The access modifier sits in **type position** (`name as take Type`), so the
+move is driven by the callee's parameter, not by a marker at the call site:
+
 ```jinn
-*consume(take s as String)
-    log(s)
+*consume(s as take String)
+    log(s.len())
 
 *main()
     name is "alice"
-    consume(take name)
-    # log(name) here would be a compile error: name has been moved
+    consume(name)
+    # log(name.len()) here is a compile error: `name` was moved out
+    # by an earlier `take`; reassign `name` before reading it
 ```
+
+The same tombstone applies to a `take` binding (`b is take a`) and to a
+moved-out struct field (`b is take a.items`, after which reading `a.items`
+is rejected until it is reassigned).
 
 ### 6.4 Cross-thread (allowed)
 
@@ -252,6 +266,7 @@ annotation.
 | `@resource` parsing                    | [src/parser/decl/types.rs](src/parser/decl/types.rs#L48)                        |
 | Ownership tier selection               | [src/typer/mod.rs](src/typer/mod.rs)                                            |
 | Statement-level ownership overrides    | [src/typer/stmt/dispatch.rs](src/typer/stmt/dispatch.rs)                        |
+| Move tombstones (whole-var + field)    | [src/typer/lower/block.rs](src/typer/lower/block.rs) (`record_take_moves_in_stmt`), [src/typer/expr/ident.rs](src/typer/expr/ident.rs), [src/typer/expr/access.rs](src/typer/expr/access.rs) |
 | HIR `Ownership` enum                   | [src/hir/mod.rs](src/hir/mod.rs#L15)                                            |
 | Cross-thread enforcement               | [src/typer/mod.rs](src/typer/mod.rs) (`enforce_cross_thread_safe`)              |
 | Escape analysis                        | [src/escape/mod.rs](src/escape/mod.rs)                                          |
@@ -269,3 +284,31 @@ annotation.
   [src/codegen/support/runtime.rs](src/codegen/support/runtime.rs)
   (`set_ptr_param_attrs`).
 - Actor scheduler internals — see [runtime/actor.c](runtime/actor.c).
+
+## 10. Conformance tests
+
+Every rule in this document is pinned by an executable conformance test in
+[tests/access_semantics.rs](tests/access_semantics.rs). Each test compiles
+and runs a real `.jn` program through `jinnc` (or asserts a specific
+compile-time diagnostic), so the contract above cannot silently drift from
+the implementation.
+
+| Test                                      | Rule pinned                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| `vec_param_borrows_and_mutates_in_place`  | Heap params borrow by default; callee mutates the caller's value in place (§6.1). |
+| `vec_copy_param_is_independent`           | `copy` parameter is an independent value; callee mutations never reach the caller (§2, §4.1). |
+| `string_param_borrows_caller_retains`     | A borrowed `String` parameter leaves the caller owning it (§3). |
+| `string_take_moves_use_after_is_error`    | Whole-variable use-after-`take` is a compile error (§4.2, §6.3). |
+| `struct_field_take_preserves_siblings`    | `take` of one struct field leaves the siblings intact and readable. |
+| `struct_copy_is_deep_independent`         | `copy` of a struct deep-clones nested heap fields (§2). |
+| `enum_payload_value_semantics`            | Enum payloads obey value semantics. |
+| `resource_copy_is_compile_error`          | `copy` of a `@resource` type is rejected — resources are linear (§4.1). |
+| `resource_drop_runs_once_at_scope_exit`   | `*drop` runs exactly once, deterministically, at scope exit (§4.2, §6.2). |
+| `take_then_reassign_is_ok`                | Reassigning a moved-out variable clears its tombstone (§4.2). |
+| `field_take_use_after_is_error`           | Reading a struct field after `take` is a compile error (§4.2, §6.3). |
+
+Run them with:
+
+```sh
+cargo test --test access_semantics
+```

@@ -111,6 +111,40 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
             .insert(p.name.clone(), val);
     }
 
+    // `copy` parameters: the caller passes its value by reference (it is NOT
+    // consumed at the call site), but the callee must own an independent deep
+    // clone so that (a) mutations inside the callee do not alias the caller's
+    // value and (b) the end-of-scope drop frees the clone, not the caller's
+    // still-live buffer. Rebind the parameter local to a clone of the incoming
+    // value; the original incoming pointer is then only read by the clone and
+    // is never dropped by the callee.
+    for p in &f.params {
+        if matches!(p.access_mod, Some(crate::ast::AccessMod::Copy))
+            && !p.ty.is_trivially_droppable()
+            && p.ty.is_value_clonable()
+        {
+            let entry = lowerer.func.entry;
+            let Some(incoming) = lowerer
+                .current_def
+                .get(&entry)
+                .and_then(|m| m.get(&p.name))
+                .copied()
+            else {
+                continue;
+            };
+            let cloned = lowerer.emit(
+                InstKind::Clone(incoming, p.ty.clone()),
+                p.ty.clone(),
+                p.span,
+            );
+            lowerer
+                .current_def
+                .entry(entry)
+                .or_default()
+                .insert(p.name.clone(), cloned);
+        }
+    }
+
     finish_body(
         &mut lowerer,
         &f.body,

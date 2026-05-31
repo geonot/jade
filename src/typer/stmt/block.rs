@@ -36,11 +36,15 @@ impl Typer {
             if idx == block_len - 1 {
                 if let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s) {
                     let he = self.lower_expr_expected(e, Some(expected))?;
-                    stmts.push(hir::Stmt::Expr(he));
+                    let stmt = hir::Stmt::Expr(he);
+                    self.record_take_moves_in_stmt(&stmt);
+                    stmts.push(stmt);
                     continue;
                 }
             }
-            stmts.push(self.lower_stmt(s, ret_ty)?);
+            let stmt = self.lower_stmt(s, ret_ty)?;
+            self.record_take_moves_in_stmt(&stmt);
+            stmts.push(stmt);
         }
         if self.deferred_quantified_vars.len() > deferred_snapshot {
             let vars_to_default: Vec<u32> = self

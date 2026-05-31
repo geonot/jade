@@ -37,6 +37,16 @@ mod mono;
 mod resolve;
 pub(crate) mod unify;
 
+/// Snapshot of the move-tombstone dataflow state. Bundles both the field-level
+/// tombstones (`moved_fields`) and whole-variable tombstones (`moved_vars`) so
+/// that branch analysis (`if`/`match`/loops) can snapshot, restore, and union
+/// both kinds of move state together.
+#[derive(Clone, Default)]
+pub(crate) struct MoveState {
+    pub(crate) fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
+    pub(crate) vars: std::collections::HashSet<DefId>,
+}
+
 pub struct Typer {
     pub(crate) next_id: u32,
     pub(crate) scopes: Vec<HashMap<Symbol, VarInfo>>,
@@ -91,6 +101,13 @@ pub struct Typer {
     pub(crate) fn_param_access: IndexMap<Symbol, Vec<Option<ast::AccessMod>>>,
 
     pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
+
+    /// Whole-variable move tombstones: a `DefId` here was moved out by an
+    /// explicit `take` (a `take` binding, or passed to a `take` parameter)
+    /// and must not be read until it is reassigned. The field-level analogue
+    /// is `moved_fields`; the two share the snapshot/restore/merge dataflow
+    /// (see `MoveState`) so both flow correctly through `if`/`match`/loops.
+    pub(crate) moved_vars: std::collections::HashSet<DefId>,
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
 
@@ -167,6 +184,7 @@ impl Typer {
             fn_defaults: IndexMap::new(),
             fn_param_access: IndexMap::new(),
             moved_fields: std::collections::HashMap::new(),
+            moved_vars: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,
@@ -311,34 +329,45 @@ impl Typer {
         }
     }
 
+    /// Tombstone a whole variable: it was moved out by an explicit `take` and
+    /// must not be read until reassigned. Only types that actually own a heap
+    /// resource are tracked (trivially-droppable scalars are never tombstoned),
+    /// keeping the read-check free of false positives.
+    pub(crate) fn mark_var_moved(&mut self, id: DefId) {
+        self.moved_vars.insert(id);
+    }
+
     pub(crate) fn clear_all_moved_for(&mut self, parent: DefId) {
         self.moved_fields.remove(&parent);
+        self.moved_vars.remove(&parent);
     }
 
-    pub(crate) fn snapshot_moved_fields(
-        &self,
-    ) -> std::collections::HashMap<DefId, std::collections::HashSet<Symbol>> {
-        self.moved_fields.clone()
-    }
-
-    pub(crate) fn restore_moved_fields(
-        &mut self,
-        snap: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
-    ) {
-        self.moved_fields = snap;
-    }
-
-    pub(crate) fn merge_moved_fields_union(
-        &mut self,
-        branches: &[std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>],
-    ) {
-        let mut out = self.moved_fields.clone();
-        for br in branches {
-            for (id, fields) in br {
-                out.entry(*id).or_default().extend(fields.iter().cloned());
-            }
+    pub(crate) fn snapshot_moved_fields(&self) -> MoveState {
+        MoveState {
+            fields: self.moved_fields.clone(),
+            vars: self.moved_vars.clone(),
         }
-        self.moved_fields = out;
+    }
+
+    pub(crate) fn restore_moved_fields(&mut self, snap: MoveState) {
+        self.moved_fields = snap.fields;
+        self.moved_vars = snap.vars;
+    }
+
+    pub(crate) fn merge_moved_fields_union(&mut self, branches: &[MoveState]) {
+        let mut out_fields = self.moved_fields.clone();
+        let mut out_vars = self.moved_vars.clone();
+        for br in branches {
+            for (id, fields) in &br.fields {
+                out_fields
+                    .entry(*id)
+                    .or_default()
+                    .extend(fields.iter().cloned());
+            }
+            out_vars.extend(br.vars.iter().copied());
+        }
+        self.moved_fields = out_fields;
+        self.moved_vars = out_vars;
     }
 
     fn ownership_for_type(ty: &Type) -> Ownership {
