@@ -1,15 +1,11 @@
 use super::*;
 
-/// Decode the UTF-8 codepoint starting at `src[*pos]` and append it
-/// (preserving the original bytes) to `val`, then advance `*pos` past
-/// the entire codepoint and bump `*col` once. Continuation bytes do
-/// not increment the column count, matching `Lexer::advance`.
 fn push_utf8_at(val: &mut String, src: &[u8], pos: &mut usize, col: &mut u32) {
     let b = src[*pos];
     let n = if b < 0x80 {
         1
     } else if b < 0xC0 {
-        1 // stray continuation byte; treat as one byte
+        1
     } else if b < 0xE0 {
         2
     } else if b < 0xF0 {

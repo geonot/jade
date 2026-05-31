@@ -184,10 +184,7 @@ pub struct ActorDef {
     pub def_id: DefId,
     pub name: Symbol,
     pub fields: Vec<Field>,
-    /// Canonical `DefId` for each field in `fields` (parallel vector). Every
-    /// handler body that references a field resolves the bare `Var` to the
-    /// SAME id here, so MIR lowering can map a `Var(def_id, _)` back to its
-    /// field index regardless of name shadowing by handler params/locals.
+
     pub field_def_ids: Vec<DefId>,
     pub handlers: Vec<HandlerDef>,
     pub span: Span,

@@ -100,9 +100,6 @@ impl Typer {
                     }
                 }
                 hir::Stmt::Bind(b) => {
-                    // A `copy` binding deep-clones its source (see MIR
-                    // `lower_stmt_core`): the source var is NOT consumed and
-                    // must still be dropped by its owning scope.
                     if !matches!(b.access_mod, Some(crate::ast::AccessMod::Copy)) {
                         let resolved = self.infer_ctx.resolve(&b.value.ty);
                         if Self::expr_type_needs_drop(&resolved) {
@@ -204,19 +201,6 @@ impl Typer {
         )
     }
 
-    /// Record whole-variable move tombstones produced by a single statement.
-    ///
-    /// A whole `Var` is tombstoned (via [`Typer::mark_var_moved`]) when it is
-    /// moved out by an explicit `take` — either bound with `x is take y`, or
-    /// passed to a `take` parameter of a call/method. Subsequent reads of the
-    /// variable are then rejected by the read-check in `lower_expr_ident`.
-    ///
-    /// This runs *after* the statement has been fully lowered (so the move's
-    /// own argument read is not flagged) and is intentionally conservative:
-    /// it only ever tombstones a variable that is verifiably consumed by an
-    /// explicit `take`, so it can never produce a false positive. Moves buried
-    /// inside nested blocks / `if`-expressions / lambdas are handled when those
-    /// sub-blocks are lowered through their own statement loop.
     pub(in crate::typer) fn record_take_moves_in_stmt(&mut self, s: &hir::Stmt) {
         match s {
             hir::Stmt::Bind(b) => {
@@ -240,8 +224,7 @@ impl Typer {
                 self.record_take_moves_in_expr(value);
                 self.record_take_moves_in_expr(target);
             }
-            // Control-flow statements own nested blocks that are lowered
-            // through their own statement loop, where this hook already runs.
+
             _ => {}
         }
     }

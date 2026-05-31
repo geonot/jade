@@ -1,20 +1,3 @@
-//! Scalar / SSA cleanup passes.
-//!
-//! Per `/memories/jinn_arch.md`: MIR opt only contains passes that LLVM does
-//! NOT already perform. This module keeps only:
-//!   * `simplify_phis` — trivial-phi removal needed because our SSA construction
-//!     uses the "demote-to-memory" workaround, which can produce single-incoming
-//!     phis after `store_load_forwarding` rewrites Load/Store pairs.
-//!   * `dead_code_elimination` — keeps `--emit-mir` output readable and lets
-//!     Perceus see a clean instruction stream.
-//!
-//! Removed (LLVM duplicates):
-//!   * `copy_propagation`     — handled by LLVM SSA + InstCombine
-//!   * `strength_reduction`   — handled by LLVM InstCombine
-//!
-//! Note: `InstKind::Copy` survives in the IR and is resolved by codegen
-//! (`emit_inst/collections.rs`) — no extra pass needed.
-
 use super::subst::{subst_inst, subst_term};
 use super::uses::{collect_used, is_pure};
 

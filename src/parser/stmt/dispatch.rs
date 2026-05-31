@@ -463,7 +463,6 @@ impl Parser {
     }
 
     pub(in crate::parser) fn is_tuple_bind(&self) -> bool {
-        // Form 1: bare `a, b, c is …`
         if matches!(self.peek(), Token::Ident(_)) {
             let mut i = self.pos + 1;
             loop {
@@ -480,7 +479,7 @@ impl Parser {
                 }
             }
         }
-        // Form 2: parenthesised `(a, b, c) is …`
+
         if matches!(self.peek(), Token::LParen) {
             let mut i = self.pos + 1;
             if i >= self.tok.len() || !matches!(self.tok[i].token, Token::Ident(_)) {

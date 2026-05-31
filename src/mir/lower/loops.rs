@@ -8,15 +8,6 @@ impl Lowerer {
     pub(super) fn lower_stmt_loops(&mut self, stmt: &hir::Stmt) -> ValueId {
         match stmt {
             hir::Stmt::While(w) => {
-                // Pure Braun SSA construction for `while`:
-                //   entry --> cond_bb (UNSEALED; body's back-edge pending)
-                //   cond_bb --branch(cond)--> body_bb | exit_bb
-                //   body_bb (sealed early; pred = cond_bb) --> ... --> cond_bb
-                //
-                // Loop-carried vars need no pre-seeding: a read inside the
-                // (unsealed) loop header inserts an incomplete phi whose
-                // operands are filled when cond_bb is sealed after the
-                // back-edge from the body is installed.
                 let cond_bb = self.new_block("while.cond");
                 let body_bb = self.new_block("while.body");
                 let exit_bb = self.new_block("while.exit");
@@ -27,7 +18,6 @@ impl Lowerer {
                 let cond = self.lower_expr(&w.cond);
                 self.set_terminator(Terminator::Branch(cond, body_bb, exit_bb));
 
-                // Body: single pred (cond_bb) so safe to seal immediately.
                 self.switch_to(body_bb);
                 self.seal_block(body_bb);
 
@@ -38,7 +28,6 @@ impl Lowerer {
                 }
                 self.loop_stack.pop();
 
-                // Back-edge installed; seal cond_bb (fills its incomplete phis).
                 self.seal_block(cond_bb);
 
                 self.switch_to(exit_bb);
@@ -47,18 +36,6 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, w.span)
             }
             hir::Stmt::For(f) => {
-                // Pure Braun SSA for `for`:
-                //   - cond_bb: UNSEALED (preds = entry + inc_bb back-edge);
-                //     seal AFTER inc_bb terminates Goto(cond_bb).
-                //   - body_bb: sealed immediately (single pred cond_bb).
-                //   - inc_bb: UNSEALED until body completes (continues land
-                //     here as additional preds); seal AFTER body lowering.
-                //   - exit_bb: UNSEALED until body completes (breaks land
-                //     here as additional preds); seal AFTER body lowering.
-                //
-                // The bind / bind2 / __for_idx counters remain on Load/Store
-                // (they are loop-internal, not user variables). User-assigned
-                // vars in the body are Braun-managed via incomplete phis.
                 let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("for.cond");
                 let body_bb = self.new_block("for.body");
@@ -262,10 +239,6 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
                 }
 
-                // All loop edges installed. Seal in order: inc_bb (preds:
-                // body + continues), cond_bb (preds: entry + inc back-edge),
-                // exit_bb (preds: cond false + breaks). seal_block on a
-                // block with no incomplete phis is a no-op.
                 self.seal_block(inc_bb);
                 self.seal_block(cond_bb);
 
@@ -279,10 +252,6 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, f.span)
             }
             hir::Stmt::Loop(l) => {
-                // Pure Braun SSA for `loop { ... }`:
-                //   entry --> body_bb (UNSEALED; back-edge from body pending)
-                //   body_bb --> body_bb (back-edge)
-                //   body_bb --break--> exit_bb (via Terminator::Goto from break)
                 let body_bb = self.new_block("loop.body");
                 let exit_bb = self.new_block("loop.exit");
 
@@ -297,7 +266,6 @@ impl Lowerer {
                 }
                 self.loop_stack.pop();
 
-                // All back-edges + break edges installed; seal both blocks.
                 self.seal_block(body_bb);
                 self.switch_to(exit_bb);
                 self.seal_block(exit_bb);

@@ -208,7 +208,7 @@ impl Parser {
                     let ret = self.parse_type()?;
                     return Ok(Type::Fn(params, Box::new(ret)));
                 }
-                // No `returns` ⇒ tuple / parenthesised / unit type.
+
                 Ok(match params.len() {
                     0 => Type::Void,
                     1 => params.into_iter().next().unwrap(),

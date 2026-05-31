@@ -37,10 +37,6 @@ mod mono;
 mod resolve;
 pub(crate) mod unify;
 
-/// Snapshot of the move-tombstone dataflow state. Bundles both the field-level
-/// tombstones (`moved_fields`) and whole-variable tombstones (`moved_vars`) so
-/// that branch analysis (`if`/`match`/loops) can snapshot, restore, and union
-/// both kinds of move state together.
 #[derive(Clone, Default)]
 pub(crate) struct MoveState {
     pub(crate) fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
@@ -102,11 +98,6 @@ pub struct Typer {
 
     pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
 
-    /// Whole-variable move tombstones: a `DefId` here was moved out by an
-    /// explicit `take` (a `take` binding, or passed to a `take` parameter)
-    /// and must not be read until it is reassigned. The field-level analogue
-    /// is `moved_fields`; the two share the snapshot/restore/merge dataflow
-    /// (see `MoveState`) so both flow correctly through `if`/`match`/loops.
     pub(crate) moved_vars: std::collections::HashSet<DefId>,
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
@@ -329,10 +320,6 @@ impl Typer {
         }
     }
 
-    /// Tombstone a whole variable: it was moved out by an explicit `take` and
-    /// must not be read until reassigned. Only types that actually own a heap
-    /// resource are tracked (trivially-droppable scalars are never tombstoned),
-    /// keeping the read-check free of false positives.
     pub(crate) fn mark_var_moved(&mut self, id: DefId) {
         self.moved_vars.insert(id);
     }

@@ -319,12 +319,6 @@ impl<'ctx> Compiler<'ctx> {
 
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
-        // Coroutine/generator bodies have a fixed `void(ptr gen_ptr)` ABI: the
-        // single LLVM parameter is the generator struct pointer (captures are
-        // reloaded from it in the prologue, see `compile_mir_fn`). They are
-        // never called via a normal MIR `Call` — only referenced as a function
-        // pointer by `jinn_coro_create` — so the captures do not appear in the
-        // LLVM signature. Internal linkage: purely module-local.
         if func.is_coroutine {
             let void = self.ctx.void_type();
             let ft = void.fn_type(&[ptr_ty.into()], false);
@@ -490,10 +484,6 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         if func.is_coroutine {
-            // Coroutine ABI: the single LLVM parameter is the generator struct
-            // pointer. Stash it in `__coro_ctx` (consumed by `__yield`/`Return`
-            // epilogue) and reload each capture (= MIR param) from the struct
-            // in the entry block, where it dominates the whole body.
             let entry_bb = self.block_map[&func.entry];
             self.bld.position_at_end(entry_bb);
 
@@ -551,28 +541,10 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(llvm_bb);
 
             for phi in &bb.phis {
-                // Phis merge SSA *values*, including aggregate structs/tuples/
-                // enums (LLVM represents these as first-class aggregate phis).
-                // A struct local may be *produced* as an alloca-backed pointer
-                // (StructInit / in-place FieldSet/FieldClear), but a phi over
-                // such producers must still be by *value*: a pointer phi would
-                // require coercing by-value incomings (e.g. call results) into
-                // a shared entry-block alloca, which is a single memory cell
-                // reused across loop iterations — collapsing distinct
-                // loop-carried values into one another (a use-after-free /
-                // double-free hazard). By-value incomings are used directly;
-                // pointer incomings are loaded across the predecessor edge in
-                // the coercion pass below. Downstream consumers
-                // (FieldGet/FieldSet/FieldClear/drop/coerce_call_args) all
-                // already handle the struct-value form, so the phi is left out
-                // of `self_allocs`.
                 let llvm_ty = self.llvm_ty(&phi.ty);
                 let phi_val = b!(self.bld.build_phi(llvm_ty, &format!("v{}", phi.dest.0)));
                 self.value_map.insert(phi.dest, phi_val.as_basic_value());
-                // Record the phi's source-level type so type-dependent consumers
-                // (e.g. FieldGet on a String/struct phi result) resolve it
-                // correctly. Without this, a `length` field-get on a phi value
-                // misresolves to a raw struct extract.
+
                 self.value_types.insert(phi.dest, phi.ty.clone());
                 self.pending_phis.push(PendingPhi {
                     phi: phi_val,
@@ -618,13 +590,13 @@ impl<'ctx> Compiler<'ctx> {
 
                     let v = if llvm_val.get_type() != phi_ty {
                         if phi_ty.is_struct_type() && llvm_val.is_pointer_value() {
-                            // The phi merges struct *values* (see construction
-                            // above), but this incoming was produced as an
-                            // alloca-backed pointer (StructInit / in-place
-                            // FieldSet/FieldClear). Load the struct value across
-                            // the predecessor edge — positioned just before the
-                            // predecessor's terminator so the load dominates the
-                            // edge — and feed the value to the phi.
+
+
+
+
+
+
+
                             let ptr = (*llvm_val).into_pointer_value();
                             match llvm_bb.get_terminator() {
                                 Some(t) => self.bld.position_before(&t),
@@ -722,11 +694,6 @@ impl<'ctx> Compiler<'ctx> {
             mir::Terminator::Return(val) => {
                 self.drain_reuse_slots();
                 if self.cur_fn_is_coroutine {
-                    // A coroutine body never returns to a caller: every exit
-                    // point marks the generator done and suspends back to the
-                    // resumer. `__coro_ctx` holds the generator struct pointer
-                    // (stored in the entry-block prologue). The return value,
-                    // if any, is discarded — coroutines communicate via `yield`.
                     let _ = val;
                     let ptr = self.ctx.ptr_type(AddressSpace::default());
                     let i8t = self.ctx.i8_type();

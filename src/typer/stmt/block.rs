@@ -14,15 +14,6 @@ impl Typer {
         self.lower_block_no_scope_with_tail(block, ret_ty, None)
     }
 
-    /// Lower a block without pushing a scope. If `tail_expected` is `Some(t)`,
-    /// the final statement (when it is a bare `Expr`) is typed with `t` as
-    /// the expected type, allowing literal width propagation (e.g. `42` as `u8`).
-    ///
-    /// `ret_ty` is the *function's* return type, used by `return` statements
-    /// inside the block. It is intentionally separate from `tail_expected`:
-    /// the tail of an inner `if`/`while`/`for` body is NOT the function's
-    /// return value, so passing `ret_ty` as `tail_expected` for those would
-    /// erroneously unify unrelated expressions with the function's ret type.
     pub(crate) fn lower_block_no_scope_with_tail(
         &mut self,
         block: &ast::Block,

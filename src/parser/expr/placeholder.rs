@@ -24,9 +24,6 @@ pub(in crate::parser) fn is_hof_name(name: &str) -> bool {
     )
 }
 
-/// Lift any argument containing a top-level lambda placeholder (`$`) into a
-/// single-parameter lambda. Used by HOF call/method dispatch so that
-/// `map(v, $ * 2)` and `v.map($ * 2)` both build a `Lambda` argument.
 pub(in crate::parser) fn lift_hof_placeholder_args(args: Vec<Expr>) -> Vec<Expr> {
     args.into_iter()
         .map(|arg| {

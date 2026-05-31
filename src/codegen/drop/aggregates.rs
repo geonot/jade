@@ -55,12 +55,6 @@ impl<'ctx> Compiler<'ctx> {
             None => return Ok(()),
         };
 
-        // The MIR value may already be a *pointer* to the struct (e.g. the
-        // result of an in-place `FieldSet`/`FieldClear`, which returns the
-        // backing alloca pointer) or a by-value struct aggregate. Drop in
-        // place through the pointer when we have one; otherwise spill the
-        // value to a scratch alloca. Storing a pointer into a struct-typed
-        // slot would be a type confusion that the optimizer miscompiles.
         let struct_ptr = if val.is_pointer_value() {
             val.into_pointer_value()
         } else {

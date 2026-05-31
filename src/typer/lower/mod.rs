@@ -320,8 +320,6 @@ impl Typer {
                 }
                 for (needs_resolve, _span, hfn, fname) in &mut scc_fns {
                     if *needs_resolve && !self.inferable_fns.contains_key(&*fname) {
-                        // Resolution deferred to final pass in lower_program;
-                        // see comment in lower_fn().
                         let _ = hfn;
                     }
                 }
@@ -438,12 +436,6 @@ impl Typer {
             }
         }
 
-        // Final ret-type resolution pass: re-resolve every fn's return type
-        // now that all bodies (including methods on types/stores/impls/actors)
-        // have been lowered and any inferred-ret unifications have settled.
-        // Without this, a fn whose inferred ret ultimately unifies with the
-        // ret of a method (whose body wasn't lowered until later) would have
-        // been frozen as the I64 default by the resolve in lower_fn.
         for hfn in hir_fns.iter_mut() {
             hfn.ret = self.infer_ctx.resolve(&hfn.ret);
         }

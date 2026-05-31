@@ -46,10 +46,6 @@ impl Lowerer {
                 self.emit(InstKind::ChanRecv(c), ty, span)
             }
             ExprKind::Select(arms, default) => {
-                // Pure Braun SSA: each arm/default block is lowered then
-                // sealed once its predecessor edge from the Switch exists;
-                // reads of outer vars build incomplete phis collapsed at
-                // seal time, and post-merge reads phi lazily at merge_bb.
                 let ch_vals: Vec<ValueId> =
                     arms.iter().map(|arm| self.lower_expr(&arm.chan)).collect();
                 let has_default = default.is_some();
@@ -100,19 +96,12 @@ impl Lowerer {
                         .find(|b| b.insts.iter().any(|i| i.dest == Some(select_val)))
                         .map(|b| b.id)
                         .unwrap_or(self.current_block);
-                    // Route through set_terminator (on select_block) so
-                    // predecessor edges into each arm_bb / default_bb are
-                    // tracked for Braun phi construction at merge_bb.
+
                     let saved_block = self.current_block;
                     self.switch_to(select_block);
                     self.set_terminator(Terminator::Switch(select_val, cases, default_bb));
                     self.switch_to(saved_block);
-                    // The Switch terminator on `select_block` now records the
-                    // predecessor edges into each arm / default block. Seal them
-                    // so the incomplete phis created while lowering their bodies
-                    // (reads of outer vars like `total`/`i`/`ch`) are filled and
-                    // collapsed. They could not be sealed earlier because their
-                    // sole predecessor edge did not yet exist.
+
                     for &arm_bb in &arm_bbs {
                         self.seal_block(arm_bb);
                     }
@@ -127,10 +116,6 @@ impl Lowerer {
             }
 
             ExprKind::CoroutineCreate(name, body) => {
-                // Lower the coroutine body as a standalone MIR function
-                // `__coro_{name}` (codegen gives it the `void(ptr)` coroutine
-                // ABI). Dispatch coroutines never capture, so the param list
-                // is empty.
                 self.lower_coroutine(*name, body, &[], span);
                 self.emit(
                     InstKind::Call(Symbol::intern(&format!("__coro_create_{name}")), vec![]),
@@ -148,10 +133,6 @@ impl Lowerer {
             }
 
             ExprKind::GeneratorCreate(def_id, name, body, captures) => {
-                // Resolve the capture values in the *enclosing* function before
-                // lowering the body in a fresh sub-lowerer; these are passed to
-                // `__gen_create_{name}` and stored into the generator struct,
-                // from which the body's prologue reloads them.
                 let mut arg_ids: Vec<ValueId> = Vec::with_capacity(captures.len());
                 for (cap_name, cap_ty) in captures {
                     arg_ids.push(self.read_var(
@@ -176,13 +157,6 @@ impl Lowerer {
         }
     }
 
-    /// Lower a coroutine/generator body into a standalone MIR `Function` named
-    /// `__coro_{name}` and append it to `self.lambda_fns`. Captures (empty for
-    /// dispatch coroutines) become the function's parameters, in order; codegen
-    /// reloads them from the generator struct in the prologue. The body is
-    /// lowered like any ordinary `Void`-returning function — `yield` expressions
-    /// become `__yield` calls, and fall-through synthesizes a `Return(None)`
-    /// terminator that codegen turns into "mark done + suspend".
     pub(super) fn lower_coroutine(
         &mut self,
         name: Symbol,

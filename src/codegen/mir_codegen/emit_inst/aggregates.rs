@@ -256,9 +256,6 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
                 mir::InstKind::FieldClear(obj, field) => {
-                    // SSA-form field zeroing. Mirrors FieldSet's two cases
-                    // (pointer-backed self_alloc OR struct SSA value) but
-                    // substitutes the zero value of the field's type.
                     let obj_val = if let Some(alloca_ptr) = self.self_allocs.get(obj).copied() {
                         alloca_ptr.into()
                     } else {

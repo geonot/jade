@@ -211,15 +211,6 @@ impl std::fmt::Display for Type {
 }
 
 impl Type {
-    /// Canonicalize a type for comparison/unification purposes (P0-12).
-    ///
-    /// Resolves long-standing asymmetries between equivalent representations:
-    ///   - `Type::Struct("String"|"string", _)` collapses to `Type::String`.
-    ///   - `Type::Alias(_, inner)` collapses to `inner.canonical()`. Aliases
-    ///     are transparent.
-    ///   - `Type::Newtype(_, _)` is preserved — newtypes are nominally
-    ///     distinct from their underlying type.
-    ///   - Composites recurse into their components.
     pub fn canonical(&self) -> Type {
         match self {
             Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => Type::String,
@@ -244,12 +235,10 @@ impl Type {
         }
     }
 
-    /// True iff `self` and `other` denote the same canonical type.
     pub fn eq_canonical(&self, other: &Type) -> bool {
         self.canonical() == other.canonical()
     }
 
-    /// True if this is the canonical string type regardless of representation.
     pub fn is_string(&self) -> bool {
         matches!(self.canonical(), Type::String)
     }

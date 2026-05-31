@@ -1,17 +1,3 @@
-//! Memory-access cleanup passes.
-//!
-//! Per `/memories/jinn_arch.md`: MIR opt only contains passes that LLVM does
-//! NOT already perform. This module keeps only:
-//!   * `store_load_forwarding` — cleans up the "demote-to-memory" workaround
-//!     used by the current SSA construction (see `mir/lower/analysis.rs`).
-//!     Once `lower/control.rs` is rewritten to use Braun-style SSA construction
-//!     directly (see `/memories/session/option_a_roadmap.md` Item 7), this
-//!     pass can also be deleted.
-//!
-//! Removed (LLVM duplicates):
-//!   * `redundant_store_elimination`  — handled by LLVM DSE
-//!   * `constant_branch_elimination`  — subset of constant_fold; LLVM does it
-
 use super::super::*;
 use super::subst::{subst_inst, subst_term};
 use crate::intern::Symbol;

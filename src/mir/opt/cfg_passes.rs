@@ -1,17 +1,3 @@
-//! CFG cleanup passes.
-//!
-//! Per `/memories/jinn_arch.md`: MIR opt only contains passes that LLVM does
-//! NOT already perform. This module keeps only:
-//!   * `merge_linear_blocks`     — keeps `--emit-mir` readable and reduces the
-//!     block count Perceus has to walk; cheap and structural.
-//!   * `remove_unreachable_blocks` — structural sanity; our inkwell emitter
-//!     can choke on phis whose incoming blocks are unreachable.
-//!
-//! Removed (LLVM duplicates):
-//!   * `global_value_numbering`     — handled by LLVM NewGVN/GVN
-//!   * `branch_threading`           — handled by LLVM JumpThreading
-//!   * `loop_invariant_code_motion` — handled by LLVM LICM
-
 use super::super::*;
 use crate::ast::Span;
 use std::collections::{HashSet, VecDeque};

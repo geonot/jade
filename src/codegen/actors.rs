@@ -126,10 +126,6 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         if let Some(loop_h) = loop_handler {
-            // The loop handler body is lowered to a standalone MIR function
-            // `__actor_<name>_loop(ptr state)`. Call it, passing the actor's
-            // persistent state pointer. Field access inside the body is
-            // resolved against that pointer by MIR lowering.
             let loop_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), loop_h);
             let loop_fv = self.module.get_function(&loop_fn_name).unwrap_or_else(|| {
                 panic!("ICE: actor loop handler fn not lowered: {loop_fn_name}")
@@ -139,10 +135,7 @@ impl<'ctx> Compiler<'ctx> {
             let sched_yield = crate::codegen::fn_or_die(&self.module, "jinn_sched_yield");
             if loop_h.loop_sleep_ms.is_some() {
                 let i64t = self.ctx.i64_type();
-                // The sleep-duration expression is lowered to a standalone MIR
-                // function `__actor_sleep_<name>(ptr state) -> i64`. Call it,
-                // passing the actor's persistent state pointer, so the sleep
-                // duration can reference actor fields without the HIR walker.
+
                 let sleep_fn_name = crate::mir::actor_sleep_fn_name(ad.name.clone());
                 let sleep_fv = self
                     .module
@@ -270,12 +263,6 @@ impl<'ctx> Compiler<'ctx> {
                 let bb = handler_bbs[i].1;
                 self.bld.position_at_end(bb);
 
-                // The handler body is lowered to a standalone MIR function
-                // `__actor_<name>_h_<handler>(ptr state, msg_params...)`.
-                // Unpack the message params from the payload and call it.
-                // For the explicit-self form (`@h self, ...`), the leading
-                // `self` param is the state pointer, not a sent argument, so
-                // it is excluded from payload unpacking.
                 let has_self = h.params.first().is_some_and(|p| p.name.as_str() == "self");
                 let msg_params: &[hir::Param] = if has_self {
                     &h.params[1..]
@@ -300,9 +287,7 @@ impl<'ctx> Compiler<'ctx> {
                             &format!("param_{}_ptr", p.name)
                         ))
                     };
-                    // Aggregates (struct/tuple/enum) use the by-pointer ABI in
-                    // MIR codegen: pass the payload slot pointer directly.
-                    // Scalars are passed by value: load from the slot.
+
                     if matches!(p.ty, Type::Struct(..) | Type::Tuple(..) | Type::Enum(..)) {
                         call_args.push(param_ptr.into());
                     } else {

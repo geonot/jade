@@ -17,13 +17,6 @@ pub enum OptLevel {
     Full,
 }
 
-/// MIR optimization pipeline.
-///
-/// Per `/memories/jinn_arch.md`, MIR opt only contains passes that LLVM does
-/// NOT already perform. The remaining passes are structural cleanup of
-/// artifacts produced by our own lowering, plus what `--emit-mir` readability
-/// requires. Scalar opts (constant folding, GVN, LICM, strength reduction,
-/// jump threading, DSE, copy propagation, etc.) are LLVM's job.
 pub fn optimize(func: &mut Function, level: OptLevel) {
     if level == OptLevel::None {
         return;

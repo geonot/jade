@@ -328,9 +328,6 @@ impl Typer {
                     self.infer_ctx
                         .unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
             } else {
-                // No tail expression and no explicit return type — the
-                // function returns nothing. Pin the ret typevar to Void so
-                // it does not later default to i64.
                 let _ = self.infer_ctx.unify(ret, &Type::Void);
             }
         }

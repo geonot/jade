@@ -251,9 +251,6 @@ impl Typer {
                 }))
             }
             "map" if !self.fns.contains_key(name) => {
-                // P0-4: `map(v, f)` is a HOF over the first arg's collection;
-                // route to the method-call path so the closure parameter is
-                // inferred as the element type (not a slot pointer).
                 if args.len() >= 1 {
                     let probe = match self.lower_expr(&args[0]) {
                         Ok(e) => e,

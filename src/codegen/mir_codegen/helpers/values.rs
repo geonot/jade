@@ -312,8 +312,6 @@ impl<'ctx> Compiler<'ctx> {
             let src_bits = val.into_int_value().get_type().get_bit_width();
             let dst_bits = target_llvm.into_int_type().get_bit_width();
             return if dst_bits > src_bits {
-                // Bool (i1) must always zero-extend: sext would map true (1) to -1.
-                // Otherwise widen according to the *source* signedness.
                 if matches!(src_ty, Type::Bool) || !src_ty.is_signed() {
                     Ok(b!(self.bld.build_int_z_extend(
                         val.into_int_value(),

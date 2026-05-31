@@ -17,11 +17,6 @@ pub struct ValueId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);
 
-/// Canonical LLVM symbol name for an actor handler function. Used by BOTH
-/// MIR lowering (which emits the handler as a `Function`) and the actor
-/// codegen driver (which looks it up to emit a call from the mailbox/dispatch
-/// loop). The actor name + handler name (or the `loop` marker) is unique, so
-/// the resulting symbol never collides with user functions.
 pub fn actor_handler_fn_name(actor: Symbol, handler: &crate::hir::HandlerDef) -> String {
     if handler.is_loop {
         format!("__actor_{}_loop", actor)
@@ -30,19 +25,10 @@ pub fn actor_handler_fn_name(actor: Symbol, handler: &crate::hir::HandlerDef) ->
     }
 }
 
-/// Canonical LLVM symbol name for an actor's field-default initializer
-/// function. MIR lowering emits a `void(ptr state)` `Function` under this name
-/// that populates the actor state struct with its field defaults; the codegen
-/// actor factory calls it before applying user-supplied spawn overrides.
 pub fn actor_init_fn_name(actor: Symbol) -> String {
     format!("__actor_init_{}", actor)
 }
 
-/// Canonical LLVM symbol name for an actor's loop-sleep-duration function. When
-/// a `loop` handler declares a sleep interval (`loop ... sleep <expr>`), MIR
-/// lowering emits an `i64(ptr state)` `Function` under this name that evaluates
-/// the duration expression against the actor state; the codegen actor loop
-/// calls it each iteration to obtain the millisecond count.
 pub fn actor_sleep_fn_name(actor: Symbol) -> String {
     format!("__actor_sleep_{}", actor)
 }
@@ -60,13 +46,6 @@ pub struct Function {
     pub next_block: u32,
     pub attrs: FnAttrs,
 
-    /// True if this function is a coroutine/generator body. Such functions are
-    /// lowered like any other (params = captures, body lowered normally with
-    /// `yield` → `__yield` calls), but codegen gives them a fixed
-    /// `void(ptr gen_ptr)` ABI: the single LLVM parameter is the generator
-    /// struct pointer, captures are loaded from it in the prologue, and a
-    /// `Return` terminator marks the generator done and suspends instead of
-    /// returning normally.
     pub is_coroutine: bool,
 
     pub perceus: PerceusMeta,
@@ -192,11 +171,6 @@ pub enum InstKind {
 
     Call(Symbol, Vec<ValueId>),
 
-    /// Runtime-system call (store/KV/Vec/FTS/Graph/TS/Bloom/atomic/channel
-    /// lifecycle/transaction). Same calling convention as `Call`, but tagged
-    /// so the verifier and Perceus can apply runtime-specific ownership and
-    /// effect rules. The `Symbol` is the runtime function name; the prefix
-    /// (e.g. `__store_`, `__kv_`, `__atomic_`) identifies the category.
     RuntimeOp(Symbol, Vec<ValueId>),
 
     MethodCall(ValueId, Symbol, Vec<ValueId>, bool),
@@ -210,11 +184,6 @@ pub enum InstKind {
 
     FieldStore(Symbol, Symbol, ValueId),
 
-    /// SSA-form field zeroing: takes a struct ValueId, returns a new struct
-    /// ValueId identical to the input except that `field` is replaced with
-    /// the zero value of its type. Used by `take` of a non-trivially-
-    /// droppable field so the parent's eventual drop sees a null/zero slot
-    /// and skips that field's drop.
     FieldClear(ValueId, Symbol),
 
     Index(ValueId, ValueId),
@@ -228,10 +197,6 @@ pub enum InstKind {
     VariantInit(Symbol, Symbol, u32, Vec<ValueId>),
     ArrayInit(Vec<ValueId>),
 
-    /// `Cast(val, src_ty, dst_ty)` — convert `val` (typed `src_ty`) to `dst_ty`.
-    /// Carrying both types is required so codegen can pick zext vs sext
-    /// correctly (Jinn signedness is not recoverable from LLVM types alone, and
-    /// in particular `bool` (i1) must always zero-extend).
     Cast(ValueId, Type, Type),
     StrictCast(ValueId, Type, Type),
     Ref(ValueId),

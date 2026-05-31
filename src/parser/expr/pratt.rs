@@ -251,10 +251,7 @@ impl Parser {
                     self.advance();
                     let a = self.parse_args()?;
                     self.expect(Token::RParen)?;
-                    // P0-4: when the callee is a free-function HOF name
-                    // (`map(v, $ * 2)`, `filter(v, $ > 0)`, ...), apply the
-                    // same lambda-placeholder lift as for method form so the
-                    // typer's HOF dispatch sees a real Lambda.
+
                     let a: Vec<Expr> = if let Expr::Ident(name, _) = &e {
                         if name.with_str(super::placeholder::is_hof_name) {
                             super::placeholder::lift_hof_placeholder_args(a)

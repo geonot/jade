@@ -31,16 +31,6 @@ use sources::{
     resolve_modules,
 };
 
-/// Initialize the `tracing` subscriber based on CLI verbosity flags.
-///
-/// Filter levels:
-/// - default: WARN (silent)
-/// - `--verbose`: INFO
-/// - `--debug`: DEBUG for all `jinnc::*` targets
-/// - `--debug-types`: TRACE for `jinnc::type`
-/// - `--debug-perceus`: TRACE for `jinnc::perceus`
-///
-/// Output goes to stderr without timestamps to keep diagnostics terse.
 fn init_tracing(cli: &Cli) {
     use tracing_subscriber::EnvFilter;
 
@@ -281,9 +271,7 @@ pub fn run() {
     }
 
     let input = cli.input.unwrap_or_else(|| die("no input file provided"));
-    // P1-17: `jinnc PATH/` and `jinnc PATH/project.jn` should both
-    // resolve to the project's declared entry file rather than try
-    // to compile the directory or the manifest itself.
+
     let input = resolve_project_input(input);
     let src = fs::read_to_string(&input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
@@ -660,9 +648,6 @@ pub fn run() {
     }
 }
 
-/// P1-17: resolve `jinnc PATH/` and `jinnc PATH/project.jn` to the
-/// project's declared entry file. A plain `.jn` source file is
-/// returned unchanged.
 fn resolve_project_input(input: PathBuf) -> PathBuf {
     let project_jinn = if input.is_dir() {
         input.join("project.jn")

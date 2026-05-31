@@ -18,10 +18,6 @@ impl Lowerer {
             ExprKind::None => self.emit(InstKind::IntConst(0), ty, span),
 
             ExprKind::Var(def_id, name) => {
-                // In an actor handler, bare references to actor fields are
-                // `Var`s carrying the field's canonical DefId. Redirect them
-                // to a load from the persistent state struct. Params/locals
-                // shadow fields by DefId, so `field_lookup` correctly misses.
                 if let Some((field_sym, field_ty)) = self.field_lookup(*def_id) {
                     let self_state = self.field_self();
                     return self.emit(InstKind::FieldGet(self_state, field_sym), field_ty, span);
