@@ -118,7 +118,8 @@ impl Typer {
                 scheme: None,
             },
         );
-        let body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        self.finalize_loop_body_drops(&mut body);
         self.pop_scope();
 
         let some_arm = hir::Arm {
@@ -314,7 +315,8 @@ impl Typer {
             span,
         });
 
-        let user_body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        let mut user_body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        self.finalize_loop_body_drops(&mut user_body);
         self.pop_scope();
 
         let mut for_body = vec![k_bind, v_bind];

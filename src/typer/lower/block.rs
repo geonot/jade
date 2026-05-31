@@ -82,6 +82,24 @@ impl Typer {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
 
+    pub(in crate::typer) fn finalize_loop_body_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
+        let ends_with_jump = stmts.last().map_or(false, |s| {
+            matches!(
+                s,
+                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
+            )
+        });
+        if ends_with_jump {
+            let jump = stmts.pop().unwrap();
+            let mut jump_refs = std::collections::HashSet::new();
+            Self::collect_hir_var_ids_stmt(&jump, &mut jump_refs);
+            self.emit_scope_drops_excluding(stmts, &jump_refs);
+            stmts.push(jump);
+        } else {
+            self.emit_scope_drops(stmts);
+        }
+    }
+
     fn collect_block_consumed_ids(
         &mut self,
         stmts: &[hir::Stmt],

@@ -504,7 +504,8 @@ impl Typer {
                 };
 
                 let pre_loop = self.snapshot_moved_fields();
-                let body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
                 self.restore_moved_fields(pre_loop);
                 Ok(hir::Stmt::For(hir::For {
@@ -831,7 +832,8 @@ impl Typer {
                 );
 
                 let pre_loop = self.snapshot_moved_fields();
-                let body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
                 self.restore_moved_fields(pre_loop);
                 Ok(hir::Stmt::SimFor(
