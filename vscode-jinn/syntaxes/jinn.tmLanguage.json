@@ -76,7 +76,7 @@
         },
         {
           "name": "support.function.builtin.jn",
-          "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float|assert|panic|time_now|popcount|clz|ctz|bswap|rotate_left|rotate_right|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul|checked_add|checked_sub|checked_mul|volatile_load|volatile_store|signal_handle|signal_ignore|signal_raise|weak_upgrade|atomic_load|atomic_store|atomic_add|atomic_sub|atomic_cas|vec_with_alloc|map_with_alloc|constant_time_eq|fields_of|type_of|size_of|align_of|matmul|ndarray|priority_queue|map|filter|fold|zip|take|skip|any|all|find|flatten|chain|collect|split|join|trim|to_upper|to_lower|replace|contains|starts_with|ends_with|char_at|slice|matches|find_all|replace_re|deque|grad|einsum|contract|count|where)\\b"
+          "match": "\\b(log|len|push|pop|has|get|set|keys|values|del|append|sqrt|abs|floor|ceil|to_str|to_int|to_float|assert|panic|time_now|popcount|clz|ctz|bswap|rotate_left|rotate_right|wrapping_add|wrapping_sub|wrapping_mul|saturating_add|saturating_sub|saturating_mul|checked_add|checked_sub|checked_mul|volatile_load|volatile_store|signal_handle|signal_ignore|signal_raise|atomic_load|atomic_store|atomic_add|atomic_sub|atomic_cas|vec_with_alloc|map_with_alloc|constant_time_eq|fields_of|type_of|size_of|align_of|matmul|ndarray|priority_queue|map|filter|fold|zip|take|skip|any|all|find|flatten|chain|collect|split|join|trim|to_upper|to_lower|replace|contains|starts_with|ends_with|char_at|slice|matches|find_all|replace_re|deque|grad|einsum|contract|count|where)\\b"
         },
         {
           "name": "support.type.jn",

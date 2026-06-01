@@ -6818,12 +6818,6 @@ fn store_row_field_access_in_coroutine_body() {
 }
 
 #[test]
-#[ignore = "weak()/weak_upgrade() on heap nominals requires the heap-tax \
-            inference (struct-literal → RcNew with {strong,weak,payload} \
-            layout) to be wired up. Tracked under Phase-7 circle-back."]
-fn weak_roundtrip_recovers_value_removed() {}
-
-#[test]
 fn const_binding_rejects_rebind() {
     let err = expect_compile_fail("*main()\n    x is const 42\n    x is 99\n    log(x)\n");
     assert!(

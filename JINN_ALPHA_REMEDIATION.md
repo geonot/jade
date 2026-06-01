@@ -47,13 +47,17 @@ Beyond the safety floor, the **major** stdlib defects, the **significant**
 Phase-B/C items (LSP wiring, stability/std docs, SECURITY.md, residual
 keyword-as-identifier conflicts, release-hygiene), and the **minor** test/tooling
 backlog have all since been worked to completion: **MAJOR-1..5, SIG-1..8, and
-MIN-3..6 are FIXED**, and **MIN-1/MIN-2** are deliberate deferrals of a removed
-Phase-7 heap-tax feature (their tests stay `#[ignore]` by design).
+MIN-3..6 are FIXED**, and **MIN-1/MIN-2 are now RESOLVED** by formally adopting
+the value-semantics memory model (the removed `rc()`/`weak()` heap-tax surface is
+not returning): MIN-1's drop-fusion coverage was rewritten as a live
+value-semantics test and MIN-2's `weak_roundtrip` placeholder was deleted. There
+are now **zero `#[ignore]`d tests** in the suite.
 
 **Recommendation:** CRITICAL-1 and the full MAJOR/SIGNIFICANT/MINOR backlog are
 closed. The Phase-C entry gate (below) is satisfied; the only standing residuals
 are environment-bound (no local `clippy`/`rustup`) and the explicitly-deferred
-SIMD literal syntax (F P1-3) and `rc()`/`weak()` heap-tax feature (MIN-1/2).
+SIMD literal syntax (F P1-3). The `rc()`/`weak()` heap-tax feature is formally
+retired in favor of value semantics (MIN-1/2 resolved).
 
 ---
 
@@ -156,7 +160,7 @@ SIMD literal syntax (F P1-3) and `rc()`/`weak()` heap-tax feature (MIN-1/2).
 The items that were open mid-sweep — CRITICAL-1 (generic enum empty variant),
 MAJOR-1..3 (stdlib defects), and the SIGNIFICANT list — are all now FIXED;
 see the per-item status in the prioritized backlog below. The MINOR backlog
-(MIN-3..6) is likewise FIXED, with MIN-1/MIN-2 deferred by design.
+(MIN-3..6) is likewise FIXED, with MIN-1/MIN-2 resolved via value semantics.
 
 ---
 
@@ -467,12 +471,24 @@ see the per-item status in the prioritized backlog below. The MINOR backlog
 
 ### MINOR / Test debt — polish, post-alpha
 
-- **MIN-1 — Ignored test `perceus_debug.rs:83` (`drop_fusion_coalesces`)** and
-  **MIN-2 — `bulk_tests.rs` (`weak_roundtrip`)** are both blocked on a
+- **MIN-1 — Ignored test `perceus_debug.rs` (`drop_fusion_coalesces`)** and
+  **MIN-2 — `bulk_tests.rs` (`weak_roundtrip`)** were both blocked on a
   missing heap-tax inference path (the surface `rc()`/`weak()`/`weak_upgrade()`
-  builtins were removed with no replacement). ⏸️ DEFERRED (by design) — this is a
-  real Phase-7 feature gap, not a bug; the tests remain correctly ignored until
-  the feature returns.
+  builtins were removed with no replacement). ✅ RESOLVED by formally adopting the
+  value-semantics memory model documented in `docs/access-semantics.md` (the
+  authoritative source that supersedes `memory-model.md`): Jinn is value-semantics
+  first — no `Rc`/`Arc`/`Box`, no hidden refcount in the IR, cross-thread sharing
+  via `Channel`/`ActorRef` only. MIN-1's ignored `rc()` probe was rewritten as a
+  live, non-ignored drop-fusion test (`drop_fusion_coalesces_consecutive_scope_exit_drops`)
+  that borrows three owned heap vectors through one call so their scope-exit drops
+  fuse into a single `DropMany` (verified: 3 drops fused). MIN-2's empty
+  `weak_roundtrip_recovers_value_removed` placeholder was deleted (weak refs are
+  not part of the value-semantics alpha). Loose ends were also closed: the dangling
+  `weak_upgrade` builtin was removed from the VS Code grammar, `tests/programs/syntax.jn`
+  §24 was rewritten from "Reference Counting / heap tax" to honest value-semantics
+  struct prose, and `jinn.md`'s stale `rc()`/`arc()`/`@atomic`/`weak ref` claims
+  (Principle 4, the Memory Model section, and the Key Decisions table) were aligned
+  with the authoritative model. The suite now carries **zero `#[ignore]`d tests**.
 - **MIN-3 — `bulk_tests.rs` (`b_p42_strict_unsolved_typevar`)** ✅ FIXED. The
   obsolete `#[ignore]`d test (its program `*foo(x)/x` … `foo` now legitimately
   generalizes and compiles) was replaced with a real, non-ignored test

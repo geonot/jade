@@ -635,16 +635,18 @@ type NetPacket @packed @strict @align(4)
     log(v)                       # 100
 
 
-# ── 24. Reference Counting ─────────────────────────────────────────────────
+# ── 24. Value-Semantics Structs ────────────────────────────────────────────
 
-type RcDemoNode
+type ValueNode
     val as i64
 
-*demo_rc
-    # Heap nominals are intrinsically refcounted ("heap tax") — no
-    # surface `rc()` wrapper exists. Allocating a struct gives you
-    # an Rc-tier value automatically.
-    node is RcDemoNode(val is 42)
+*demo_value_struct
+    # Structs are value types with single-owner semantics: there is no
+    # `Rc`/`Arc`/`Box` and no surface refcount wrapper. The compiler
+    # inserts exactly one static drop site per owned value (no GC).
+    # Cross-thread sharing moves values through `Channel`/`ActorRef`.
+    # See docs/access-semantics.md.
+    node is ValueNode(val is 42)
     log(node.val)
 
 
