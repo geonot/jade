@@ -10,7 +10,7 @@ impl Lowerer {
             hir::Stmt::ChannelClose(ch, span) => {
                 let c = self.lower_expr(ch);
                 self.emit(
-                    InstKind::RuntimeOp("__chan_close".into(), vec![c]),
+                    InstKind::Call("__chan_close".into(), vec![c]),
                     Type::Void,
                     *span,
                 )
@@ -18,7 +18,7 @@ impl Lowerer {
             hir::Stmt::Stop(expr, span) => {
                 let v = self.lower_expr(expr);
                 self.emit(
-                    InstKind::RuntimeOp("__stop".into(), vec![v]),
+                    InstKind::Call("__stop".into(), vec![v]),
                     Type::Void,
                     *span,
                 )

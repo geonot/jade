@@ -10,6 +10,20 @@ impl Lowerer {
             hir::Stmt::Bind(b) => {
                 let val = match b.access_mod {
                     Some(AccessMod::Take) => self.lower_expr(&b.value),
+                    Some(AccessMod::Copy) => {
+                        // Explicit `copy` binds deep-clone the value so the new
+                        // binding owns an independent copy (e.g. `b is copy a`).
+                        let v = self.lower_expr(&b.value);
+                        if !b.value.ty.is_trivially_droppable() && b.value.ty.is_value_clonable() {
+                            self.emit(
+                                InstKind::Clone(v, b.value.ty.clone()),
+                                b.value.ty.clone(),
+                                b.value.span,
+                            )
+                        } else {
+                            v
+                        }
+                    }
                     _ => {
                         if matches!(b.ownership, hir::Ownership::Borrowed)
                             && matches!(b.value.kind, ExprKind::Field(..) | ExprKind::Index(..))

@@ -577,19 +577,25 @@ impl<'ctx> Compiler<'ctx> {
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
 
-                mir::InstKind::Cast(val, src_ty, target_ty) => {
+                mir::InstKind::Cast(val, target_ty) => {
                     let v = self.val(*val);
+                    let src_ty = self.value_types.get(val).cloned().ok_or_else(|| {
+                        format!("ICE: missing value type for cast source {val:?}")
+                    })?;
                     let target_llvm = self.llvm_ty(target_ty);
-                    self.emit_cast(v, src_ty, target_ty, target_llvm)
+                    self.emit_cast(v, &src_ty, target_ty, target_llvm)
                 }
-                mir::InstKind::StrictCast(val, src_ty, target_ty) => {
+                mir::InstKind::StrictCast(val, target_ty) => {
                     let v = self.val(*val);
+                    let src_ty = self.value_types.get(val).cloned().ok_or_else(|| {
+                        format!("ICE: missing value type for strict cast source {val:?}")
+                    })?;
                     let target_llvm = self.llvm_ty(target_ty);
-                    let casted = self.emit_cast(v, src_ty, target_ty, target_llvm)?;
+                    let casted = self.emit_cast(v, &src_ty, target_ty, target_llvm)?;
 
                     let source_llvm = v.get_type();
                     if v.is_int_value() && casted.is_int_value() {
-                        let back = self.emit_cast(casted, target_ty, src_ty, source_llvm)?;
+                        let back = self.emit_cast(casted, target_ty, &src_ty, source_llvm)?;
                         let eq = b!(self.bld.build_int_compare(
                             inkwell::IntPredicate::EQ,
                             v.into_int_value(),

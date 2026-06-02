@@ -128,14 +128,12 @@ impl Lowerer {
             }
 
             ExprKind::Cast(inner, target_ty) => {
-                let src_ty = inner.ty.clone();
                 let v = self.lower_expr(inner);
-                self.emit(InstKind::Cast(v, src_ty, target_ty.clone()), ty, span)
+                self.emit(InstKind::Cast(v, target_ty.clone()), ty, span)
             }
             ExprKind::StrictCast(inner, target_ty) => {
-                let src_ty = inner.ty.clone();
                 let v = self.lower_expr(inner);
-                self.emit(InstKind::StrictCast(v, src_ty, target_ty.clone()), ty, span)
+                self.emit(InstKind::StrictCast(v, target_ty.clone()), ty, span)
             }
             ExprKind::Ref(inner) => {
                 let v = self.lower_expr(inner);

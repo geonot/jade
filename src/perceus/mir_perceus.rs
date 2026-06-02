@@ -241,7 +241,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::FieldGet(obj, _) => vec![*obj],
         InstKind::FieldSet(obj, _, val) => vec![*obj, *val],
         InstKind::FieldStore(_, _, val) => vec![*val],
-        InstKind::FieldTombstone(_, _) => vec![],
+        InstKind::FieldClear(o, _) => vec![*o],
         InstKind::Index(base, idx) | InstKind::IndexUnchecked(base, idx) => vec![*base, *idx],
         InstKind::IndexSet(base, idx, val) => vec![*base, *idx, *val],
         InstKind::IndexStore(_, idx, val) => vec![*idx, *val],
@@ -278,6 +278,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::SelectArm(channels, _) => channels.clone(),
 
         InstKind::Log(v) => vec![*v],
+        InstKind::Eprint(v) => vec![*v],
         InstKind::Assert(v, _) => vec![*v],
 
         InstKind::InlineAsm(_, args) => args.clone(),

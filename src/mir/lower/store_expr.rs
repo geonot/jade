@@ -42,10 +42,10 @@ impl Lowerer {
                     let ev = self.lower_expr(&cond.value);
                     args.push(ev);
                 }
-                self.emit(InstKind::RuntimeOp(Symbol::intern(&name), args), ty, span)
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
             }
             ExprKind::StoreCount(store_name) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_count_{store_name}")),
                     vec![],
                 ),
@@ -53,7 +53,7 @@ impl Lowerer {
                 span,
             ),
             ExprKind::StoreAll(store_name) => self.emit(
-                InstKind::RuntimeOp(Symbol::intern(&format!("__store_all_{store_name}")), vec![]),
+                InstKind::Call(Symbol::intern(&format!("__store_all_{store_name}")), vec![]),
                 ty,
                 span,
             ),
@@ -88,7 +88,7 @@ impl Lowerer {
                     let ev = self.lower_expr(&cond.value);
                     args.push(ev);
                 }
-                self.emit(InstKind::RuntimeOp(Symbol::intern(&name), args), ty, span)
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
             }
             ExprKind::ViewAll(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
@@ -121,12 +121,12 @@ impl Lowerer {
                     let ev = self.lower_expr(&cond.value);
                     args.push(ev);
                 }
-                self.emit(InstKind::RuntimeOp(Symbol::intern(&name), args), ty, span)
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
             }
             ExprKind::StoreGet(store_name, key_expr) => {
                 let val = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__store_get_{store_name}")),
                         vec![val],
                     ),
@@ -164,7 +164,7 @@ impl Lowerer {
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     args.push(self.lower_expr(&cond.value));
                 }
-                self.emit(InstKind::RuntimeOp(Symbol::intern(&name), args), ty, span)
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
             }
             ExprKind::StoreExists(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
@@ -196,10 +196,10 @@ impl Lowerer {
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     args.push(self.lower_expr(&cond.value));
                 }
-                self.emit(InstKind::RuntimeOp(Symbol::intern(&name), args), ty, span)
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
             }
             ExprKind::StoreDistinct(store_name, field) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_distinct_{store_name}__{field}")),
                     vec![],
                 ),
@@ -208,7 +208,7 @@ impl Lowerer {
             ),
 
             ExprKind::StoreSum(store_name, field) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_sum_{store_name}__{field}")),
                     vec![],
                 ),
@@ -216,7 +216,7 @@ impl Lowerer {
                 span,
             ),
             ExprKind::StoreAvg(store_name, field) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_avg_{store_name}__{field}")),
                     vec![],
                 ),
@@ -224,7 +224,7 @@ impl Lowerer {
                 span,
             ),
             ExprKind::StoreMin(store_name, field) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_min_{store_name}__{field}")),
                     vec![],
                 ),
@@ -232,7 +232,7 @@ impl Lowerer {
                 span,
             ),
             ExprKind::StoreMax(store_name, field) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_max_{store_name}__{field}")),
                     vec![],
                 ),
@@ -243,7 +243,7 @@ impl Lowerer {
             ExprKind::StoreVersionCount(store_name, sid_expr) => {
                 let sid = self.lower_expr(sid_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__store_version_count_{store_name}")),
                         vec![sid],
                     ),
@@ -254,7 +254,7 @@ impl Lowerer {
             ExprKind::StoreHistory(store_name, sid_expr) => {
                 let sid = self.lower_expr(sid_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__store_history_{store_name}")),
                         vec![sid],
                     ),
@@ -266,7 +266,7 @@ impl Lowerer {
                 let sid = self.lower_expr(sid_expr);
                 let ver = self.lower_expr(ver_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__store_at_version_{store_name}")),
                         vec![sid, ver],
                     ),
@@ -278,7 +278,7 @@ impl Lowerer {
             ExprKind::KvGet(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__kv_get_{store_name}")),
                         vec![key],
                     ),
@@ -289,7 +289,7 @@ impl Lowerer {
             ExprKind::KvHas(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__kv_has_{store_name}")),
                         vec![key],
                     ),
@@ -298,7 +298,7 @@ impl Lowerer {
                 )
             }
             ExprKind::KvCount(store_name) => self.emit(
-                InstKind::RuntimeOp(Symbol::intern(&format!("__kv_count_{store_name}")), vec![]),
+                InstKind::Call(Symbol::intern(&format!("__kv_count_{store_name}")), vec![]),
                 ty,
                 span,
             ),
@@ -306,7 +306,7 @@ impl Lowerer {
                 let key = self.lower_expr(key_expr);
                 let val = self.lower_expr(val_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__kv_set_{store_name}")),
                         vec![key, val],
                     ),
@@ -317,7 +317,7 @@ impl Lowerer {
             ExprKind::KvDel(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__kv_del_{store_name}")),
                         vec![key],
                     ),
@@ -329,7 +329,7 @@ impl Lowerer {
                 let key = self.lower_expr(key_expr);
                 let delta = self.lower_expr(delta_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__kv_incr_{store_name}")),
                         vec![key, delta],
                     ),
@@ -341,7 +341,7 @@ impl Lowerer {
             ExprKind::VecInsert(store_name, vec_expr) => {
                 let v = self.lower_expr(vec_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__vec_insert_{store_name}")),
                         vec![v],
                     ),
@@ -350,14 +350,14 @@ impl Lowerer {
                 )
             }
             ExprKind::VecCount(store_name) => self.emit(
-                InstKind::RuntimeOp(Symbol::intern(&format!("__vec_count_{store_name}")), vec![]),
+                InstKind::Call(Symbol::intern(&format!("__vec_count_{store_name}")), vec![]),
                 ty,
                 span,
             ),
             ExprKind::BloomTest(store_name, field_name, value_expr) => {
                 let v = self.lower_expr(value_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__bloom_test_{store_name}_{field_name}")),
                         vec![v],
                     ),
@@ -368,7 +368,7 @@ impl Lowerer {
             ExprKind::FtsSearch(store_name, field_name, query_expr) => {
                 let q = self.lower_expr(query_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__fts_search_{store_name}_{field_name}")),
                         vec![q],
                     ),
@@ -377,7 +377,7 @@ impl Lowerer {
                 )
             }
             ExprKind::FtsCount(store_name, field_name) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__fts_count_{store_name}_{field_name}")),
                     vec![],
                 ),
@@ -388,7 +388,7 @@ impl Lowerer {
                 let q = self.lower_expr(query_expr);
                 let k = self.lower_expr(k_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__vec_nearest_{store_name}")),
                         vec![q, k],
                     ),
@@ -399,7 +399,7 @@ impl Lowerer {
             ExprKind::GraphFrom(store_name, node_expr) => {
                 let n = self.lower_expr(node_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__graph_from_{store_name}")),
                         vec![n],
                     ),
@@ -410,7 +410,7 @@ impl Lowerer {
             ExprKind::GraphTo(store_name, node_expr) => {
                 let n = self.lower_expr(node_expr);
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__graph_to_{store_name}")),
                         vec![n],
                     ),
@@ -419,7 +419,7 @@ impl Lowerer {
                 )
             }
             ExprKind::TsLatest(store_name) => self.emit(
-                InstKind::RuntimeOp(Symbol::intern(&format!("__ts_latest_{store_name}")), vec![]),
+                InstKind::Call(Symbol::intern(&format!("__ts_latest_{store_name}")), vec![]),
                 ty,
                 span,
             ),

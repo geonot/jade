@@ -57,6 +57,7 @@ impl Lowerer {
                 self.set_terminator(Terminator::Branch(cmp, body_bb, exit_bb));
 
                 self.switch_to(body_bb);
+                self.seal_block(body_bb);
 
                 if end.is_none() {
                     let elem = self.emit(InstKind::Index(iter_val, idx), ty.clone(), span);
@@ -72,10 +73,12 @@ impl Lowerer {
                     self.set_terminator(Terminator::Branch(cond_val, push_bb, filter_bb));
 
                     self.switch_to(push_bb);
+                    self.seal_block(push_bb);
                     self.emit_void(InstKind::VecPush(vec_val, elem_val), span);
                     self.set_terminator(Terminator::Goto(inc_bb));
 
                     self.switch_to(filter_bb);
+                    self.seal_block(filter_bb);
                     self.set_terminator(Terminator::Goto(inc_bb));
                 } else {
                     self.emit_void(InstKind::VecPush(vec_val, elem_val), span);
@@ -89,7 +92,18 @@ impl Lowerer {
                 self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, span);
                 self.set_terminator(Terminator::Goto(cond_bb));
 
+                // All comprehension loop edges installed. Seal in Braun order:
+                // inc_bb (preds: push/filter or body), cond_bb (preds: entry +
+                // inc back-edge), exit_bb (pred: cond false). Without these the
+                // exit block stays open forever, so a cross-block variable read
+                // landing here (e.g. a drop of a value bound before this
+                // comprehension) inserts an incomplete phi that never receives
+                // operands — an empty phi that fails LLVM verification.
+                self.seal_block(inc_bb);
+                self.seal_block(cond_bb);
+
                 self.switch_to(exit_bb);
+                self.seal_block(exit_bb);
                 vec_val
             }
 

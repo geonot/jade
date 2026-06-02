@@ -370,11 +370,19 @@ impl Typer {
 
         if let Some(fields) = self.structs.get(name).cloned() {
             if self.inferred_field_structs.contains(&Symbol::intern(name)) {
+                // When any init is named, fields must be matched by name only:
+                // positional fallback (`hinits.get(i)`) would pair an omitted field
+                // with an unrelated provided init (e.g. an inferred-Integer field
+                // omitted at index 0 paired with a String init), spuriously
+                // triggering monomorphization with swapped field types.
+                let any_named = hinits.iter().any(|fi| fi.name.is_some());
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
                     let resolved = self.infer_ctx.shallow_resolve(declared_ty);
                     let arg_ty = if let Some(fi) = hinits.iter().find(|fi| fi.name == Some(*fname))
                     {
                         Some(&fi.value.ty)
+                    } else if any_named {
+                        None
                     } else {
                         hinits.get(i).map(|fi| &fi.value.ty)
                     };
@@ -433,9 +441,24 @@ impl Typer {
                 });
 
                 if needs_mono {
-                    let arg_tys: Vec<Type> = hinits
+                    let arg_tys: Vec<Type> = fields
                         .iter()
-                        .map(|fi| self.infer_ctx.shallow_resolve(&fi.value.ty))
+                        .enumerate()
+                        .map(|(i, (fname, declared_ty))| {
+                            let provided = if let Some(fi) =
+                                hinits.iter().find(|fi| fi.name == Some(*fname))
+                            {
+                                Some(&fi.value.ty)
+                            } else if any_named {
+                                None
+                            } else {
+                                hinits.get(i).map(|fi| &fi.value.ty)
+                            };
+                            match provided {
+                                Some(t) => self.infer_ctx.shallow_resolve(t),
+                                None => self.infer_ctx.shallow_resolve(declared_ty),
+                            }
+                        })
                         .collect();
                     let mangled_name = self.monomorphize_struct(name, &fields, &arg_tys, span)?;
                     return Ok(hir::Expr {

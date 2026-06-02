@@ -145,7 +145,7 @@ impl Typer {
                     .transpose()?;
                 self.pop_scope();
 
-                let ty = Type::Ptr(Box::new(hbody.ty.clone()));
+                let ty = Type::Vec(Box::new(hbody.ty.clone()));
                 Ok(hir::Expr {
                     kind: hir::ExprKind::ListComp(
                         Box::new(hbody),

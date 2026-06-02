@@ -17,6 +17,22 @@ pub struct ValueId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);
 
+pub fn actor_handler_fn_name(actor: Symbol, handler: &crate::hir::HandlerDef) -> String {
+    if handler.is_loop {
+        format!("__actor_{}_loop", actor)
+    } else {
+        format!("__actor_{}_h_{}", actor, handler.name)
+    }
+}
+
+pub fn actor_init_fn_name(actor: Symbol) -> String {
+    format!("__actor_init_{}", actor)
+}
+
+pub fn actor_sleep_fn_name(actor: Symbol) -> String {
+    format!("__actor_sleep_{}", actor)
+}
+
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: Symbol,
@@ -29,6 +45,8 @@ pub struct Function {
     pub next_value: u32,
     pub next_block: u32,
     pub attrs: FnAttrs,
+
+    pub is_coroutine: bool,
 
     pub perceus: PerceusMeta,
 }
@@ -163,7 +181,7 @@ pub enum InstKind {
 
     FieldStore(Symbol, Symbol, ValueId),
 
-    FieldTombstone(Symbol, Symbol),
+    FieldClear(ValueId, Symbol),
 
     Index(ValueId, ValueId),
 
@@ -209,6 +227,7 @@ pub enum InstKind {
     SelectArm(Vec<ValueId>, bool),
 
     Log(ValueId),
+    Eprint(ValueId),
     Assert(ValueId, String),
 
     InlineAsm(String, Vec<ValueId>),

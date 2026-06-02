@@ -262,7 +262,6 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
         | StringConst(_)
         | Void
         | Load(_)
-        | FieldTombstone(_, _)
         | FnRef(_)
         | MapInit
         | GlobalLoad(_) => Vec::new(),
@@ -284,6 +283,7 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
         FieldGet(r, _) => vec![*r],
         FieldSet(r, _, v) => vec![*r, *v],
         FieldStore(_, _, v) => vec![*v],
+        FieldClear(o, _) => vec![*o],
         Index(a, b) | IndexUnchecked(a, b) => vec![*a, *b],
         IndexSet(a, b, c) => vec![*a, *b, *c],
         IndexStore(_, a, b) => vec![*a, *b],
@@ -309,7 +309,7 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
         ChanSend(a, b) => vec![*a, *b],
         ChanRecv(v) => vec![*v],
         SelectArm(args, _) => args.clone(),
-        Log(v) | Assert(v, _) => vec![*v],
+        Log(v) | Eprint(v) | Assert(v, _) => vec![*v],
         InlineAsm(_, args) => args.clone(),
         GlobalStore(_, v) => vec![*v],
     }
@@ -335,7 +335,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
         FieldGet(..) => "FieldGet",
         FieldSet(..) => "FieldSet",
         FieldStore(..) => "FieldStore",
-        FieldTombstone(..) => "FieldTombstone",
+        FieldClear(..) => "FieldClear",
         Index(..) => "Index",
         IndexUnchecked(..) => "IndexUnchecked",
         IndexSet(..) => "IndexSet",
@@ -366,6 +366,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
         ChanRecv(_) => "ChanRecv",
         SelectArm(..) => "SelectArm",
         Log(_) => "Log",
+        Eprint(_) => "Eprint",
         Assert(..) => "Assert",
         InlineAsm(..) => "InlineAsm",
         GlobalLoad(_) => "GlobalLoad",

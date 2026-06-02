@@ -11,7 +11,7 @@ impl Lowerer {
             hir::Stmt::StoreInsert(store_name, exprs, span) => {
                 let vals: Vec<_> = exprs.iter().map(|e| self.lower_expr(e)).collect();
                 self.emit(
-                    InstKind::RuntimeOp(
+                    InstKind::Call(
                         Symbol::intern(&format!("__store_insert_{store_name}")),
                         vals,
                     ),
@@ -56,7 +56,7 @@ impl Lowerer {
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(
-                    InstKind::RuntimeOp(Symbol::intern(&encoded), all_vals),
+                    InstKind::Call(Symbol::intern(&encoded), all_vals),
                     Type::Void,
                     *span,
                 )
@@ -95,7 +95,7 @@ impl Lowerer {
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(
-                    InstKind::RuntimeOp(Symbol::intern(&encoded), all_vals),
+                    InstKind::Call(Symbol::intern(&encoded), all_vals),
                     Type::Void,
                     *span,
                 )
@@ -134,13 +134,13 @@ impl Lowerer {
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(
-                    InstKind::RuntimeOp(Symbol::intern(&encoded), all_vals),
+                    InstKind::Call(Symbol::intern(&encoded), all_vals),
                     Type::Void,
                     *span,
                 )
             }
             hir::Stmt::StoreSave(store_name, span) => self.emit(
-                InstKind::RuntimeOp(
+                InstKind::Call(
                     Symbol::intern(&format!("__store_save_{store_name}")),
                     vec![],
                 ),
@@ -191,20 +191,20 @@ impl Lowerer {
                     encoded.push_str(&format!("_{fname}"));
                 }
                 self.emit(
-                    InstKind::RuntimeOp(Symbol::intern(&encoded), all_vals),
+                    InstKind::Call(Symbol::intern(&encoded), all_vals),
                     Type::Void,
                     *span,
                 )
             }
             hir::Stmt::Transaction(body, span) => {
                 self.emit(
-                    InstKind::RuntimeOp("__txn_begin".into(), vec![]),
+                    InstKind::Call("__txn_begin".into(), vec![]),
                     Type::Void,
                     *span,
                 );
                 self.lower_block_stmts(body);
                 self.emit(
-                    InstKind::RuntimeOp("__txn_commit".into(), vec![]),
+                    InstKind::Call("__txn_commit".into(), vec![]),
                     Type::Void,
                     *span,
                 )

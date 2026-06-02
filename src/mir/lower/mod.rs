@@ -98,7 +98,6 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
             value: val,
             name: p.name.clone(),
             ty: p.ty.clone(),
-            ownership: p.ownership,
         });
         lowerer.var_types.insert(p.name.clone(), p.ty.clone());
         // Seed Braun's per-block definition map so `read_var` at the entry
@@ -109,6 +108,36 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
             .entry(entry)
             .or_default()
             .insert(p.name.clone(), val);
+    }
+
+    // `copy` parameters receive an independent deep copy: clone the incoming
+    // value on function entry and rebind the parameter name to the clone so
+    // mutations in the body never alias the caller's value.
+    for p in &f.params {
+        if matches!(p.access_mod, Some(crate::ast::AccessMod::Copy))
+            && !p.ty.is_trivially_droppable()
+            && p.ty.is_value_clonable()
+        {
+            let entry = lowerer.func.entry;
+            let Some(incoming) = lowerer
+                .current_def
+                .get(&entry)
+                .and_then(|m| m.get(&p.name))
+                .copied()
+            else {
+                continue;
+            };
+            let cloned = lowerer.emit(
+                InstKind::Clone(incoming, p.ty.clone()),
+                p.ty.clone(),
+                p.span,
+            );
+            lowerer
+                .current_def
+                .entry(entry)
+                .or_default()
+                .insert(p.name.clone(), cloned);
+        }
     }
 
     finish_body(
@@ -263,9 +292,6 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         value: self_val,
         name: self_name.clone(),
         ty: state_ptr_ty.clone(),
-        // Raw: the state pointer aliases the live actor mailbox; do not let
-        // the ownership tagging attach `noalias`.
-        ownership: hir::Ownership::Raw,
     });
     let entry = lowerer.func.entry;
     lowerer
@@ -289,7 +315,6 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
             value: val,
             name: p.name.clone(),
             ty: p.ty.clone(),
-            ownership: p.ownership,
         });
         lowerer.var_types.insert(p.name.clone(), p.ty.clone());
         lowerer
@@ -334,9 +359,6 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
         value: self_val,
         name: self_name.clone(),
         ty: state_ptr_ty,
-        // Raw: the state pointer aliases the live actor mailbox; do not let the
-        // ownership tagging attach `noalias`.
-        ownership: hir::Ownership::Raw,
     });
     let entry = lowerer.func.entry;
     let self_ty = lowerer.func.params.last().unwrap().ty.clone();

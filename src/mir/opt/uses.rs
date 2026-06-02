@@ -24,8 +24,8 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             s.insert(*b);
         }
         InstKind::UnaryOp(_, v)
-        | InstKind::Cast(v, _, _)
-        | InstKind::StrictCast(v, _, _)
+        | InstKind::Cast(v, _)
+        | InstKind::StrictCast(v, _)
         | InstKind::Ref(v)
         | InstKind::Deref(v)
         | InstKind::Copy(v)
@@ -41,7 +41,6 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             }
         }
         InstKind::Call(_, args)
-        | InstKind::RuntimeOp(_, args)
         | InstKind::ArrayInit(args)
         | InstKind::VariantInit(_, _, _, args) => {
             for a in args {

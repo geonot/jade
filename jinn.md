@@ -1,66 +1,565 @@
-# Jinn
+,//xxxx,,,kkkkzzzz# Jinn
 
-**Systems language. Scripting readability. C performance.**
+Jinn is a compiled, statically typed systems language with an indentation-based
+syntax and word-based operators. It reads close to pseudocode, infers most
+types, and has no garbage collector — memory is managed automatically through
+ownership.
 
-Jinn inherits the cleanest syntax we know — `is` bindings, `*` functions, `?`/`!` ternary, `~` pipelines, indentation structure — and compiles through LLVM 21 to native code that matches Clang -O3. No runtime. No GC. No 64-byte Value class. Every integer is a register. Every class is contiguous memory. Every function is a native call.
+```jinn
+*main
+    log('hello, world')
+```
+
+This document is a tour of the language, from the basics to the more advanced
+features. Every example is valid Jinn.
+        
+---
+
+## Contents
+
+- [Contents](#contents)
+- [Source files](#source-files)
+- [Bindings](#bindings)
+  - [Constants](#constants)
+- [Primitive types](#primitive-types)
+- [Strings](#strings)
+- [Operators](#operators)
+  - [Equality and comparison](#equality-and-comparison)
+  - [Logical](#logical)
+  - [Membership](#membership)
+  - [Arithmetic and bitwise](#arithmetic-and-bitwise)
+  - [Casting](#casting)
+- [Control flow](#control-flow)
+  - [Conditionals](#conditionals)
+  - [Ternary](#ternary)
+  - [Loops](#loops)
+  - [Parallel loops](#parallel-loops)
+- [Functions](#functions)
+  - [Default and named arguments](#default-and-named-arguments)
+  - [Inline bodies](#inline-bodies)
+  - [Pattern clauses](#pattern-clauses)
+  - [Higher-order functions](#higher-order-functions)
+- [Lambdas and pipelines](#lambdas-and-pipelines)
+- [Types](#types)
+  - [Methods](#methods)
+- [Enums](#enums)
+- [Pattern matching](#pattern-matching)
+- [Generics](#generics)
+- [Aliases and newtypes](#aliases-and-newtypes)
+- [Collections](#collections)
+  - [Vectors](#vectors)
+  - [Maps](#maps)
+  - [Array literals](#array-literals)
+- [Comprehensions and iterators](#comprehensions-and-iterators)
+- [Generators](#generators)
+- [Error handling](#error-handling)
+- [Modules](#modules)
+- [Concurrency](#concurrency)
+  - [Actors](#actors)
+  - [Channels](#channels)
+  - [Select](#select)
+- [Persistent stores](#persistent-stores)
+- [Systems programming](#systems-programming)
+  - [C interop](#c-interop)
+  - [System calls](#system-calls)
+  - [Raw pointers](#raw-pointers)
+  - [Volatile access](#volatile-access)
+  - [Signals](#signals)
+- [Standard library](#standard-library)
+  - [Numeric methods](#numeric-methods)
+  - [Integer bit operations](#integer-bit-operations)
+  - [Regular expressions](#regular-expressions)
+  - [Built-ins](#built-ins)
+- [Memory and ownership](#memory-and-ownership)
+
+---
+
+## Source files
+
+Jinn uses indentation for structure — no braces, no semicolons. Indent with
+spaces; tabs are rejected. Comments begin with `#` and run to end of line.
+
+```jinn
+# This is a comment.
+*main
+    x is 1      # trailing comment
+    log(x)
+```
+
+A function named `main` is the program entry point.
+
+---
+
+## Bindings
+
+`is` introduces a binding. The type is inferred from the value.
+
+```jinn
+x is 42                # i64
+pi is 3.14159          # f64
+name is 'jinn'         # String
+ready is true          # bool
+```
+
+You can annotate a type explicitly with `as`:
+
+```jinn
+count as i32 is 0
+```
+
+Reassigning a variable uses the same `is`:
+
+```jinn
+x is 0
+x is x + 1
+```
+
+Augmented assignments update a variable in place:
+
+```jinn
+x += 1
+x -= 2
+x *= 3
+x /= 4
+x %= 5
+x &= 0xFF
+x |= 0x80
+x ^= mask
+x <<= 2
+x >>= 1
+```
+
+### Constants
+
+Top-level names written in `ALL_CAPS` are the convention for constants and
+cannot be reassigned.
+
+```jinn
+MAX_SIZE is 1024
+DEFAULT_PORT is 8080
+```
+
+---
+
+## Primitive types
+
+| Type                     | Description              |
+| ------------------------ | ------------------------ |
+| `i8` `i16` `i32` `i64`   | Signed integers          |
+| `u8` `u16` `u32` `u64`   | Unsigned integers        |
+| `f32` `f64`              | Floating-point numbers   |
+| `bool`                   | `true` or `false`        |
+| `String`                 | UTF-8 text               |
+
+Integer literals default to `i64` and adapt to the type they are used with.
+Underscores may be used as digit separators: `1_000_000`.
+
+---
+
+## Strings
+
+String literals use single or double quotes. Both support `{expr}`
+interpolation.
+
+```jinn
+name is 'world'
+log('hello {name}')           # hello world
+
+x is 42
+log('x={x}, doubled={x * 2}')  # x=42, doubled=84
+```
+
+Common string methods:
+
+```jinn
+s.length              # number of bytes
+s.contains('sub')
+s.starts_with('pre')
+s.ends_with('suf')
+s.slice(start, end)
+s.split(delim)
+s.trim()
+s.to_upper()
+s.to_lower()
+s.replace(old, new)
+s.find(sub)           # index, or -1 if absent
+s.lines()
+s.repeat(n)
+s.is_empty()
+```
+
+---
+
+## Operators
+
+Jinn uses words for logical and equality operators, and symbols for arithmetic.
+
+### Equality and comparison
+
+`equals` (or `eq`) and `neq` test equality. Ordering uses `<`, `>`, `<=`, `>=`.
+
+```jinn
+if x equals 0
+    log('zero')
+if x neq y
+    log('different')
+```
+
+Comparisons can be chained the way they read in mathematics:
+
+```jinn
+if 0 < x < 100
+    log('in range')
+if a <= b <= c
+    log('sorted')
+```
+
+### Logical
+
+`and`, `or`, `not`, and `xor`:
+
+```jinn
+if a and not b
+    log('a only')
+if a xor b
+    log('exactly one')
+```
+
+### Membership
+
+`in` tests membership in arrays, vectors, maps (keys), and strings
+(substrings).
+
+```jinn
+if x in [1, 2, 3]
+    log('found')
+if 'lo' in 'hello'
+    log('substring')
+```
+
+### Arithmetic and bitwise
+
+```jinn
+a + b    a - b    a * b    a / b    a % b    a mod b
+a pow b                    # exponentiation
+a & b    a | b    a ^ b    # bitwise and / or / xor
+a << b   a >> b            # shifts
+```
+
+### Casting
+
+```jinn
+y is x as f64            # widen — always safe
+z is big as strict i16   # narrow, panics if the value does not fit
+w is big as i16          # narrow, truncates
+```
+
+---
+
+## Control flow
+
+### Conditionals
+
+```jinn
+if x > 0
+    log('positive')
+elif x equals 0
+    log('zero')
+else
+    log('negative')
+```
+
+### Ternary
+
+`condition ? then ! else` is a conditional expression. It is the idiomatic way
+to choose a value.
+
+```jinn
+sign is x > 0 ? 1 ! -1
+label is ready ? 'go' ! 'wait'
+```
+
+Ternaries can nest (they associate to the right) and can span multiple lines
+when the branches are large:
+
+```jinn
+grade is score > 90 ? 'A' ! score > 80 ? 'B' ! 'C'
+
+result is condition
+    ? do_something()
+    ! do_something_else()
+```
+
+### Loops
+
+```jinn
+# While
+while n > 0
+    n is n - 1
+
+# Count over a range
+for i in 0 to 100
+    log(i)
+
+# Range with a step
+for i in 0 to 100 by 2
+    log(i)
+
+# Iterate a collection
+for item in items
+    process(item)
+
+# Infinite loop
+loop
+    if done
+        break
+```
+
+A C-style counted loop is written `loop(init, cond, step)`, where `$` is the
+current value. It is the common idiom for indexed iteration over a collection:
+
+```jinn
+loop(0, $ < items.len(), $ + 1)
+    log(items.get($))
+```
+
+`break` and `continue` work in any loop. A loop bound to a name can be used as
+a label for breaking out of nested loops:
+
+```jinn
+outer is for i in 0 to 10
+    for j in 0 to 10
+        if i * j > 50
+            break outer
+```
+
+### Parallel loops
+
+`sim for` runs iterations in parallel on a work-stealing scheduler. Iterations
+must be independent.
+
+```jinn
+sim for x in items
+    process(x)
+```
+
+---
+
+## Functions
+
+Functions are declared with `*`. Parentheses are optional on both definitions
+and calls. Parameter and return types are inferred when omitted.
+
+```jinn
+*add a, b
+    a + b
+
+*main
+    log(add(1, 2))
+```
+
+The last expression in a body is its result; `return` is available for early
+exit.
 
 ```jinn
 *fib n
     if n < 2
         return n
     fib(n - 1) + fib(n - 2)
-
-*main
-    log fib(40)
 ```
 
-This compiles to the same LLVM IR as equivalent C. Same speed. Zero overhead.
+Annotate types with `as` and `returns` when you want them. Parentheses are
+required around parameters once you annotate them.
 
-### Principles
+```jinn
+*greet(name as String) returns String
+    'hello {name}'
+```
 
-1. **Values are their types.** An `i64` is a register. A class is contiguous memory at known offsets. No universal wrapper. No indirection unless requested.
-2. **Ownership is default.** One owner per value. Compiler inserts drops statically. No GC, no cycle detector.
-3. **Borrowing is free.** Read access borrows a reference — zero runtime cost. No retain, no release. Container reads (`vec.get(i)`, `map.get(k)`, `for x in xs`) default to borrows when the element type is heap-managed; use the `copy` modifier (`x is copy v.get(0)`) for an owned clone, or `take` to move out.
-4. **Sharing is explicit, access is transparent.** When you want shared ownership, write `rc(x)` (single-threaded), `rc_cell(x)` (single-threaded mutable), `arc(x)` (cross-thread), or `arc_mutex(x)` (cross-thread mutable). The compiler makes the wrapper invisible at every use site — `r.field`, `r[i]`, `r.method()` peer through the wrapper automatically; you never write `*r`. For non-shared bindings, the compiler still chooses Owned vs Borrowed automatically via escape analysis (T1 short-lived reads stay raw pointers; only escaping values get cloned). Types annotated `@atomic` use atomic refcounts; `@weakable @atomic` types expose `weak ref T`. Types annotated `@resource` (file handles, sockets, store rows) reject `copy` and must be explicitly shared via `ref` or wrapped in `rc(...)`/`arc(...)`.
-5. **Inference does the work.** HM + bidirectional + ownership inference. You don't write types unless you want to.
-6. **Performance is non-negotiable.** Every design evaluated against: *does this prevent generating the same code C would?* If yes, the design is wrong.
+### Default and named arguments
+
+```jinn
+*connect(host as String, port as i64 is 8080)
+    log('connecting to {host}:{port}')
+
+connect(host is 'localhost', port is 3000)
+```
+
+### Inline bodies
+
+A single-expression function can use `is` instead of an indented block.
+
+```jinn
+*double x is x * 2
+*square(x as i64) is x * x
+```
+
+### Pattern clauses
+
+A function may be defined in several clauses with literal parameters. Clauses
+are tried in order; the first matching one runs.
+
+```jinn
+*fib(0) is 0
+*fib(1) is 1
+*fib n is fib(n - 1) + fib(n - 2)
+
+*gcd(a, 0) is a
+*gcd a, b is gcd(b, a % b)
+```
+
+### Higher-order functions
+
+Functions are values. A function parameter is typed `(ParamTypes) returns Ret`.
+
+```jinn
+*apply(f as (i64) returns i64, x as i64)
+    f(x)
+```
 
 ---
 
-## Types
+## Lambdas and pipelines
 
-### Primitives
-
-| Type | Size | Description |
-|------|------|-------------|
-| `i8` `i16` `i32` `i64` | 1–8B | Signed integers |
-| `u8` `u16` `u32` `u64` | 1–8B | Unsigned integers |
-| `f32` `f64` | 4–8B | IEEE 754 floats |
-| `bool` | 1b | `true` / `false` |
-| `void` | 0B | Unit type |
-| `String` | ptr+len+cap | Heap-allocated UTF-8 |
-
-Integer literals infer width from context. `42` is `i64` by default, narrows to match operand type.
-
-### Compound Types
+A lambda is written `|params| body`:
 
 ```jinn
-# Classes — value types, contiguous memory
-type Vec3
+square is |x| x * x
+double is |x as i64| x * 2
+
+# Multi-line: indent the body
+transform is |x|
+    y is x * 2
+    y + 1
+```
+
+The pipeline operator `~` feeds the left value as the first argument of the
+function on the right:
+
+```jinn
+result is value ~ double ~ add_one
+```
+
+Inside a pipeline, `$` marks where the piped value goes when you need it in a
+different position:
+
+```jinn
+result is value ~ add(5, $)     # add(5, value)
+```
+        
+---dddnnnnnnnnnnnnnnnnnnnnnnnnn                                              nnnnnnnnnn nnnnn   nnnnnnnnnnnnnnnnnnnnnn                                      
+
+## Types
+
+A `type` declares a record with named fields. Values are constructed wit              nnnnnnnnnnnnnnnnh named
+fields and accessed with `.`.
+
+```jinn
+type Point
     x as i64
     y as i64
-    z as i64
 
-# Enums — tagged unions
+p is Point(x is 10, y is 20)
+log(p.x)
+```
+
+A field may have a default value, which can be supplied with `is`:
+
+```jinn
+type Config
+    retries is 3
+    host as String
+```
+
+### Methods
+
+Methods are functions declared inside the type. They take `self` explicitly, or
+omit it and refer to fields by name.
+
+```jinn
+type Vec3
+    x as f64
+    y as f64
+    z as f64
+
+    *dot(self, other as Vec3)
+        self.x * other.x + self.y * other.y + self.z * other.z
+
+    *length
+        (x * x + y * y + z * z).sqrt()
+```
+
+Functions that operate on a type can also be written as free functions in a
+module and called through the module name — both styles are common.
+
+---
+
+## Enums
+
+An `enum` is a tagged union. Variants may carry data.
+
+```jinn
 enum Shape
     Circle(f64)
     Rect(f64, f64)
-
-# Fixed arrays
-nums is [1, 2, 3, 4, 5]
+    Unit
 ```
 
-### Generics — the `of` keyword
+You handle an enum by matching on it:
+
+```jinn
+*area(s as Shape) returns f64
+    match s
+        Circle(r) ? 3.14159 * r * r
+        Rect(w, h) ? w * h
+        Unit ? 0.0
+```
+
+Variants can be given explicit integer values, which is useful for flags and C
+interop:
+
+```jinn
+enum HttpStatus
+    Ok is 200
+    NotFound is 404
+    ServerError is 500
+```
+
+---
+
+## Pattern matching
+
+`match` selects a branch by pattern. Patterns include literals, binding names,
+enum constructors with destructuring, and the wildcard `_`.
+
+```jinn
+match n
+    0 ? log('zero')
+    1 ? log('one')
+    _ ? log('many')
+
+match shape
+    Circle(r) ? log(r)
+    Rect(w, h) ? log(w * h)
+```
+
+A branch body may be a single expression after `?`, or an indented block:
+
+```jinn
+match result
+    Ok(v) ?
+        log('ok')
+        log(v)
+    Err(e) ?
+        log(e)
+```
+
+---
+
+## Generics
+
+`of` introduces type parameters. Generic code is specialized for each concrete
+type at compile time.
 
 ```jinn
 *max of T(a as T, b as T)
@@ -75,927 +574,195 @@ enum Option of T
     None
 ```
 
-Single uppercase letters by convention. Monomorphized at compile time — zero runtime cost.
+Generic types appear in annotations with `of`, for example `Vec of Account`.
 
-### Type Aliases & Newtypes
+---
+
+## Aliases and newtypes
+
+An `alias` is a second name for an existing type — interchangeable with it.
 
 ```jinn
-# Alias — transparent, interchangeable with the underlying type
 alias Seconds is f64
 alias UserId is i64
+```
 
-# Newtype — opaque, distinct type at compile time
+A `type` that wraps a single field is a distinct type, even if two such types
+wrap the same underlying type:
+
+```jinn
 type Celsius
     value as f64
 
 type Fahrenheit
     value as f64
-# Celsius and Fahrenheit are NOT interchangeable even though both wrap f64
+# Celsius and Fahrenheit cannot be used interchangeably.
 ```
-
----
-
-## Bindings
-
-```jinn
-x is 42                    # inferred i64
-name is 'jinn'             # String
-pi is 3.14159              # f64
-done is true               # bool
-
-# Typed binding
-count as i32 is 0
-
-# Reassignment (same binding, new value)
-x is x + 1
-
-# Augmented assignment (desugars to `x is x op expr`)
-x += 1              # x is x + 1
-x -= 2              # x is x - 2
-x *= 3              # x is x * 3
-x /= 4              # x is x / 4
-x %= 5              # x is x % 5
-x &= 0xFF           # x is x & 0xFF
-x |= 0x80           # x is x | 0x80
-x ^= mask           # x is x ^ mask
-x <<= 2             # x is x << 2
-x >>= 1             # x is x >> 1
-
-# Destructuring
-p is Vec3(x is 1, y is 2, z is 3)
-```
-
-`is` is binding, not comparison. Comparison uses `equals`, `neq`, and `not equals`.
-
-### ALL_CAPS Constants
-
-Top-level constants use `ALL_CAPS` by convention. Constants cannot be reassigned — the compiler enforces this.
-
-```jinn
-MAX_SIZE is 1024
-PI is 3.14159265
-DEFAULT_PORT is 8080
-```
-The same convention applies inside types, where `FIELD is value` provides a default:
-```jinn
-type Foo
-    BAR is 10
-    BAZ as i64
-
-x is Foo(BAZ is 5)
-log x.BAR    # 10 (constant default)
-log x.BAZ   # 5
-```
-
-
-## Functions
-
-```jinn
-# Parentheses are optional on definitions and calls
-*add a, b
-    a + b
-
-*greet name as String
-    'hello {name}'
-
-# With defaults
-*connect(host as String, port as i64 is 8080)
-    ...
-```
-
-```jinn
-# No-arg functions — no parens needed
-*hello
-    log 'hi'
-
-# Calling
-result is add 1, 2
-greet 'world'
-hello
-
-# Parentheses still allowed where clarity helps
-result is add(1, 2)
-```
-
-Parameters infer types from usage. Return type inferred from body. Explicit annotations optional. Parentheses are always optional on both definitions and calls.
-
-### The `of` Call Syntax
-
-`of` can be used as an alternative to parentheses for single-argument calls:
-
-```jinn
-*double x is x * 2
-
-result is double of 5      # same as double(5)
-```
-
-`of` after a user-defined function name treats the next expression as its argument. Does not work with builtins like `log`.
-
-### Pattern-Directed Function Clauses
-
-Multiple definitions of the same function with literal parameters. The compiler merges them into a single function with conditional dispatch.
-
-```jinn
-# Fibonacci by pattern
-*fib(0) is 0
-*fib(1) is 1
-*fib n
-    fib(n - 1) + fib(n - 2)
-
-# Factorial
-*fact(0) is 1
-*fact n
-    n * fact(n - 1)
-
-# GCD with base case
-*gcd(a, 0) is a
-*gcd a, b
-    gcd b, a % b
-```
-
-Literal parameters (`0`, `1`, `true`, `3.14`, `'hello'`) match by equality. Non-literal clauses become the `else` branch. Clauses are checked in definition order.
-
-### Inline Body Syntax
-
-Single-expression functions use `is` instead of an indented block.
-
-```jinn
-*double x is x * 2
-*square(x as i64) is x * x
-*add a, b is a + b
-*neg x is 0 - x
-```
-
-Combines naturally with pattern clauses:
-
-```jinn
-*fib(0) is 0
-*fib(1) is 1
-*fib n is fib(n - 1) + fib(n - 2)
-```
-
-### Higher-Order Functions
-
-```jinn
-*apply(f as (i64) returns i64, x as i64)
-    f(x)
-
-*main
-    double is |x as i64| x * 2
-    log apply(double, 21)    # 42
-```
-
-Function-typed parameters use the form `f as (ParamTypes) returns RetType`. Parentheses on the function definition are required when using `as` type annotations.
-
-### Lambdas
-
-```jinn
-# Inline
-square is |x| x * x
-
-# With type annotation
-double is |x as i64| x * 2
-
-# Placeholder shorthand in pipelines
-doubled is items ~ |x| x * 2
-
-# Multi-line — just indent the body
-result is items ~ |x|
-    y is x * 2
-    y + 1
-```
-
-The `|params| body` form defines an anonymous function.
-
-### Pipelines
-
-```jinn
-result is value ~ double ~ add_one ~ square
-```
-
-`~` pipes the left value as the first argument to the right function.
-
-### Named Arguments
-
-```jinn
-*connect(host as String, port as i64 is 8080)
-    log 'connecting to {host}:{port}'
-
-connect(host is 'localhost', port is 3000)
-```
-
-Parentheses are required when using `as` type annotations on parameters.
-
-### `$` Placeholder
-
-Placeholder for partial application in pipelines. In pipeline context, `$ expr` desugars to an implicit lambda at parse time:
-
-```jinn
-# In named calls (pipeline + call with $ in args)
-result is value ~ add(5, $)       # → add(5, value)
-
-# Numbered: $0, $1, $2 for multi-arg
-pairs ~ combine($0, $1)
-```
-
-For expressions outside pipeline context, use explicit lambdas: `nums.map(|x| x * 2)`.
-
----
-
-## Control Flow
-
-### Ternary — `? !`
-
-The preferred conditional expression. `condition ? then ! else`.
-
-```jinn
-# Basic
-sign is x > 0 ? 1 ! -1
-
-# Absolute value
-abs_x is x >= 0 ? x ! 0 - x
-
-# Nested ternary (right-associative)
-grade is score > 90 ? 'A' ! score > 80 ? 'B' ! score > 70 ? 'C' ! 'F'
-
-# In function calls
-log x > 0 ? 'positive' ! 'non-positive'
-
-# Assigning different types (branches must unify)
-result is ready ? compute() ! fallback()
-
-# Multi-line ternary — indent branches for complex logic
-result is condition
-    ? do_something()
-    ! do_something_else()
-
-# Nested multi-line
-output is status equals 'ok'
-    ? data.length > 0
-        ? process(data)
-        ! default_value
-    ! handle_error(status)
-```
-
-Ternary binds looser than pipelines — `value ~ transform ? check ! default` works as expected.
-
-### Conditionals
-
-```jinn
-if x > 0
-    log 'positive'
-elif x equals 0
-    log 'zero'
-else
-    log 'negative'
-
-# If as expression — use ternary
-sign is x > 0 ? 1 ! -1
-```
-
-### Loops
-
-```jinn
-# While
-while n > 0
-    n is n - 1
-
-# For range (with 'from')
-for i from 0 to 100
-    log i
-
-# For range (with 'in')
-for i in 1 to 100
-    log i
-
-# For with step
-for i from 0 to 100 by 2
-    log i
-
-# Infinite loop
-loop
-    if done
-        break
-
-# C-style counted loop — `$` is the iteration value.
-#   loop(init, cond, step)
-# Desugars to: bind $ to init, then while cond { body; $ is step }.
-loop(0, $ < 100, $ + 1)
-    log $
-
-# Labeled loops — binding name IS the label
-outer is for i from 0 to 10
-    for j from 0 to 10
-        if i * j > 50
-            break outer
-
-# Parallel loop (work-stealing, all iterations must be independent)
-sim for x in items
-    process(x)
-
-# Range slicing
-sub is items from 2 to 5    # elements at indices 2, 3, 4
-```
-
-### Match
-
-```jinn
-match shape
-    Circle(r) ? log 3.14 * r * r
-    Rect(w, h) ? log w * h
-
-# With wildcard
-match n
-    0 ? log 'zero'
-    1 ? log 'one'
-    _ ? log 'other'
-```
-
-Pattern types: literals, identifiers (bind), constructors with destructuring, wildcards.
-
----
-
-## Operators
-
-| Prec | Operator | Description |
-|------|----------|-------------|
-| 1 | `~` | Pipeline |
-| 2 | `? !` | Ternary |
-| 3 | `or` | Logical OR |
-| 4 | `xor` | Logical XOR |
-| 5 | `and` | Logical AND |
-| 6 | `equals` `eq` `neq` `not equals` | Equality |
-| 7 | `< > <= >=` `in` | Comparison / membership |
-| 8 | `\|` | Bitwise OR |
-| 9 | `^` | Bitwise XOR |
-| 10 | `&` | Bitwise AND |
-| 11 | `<< >>` | Shift |
-| 12 | `+ -` | Additive |
-| 13 | `* / % mod` | Multiplicative |
-| 14 | `pow` | Exponent |
-| 15 | `- not` | Unary |
-| 16 | `() [] . as` | Postfix |
-
-### Comparison
-
-`equals` (shorthand `eq`) and `neq` / `not equals` — not `==` or `!=`. Reads like language.
-
-```jinn
-if x equals 0
-    log 'zero'
-if x eq 0
-    log 'also zero'
-if x neq y
-    log 'different'
-if x not equals y
-    log 'also different'
-```
-
-### Comparison Chaining
-
-Math-style chained comparisons without double-evaluating the middle operand:
-
-```jinn
-if 0 < x < 100
-    log 'in range'
-if a <= b <= c
-    log 'sorted'
-```
-
-### Membership — `in`
-
-```jinn
-if x in [1, 2, 3]
-    log 'found'
-if key in my_map
-    log 'exists'
-if 'world' in greeting
-    log 'found substring'
-```
-
-Works with arrays, vectors, strings (substring search), and maps (key lookup).
-
-### Logical
-
-`and`, `or`, `not`, `xor` — not `&&`, `||`, `!`.
-
-```jinn
-if a xor b
-    log 'exactly one is true'
-```
-
-### Type Casting
-
-```jinn
-x is 42
-y is x as f64           # widening — always safe
-z is big as strict i16   # strict narrowing — panics if value doesn't fit
-w is big as i16          # truncating — silently truncates (compiler warning)
-```
-
-### Serialization Casts
-
-```jinn
-data is my_struct as json    # serialize struct to JSON string
-```
-
-`as json` serializes any struct to a JSON string. Field names and values are emitted as key-value pairs.
-
----
-
-## Classes
-
-```jinn
-type Point
-    x as i64
-    y as i64
-
-# Constructor
-p is Point(x is 10, y is 20)
-
-# Field access
-log p.x
-
-# Methods
-type Vec3
-    x as i64
-    y as i64
-    z as i64
-
-    *length(self)
-        ((self.x * self.x + self.y * self.y + self.z * self.z) as f64).sqrt()
-
-    *dot(self, other as Vec3)
-        self.x * other.x + self.y * other.y + self.z * other.z
-```
-
-Classes are value types. Passed by value (move), stack allocated. Methods take `self` explicitly, or omit it and access fields by name directly — `self` is injected by the compiler.
-
-```jinn
-type Vec3
-    x as i64
-    y as i64
-    z as i64
-
-    # Explicit self
-    *dot(self, other as Vec3)
-        self.x * other.x + self.y * other.y + self.z * other.z
-
-    # Implicit self — fields resolve to self.field automatically
-    *sum()
-        x + y + z
-```
-
----
-
-## Enums
-
-```jinn
-enum Color
-    Red
-    Green
-    Blue
-    Custom(u8, u8, u8)
-
-*describe c as Color
-    match c
-        Red ? 1
-        Green ? 2
-        Blue ? 3
-        Custom(r, g, b) ? r + g + b
-```
-
-Enums compile to tagged unions. Pattern matching is the primary dispatch mechanism.
-
-### Enum Discriminant Values
-
-Explicit discriminant values for C interop and bitflags:
-
-```jinn
-enum Permission
-    Read is 1
-    Write is 2
-    Execute is 4
-
-enum HttpStatus
-    Ok is 200
-    NotFound is 404
-    ServerError is 500
-```
-
----
-
-## Error Handling
-
-Errors are values, not exceptions. Jinn has one error convention: declare an
-err enum, return it from your function, and pattern-match at the call site.
-There is no `try`, no `catch`, no exception machinery, no two-color
-`async`/`throws` split.
-
-### Primitives
-
-| Form               | Meaning                                                                |
-| ------------------ | ---------------------------------------------------------------------- |
-| `err E`            | Declares a tagged error enum (compiles like `enum`, semantically marked). |
-| `*fn() returns T`  | Canonical signature; `T` may be any type, including an err enum.       |
-| `! value`          | Universal early-return; `value` must be type-compatible with `T`.      |
-| `! E1 ! E2` suffix | Declarative annotation listing which err enums may be used with `!`.   |
-| `defer block`      | Function-scoped cleanup; runs LIFO at every exit.                      |
-| `match` / `is`     | Universal handler for the returned value.                              |
-
-### The canonical form — return the err enum directly
-
-```jinn
-err Outcome
-    Ok(i64)
-    Bad
-
-*compute(x as i64) returns Outcome
-    if x is 0
-        ! Bad
-    Ok(x + 1)
-
-*main()
-    r is compute(41)
-    match r
-        Ok(v) ?
-            log(v)
-        Bad ?
-            log(-1)
-```
-
-### The sentinel form — encode errors as values of `T`
-
-```jinn
-*lookup(k as string) returns i64
-    if missing
-        ! -1
-    found_value
-```
-
-### `! E` annotation — declarative validation
-
-```jinn
-err Network
-    Timeout
-err Disk
-    NotFound
-
-*fetch(url as string) returns i64 ! Network ! Disk
-    if down
-        ! Timeout       // ok: variant of Network
-    if no_space
-        ! NotFound      // ok: variant of Disk
-    payload_size
-```
-
-The `! E` suffix constrains *which* err variants the body may early-return.
-The function's runtime return type is still `T`. The early-returned value
-must be type-compatible with `T` — so this form is only useful when `T`
-itself is one of the listed err enums, or when errors are sentinel-encoded
-into `T`. Returning a variant of an err enum that is not in the list is a
-compile error. Returning a variant whose enum type is incompatible with `T`
-is also a compile error and the message points at one of the two canonical
-forms above.
-
-### `defer` — universal cleanup
-
-```jinn
-*compute(x as i64) returns Outcome
-    defer
-        log("cleanup")    // runs whether the function returns normally,
-                          // exits early via `!`, or falls through
-    if x is 0
-        ! Bad
-    Ok(x)
-```
-
-`defer` is function-scoped; placing one inside an `if` or `while` block still
-fires it at function exit, in reverse order of registration.
-
-### Disambiguating `!` from the ternary
-
-When `!` might be ambiguous with the ternary `!` (else branch), use `!!` to
-make intent explicit:
-
-```jinn
-result is condition ? value ! fallback     # ternary: condition ? then ! else
-!! NotFound                                # early return (unambiguous)
-```
-
-
----
-
-## List Comprehensions
-
-```jinn
-squares is [x pow 2 for x in 0 to 10]
-evens is [x for x in 0 to 100 if x mod 2 eq 0]
-```
-
-Syntax: `[expr for bind in start to end]` or `[expr for bind in start to end if cond]`. Produces a `vector`.
-
-For a fixed-size array instead:
-
-```jinn
-squares is array[x pow 2 for x in 0 to 10]
-```
-
----
-
-## Iterator Combinators
-
-Vector methods for functional data transformation. Chain with `.method()` syntax or `~` pipelines with named functions.
-
-```jinn
-*double(x as i64) returns i64 is x * 2
-*big(x as i64) returns bool is x > 10
-
-# map, filter as method chains
-doubled is nums.map(double)
-result is nums.map(double).filter(big)
-
-# fold
-total is nums.fold(0, |acc, x| acc + x)
-
-# zip, take, skip
-pairs is a.zip(b).take(5)
-
-# any, all, find
-has_neg is nums.any(|x| x < 0)
-found is items.find(|x| x eq target)
-
-# chain, flatten
-combined is a.chain(b)
-flat is nested.flatten()
-```
-
-Available methods: `map`, `filter`, `fold`, `any`, `all`, `find`, `zip`, `take`, `skip`, `chain`, `flatten`, `enumerate`, `reverse`, `sort`, `sum`, `count`, `contains`, `join`, `collect`.
-
----
-
-## Generators (Lazy Sequences)
-
-A function containing `yield` is automatically a generator. Calling it returns a lazy sequence.
-
-```jinn
-*fibonacci()
-    a is 0
-    b is 1
-    loop
-        yield a
-        temp is a
-        a is b
-        b is temp + b
-
-*main()
-    gen is fibonacci()
-    log gen.next()     # 0
-    log gen.next()     # 1
-    log gen.next()     # 1
-    log gen.next()     # 2
-```
-
-Generators are backed by the coroutine runtime (cooperative context switching). For-in iteration over generators is supported.
 
 ---
 
 ## Collections
 
-### Vector (dynamic array)
+### Vectors
+
+A vector is a growable array, created with `vec()`.
 
 ```jinn
-v is vector()
+v is vec()
 v.push(1)
 v.push(2)
-log v.length      # 2
-log v.pop()       # 2
+log(v.len())     # 2
+log(v.get(0))    # 1
+log(v.pop())     # 2
 ```
 
-### Map (hash map)
+### Maps
 
 ```jinn
 m is map()
 m.set('key', 42)
-log m.get('key')   # 42
-log m.has('key')   # true
+log(m.get('key'))    # 42
+log(m.has('key'))    # true
+```
+
+### Array literals
+
+```jinn
+nums is [1, 2, 3, 4, 5]
 ```
 
 ---
 
-## Regex
+## Comprehensions and iterators
 
-Pattern matching via the `regex` standard library module:
+A comprehension builds a vector from a range, with an optional filter:
 
 ```jinn
-use regex
-
-log regex.is_match('hello123', '[0-9]+')        # true
-found is regex.find('hello123world', '[0-9]+')  # '123'
-results is regex.find_all('a1b2c3', '[0-9]+')   # ['1', '2', '3']
+squares is [x pow 2 for x in 0 to 10]
+evens is [x for x in 0 to 100 if x mod 2 equals 0]
 ```
 
-Backed by PCRE2 at the runtime level. Also available with flat imports: `is_match(text, pattern)`.
+Vectors also provide functional combinators, which chain with `.` or `~`:
+
+```jinn
+doubled is nums.map(|x| x * 2)
+big is nums.filter(|x| x > 10)
+total is nums.fold(0, |acc, x| acc + x)
+found is items.find(|x| x equals target)
+```
+
+Available combinators include `map`, `filter`, `fold`, `any`, `all`, `find`,
+`zip`, `take`, `skip`, `chain`, `flatten`, `enumerate`, `reverse`, `sort`,
+`sum`, `count`, and `contains`.
 
 ---
 
-## Query Blocks
+## Generators
 
-Native query syntax for structured data operations. Store queries are operational; general query blocks are parsed but execution is deferred.
+A function that contains `yield` is a generator. Calling it produces a lazy
+sequence; `next()` advances it.
 
 ```jinn
-# Query with clauses
-query users
-    where age > 21
-    sort name
-    limit 10
+*counter()
+    n is 0
+    loop
+        yield n
+        n is n + 1
 
-# Available clauses: where, sort, limit, take, skip, set, delete
+*main
+    g is counter()
+    log(g.next())    # 0
+    log(g.next())    # 1
 ```
 
-Query blocks produce a `query` expression over a source with typed clauses. The compiler validates clause structure at parse time. Store-specific queries (using persistent stores) are fully implemented.
+Generators can also be iterated with `for`.
+
+---
+
+## Error handling
+
+Errors are ordinary values. There are no exceptions. You model an error with an
+enum, return it, and handle it with `match` at the call site.
+
+```jinn
+enum Result
+    Ok(i64)
+    Err(i64)
+
+*checked_add(a as i64, b as i64) returns Result
+    sum is a + b
+    if sum > 100
+        return Err(sum)
+    Ok(sum)
+
+*main
+    match checked_add(60, 50)
+        Ok(v) ? log(v)
+        Err(e) ? log(0 - e)
+```
+
+The `err` keyword marks an enum as an error type. It behaves like a regular
+enum and documents intent:
+
+```jinn
+err FileError
+    NotFound
+    Denied
+```
+
+`!` is shorthand for returning early — typically an error value:
+
+```jinn
+*open(path as String) returns FileError
+    if path equals ''
+        ! NotFound
+    ...
+```
+
+A function may declare which error enums it returns with a trailing `! E`:
+
+```jinn
+*read(path as String) returns i64 ! FileError
+    ...
+```
+
+`defer` registers cleanup that runs when the function exits, whichever way it
+exits. Deferred blocks run in reverse order of registration.
+
+```jinn
+*process()
+    defer
+        log('cleanup')
+    ...
+```
 
 ---
 
 ## Modules
 
+Each file is a module. A module's name is its file name, and its functions and
+types are referred to through that name.
+
 ```jinn
 # math.jn
 *add a, b
     a + b
+```
 
-# main.jn — implicit import (no `use` required)
+```jinn
+# main.jn
+use math
+
 *main
-    log math.add(1, 2)
+    log(math.add(1, 2))
 ```
 
-File = module. The compiler automatically resolves module references — `math.add` searches the standard library, project source files, and dependencies without requiring an explicit `use` statement.
-
-### Explicit Imports
+`use` accepts a path for files in subdirectories, and an alias:
 
 ```jinn
-use math                     # import module explicitly
-use math [sin, cos, pi]      # import specific symbols
-log sin(pi)
-```
-
-### Import Aliases
-
-```jinn
+use models/account
 use long_module_name as lmn
-lmn.do_thing()
 ```
-
----
-
-## Persistent Stores
-
-Stores are typed, persistent data collections that survive across program runs. They compile to flat binary files with compile-time query validation.
-
-```jinn
-# Define a store with typed fields
-store users
-    name as String
-    age as i64
-
-# Insert records (values match field order)
-insert users 'Alice', 30
-insert users 'Bob', 25
-insert users 'Carol', 35
-
-# Query — returns first matching record
-young is users where age < 30
-log young.name    # Bob
-log young.age     # 25
-
-# String equality queries
-found is users where name equals 'Bob'
-
-# Multi-field filters with AND/OR
-result is users where age > 20 and name equals 'Alice'
-match is users where age < 25 or age > 30
-
-# Delete matching records
-delete users where age > 28
-delete users where name equals 'Bob' and age < 30
-
-# Update records with set
-set users where name equals 'Alice' age 31
-set users where age > 30 name 'Senior', age 99
-
-# Count records
-total is count users
-
-# All records (returns pointer to array)
-all_users is all users
-
-# Transactions (atomic batches)
-transaction
-    insert users 'Dave', 40
-    insert users 'Eve', 22
-    delete users where age > 50
-```
-
-**Supported field types:** `i64`, `f64`, `bool`, `String` (fixed 256-byte buffers on disk).
-
-**Query operators:** `equals`, `neq`, `<`, `>`, `<=`, `>=` — validated at compile time.
-
-**Compound filters:** Chain conditions with `and` / `or` for multi-field filtering.
-
-**Set (update):** `set <store> where <filter> <field> <value> [, <field> <value>]*` — updates matching records in-place.
-
-**Transactions:** `transaction` blocks group store operations for batch execution.
-
-**Persistence:** Store data lives in `<name>.store` files in the working directory. Data accumulates across program runs.
-
----
-
-## Systems Programming
-
-### Extern Functions (C FFI)
-
-```jinn
-extern *printf(fmt as %i8, ...) returns i32
-
-*main
-    printf 'hello from jinn\n'
-```
-
-### System Calls
-
-```jinn
-*main
-    syscall 1, 1, 'hello\n', 6   # write(stdout, msg, len)
-```
-
-Direct system call interface for low-level OS interaction.
-
-### Inline Assembly
-
-```jinn
-asm
-    nop
-```
-
-Assembly lines are bare instructions (no quotes). The parser collects indented lines as raw assembly text and emits them via LLVM inline asm.
-
-### Raw Pointers
-
-```jinn
-ptr is %value
-val is @ptr        # dereference
-```
-
-### Volatile Memory Operations
-
-Hardware-observable reads and writes via the `volatile` standard library module. The compiler will not reorder, combine, or elide these operations — every load/store hits memory exactly as written. Required for memory-mapped I/O, hardware registers, and shared-memory communication where the compiler must not optimize away accesses.
-
-```jinn
-use volatile
-
-*poll_device
-    x is 0
-    ptr is %x
-    volatile.write(ptr, 99)
-    v is volatile.read(ptr)      # Always reads from memory
-    log v                        # 99
-```
-
-### Copy-on-Write (COW)
-
-Strings and vectors use copy-on-write when reference count > 1. Shared reads are zero-copy; mutation transparently clones on first write.
-
-```jinn
-a is 'hello'
-b is a              # shared — no copy
-b is b + ' world'   # COW triggers: b gets its own copy
-```
-
-### Signal Handling
-
-POSIX signal infrastructure via the `signal` standard library module.
-
-```jinn
-use signal
-
-*handler(sig as i32)
-    log sig
-
-*main
-    signal.handle(2, handler)      # SIGINT → handler
-    signal.ignore(13)              # SIGPIPE → ignore
-    signal.raise(2)                # raise SIGINT
-```
-
-### C Header Import
-
-Generate Jinn extern declarations from C headers automatically:
-
-```bash
-jinn bind /usr/include/sqlite3.h > std/sqlite.jn
-```
-
-Parses function declarations, types, typedefs and generates corresponding Jinn `extern` declarations with correct type mappings.
 
 ---
 
@@ -1003,427 +770,210 @@ Parses function declarations, types, typedefs and generates corresponding Jinn `
 
 ### Actors
 
+An `actor` has private fields and message handlers. Spawn one with `spawn`, send
+it a message by calling a handler, and shut it down with `stop`.
+
 ```jinn
 actor Counter
-    count is 0
+    count as i64
 
-    @increment amount
+    @init start as i64
+        count is start
+
+    @increment amount as i64
         count is count + amount
 
-    @get_count
-        count
+    @report
+        log(count)
 
 *main
     c is spawn Counter
+    c.init(0)
     c.increment(5)
     c.increment(3)
+    c.report()
+    stop c
 ```
 
-Actor handlers use `@name` syntax. Fields are defined in the actor body. Messages are sent with `target.handler(args)`. Actors run on a cooperative work-stealing scheduler. Message sends are non-blocking.
-
-### Supervisor Trees
-
-Erlang/OTP-style supervision for fault-tolerant actor hierarchies:
-
-```jinn
-supervisor my_system
-    strategy one_for_one    # restart only the failed child
-    children
-        spawn Worker('task-a')
-        spawn Worker('task-b')
-        spawn Logger
-```
-
-Strategies: `one_for_one`, `one_for_all`, `rest_for_one`.
-
-**Status:** Parsed but not yet compiled. Supervisor definitions are accepted by the parser but skipped during type checking and codegen.
+Handlers introduced with `@` are asynchronous (fire-and-forget). A handler
+introduced with `*` is synchronous and can return a value to the caller.
 
 ### Channels
 
+A channel carries values of one type between concurrent tasks.
+
 ```jinn
-ch is channel of i64(10)     # buffered channel, capacity 10
-send ch, 42                  # send value
-val is receive ch            # receive value
-close ch                     # close channel
+ch is channel of i64(16)    # buffered, capacity 16
+send ch, 42
+v is receive ch
+close ch
 ```
 
 ### Select
 
+`select` waits on several channel operations and runs the first one ready.
+
 ```jinn
 select
     receive ch1 as val
-        log 'got {val} from ch1'
+        log('from ch1: {val}')
     receive ch2 as val
-        log 'got {val} from ch2'
+        log('from ch2: {val}')
     default
-        log 'no messages'
+        log('nothing ready')
 ```
 
 ---
 
-## Numeric Computing
+## Persistent stores
 
-### Multi-Dimensional Arrays
+A `store` is a typed collection that persists to disk between runs. Queries are
+checked at compile time.
 
 ```jinn
-# 3×3 matrix (created with the `by` keyword)
-m is 3 by 3
+store users
+    name as String
+    age as i64
 
-# Access
-log m[1][2]
+# Insert records in field order
+insert users 'Alice', 30
+insert users 'Bob', 25
 
-# Element-wise arithmetic (broadcasting)
-a is 3 by 3
-b is 3 by 3
-c is a + b       # element-wise add
-d is a * 2.0     # scalar broadcast
+# Query — returns the first matching record
+young is users where age < 30
+log(young.name)
+
+# Compound filters
+adult is users where age > 20 and name equals 'Alice'
+
+# Update matching records
+set users where name equals 'Alice' age 31
+
+# Delete matching records
+delete users where age > 28
+
+# Count
+total is count users
+
+# Group operations atomically
+transaction
+    insert users 'Dave', 40
+    delete users where age > 50
 ```
 
-The `by` keyword creates an NDArray. `3 by 3` produces a 3×3 matrix of f64 zeros.
+Field types are `i64`, `f64`, `bool`, and `String`. Query operators are
+`equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with `and` / `or`. Data is
+stored in a `<name>.store` file in the working directory.
 
 ---
 
-## Compile-Time Evaluation
+## Systems programming
 
-### Extended Comptime Inference
+### C interop
 
-Pure functions with constant arguments are evaluated at compile time automatically — no keyword needed:
+Declare an external C function with `extern *`:
 
 ```jinn
-*fib(0) is 0
-*fib(1) is 1
-*fib n is fib(n - 1) + fib(n - 2)
+extern *printf(fmt as %i8, ...) returns i32
 
-x is fib(10)    # computed at compile time → 55
+*main
+    printf('hello from jinn\n')
 ```
 
-The compiler detects pure functions (no side effects) and evaluates them when all arguments are constants. Recursion depth limited to 100.
-
-### Rich Assert Messages
-
-The compiler auto-generates descriptive failure messages:
+### System calls
 
 ```jinn
-assert x > 0 and x < 100
-# On failure: "assertion failed: x > 0 and x < 100 where x = -5"
+syscall 1, 1, 'hello\n', 6    # write(stdout, msg, len)
 ```
 
----
+### Raw pointers
 
-## Compiler
-
-### Pipeline
-
-```
-Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership → Codegen → LLVM IR → Native Binary
-```
-
-Implemented in Rust with inkwell (LLVM 21). Multi-pass compilation: parse to AST, type-check and lower to HIR, run Perceus optimization pass, verify ownership, then codegen to LLVM IR.
-
-### CLI
-
-```
-jinnc <INPUT> [-o OUTPUT] [--emit-llvm] [--emit-hir] [--emit-mir] [--emit-obj] [--opt 0-3] [--lto] [--debug] [--threads N]
-```
-
-Subcommands:
-
-```bash
-jinn init [name]           # create new project with project.jn
-jinn build [-o out] [--opt N] [--lto]  # compile the project
-jinn run [-- args]         # compile and run
-jinn test                  # run project tests
-jinn check                 # type-check without codegen
-jinn fmt [files]           # format Jinn source files
-jinn fetch                 # download dependencies
-jinn update                # update dependency lock file
-jinn package               # emit jinn.pkg (+ dist tarball)
-jinn publish               # create git tag v<version> for package release
-jinn bind header.h         # generate extern declarations from C header
-```
-
-- `--emit-llvm` — print LLVM IR
-- `--emit-hir` — print HIR (typed intermediate representation)
-- `--emit-mir` — print MIR (mid-level IR)
-- `--emit-obj` — emit object file only
-- `--opt` — optimization level (default: 3)
-- `--lto` — link-time optimization
-- `--debug` — emit DWARF debug info (for lldb/gdb)
-- `--threads N` — parallel codegen threads (0 = auto-detect)
-
-Cross compilation and embedded/OS-style builds:
-
-```bash
-jinnc --target aarch64-unknown-linux-gnu source/main.jn -o app-aarch64
-jinn build --target riscv64-unknown-linux-gnu --cpu rocket --features +m,+a
-jinn build --target wasm32-wasi --standalone -o app.wasm
-```
-
-### Codegen Optimizations
-
-- **Integer literal coercion:** literals match operand width automatically
-- **Call/return coercion:** arguments and returns coerced to match declared types
-- **Function attributes:** `nounwind`, `nosync`, `nofree`, `mustprogress`, `willreturn` (non-recursive only), `noundef` on params
-- **Internal linkage:** non-main functions marked internal for cross-function optimization
-- **Arithmetic flags:** `nsw`/`nuw` on integer operations where provable
-- **Integer exponentiation:** square-and-multiply algorithm, no float roundtrip
-- **Boolean results:** `zext i1` for correct 0/1 values
-- **Printf format strings:** width-correct (`%d`/`%ld`/`%u`/`%lu`)
-
----
-
-## Performance
-
-Jinn compiles to identical LLVM IR as equivalent C. Benchmark suite tested against C (Clang 21 -O3, same LLVM backend). Five runs, median reported.
-
-| Benchmark | Jinn | Clang | J/C |
-|-----------|------|-------|-----|
-| ackermann(3,10) | 186ms | 202ms | 0.92× |
-| fibonacci(40) | 339ms | 336ms | 1.01× |
-| collatz(1M) | 169ms | 172ms | 0.99× |
-| sieve(1M) | 142ms | 142ms | 1.00× |
-| gcd_intensive | 24ms | 24ms | 0.99× |
-| spectral_norm | 209ms | 232ms | 0.90× |
-| nbody | 136ms | 136ms | 0.99× |
-| math_compute | 380μs | 580μs | 0.66× |
-| matrix_mul | 370μs | 460μs | 0.80× |
-| struct_ops | 430μs | 410μs | 1.05× |
-| enum_dispatch | 380μs | 450μs | 0.84× |
-| array_ops | 390μs | 470μs | 0.83× |
-| closure_capture | 380μs | 450μs | 0.84× |
-| tight_loop | 390μs | 450μs | 0.87× |
-| **TOTAL** | **1.21s** | **1.25s** | **0.97×** |
-
-Jinn matches Clang across the full compute suite — **0.97× C performance**.
-
-Run benchmarks:
-```
-python3 run_benchmarks.py --opt=3 --runs=5 --save=v0.5.0
-python3 run_benchmarks.py --opt=all --runs=5    # O0–O3 sweep
-python3 run_benchmarks.py --langs=jinn,c        # subset
-```
-
----
-
-## Building
-
-```bash
-# Prerequisites: Rust, LLVM 21
-export LLVM_SYS_211_PREFIX=/usr/lib/llvm-21
-
-# Build
-cd jinn && cargo build --release
-
-# Compile a program
-./target/release/jinnc hello.jn -o hello
-./hello
-
-# Run tests
-cargo test
-
-# Emit LLVM IR
-./target/release/jinnc hello.jn --emit-llvm
-```
-
----
-
-## Memory Model
-
-Three tiers, determined at compile time:
-
-| Tier | Allocation | Deallocation | Cost | Used For |
-|------|------------|--------------|------|----------|
-| **Register** | CPU register | N/A | Zero | Scalars |
-| **Stack** | `alloca` | Function return | Zero | Classes, fixed arrays, locals |
-| **Heap** | `malloc`/pool | Ownership drop or RC | Non-zero | Strings, dynamic arrays, shared values |
-
-**Decision rules:**
-1. Primitives (`i64`, `f64`, `bool`): always Register.
-2. Small classes (≤128 bytes) that don't escape: Stack.
-3. Fixed-size arrays that don't escape: Stack.
-4. Strings: Heap (but small-string optimization for ≤23 bytes).
-5. Values that escape (returned, stored in heap class): promoted to Heap.
-6. Shared values: Heap with automatic reference counting.
-
-**Ownership inference:** read → borrow, consume → move, mutate → mut ref, shared → automatic RC.
-
-**Perceus reference counting** (automatic for shared values):
-- Precision retain/release insertion based on ownership analysis
-- Borrow optimization — no retain/release for read-only access
-- Drop specialization — each type gets a specialized drop function
-- Reuse analysis — in-place update when RC=1 and same layout
-- Non-atomic fast path for thread-local values
-- Compiler detects potential cycles in the type graph and breaks them automatically
-
-### Memory Layout Control
+`%` takes a pointer; `@` dereferences one.
 
 ```jinn
-# Default — compiler may reorder fields for optimal alignment
-type Example
-    a as u8
-    b as u64
-    c as u8
-
-# C-compatible — declaration order preserved
-type CStruct @strict
-    magic as u32
-    version as u16
-    flags as u16
-    data as u64
-
-# Packed — no padding
-type Pixel @packed
-    r as u8
-    g as u8
-    b as u8
-
-# Cache-aligned
-type CacheAligned @align(64)
-    data as [u8; 64]
-
-# Combinable
-type NetPacket @packed @strict @align(4)
-    header as u32
-    payload as [u8; 1024]
+ptr is %value
+val is @ptr
 ```
 
-### Memory Safety Guarantees
+### Volatile access
 
-No use-after-free. No double-free. No dangling references. No data races. No null pointers. No buffer overflow. All enforced at compile time — zero runtime cost.
+The `volatile` module performs reads and writes that are never reordered or
+elided — for memory-mapped I/O and hardware registers.
+
+```jinn
+use volatile
+
+ptr is %reg
+volatile.write(ptr, 1)
+v is volatile.read(ptr)
+```
+
+### Signals
+
+```jinn
+use signal
+
+*handler(sig as i32)
+    log(sig)
+
+*main
+    signal.handle(2, handler)    # SIGINT
+```
 
 ---
 
-## Architecture
+## Standard library
 
-### Pipeline
+A few commonly used pieces.
 
-```
-Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership → Codegen → LLVM Opt → Native Binary
-         (indent)  (LL,RD)        (bidir)       (9 passes) (verify)    (DWARF)   (O0–O3)    (ELF/Mach-O)
-```
-
-### Key Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| No runtime library | Primitives compile to pure LLVM IR. No FFI boundary for basic operations. |
-| Typed native ABI | Functions use native LLVM signatures (`i64`, `f64`, `ptr`). No NaN-boxing. |
-| Value types as default | Classes laid out contiguously. No heap indirection for compound data. |
-| Monomorphization | Generics generate specialized code. No boxing, no virtual dispatch. |
-| Ownership + borrow checking | Memory safety without GC. Compile-time only — zero runtime cost. |
-| Perceus RC for shared values | Reference counting with borrow elision for shared data. Users opt in with `rc(x)` / `arc(x)`; use sites auto-deref through the wrapper. |
-
-### Diagnostics
-
-Structured error system with codes, spans, labels, and suggestions:
-
-```
-error[E301]: use of moved value 'data'
-  --> src/main.jn:12:5
-   |
-10 |     result is process(data)
-   |                       ---- value moved here
-12 |     log(data.len)
-   |         ^^^^ value used after move
-   = help: consider borrowing: process(ref data)
-```
-
-| Code Range | Category |
-|------------|----------|
-| E001–E099 | Syntax errors |
-| E100–E199 | Name resolution |
-| E200–E299 | Type errors |
-| E300–E399 | Ownership & borrow |
-| E400–E499 | Safety (volatile, FFI, signals) |
-| E500–E599 | Pattern matching |
-| E600–E699 | Memory (layout, allocation) |
-| E700–E799 | Integer overflow |
-| W001+ | Warnings |
-
----
-
-## Built-in Operations
-
-### Integer
+### Numeric methods
 
 ```jinn
-popcount(x)             # count set bits
-clz(x)                  # count leading zeros
-ctz(x)                  # count trailing zeros
-rotate_left(x, n)       # bit rotation
-rotate_right(x, n)
-bswap(x)                # byte swap (endianness)
-x pow n                 # square-and-multiply exponentiation
-```
-
-### Float
-
-```jinn
-x.sqrt()    x.sin()     x.cos()     x.tan()
-x.abs()     x.floor()   x.ceil()    x.round()
-x.is_nan()  x.is_infinite()  x.is_finite()
+x.sqrt()    x.sin()    x.cos()    x.abs()
+x.floor()   x.ceil()   x.round()
 x.min(y)    x.max(y)
+x.is_nan()  x.is_finite()
 ```
 
-### Array/Slice
+### Integer bit operations
 
 ```jinn
-a.length              # length (property access)
-a.len()               # length (method call)
-a[i]                  # bounds-checked index
-a from i to j         # slice
-a.contains(x)
-a.join(sep)           # join elements with separator string
+popcount(x)         # set bits
+clz(x)              # leading zeros
+ctz(x)              # trailing zeros
+rotate_left(x, n)
+rotate_right(x, n)
+bswap(x)            # byte swap
 ```
 
-### String
+### Regular expressions
 
 ```jinn
-s.contains('sub')       # true if s contains substring
-s.starts_with('pre')    # true if s starts with prefix
-s.ends_with('suf')      # true if s ends with suffix
-s.char_at(i)            # byte at index i (as i64)
-s.slice(start, end)     # substring [start, end)
-s.split(delim)          # split into array of strings
-s.trim()                # strip leading/trailing whitespace
-s.to_upper()            # uppercase copy
-s.to_lower()            # lowercase copy
-s.replace(old, new)     # replace all occurrences
-s.find(sub)             # index of first occurrence (-1 if not found)
-s.lines()               # split by newlines
-s.repeat(n)             # repeat string n times
-s.is_empty()            # true if length is 0
-s.trim_left()           # strip leading whitespace
-s.trim_right()          # strip trailing whitespace
+use regex
+
+regex.is_match('abc123', '[0-9]+')      # true
+regex.find('abc123', '[0-9]+')          # '123'
+regex.find_all('a1b2c3', '[0-9]+')      # ['1', '2', '3']
 ```
 
-String interpolation with `{expr}` inside single-quoted strings:
+### Built-ins
 
 ```jinn
-name is 'world'
-log('hello {name}')           # hello world
-x is 42
-log('x={x} x2={x * 2}')      # x=42 x2=84
-```
-
-### Global
-
-```jinn
-log(value)              # print to stdout
-to_string(x)            # convert to string
-time_now()              # nanosecond timestamp
-assert(cond)            # rich assert with auto-generated messages
-```
-
-### Debug
-
-Compile with `--debug` to emit DWARF debug info. Use with lldb or gdb:
-
-```bash
-jinnc main.jn -o main --debug
-lldb ./main
+log(value)        # print a line to stdout
+to_string(x)      # convert a value to a String
+assert(cond)      # check a condition at runtime
 ```
 
 ---
 
-*Jinn: Hard. Dense. Beautiful.*
+## Memory and ownership
+
+Jinn manages memory for you, without a garbage collector. Each value has a
+single owner, and its memory is released automatically when the owner goes out
+of scope. Reading a value borrows it without copying, so passing data around is
+cheap.
+
+You do not write allocation or free calls, and the language prevents
+use-after-free, double-free, and data races. Most of the time memory management
+is invisible — you write code in terms of values, and the compiler takes care of
+the rest.

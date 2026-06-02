@@ -97,7 +97,6 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::Cmp(op, l, r, _) => format!("{op} {l} {r}"),
 
         InstKind::Call(name, args) => format!("call {name}({})", fmt_args(args)),
-        InstKind::RuntimeOp(name, args) => format!("runtime {name}({})", fmt_args(args)),
         InstKind::MethodCall(obj, name, args, borrow) => {
             let suffix = if *borrow { " [borrow]" } else { "" };
             format!("method_call {obj}.{name}({}){suffix}", fmt_args(args))
@@ -136,8 +135,8 @@ fn format_inst_kind(kind: &InstKind) -> String {
         }
         InstKind::ArrayInit(vals) => format!("array [{}]", fmt_args(vals)),
 
-        InstKind::Cast(v, src, dst) => format!("cast {v} : {src:?} as {dst:?}"),
-        InstKind::StrictCast(v, src, dst) => format!("strict_cast {v} : {src:?} as {dst:?}"),
+        InstKind::Cast(v, dst) => format!("cast {v} as {dst:?}"),
+        InstKind::StrictCast(v, dst) => format!("strict_cast {v} as {dst:?}"),
         InstKind::Ref(v) => format!("ref {v}"),
         InstKind::Deref(v) => format!("deref {v}"),
         InstKind::Alloc(v) => format!("alloc {v}"),

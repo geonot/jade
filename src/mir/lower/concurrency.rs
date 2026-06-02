@@ -187,7 +187,6 @@ impl Lowerer {
                 value: val,
                 name: *cap_name,
                 ty: cap_ty.clone(),
-                ownership: hir::Ownership::Owned,
             });
             sub.var_types.insert(*cap_name, cap_ty.clone());
             sub.current_def
