@@ -126,28 +126,36 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         if let Some(loop_h) = loop_handler {
-            let loop_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), loop_h);
-            let loop_fv = self.module.get_function(&loop_fn_name).unwrap_or_else(|| {
-                panic!("ICE: actor loop handler fn not lowered: {loop_fn_name}")
-            });
-            b!(self.bld.build_call(loop_fv, &[state_ptr.into()], ""));
+            self.push_var_scope();
+
+            let state_name = format!("{name}_state");
+            let state_st = self
+                .module
+                .get_struct_type(&state_name)
+                .expect("ICE: struct type not declared");
+            for (fi, field) in ad.fields.iter().enumerate() {
+                let field_ptr = b!(self.bld.build_struct_gep(
+                    state_st,
+                    state_ptr,
+                    fi as u32,
+                    &format!("state_{}", field.name)
+                ));
+                self.set_var(&field.name.as_str(), field_ptr, field.ty.clone());
+            }
+
+            self.compile_block(&loop_h.body)?;
+            self.pop_var_scope();
+
+            if !self.no_term() {
+                return Err(format!(
+                    "actor '{name}': *loop handler cannot terminate control flow"
+                ));
+            }
 
             let sched_yield = crate::codegen::fn_or_die(&self.module, "jinn_sched_yield");
-            if loop_h.loop_sleep_ms.is_some() {
+            if let Some(sleep_expr) = &loop_h.loop_sleep_ms {
                 let i64t = self.ctx.i64_type();
-
-                let sleep_fn_name = crate::mir::actor_sleep_fn_name(ad.name.clone());
-                let sleep_fv = self
-                    .module
-                    .get_function(&sleep_fn_name)
-                    .unwrap_or_else(|| panic!("ICE: actor sleep fn not lowered: {sleep_fn_name}"));
-                let sleep_ms = b!(self
-                    .bld
-                    .build_call(sleep_fv, &[state_ptr.into()], "sleep_ms"))
-                .try_as_basic_value()
-                .basic()
-                .expect("ICE: sleep fn returned void")
-                .into_int_value();
+                let sleep_ms = self.compile_expr(sleep_expr)?.into_int_value();
                 let should_sleep = b!(self.bld.build_int_compare(
                     IntPredicate::SGT,
                     sleep_ms,
@@ -163,7 +171,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_conditional_branch(should_sleep, sleep_bb, yield_bb));
 
                 self.bld.position_at_end(sleep_bb);
-                self.emit_sleep_ms_val(sleep_ms)?;
+                let _ = self.compile_sleep_ms(std::slice::from_ref(sleep_expr))?;
                 b!(self.bld.build_unconditional_branch(pause_done_bb));
 
                 self.bld.position_at_end(yield_bb);
@@ -259,23 +267,31 @@ impl<'ctx> Compiler<'ctx> {
                     .collect::<Vec<_>>()
             ));
 
+            let state_name = format!("{name}_state");
+            let state_st = self
+                .module
+                .get_struct_type(&state_name)
+                .expect("ICE: struct type not declared");
+
             for (i, h) in message_handlers.iter().enumerate() {
                 let bb = handler_bbs[i].1;
                 self.bld.position_at_end(bb);
 
-                let has_self = h.params.first().is_some_and(|p| p.name.as_str() == "self");
-                let msg_params: &[hir::Param] = if has_self {
-                    &h.params[1..]
-                } else {
-                    &h.params[..]
-                };
+                self.push_var_scope();
 
-                let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
-                    vec![state_ptr.into()];
+                for (fi, field) in ad.fields.iter().enumerate() {
+                    let field_ptr = b!(self.bld.build_struct_gep(
+                        state_st,
+                        state_ptr,
+                        fi as u32,
+                        &format!("state_{}", field.name)
+                    ));
+                    self.set_var(&field.name.as_str(), field_ptr, field.ty.clone());
+                }
 
                 let i64t = self.ctx.i64_type();
                 let mut param_offset: u64 = 0;
-                for p in msg_params {
+                for p in &h.params {
                     let pty = self.llvm_ty(&p.ty);
                     let psize = self.type_store_size(pty);
                     let offset_val = i64t.const_int(param_offset, false);
@@ -287,28 +303,22 @@ impl<'ctx> Compiler<'ctx> {
                             &format!("param_{}_ptr", p.name)
                         ))
                     };
+                    let param_val = b!(self.bld.build_load(pty, param_ptr, &p.name.as_str()));
 
-                    if matches!(p.ty, Type::Struct(..) | Type::Tuple(..) | Type::Enum(..)) {
-                        call_args.push(param_ptr.into());
-                    } else {
-                        let param_val = b!(self.bld.build_load(pty, param_ptr, &p.name.as_str()));
-                        call_args.push(param_val.into());
-                    }
+                    let alloca = self.entry_alloca(pty, &p.name.as_str());
+                    b!(self.bld.build_store(alloca, param_val));
+                    self.set_var(&p.name.as_str(), alloca, p.ty.clone());
+
                     param_offset += psize;
                 }
 
-                let handler_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), h);
-                let handler_fv = self
-                    .module
-                    .get_function(&handler_fn_name)
-                    .unwrap_or_else(|| {
-                        panic!("ICE: actor handler fn not lowered: {handler_fn_name}")
-                    });
-                b!(self.bld.build_call(handler_fv, &call_args, ""));
+                self.compile_block(&h.body)?;
 
                 if self.no_term() {
                     b!(self.bld.build_unconditional_branch(loop_bb));
                 }
+
+                self.pop_var_scope();
             }
         }
 
@@ -321,6 +331,32 @@ impl<'ctx> Compiler<'ctx> {
 
         self.cur_fn = old_fn;
         Ok(())
+    }
+
+    pub(crate) fn synthesize_field_init(
+        &mut self,
+        field: &crate::hir::Field,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        if let Some(ref default_expr) = field.default {
+            return Ok(Some(self.compile_expr(default_expr)?));
+        }
+        match &field.ty {
+            Type::Vec(_) => Ok(Some(self.compile_vec_new(&[])?)),
+            Type::Map(_, _) => Ok(Some(self.compile_map_new()?)),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn compile_spawn_with_inits(
+        &mut self,
+        actor_name: &str,
+        inits: &[(crate::intern::Symbol, crate::hir::Expr)],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let lowered: Vec<(crate::intern::Symbol, BasicValueEnum<'ctx>)> = inits
+            .iter()
+            .map(|(name, e)| Ok::<_, String>((*name, self.compile_expr(e)?)))
+            .collect::<Result<_, _>>()?;
+        self.compile_spawn_with_init_vals(actor_name, &lowered)
     }
 
     pub(crate) fn compile_spawn_with_init_vals(
@@ -396,11 +432,18 @@ impl<'ctx> Compiler<'ctx> {
                 let state_ptr = b!(self
                     .bld
                     .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
-                let init_fn = self
-                    .module
-                    .get_function(&crate::mir::actor_init_fn_name(ad.name.clone()))
-                    .unwrap_or_else(|| panic!("ICE: actor init fn not lowered: {actor_name}"));
-                b!(self.bld.build_call(init_fn, &[state_ptr.into()], ""));
+                for (fi, field) in ad.fields.iter().enumerate() {
+                    let field_ptr = b!(self.bld.build_struct_gep(
+                        state_st,
+                        state_ptr,
+                        fi as u32,
+                        &format!("state_init_{}", field.name)
+                    ));
+                    let val = self.synthesize_field_init(field)?;
+                    if let Some(v) = val {
+                        b!(self.bld.build_store(field_ptr, v));
+                    }
+                }
 
                 for (uname, uval) in inits {
                     let fi = ad
@@ -526,14 +569,24 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
 
         if let Some(ad) = self.actor_defs.get(actor_name).cloned() {
-            let state_ptr = b!(self
-                .bld
-                .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
-            let init_fn = self
-                .module
-                .get_function(&crate::mir::actor_init_fn_name(ad.name.clone()))
-                .unwrap_or_else(|| panic!("ICE: actor init fn not lowered: {actor_name}"));
-            b!(self.bld.build_call(init_fn, &[state_ptr.into()], ""));
+            let state_name = format!("{actor_name}_state");
+            if let Some(state_st) = self.module.get_struct_type(&state_name) {
+                let state_ptr = b!(self
+                    .bld
+                    .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
+                for (fi, field) in ad.fields.iter().enumerate() {
+                    let field_ptr = b!(self.bld.build_struct_gep(
+                        state_st,
+                        state_ptr,
+                        fi as u32,
+                        &format!("state_init_{}", field.name)
+                    ));
+                    let val = self.synthesize_field_init(field)?;
+                    if let Some(v) = val {
+                        b!(self.bld.build_store(field_ptr, v));
+                    }
+                }
+            }
         }
 
         b!(self.bld.build_return(Some(&mb_ptr_v)));
@@ -543,5 +596,70 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(bb);
         }
         Ok(fv)
+    }
+
+    pub(crate) fn compile_send(
+        &mut self,
+        target: &hir::Expr,
+        actor_name: &str,
+        _handler_name: &str,
+        tag: u32,
+        args: &[hir::Expr],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let mb_name = format!("{actor_name}_mailbox");
+        let msg_name = format!("{actor_name}_msg");
+
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+
+        let mb_st = self
+            .module
+            .get_struct_type(&mb_name)
+            .ok_or_else(|| format!("mailbox type '{mb_name}' not found"))?;
+        let msg_st = self
+            .module
+            .get_struct_type(&msg_name)
+            .ok_or_else(|| format!("message type '{msg_name}' not found"))?;
+
+        let mb_ptr = self.compile_expr(target)?.into_pointer_value();
+
+        let ch_ptr_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 0, "ch_ptr_ptr"));
+        let ch_ptr = b!(self.bld.build_load(ptr_ty, ch_ptr_ptr, "ch_ptr"));
+
+        let msg_alloca = self.entry_alloca(msg_st.into(), "send_msg");
+
+        let tag_ptr = b!(self.bld.build_struct_gep(msg_st, msg_alloca, 0, "tag_ptr"));
+        b!(self
+            .bld
+            .build_store(tag_ptr, i32t.const_int(tag as u64, false)));
+
+        let payload_ptr = b!(self
+            .bld
+            .build_struct_gep(msg_st, msg_alloca, 1, "payload_ptr"));
+        let mut arg_offset: u64 = 0;
+        for arg in args {
+            let val = self.compile_expr(arg)?;
+            let pty = self.llvm_ty(&arg.ty);
+            let psize = self.type_store_size(pty);
+            let offset_val = i64t.const_int(arg_offset, false);
+            let dest = unsafe {
+                b!(self.bld.build_gep(
+                    self.ctx.i8_type(),
+                    payload_ptr,
+                    &[offset_val.into()],
+                    "arg_ptr"
+                ))
+            };
+            b!(self.bld.build_store(dest, val));
+            arg_offset += psize;
+        }
+
+        let chan_send = crate::codegen::fn_or_die(&self.module, "jinn_chan_send");
+        b!(self
+            .bld
+            .build_call(chan_send, &[ch_ptr.into(), msg_alloca.into()], ""));
+
+        Ok(i64t.const_int(0, false).into())
     }
 }

@@ -24,13 +24,23 @@ use crate::typer::Typer;
 use cli::{Cli, Cmd, die, dirs_cache, strip_codegen_prefix};
 use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
-use pipeline::{LinkSpec, compile_and_link, link_object};
+use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{
-    EntityIndex, find_project_entry, load_packages, merge_source_files, resolve_implicit_imports,
-    resolve_modules,
+    EntityIndex, find_project_entry, load_packages, merge_source_files,
+    resolve_implicit_imports, resolve_modules,
 };
 
+/// Initialize the `tracing` subscriber based on CLI verbosity flags.
+///
+/// Filter levels:
+/// - default: WARN (silent)
+/// - `--verbose`: INFO
+/// - `--debug`: DEBUG for all `jinnc::*` targets
+/// - `--debug-types`: TRACE for `jinnc::type`
+/// - `--debug-perceus`: TRACE for `jinnc::perceus`
+///
+/// Output goes to stderr without timestamps to keep diagnostics terse.
 fn init_tracing(cli: &Cli) {
     use tracing_subscriber::EnvFilter;
 
@@ -271,7 +281,9 @@ pub fn run() {
     }
 
     let input = cli.input.unwrap_or_else(|| die("no input file provided"));
-
+    // P1-17: `jinnc PATH/` and `jinnc PATH/project.jn` should both
+    // resolve to the project's declared entry file rather than try
+    // to compile the directory or the manifest itself.
     let input = resolve_project_input(input);
     let src = fs::read_to_string(&input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
@@ -521,7 +533,12 @@ pub fn run() {
         use crate::perceus::mir_perceus;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_perceus::run(&mut mir_prog);
-        if cli.debug_perceus {
+        if cli.debug_perceus
+            || mir_hints.stats.drops_elided > 0
+            || mir_hints.stats.reuse_sites > 0
+            || mir_hints.stats.drops_fused > 0
+            || mir_hints.stats.last_use_tracked > 0
+        {
             eprintln!(
                 "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",
                 mir_hints.stats.drops_elided,
@@ -578,24 +595,79 @@ pub fn run() {
         die(&format!("emit: {e}"));
     }
 
+    let mut cc = Command::new("cc");
+    cc.arg(&obj).arg("-o").arg(&cli.output);
+    if comp.needs_runtime {
+        let rt_dir = env!("JINN_RT_DIR");
+        cc.arg("-L").arg(rt_dir).arg("-ljinn_rt").arg("-lpthread");
+    }
+    if comp.needs_ssl {
+        if env!("JINN_HAS_SSL") != "1" {
+            die(
+                "program uses std.tls or std.crypto but OpenSSL was not available when the compiler was built",
+            );
+        }
+        let rt_dir = env!("JINN_RT_DIR");
+        cc.arg("-L")
+            .arg(rt_dir)
+            .arg("-ljinn_ssl")
+            .arg("-lssl")
+            .arg("-lcrypto");
+    }
+    if comp.needs_sqlite {
+        if env!("JINN_HAS_SQLITE") != "1" {
+            die(
+                "program uses std.sqlite but SQLite3 was not available when the compiler was built",
+            );
+        }
+        let rt_dir = env!("JINN_RT_DIR");
+        cc.arg("-L")
+            .arg(rt_dir)
+            .arg("-ljinn_sqlite")
+            .arg("-lsqlite3");
+    }
+    cc.arg("-lm");
+    for extra in &cli.link {
+        cc.arg(extra);
+    }
     let use_lto = project_config
         .as_ref()
         .and_then(|p| p.lto)
         .unwrap_or(cli.lto);
-    link_object(&LinkSpec {
-        obj: &obj,
-        output: &cli.output,
-        needs_runtime: comp.needs_runtime,
-        standalone: comp.standalone,
-        needs_ssl: comp.needs_ssl,
-        needs_sqlite: comp.needs_sqlite,
-        lto: use_lto,
-        debug: cli.debug,
-        target: comp.target_triple.as_deref(),
-        extra_links: &cli.link,
-    });
+    if use_lto {
+        cc.arg("-flto");
+    }
+    if cli.debug {
+        cc.arg("-g");
+    }
+
+    if let Some(ref triple) = comp.target_triple {
+        cc.arg(&format!("--target={triple}"));
+        if triple.contains("wasm") {
+            cc = Command::new("clang");
+            cc.arg(&format!("--target={triple}"));
+            cc.arg(&obj).arg("-o").arg(&cli.output);
+            if !comp.standalone {
+                cc.arg("-lc");
+            } else {
+                cc.arg("-nostdlib")
+                    .arg("-Wl,--no-entry")
+                    .arg("-Wl,--export-all");
+            }
+        }
+    }
+    let status = cc.status();
+    let _ = fs::remove_file(&obj);
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) => die(&format!("linker failed: {}", s.code().unwrap_or(-1))),
+        Err(e) => die(&format!("linker: {e}")),
+    }
 }
 
+/// P1-17: resolve `jinnc PATH/` and `jinnc PATH/project.jn` to the
+/// project's declared entry file. A plain `.jn` source file is
+/// returned unchanged.
 fn resolve_project_input(input: PathBuf) -> PathBuf {
     let project_jinn = if input.is_dir() {
         input.join("project.jn")

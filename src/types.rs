@@ -211,9 +211,20 @@ impl std::fmt::Display for Type {
 }
 
 impl Type {
+    /// Canonicalize a type for comparison/unification purposes (P0-12).
+    ///
+    /// Resolves long-standing asymmetries between equivalent representations:
+    ///   - `Type::Struct("String"|"string", _)` collapses to `Type::String`.
+    ///   - `Type::Alias(_, inner)` collapses to `inner.canonical()`. Aliases
+    ///     are transparent.
+    ///   - `Type::Newtype(_, _)` is preserved — newtypes are nominally
+    ///     distinct from their underlying type.
+    ///   - Composites recurse into their components.
     pub fn canonical(&self) -> Type {
         match self {
-            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => Type::String,
+            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => {
+                Type::String
+            }
             Type::Alias(_, inner) => inner.canonical(),
             Type::Array(inner, n) => Type::Array(Box::new(inner.canonical()), *n),
             Type::Vec(inner) => Type::Vec(Box::new(inner.canonical())),
@@ -235,43 +246,14 @@ impl Type {
         }
     }
 
+    /// True iff `self` and `other` denote the same canonical type.
     pub fn eq_canonical(&self, other: &Type) -> bool {
         self.canonical() == other.canonical()
     }
 
+    /// True if this is the canonical string type regardless of representation.
     pub fn is_string(&self) -> bool {
         matches!(self.canonical(), Type::String)
-    }
-
-    /// Debug-only invariant check: returns `true` if any nested type is a
-    /// `Struct("String"|"string")`, i.e. a non-canonical spelling of
-    /// [`Type::String`] that should have been normalized at the resolution
-    /// boundary (parser `ident_to_type`, typer `ident_to_type`, iterator
-    /// element inference). Such a type is canonicalized away by
-    /// [`Type::canonical`], but its presence means a birth site forgot to
-    /// canonicalize, so equality/`matches!` checks that bypass `canonical`
-    /// could silently mis-compare. Used by the `debug_assert!` at the
-    /// unification entry to catch regressions.
-    pub(crate) fn has_string_struct(&self) -> bool {
-        match self {
-            Type::Struct(n, args) => {
-                n.as_str() == "String"
-                    || n.as_str() == "string"
-                    || args.iter().any(Type::has_string_struct)
-            }
-            Type::Array(inner, _)
-            | Type::Vec(inner)
-            | Type::Ptr(inner)
-            | Type::Coroutine(inner)
-            | Type::Channel(inner)
-            | Type::Generator(inner)
-            | Type::Alias(_, inner)
-            | Type::Newtype(_, inner) => inner.has_string_struct(),
-            Type::Map(k, v) => k.has_string_struct() || v.has_string_struct(),
-            Type::Tuple(ts) => ts.iter().any(Type::has_string_struct),
-            Type::Fn(ps, r) => ps.iter().any(Type::has_string_struct) || r.has_string_struct(),
-            _ => false,
-        }
     }
 }
 

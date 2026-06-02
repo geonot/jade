@@ -17,22 +17,6 @@ pub struct ValueId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockId(pub u32);
 
-pub fn actor_handler_fn_name(actor: Symbol, handler: &crate::hir::HandlerDef) -> String {
-    if handler.is_loop {
-        format!("__actor_{}_loop", actor)
-    } else {
-        format!("__actor_{}_h_{}", actor, handler.name)
-    }
-}
-
-pub fn actor_init_fn_name(actor: Symbol) -> String {
-    format!("__actor_init_{}", actor)
-}
-
-pub fn actor_sleep_fn_name(actor: Symbol) -> String {
-    format!("__actor_sleep_{}", actor)
-}
-
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: Symbol,
@@ -45,8 +29,6 @@ pub struct Function {
     pub next_value: u32,
     pub next_block: u32,
     pub attrs: FnAttrs,
-
-    pub is_coroutine: bool,
 
     pub perceus: PerceusMeta,
 }
@@ -128,7 +110,6 @@ pub struct Param {
     pub value: ValueId,
     pub name: Symbol,
     pub ty: Type,
-    pub ownership: crate::hir::Ownership,
 }
 
 #[derive(Debug, Clone)]
@@ -171,8 +152,6 @@ pub enum InstKind {
 
     Call(Symbol, Vec<ValueId>),
 
-    RuntimeOp(Symbol, Vec<ValueId>),
-
     MethodCall(ValueId, Symbol, Vec<ValueId>, bool),
     IndirectCall(ValueId, Vec<ValueId>),
 
@@ -184,7 +163,7 @@ pub enum InstKind {
 
     FieldStore(Symbol, Symbol, ValueId),
 
-    FieldClear(ValueId, Symbol),
+    FieldTombstone(Symbol, Symbol),
 
     Index(ValueId, ValueId),
 
@@ -197,8 +176,8 @@ pub enum InstKind {
     VariantInit(Symbol, Symbol, u32, Vec<ValueId>),
     ArrayInit(Vec<ValueId>),
 
-    Cast(ValueId, Type, Type),
-    StrictCast(ValueId, Type, Type),
+    Cast(ValueId, Type),
+    StrictCast(ValueId, Type),
     Ref(ValueId),
     Deref(ValueId),
 
@@ -230,7 +209,6 @@ pub enum InstKind {
     SelectArm(Vec<ValueId>, bool),
 
     Log(ValueId),
-    Eprint(ValueId),
     Assert(ValueId, String),
 
     InlineAsm(String, Vec<ValueId>),

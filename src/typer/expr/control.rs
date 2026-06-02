@@ -17,30 +17,30 @@ impl Typer {
                     .cloned()
                     .unwrap_or_else(|| self.infer_ctx.fresh_var());
                 let hi = self.lower_if(i, &result_ty)?;
-                let then_ty = self.hir_tail_type(&hi.then);
-                let ty = if let Some(t) = then_ty {
-                    let r = self.infer_ctx.unify_at(
-                        &result_ty,
-                        &t,
-                        i.span,
-                        "if-expression then branch",
-                    );
-                    self.collect_unify_error(r);
-                    t
-                } else {
-                    Type::Void
+                let ty = match hi.then.last() {
+                    Some(hir::Stmt::Expr(e)) => {
+                        let r = self.infer_ctx.unify_at(
+                            &result_ty,
+                            &e.ty,
+                            i.span,
+                            "if-expression then branch",
+                        );
+                        self.collect_unify_error(r);
+                        e.ty.clone()
+                    }
+                    _ => Type::Void,
                 };
                 if let Some(ref els) = hi.els {
-                    if let Some(t) = self.hir_tail_type(els) {
+                    if let Some(hir::Stmt::Expr(e)) = els.last() {
                         let r =
                             self.infer_ctx
-                                .unify_at(&ty, &t, i.span, "if-expression branches");
+                                .unify_at(&ty, &e.ty, i.span, "if-expression branches");
                         self.collect_unify_error(r);
                     }
                 }
                 for (_, branch) in &hi.elifs {
-                    if let Some(t) = self.hir_tail_type(branch) {
-                        let r = self.infer_ctx.unify_at(&ty, &t, i.span, "elif branch");
+                    if let Some(hir::Stmt::Expr(e)) = branch.last() {
+                        let r = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");
                         self.collect_unify_error(r);
                     }
                 }
@@ -91,9 +91,11 @@ impl Typer {
                         hstmts.push(self.lower_stmt(s, &Type::Void)?);
                     }
                 }
-                self.finalize_block_drops(&mut hstmts);
                 self.pop_scope();
-                let ty = self.hir_tail_type(&hstmts).unwrap_or(Type::Void);
+                let ty = match hstmts.last() {
+                    Some(hir::Stmt::Expr(e)) => e.ty.clone(),
+                    _ => Type::Void,
+                };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Block(hstmts),
                     ty,

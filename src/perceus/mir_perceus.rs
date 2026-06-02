@@ -6,6 +6,10 @@ use crate::types::Type;
 
 use super::PerceusHints;
 
+pub fn analyze_mir_program(prog: &mut mir::Program) -> PerceusHints {
+    run(prog)
+}
+
 pub fn run(prog: &mut mir::Program) -> PerceusHints {
     let mut hints = PerceusHints::default();
     let mut next_slot: u32 = 0;
@@ -95,7 +99,6 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
 
             match &inst.kind {
                 InstKind::Call(_, args)
-                | InstKind::RuntimeOp(_, args)
                 | InstKind::IndirectCall(_, args)
                 | InstKind::ClosureCall(_, args) => {
                     for a in args {
@@ -223,7 +226,6 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::UnaryOp(_, a) => vec![*a],
 
         InstKind::Call(_, args) => args.clone(),
-        InstKind::RuntimeOp(_, args) => args.clone(),
         InstKind::MethodCall(recv, _, args, _) => {
             let mut v = vec![*recv];
             v.extend(args);
@@ -239,7 +241,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::FieldGet(obj, _) => vec![*obj],
         InstKind::FieldSet(obj, _, val) => vec![*obj, *val],
         InstKind::FieldStore(_, _, val) => vec![*val],
-        InstKind::FieldClear(o, _) => vec![*o],
+        InstKind::FieldTombstone(_, _) => vec![],
         InstKind::Index(base, idx) | InstKind::IndexUnchecked(base, idx) => vec![*base, *idx],
         InstKind::IndexSet(base, idx, val) => vec![*base, *idx, *val],
         InstKind::IndexStore(_, idx, val) => vec![*idx, *val],
@@ -248,7 +250,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::VariantInit(_, _, _, payload) => payload.clone(),
         InstKind::ArrayInit(elems) => elems.clone(),
 
-        InstKind::Cast(v, _, _) | InstKind::StrictCast(v, _, _) => vec![*v],
+        InstKind::Cast(v, _) | InstKind::StrictCast(v, _) => vec![*v],
         InstKind::Ref(v) | InstKind::Deref(v) => vec![*v],
 
         InstKind::Alloc(v) => vec![*v],
@@ -275,7 +277,7 @@ fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         InstKind::ChanRecv(ch) => vec![*ch],
         InstKind::SelectArm(channels, _) => channels.clone(),
 
-        InstKind::Log(v) | InstKind::Eprint(v) => vec![*v],
+        InstKind::Log(v) => vec![*v],
         InstKind::Assert(v, _) => vec![*v],
 
         InstKind::InlineAsm(_, args) => args.clone(),
@@ -435,7 +437,11 @@ fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
     false
 }
 
-fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_slot: &mut u32) {
+fn vec_reuse_pairing(
+    func: &mut mir::Function,
+    hints: &mut PerceusHints,
+    next_slot: &mut u32,
+) {
     let mut pairs = 0u32;
 
     for bi in 0..func.blocks.len() {
@@ -473,7 +479,6 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
                     }
                 }
                 InstKind::Call(_, _)
-                | InstKind::RuntimeOp(_, _)
                 | InstKind::IndirectCall(_, _)
                 | InstKind::MethodCall(_, _, _, _)
                 | InstKind::ClosureCall(_, _)
@@ -556,7 +561,6 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
                 matches!(
                     inst.kind,
                     InstKind::Call(_, _)
-                        | InstKind::RuntimeOp(_, _)
                         | InstKind::IndirectCall(_, _)
                         | InstKind::MethodCall(_, _, _, _)
                         | InstKind::ClosureCall(_, _)

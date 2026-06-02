@@ -9,6 +9,11 @@ impl Lowerer {
     pub(super) fn lower_stmt_control(&mut self, stmt: &hir::Stmt) -> ValueId {
         match stmt {
             hir::Stmt::If(if_stmt) => {
+                // Pure Braun SSA: each branch lowers into its own block and
+                // writes definitions into its per-block `current_def`. Reads
+                // after the merge build phis on demand via `read_var`, so no
+                // cross-branch snapshotting or post-merge re-materialization is
+                // required here.
                 let cond = self.lower_expr(&if_stmt.cond);
                 let then_bb = self.new_block("if.then");
                 let merge_bb = self.new_block("if.merge");
@@ -26,6 +31,8 @@ impl Lowerer {
 
                 self.set_terminator(Terminator::Branch(cond, then_bb, else_bb));
 
+                // Then-branch: single predecessor (the block we just left), so
+                // safe to seal immediately.
                 self.switch_to(then_bb);
                 self.seal_block(then_bb);
                 let then_val = self.lower_block_expr(&if_stmt.then);
@@ -49,6 +56,8 @@ impl Lowerer {
                         Some(self.new_block("elif.test"))
                     };
 
+                    // Pure Braun: this elif's cond/body reads phi lazily;
+                    // per-block current_def gives structural branch isolation.
                     self.switch_to(elif_test);
                     self.seal_block(elif_test);
                     let c = self.lower_expr(elif_cond);
@@ -80,6 +89,8 @@ impl Lowerer {
                     None
                 };
 
+                // All predecessors of merge_bb are now terminated — safe to seal.
+                // Reads after the merge build phis lazily via `read_var`.
                 self.switch_to(merge_bb);
                 self.seal_block(merge_bb);
 
@@ -92,12 +103,12 @@ impl Lowerer {
                     if let Some((eb, ev)) = else_val_info {
                         incoming.push((eb, ev));
                     }
-
+                    // Arms that diverged (return/break/continue) end in a dead
+                    // `after.*` block that is not wired into `merge_bb`. They
+                    // contribute no value to the merge — drop them, else the
+                    // result phi references a non-predecessor block.
                     incoming.retain(|(bb, _)| !self.unreachable_blocks.contains(bb));
-                    let types_agree = incoming
-                        .iter()
-                        .all(|(_, v)| self.value_type(*v) == then_ty);
-                    if incoming.is_empty() || !types_agree {
+                    if incoming.is_empty() {
                         self.emit(InstKind::Void, Type::Void, if_stmt.span)
                     } else {
                         let result = self.new_value();
@@ -113,6 +124,11 @@ impl Lowerer {
                 }
             }
             hir::Stmt::Match(m) => {
+                // Pure Braun SSA: each arm lowers into its own block(s) and
+                // records bindings/definitions in its per-block `current_def`.
+                // Arms are structurally isolated (no arm is a predecessor of
+                // another), and reads after the merge build phis on demand, so
+                // no snapshotting or post-merge re-materialization is needed.
                 let subj = self.lower_expr(&m.subject);
                 let merge_bb = self.new_block("match.merge");
 
@@ -240,7 +256,10 @@ impl Lowerer {
                                 }
                             }
                         }
-                        let arm_last = self.lower_block_expr(&arm.body);
+                        let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
+                        for s in &arm.body {
+                            arm_last = self.lower_stmt(s);
+                        }
                         if !self.current_block_has_terminator() {
                             if has_result {
                                 phi_entries.push((arm_last, self.current_block));
@@ -439,7 +458,9 @@ impl Lowerer {
 
                         self.switch_to(arm_bb);
                         self.seal_block(arm_bb);
-
+                        // Re-establish the top-level bind in the arm body so the
+                        // guard and body read it from this block's `current_def`
+                        // (the dispatch test wrote it into the predecessor's).
                         if let Pat::Bind(_, name, _ty, _) = &arm.pat {
                             self.write_var(name.clone(), self.current_block, subj);
                         }
@@ -492,7 +513,10 @@ impl Lowerer {
                             self.switch_to(body_bb);
                             self.seal_block(body_bb);
                         }
-                        let arm_last = self.lower_block_expr(&arm.body);
+                        let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
+                        for s in &arm.body {
+                            arm_last = self.lower_stmt(s);
+                        }
                         if !self.current_block_has_terminator() {
                             if has_result {
                                 phi_entries.push((arm_last, self.current_block));
@@ -511,8 +535,11 @@ impl Lowerer {
 
                 self.switch_to(merge_bb);
                 self.seal_block(merge_bb);
-
+                // Reads after the merge build phis lazily via `read_var`.
                 if has_result && !phi_entries.is_empty() {
+                    // Arms that diverged (return/break/continue) end in a dead
+                    // `after.*` block that is not a predecessor of `merge_bb`;
+                    // exclude them so the result phi only references real preds.
                     let incoming: Vec<(BlockId, ValueId)> = phi_entries
                         .iter()
                         .filter(|(_, blk)| !self.unreachable_blocks.contains(blk))

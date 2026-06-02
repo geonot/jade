@@ -43,7 +43,10 @@ impl Typer {
             .collect();
 
         let mut hir_handlers = Vec::new();
-
+        // Allocate ONE canonical DefId per field, reused in every handler
+        // scope below. Without this, each handler would re-define fields with
+        // a fresh id, making a field's `Var` def_id non-correlatable across
+        // handlers (and impossible to map back to the field for MIR lowering).
         let field_def_ids: Vec<crate::hir::DefId> =
             fields.iter().map(|_| self.fresh_id()).collect();
         for (i, h) in ad.handlers.iter().enumerate() {
@@ -255,6 +258,12 @@ impl Typer {
 
     pub(in crate::typer) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let mut hfn = self.lower_fn_deferred(f)?;
+        // NOTE: hfn.ret may still be an unresolved TypeVar here for fns with
+        // an inferred return type. Resolution is deferred to a final pass in
+        // lower_program() — after all method bodies have been lowered — so
+        // that ret types that ultimately unify with the return of a method
+        // (whose body is lowered later) do not get prematurely defaulted to
+        // i64.
 
         let einfo = crate::escape::analyze_fn(&hfn);
         for (id, t) in einfo.iter() {

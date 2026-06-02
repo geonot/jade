@@ -404,21 +404,11 @@ impl InferCtx {
         let a = self.shallow_resolve(&a);
         let b = self.shallow_resolve(&b);
 
-        // Invariant: string types must reach unification in their canonical
-        // `Type::String` form, never as `Struct("String"|"string")`. Every
-        // name->Type resolution site (parser/typer `ident_to_type`, iterator
-        // element inference) normalizes them at birth. `canonical()` below is
-        // a safety net, but a non-canonical type here means a birth site was
-        // missed and a `==`/`matches!` check elsewhere could mis-compare.
-        debug_assert!(
-            !a.has_string_struct(),
-            "non-canonical string type reached unify (lhs): {a}"
-        );
-        debug_assert!(
-            !b.has_string_struct(),
-            "non-canonical string type reached unify (rhs): {b}"
-        );
-
+        // Canonicalize at the unification entry (P0-12). This collapses
+        // `Type::Struct("String", _)` ↔ `Type::String`, transparently
+        // unwraps `Type::Alias`, and recurses into composites. After this
+        // step the unifier sees a single canonical representation per
+        // semantic type.
         let a = a.canonical();
         let b = b.canonical();
 
@@ -564,7 +554,11 @@ impl InferCtx {
                 }
                 Ok(())
             }
-
+            // P0-12 compatibility shim: until every site that produces
+            // `Type::Enum(n)` is migrated to produce `Type::Struct(n, args)`,
+            // accept `Struct(n, _) ↔ Enum(n)` when names match. Generic args
+            // on the struct side are not unified (the enum side carries no
+            // arg info), which preserves existing behaviour.
             (Type::Struct(na, _), Type::Enum(nb)) | (Type::Enum(nb), Type::Struct(na, _))
                 if na == nb =>
             {

@@ -162,6 +162,10 @@ pub struct Compiler<'ctx> {
 
     pub(crate) current_alloc_dest: Option<mir::ValueId>,
 
+    /// True while `compile_mir_fn` is emitting a coroutine body (a MIR
+    /// `Function` with `is_coroutine == true`). Consulted by `emit_terminator`
+    /// so a `Return` marks the generator done and suspends instead of emitting
+    /// a normal LLVM `ret`.
     pub(crate) cur_fn_is_coroutine: bool,
 }
 

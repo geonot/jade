@@ -41,7 +41,7 @@ same fix also covers generic structs in concrete parameter annotations.
 A second, severe defect was discovered and fixed **during** this sweep: loop
 bodies, match arms, value-position `if`, and expression blocks never dropped
 their heap-allocated locals, producing an unbounded memory leak that OOM-froze
-the host. Fixed in commits `d23c949` and `94f4838`.
+the host. Fixed in commits `d23c949` and `94f4838`.  
 
 Beyond the safety floor, the **major** stdlib defects, the **significant**
 Phase-B/C items (LSP wiring, stability/std docs, SECURITY.md, residual

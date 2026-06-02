@@ -169,7 +169,6 @@ impl<'ctx> Compiler<'ctx> {
                             | "clear"
                             | "next"
                     ),
-                    mir::InstKind::RuntimeOp(_, _) => true,
                     mir::InstKind::Call(name, _) => {
                         name.starts_with("__coro_create_")
                             || name.starts_with("__gen_create_")
@@ -260,6 +259,12 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        Self::extract_coro_bodies_from_program(
+            hir_prog,
+            &mut self.coro_bodies,
+            &mut self.coro_captures,
+        );
+
         for gdef in &prog.globals {
             let llvm_ty = self.llvm_ty(&gdef.ty);
             let gv = self
@@ -290,6 +295,14 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_mir_fn(func)?;
         }
 
+        for ti in &hir_prog.trait_impls {
+            for m in &ti.methods {
+                if !self.fns.contains_key(&m.name) {
+                    self.declare_method(&ti.type_name.as_str(), m)?;
+                }
+            }
+        }
+
         self.generate_vtables(&hir_prog.trait_impls)?;
 
         if !hir_prog.actors.is_empty() {
@@ -318,19 +331,6 @@ impl<'ctx> Compiler<'ctx> {
         let ret = func.ret_ty.clone();
 
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-
-        if func.is_coroutine {
-            let void = self.ctx.void_type();
-            let ft = void.fn_type(&[ptr_ty.into()], false);
-            let fv = self
-                .module
-                .add_function(&func.name.as_str(), ft, Some(Linkage::Internal));
-            self.tag_fn(fv);
-            self.apply_fn_attrs(fv, &func.attrs);
-            self.fns.insert(func.name, (fv, ptys, ret));
-            return Ok(());
-        }
-
         let lp: Vec<BasicMetadataTypeEnum<'ctx>> = ptys
             .iter()
             .map(|t| match t {
@@ -368,21 +368,6 @@ impl<'ctx> Compiler<'ctx> {
             b!(self
                 .bld
                 .build_store(argv_global.as_pointer_value(), argv_param));
-
-            if !self.standalone {
-                let install_crash = self
-                    .module
-                    .get_function("jinn_install_crash_handlers")
-                    .unwrap_or_else(|| {
-                        let ft = self.ctx.void_type().fn_type(&[], false);
-                        self.module.add_function(
-                            "jinn_install_crash_handlers",
-                            ft,
-                            Some(Linkage::External),
-                        )
-                    });
-                b!(self.bld.build_call(install_crash, &[], ""));
-            }
 
             if let Some(sched_init) = self.module.get_function("jinn_sched_init") {
                 b!(self
@@ -424,11 +409,6 @@ impl<'ctx> Compiler<'ctx> {
             let fv = self.module.add_function(&func.name.as_str(), ft, None);
             self.tag_fn(fv);
             self.apply_fn_attrs(fv, &func.attrs);
-            for (i, p) in func.params.iter().enumerate() {
-                let loc = inkwell::attributes::AttributeLoc::Param(i as u32);
-                fv.add_attribute(loc, self.attr("noundef"));
-                self.tag_param_ownership(fv, loc, &p.ownership, &p.ty);
-            }
             self.fns.insert(func.name, (fv, ptys, ret));
         }
         Ok(())
@@ -476,63 +456,39 @@ impl<'ctx> Compiler<'ctx> {
         self.vars = IndexMap::new();
         self.var_shadows.clear();
         self.var_scope_markers.clear();
-        self.cur_fn_is_coroutine = func.is_coroutine;
 
         for bb in &func.blocks {
             let llvm_bb = self.ctx.append_basic_block(fv, &bb.label.as_str());
             self.block_map.insert(bb.id, llvm_bb);
         }
 
-        if func.is_coroutine {
-            let entry_bb = self.block_map[&func.entry];
-            self.bld.position_at_end(entry_bb);
+        for (i, param) in func.params.iter().enumerate() {
+            let llvm_val = fv.get_nth_param(i as u32).unwrap();
+            self.value_map.insert(param.value, llvm_val);
+            self.value_types.insert(param.value, param.ty.clone());
 
-            let ptr = self.ctx.ptr_type(AddressSpace::default());
-            let gen_ptr_param = fv
-                .get_first_param()
-                .expect("ICE: coroutine fn has no parameter")
-                .into_pointer_value();
-            let gen_ptr_alloca = self.entry_alloca(ptr.into(), "__coro_ctx");
-            b!(self.bld.build_store(gen_ptr_alloca, gen_ptr_param));
-            self.set_var("__coro_ctx", gen_ptr_alloca, Type::Ptr(Box::new(Type::I64)));
-
-            for (i, param) in func.params.iter().enumerate() {
-                let off = Self::GEN_SIZE + (i as u64) * 8;
-                let slot_ptr = self.gen_field_ptr(gen_ptr_param, off, "cap.slot")?;
-                let llvm_ty = self.llvm_ty(&param.ty);
-                let loaded = b!(self.bld.build_load(llvm_ty, slot_ptr, &param.name.as_str()));
-                self.value_map.insert(param.value, loaded);
-                self.value_types.insert(param.value, param.ty.clone());
-            }
-        } else {
-            for (i, param) in func.params.iter().enumerate() {
-                let llvm_val = fv.get_nth_param(i as u32).unwrap();
-                self.value_map.insert(param.value, llvm_val);
-                self.value_types.insert(param.value, param.ty.clone());
-
-                let effective_ty = match &param.ty {
-                    Type::Ptr(inner)
-                        if matches!(
-                            inner.as_ref(),
-                            Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
-                        ) =>
-                    {
-                        (**inner).clone()
-                    }
-                    _ => param.ty.clone(),
-                };
-                if matches!(
-                    effective_ty,
-                    Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
-                ) && llvm_val.is_pointer_value()
+            let effective_ty = match &param.ty {
+                Type::Ptr(inner)
+                    if matches!(
+                        inner.as_ref(),
+                        Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
+                    ) =>
                 {
-                    let ptr = llvm_val.into_pointer_value();
-                    let lt = self.llvm_ty(&effective_ty);
-                    self.self_allocs.insert(param.value, ptr);
-                    self.self_alloc_types.insert(param.value, lt);
-
-                    self.value_types.insert(param.value, effective_ty);
+                    (**inner).clone()
                 }
+                _ => param.ty.clone(),
+            };
+            if matches!(
+                effective_ty,
+                Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
+            ) && llvm_val.is_pointer_value()
+            {
+                let ptr = llvm_val.into_pointer_value();
+                let lt = self.llvm_ty(&effective_ty);
+                self.self_allocs.insert(param.value, ptr);
+                self.self_alloc_types.insert(param.value, lt);
+
+                self.value_types.insert(param.value, effective_ty);
             }
         }
 
@@ -544,8 +500,6 @@ impl<'ctx> Compiler<'ctx> {
                 let llvm_ty = self.llvm_ty(&phi.ty);
                 let phi_val = b!(self.bld.build_phi(llvm_ty, &format!("v{}", phi.dest.0)));
                 self.value_map.insert(phi.dest, phi_val.as_basic_value());
-
-                self.value_types.insert(phi.dest, phi.ty.clone());
                 self.pending_phis.push(PendingPhi {
                     phi: phi_val,
                     incoming: phi.incoming.clone(),
@@ -589,48 +543,30 @@ impl<'ctx> Compiler<'ctx> {
                     let llvm_val = self.value_map.get(val_id)?;
 
                     let v = if llvm_val.get_type() != phi_ty {
-                        if phi_ty.is_struct_type() && llvm_val.is_pointer_value() {
-
-
-
-
-
-
-
-                            let ptr = (*llvm_val).into_pointer_value();
-                            match llvm_bb.get_terminator() {
-                                Some(t) => self.bld.position_before(&t),
-                                None => self.bld.position_at_end(*llvm_bb),
-                            }
-                            self.bld
-                                .build_load(phi_ty, ptr, "phi.load")
-                                .expect("ICE: failed to load phi coercion")
+                        let is_void_sentinel = llvm_val.get_type().is_int_type()
+                            && llvm_val.get_type().into_int_type().get_bit_width() == 8;
+                        if !is_void_sentinel {
+                            panic!(
+                                "ICE: phi node type mismatch: incoming {:?} vs phi {:?} (block {:?}, val {:?})",
+                                llvm_val.get_type(),
+                                phi_ty,
+                                block_id,
+                                val_id,
+                            );
+                        }
+                        if phi_ty.is_int_type() {
+                            phi_ty.into_int_type().const_int(0, false).into()
+                        } else if phi_ty.is_float_type() {
+                            phi_ty.into_float_type().const_float(0.0).into()
+                        } else if phi_ty.is_pointer_type() {
+                            phi_ty.into_pointer_type().const_null().into()
+                        } else if phi_ty.is_struct_type() {
+                            phi_ty.into_struct_type().const_zero().into()
                         } else {
-                            let is_void_sentinel = llvm_val.get_type().is_int_type()
-                                && llvm_val.get_type().into_int_type().get_bit_width() == 8;
-                            if !is_void_sentinel {
-                                panic!(
-                                    "ICE: phi node type mismatch: incoming {:?} vs phi {:?} (block {:?}, val {:?})",
-                                    llvm_val.get_type(),
-                                    phi_ty,
-                                    block_id,
-                                    val_id,
-                                );
-                            }
-                            if phi_ty.is_int_type() {
-                                phi_ty.into_int_type().const_int(0, false).into()
-                            } else if phi_ty.is_float_type() {
-                                phi_ty.into_float_type().const_float(0.0).into()
-                            } else if phi_ty.is_pointer_type() {
-                                phi_ty.into_pointer_type().const_null().into()
-                            } else if phi_ty.is_struct_type() {
-                                phi_ty.into_struct_type().const_zero().into()
-                            } else {
-                                panic!(
-                                    "ICE: cannot coerce void sentinel to phi type {:?}",
-                                    phi_ty,
-                                );
-                            }
+                            panic!(
+                                "ICE: cannot coerce void sentinel to phi type {:?}",
+                                phi_ty,
+                            );
                         }
                     } else {
                         *llvm_val
@@ -693,26 +629,6 @@ impl<'ctx> Compiler<'ctx> {
             }
             mir::Terminator::Return(val) => {
                 self.drain_reuse_slots();
-                if self.cur_fn_is_coroutine {
-                    let _ = val;
-                    let ptr = self.ctx.ptr_type(AddressSpace::default());
-                    let i8t = self.ctx.i8_type();
-                    let (gen_alloca, _) = self
-                        .find_var("__coro_ctx")
-                        .cloned()
-                        .ok_or("internal: no __coro_ctx in coroutine body")?;
-                    let gen_ptr =
-                        b!(self.bld.build_load(ptr, gen_alloca, "gen.ctx")).into_pointer_value();
-                    let done_ptr = self.gen_field_ptr(gen_ptr, Self::GEN_DONE_OFF, "gen.done")?;
-                    b!(self.bld.build_store(done_ptr, i8t.const_int(1, false)));
-                    let gen_suspend = self
-                        .module
-                        .get_function("jinn_gen_suspend")
-                        .ok_or("jinn_gen_suspend not declared")?;
-                    b!(self.bld.build_call(gen_suspend, &[gen_ptr.into()], ""));
-                    b!(self.bld.build_unreachable());
-                    return Ok(());
-                }
                 if let Some(vid) = val {
                     let v = self.val(*vid);
                     let expected = self.llvm_ty(ret_ty);

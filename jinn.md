@@ -21,7 +21,7 @@ This compiles to the same LLVM IR as equivalent C. Same speed. Zero overhead.
 1. **Values are their types.** An `i64` is a register. A class is contiguous memory at known offsets. No universal wrapper. No indirection unless requested.
 2. **Ownership is default.** One owner per value. Compiler inserts drops statically. No GC, no cycle detector.
 3. **Borrowing is free.** Read access borrows a reference — zero runtime cost. No retain, no release. Container reads (`vec.get(i)`, `map.get(k)`, `for x in xs`) default to borrows when the element type is heap-managed; use the `copy` modifier (`x is copy v.get(0)`) for an owned clone, or `take` to move out.
-4. **Single ownership; aliasing is transparent.** Every heap-backed value has exactly one owner at any moment, and the compiler inserts its single drop site statically. There is no `Rc`, no `Arc`, no `Box`, and no surface refcount wrapper — refcounted handles do not exist in the IR. For each binding the compiler chooses an ownership tier (Owned / Borrowed / BorrowMut) automatically via escape analysis (short-lived reads stay raw-pointer borrows; only escaping values get cloned), preserving value semantics with zero runtime cost. Cross-thread sharing is done by *moving* values through the purpose-built `Channel<T>` and `ActorRef<T>` primitives, which carry their own atomic refcount inside the runtime. Types annotated `@resource` (file handles, sockets, store rows) are linear: they reject `copy`, may not cross a thread boundary, and have their `*drop` run automatically at scope exit.
+4. **Sharing is explicit, access is transparent.** When you want shared ownership, write `rc(x)` (single-threaded), `rc_cell(x)` (single-threaded mutable), `arc(x)` (cross-thread), or `arc_mutex(x)` (cross-thread mutable). The compiler makes the wrapper invisible at every use site — `r.field`, `r[i]`, `r.method()` peer through the wrapper automatically; you never write `*r`. For non-shared bindings, the compiler still chooses Owned vs Borrowed automatically via escape analysis (T1 short-lived reads stay raw pointers; only escaping values get cloned). Types annotated `@atomic` use atomic refcounts; `@weakable @atomic` types expose `weak ref T`. Types annotated `@resource` (file handles, sockets, store rows) reject `copy` and must be explicitly shared via `ref` or wrapped in `rc(...)`/`arc(...)`.
 5. **Inference does the work.** HM + bidirectional + ownership inference. You don't write types unless you want to.
 6. **Performance is non-negotiable.** Every design evaluated against: *does this prevent generating the same code C would?* If yes, the design is wrong.
 
@@ -1235,7 +1235,7 @@ Three tiers, determined at compile time:
 |------|------------|--------------|------|----------|
 | **Register** | CPU register | N/A | Zero | Scalars |
 | **Stack** | `alloca` | Function return | Zero | Classes, fixed arrays, locals |
-| **Heap** | `malloc`/pool | Single-owner drop | Non-zero | Strings, dynamic arrays, escaping values |
+| **Heap** | `malloc`/pool | Ownership drop or RC | Non-zero | Strings, dynamic arrays, shared values |
 
 **Decision rules:**
 1. Primitives (`i64`, `f64`, `bool`): always Register.
@@ -1243,17 +1243,17 @@ Three tiers, determined at compile time:
 3. Fixed-size arrays that don't escape: Stack.
 4. Strings: Heap (but small-string optimization for ≤23 bytes).
 5. Values that escape (returned, stored in heap class): promoted to Heap.
-6. Cross-thread values: moved through `Channel`/`ActorRef`, which the runtime refcounts atomically.
+6. Shared values: Heap with automatic reference counting.
 
-**Ownership inference:** read → borrow, consume → move, mutate → mut ref. Cross-thread transfer → move through a `Channel`/`ActorRef` (runtime-refcounted).
+**Ownership inference:** read → borrow, consume → move, mutate → mut ref, shared → automatic RC.
 
-**Perceus-style ownership pass** (use counting + static drop placement — no GC, no generic `Rc`/`Arc`):
-- Precise drop insertion at each value's last use, based on ownership analysis
-- Borrow optimization — no drop glue for read-only (`Borrowed`) access
+**Perceus reference counting** (automatic for shared values):
+- Precision retain/release insertion based on ownership analysis
+- Borrow optimization — no retain/release for read-only access
 - Drop specialization — each type gets a specialized drop function
-- Reuse analysis — in-place update when a heap value is uniquely owned at its last use and the layout matches
-- Drop sinking + fusion — consecutive scope-exit drops coalesce into a single `DropMany`
-- The only atomic refcounts in the runtime belong to the `Channel`/`ActorRef` concurrency primitives
+- Reuse analysis — in-place update when RC=1 and same layout
+- Non-atomic fast path for thread-local values
+- Compiler detects potential cycles in the type graph and breaks them automatically
 
 ### Memory Layout Control
 
@@ -1311,7 +1311,7 @@ Source → Lexer → Parser → AST → Typer → HIR → Perceus → Ownership 
 | Value types as default | Classes laid out contiguously. No heap indirection for compound data. |
 | Monomorphization | Generics generate specialized code. No boxing, no virtual dispatch. |
 | Ownership + borrow checking | Memory safety without GC. Compile-time only — zero runtime cost. |
-| Single-owner drops + Perceus | Static drop placement with borrow elision; no GC and no generic `Rc`/`Arc`. Cross-thread sharing moves values through runtime-refcounted `Channel`/`ActorRef` primitives. |
+| Perceus RC for shared values | Reference counting with borrow elision for shared data. Users opt in with `rc(x)` / `arc(x)`; use sites auto-deref through the wrapper. |
 
 ### Diagnostics
 

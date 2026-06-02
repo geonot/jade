@@ -109,7 +109,10 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         fv.add_attribute(loc, self.attr("nonnull"));
-
+        // LLVM 21 deprecates `nocapture` (use `captures(none)`) and `readonly`
+        // (use `memory(read)`). The string-attribute forms required for those
+        // aren't worth threading in until we have a measurable optimizer win.
+        // `noalias` remains a valid enum attribute on params.
         match ownership {
             hir::Ownership::Owned | hir::Ownership::BorrowMut | hir::Ownership::Borrowed => {
                 fv.add_attribute(loc, self.attr("noalias"));

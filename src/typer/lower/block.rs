@@ -78,76 +78,8 @@ impl Typer {
         }
     }
 
-    pub(in crate::typer) fn finalize_block_drops_excluding(
-        &mut self,
-        stmts: &mut Vec<hir::Stmt>,
-        extra: &std::collections::HashSet<crate::hir::DefId>,
-    ) {
-        let ends_with_jump = stmts.last().map_or(false, |s| {
-            matches!(
-                s,
-                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
-            )
-        });
-        if ends_with_jump {
-            let jump = stmts.pop().unwrap();
-            let mut excl = extra.clone();
-            Self::collect_hir_var_ids_stmt(&jump, &mut excl);
-            self.emit_scope_drops_excluding(stmts, &excl);
-            stmts.push(jump);
-        } else if let Some(hir::Stmt::Expr(_)) = stmts.last() {
-            let tail = stmts.pop().unwrap();
-            let mut excl = extra.clone();
-            if let hir::Stmt::Expr(te) = &tail {
-                Self::collect_moved_var_ids(te, &mut excl);
-            }
-            stmts.push(tail);
-            self.emit_scope_drops_excluding(stmts, &excl);
-        } else {
-            self.emit_scope_drops_excluding(stmts, extra);
-        }
-    }
-
-    pub(in crate::typer) fn collect_pat_bind_ids(
-        pat: &hir::Pat,
-        out: &mut std::collections::HashSet<crate::hir::DefId>,
-    ) {
-        match pat {
-            hir::Pat::Bind(id, _, _, _) => {
-                out.insert(*id);
-            }
-            hir::Pat::Ctor(_, _, sub, _)
-            | hir::Pat::Or(sub, _)
-            | hir::Pat::Tuple(sub, _)
-            | hir::Pat::Array(sub, _) => {
-                for p in sub {
-                    Self::collect_pat_bind_ids(p, out);
-                }
-            }
-            hir::Pat::Wild(_) | hir::Pat::Lit(_) | hir::Pat::Range(..) => {}
-        }
-    }
-
     pub(in crate::typer) fn emit_scope_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
-    }
-
-    pub(in crate::typer) fn finalize_loop_body_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
-        let ends_with_jump = stmts.last().map_or(false, |s| {
-            matches!(
-                s,
-                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
-            )
-        });
-        if ends_with_jump {
-            let jump = stmts.pop().unwrap();
-            let mut jump_refs = std::collections::HashSet::new();
-            Self::collect_hir_var_ids_stmt(&jump, &mut jump_refs);
-            self.emit_scope_drops_excluding(stmts, &jump_refs);
-            stmts.push(jump);
-        } else {
-            self.emit_scope_drops(stmts);
-        }
     }
 
     fn collect_block_consumed_ids(
@@ -168,12 +100,10 @@ impl Typer {
                     }
                 }
                 hir::Stmt::Bind(b) => {
-                    if !matches!(b.access_mod, Some(crate::ast::AccessMod::Copy)) {
-                        let resolved = self.infer_ctx.resolve(&b.value.ty);
-                        if Self::expr_type_needs_drop(&resolved) {
-                            if let hir::ExprKind::Var(id, _) = &b.value.kind {
-                                out.insert(*id);
-                            }
+                    let resolved = self.infer_ctx.resolve(&b.value.ty);
+                    if Self::expr_type_needs_drop(&resolved) {
+                        if let hir::ExprKind::Var(id, _) = &b.value.kind {
+                            out.insert(*id);
                         }
                     }
                 }
@@ -267,117 +197,6 @@ impl Typer {
             ty,
             Type::Vec(_) | Type::Map(_, _) | Type::String | Type::Struct(_, _) | Type::Enum(_)
         )
-    }
-
-    pub(in crate::typer) fn record_take_moves_in_stmt(&mut self, s: &hir::Stmt) {
-        match s {
-            hir::Stmt::Bind(b) => {
-                if matches!(b.access_mod, Some(crate::ast::AccessMod::Take))
-                    && let hir::ExprKind::Var(id, _) = &b.value.kind
-                {
-                    let resolved = self.infer_ctx.resolve(&b.value.ty);
-                    if Self::expr_type_needs_drop(&resolved) {
-                        self.mark_var_moved(*id);
-                    }
-                }
-                self.record_take_moves_in_expr(&b.value);
-            }
-            hir::Stmt::Expr(e)
-            | hir::Stmt::Ret(Some(e), _, _)
-            | hir::Stmt::ErrReturn(e, _, _)
-            | hir::Stmt::Break(Some(e), _) => {
-                self.record_take_moves_in_expr(e);
-            }
-            hir::Stmt::Assign(target, value, _) => {
-                self.record_take_moves_in_expr(value);
-                self.record_take_moves_in_expr(target);
-            }
-
-            _ => {}
-        }
-    }
-
-    fn record_take_moves_in_expr(&mut self, expr: &hir::Expr) {
-        match &expr.kind {
-            hir::ExprKind::Call(_, name, args) => {
-                if let Some(access) = self.fn_param_access.get(name).cloned() {
-                    for (i, a) in args.iter().enumerate() {
-                        if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
-                            && let hir::ExprKind::Var(id, _) = &a.kind
-                        {
-                            let resolved = self.infer_ctx.resolve(&a.ty);
-                            if Self::expr_type_needs_drop(&resolved) {
-                                self.mark_var_moved(*id);
-                            }
-                        }
-                    }
-                }
-                for a in args {
-                    self.record_take_moves_in_expr(a);
-                }
-            }
-            hir::ExprKind::Method(recv, ty_name, m_name, args) => {
-                let mangled: crate::intern::Symbol =
-                    format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
-                if let Some(access) = self.fn_param_access.get(&mangled).cloned() {
-                    if matches!(access.first(), Some(Some(crate::ast::AccessMod::Take)))
-                        && let hir::ExprKind::Var(id, _) = &recv.kind
-                    {
-                        let resolved = self.infer_ctx.resolve(&recv.ty);
-                        if Self::expr_type_needs_drop(&resolved) {
-                            self.mark_var_moved(*id);
-                        }
-                    }
-                    for (i, a) in args.iter().enumerate() {
-                        if matches!(access.get(i + 1), Some(Some(crate::ast::AccessMod::Take)))
-                            && let hir::ExprKind::Var(id, _) = &a.kind
-                        {
-                            let resolved = self.infer_ctx.resolve(&a.ty);
-                            if Self::expr_type_needs_drop(&resolved) {
-                                self.mark_var_moved(*id);
-                            }
-                        }
-                    }
-                }
-                self.record_take_moves_in_expr(recv);
-                for a in args {
-                    self.record_take_moves_in_expr(a);
-                }
-            }
-            hir::ExprKind::IndirectCall(callee, args) => {
-                self.record_take_moves_in_expr(callee);
-                for a in args {
-                    self.record_take_moves_in_expr(a);
-                }
-            }
-            hir::ExprKind::BinOp(l, _, r) | hir::ExprKind::Index(l, r) => {
-                self.record_take_moves_in_expr(l);
-                self.record_take_moves_in_expr(r);
-            }
-            hir::ExprKind::UnaryOp(_, x)
-            | hir::ExprKind::Field(x, _, _)
-            | hir::ExprKind::Cast(x, _)
-            | hir::ExprKind::StrictCast(x, _)
-            | hir::ExprKind::Coerce(x, _)
-            | hir::ExprKind::Ref(x)
-            | hir::ExprKind::Deref(x) => {
-                self.record_take_moves_in_expr(x);
-            }
-            hir::ExprKind::Ternary(c, t, e) => {
-                self.record_take_moves_in_expr(c);
-                self.record_take_moves_in_expr(t);
-                self.record_take_moves_in_expr(e);
-            }
-            hir::ExprKind::Tuple(xs)
-            | hir::ExprKind::Array(xs)
-            | hir::ExprKind::VecNew(xs)
-            | hir::ExprKind::Builtin(_, xs) => {
-                for x in xs {
-                    self.record_take_moves_in_expr(x);
-                }
-            }
-            _ => {}
-        }
     }
 
     pub(in crate::typer) fn emit_scope_drops_excluding(

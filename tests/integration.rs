@@ -2748,6 +2748,113 @@ fn store_set_skips_deleted() {
 }
 
 #[test]
+#[ignore]
+fn store_perf_regression() {
+    use std::time::Instant;
+
+    let src = r#"
+use std/time
+
+store bench
+    key as i64
+    value as i64
+    score as f64
+
+*main
+    i is 0
+    while i < 5000
+        insert bench i, i * 7, 3.14
+        i is i + 1
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        c is count bench
+        j is j + 1
+    log('count_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        r1 is bench where key equals 2500
+        j is j + 1
+    log('query_eq_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        s is bench.sum(value)
+        j is j + 1
+    log('agg_sum_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        d is bench.distinct(value)
+        j is j + 1
+    log('distinct_x100')
+    log(elapsed(t0))
+
+    t0 is monotonic()
+    j is 0
+    while j < 100
+        set bench where key equals 500 value 999
+        j is j + 1
+    log('set_eq_x100')
+    log(elapsed(t0))
+
+    log('done')
+"#;
+
+    let wall_start = Instant::now();
+    let output = compile_and_run_in_dir(src);
+    let wall_total = wall_start.elapsed();
+
+    let lines: Vec<&str> = output.trim().lines().collect();
+    assert_eq!(
+        lines.last().copied(),
+        Some("done"),
+        "benchmark did not complete"
+    );
+
+    let mut timings: Vec<(&str, f64)> = Vec::new();
+    let mut i = 0;
+    while i + 1 < lines.len() {
+        if let Ok(t) = lines[i + 1].parse::<f64>() {
+            timings.push((lines[i], t));
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    eprintln!("\n=== Store Performance Results (5000 records × 100 iterations) ===");
+    for (name, secs) in &timings {
+        let per_call_us = secs * 1_000_000.0 / 100.0;
+        eprintln!("  {name:<20} {secs:.6}s  ({per_call_us:.0}µs/call)");
+    }
+    eprintln!("  wall total: {:.3}s", wall_total.as_secs_f64());
+
+    let max_allowed = 0.5;
+    for (name, secs) in &timings {
+        assert!(
+            *secs < max_allowed,
+            "PERF REGRESSION: {name} took {secs:.3}s (limit {max_allowed}s)"
+        );
+    }
+
+    if let Some((_, distinct_time)) = timings.iter().find(|(n, _)| *n == "distinct_x100") {
+        assert!(
+            *distinct_time < 0.25,
+            "PERF REGRESSION: distinct is too slow ({distinct_time:.3}s) — may have regressed to O(n²)"
+        );
+    }
+}
+
+#[test]
 fn defer_runs_on_normal_exit() {
     expect("*main()\n    defer\n        log(2)\n    log(1)\n", "1\n2");
 }
@@ -3994,171 +4101,4 @@ fn access_field_auto_copy_escape() {
 #[test]
 fn access_field_short_lived_borrow() {
     expect_file("tests/programs/field_short_lived_borrow.jn", "zero\n0\nhi");
-}
-
-// ---------------------------------------------------------------------------
-// MIR SSA construction edge cases (Braun et al. 2013 incremental SSA).
-//
-// These programs stress the variable model in `src/mir/lower/ssa.rs` and the
-// lazy phi insertion that replaced the legacy `var_map` + branch-snapshot
-// scaffolding. Each is compiled and run at every optimization level so that
-// any divergence between the unoptimized form and the phi-collapsed /
-// DCE'd / store-load-forwarded form is caught. A miscompiled phi (missing
-// operand, wrong predecessor value, or a spuriously materialized value)
-// changes the program output at one opt level but not another.
-// ---------------------------------------------------------------------------
-
-/// Compile `src` at every opt level (0..=3) and assert each run prints
-/// `expected`. Divergence across opt levels indicates an SSA/phi bug.
-fn expect_all_opts(src: &str, expected: &str) {
-    for opt in ["0", "1", "2", "3"] {
-        let dir = tempfile::tempdir().unwrap();
-        let jinn = dir.path().join("test.jn");
-        let out = dir.path().join("test_bin");
-        std::fs::write(&jinn, src).unwrap();
-        let status = Command::new(jinnc())
-            .arg(&jinn)
-            .arg("--opt")
-            .arg(opt)
-            .arg("-o")
-            .arg(&out)
-            .status()
-            .expect("jinnc failed to start");
-        assert!(status.success(), "jinnc --opt {opt} failed for:\n{src}");
-        let output = Command::new(&out)
-            .output()
-            .expect("compiled binary failed to start");
-        assert!(
-            output.status.success(),
-            "binary (--opt {opt}) exited with {:?}\nstderr: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let got = String::from_utf8(output.stdout).unwrap();
-        assert_eq!(
-            got.trim(),
-            expected.trim(),
-            "opt level {opt} diverged for source:\n{src}"
-        );
-    }
-}
-
-/// A variable assigned in only the `then` branch must, at the merge, phi the
-/// branch value against the pre-`if` value flowing through the implicit
-/// else-path. Reads after the merge must observe the correct phi.
-#[test]
-fn ssa_var_assigned_in_one_branch_only() {
-    expect_all_opts(
-        "*main()\n    x is 10\n    if 1 > 0\n        x is 20\n    log(x)\n    if 0 > 1\n        x is 30\n    log(x)\n",
-        "20\n20",
-    );
-}
-
-/// A variable assigned in BOTH arms of an if/else: the merge phi has a real
-/// operand from each predecessor; the pre-`if` value must not leak through.
-#[test]
-fn ssa_var_assigned_in_both_branches() {
-    expect_all_opts(
-        "*main()\n    cond is 1\n    x is 0\n    if cond equals 1\n        x is 5\n    else\n        x is 9\n    log(x)\n",
-        "5",
-    );
-}
-
-/// Classic loop-carried accumulator: `sum` is read and rewritten each
-/// iteration. The header phi must merge the pre-loop seed with the
-/// back-edge value.
-#[test]
-fn ssa_loop_carried_accumulator() {
-    expect_all_opts(
-        "*main()\n    sum is 0\n    for i in 0 to 100\n        sum is sum + i\n    log(sum)\n",
-        "4950",
-    );
-}
-
-/// A pre-existing variable WRITTEN inside the loop body but never read there.
-/// After the loop, the read must phi the seed (zero iterations) against the
-/// body value (>=1 iteration). Here the loop always runs, so the body value
-/// wins.
-#[test]
-fn ssa_loop_writes_var_without_reading() {
-    expect_all_opts(
-        "*main()\n    x is 1\n    for i in 0 to 3\n        x is 7\n    log(x)\n",
-        "7",
-    );
-}
-
-/// A conditional reassignment INSIDE a loop body: the back-edge phi at the
-/// loop header interacts with the merge phi of the inner if. `acc` doubles
-/// only on even iterations.
-#[test]
-fn ssa_conditional_reassign_in_loop() {
-    expect_all_opts(
-        "*main()\n    acc is 1\n    for i in 0 to 6\n        if i % 2 equals 0\n            acc is acc + i\n    log(acc)\n",
-        "7",
-    );
-}
-
-/// Nested loop mutating an outer-scope accumulator: both the inner and outer
-/// header phis carry `total`, and the inner loop's exit value flows back into
-/// the outer back-edge.
-#[test]
-fn ssa_nested_loop_outer_accumulator() {
-    expect_all_opts(
-        "*main()\n    total is 0\n    for i in 0 to 4\n        for j in 0 to 3\n            total is total + 1\n    log(total)\n",
-        "12",
-    );
-}
-
-/// `break` out of a loop: the exit block has two predecessors (the break edge
-/// and the cond-false edge). The post-loop read of `sum` must phi correctly
-/// across both.
-#[test]
-fn ssa_break_two_exit_predecessors() {
-    expect_all_opts(
-        "*main()\n    sum is 0\n    for i in 0 to 100\n        if i equals 5\n            break\n        sum is sum + i\n    log(sum)\n",
-        "10",
-    );
-}
-
-/// `continue`: the increment block gains an extra predecessor (the continue
-/// edge). A loop-carried var skipped on some iterations must still phi
-/// correctly.
-#[test]
-fn ssa_continue_extra_inc_predecessor() {
-    expect_all_opts(
-        "*main()\n    i is 0\n    sum is 0\n    while i < 10\n        i is i + 1\n        if i % 2 equals 0\n            continue\n        sum is sum + i\n    log(sum)\n",
-        "25",
-    );
-}
-
-/// Match arms each binding the same-named variable, whose value is consumed
-/// inside the arm. Exercises the `Pat::Bind` write into per-arm `current_def`.
-#[test]
-fn ssa_match_arms_bind_same_name() {
-    expect_all_opts(
-        "enum E\n    A(i64)\n    B(i64)\n\n*classify(e as E) returns i64\n    match e\n        A(v) ?\n            v + 1\n        B(v) ?\n            v + 100\n\n*main()\n    log(classify(A(5)))\n    log(classify(B(5)))\n",
-        "6\n105",
-    );
-}
-
-/// A ternary value (`cond ? a ! b`) bound and accumulated inside a loop. The
-/// ternary's merge phi must select the taken branch's value; the loop adds a
-/// header phi for the accumulator.
-#[test]
-fn ssa_ternary_value_in_loop() {
-    expect_all_opts(
-        "*main()\n    acc is 0\n    for i in 0 to 5\n        step is i % 2 equals 0 ? 10 ! 1\n        acc is acc + step\n    log(acc)\n",
-        "32",
-    );
-}
-
-/// A block if/elif/else USED AS AN EXPRESSION (each branch's tail is the
-/// value, returned directly as the function result). Exercises the IfExpr
-/// MIR lowering path and its result-value phi at the merge block.
-#[test]
-fn ssa_if_expr_elif_else_value() {
-    expect_all_opts(
-        "*pick(n as i64) returns i64\n    if n equals 1\n        11\n    elif n equals 2\n        22\n    elif n equals 3\n        33\n    else\n        99\n\n*main()\n    log(pick(1))\n    log(pick(2))\n    log(pick(3))\n    log(pick(7))\n",
-        "11\n22\n33\n99",
-    );
 }

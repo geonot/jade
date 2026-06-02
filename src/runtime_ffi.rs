@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use std::ffi::c_void;
-use std::os::raw::{c_char, c_int, c_uchar};
+use std::os::raw::{c_char, c_uchar};
 
 #[repr(C)]
 pub struct CFile {
@@ -35,21 +35,3 @@ pub fn force_link_wal() -> [usize; 7] {
     ]
 }
 
-unsafe extern "C" {
-    pub fn jinn_chan_create(elem_size: usize, capacity: usize) -> *mut c_void;
-    pub fn jinn_chan_send(ch: *mut c_void, data: *const c_void);
-    pub fn jinn_chan_recv(ch: *mut c_void, data_out: *mut c_void) -> c_int;
-    pub fn jinn_chan_close(ch: *mut c_void);
-    pub fn jinn_chan_destroy(ch: *mut c_void);
-}
-
-#[doc(hidden)]
-pub fn force_link_chan() -> [usize; 5] {
-    [
-        jinn_chan_create as usize,
-        jinn_chan_send as usize,
-        jinn_chan_recv as usize,
-        jinn_chan_close as usize,
-        jinn_chan_destroy as usize,
-    ]
-}

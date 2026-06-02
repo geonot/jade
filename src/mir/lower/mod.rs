@@ -38,6 +38,9 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         }
     }
 
+    // Actor handlers lower to standalone MIR functions taking the actor state
+    // pointer (+ message params). The codegen actor driver emits the mailbox/
+    // dispatch loop and calls into these.
     for ad in &prog.actors {
         functions.extend(lower_actor_init(ad));
         if let Some(sleep_fn) = lower_actor_sleep(ad) {
@@ -98,40 +101,14 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
             ownership: p.ownership,
         });
         lowerer.var_types.insert(p.name.clone(), p.ty.clone());
-
+        // Seed Braun's per-block definition map so `read_var` at the entry
+        // block resolves the parameter directly.
         let entry = lowerer.func.entry;
         lowerer
             .current_def
             .entry(entry)
             .or_default()
             .insert(p.name.clone(), val);
-    }
-
-    for p in &f.params {
-        if matches!(p.access_mod, Some(crate::ast::AccessMod::Copy))
-            && !p.ty.is_trivially_droppable()
-            && p.ty.is_value_clonable()
-        {
-            let entry = lowerer.func.entry;
-            let Some(incoming) = lowerer
-                .current_def
-                .get(&entry)
-                .and_then(|m| m.get(&p.name))
-                .copied()
-            else {
-                continue;
-            };
-            let cloned = lowerer.emit(
-                InstKind::Clone(incoming, p.ty.clone()),
-                p.ty.clone(),
-                p.span,
-            );
-            lowerer
-                .current_def
-                .entry(entry)
-                .or_default()
-                .insert(p.name.clone(), cloned);
-        }
     }
 
     finish_body(
@@ -147,6 +124,11 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
     result
 }
 
+/// Lower a function/handler body (a statement list) into the current
+/// `Lowerer`, including tail-expression-as-return handling and terminator
+/// synthesis for fall-through paths. Shared by `lower_function` and
+/// `lower_handler`. The `Lowerer`'s params and (for handlers) `field_ctx`
+/// must already be set up before calling.
 fn finish_body(
     lowerer: &mut Lowerer,
     body: &[hir::Stmt],
@@ -190,34 +172,42 @@ fn finish_body(
         lowerer.func.block(lowerer.current_block).terminator,
         Terminator::Unreachable
     ) {
+        // If the trailing open block is actually unreachable (e.g. it's a
+        // dead block created after an explicit `Ret`/`ErrReturn`), leave it
+        // as `Unreachable` — synthesizing a return here would emit a value
+        // of the wrong type and confuse downstream passes.
         let cur = lowerer.current_block;
-
+        // Forward-BFS reachability from entry. A block can have non-empty
+        // `preds` yet still be unreachable: e.g. the `after.ret` dead block
+        // gets a Goto(merge_bb) terminator set unconditionally by the if-stmt
+        // lowering even when the body ended with an explicit `return`.
+        // Those dead blocks register as predecessors of `merge_bb` but have
+        // no predecessors themselves, so they are not reachable from entry.
         let is_reachable = {
             let entry = lowerer.func.entry;
             let mut visited = std::collections::HashSet::new();
             let mut stack = vec![entry];
             while let Some(b) = stack.pop() {
-                if !visited.insert(b) {
-                    continue;
-                }
-                if b == cur {
-                    break;
-                }
+                if !visited.insert(b) { continue; }
+                if b == cur { break; }
                 for s in lowerer.func.block(b).terminator.successors() {
-                    if !visited.contains(&s) {
-                        stack.push(s);
-                    }
+                    if !visited.contains(&s) { stack.push(s); }
                 }
             }
             visited.contains(&cur)
         };
 
         if !is_reachable {
+            // Already Unreachable — nothing to do.
         } else {
             lowerer.lower_deferred_in_reverse();
             if matches!(ret_ty, Type::Void) {
                 lowerer.set_terminator(Terminator::Return(None));
             } else {
+                // Special case: `main` is declared `-> i32` (exit code) but
+                // the user is not required to explicitly `return 0`. When
+                // the body falls through without producing an i32,
+                // synthesize one.
                 let last_ty = lowerer
                     .func
                     .blocks
@@ -226,18 +216,26 @@ fn finish_body(
                     .find(|i| i.dest == Some(last))
                     .map(|i| i.ty.clone())
                     .unwrap_or(Type::Void);
-                let ret_val =
-                    if is_main && matches!(ret_ty, Type::I32) && !matches!(last_ty, Type::I32) {
-                        lowerer.emit(InstKind::IntConst(0), Type::I32, span)
-                    } else {
-                        last
-                    };
+                let ret_val = if is_main
+                    && matches!(ret_ty, Type::I32)
+                    && !matches!(last_ty, Type::I32)
+                {
+                    lowerer.emit(InstKind::IntConst(0), Type::I32, span)
+                } else {
+                    last
+                };
                 lowerer.set_terminator(Terminator::Return(Some(ret_val)));
             }
         }
     }
 }
 
+/// Lower a single actor handler into a standalone MIR `Function`. The handler
+/// takes the actor state struct pointer as its first parameter (`__self_state`,
+/// or an explicit `self` param when present) followed by the message
+/// parameters. Field references in the body (bare `Var`s carrying field
+/// `DefId`s, or `self.field` for the explicit-self form) are redirected to
+/// load/store through the state struct via the `field_ctx`.
 fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Function> {
     let fn_name = actor_handler_fn_name(actor.name.clone(), handler);
     let mut lowerer = Lowerer::new(&fn_name, actor.def_id, handler.span);
@@ -246,11 +244,15 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
     let state_struct_name = Symbol::intern(&format!("{}_state", actor.name));
     let state_ptr_ty = Type::Ptr(Box::new(Type::Struct(state_struct_name.clone(), vec![])));
 
+    // Detect the explicit-self form (`@handler self, ...`): the leading param
+    // named `self` IS the state pointer rather than a message argument.
     let has_explicit_self = handler
         .params
         .first()
         .is_some_and(|p| p.name.as_str() == "self");
 
+    // First parameter: the state pointer. Use the explicit `self` name when
+    // present so `self.field` reads resolve to it; otherwise a synthetic name.
     let self_name = if has_explicit_self {
         handler.params[0].name.clone()
     } else {
@@ -261,7 +263,8 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         value: self_val,
         name: self_name.clone(),
         ty: state_ptr_ty.clone(),
-
+        // Raw: the state pointer aliases the live actor mailbox; do not let
+        // the ownership tagging attach `noalias`.
         ownership: hir::Ownership::Raw,
     });
     let entry = lowerer.func.entry;
@@ -274,6 +277,7 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         .or_default()
         .insert(self_name, self_val);
 
+    // Message parameters (skip the explicit `self`, which is the state ptr).
     let msg_params = if has_explicit_self {
         &handler.params[1..]
     } else {
@@ -295,6 +299,8 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
             .insert(p.name.clone(), val);
     }
 
+    // Field context: map each field's canonical DefId to (name, type) so bare
+    // field references in the body redirect to the state struct.
     let mut map = std::collections::HashMap::new();
     for (f, &fid) in actor.fields.iter().zip(actor.field_def_ids.iter()) {
         map.insert(fid, (f.name.clone(), f.ty.clone()));
@@ -305,19 +311,17 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         map,
     });
 
-    finish_body(
-        &mut lowerer,
-        &handler.body,
-        &Type::Void,
-        handler.span,
-        false,
-    );
+    finish_body(&mut lowerer, &handler.body, &Type::Void, handler.span, false);
 
     let mut result = vec![lowerer.func];
     result.append(&mut lowerer.lambda_fns);
     result
 }
 
+/// Build a `Lowerer` set up like an actor handler: a single `__self_state`
+/// pointer parameter and a `field_ctx` mapping each field's canonical `DefId`
+/// to its `(name, type)`, so bare field references in synthesized bodies
+/// redirect to load/store through the actor state struct.
 fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
     let mut lowerer = Lowerer::new(fn_name, actor.def_id, actor.span);
 
@@ -330,7 +334,8 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
         value: self_val,
         name: self_name.clone(),
         ty: state_ptr_ty,
-
+        // Raw: the state pointer aliases the live actor mailbox; do not let the
+        // ownership tagging attach `noalias`.
         ownership: hir::Ownership::Raw,
     });
     let entry = lowerer.func.entry;
@@ -355,11 +360,20 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
     lowerer
 }
 
+/// Lower an actor's field-default initializers into a standalone MIR function
+/// `__actor_init_<name>(ptr state)`. The codegen actor factory calls this
+/// (passing the actor state struct pointer) to populate field defaults before
+/// applying user-supplied spawn overrides. Fields without a default that are
+/// `Vec`/`Map` get an empty container; scalar fields without a default are left
+/// zero-initialized by the factory's `memset` and so are skipped here.
 fn lower_actor_init(actor: &hir::ActorDef) -> Vec<Function> {
     let fn_name = actor_init_fn_name(actor.name.clone());
     let mut lowerer = actor_state_lowerer(actor, &fn_name);
     lowerer.func.ret_ty = Type::Void;
 
+    // Synthesize one assignment per field that needs initialization. The
+    // assignment target is a bare `Var` carrying the field's canonical DefId,
+    // which `field_ctx` redirects to a `FieldSet` on the state struct.
     let mut body: Vec<hir::Stmt> = Vec::new();
     for (f, &fid) in actor.fields.iter().zip(actor.field_def_ids.iter()) {
         let value = if let Some(def) = &f.default {
@@ -394,6 +408,11 @@ fn lower_actor_init(actor: &hir::ActorDef) -> Vec<Function> {
     result
 }
 
+/// Lower an actor loop handler's sleep-duration expression into a standalone
+/// MIR function `__actor_sleep_<name>(ptr state) -> i64`. Returns `None` when
+/// the actor has no `loop` handler or that handler declares no sleep interval.
+/// The codegen actor loop calls this each iteration to obtain the millisecond
+/// count, keeping the sleep/yield mechanics in hand-built LLVM.
 fn lower_actor_sleep(actor: &hir::ActorDef) -> Option<Vec<Function>> {
     let loop_h = actor.handlers.iter().find(|h| h.is_loop)?;
     let sleep_expr = loop_h.loop_sleep_ms.as_ref()?;
