@@ -220,6 +220,30 @@ impl<'ctx> Compiler<'ctx> {
                                 return Err("push() requires an argument".into());
                             }
                             "pop" => return Ok(Some((self.vec_pop(header_ptr, &elem_ty))?)),
+                            "shift" => {
+                                // Remove and return the front element (index 0).
+                                let zero = self.ctx.i64_type().const_zero();
+                                return Ok(Some(
+                                    (self.vec_remove_val(header_ptr, &elem_ty, zero))?,
+                                ));
+                            }
+                            "first" => {
+                                // Borrow-aware read of the front element (index 0).
+                                let zero = self.ctx.i64_type().const_zero();
+                                return Ok(Some((self.vec_get_idx_borrow(
+                                    header_ptr, &elem_ty, zero, borrow,
+                                ))?));
+                            }
+                            "last" => {
+                                // Borrow-aware read of the back element (index len-1).
+                                let len = self.vec_len(header_ptr)?.into_int_value();
+                                let one = self.ctx.i64_type().const_int(1, false);
+                                let idx =
+                                    b!(self.bld.build_int_nsw_sub(len, one, "vlast.idx"));
+                                return Ok(Some((self.vec_get_idx_borrow(
+                                    header_ptr, &elem_ty, idx, borrow,
+                                ))?));
+                            }
                             "get" => {
                                 if !args.is_empty() {
                                     let idx = self.val(args[0]).into_int_value();

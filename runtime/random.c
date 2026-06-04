@@ -16,6 +16,15 @@
 #  include <sys/random.h>
 #endif
 
+/* Prototypes for the runtime-ABI symbols defined below. These are called from
+ * Jinn-generated code (declared there as externs), so they must have external
+ * linkage; the forward declarations here satisfy -Wmissing-prototypes. */
+long long __random_u64(void);
+double    __sqrt(double x);
+double    __ln(double x);
+double    __cos(double x);
+long long __time_monotonic(void);
+
 long long __random_u64(void) {
     unsigned long long v = 0;
 #if defined(__linux__)

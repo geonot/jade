@@ -48,6 +48,11 @@ impl Typer {
                     "internal compiler error: monomorphized fn '{mangled}' not found after instantiation"
                 )
             })?;
+        // Numeric argument coercion to the concrete monomorphized parameter
+        // types. Only applied on the fully-inferred (fn_schemes) path where the
+        // argument types are already concrete; on the generic_fns path the
+        // argument TypeVars must be *unified* with the parameter types by the
+        // caller, not coerced (a Coerce wrapper would leave the var unsolved).
         if coerce {
             for (i, ha) in hargs.iter_mut().enumerate() {
                 if let Some(pt) = mono_param_tys.get(i) {

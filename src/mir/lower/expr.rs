@@ -119,7 +119,30 @@ impl Lowerer {
                 ty,
                 span,
             ),
-            ExprKind::Coerce(inner, _) => self.lower_expr(inner),
+            ExprKind::Coerce(inner, kind) => match kind {
+                // Array-to-Vec is a representation change, not a numeric cast:
+                // read each element out of the fixed array and rebuild a heap vec
+                // (Perceus already understands VecNew ownership).
+                hir::CoercionKind::ArrayToVec { elem_ty, len } => {
+                    let arr = self.lower_expr(inner);
+                    let elem_ty = elem_ty.clone();
+                    let n = *len;
+                    let elems: Vec<ValueId> = (0..n)
+                        .map(|i| {
+                            let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
+                            self.emit(InstKind::IndexUnchecked(arr, idx), elem_ty.clone(), span)
+                        })
+                        .collect();
+                    self.emit(InstKind::VecNew(elems), ty, span)
+                }
+                // Every numeric coercion (int widen/trunc, int<->float, float
+                // widen/narrow, bool->int) is exactly what `emit_cast` performs
+                // off the source/target LLVM types, so lower to a plain Cast.
+                _ => {
+                    let v = self.lower_expr(inner);
+                    self.emit(InstKind::Cast(v, ty.clone()), ty, span)
+                }
+            },
 
             ExprKind::Pipe(inner, _def_id, name, extra_args) => {
                 let mut args = vec![self.lower_expr_owned(inner)];

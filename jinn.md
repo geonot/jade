@@ -1,4 +1,4 @@
-,//xxxx,,,kkkkzzzz# Jinn
+# Jinn
 
 Jinn is a compiled, statically typed systems language with an indentation-based
 syntax and word-based operators. It reads close to pseudocode, infers most
@@ -447,11 +447,11 @@ different position:
 result is value ~ add(5, $)     # add(5, value)
 ```
         
----dddnnnnnnnnnnnnnnnnnnnnnnnnn                                              nnnnnnnnnn nnnnn   nnnnnnnnnnnnnnnnnnnnnn                                      
+---
 
 ## Types
 
-A `type` declares a record with named fields. Values are constructed wit              nnnnnnnnnnnnnnnnh named
+A `type` declares a record with named fields. Values are constructed with named
 fields and accessed with `.`.
 
 ```jinn

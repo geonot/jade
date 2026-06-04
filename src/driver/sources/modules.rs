@@ -145,6 +145,13 @@ pub(in crate::driver) fn resolve_modules(
         let mut mod_prog = Parser::new(tokens)
             .parse_program()
             .unwrap_or_else(|e| die(&format!("{}: {e}", candidate.display())));
+        // Decls parsed from this module file are its *own* decls; the recursive
+        // `resolve_modules` call below appends transitively-imported decls that
+        // have ALREADY been prefixed with their own module name. We must not
+        // re-prefix those (doing so turns `queue_pick_next` into
+        // `dispatcher_queue_pick_next`, which no call site references). Snapshot
+        // the boundary so own and transitive decls are handled separately.
+        let own_decl_count = mod_prog.decls.len();
         resolve_modules(
             &mut mod_prog,
             candidate.parent().unwrap_or(base_dir),
@@ -152,9 +159,19 @@ pub(in crate::driver) fn resolve_modules(
             packages,
         );
 
-        let mut importable: Vec<Decl> = Vec::new();
-        for d in mod_prog.decls {
+        let all_decls = std::mem::take(&mut mod_prog.decls);
+        let mut own_importable: Vec<Decl> = Vec::new();
+        let mut transitive: Vec<Decl> = Vec::new();
+        for (i, d) in all_decls.into_iter().enumerate() {
             if matches!(d, Decl::Use(_)) {
+                continue;
+            }
+
+            if i >= own_decl_count {
+                // Transitively-imported, already-prefixed decl. Re-export it
+                // verbatim (it is an internal dependency of this module and must
+                // be available regardless of a selective import list).
+                transitive.push(d);
                 continue;
             }
 
@@ -164,7 +181,7 @@ pub(in crate::driver) fn resolve_modules(
                         if let Stmt::Bind(b) = stmt {
                             let cd = Decl::Const(b.name.clone(), b.value.clone(), b.span);
                             if should_import_decl(&cd, &imports) {
-                                importable.push(cd);
+                                own_importable.push(cd);
                             }
                         }
                     }
@@ -172,11 +189,14 @@ pub(in crate::driver) fn resolve_modules(
                 }
             }
             if should_import_decl(&d, &imports) {
-                importable.push(d);
+                own_importable.push(d);
             }
         }
-        for pd in prefix_module(importable, &name.as_str()) {
+        for pd in prefix_module(own_importable, &name.as_str()) {
             prog.decls.push(pd);
+        }
+        for d in transitive {
+            prog.decls.push(d);
         }
     }
 }

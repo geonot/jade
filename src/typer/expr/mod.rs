@@ -333,60 +333,66 @@ impl Typer {
         }
     }
 
-    pub(crate) fn maybe_coerce_to(&mut self, expr: hir::Expr, target: &Type) -> hir::Expr {
-        if &expr.ty == target {
+    pub(crate) fn maybe_coerce_to(&mut self, mut expr: hir::Expr, target: &Type) -> hir::Expr {
+        // Resolve inference variables for the coercion *decision* only. A value
+        // derived from an integer literal (e.g. `n is 7`) may still carry an
+        // unbound integer TypeVar whose `is_int()`/`is_float()` queries return
+        // false, which would otherwise silently skip a required numeric
+        // coercion and emit a type-mismatched call in codegen.
+        //
+        // Critically, we must NOT mutate `expr.ty` on the no-coercion path:
+        // the node's original TypeVar may still need to be unified/solved by
+        // later inference (HOFs, lambdas, generic calls). We only concretize
+        // `expr.ty` when actually wrapping the node in a `Coerce`, where the
+        // source type is genuinely fixed and MIR lowering needs it concrete.
+        let et = self.infer_ctx.resolve(&expr.ty);
+        let tt = self.infer_ctx.resolve(target);
+        if et == tt {
             return expr;
         }
-        if let Some(ref coercion) = Self::needs_int_coercion(&expr.ty, target) {
+        if let Some(coercion) = Self::needs_int_coercion(&et, &tt) {
             if matches!(coercion, CoercionKind::IntTrunc { .. }) {
                 self.warnings.push(format!(
                     "implicit truncation from {} to {} may lose data (line {})",
-                    expr.ty, target, expr.span.line
+                    et, tt, expr.span.line
                 ));
             }
-            return Self::make_coerce(expr, coercion.clone(), target.clone());
+            expr.ty = et;
+            return Self::make_coerce(expr, coercion, tt);
         }
-        if expr.ty.is_int() && target.is_float() {
-            return Self::make_coerce(
-                expr,
-                CoercionKind::IntToFloat { signed: true },
-                target.clone(),
-            );
+        if et.is_int() && tt.is_float() {
+            expr.ty = et;
+            return Self::make_coerce(expr, CoercionKind::IntToFloat { signed: true }, tt);
         }
-        if expr.ty.is_float() && target.is_int() {
+        if et.is_float() && tt.is_int() {
             self.warnings.push(format!(
                 "implicit float-to-int conversion may lose precision (line {})",
                 expr.span.line
             ));
-            return Self::make_coerce(
-                expr,
-                CoercionKind::FloatToInt {
-                    signed: target.is_signed(),
-                },
-                target.clone(),
-            );
+            let signed = tt.is_signed();
+            expr.ty = et;
+            return Self::make_coerce(expr, CoercionKind::FloatToInt { signed }, tt);
         }
-        if expr.ty.is_float() && target.is_float() && expr.ty.bits() != target.bits() {
-            let coercion = if expr.ty.bits() < target.bits() {
+        if et.is_float() && tt.is_float() && et.bits() != tt.bits() {
+            let coercion = if et.bits() < tt.bits() {
                 CoercionKind::FloatWiden
             } else {
                 CoercionKind::FloatNarrow
             };
-            return Self::make_coerce(expr, coercion, target.clone());
+            expr.ty = et;
+            return Self::make_coerce(expr, coercion, tt);
         }
-        if expr.ty == Type::Bool && target.is_int() {
-            return Self::make_coerce(expr, CoercionKind::BoolToInt, target.clone());
+        if et == Type::Bool && tt.is_int() {
+            expr.ty = et;
+            return Self::make_coerce(expr, CoercionKind::BoolToInt, tt);
         }
 
-        if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&expr.ty, target) {
+        if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&et, &tt) {
             if **arr_elem == **vec_elem {
                 let elem_ty = (**arr_elem).clone();
                 let len = *len as u64;
-                return Self::make_coerce(
-                    expr,
-                    CoercionKind::ArrayToVec { elem_ty, len },
-                    target.clone(),
-                );
+                expr.ty = et.clone();
+                return Self::make_coerce(expr, CoercionKind::ArrayToVec { elem_ty, len }, tt);
             }
         }
         expr
