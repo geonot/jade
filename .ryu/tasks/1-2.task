@@ -1,11 +1,24 @@
 title: Single source of truth for builtin method surfaces
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by: []
 created_at: '2026-06-04T04:27:12'
-updated_at: '2026-06-04T04:27:12'
-result: ''
+updated_at: '2026-06-04T05:15:08'
+result: 'Introduced src/builtin_methods.rs as the single shared registry of builtin
+  Vec/Map/String method surfaces (VecMethod/MapMethod/StrMethod enums with from_name
+  + ret_ty). The typer (string/vec/map_method_ret_ty, is_string_exclusive_method in
+  src/typer/mod.rs) now delegates entirely to it. Codegen (src/codegen/mir_codegen/emit_inst/core.rs)
+  resolves the method name to the registry enum and matches it EXHAUSTIVELY, so adding
+  a variant in the registry breaks the codegen build until an arm is wired — making
+  typer/codegen drift impossible. This surfaced and fixed 6 latent drift bugs that
+  typechecked but failed codegen with "unknown method": Vec.chain, Vec.flatten, Vec.enumerate,
+  Map.keys, Map.values (now implemented: vec_chain_v/vec_enumerate_v/vec_flatten_v
+  in transforms.rs, map_keys/map_values in map.rs), plus removed the never-implemented
+  String.matches/find_all/replace_re from the surface (regex lives in std.regex).
+  Added tests/builtin_method_surface.rs conformance (6 tests) pinning the runtime
+  behaviour. Full suite green: 1639 passed, 0 failed; zero build warnings; clippy
+  clean.'
 description: 'The Vec/Map/String builtin method tables consulted by the typer and
   codegen must be the same table, so typer/codegen drift (the shift/first/last bug)
   becomes impossible. Introduce a shared enum BuiltinMethod (or shared descriptor

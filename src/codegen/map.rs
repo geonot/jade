@@ -343,6 +343,107 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
+    pub(crate) fn map_keys(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        key_ty: &crate::types::Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.map_collect(header_ptr, key_ty, 8)
+    }
+
+    pub(crate) fn map_values(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        val_ty: &crate::types::Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.map_collect(header_ptr, val_ty, 32)
+    }
+
+    fn map_collect(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        elem_ty: &crate::types::Type,
+        field_off: u64,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let header_ty = self.vec_header_type();
+        let fv = self.current_fn();
+        let lty = self.llvm_ty(elem_ty);
+        let elem_size = self.type_store_size(lty);
+
+        let ptr_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 0, "mk.ptrp"));
+        let entries = b!(self.bld.build_load(
+            self.ctx.ptr_type(AddressSpace::default()),
+            ptr_gep,
+            "mk.entries"
+        ))
+        .into_pointer_value();
+        let cap_gep = b!(self
+            .bld
+            .build_struct_gep(header_ty, header_ptr, 2, "mk.capp"));
+        let cap = b!(self.bld.build_load(i64t, cap_gep, "mk.cap")).into_int_value();
+
+        let out_hdr = self.vec_alloc_empty()?;
+        let idx_ptr = self.entry_alloca(i64t.into(), "mk.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let entry_size = i64t.const_int(48, false);
+
+        let loop_bb = self.ctx.append_basic_block(fv, "mk.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "mk.body");
+        let push_bb = self.ctx.append_basic_block(fv, "mk.push");
+        let next_bb = self.ctx.append_basic_block(fv, "mk.next");
+        let done_bb = self.ctx.append_basic_block(fv, "mk.done");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "mk.i")).into_int_value();
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, cap, "mk.c"));
+        b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let byte_off = b!(self.bld.build_int_nsw_mul(idx, entry_size, "mk.off"));
+        let entry_ptr = unsafe { b!(self.bld.build_gep(i8t, entries, &[byte_off], "mk.eptr")) };
+        let occ_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mk.occp"))
+        };
+        let occ = b!(self.bld.build_load(i8t, occ_ptr, "mk.occ")).into_int_value();
+        let is_occ = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            occ,
+            i8t.const_int(0, false),
+            "mk.io"
+        ));
+        b!(self.bld.build_conditional_branch(is_occ, push_bb, next_bb));
+
+        self.bld.position_at_end(push_bb);
+        let field_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(field_off, false)], "mk.fp"))
+        };
+        let elem = b!(self.bld.build_load(lty, field_ptr, "mk.elem"));
+        self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
+        b!(self.bld.build_unconditional_branch(next_bb));
+
+        self.bld.position_at_end(next_bb);
+        let cur = b!(self.bld.build_load(i64t, idx_ptr, "mk.cur")).into_int_value();
+        let nxt = b!(self
+            .bld
+            .build_int_nsw_add(cur, i64t.const_int(1, false), "mk.nxt"));
+        b!(self.bld.build_store(idx_ptr, nxt));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(out_hdr.into())
+    }
+
     fn fnv_hash_string(
         &mut self,
         str_val: BasicValueEnum<'ctx>,

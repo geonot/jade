@@ -517,74 +517,19 @@ impl Typer {
     }
 
     pub(crate) fn string_method_ret_ty(method: &str) -> Option<Type> {
-        match method {
-            "contains" | "starts_with" | "ends_with" => Some(Type::Bool),
-            "matches" => Some(Type::Bool),
-            "char_at" | "len" | "find" => Some(Type::I64),
-            "slice" | "trim" | "trim_left" | "trim_right" | "replace" | "to_upper" | "to_lower"
-            | "repeat" | "replace_re" => Some(Type::String),
-            "split" | "lines" => Some(Type::Vec(Box::new(Type::String))),
-            "find_all" => Some(Type::Vec(Box::new(Type::String))),
-            "is_empty" => Some(Type::Bool),
-            _ => None,
-        }
+        crate::builtin_methods::StrMethod::from_name(method).map(|m| m.ret_ty())
     }
 
     pub(crate) fn is_string_exclusive_method(method: &str) -> bool {
-        matches!(
-            method,
-            "contains"
-                | "starts_with"
-                | "ends_with"
-                | "char_at"
-                | "find"
-                | "slice"
-                | "trim"
-                | "trim_left"
-                | "trim_right"
-                | "replace"
-                | "to_upper"
-                | "to_lower"
-                | "split"
-                | "lines"
-                | "repeat"
-                | "is_empty"
-                | "matches"
-                | "find_all"
-                | "replace_re"
-        )
+        crate::builtin_methods::StrMethod::from_name(method).is_some_and(|m| m.is_exclusive())
     }
 
     pub(crate) fn vec_method_ret_ty(method: &str, elem_ty: &Type) -> Option<Type> {
-        match method {
-            "push" | "clear" | "set" => Some(Type::Void),
-            "pop" | "get" | "remove" | "shift" | "first" | "last" => Some(elem_ty.clone()),
-            "len" | "count" => Some(Type::I64),
-            "is_empty" => Some(Type::Bool),
-            "take" | "skip" | "flatten" | "collect" | "reverse" | "sort" => {
-                Some(Type::Vec(Box::new(elem_ty.clone())))
-            }
-            "sum" => Some(elem_ty.clone()),
-            "contains" => Some(Type::Bool),
-            "join" => Some(Type::String),
-            "enumerate" => Some(Type::Vec(Box::new(Type::Tuple(vec![
-                Type::I64,
-                elem_ty.clone(),
-            ])))),
-            _ => None,
-        }
+        crate::builtin_methods::VecMethod::from_name(method).map(|m| m.ret_ty(elem_ty))
     }
 
     pub(crate) fn map_method_ret_ty(method: &str, key_ty: &Type, val_ty: &Type) -> Option<Type> {
-        match method {
-            "set" | "remove" | "clear" => Some(Type::Void),
-            "get" => Some(val_ty.clone()),
-            "has" | "contains" => Some(Type::Bool),
-            "len" => Some(Type::I64),
-            "keys" => Some(Type::Vec(Box::new(key_ty.clone()))),
-            "values" => Some(Type::Vec(Box::new(val_ty.clone()))),
-            _ => None,
-        }
+        crate::builtin_methods::MapMethod::from_name(method).map(|m| m.ret_ty(key_ty, val_ty))
     }
 }
 

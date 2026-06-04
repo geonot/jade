@@ -453,6 +453,164 @@ impl<'ctx> Compiler<'ctx> {
         Ok(out_hdr.into())
     }
 
+    pub(in crate::codegen) fn vec_chain_v(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        elem_ty: &Type,
+        other_ptr: inkwell::values::PointerValue<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let lty = self.llvm_ty(elem_ty);
+        let elem_size = self.type_store_size(lty);
+        let out_hdr = self.vec_alloc_empty()?;
+        for src in [header_ptr, other_ptr] {
+            let fv = self.current_fn();
+            let (data, len) = self.vec_data_and_len(src)?;
+            let idx_ptr = self.entry_alloca(i64t.into(), "ch.idx");
+            b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+            let loop_bb = self.ctx.append_basic_block(fv, "ch.loop");
+            let body_bb = self.ctx.append_basic_block(fv, "ch.body");
+            let done_bb = self.ctx.append_basic_block(fv, "ch.done");
+            b!(self.bld.build_unconditional_branch(loop_bb));
+            self.bld.position_at_end(loop_bb);
+            let idx = b!(self.bld.build_load(i64t, idx_ptr, "ch.i")).into_int_value();
+            let cond = b!(self
+                .bld
+                .build_int_compare(IntPredicate::SLT, idx, len, "ch.c"));
+            b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+            self.bld.position_at_end(body_bb);
+            let gep = unsafe { b!(self.bld.build_gep(lty, data, &[idx], "ch.gep")) };
+            let elem = b!(self.bld.build_load(lty, gep, "ch.elem"));
+            self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
+            let next = b!(self
+                .bld
+                .build_int_nsw_add(idx, i64t.const_int(1, false), "ch.next"));
+            b!(self.bld.build_store(idx_ptr, next));
+            b!(self.bld.build_unconditional_branch(loop_bb));
+            self.bld.position_at_end(done_bb);
+        }
+        Ok(out_hdr.into())
+    }
+
+    pub(in crate::codegen) fn vec_enumerate_v(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        elem_ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let lty = self.llvm_ty(elem_ty);
+        let tuple_lty = self.ctx.struct_type(&[i64t.into(), lty], false);
+        let tuple_size = self.type_store_size(tuple_lty.into());
+        let fv = self.current_fn();
+        let (data, len) = self.vec_data_and_len(header_ptr)?;
+        let out_hdr = self.vec_alloc_empty()?;
+        let idx_ptr = self.entry_alloca(i64t.into(), "en.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let loop_bb = self.ctx.append_basic_block(fv, "en.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "en.body");
+        let done_bb = self.ctx.append_basic_block(fv, "en.done");
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "en.i")).into_int_value();
+        let cond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, idx, len, "en.c"));
+        b!(self.bld.build_conditional_branch(cond, body_bb, done_bb));
+        self.bld.position_at_end(body_bb);
+        let gep = unsafe { b!(self.bld.build_gep(lty, data, &[idx], "en.gep")) };
+        let elem = b!(self.bld.build_load(lty, gep, "en.elem"));
+        let mut tup = tuple_lty.get_undef();
+        tup = b!(self.bld.build_insert_value(tup, idx, 0, "en.t0")).into_struct_value();
+        tup = b!(self.bld.build_insert_value(tup, elem, 1, "en.t1")).into_struct_value();
+        self.vec_push_raw(out_hdr, tup.into(), tuple_lty.into(), tuple_size)?;
+        let next = b!(self
+            .bld
+            .build_int_nsw_add(idx, i64t.const_int(1, false), "en.next"));
+        b!(self.bld.build_store(idx_ptr, next));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(done_bb);
+        Ok(out_hdr.into())
+    }
+
+    pub(in crate::codegen) fn vec_flatten_v(
+        &mut self,
+        header_ptr: inkwell::values::PointerValue<'ctx>,
+        outer_elem_ty: &Type,
+        inner_elem_ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let outer_lty = self.llvm_ty(outer_elem_ty);
+        let inner_lty = self.llvm_ty(inner_elem_ty);
+        let inner_size = self.type_store_size(inner_lty);
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let fv = self.current_fn();
+        let (data, len) = self.vec_data_and_len(header_ptr)?;
+        let out_hdr = self.vec_alloc_empty()?;
+
+        let oi_ptr = self.entry_alloca(i64t.into(), "fl.oi");
+        b!(self.bld.build_store(oi_ptr, i64t.const_int(0, false)));
+        let oloop_bb = self.ctx.append_basic_block(fv, "fl.oloop");
+        let obody_bb = self.ctx.append_basic_block(fv, "fl.obody");
+        let iloop_bb = self.ctx.append_basic_block(fv, "fl.iloop");
+        let ibody_bb = self.ctx.append_basic_block(fv, "fl.ibody");
+        let inext_bb = self.ctx.append_basic_block(fv, "fl.inext");
+        let onext_bb = self.ctx.append_basic_block(fv, "fl.onext");
+        let done_bb = self.ctx.append_basic_block(fv, "fl.done");
+
+        b!(self.bld.build_unconditional_branch(oloop_bb));
+        self.bld.position_at_end(oloop_bb);
+        let oi = b!(self.bld.build_load(i64t, oi_ptr, "fl.oiv")).into_int_value();
+        let ocond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, oi, len, "fl.oc"));
+        b!(self.bld.build_conditional_branch(ocond, obody_bb, done_bb));
+
+        self.bld.position_at_end(obody_bb);
+        let ogep = unsafe { b!(self.bld.build_gep(outer_lty, data, &[oi], "fl.ogep")) };
+        let inner_hdr_raw = b!(self.bld.build_load(outer_lty, ogep, "fl.inner"));
+        let inner_hdr = if inner_hdr_raw.is_pointer_value() {
+            inner_hdr_raw.into_pointer_value()
+        } else {
+            b!(self
+                .bld
+                .build_int_to_ptr(inner_hdr_raw.into_int_value(), ptr_ty, "fl.innerp"))
+        };
+        let (idata, ilen) = self.vec_data_and_len(inner_hdr)?;
+        let ii_ptr = self.entry_alloca(i64t.into(), "fl.ii");
+        b!(self.bld.build_store(ii_ptr, i64t.const_int(0, false)));
+        b!(self.bld.build_unconditional_branch(iloop_bb));
+
+        self.bld.position_at_end(iloop_bb);
+        let ii = b!(self.bld.build_load(i64t, ii_ptr, "fl.iiv")).into_int_value();
+        let icond = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLT, ii, ilen, "fl.ic"));
+        b!(self.bld.build_conditional_branch(icond, ibody_bb, onext_bb));
+
+        self.bld.position_at_end(ibody_bb);
+        let igep = unsafe { b!(self.bld.build_gep(inner_lty, idata, &[ii], "fl.igep")) };
+        let elem = b!(self.bld.build_load(inner_lty, igep, "fl.elem"));
+        self.vec_push_raw(out_hdr, elem, inner_lty, inner_size)?;
+        b!(self.bld.build_unconditional_branch(inext_bb));
+
+        self.bld.position_at_end(inext_bb);
+        let iin = b!(self
+            .bld
+            .build_int_nsw_add(ii, i64t.const_int(1, false), "fl.iin"));
+        b!(self.bld.build_store(ii_ptr, iin));
+        b!(self.bld.build_unconditional_branch(iloop_bb));
+
+        self.bld.position_at_end(onext_bb);
+        let oin = b!(self
+            .bld
+            .build_int_nsw_add(oi, i64t.const_int(1, false), "fl.oin"));
+        b!(self.bld.build_store(oi_ptr, oin));
+        b!(self.bld.build_unconditional_branch(oloop_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(out_hdr.into())
+    }
+
     pub(in crate::codegen) fn vec_zip_v(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,

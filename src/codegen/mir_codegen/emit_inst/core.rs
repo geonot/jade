@@ -87,80 +87,91 @@ impl<'ctx> Compiler<'ctx> {
 
                     let recv_ty = self.value_types.get(recv).cloned();
 
-                    if matches!(&recv_ty, Some(Type::String)) {
+                    if matches!(&recv_ty, Some(Type::String))
+                        && let Some(sm) = crate::builtin_methods::StrMethod::from_name(&method.as_str())
+                    {
+                        use crate::builtin_methods::StrMethod;
                         let recv_val = self.val(*recv);
-                        match &*method.as_str() {
-                            "length" | "len" => return Ok(Some((self.string_len(recv_val))?)),
-                            "contains" => {
+                        match sm {
+                            StrMethod::Length | StrMethod::Len => {
+                                return Ok(Some((self.string_len(recv_val))?));
+                            }
+                            StrMethod::Contains => {
                                 if !args.is_empty() {
                                     let a = self.val(args[0]);
                                     return Ok(Some((self.string_contains(recv_val, a))?));
                                 }
                             }
-                            "starts_with" => {
+                            StrMethod::StartsWith => {
                                 if !args.is_empty() {
                                     let a = self.val(args[0]);
                                     return Ok(Some((self.string_starts_with(recv_val, a))?));
                                 }
                             }
-                            "ends_with" => {
+                            StrMethod::EndsWith => {
                                 if !args.is_empty() {
                                     let a = self.val(args[0]);
                                     return Ok(Some((self.string_ends_with(recv_val, a))?));
                                 }
                             }
-                            "char_at" => {
+                            StrMethod::CharAt => {
                                 if !args.is_empty() {
                                     let a = self.val(args[0]);
                                     return Ok(Some((self.string_char_at(recv_val, a))?));
                                 }
                             }
-                            "slice" => {
+                            StrMethod::Slice => {
                                 if args.len() >= 2 {
                                     let start = self.val(args[0]);
                                     let end = self.val(args[1]);
                                     return Ok(Some((self.string_slice(recv_val, start, end))?));
                                 }
                             }
-                            "find" => {
+                            StrMethod::Find => {
                                 if !args.is_empty() {
                                     let a = self.val(args[0]);
                                     return Ok(Some((self.string_find(recv_val, a))?));
                                 }
                             }
-                            "trim" => return Ok(Some((self.string_trim(recv_val, true, true))?)),
-                            "trim_left" => {
+                            StrMethod::Trim => {
+                                return Ok(Some((self.string_trim(recv_val, true, true))?));
+                            }
+                            StrMethod::TrimLeft => {
                                 return Ok(Some((self.string_trim(recv_val, true, false))?));
                             }
-                            "trim_right" => {
+                            StrMethod::TrimRight => {
                                 return Ok(Some((self.string_trim(recv_val, false, true))?));
                             }
-                            "to_upper" => return Ok(Some((self.string_case(recv_val, true))?)),
-                            "to_lower" => return Ok(Some((self.string_case(recv_val, false))?)),
-                            "replace" => {
+                            StrMethod::ToUpper => {
+                                return Ok(Some((self.string_case(recv_val, true))?));
+                            }
+                            StrMethod::ToLower => {
+                                return Ok(Some((self.string_case(recv_val, false))?));
+                            }
+                            StrMethod::Replace => {
                                 if args.len() >= 2 {
                                     let old = self.val(args[0]);
                                     let new = self.val(args[1]);
                                     return Ok(Some((self.string_replace(recv_val, old, new))?));
                                 }
                             }
-                            "split" => {
+                            StrMethod::Split => {
                                 if !args.is_empty() {
                                     let delim = self.val(args[0]);
                                     return Ok(Some((self.string_split(recv_val, delim))?));
                                 }
                             }
-                            "lines" => {
+                            StrMethod::Lines => {
                                 let newline = self.compile_str_literal("\n")?;
                                 return Ok(Some((self.string_split(recv_val, newline))?));
                             }
-                            "repeat" => {
+                            StrMethod::Repeat => {
                                 if !args.is_empty() {
                                     let count = self.val(args[0]);
                                     return Ok(Some((self.string_repeat(recv_val, count))?));
                                 }
                             }
-                            "is_empty" => {
+                            StrMethod::IsEmpty => {
                                 let len = self.string_len(recv_val)?.into_int_value();
                                 let i64t = self.ctx.i64_type();
                                 let cmp = b!(self.bld.build_int_compare(
@@ -171,7 +182,6 @@ impl<'ctx> Compiler<'ctx> {
                                 ));
                                 return Ok(Some(cmp.into()));
                             }
-                            _ => {}
                         }
                     }
 
@@ -202,233 +212,289 @@ impl<'ctx> Compiler<'ctx> {
                             ))
                         };
                         let lty = self.llvm_ty(&elem_ty);
-                        match &*method.as_str() {
-                            "len" | "count" => return Ok(Some((self.vec_len(header_ptr))?)),
-                            "push" => {
-                                if !args.is_empty() {
-                                    let val = self.val(args[0]);
-                                    let elem_size = self.type_store_size(lty);
-                                    self.vec_push_raw(header_ptr, val, lty, elem_size)?;
-                                    return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+                        if let Some(vm) = crate::builtin_methods::VecMethod::from_name(&method.as_str()) {
+                            use crate::builtin_methods::VecMethod;
+                            match vm {
+                                VecMethod::Len | VecMethod::Count => {
+                                    return Ok(Some((self.vec_len(header_ptr))?));
                                 }
-                                return Err("push() requires an argument".into());
-                            }
-                            "pop" => return Ok(Some((self.vec_pop(header_ptr, &elem_ty))?)),
-                            "shift" => {
-                                // Remove and return the front element (index 0).
-                                let zero = self.ctx.i64_type().const_zero();
-                                return Ok(Some(
-                                    (self.vec_remove_val(header_ptr, &elem_ty, zero))?,
-                                ));
-                            }
-                            "first" => {
-                                // Borrow-aware read of the front element (index 0).
-                                let zero = self.ctx.i64_type().const_zero();
-                                return Ok(Some((self.vec_get_idx_borrow(
-                                    header_ptr, &elem_ty, zero, borrow,
-                                ))?));
-                            }
-                            "last" => {
-                                // Borrow-aware read of the back element (index len-1).
-                                let len = self.vec_len(header_ptr)?.into_int_value();
-                                let one = self.ctx.i64_type().const_int(1, false);
-                                let idx =
-                                    b!(self.bld.build_int_nsw_sub(len, one, "vlast.idx"));
-                                return Ok(Some((self.vec_get_idx_borrow(
-                                    header_ptr, &elem_ty, idx, borrow,
-                                ))?));
-                            }
-                            "get" => {
-                                if !args.is_empty() {
-                                    let idx = self.val(args[0]).into_int_value();
+                                VecMethod::IsEmpty => {
+                                    let len = self.vec_len(header_ptr)?.into_int_value();
+                                    let i64t = self.ctx.i64_type();
+                                    let cmp = b!(self.bld.build_int_compare(
+                                        inkwell::IntPredicate::EQ,
+                                        len,
+                                        i64t.const_int(0, false),
+                                        "vempty"
+                                    ));
+                                    return Ok(Some(cmp.into()));
+                                }
+                                VecMethod::Push => {
+                                    if !args.is_empty() {
+                                        let val = self.val(args[0]);
+                                        let elem_size = self.type_store_size(lty);
+                                        self.vec_push_raw(header_ptr, val, lty, elem_size)?;
+                                        return Ok(Some(
+                                            self.ctx.i8_type().const_int(0, false).into(),
+                                        ));
+                                    }
+                                    return Err("push() requires an argument".into());
+                                }
+                                VecMethod::Pop => {
+                                    return Ok(Some((self.vec_pop(header_ptr, &elem_ty))?));
+                                }
+                                VecMethod::Shift => {
+                                    let zero = self.ctx.i64_type().const_zero();
                                     return Ok(Some(
-                                        (self.vec_get_idx_borrow(
+                                        (self.vec_remove_val(header_ptr, &elem_ty, zero))?,
+                                    ));
+                                }
+                                VecMethod::First => {
+                                    let zero = self.ctx.i64_type().const_zero();
+                                    return Ok(Some((self.vec_get_idx_borrow(
+                                        header_ptr, &elem_ty, zero, borrow,
+                                    ))?));
+                                }
+                                VecMethod::Last => {
+                                    let len = self.vec_len(header_ptr)?.into_int_value();
+                                    let one = self.ctx.i64_type().const_int(1, false);
+                                    let idx = b!(self.bld.build_int_nsw_sub(len, one, "vlast.idx"));
+                                    return Ok(Some((self.vec_get_idx_borrow(
+                                        header_ptr, &elem_ty, idx, borrow,
+                                    ))?));
+                                }
+                                VecMethod::Get => {
+                                    if !args.is_empty() {
+                                        let idx = self.val(args[0]).into_int_value();
+                                        return Ok(Some((self.vec_get_idx_borrow(
                                             header_ptr, &elem_ty, idx, borrow,
-                                        ))?,
-                                    ));
+                                        ))?));
+                                    }
+                                    return Err("get() requires an index".into());
                                 }
-                                return Err("get() requires an index".into());
-                            }
-                            "collect" => return Ok(Some(recv_val)),
-                            "set" => {
-                                if args.len() >= 2 {
-                                    let idx = self.val(args[0]).into_int_value();
-                                    let val = self.val(args[1]);
-                                    return Ok(Some(
-                                        (self.vec_set_val(header_ptr, &elem_ty, idx, val))?,
-                                    ));
+                                VecMethod::Collect => return Ok(Some(recv_val)),
+                                VecMethod::Set => {
+                                    if args.len() >= 2 {
+                                        let idx = self.val(args[0]).into_int_value();
+                                        let val = self.val(args[1]);
+                                        return Ok(Some(
+                                            (self.vec_set_val(header_ptr, &elem_ty, idx, val))?,
+                                        ));
+                                    }
+                                    return Err("set() requires index and value".into());
                                 }
-                                return Err("set() requires index and value".into());
-                            }
-                            "remove" => {
-                                if !args.is_empty() {
-                                    let idx = self.val(args[0]).into_int_value();
-                                    return Ok(Some(
-                                        (self.vec_remove_val(header_ptr, &elem_ty, idx))?,
-                                    ));
+                                VecMethod::Remove => {
+                                    if !args.is_empty() {
+                                        let idx = self.val(args[0]).into_int_value();
+                                        return Ok(Some(
+                                            (self.vec_remove_val(header_ptr, &elem_ty, idx))?,
+                                        ));
+                                    }
+                                    return Err("remove() requires an index".into());
                                 }
-                                return Err("remove() requires an index".into());
-                            }
-                            "clear" => return Ok(Some((self.vec_clear(header_ptr))?)),
-                            "map" | "filter" => {
-                                if args.is_empty() {
-                                    return Err(format!(
-                                        "{}() requires a callback",
-                                        method.as_str()
-                                    ));
+                                VecMethod::Clear => {
+                                    return Ok(Some((self.vec_clear(header_ptr))?));
                                 }
-                                let closure_val = self.val(args[0]);
-                                let closure_ty =
-                                    self.value_types.get(&args[0]).cloned().ok_or_else(|| {
-                                        format!(
-                                            "missing closure type for `{}` callback",
-                                            method.as_str()
-                                        )
-                                    })?;
-                                let result = if &*method.as_str() == "map" {
-                                    self.vec_map_dynamic(
+                                VecMethod::Map | VecMethod::Filter => {
+                                    if args.is_empty() {
+                                        return Err(format!("{}() requires a callback", method));
+                                    }
+                                    let closure_val = self.val(args[0]);
+                                    let closure_ty = self
+                                        .value_types
+                                        .get(&args[0])
+                                        .cloned()
+                                        .ok_or_else(|| {
+                                            format!("missing closure type for `{method}` callback")
+                                        })?;
+                                    let result = if vm == VecMethod::Map {
+                                        self.vec_map_dynamic(
+                                            header_ptr,
+                                            &elem_ty,
+                                            closure_val,
+                                            &closure_ty,
+                                        )?
+                                    } else {
+                                        self.vec_filter_dynamic(
+                                            header_ptr,
+                                            &elem_ty,
+                                            closure_val,
+                                            &closure_ty,
+                                        )?
+                                    };
+                                    return Ok(Some(result));
+                                }
+                                VecMethod::Fold => {
+                                    if args.len() < 2 {
+                                        return Err("fold() requires (initial, callback)".into());
+                                    }
+                                    let init_val = self.val(args[0]);
+                                    let closure_val = self.val(args[1]);
+                                    let closure_ty = self
+                                        .value_types
+                                        .get(&args[1])
+                                        .cloned()
+                                        .ok_or_else(|| {
+                                            "missing closure type for fold callback".to_string()
+                                        })?;
+                                    return Ok(Some(self.vec_fold_dynamic(
+                                        header_ptr,
+                                        &elem_ty,
+                                        init_val,
+                                        closure_val,
+                                        &closure_ty,
+                                    )?));
+                                }
+                                VecMethod::Find => {
+                                    if args.is_empty() {
+                                        return Err("find() requires a callback".into());
+                                    }
+                                    let closure_val = self.val(args[0]);
+                                    let closure_ty = self
+                                        .value_types
+                                        .get(&args[0])
+                                        .cloned()
+                                        .ok_or_else(|| {
+                                            "missing closure type for find callback".to_string()
+                                        })?;
+                                    return Ok(Some(self.vec_find_dynamic(
                                         header_ptr,
                                         &elem_ty,
                                         closure_val,
                                         &closure_ty,
-                                    )?
-                                } else {
-                                    self.vec_filter_dynamic(
+                                    )?));
+                                }
+                                VecMethod::Any | VecMethod::All => {
+                                    if args.is_empty() {
+                                        return Err(format!("{}() requires a callback", method));
+                                    }
+                                    let closure_val = self.val(args[0]);
+                                    let closure_ty = self
+                                        .value_types
+                                        .get(&args[0])
+                                        .cloned()
+                                        .ok_or_else(|| {
+                                            format!("missing closure type for `{method}` callback")
+                                        })?;
+                                    let is_any = vm == VecMethod::Any;
+                                    return Ok(Some(self.vec_any_all_dynamic(
                                         header_ptr,
                                         &elem_ty,
                                         closure_val,
                                         &closure_ty,
-                                    )?
-                                };
-                                return Ok(Some(result));
-                            }
-                            "fold" | "reduce" => {
-                                if args.len() < 2 {
-                                    return Err("fold() requires (initial, callback)".into());
+                                        is_any,
+                                    )?));
                                 }
-                                let init_val = self.val(args[0]);
-                                let closure_val = self.val(args[1]);
-                                let closure_ty =
-                                    self.value_types.get(&args[1]).cloned().ok_or_else(|| {
-                                        "missing closure type for fold callback".to_string()
-                                    })?;
-                                return Ok(Some(self.vec_fold_dynamic(
-                                    header_ptr,
-                                    &elem_ty,
-                                    init_val,
-                                    closure_val,
-                                    &closure_ty,
-                                )?));
-                            }
-                            "find" => {
-                                if args.is_empty() {
-                                    return Err("find() requires a callback".into());
+                                VecMethod::Sum => {
+                                    return Ok(Some(self.vec_sum(header_ptr, &elem_ty)?));
                                 }
-                                let closure_val = self.val(args[0]);
-                                let closure_ty =
-                                    self.value_types.get(&args[0]).cloned().ok_or_else(|| {
-                                        "missing closure type for find callback".to_string()
-                                    })?;
-                                return Ok(Some(self.vec_find_dynamic(
-                                    header_ptr,
-                                    &elem_ty,
-                                    closure_val,
-                                    &closure_ty,
-                                )?));
-                            }
-                            "any" | "all" => {
-                                if args.is_empty() {
-                                    return Err(format!(
-                                        "{}() requires a callback",
-                                        method.as_str()
+                                VecMethod::Sort => {
+                                    return Ok(Some(self.vec_sort(header_ptr, &elem_ty)?));
+                                }
+                                VecMethod::Reverse => {
+                                    return Ok(Some(self.vec_reverse(header_ptr, &elem_ty)?));
+                                }
+                                VecMethod::Contains => {
+                                    if args.is_empty() {
+                                        return Err("contains() requires a needle".into());
+                                    }
+                                    let needle = self.val(args[0]);
+                                    return Ok(Some(
+                                        self.vec_contains_v(header_ptr, &elem_ty, needle)?,
                                     ));
                                 }
-                                let closure_val = self.val(args[0]);
-                                let closure_ty =
-                                    self.value_types.get(&args[0]).cloned().ok_or_else(|| {
-                                        format!(
-                                            "missing closure type for `{}` callback",
-                                            method.as_str()
-                                        )
-                                    })?;
-                                let is_any = &*method.as_str() == "any";
-                                return Ok(Some(self.vec_any_all_dynamic(
-                                    header_ptr,
-                                    &elem_ty,
-                                    closure_val,
-                                    &closure_ty,
-                                    is_any,
-                                )?));
-                            }
-                            "sum" => return Ok(Some(self.vec_sum(header_ptr, &elem_ty)?)),
-                            "sort" => {
-                                return Ok(Some(self.vec_sort(header_ptr, &elem_ty)?));
-                            }
-                            "reverse" => {
-                                return Ok(Some(self.vec_reverse(header_ptr, &elem_ty)?));
-                            }
-                            "contains" => {
-                                if args.is_empty() {
-                                    return Err("contains() requires a needle".into());
+                                VecMethod::Join => {
+                                    if args.is_empty() {
+                                        return Err("join() requires a separator".into());
+                                    }
+                                    let sep = self.val(args[0]);
+                                    return Ok(Some(self.vec_join_v(header_ptr, sep)?));
                                 }
-                                let needle = self.val(args[0]);
-                                return Ok(Some(
-                                    self.vec_contains_v(header_ptr, &elem_ty, needle)?,
-                                ));
-                            }
-                            "join" => {
-                                if args.is_empty() {
-                                    return Err("join() requires a separator".into());
+                                VecMethod::Take | VecMethod::Skip => {
+                                    if args.is_empty() {
+                                        return Err(format!("{}() requires a count", method));
+                                    }
+                                    let n = self.val(args[0]).into_int_value();
+                                    let is_take = vm == VecMethod::Take;
+                                    return Ok(Some(
+                                        self.vec_take_skip_v(header_ptr, &elem_ty, n, is_take)?,
+                                    ));
                                 }
-                                let sep = self.val(args[0]);
-                                return Ok(Some(self.vec_join_v(header_ptr, sep)?));
-                            }
-                            "take" | "skip" | "drop" => {
-                                if args.is_empty() {
-                                    return Err(format!("{}() requires a count", method.as_str()));
+                                VecMethod::Slice => {
+                                    if args.len() < 2 {
+                                        return Err("slice() requires (start, end)".into());
+                                    }
+                                    let s = self.val(args[0]).into_int_value();
+                                    let e = self.val(args[1]).into_int_value();
+                                    return Ok(Some(self.vec_slice_v(header_ptr, &elem_ty, s, e)?));
                                 }
-                                let n = self.val(args[0]).into_int_value();
-                                let is_take = &*method.as_str() == "take";
-                                return Ok(Some(
-                                    self.vec_take_skip_v(header_ptr, &elem_ty, n, is_take)?,
-                                ));
-                            }
-                            "slice" => {
-                                if args.len() < 2 {
-                                    return Err("slice() requires (start, end)".into());
+                                VecMethod::Zip => {
+                                    if args.is_empty() {
+                                        return Err("zip() requires another vector".into());
+                                    }
+                                    let other_val = self.val(args[0]);
+                                    let other_ptr = if other_val.is_pointer_value() {
+                                        other_val.into_pointer_value()
+                                    } else {
+                                        let pt = self.ctx.ptr_type(AddressSpace::default());
+                                        b!(self.bld.build_int_to_ptr(
+                                            other_val.into_int_value(),
+                                            pt,
+                                            "zip.optr"
+                                        ))
+                                    };
+                                    let other_elem_ty =
+                                        match self.value_types.get(&args[0]).cloned() {
+                                            Some(Type::Vec(et)) => *et,
+                                            Some(Type::Array(et, _)) => *et,
+                                            _ => Type::I64,
+                                        };
+                                    return Ok(Some(self.vec_zip_v(
+                                        header_ptr,
+                                        &elem_ty,
+                                        other_ptr,
+                                        &other_elem_ty,
+                                    )?));
                                 }
-                                let s = self.val(args[0]).into_int_value();
-                                let e = self.val(args[1]).into_int_value();
-                                return Ok(Some(self.vec_slice_v(header_ptr, &elem_ty, s, e)?));
-                            }
-                            "zip" => {
-                                if args.is_empty() {
-                                    return Err("zip() requires another vector".into());
+                                VecMethod::Chain => {
+                                    if args.is_empty() {
+                                        return Err("chain() requires another vector".into());
+                                    }
+                                    let other_val = self.val(args[0]);
+                                    let other_ptr = if other_val.is_pointer_value() {
+                                        other_val.into_pointer_value()
+                                    } else {
+                                        let pt = self.ctx.ptr_type(AddressSpace::default());
+                                        b!(self.bld.build_int_to_ptr(
+                                            other_val.into_int_value(),
+                                            pt,
+                                            "chain.optr"
+                                        ))
+                                    };
+                                    return Ok(Some(self.vec_chain_v(
+                                        header_ptr, &elem_ty, other_ptr,
+                                    )?));
                                 }
-                                let other_val = self.val(args[0]);
-                                let other_ptr = if other_val.is_pointer_value() {
-                                    other_val.into_pointer_value()
-                                } else {
-                                    let pt = self.ctx.ptr_type(AddressSpace::default());
-                                    b!(self.bld.build_int_to_ptr(
-                                        other_val.into_int_value(),
-                                        pt,
-                                        "zip.optr"
-                                    ))
-                                };
-                                let other_elem_ty = match self.value_types.get(&args[0]).cloned() {
-                                    Some(Type::Vec(et)) => *et,
-                                    Some(Type::Array(et, _)) => *et,
-                                    _ => Type::I64,
-                                };
-                                return Ok(Some(self.vec_zip_v(
-                                    header_ptr,
-                                    &elem_ty,
-                                    other_ptr,
-                                    &other_elem_ty,
-                                )?));
+                                VecMethod::Enumerate => {
+                                    return Ok(Some(
+                                        self.vec_enumerate_v(header_ptr, &elem_ty)?,
+                                    ));
+                                }
+                                VecMethod::Flatten => {
+                                    let inner_ty = match &elem_ty {
+                                        Type::Vec(et) => (**et).clone(),
+                                        Type::Array(et, _) => (**et).clone(),
+                                        _ => {
+                                            return Err(
+                                                "flatten() requires a Vec of Vec".into()
+                                            );
+                                        }
+                                    };
+                                    return Ok(Some(
+                                        self.vec_flatten_v(header_ptr, &elem_ty, &inner_ty)?,
+                                    ));
+                                }
                             }
-                            _ => {}
                         }
                     }
                     let is_map = matches!(&recv_ty, Some(Type::Map(_, _)))
@@ -445,39 +511,55 @@ impl<'ctx> Compiler<'ctx> {
                                 "map.ptr"
                             ))
                         };
-                        match &*method.as_str() {
-                            "len" | "count" => return Ok(Some((self.vec_len(header_ptr))?)),
-                            "set" => {
-                                if args.len() >= 2 {
-                                    let k = self.val(args[0]);
-                                    let v = self.val(args[1]);
-                                    return Ok(Some((self.map_set_val(header_ptr, k, v))?));
+                        let (key_ty, val_ty) = match &recv_ty {
+                            Some(Type::Map(k, v)) => ((**k).clone(), (**v).clone()),
+                            _ => (Type::String, Type::I64),
+                        };
+                        if let Some(mm) = crate::builtin_methods::MapMethod::from_name(&method.as_str()) {
+                            use crate::builtin_methods::MapMethod;
+                            match mm {
+                                MapMethod::Len | MapMethod::Count => {
+                                    return Ok(Some((self.vec_len(header_ptr))?));
                                 }
-                                return Err("map.set() requires key and value".into());
-                            }
-                            "get" => {
-                                if !args.is_empty() {
-                                    let k = self.val(args[0]);
-                                    return Ok(Some((self.map_get_val(header_ptr, k))?));
+                                MapMethod::Set => {
+                                    if args.len() >= 2 {
+                                        let k = self.val(args[0]);
+                                        let v = self.val(args[1]);
+                                        return Ok(Some((self.map_set_val(header_ptr, k, v))?));
+                                    }
+                                    return Err("map.set() requires key and value".into());
                                 }
-                                return Err("map.get() requires a key".into());
-                            }
-                            "has" | "contains" => {
-                                if !args.is_empty() {
-                                    let k = self.val(args[0]);
-                                    return Ok(Some((self.map_has_val(header_ptr, k))?));
+                                MapMethod::Get => {
+                                    if !args.is_empty() {
+                                        let k = self.val(args[0]);
+                                        return Ok(Some((self.map_get_val(header_ptr, k))?));
+                                    }
+                                    return Err("map.get() requires a key".into());
                                 }
-                                return Err("map.has() requires a key".into());
-                            }
-                            "remove" => {
-                                if !args.is_empty() {
-                                    let k = self.val(args[0]);
-                                    return Ok(Some((self.map_remove_val(header_ptr, k))?));
+                                MapMethod::Has | MapMethod::Contains => {
+                                    if !args.is_empty() {
+                                        let k = self.val(args[0]);
+                                        return Ok(Some((self.map_has_val(header_ptr, k))?));
+                                    }
+                                    return Err("map.has() requires a key".into());
                                 }
-                                return Err("map.remove() requires a key".into());
+                                MapMethod::Remove => {
+                                    if !args.is_empty() {
+                                        let k = self.val(args[0]);
+                                        return Ok(Some((self.map_remove_val(header_ptr, k))?));
+                                    }
+                                    return Err("map.remove() requires a key".into());
+                                }
+                                MapMethod::Clear => {
+                                    return Ok(Some((self.map_clear(header_ptr))?));
+                                }
+                                MapMethod::Keys => {
+                                    return Ok(Some((self.map_keys(header_ptr, &key_ty))?));
+                                }
+                                MapMethod::Values => {
+                                    return Ok(Some((self.map_values(header_ptr, &val_ty))?));
+                                }
                             }
-                            "clear" => return Ok(Some((self.map_clear(header_ptr))?)),
-                            _ => {}
                         }
                     }
 
