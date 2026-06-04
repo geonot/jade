@@ -1,11 +1,27 @@
 title: Design checked error-effect system specification
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
-result: ''
+updated_at: '2026-06-04T05:34:21'
+result: 'Wrote docs/error-effects.md — formal spec for Jinn''s checked error-effect
+  system. Grounded in actual codebase state (existing ast::Fn.error_types, current_fn_error_types
+  inference, ErrReturn, landed trait system from 1-4, and the review''s ?-overloading
+  concern).
+
+
+  Covers: (1) principles; (2) canonical prelude Option of T / Result of T,E with combinator
+  method surfaces; (3) err + ! E1|E2 declarations as sugar for Result of R,E; (4)
+  new ?> propagation operator (distinct from overloaded ?, desugars to match/!); (5)
+  checking rules R1-R6 incl. caller-obligation/--strict-errors; (6) From trait for
+  type-directed error conversion (one-step, coherence/orphan rule, union disambiguation);
+  (7) SCC least-fixpoint error-set inference algorithm; (8) interaction with defer/generators/actors/value-semantics;
+  (9) diagnostics; (10) implementation phasing mapped to subtasks 2-2/2-3/2-4; (11)
+  full surface-syntax example.
+
+
+  Updated dependent subtasks 2-2/2-3/2-4 with spec section references.'
 description: Write the formal spec for a real checked error-effect system, defining
   how effects are tracked, declared, and checked at compile time. Done when a reviewed
   design doc exists covering syntax, semantics, and inference rules.
