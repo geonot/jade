@@ -72,6 +72,56 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
+    pub(crate) fn string_scalar_count(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let fv = self.current_fn();
+        let i8t = self.ctx.i8_type();
+        let i64t = self.ctx.i64_type();
+
+        let len = self.string_len(val)?.into_int_value();
+        let data = self.string_data(val)?.into_pointer_value();
+
+        let cond_bb = self.ctx.append_basic_block(fv, "scc.cond");
+        let body_bb = self.ctx.append_basic_block(fv, "scc.body");
+        let done_bb = self.ctx.append_basic_block(fv, "scc.done");
+        let entry_bb = self.current_bb();
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(cond_bb);
+        let phi_i = b!(self.bld.build_phi(i64t, "scc.i"));
+        phi_i.add_incoming(&[(&i64t.const_int(0, false), entry_bb)]);
+        let phi_n = b!(self.bld.build_phi(i64t, "scc.n"));
+        phi_n.add_incoming(&[(&i64t.const_int(0, false), entry_bb)]);
+        let i = phi_i.as_basic_value().into_int_value();
+        let n = phi_n.as_basic_value().into_int_value();
+        let at_end = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SGE, i, len, "scc.end"));
+        b!(self.bld.build_conditional_branch(at_end, done_bb, body_bb));
+
+        self.bld.position_at_end(body_bb);
+        let bp = unsafe { b!(self.bld.build_gep(i8t, data, &[i], "scc.bp")) };
+        let byte = b!(self.bld.build_load(i8t, bp, "scc.b")).into_int_value();
+        let masked = b!(self.bld.build_and(byte, i8t.const_int(0xC0, false), "scc.m"));
+        let is_lead = b!(self.bld.build_int_compare(
+            IntPredicate::NE,
+            masked,
+            i8t.const_int(0x80, false),
+            "scc.lead"
+        ));
+        let lead_i64 = b!(self.bld.build_int_z_extend(is_lead, i64t, "scc.li"));
+        let n_next = b!(self.bld.build_int_add(n, lead_i64, "scc.nn"));
+        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "scc.in"));
+        phi_i.add_incoming(&[(&i_next, body_bb)]);
+        phi_n.add_incoming(&[(&n_next, body_bb)]);
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(n.into())
+    }
+
     pub(crate) fn string_data(
         &mut self,
         val: BasicValueEnum<'ctx>,

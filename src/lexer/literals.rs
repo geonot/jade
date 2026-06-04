@@ -329,8 +329,7 @@ impl<'s> Lexer<'s> {
             if self.src[self.pos] == b'\n' {
                 return self.err("unterminated raw string");
             }
-            val.push(self.src[self.pos] as char);
-            self.advance();
+            push_utf8_at(&mut val, self.src, &mut self.pos, &mut self.col);
         }
         if self.pos >= self.src.len() {
             return self.err("unterminated raw string");

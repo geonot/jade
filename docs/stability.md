@@ -22,7 +22,11 @@ behaviour across patch releases within the same minor series.
 - **Language:** the core syntax and semantics exercised by the test suite
   (`tests/`) and the example programs (`apps/`, `benchmarks/`) — functions
   (`*name`), `type`/`enum` declarations, pattern `match`, the expression and
-  statement grammar, actors/channels, and the `store` surface.
+  statement grammar, actors/channels, and the `store` surface. The `String`
+  type's UTF-8 contract — `.length` (Unicode scalar count), `.byte_count`,
+  byte-based `char_at`/indexing/`slice`, and byte-exact comparison — is pinned
+  in [`docs/strings.md`](strings.md) and enforced by
+  [`tests/string_unicode.rs`](../tests/string_unicode.rs).
 - **Standard library:** the **alpha-stable subset** enumerated in
   [`docs/std.md`](std.md). Membership is *machine-checked*: every module in the
   subset must pass the compiler frontend

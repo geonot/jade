@@ -101,9 +101,9 @@ fn registry_names_round_trip() {
     assert!(MapMethod::from_name("nope").is_none());
 
     for name in [
-        "len", "length", "contains", "starts_with", "ends_with", "char_at", "find", "slice",
-        "trim", "trim_left", "trim_right", "replace", "to_upper", "to_lower", "repeat", "split",
-        "lines", "is_empty",
+        "len", "length", "byte_count", "contains", "starts_with", "ends_with", "char_at", "find",
+        "slice", "trim", "trim_left", "trim_right", "replace", "to_upper", "to_lower", "repeat",
+        "split", "lines", "is_empty",
     ] {
         assert!(StrMethod::from_name(name).is_some(), "string method `{name}` missing");
     }

@@ -272,7 +272,9 @@ impl Typer {
                     } else {
                         (Type::I64, 0)
                     }
-                } else if matches!(peeled_ty, Type::String) && field == "length" {
+                } else if matches!(peeled_ty, Type::String)
+                    && (field == "length" || field == "byte_count")
+                {
                     (Type::I64, 0)
                 } else if matches!(&peeled_ty, Type::Vec(_)) && field == "length" {
                     (Type::I64, 0)

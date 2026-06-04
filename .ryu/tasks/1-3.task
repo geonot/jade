@@ -1,11 +1,24 @@
 title: Pin String/Unicode semantics (UTF-8)
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by: []
 created_at: '2026-06-04T04:27:12'
-updated_at: '2026-06-04T04:34:22'
-result: ''
+updated_at: '2026-06-04T05:30:15'
+result: 'Pinned String/Unicode semantics (UTF-8). (1) Wrote docs/strings.md as canonical
+  stability-pinned spec: String is valid UTF-8; .length/.len() = Unicode scalar count;
+  .byte_count = storage bytes and the unit for char_at/indexing/slice/find/contains/starts_with/ends_with;
+  s[i]/char_at(i) return a single UTF-8 byte as i64; equality/search byte-exact (no
+  normalisation); to_upper/to_lower ASCII-only. (2) Implemented semantics: added ByteCount
+  to StrMethod (single source of truth in src/builtin_methods.rs); new string_scalar_count
+  codegen helper in src/codegen/strings.rs counting UTF-8 lead bytes; .length now
+  returns scalar count, .byte_count returns byte length in both method-call (core.rs)
+  and field-access (values.rs) paths; typer accepts .byte_count field (access.rs,
+  deferred.rs). Fixed a real lexer bug: lex_raw_string was double-UTF-8-encoding non-ASCII
+  bytes via `byte as char`; now uses push_utf8_at. (3) Added tests/string_unicode.rs
+  (15 conformance tests pinning length/byte_count/char_at/index/slice/equality/concat/contains/case
+  on héllo and emoji); extended tests/builtin_method_surface.rs for byte_count; referenced
+  spec from docs/stability.md. Full suite: zero failures, zero warnings.'
 description: 'ASSESSMENT (verified 2026-06-04): String is byte-based SSO (runtime/process.c
   layout: ptr/len/cap with 23-byte inline). `.length` and indexing operate on BYTES
   today. No documented UTF-8 contract; no docs/strings.md. P0 WORK: (1) Write docs/strings.md

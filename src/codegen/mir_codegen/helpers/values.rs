@@ -371,7 +371,8 @@ impl<'ctx> Compiler<'ctx> {
 
         if matches!(&obj_ty, Some(Type::String)) {
             match field {
-                "length" => return self.string_len(obj_val),
+                "length" => return self.string_scalar_count(obj_val),
+                "byte_count" => return self.string_len(obj_val),
                 "data" => return self.string_data(obj_val),
                 _ => {}
             }

@@ -277,12 +277,14 @@ impl Typer {
                             "deferred field access",
                         );
                     }
-            } else if matches!(recv_ty, Type::String) && df.field_name == "length" {
+            } else if matches!(recv_ty, Type::String)
+                && (df.field_name == "length" || df.field_name == "byte_count")
+            {
                 let _ = self.infer_ctx.unify_at(
                     &df.field_ty,
                     &Type::I64,
                     df.span,
-                    "deferred string.length",
+                    "deferred string length field",
                 );
             }
         }

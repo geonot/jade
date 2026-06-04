@@ -94,6 +94,9 @@ impl<'ctx> Compiler<'ctx> {
                         let recv_val = self.val(*recv);
                         match sm {
                             StrMethod::Length | StrMethod::Len => {
+                                return Ok(Some((self.string_scalar_count(recv_val))?));
+                            }
+                            StrMethod::ByteCount => {
                                 return Ok(Some((self.string_len(recv_val))?));
                             }
                             StrMethod::Contains => {

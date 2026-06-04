@@ -151,6 +151,7 @@ pub enum StrMethod {
     StartsWith,
     EndsWith,
     CharAt,
+    ByteCount,
     Find,
     Slice,
     Trim,
@@ -174,6 +175,7 @@ impl StrMethod {
             "starts_with" => Self::StartsWith,
             "ends_with" => Self::EndsWith,
             "char_at" => Self::CharAt,
+            "byte_count" => Self::ByteCount,
             "find" => Self::Find,
             "slice" => Self::Slice,
             "trim" => Self::Trim,
@@ -193,7 +195,7 @@ impl StrMethod {
     pub fn ret_ty(self) -> Type {
         match self {
             Self::Contains | Self::StartsWith | Self::EndsWith | Self::IsEmpty => Type::Bool,
-            Self::Len | Self::Length | Self::CharAt | Self::Find => Type::I64,
+            Self::Len | Self::Length | Self::CharAt | Self::ByteCount | Self::Find => Type::I64,
             Self::Slice
             | Self::Trim
             | Self::TrimLeft
@@ -207,6 +209,9 @@ impl StrMethod {
     }
 
     pub fn is_exclusive(self) -> bool {
-        !matches!(self, Self::Len | Self::Length | Self::IsEmpty)
+        !matches!(
+            self,
+            Self::Len | Self::Length | Self::ByteCount | Self::IsEmpty
+        )
     }
 }
