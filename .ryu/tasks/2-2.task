@@ -1,11 +1,20 @@
 title: Implement Option and Result prelude types
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:34:09'
-result: ''
+updated_at: '2026-06-04T05:45:22'
+result: Shipped the canonical Option/Result prelude combinator surfaces as a single
+  source of truth in the typer (src/typer/call/method_call.rs::lower_option_result_method),
+  shared with codegen via existing EnumIs/EnumUnwrap/VariantCtor/IndirectCall HIR
+  lowered through Ternary. Implemented Option{is_some,is_none,unwrap,unwrap_or,map,and_then,ok_or}
+  and Result{is_ok,is_err,unwrap,unwrap_or,map,map_err,and_then,ok,err}. Transforming
+  combinators monomorphize their target Option/Result via the existing enum-mono scheme.
+  Extended the type-annotation parser to accept multi-arg generics (Result of T, E)
+  in returns/bind positions via an allow_multi_type_args context flag (avoids param-list
+  comma ambiguity). Added tests/error_effects.rs conformance suite (6 tests, all passing).
+  Full suite green, zero warnings, clippy clean.
 description: 'Ship canonical Option of T / Result of T, E in the prelude with combinator
   method surfaces (single source of truth shared by typer+codegen). SPEC: docs/error-effects.md
   §2. Surfaces: Option{is_some,is_none,unwrap,unwrap_or,map,and_then,ok_or}; Result{is_ok,is_err,unwrap,unwrap_or,map,map_err,and_then,ok,err}.
