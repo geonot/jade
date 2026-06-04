@@ -213,6 +213,17 @@ impl Typer {
             let hm = self.lower_method_by_ptr(&ib.type_name.as_str(), m)?;
             hir_methods.push(hm);
         }
+        if let Some(trait_name) = ib.trait_name
+            && let Some(synthesized) = self
+                .trait_default_methods
+                .get(&(ib.type_name, trait_name))
+                .cloned()
+        {
+            for m in &synthesized {
+                let hm = self.lower_method_by_ptr(&ib.type_name.as_str(), m)?;
+                hir_methods.push(hm);
+            }
+        }
         Ok(hir::TraitImpl {
             trait_name: ib.trait_name,
             trait_type_args: ib.trait_type_args.clone(),

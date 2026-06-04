@@ -257,6 +257,7 @@ impl Typer {
             })
             .collect();
         self.traits.insert(td.name, sigs);
+        self.trait_defs.insert(td.name, td.clone());
         if !td.assoc_types.is_empty() {
             self.trait_assoc_types.insert(
                 td.name,
@@ -314,6 +315,16 @@ impl Typer {
                 }
             }
 
+            let synthesized = self.synthesize_default_methods(
+                *trait_name,
+                ib.type_name,
+                &impl_method_names,
+            );
+            if !synthesized.is_empty() {
+                self.trait_default_methods
+                    .insert((ib.type_name, *trait_name), synthesized);
+            }
+
             self.trait_impls
                 .entry(ib.type_name)
                 .or_default()
@@ -340,7 +351,75 @@ impl Typer {
             self.declare_method_sig_by_ptr(&ib.type_name.as_str(), m);
         }
 
+        if let Some(trait_name) = ib.trait_name
+            && let Some(synthesized) =
+                self.trait_default_methods.get(&(ib.type_name, trait_name)).cloned()
+        {
+            for m in &synthesized {
+                self.methods
+                    .entry(ib.type_name)
+                    .or_default()
+                    .push(m.clone());
+                self.declare_method_sig_by_ptr(&ib.type_name.as_str(), m);
+            }
+        }
+
         Ok(())
+    }
+
+    fn synthesize_default_methods(
+        &self,
+        trait_name: Symbol,
+        type_name: Symbol,
+        impl_method_names: &[String],
+    ) -> Vec<ast::Fn> {
+        let Some(td) = self.trait_defs.get(&trait_name) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for tm in &td.methods {
+            let Some(body) = &tm.default_body else {
+                continue;
+            };
+            if impl_method_names.contains(&tm.name.as_str()) {
+                continue;
+            }
+            let ret = tm.ret.clone().map(|t| Self::subst_self_ty(t, type_name));
+            let params = tm
+                .params
+                .iter()
+                .map(|p| ast::Param {
+                    name: p.name,
+                    ty: p.ty.clone().map(|t| Self::subst_self_ty(t, type_name)),
+                    default: p.default.clone(),
+                    literal: p.literal.clone(),
+                    access_mod: p.access_mod,
+                    span: p.span,
+                })
+                .collect();
+            out.push(ast::Fn {
+                name: tm.name,
+                type_params: Vec::new(),
+                type_bounds: Vec::new(),
+                params,
+                ret,
+                error_types: Vec::new(),
+                body: body.clone(),
+                is_generator: false,
+                attrs: ast::FnAttrs::default(),
+                span: tm.span,
+            });
+        }
+        out
+    }
+
+    fn subst_self_ty(ty: Type, type_name: Symbol) -> Type {
+        match ty {
+            Type::Param(n) if n.as_str() == "Self" => Type::Struct(type_name, vec![]),
+            Type::Struct(n, _) if n.as_str() == "Self" => Type::Struct(type_name, vec![]),
+            Type::Ptr(inner) => Type::Ptr(Box::new(Self::subst_self_ty(*inner, type_name))),
+            other => other,
+        }
     }
 
     pub(crate) fn infer_param_types(&mut self, _prog: &ast::Program) {
