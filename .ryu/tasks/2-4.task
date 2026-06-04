@@ -1,0 +1,14 @@
+title: Implement checked error-effect enforcement in type checker
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:34:09'
+result: ''
+description: 'Implement checked error-effect enforcement. SPEC: docs/error-effects.md
+  §5 (R1-R6: declaration soundness, propagation well-formedness, caller obligation/--strict-errors,
+  ! consistency), §6 (From conversion graph + orphan rule), §7 (SCC least-fixpoint
+  error-set inference, reuse src/typer/scc.rs and current_fn_error_types). Done when
+  conformance tests in tests/error_effects.rs pin declared-vs-inferred soundness errors
+  and missing-conversion diagnostics.'

@@ -1,0 +1,11 @@
+title: Implement stop-and-drain channel/scope shutdown
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Add stop-and-drain semantics so pending work is processed before shutdown
+  completes. Depends on structured concurrency scopes. Done when drain ordering is
+  verified by tests.

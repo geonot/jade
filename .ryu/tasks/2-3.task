@@ -1,0 +1,12 @@
+title: Implement error propagation operator
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:34:09'
+result: ''
+description: 'Implement the ?> error-propagation operator (distinct from overloaded
+  ?). SPEC: docs/error-effects.md §4 (parse postfix ?>, desugar to match{Ok(v)?v;
+  Err(e)?! E.from(e)}) and §6 (From trait conversion). Retain ! for explicit early
+  return. Done when read(path)?> propagates and converts via From end-to-end.'

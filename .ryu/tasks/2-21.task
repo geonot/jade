@@ -1,0 +1,10 @@
+title: Write sigil reference documentation
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Document every sigil/operator with meaning, examples, and edge cases.
+  Done when reference doc is complete, reviewed, and published.

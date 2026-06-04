@@ -1,0 +1,11 @@
+title: Implement store crash-consistency tests
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Create tests that simulate crashes at various points to verify the store
+  recovers to a consistent state. Done when crash-injection tests pass and cover key
+  write/commit paths.

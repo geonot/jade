@@ -1,0 +1,11 @@
+title: Define and adopt real version numbers
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Establish a versioning scheme (e.g. semver) and apply real version numbers
+  to the toolchain and stdlib. Done when version scheme is documented and emitted
+  by the toolchain.

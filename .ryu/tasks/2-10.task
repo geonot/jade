@@ -1,0 +1,11 @@
+title: Implement cooperative preemption and yield injection
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Add cooperative preemption points and yield injection so long-running
+  tasks yield to the scheduler. Depends on concurrency runtime. Done when yield points
+  are inserted and fairness is demonstrated by tests.

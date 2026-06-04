@@ -1,0 +1,11 @@
+title: Implement safe/unsafe boundary enforcement for raw pointers
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Enforce the unsafe boundary in the compiler so raw-pointer operations
+  require unsafe context. Depends on safe/unsafe boundary spec. Done when violations
+  error and valid unsafe blocks compile, with tests.

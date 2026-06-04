@@ -1,0 +1,11 @@
+title: Build property tests for numeric coercion
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-04T05:31:38'
+result: ''
+description: Create property-based tests covering numeric coercion rules across integer/float
+  types for correctness and roundtripping. Done when property tests run in CI and
+  cover documented coercion cases.
