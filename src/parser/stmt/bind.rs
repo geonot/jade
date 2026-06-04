@@ -22,7 +22,7 @@ impl Parser {
         let mut declared_ty: Option<crate::types::Type> = None;
         if self.check(Token::As) {
             self.advance();
-            declared_ty = Some(self.parse_type()?);
+            declared_ty = Some(self.parse_type_multi()?);
         }
         self.expect(Token::Is)?;
 

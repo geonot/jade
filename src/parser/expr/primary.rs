@@ -171,6 +171,14 @@ impl Parser {
         Ok(a)
     }
 
+    pub(in crate::parser) fn parse_type_multi(&mut self) -> Result<Type, ParseError> {
+        let prev = self.allow_multi_type_args;
+        self.allow_multi_type_args = true;
+        let r = self.parse_type();
+        self.allow_multi_type_args = prev;
+        r
+    }
+
     pub(in crate::parser) fn parse_type(&mut self) -> Result<Type, ParseError> {
         match self.peek() {
             Token::Percent => {
@@ -191,13 +199,14 @@ impl Parser {
                         if name == "Map" {
                             return Ok(Type::Map(Box::new(Type::String), Box::new(arg)));
                         }
-                        // Preserve the generic application as-is. The typer
-                        // canonicalizes it to the concrete monomorphic type
-                        // (`Type::Enum`/`Type::Struct` with a mangled name) once
-                        // all declarations are known, so that the enum and struct
-                        // monomorphization schemes stay the single source of truth
-                        // instead of being duplicated here.
-                        Ok(Type::Struct(name, vec![arg]))
+                        let mut targs = vec![arg];
+                        if self.allow_multi_type_args {
+                            while self.check(Token::Comma) {
+                                self.advance();
+                                targs.push(self.parse_type()?);
+                            }
+                        }
+                        Ok(Type::Struct(name, targs))
                     } else {
                         Ok(t)
                     }

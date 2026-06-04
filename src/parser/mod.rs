@@ -22,6 +22,7 @@ pub struct Parser {
     depth: u32,
 
     label_stack: Vec<crate::intern::Symbol>,
+    allow_multi_type_args: bool,
 }
 
 macro_rules! binop {
@@ -54,6 +55,7 @@ impl Parser {
             gensym_counter: 0,
             depth: 0,
             label_stack: Vec::new(),
+            allow_multi_type_args: false,
         }
     }
 

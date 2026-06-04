@@ -428,83 +428,11 @@ impl Typer {
         if let Type::Enum(ref enum_name) = obj_ty {
             let is_option = enum_name.starts_with("Option_") || enum_name == "Option";
             let is_result = enum_name.starts_with("Result_") || enum_name == "Result";
-            if is_option || is_result {
-                let variants = self.enums.get(enum_name).cloned().unwrap_or_default();
-                match method {
-                    "unwrap" => {
-                        let inner_ty = variants
-                            .first()
-                            .and_then(|(_, ftys)| ftys.first().cloned())
-                            .unwrap_or(Type::I64);
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), *enum_name, 0),
-                            ty: inner_ty,
-                            span,
-                        });
-                    }
-                    "is_some" if is_option => {
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::EnumIs(Box::new(hobj), 0),
-                            ty: Type::Bool,
-                            span,
-                        });
-                    }
-                    "is_nothing" if is_option => {
-                        let nothing_tag = variants
-                            .iter()
-                            .position(|(n, _)| n == "Nothing")
-                            .unwrap_or(1) as u32;
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::EnumIs(Box::new(hobj), nothing_tag),
-                            ty: Type::Bool,
-                            span,
-                        });
-                    }
-                    "is_ok" if is_result => {
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::EnumIs(Box::new(hobj), 0),
-                            ty: Type::Bool,
-                            span,
-                        });
-                    }
-                    "is_err" if is_result => {
-                        let err_tag =
-                            variants.iter().position(|(n, _)| n == "Err").unwrap_or(1) as u32;
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::EnumIs(Box::new(hobj), err_tag),
-                            ty: Type::Bool,
-                            span,
-                        });
-                    }
-                    "unwrap_or" if args.len() == 1 => {
-                        let inner_ty = variants
-                            .first()
-                            .and_then(|(_, ftys)| ftys.first().cloned())
-                            .unwrap_or(Type::I64);
-
-                        let default_arg = self.lower_expr_expected(&args[0], Some(&inner_ty))?;
-                        let is_check = hir::Expr {
-                            kind: hir::ExprKind::EnumIs(Box::new(hobj.clone()), 0),
-                            ty: Type::Bool,
-                            span,
-                        };
-                        let unwrap_expr = hir::Expr {
-                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), *enum_name, 0),
-                            ty: inner_ty.clone(),
-                            span,
-                        };
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::Ternary(
-                                Box::new(is_check),
-                                Box::new(unwrap_expr),
-                                Box::new(default_arg),
-                            ),
-                            ty: inner_ty,
-                            span,
-                        });
-                    }
-                    _ => {}
-                }
+            if (is_option || is_result)
+                && let Some(e) = self
+                    .lower_option_result_method(&hobj, *enum_name, is_option, method, args, span)?
+            {
+                return Ok(e);
             }
         }
 
@@ -691,5 +619,288 @@ impl Typer {
             ty: ret_ty,
             span,
         })
+    }
+
+    fn ok_inner_ty(&self, enum_name: Symbol) -> Type {
+        self.enums
+            .get(&enum_name)
+            .and_then(|vs| vs.first())
+            .and_then(|(_, ftys)| ftys.first().cloned())
+            .unwrap_or(Type::I64)
+    }
+
+    fn err_inner_ty(&self, enum_name: Symbol) -> Type {
+        self.enums
+            .get(&enum_name)
+            .and_then(|vs| vs.get(1))
+            .and_then(|(_, ftys)| ftys.first().cloned())
+            .unwrap_or(Type::I64)
+    }
+
+    fn variant_tag_in(&self, enum_name: Symbol, variant: &str) -> u32 {
+        self.enums
+            .get(&enum_name)
+            .and_then(|vs| vs.iter().position(|(n, _)| n == variant))
+            .unwrap_or(0) as u32
+    }
+
+    fn enum_is(&self, recv: &hir::Expr, tag: u32, span: Span) -> hir::Expr {
+        hir::Expr {
+            kind: hir::ExprKind::EnumIs(Box::new(recv.clone()), tag),
+            ty: Type::Bool,
+            span,
+        }
+    }
+
+    fn enum_unwrap(
+        &self,
+        recv: &hir::Expr,
+        enum_name: Symbol,
+        tag: u32,
+        ty: Type,
+        span: Span,
+    ) -> hir::Expr {
+        hir::Expr {
+            kind: hir::ExprKind::EnumUnwrap(Box::new(recv.clone()), enum_name, tag),
+            ty,
+            span,
+        }
+    }
+
+    fn variant_ctor(
+        &self,
+        enum_name: Symbol,
+        variant: &str,
+        payload: Option<hir::Expr>,
+        span: Span,
+    ) -> hir::Expr {
+        let tag = self.variant_tag_in(enum_name, variant);
+        let inits = match payload {
+            Some(v) => vec![hir::FieldInit { name: None, value: v }],
+            None => vec![],
+        };
+        hir::Expr {
+            kind: hir::ExprKind::VariantCtor(enum_name, variant.into(), tag, inits),
+            ty: Type::Enum(enum_name),
+            span,
+        }
+    }
+
+    fn lower_option_result_method(
+        &mut self,
+        hobj: &hir::Expr,
+        enum_name: Symbol,
+        is_option: bool,
+        method: &str,
+        args: &[ast::Expr],
+        span: Span,
+    ) -> Result<Option<hir::Expr>, String> {
+        let ok_tag = self.variant_tag_in(enum_name, if is_option { "Some" } else { "Ok" });
+        let inner_ty = self.ok_inner_ty(enum_name);
+
+        match method {
+            "unwrap" => Ok(Some(self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty, span))),
+            "is_some" if is_option => Ok(Some(self.enum_is(hobj, ok_tag, span))),
+            "is_none" | "is_nothing" if is_option => {
+                let t = self.variant_tag_in(enum_name, "Nothing");
+                Ok(Some(self.enum_is(hobj, t, span)))
+            }
+            "is_ok" if !is_option => Ok(Some(self.enum_is(hobj, ok_tag, span))),
+            "is_err" if !is_option => {
+                let t = self.variant_tag_in(enum_name, "Err");
+                Ok(Some(self.enum_is(hobj, t, span)))
+            }
+            "unwrap_or" if args.len() == 1 => {
+                let default_arg = self.lower_expr_expected(&args[0], Some(&inner_ty))?;
+                let is_check = self.enum_is(hobj, ok_tag, span);
+                let unwrap_expr =
+                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_check),
+                        Box::new(unwrap_expr),
+                        Box::new(default_arg),
+                    ),
+                    ty: inner_ty,
+                    span,
+                }))
+            }
+            "map" if args.len() == 1 => {
+                let fn_ret = self.infer_ctx.fresh_var_at(span, "map() callback result");
+                let fn_ty = Type::Fn(vec![inner_ty.clone()], Box::new(fn_ret.clone()));
+                let hf = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                let _ = self.infer_ctx.unify_at(&fn_ty, &hf.ty, span, "map callback");
+                let u_ty = self.infer_ctx.shallow_resolve(&fn_ret);
+                let target = if is_option {
+                    self.mono_option(&u_ty)?
+                } else {
+                    let e_ty = self.err_inner_ty(enum_name);
+                    self.mono_result(&u_ty, &e_ty)?
+                };
+                let unwrap_expr =
+                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let mapped = hir::Expr {
+                    kind: hir::ExprKind::IndirectCall(Box::new(hf), vec![unwrap_expr]),
+                    ty: u_ty.clone(),
+                    span,
+                };
+                let ok_name = if is_option { "Some" } else { "Ok" };
+                let some_branch = self.variant_ctor(target, ok_name, Some(mapped), span);
+                let else_branch = if is_option {
+                    self.variant_ctor(target, "Nothing", None, span)
+                } else {
+                    let err_ty = self.err_inner_ty(enum_name);
+                    let err_tag = self.variant_tag_in(enum_name, "Err");
+                    let err_val = self.enum_unwrap(hobj, enum_name, err_tag, err_ty, span);
+                    self.variant_ctor(target, "Err", Some(err_val), span)
+                };
+                let is_check = self.enum_is(hobj, ok_tag, span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_check),
+                        Box::new(some_branch),
+                        Box::new(else_branch),
+                    ),
+                    ty: Type::Enum(target),
+                    span,
+                }))
+            }
+            "and_then" if args.len() == 1 => {
+                let fn_ret = self.infer_ctx.fresh_var_at(span, "and_then() callback result");
+                let fn_ty = Type::Fn(vec![inner_ty.clone()], Box::new(fn_ret.clone()));
+                let hf = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                let _ = self
+                    .infer_ctx
+                    .unify_at(&fn_ty, &hf.ty, span, "and_then callback");
+                let target = self.infer_ctx.shallow_resolve(&fn_ret);
+                let target_name = match &target {
+                    Type::Enum(n) => *n,
+                    _ => return Err(format!("{}: and_then callback must return an Option/Result", span.loc())),
+                };
+                let unwrap_expr =
+                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let applied = hir::Expr {
+                    kind: hir::ExprKind::IndirectCall(Box::new(hf), vec![unwrap_expr]),
+                    ty: target.clone(),
+                    span,
+                };
+                let else_branch = if is_option {
+                    self.variant_ctor(target_name, "Nothing", None, span)
+                } else {
+                    let err_ty = self.err_inner_ty(enum_name);
+                    let err_tag = self.variant_tag_in(enum_name, "Err");
+                    let err_val = self.enum_unwrap(hobj, enum_name, err_tag, err_ty, span);
+                    self.variant_ctor(target_name, "Err", Some(err_val), span)
+                };
+                let is_check = self.enum_is(hobj, ok_tag, span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_check),
+                        Box::new(applied),
+                        Box::new(else_branch),
+                    ),
+                    ty: target,
+                    span,
+                }))
+            }
+            "ok_or" if is_option && args.len() == 1 => {
+                let herr = self.lower_expr(&args[0])?;
+                let err_ty = herr.ty.clone();
+                let target = self.mono_result(&inner_ty, &err_ty)?;
+                let unwrap_expr =
+                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let ok_branch = self.variant_ctor(target, "Ok", Some(unwrap_expr), span);
+                let err_branch = self.variant_ctor(target, "Err", Some(herr), span);
+                let is_check = self.enum_is(hobj, ok_tag, span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_check),
+                        Box::new(ok_branch),
+                        Box::new(err_branch),
+                    ),
+                    ty: Type::Enum(target),
+                    span,
+                }))
+            }
+            "map_err" if !is_option && args.len() == 1 => {
+                let err_ty = self.err_inner_ty(enum_name);
+                let fn_ret = self.infer_ctx.fresh_var_at(span, "map_err() callback result");
+                let fn_ty = Type::Fn(vec![err_ty.clone()], Box::new(fn_ret.clone()));
+                let hf = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
+                let _ = self
+                    .infer_ctx
+                    .unify_at(&fn_ty, &hf.ty, span, "map_err callback");
+                let f_ty = self.infer_ctx.shallow_resolve(&fn_ret);
+                let target = self.mono_result(&inner_ty, &f_ty)?;
+                let ok_val = self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let ok_branch = self.variant_ctor(target, "Ok", Some(ok_val), span);
+                let err_tag = self.variant_tag_in(enum_name, "Err");
+                let err_val = self.enum_unwrap(hobj, enum_name, err_tag, err_ty, span);
+                let mapped = hir::Expr {
+                    kind: hir::ExprKind::IndirectCall(Box::new(hf), vec![err_val]),
+                    ty: f_ty.clone(),
+                    span,
+                };
+                let err_branch = self.variant_ctor(target, "Err", Some(mapped), span);
+                let is_check = self.enum_is(hobj, ok_tag, span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_check),
+                        Box::new(ok_branch),
+                        Box::new(err_branch),
+                    ),
+                    ty: Type::Enum(target),
+                    span,
+                }))
+            }
+            "ok" if !is_option => {
+                let target = self.mono_option(&inner_ty)?;
+                let ok_val = self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let some_branch = self.variant_ctor(target, "Some", Some(ok_val), span);
+                let none_branch = self.variant_ctor(target, "Nothing", None, span);
+                let is_check = self.enum_is(hobj, ok_tag, span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_check),
+                        Box::new(some_branch),
+                        Box::new(none_branch),
+                    ),
+                    ty: Type::Enum(target),
+                    span,
+                }))
+            }
+            "err" if !is_option => {
+                let err_ty = self.err_inner_ty(enum_name);
+                let target = self.mono_option(&err_ty)?;
+                let err_tag = self.variant_tag_in(enum_name, "Err");
+                let err_val = self.enum_unwrap(hobj, enum_name, err_tag, err_ty, span);
+                let some_branch = self.variant_ctor(target, "Some", Some(err_val), span);
+                let none_branch = self.variant_ctor(target, "Nothing", None, span);
+                let is_err = self.enum_is(hobj, err_tag, span);
+                Ok(Some(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(is_err),
+                        Box::new(some_branch),
+                        Box::new(none_branch),
+                    ),
+                    ty: Type::Enum(target),
+                    span,
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn mono_option(&mut self, t: &Type) -> Result<Symbol, String> {
+        let mut m = std::collections::HashMap::new();
+        m.insert(Symbol::intern("T"), t.clone());
+        self.monomorphize_enum("Option", &m)
+    }
+
+    fn mono_result(&mut self, t: &Type, e: &Type) -> Result<Symbol, String> {
+        let mut m = std::collections::HashMap::new();
+        m.insert(Symbol::intern("T"), t.clone());
+        m.insert(Symbol::intern("E"), e.clone());
+        self.monomorphize_enum("Result", &m)
     }
 }

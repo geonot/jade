@@ -89,7 +89,7 @@ impl Parser {
         self.expect(Token::RParen)?;
         let ret = if self.check(Token::Returns) {
             self.advance();
-            self.parse_type()?
+            self.parse_type_multi()?
         } else {
             Type::Void
         };
@@ -134,7 +134,7 @@ impl Parser {
 
         let ret = if self.check(Token::Returns) {
             self.advance();
-            Some(self.parse_type()?)
+            Some(self.parse_type_multi()?)
         } else {
             None
         };

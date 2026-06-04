@@ -39,12 +39,16 @@ enum.
 ```jinn
 enum Option of T
     Some(T)
-    None
+    Nothing
 
 enum Result of T, E
     Ok(T)
     Err(E)
 ```
+
+The empty Option variant is spelled `Nothing` (it is also what the iterator
+protocol yields). `is_none()` is provided as a synonym for `is_nothing()` on the
+combinator surface.
 
 `Option` and `Result` are ordinary enums: `match`, destructuring, and value
 semantics all work unchanged. The prelude adds method surfaces (single source of
