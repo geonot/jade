@@ -101,18 +101,16 @@ pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir
 pub(super) fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
     fold_expr(expr);
 
-    if let ExprKind::Call(_, name, args) = &expr.kind {
-        if args.iter().all(|a| {
+    if let ExprKind::Call(_, name, args) = &expr.kind
+        && args.iter().all(|a| {
             matches!(
                 a.kind,
                 ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
             )
-        }) {
-            if let Some(result) = try_eval_pure_call(&name.as_str(), args, pure_fns, 0) {
+        })
+            && let Some(result) = try_eval_pure_call(&name.as_str(), args, pure_fns, 0) {
                 *expr = result;
             }
-        }
-    }
 }
 
 pub(super) fn fold_block(block: &mut Block) {
@@ -484,9 +482,9 @@ pub(super) fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
         BinOp::Mul => Some(ExprKind::Int(a.wrapping_mul(b))),
         BinOp::Div if b != 0 => Some(ExprKind::Int(a / b)),
         BinOp::Mod if b != 0 => Some(ExprKind::Int(a % b)),
-        BinOp::Shl if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shl(b as u32))),
-        BinOp::Shr if b >= 0 && b < 64 => Some(ExprKind::Int(a.wrapping_shr(b as u32))),
-        BinOp::Ushr if b >= 0 && b < 64 => {
+        BinOp::Shl if (0..64).contains(&b) => Some(ExprKind::Int(a.wrapping_shl(b as u32))),
+        BinOp::Shr if (0..64).contains(&b) => Some(ExprKind::Int(a.wrapping_shr(b as u32))),
+        BinOp::Ushr if (0..64).contains(&b) => {
             Some(ExprKind::Int((a as u64).wrapping_shr(b as u32) as i64))
         }
         BinOp::BitAnd => Some(ExprKind::Int(a & b)),

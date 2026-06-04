@@ -121,8 +121,8 @@ impl Parser {
             Token::Ident(_) => {
                 let sp = self.span();
 
-                if let Token::Ident(first) = self.peek() {
-                    if first.as_str() == "const"
+                if let Token::Ident(first) = self.peek()
+                    && first.as_str() == "const"
                         && self.pos + 2 < self.tok.len()
                         && matches!(self.tok[self.pos + 1].token, Token::Ident(_))
                         && matches!(self.tok[self.pos + 2].token, Token::Is)
@@ -136,7 +136,6 @@ impl Parser {
                         }
                         return Ok(Decl::Const(name, val, sp));
                     }
-                }
 
                 if self.pos + 1 < self.tok.len()
                     && matches!(self.tok[self.pos + 1].token, Token::Is)
@@ -150,13 +149,12 @@ impl Parser {
                     Ok(Decl::Const(name, val, sp))
                 } else {
                     let stmt = self.parse_stmt()?;
-                    if let Stmt::Expr(e) = &stmt {
-                        if is_useless_top_expr(e) {
+                    if let Stmt::Expr(e) = &stmt
+                        && is_useless_top_expr(e) {
                             return Err(self.error(
                                 "bare expression at top level has no effect; expected a declaration (`*function`, `type`, `actor`, `store`, ...) or a statement with side effects (`log`, `print`, function call, assignment)",
                             ));
                         }
-                    }
                     if self.check(Token::Newline) {
                         self.advance();
                     }
@@ -167,13 +165,12 @@ impl Parser {
                 let save = self.pos;
                 match self.parse_stmt() {
                     Ok(stmt) => {
-                        if let Stmt::Expr(e) = &stmt {
-                            if is_useless_top_expr(e) {
+                        if let Stmt::Expr(e) = &stmt
+                            && is_useless_top_expr(e) {
                                 return Err(self.error(
                                     "bare expression at top level has no effect; expected a declaration (`*function`, `type`, `actor`, `store`, ...) or a statement with side effects (`log`, `print`, function call, assignment)",
                                 ));
                             }
-                        }
                         if self.check(Token::Newline) {
                             self.advance();
                         }

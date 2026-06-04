@@ -23,8 +23,8 @@ impl Typer {
         let hobj = self.lower_expr(obj)?;
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
-        if let Type::Row(store) = &obj_ty {
-            if method == "snapshot" {
+        if let Type::Row(store) = &obj_ty
+            && method == "snapshot" {
                 if !args.is_empty() {
                     return Err(format!("{}: `.snapshot()` takes no arguments", span.loc()));
                 }
@@ -35,7 +35,6 @@ impl Typer {
                     span,
                 });
             }
-        }
 
         if let Type::ActorRef(actor_name) = &obj_ty {
             let (_, _, handlers) = self
@@ -80,7 +79,7 @@ impl Typer {
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Send(
                     Box::new(hobj),
-                    actor_name.clone(),
+                    *actor_name,
                     handler_name,
                     tag,
                     hargs,
@@ -438,7 +437,7 @@ impl Typer {
                             .and_then(|(_, ftys)| ftys.first().cloned())
                             .unwrap_or(Type::I64);
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), enum_name.clone(), 0),
+                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), *enum_name, 0),
                             ty: inner_ty,
                             span,
                         });
@@ -490,7 +489,7 @@ impl Typer {
                             span,
                         };
                         let unwrap_expr = hir::Expr {
-                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), enum_name.clone(), 0),
+                            kind: hir::ExprKind::EnumUnwrap(Box::new(hobj), *enum_name, 0),
                             ty: inner_ty.clone(),
                             span,
                         };
@@ -510,18 +509,16 @@ impl Typer {
         }
 
         let struct_type_name = match &obj_ty {
-            Type::Struct(name, _) => Some(name.clone()),
+            Type::Struct(name, _) => Some(*name),
             Type::Ptr(inner) => {
                 if let Type::Struct(name, _) = inner.as_ref() {
-                    Some(name.clone())
+                    Some(*name)
                 } else {
                     None
                 }
             }
             _ => None,
         };
-
-        let hobj = hobj;
 
         if let Some(ref type_name) = struct_type_name {
             let method_name = format!("{type_name}_{method}");
@@ -601,7 +598,7 @@ impl Typer {
                         .filter(|(type_name, _, _)| {
                             self.trait_impls
                                 .get(type_name.as_str())
-                                .map_or(false, |impls| {
+                                .is_some_and(|impls| {
                                     impls
                                         .iter()
                                         .any(|i| defining_traits.iter().any(|t| **t == i.as_str()))

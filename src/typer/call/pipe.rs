@@ -18,13 +18,12 @@ impl Typer {
             if let Some(gf) = self.generic_fns.get(name).cloned() {
                 let left_ty = hleft.ty.clone();
                 let mut type_map = HashMap::new();
-                if let Some(p) = gf.params.first() {
-                    if let Some(Type::Param(tp)) = &p.ty {
-                        type_map.insert(tp.clone(), left_ty);
+                if let Some(p) = gf.params.first()
+                    && let Some(Type::Param(tp)) = &p.ty {
+                        type_map.insert(*tp, left_ty);
                     }
-                }
                 for tp in &gf.type_params {
-                    type_map.entry(tp.clone()).or_insert(Type::I64);
+                    type_map.entry(*tp).or_insert(Type::I64);
                 }
                 let mangled = self.monomorphize_fn(&name.as_str(), &type_map)?;
                 let (id, _, ret) = self
@@ -55,7 +54,7 @@ impl Typer {
                     kind: hir::ExprKind::Pipe(
                         Box::new(all_args.remove(0)),
                         id,
-                        name.clone(),
+                        *name,
                         all_args,
                     ),
                     ty: ret,
@@ -86,8 +85,8 @@ impl Typer {
             });
         }
 
-        if let ast::Expr::Call(callee, call_args, _) = right {
-            if let ast::Expr::Ident(name, _) = callee.as_ref() {
+        if let ast::Expr::Call(callee, call_args, _) = right
+            && let ast::Expr::Ident(name, _) = callee.as_ref() {
                 let has_placeholder = call_args
                     .iter()
                     .any(|a| matches!(a, ast::Expr::Placeholder(_)));
@@ -109,13 +108,12 @@ impl Typer {
                 if let Some(gf) = self.generic_fns.get(name).cloned() {
                     let left_ty = all_args[0].ty.clone();
                     let mut type_map = HashMap::new();
-                    if let Some(p) = gf.params.first() {
-                        if let Some(Type::Param(tp)) = &p.ty {
-                            type_map.insert(tp.clone(), left_ty);
+                    if let Some(p) = gf.params.first()
+                        && let Some(Type::Param(tp)) = &p.ty {
+                            type_map.insert(*tp, left_ty);
                         }
-                    }
                     for tp in &gf.type_params {
-                        type_map.entry(tp.clone()).or_insert(Type::I64);
+                        type_map.entry(*tp).or_insert(Type::I64);
                     }
                     let mangled = self.monomorphize_fn(&name.as_str(), &type_map)?;
                     let mangled_sym = mangled;
@@ -139,7 +137,7 @@ impl Typer {
                         kind: hir::ExprKind::Pipe(
                             Box::new(all_args.remove(0)),
                             id,
-                            name.clone(),
+                            *name,
                             all_args,
                         ),
                         ty: ret,
@@ -147,7 +145,6 @@ impl Typer {
                     });
                 }
             }
-        }
 
         let hright = self.lower_expr(right)?;
         let ret = match &hright.ty {

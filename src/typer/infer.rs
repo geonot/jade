@@ -43,11 +43,10 @@ impl Typer {
 
     pub(crate) fn infer_field_ty(&mut self, f: &ast::Field) -> Type {
         let var = self.infer_ctx.fresh_var();
-        if let Some(ref default) = f.default {
-            if let Some(ty) = Self::literal_type(default) {
+        if let Some(ref default) = f.default
+            && let Some(ty) = Self::literal_type(default) {
                 let _ = self.infer_ctx.unify(&var, &ty);
             }
-        }
         var
     }
 

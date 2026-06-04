@@ -71,7 +71,7 @@ impl Package {
             match toks.first() {
                 Some(Token::Ident(kw)) if kw == "package" => {
                     if let Some(Token::Ident(n)) = toks.get(1) {
-                        name = Some(n.clone());
+                        name = Some(*n);
                     } else {
                         return Err(format!(
                             "jinn.pkg line {}: expected package name",

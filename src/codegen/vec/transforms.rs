@@ -463,7 +463,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let lty_a = self.llvm_ty(elem_ty);
         let lty_b = self.llvm_ty(other_elem_ty);
-        let tuple_lty = self.ctx.struct_type(&[lty_a.into(), lty_b.into()], false);
+        let tuple_lty = self.ctx.struct_type(&[lty_a, lty_b], false);
         let tuple_size = self.type_store_size(tuple_lty.into());
         let fv = self.current_fn();
         let (data_a, len_a) = self.vec_data_and_len(header_ptr)?;

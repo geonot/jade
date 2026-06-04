@@ -29,26 +29,26 @@ impl Typer {
                 ast::Decl::Fn(f) if Self::is_generic_fn(f) => {
                     if !f.type_bounds.is_empty() {
                         self.generic_bounds
-                            .insert(f.name.clone(), f.type_bounds.clone());
+                            .insert(f.name, f.type_bounds.clone());
                     }
                     self.generic_fns
-                        .insert(f.name.clone(), Self::normalize_generic_fn(f));
+                        .insert(f.name, Self::normalize_generic_fn(f));
                 }
                 ast::Decl::Fn(f) => {
                     let has_untyped_params = f.params.iter().any(|p| p.ty.is_none());
                     let all_untyped =
                         !f.params.is_empty() && f.params.iter().all(|p| p.ty.is_none());
                     if has_untyped_params {
-                        self.inferable_fns.insert(f.name.clone(), f.clone());
+                        self.inferable_fns.insert(f.name, f.clone());
                     }
                     if all_untyped && !f.params.is_empty() {
                         let normalized = Self::normalize_inferable_fn(f);
-                        self.generic_fns.insert(f.name.clone(), normalized);
+                        self.generic_fns.insert(f.name, normalized);
                     }
                     self.declare_fn_sig(f);
 
-                    if has_untyped_params {
-                        if let Some((_, ptys, ret)) = self.fns.get(&f.name).cloned() {
+                    if has_untyped_params
+                        && let Some((_, ptys, ret)) = self.fns.get(&f.name).cloned() {
                             let mut ftvs = std::collections::HashSet::new();
                             for pt in &ptys {
                                 pt.free_type_vars(&mut ftvs);
@@ -57,15 +57,14 @@ impl Typer {
                             let roots: Vec<u32> = ftvs.into_iter().collect();
                             self.infer_ctx.mark_quantified(&roots);
                         }
-                    }
                 }
                 ast::Decl::Type(td) if !td.type_params.is_empty() => {
-                    self.generic_types.insert(td.name.clone(), td.clone());
+                    self.generic_types.insert(td.name, td.clone());
                 }
                 ast::Decl::Type(td) => {
                     for m in &td.methods {
                         self.methods
-                            .entry(td.name.clone())
+                            .entry(td.name)
                             .or_default()
                             .push(m.clone());
                     }
@@ -75,7 +74,7 @@ impl Typer {
                     }
                 }
                 ast::Decl::Enum(ed) if !ed.type_params.is_empty() => {
-                    self.generic_enums.insert(ed.name.clone(), ed.clone());
+                    self.generic_enums.insert(ed.name, ed.clone());
                 }
                 ast::Decl::Enum(ed) => {
                     self.declare_enum_def(ed);
@@ -86,7 +85,6 @@ impl Typer {
                 ast::Decl::Use(u) => {
                     let mod_name = u
                         .alias
-                        .clone()
                         .unwrap_or_else(|| u.path.last().cloned().unwrap_or_default());
                     if !mod_name.is_empty() {
                         self.modules.insert(mod_name);
@@ -101,9 +99,7 @@ impl Typer {
                 }
                 ast::Decl::Store(sd) => {
                     let is_simple = sd
-                        .decorators
-                        .iter()
-                        .any(|d| *d == ast::StoreDecorator::Simple);
+                        .decorators.contains(&ast::StoreDecorator::Simple);
                     let mut fields: Vec<(Symbol, Type)> = Vec::new();
 
                     if !is_simple {
@@ -116,26 +112,26 @@ impl Typer {
                     }
                     for f in &sd.fields {
                         if !f.is_relation {
-                            fields.push((f.name.clone(), f.ty.clone().unwrap_or(Type::I64)));
+                            fields.push((f.name, f.ty.clone().unwrap_or(Type::I64)));
                         }
                     }
                     self.structs.insert(
                         Symbol::intern(&format!("__store_{}", sd.name)),
                         fields.clone(),
                     );
-                    self.store_schemas.insert(sd.name.clone(), fields);
+                    self.store_schemas.insert(sd.name, fields);
                     self.store_decorators
-                        .insert(sd.name.clone(), sd.decorators.clone());
+                        .insert(sd.name, sd.decorators.clone());
                 }
                 ast::Decl::Trait(td) => {
                     self.declare_trait_def(td);
                 }
                 ast::Decl::Impl(_) => {}
                 ast::Decl::Const(name, expr, _) => {
-                    self.consts.insert(name.clone(), expr.clone());
+                    self.consts.insert(*name, expr.clone());
                 }
                 ast::Decl::Global(name, expr, span) => {
-                    self.globals.insert(name.clone(), (expr.clone(), *span));
+                    self.globals.insert(*name, (expr.clone(), *span));
                 }
                 ast::Decl::Supervisor(sup) => {
                     for child in &sup.children {
@@ -166,23 +162,23 @@ impl Typer {
                             name
                         ));
                     }
-                    alias_map.insert(name.clone(), ty.clone());
+                    alias_map.insert(*name, ty.clone());
                 }
                 ast::Decl::Newtype(_, _, _) => {}
                 ast::Decl::TopStmt(_) => {}
                 ast::Decl::Migration(_) => {}
                 ast::Decl::View(vd) => {
                     self.view_defs
-                        .insert(vd.name.clone(), (vd.source.clone(), vd.clauses.clone()));
+                        .insert(vd.name, (vd.source, vd.clauses.clone()));
                 }
             }
         }
 
         for name in alias_map.keys() {
             let mut visited = std::collections::HashSet::new();
-            let mut cur = name.clone();
+            let mut cur = *name;
             while let Some(ty) = alias_map.get(&cur) {
-                if !visited.insert(cur.clone()) {
+                if !visited.insert(cur) {
                     let cycle: Vec<_> = visited.into_iter().collect();
                     self.type_errors.push(format!(
                         "type alias '{}' participates in a cycle: {}",
@@ -195,7 +191,7 @@ impl Typer {
                 let mut next = None;
                 for other in alias_map.keys() {
                     if other != &cur && type_references_name(ty, *other) {
-                        next = Some(other.clone());
+                        next = Some(*other);
                         break;
                     }
                 }
@@ -292,11 +288,10 @@ impl Typer {
             .decls
             .iter()
             .filter_map(|d| {
-                if let ast::Decl::Fn(f) = d {
-                    if !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
+                if let ast::Decl::Fn(f) = d
+                    && !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
                         return Some(f);
                     }
-                }
                 None
             })
             .collect();
@@ -331,9 +326,9 @@ impl Typer {
                             f.ret.is_none() && f.name != "main",
                             f.span,
                             hfn,
-                            f.name.clone(),
+                            f.name,
                         ));
-                        scc_fn_names.push(f.name.clone());
+                        scc_fn_names.push(f.name);
                         lowered_fn_names.insert(*name);
                     }
                 }
@@ -351,7 +346,7 @@ impl Typer {
                     if self
                         .fn_schemes
                         .get(&fname)
-                        .map_or(false, |s| !s.0.is_empty())
+                        .is_some_and(|s| !s.0.is_empty())
                     {
                         continue;
                     }
@@ -367,7 +362,7 @@ impl Typer {
                         if self
                             .fn_schemes
                             .get(&f.name)
-                            .map_or(false, |s| !s.0.is_empty())
+                            .is_some_and(|s| !s.0.is_empty())
                         {
                             lowered_fn_names.insert(*name);
                             continue;
@@ -388,7 +383,7 @@ impl Typer {
                 if self
                     .fn_schemes
                     .get(&f.name)
-                    .map_or(false, |s| !s.0.is_empty())
+                    .is_some_and(|s| !s.0.is_empty())
                 {
                     continue;
                 }
@@ -481,9 +476,9 @@ impl Typer {
             hir_fns.push(main_fn);
         }
 
-        hir_fns.extend(self.mono_fns.drain(..));
-        hir_enums.extend(self.mono_enums.drain(..));
-        hir_types.extend(self.mono_types.drain(..));
+        hir_fns.append(&mut self.mono_fns);
+        hir_enums.append(&mut self.mono_enums);
+        hir_types.append(&mut self.mono_types);
 
         let mut hir_supervisors = Vec::new();
         for d in &prog.decls {
@@ -495,7 +490,7 @@ impl Typer {
                 };
                 hir_supervisors.push(hir::SupervisorDef {
                     def_id: self.fresh_id(),
-                    name: sup.name.clone(),
+                    name: sup.name,
                     strategy: strat,
                     children: sup.children.clone(),
                     span: sup.span,

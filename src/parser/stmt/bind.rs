@@ -10,7 +10,7 @@ impl Parser {
             let rhs = self.parse_expr()?;
             let rsp = rhs.span();
             return Ok(Stmt::Bind(Bind {
-                name: name.clone(),
+                name,
                 value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
                 ty: None,
                 atomic: false,
@@ -56,7 +56,7 @@ impl Parser {
                 None
             };
             self.expect(Token::Newline)?;
-            self.label_stack.push(name.clone().into());
+            self.label_stack.push(name);
             let body = self.parse_block()?;
             self.label_stack.pop();
             return Ok(Stmt::For(For {
@@ -87,7 +87,7 @@ impl Parser {
                 if self.check(Token::BangBang) {
                     self.advance();
                     let var_sp = self.span();
-                    let v: Symbol = self.ident()?.into();
+                    let v: Symbol = self.ident()?;
                     (None, Some((v, var_sp)))
                 } else if self.check(Token::Bang) {
                     self.advance();
@@ -95,7 +95,7 @@ impl Parser {
                     let throw = if self.check(Token::BangBang) {
                         self.advance();
                         let var_sp = self.span();
-                        let v: Symbol = self.ident()?.into();
+                        let v: Symbol = self.ident()?;
                         Some((v, var_sp))
                     } else {
                         None
@@ -106,7 +106,7 @@ impl Parser {
                 };
             let tmp_name: Symbol = self.gensym("__hc").into();
             self.pending_pre_stmts.push(Stmt::Bind(Bind {
-                name: tmp_name.clone(),
+                name: tmp_name,
                 value,
                 ty: None,
                 atomic: false,
@@ -120,7 +120,7 @@ impl Parser {
                 if let Some(falsy_expr) = on_falsy_or_err {
                     let v_name: Symbol = self.gensym("__v").into();
                     let ternary = Expr::Ternary(
-                        Box::new(Expr::Ident(v_name.clone(), sp)),
+                        Box::new(Expr::Ident(v_name, sp)),
                         Box::new(on_ok),
                         Box::new(falsy_expr),
                         sp,
@@ -133,7 +133,7 @@ impl Parser {
                     };
                 } else {
                     ok_arm = Arm {
-                        pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name.clone(), sp)], sp),
+                        pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name, sp)], sp),
                         guard: None,
                         body: vec![Stmt::Expr(on_ok)],
                         span: sp,
@@ -147,7 +147,7 @@ impl Parser {
                 };
             } else {
                 ok_arm = Arm {
-                    pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name.clone(), sp)], sp),
+                    pat: Pat::Ctor("Ok".into(), vec![Pat::Ident(name, sp)], sp),
                     guard: None,
                     body: vec![Stmt::Expr(on_ok)],
                     span: sp,
@@ -180,7 +180,7 @@ impl Parser {
             let variant_name = self.ident()?;
             let tmp_name: Symbol = self.gensym("__guard").into();
             self.pending_pre_stmts.push(Stmt::Bind(Bind {
-                name: tmp_name.clone(),
+                name: tmp_name,
                 value,
                 ty: None,
                 atomic: false,
@@ -200,7 +200,7 @@ impl Parser {
                 span: sp,
             };
             self.pending_pre_stmts.push(Stmt::Match(Match {
-                subject: Expr::Ident(tmp_name.clone(), sp),
+                subject: Expr::Ident(tmp_name, sp),
                 arms: vec![ok_arm, err_arm],
                 span: sp,
             }));
@@ -232,8 +232,8 @@ impl Parser {
                     true
                 }
             };
-        if next_is_bare_ident {
-            if let Token::Ident(_) = &self.tok[self.pos + 1].token {
+        if next_is_bare_ident
+            && let Token::Ident(_) = &self.tok[self.pos + 1].token {
                 {
                     {
                         self.advance();
@@ -242,7 +242,7 @@ impl Parser {
 
                         let tmp_name: Symbol = self.gensym("__guard").into();
                         let bind_tmp = Stmt::Bind(Bind {
-                            name: tmp_name.clone(),
+                            name: tmp_name,
                             value,
                             ty: None,
                             atomic: false,
@@ -250,9 +250,9 @@ impl Parser {
                             span: sp,
                         });
                         let propagate_arm = Arm {
-                            pat: Pat::Ctor(variant_name.clone(), vec![], var_sp),
+                            pat: Pat::Ctor(variant_name, vec![], var_sp),
                             guard: None,
-                            body: vec![Stmt::ErrReturn(Expr::Ident(tmp_name.clone(), sp), sp)],
+                            body: vec![Stmt::ErrReturn(Expr::Ident(tmp_name, sp), sp)],
                             span: sp,
                         };
                         let fall_arm = Arm {
@@ -262,7 +262,7 @@ impl Parser {
                             span: sp,
                         };
                         let match_stmt = Stmt::Match(Match {
-                            subject: Expr::Ident(tmp_name.clone(), sp),
+                            subject: Expr::Ident(tmp_name, sp),
                             arms: vec![propagate_arm, fall_arm],
                             span: sp,
                         });
@@ -270,7 +270,7 @@ impl Parser {
                         self.pending_pre_stmts.push(bind_tmp);
                         self.pending_pre_stmts.push(match_stmt);
                         return Ok(Stmt::Bind(Bind {
-                            name: name.clone(),
+                            name,
                             value: Expr::Ident(tmp_name, sp),
                             ty: None,
                             atomic: false,
@@ -280,7 +280,6 @@ impl Parser {
                     }
                 }
             }
-        }
 
         let value = if self.check(Token::Question) {
             let qsp = self.span();
@@ -366,7 +365,7 @@ impl Parser {
         let variant_name = self.ident()?;
         let tmp_name: Symbol = self.gensym("__hc").into();
         self.pending_pre_stmts.push(Stmt::Bind(Bind {
-            name: tmp_name.clone(),
+            name: tmp_name,
             value: head,
             ty: None,
             atomic: false,
@@ -405,7 +404,7 @@ impl Parser {
             if self.check(Token::BangBang) {
                 self.advance();
                 let var_sp = self.span();
-                let v: Symbol = self.ident()?.into();
+                let v: Symbol = self.ident()?;
                 (None, Some((v, var_sp)))
             } else if self.check(Token::Bang) {
                 self.advance();
@@ -413,7 +412,7 @@ impl Parser {
                 let throw = if self.check(Token::BangBang) {
                     self.advance();
                     let var_sp = self.span();
-                    let v: Symbol = self.ident()?.into();
+                    let v: Symbol = self.ident()?;
                     Some((v, var_sp))
                 } else {
                     None
@@ -425,7 +424,7 @@ impl Parser {
 
         let tmp_name: Symbol = self.gensym("__hc").into();
         self.pending_pre_stmts.push(Stmt::Bind(Bind {
-            name: tmp_name.clone(),
+            name: tmp_name,
             value: call,
             ty: None,
             atomic: false,
@@ -439,7 +438,7 @@ impl Parser {
             if let Some(falsy_expr) = on_falsy_or_err {
                 let v_name: Symbol = self.gensym("__v").into();
                 let ternary = Expr::Ternary(
-                    Box::new(Expr::Ident(v_name.clone(), sp)),
+                    Box::new(Expr::Ident(v_name, sp)),
                     Box::new(on_ok),
                     Box::new(falsy_expr),
                     sp,

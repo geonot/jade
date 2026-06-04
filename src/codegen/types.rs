@@ -81,7 +81,7 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn type_store_size(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
         match ty {
-            BasicTypeEnum::IntType(it) => ((it.get_bit_width() + 7) / 8) as u64,
+            BasicTypeEnum::IntType(it) => it.get_bit_width().div_ceil(8) as u64,
             BasicTypeEnum::FloatType(ft) => {
                 if ft == self.ctx.f32_type() {
                     4
@@ -104,13 +104,10 @@ impl<'ctx> Compiler<'ctx> {
                 (offset + max_align - 1) & !(max_align - 1)
             }
             BasicTypeEnum::ArrayType(at) => {
-                if at.len() == 0 {
+                if at.is_empty() {
                     return 0;
                 }
-                let elem: BasicTypeEnum = at
-                    .get_element_type()
-                    .try_into()
-                    .unwrap_or(self.ctx.i8_type().into());
+                let elem: BasicTypeEnum = at.get_element_type();
                 self.type_store_size(elem) * at.len() as u64
             }
             _ => 8,
@@ -120,7 +117,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn type_abi_align(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
         match ty {
             BasicTypeEnum::IntType(it) => {
-                let bytes = ((it.get_bit_width() + 7) / 8) as u64;
+                let bytes = it.get_bit_width().div_ceil(8) as u64;
                 bytes.next_power_of_two().min(8)
             }
             BasicTypeEnum::FloatType(_) => self.type_store_size(ty).min(8),
@@ -132,10 +129,7 @@ impl<'ctx> Compiler<'ctx> {
                 .max()
                 .unwrap_or(1),
             BasicTypeEnum::ArrayType(at) => {
-                let elem: BasicTypeEnum = at
-                    .get_element_type()
-                    .try_into()
-                    .unwrap_or(self.ctx.i8_type().into());
+                let elem: BasicTypeEnum = at.get_element_type();
                 self.type_abi_align(elem)
             }
             _ => 8,

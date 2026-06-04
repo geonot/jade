@@ -66,7 +66,7 @@ impl Lowerer {
                 let exit_bb = self.new_block("for.exit");
 
                 if let Some(ref lab) = f.label {
-                    self.label_stack.push((lab.clone(), inc_bb, exit_bb));
+                    self.label_stack.push((*lab, inc_bb, exit_bb));
                 }
 
                 if let Some(ref end_expr) = f.end {
@@ -77,21 +77,21 @@ impl Lowerer {
                         self.emit(InstKind::IntConst(1), Type::I64, f.span)
                     };
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), iter_val),
+                        InstKind::Store(f.bind, iter_val),
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, iter_val);
+                    self.write_var(f.bind, self.current_block, iter_val);
 
                     if let Some(ref b2) = f.bind2 {
                         let zero = self.emit(InstKind::IntConst(0), Type::I64, f.span);
-                        self.emit_void_typed(InstKind::Store(b2.clone(), zero), Type::I64, f.span);
+                        self.emit_void_typed(InstKind::Store(*b2, zero), Type::I64, f.span);
                     }
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
                     let counter =
-                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -103,11 +103,11 @@ impl Lowerer {
                     self.switch_to(body_bb);
                     self.seal_block(body_bb);
 
-                    self.write_var(f.bind.clone(), self.current_block, counter);
+                    self.write_var(f.bind, self.current_block, counter);
 
                     if let Some(ref b2) = f.bind2 {
-                        let idx = self.emit(InstKind::Load(b2.clone()), Type::I64, f.span);
-                        self.write_var(b2.clone(), self.current_block, idx);
+                        let idx = self.emit(InstKind::Load(*b2), Type::I64, f.span);
+                        self.write_var(*b2, self.current_block, idx);
                     }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
@@ -116,25 +116,25 @@ impl Lowerer {
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
-                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let cur = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
                     let next = self.emit(
                         InstKind::BinOp(BinOp::Add, cur, step_val),
                         f.bind_ty.clone(),
                         f.span,
                     );
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), next),
+                        InstKind::Store(f.bind, next),
                         f.bind_ty.clone(),
                         f.span,
                     );
 
                     if let Some(ref b2) = f.bind2 {
                         let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
-                        let cur_idx = self.emit(InstKind::Load(b2.clone()), Type::I64, f.span);
+                        let cur_idx = self.emit(InstKind::Load(*b2), Type::I64, f.span);
                         let next_idx =
                             self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, f.span);
                         self.emit_void_typed(
-                            InstKind::Store(b2.clone(), next_idx),
+                            InstKind::Store(*b2, next_idx),
                             Type::I64,
                             f.span,
                         );
@@ -146,16 +146,16 @@ impl Lowerer {
                     let end_val = iter_val;
 
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), zero),
+                        InstKind::Store(f.bind, zero),
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, zero);
+                    self.write_var(f.bind, self.current_block, zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
                     let counter =
-                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -166,7 +166,7 @@ impl Lowerer {
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
                     self.seal_block(body_bb);
-                    self.write_var(f.bind.clone(), self.current_block, counter);
+                    self.write_var(f.bind, self.current_block, counter);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -174,14 +174,14 @@ impl Lowerer {
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
-                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), f.span);
+                    let cur = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
                     let next = self.emit(
                         InstKind::BinOp(BinOp::Add, cur, one),
                         f.bind_ty.clone(),
                         f.span,
                     );
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), next),
+                        InstKind::Store(f.bind, next),
                         f.bind_ty.clone(),
                         f.span,
                     );
@@ -212,7 +212,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, val);
+                    self.write_var(f.bind, self.current_block, val);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(cond_bb));
@@ -243,10 +243,10 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, elem);
+                    self.write_var(f.bind, self.current_block, elem);
 
                     if let Some(ref b2) = f.bind2 {
-                        self.write_var(b2.clone(), self.current_block, idx);
+                        self.write_var(*b2, self.current_block, idx);
                     }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
@@ -319,16 +319,16 @@ impl Lowerer {
                         self.emit(InstKind::IntConst(1), Type::I64, *span)
                     };
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), iter_val),
+                        InstKind::Store(f.bind, iter_val),
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, iter_val);
+                    self.write_var(f.bind, self.current_block, iter_val);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
                     let counter =
-                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -339,7 +339,7 @@ impl Lowerer {
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
                     self.seal_block(body_bb);
-                    self.write_var(f.bind.clone(), self.current_block, counter);
+                    self.write_var(f.bind, self.current_block, counter);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -347,14 +347,14 @@ impl Lowerer {
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
-                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let cur = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
                     let next = self.emit(
                         InstKind::BinOp(BinOp::Add, cur, step_val),
                         f.bind_ty.clone(),
                         *span,
                     );
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), next),
+                        InstKind::Store(f.bind, next),
                         f.bind_ty.clone(),
                         *span,
                     );
@@ -365,16 +365,16 @@ impl Lowerer {
                     let end_val = iter_val;
 
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), zero),
+                        InstKind::Store(f.bind, zero),
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, zero);
+                    self.write_var(f.bind, self.current_block, zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
                     let counter =
-                        self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -385,7 +385,7 @@ impl Lowerer {
                     self.loop_stack.push((inc_bb, exit_bb));
                     self.switch_to(body_bb);
                     self.seal_block(body_bb);
-                    self.write_var(f.bind.clone(), self.current_block, counter);
+                    self.write_var(f.bind, self.current_block, counter);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(inc_bb));
@@ -393,14 +393,14 @@ impl Lowerer {
                     self.loop_stack.pop();
 
                     self.switch_to(inc_bb);
-                    let cur = self.emit(InstKind::Load(f.bind.clone()), f.bind_ty.clone(), *span);
+                    let cur = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
                     let next = self.emit(
                         InstKind::BinOp(BinOp::Add, cur, one),
                         f.bind_ty.clone(),
                         *span,
                     );
                     self.emit_void_typed(
-                        InstKind::Store(f.bind.clone(), next),
+                        InstKind::Store(f.bind, next),
                         f.bind_ty.clone(),
                         *span,
                     );
@@ -430,10 +430,10 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.write_var(f.bind.clone(), self.current_block, elem);
+                    self.write_var(f.bind, self.current_block, elem);
 
                     if let Some(ref b2) = f.bind2 {
-                        self.write_var(b2.clone(), self.current_block, idx);
+                        self.write_var(*b2, self.current_block, idx);
                     }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {

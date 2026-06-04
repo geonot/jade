@@ -11,7 +11,7 @@ impl Typer {
     ) {
         match declared {
             Type::Param(name) => {
-                map.entry(name.clone()).or_insert_with(|| concrete.clone());
+                map.entry(*name).or_insert_with(|| concrete.clone());
             }
             Type::Vec(inner) => {
                 if let Type::Vec(ci) = concrete {
@@ -51,7 +51,7 @@ impl Typer {
                 Box::new(Self::substitute_type_params(ret, map)),
             ),
             Type::Struct(name, args) => Type::Struct(
-                name.clone(),
+                *name,
                 args.iter()
                     .map(|a| Self::substitute_type_params(a, map))
                     .collect(),
@@ -73,6 +73,7 @@ impl Typer {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn expr_to_single_type(&self, e: &ast::Expr) -> Option<Type> {
         match e {
             ast::Expr::Ident(name, _) => Some(Self::ident_to_type(&name.as_str())),

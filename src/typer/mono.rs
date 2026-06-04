@@ -43,7 +43,7 @@ impl Typer {
             // through the arguments so a recursive variant field like
             // `Branch(Tree of T, Tree of T)` becomes `Tree of i64` under the map.
             Type::Struct(name, args) => Type::Struct(
-                name.clone(),
+                *name,
                 args.iter()
                     .map(|a| Self::substitute_type(a, type_map))
                     .collect(),
@@ -112,7 +112,7 @@ impl Typer {
                         return Type::Struct(mangled, vec![]);
                     }
                 }
-                Type::Struct(name.clone(), nargs)
+                Type::Struct(*name, nargs)
             }
             Type::Array(inner, n) => {
                 Type::Array(Box::new(self.monomorphize_named_annotation(inner)), *n)
@@ -339,7 +339,7 @@ impl Typer {
             .generic_types
             .get(base_name)
             .map(|td| td.layout.clone())
-            .or_else(|| None)
+            .or(None)
             .unwrap_or_default();
 
         let htd = hir::TypeDef {
@@ -492,7 +492,7 @@ impl Typer {
             );
             params.push(hir::Param {
                 def_id: pid,
-                name: p.name.clone(),
+                name: p.name,
                 ty,
                 ownership,
                 default: None,
@@ -571,12 +571,12 @@ impl Typer {
                 ftys.push(self.monomorphize_named_annotation(&substituted));
             }
             let hv = hir::Variant {
-                name: v.name.clone(),
+                name: v.name,
                 fields: ftys
                     .iter()
                     .enumerate()
                     .map(|(fi, fty)| hir::VField {
-                        name: v.fields.get(fi).and_then(|f| f.name.clone()),
+                        name: v.fields.get(fi).and_then(|f| f.name),
                         ty: fty.clone(),
                     })
                     .collect(),
@@ -585,7 +585,7 @@ impl Typer {
                 span: v.span,
             };
             hir_variants.push(hv);
-            variants.push((v.name.clone(), ftys));
+            variants.push((v.name, ftys));
         }
         self.enums.insert(mangled, variants);
         let hed = hir::EnumDef {
@@ -616,11 +616,10 @@ impl Typer {
         let mut type_map = HashMap::new();
         if let Some(tys) = arg_tys {
             for (i, field) in variant.fields.iter().enumerate() {
-                if let Type::Param(ref p) = field.ty {
-                    if let Some(ty) = tys.get(i) {
+                if let Type::Param(ref p) = field.ty
+                    && let Some(ty) = tys.get(i) {
                         type_map.insert(*p, ty.clone());
                     }
-                }
             }
         }
         for tp in &edef.type_params {
@@ -642,7 +641,7 @@ impl Typer {
             Type::Fn(params, ret) => {
                 let ps: Vec<_> = params
                     .iter()
-                    .map(|p| Self::type_name_for_bound_check(p))
+                    .map(Self::type_name_for_bound_check)
                     .collect();
                 format!(
                     "Fn_{}_{}",
@@ -656,11 +655,10 @@ impl Typer {
     }
 
     fn type_satisfies_trait(&self, type_name: &str, trait_name: &str) -> bool {
-        if let Some(impls) = self.trait_impls.get(type_name) {
-            if impls.contains(&trait_name.to_string()) {
+        if let Some(impls) = self.trait_impls.get(type_name)
+            && impls.contains(&trait_name.to_string()) {
                 return true;
             }
-        }
         Self::builtin_trait_satisfied(type_name, trait_name)
     }
 

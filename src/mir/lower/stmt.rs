@@ -41,10 +41,10 @@ impl Lowerer {
                     }
                 };
 
-                if matches!(b.access_mod, Some(AccessMod::Take)) {
-                    if let ExprKind::Field(obj, field, _) = &b.value.kind {
-                        if let ExprKind::Var(parent_did, parent_name) = &obj.kind {
-                            if !b.value.ty.is_trivially_droppable() {
+                if matches!(b.access_mod, Some(AccessMod::Take))
+                    && let ExprKind::Field(obj, field, _) = &b.value.kind
+                        && let ExprKind::Var(parent_did, parent_name) = &obj.kind
+                            && !b.value.ty.is_trivially_droppable() {
                                 let parent_ty = obj.ty.clone();
                                 // If the parent struct is itself an actor field,
                                 // read it from / write it back to the state
@@ -60,7 +60,7 @@ impl Lowerer {
                                         b.span,
                                     );
                                     let cleared = self.emit(
-                                        InstKind::FieldClear(parent_val, field.clone()),
+                                        InstKind::FieldClear(parent_val, *field),
                                         parent_ty,
                                         b.span,
                                     );
@@ -78,26 +78,23 @@ impl Lowerer {
                                     // needed — Perceus + drop see the cleared
                                     // field on the new SSA value.
                                     let parent_val = self.read_var(
-                                        parent_name.clone(),
+                                        *parent_name,
                                         self.current_block,
                                         parent_ty.clone(),
                                         b.span,
                                     );
                                     let cleared = self.emit(
-                                        InstKind::FieldClear(parent_val, field.clone()),
+                                        InstKind::FieldClear(parent_val, *field),
                                         parent_ty,
                                         b.span,
                                     );
                                     self.write_var(
-                                        parent_name.clone(),
+                                        *parent_name,
                                         self.current_block,
                                         cleared,
                                     );
                                 }
                             }
-                        }
-                    }
-                }
 
                 if let Some(inst) = self
                     .func
@@ -124,7 +121,7 @@ impl Lowerer {
                         b.span,
                     );
                 } else {
-                    self.write_var(b.name.clone(), self.current_block, val);
+                    self.write_var(b.name, self.current_block, val);
                 }
                 val
             }
@@ -144,7 +141,7 @@ impl Lowerer {
                                 target.span,
                             );
                         } else {
-                            self.write_var(name.clone(), self.current_block, val);
+                            self.write_var(*name, self.current_block, val);
                         }
                     }
                     ExprKind::Field(obj, field, _) => {
@@ -169,7 +166,7 @@ impl Lowerer {
                                     target.span,
                                 );
                             } else {
-                                self.write_var(name.clone(), self.current_block, updated);
+                                self.write_var(*name, self.current_block, updated);
                             }
                             return val;
                         }
@@ -184,7 +181,7 @@ impl Lowerer {
             hir::Stmt::Expr(e) => self.lower_expr(e),
             hir::Stmt::Drop(_, name, ty, span) => {
                 if self.var_types.contains_key(name) {
-                    let val = self.read_var(name.clone(), self.current_block, ty.clone(), *span);
+                    let val = self.read_var(*name, self.current_block, ty.clone(), *span);
                     self.emit_void(InstKind::Drop(val, ty.clone()), *span);
                 }
                 self.emit(InstKind::Void, Type::Void, *span)
@@ -194,7 +191,7 @@ impl Lowerer {
                 for (i, (_id, name, bind_ty)) in bindings.iter().enumerate() {
                     let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, Span::dummy());
                     let elem = self.emit(InstKind::Index(val, idx), bind_ty.clone(), Span::dummy());
-                    self.write_var(name.clone(), self.current_block, elem);
+                    self.write_var(*name, self.current_block, elem);
                 }
                 val
             }

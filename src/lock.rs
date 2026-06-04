@@ -46,7 +46,7 @@ impl Lockfile {
     }
 
     fn parse_entry(line: &str) -> Result<LockEntry, String> {
-        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+        let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 4 {
             return Err(format!("jinn.lock: invalid entry: {line}"));
         }

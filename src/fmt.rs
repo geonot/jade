@@ -86,7 +86,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&Symbol::join_vec(&u.path, "."));
             if let Some(ref imports) = u.imports {
                 out.push_str(" import ");
-                out.push_str(&Symbol::join_vec(&imports, ", "));
+                out.push_str(&Symbol::join_vec(imports, ", "));
             }
             if let Some(ref alias) = u.alias {
                 out.push_str(&format!(" as {alias}"));
@@ -405,7 +405,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             out.push_str(&Symbol::join_vec(&u.path, "."));
             if let Some(ref imports) = u.imports {
                 out.push_str(" import ");
-                out.push_str(&Symbol::join_vec(&imports, ", "));
+                out.push_str(&Symbol::join_vec(imports, ", "));
             }
             out.push('\n');
         }

@@ -11,15 +11,13 @@ impl Typer {
         if let Some(args) = self
             .trait_impl_type_args
             .get(&(type_name.into(), "Iter".into()))
-        {
-            if let Some(t) = args.first() {
+            && let Some(t) = args.first() {
                 return t.clone();
             }
-        }
         let fn_name = format!("{type_name}_next");
-        if let Some((_, _, ret)) = self.fns.get(&fn_name) {
-            if let Type::Enum(ename) = ret {
-                if let Some(stripped) = ename.strip_prefix("Option_") {
+        if let Some((_, _, ret)) = self.fns.get(&fn_name)
+            && let Type::Enum(ename) = ret
+                && let Some(stripped) = ename.strip_prefix("Option_") {
                     return match &*stripped.as_str() {
                         "i64" => Type::I64,
                         "f64" => Type::F64,
@@ -28,8 +26,6 @@ impl Typer {
                         other => Type::Struct(other.into(), vec![]),
                     };
                 }
-            }
-        }
         Type::I64
     }
 
@@ -79,7 +75,7 @@ impl Typer {
         });
 
         let method_name = format!("{type_name}_next");
-        let ret = Type::Enum(option_enum_name.into());
+        let ret = Type::Enum(option_enum_name);
         if let Some(entry) = self.fns.get_mut(&method_name) {
             entry.2 = ret.clone();
         }
@@ -100,7 +96,7 @@ impl Typer {
             some_tag,
             vec![hir::Pat::Bind(
                 bind_id,
-                f.bind.clone(),
+                f.bind,
                 elem_ty.clone(),
                 span,
             )],
@@ -268,7 +264,7 @@ impl Typer {
         );
         let k_bind = hir::Stmt::Bind(hir::Bind {
             def_id: k_id,
-            name: f.bind.clone(),
+            name: f.bind,
             value: k_get,
             ty: key_ty.clone(),
             ownership: Ownership::Owned,
@@ -287,7 +283,7 @@ impl Typer {
                 }),
                 "get".into(),
                 vec![hir::Expr {
-                    kind: hir::ExprKind::Var(k_id, f.bind.clone()),
+                    kind: hir::ExprKind::Var(k_id, f.bind),
                     ty: key_ty,
                     span,
                 }],

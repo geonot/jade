@@ -12,8 +12,8 @@ impl Typer {
         args: &[ast::Expr],
         span: crate::ast::Span,
     ) -> Result<Option<hir::Expr>, String> {
-        if let ast::Expr::Ident(name, _) = obj {
-            if let Some((source, clauses)) = self.view_defs.get(&name.as_str()).cloned() {
+        if let ast::Expr::Ident(name, _) = obj
+            && let Some((source, clauses)) = self.view_defs.get(&name.as_str()).cloned() {
                 let schema = self
                     .store_schemas
                     .get(&source.as_str())
@@ -107,14 +107,14 @@ impl Typer {
                     "select" | "first" => {
                         let struct_name = Symbol::intern(&format!("__store_{source}"));
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::StoreQuery(source.clone(), Box::new(hfilter)),
+                            kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
                             ty: Type::Struct(struct_name, vec![]),
                             span,
                         }));
                     }
                     "exists" => {
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::StoreExists(source.clone(), Box::new(hfilter)),
+                            kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
                             ty: Type::Bool,
                             span,
                         }));
@@ -126,7 +126,6 @@ impl Typer {
                     }
                 }
             }
-        }
 
         Ok(None)
     }

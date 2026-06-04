@@ -1,0 +1,19 @@
+title: Pin String/Unicode semantics (UTF-8)
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-04T04:27:12'
+updated_at: '2026-06-04T04:34:22'
+result: ''
+description: 'ASSESSMENT (verified 2026-06-04): String is byte-based SSO (runtime/process.c
+  layout: ptr/len/cap with 23-byte inline). `.length` and indexing operate on BYTES
+  today. No documented UTF-8 contract; no docs/strings.md. P0 WORK: (1) Write docs/strings.md
+  as the canonical, stability-pinned spec: declare String is UTF-8, define `.length`
+  semantics (recommend: Unicode scalar count for natural-language feel; keep `.byte_count`/`.bytes`
+  for byte view), define indexing/iteration. (2) Implement chosen semantics in runtime
+  + codegen (src/codegen/string_ops.rs, string_transform.rs, runtime/*.c). Provide
+  explicit byte vs char API. (3) Conformance test pinning len/indexing/iteration on
+  multi-byte strings ("héllo", emoji). Idiomatic: implicit, inference-friendly, natural
+  naming. Definition of done: spec written; semantics implemented; conformance tests
+  green; zero warnings.'

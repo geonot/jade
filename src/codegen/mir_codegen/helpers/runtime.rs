@@ -52,8 +52,7 @@ impl<'ctx> Compiler<'ctx> {
                 let mut wrapper_params: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
                 wrapper_params.extend(
                     declared_param_tys
-                        .iter()
-                        .map(|t| BasicMetadataTypeEnum::from(*t)),
+                        .iter().copied(),
                 );
                 let wrapper_ft = match inner_type.get_return_type() {
                     Some(ret) => ret.fn_type(&wrapper_params, false),
@@ -77,14 +76,14 @@ impl<'ctx> Compiler<'ctx> {
                         .get_nth_param(0)
                         .expect("ICE: missing param")
                         .into_pointer_value();
-                    for i in 0..n_captures {
+                    for (i, inner_param) in inner_params.iter().enumerate().take(n_captures) {
                         let gep = b!(self.bld.build_struct_gep(
                             env_struct_ty,
                             env_param,
                             i as u32,
                             "cap.gep"
                         ));
-                        let load_ty: BasicTypeEnum<'ctx> = inner_params[i].try_into().unwrap();
+                        let load_ty: BasicTypeEnum<'ctx> = (*inner_param).try_into().unwrap();
                         let cap = b!(self.bld.build_load(load_ty, gep, "cap.load"));
                         call_args.push(cap.into());
                     }

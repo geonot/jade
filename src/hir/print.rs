@@ -464,6 +464,7 @@ impl PrettyPrinter {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn expr_str(&self, e: &Expr) -> String {
         match &e.kind {
             ExprKind::Int(v) => format!("{v}"),

@@ -272,7 +272,7 @@ impl Parser {
                         e = Expr::StrictCast(Box::new(e), self.parse_type()?, sp);
                     } else if matches!(self.peek(), Token::Ident(s) if s == "json" || s == "map") {
                         if let Token::Ident(fmt) = self.peek() {
-                            let fmt = fmt.clone();
+                            let fmt = *fmt;
                             self.advance();
                             e = Expr::AsFormat(Box::new(e), fmt, sp);
                         }
@@ -290,7 +290,7 @@ impl Parser {
                 }
                 Token::Ident(kw) if kw == "where" => {
                     if let Expr::Ident(ref store_name, sp) = e {
-                        let store = store_name.clone();
+                        let store = *store_name;
                         let filter = self.parse_store_filter()?;
                         e = Expr::StoreQuery(store, Box::new(filter), sp);
                     } else {

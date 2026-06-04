@@ -326,22 +326,20 @@ impl InferCtx {
 
             let mut msg = format!("{}: {} ({})", span.loc(), e, reason);
 
-            if let Some(origin) = &a_origin {
-                if origin.span.line != span.line {
+            if let Some(origin) = &a_origin
+                && origin.span.line != span.line {
                     msg.push_str(&format!(
                         "\n  note: expected `{}` because of line {} ({})",
                         ra, origin.span.line, origin.reason
                     ));
                 }
-            }
-            if let Some(origin) = &b_origin {
-                if origin.span.line != span.line {
+            if let Some(origin) = &b_origin
+                && origin.span.line != span.line {
                     msg.push_str(&format!(
                         "\n  note: found `{}` because of line {} ({})",
                         rb, origin.span.line, origin.reason
                     ));
                 }
-            }
 
             let suggestion = self.suggest_fix(reason, &ra, &rb);
             if let Some(s) = suggestion {
@@ -484,7 +482,7 @@ impl InferCtx {
                             let impl_traits = self.trait_impls.get(&name);
                             let missing: Vec<&String> = required_traits
                                 .iter()
-                                .filter(|rt| impl_traits.map_or(true, |impls| !impls.contains(rt)))
+                                .filter(|rt| impl_traits.is_none_or(|impls| !impls.contains(rt)))
                                 .collect();
                             if !missing.is_empty() {
                                 let missing_str = missing

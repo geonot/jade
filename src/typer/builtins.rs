@@ -264,7 +264,7 @@ impl Typer {
                 }))
             }
             "map" if !self.fns.contains_key(name) => {
-                if args.len() >= 1 {
+                if !args.is_empty() {
                     let probe = match self.lower_expr(&args[0]) {
                         Ok(e) => e,
                         Err(e) => return Some(Err(e)),

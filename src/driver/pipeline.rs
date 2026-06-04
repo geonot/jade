@@ -18,6 +18,7 @@ use super::sources::{
     EntityIndex, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_and_link(
     input: &std::path::Path,
     output: &std::path::Path,

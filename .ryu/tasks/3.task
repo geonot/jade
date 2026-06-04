@@ -1,0 +1,14 @@
+title: 'P2: Post-1.0 / opportunistic'
+status: pending
+atomic: false
+priority: low
+blocked_by:
+- '2'
+created_at: '2026-06-04T04:26:56'
+updated_at: '2026-06-04T04:26:56'
+result: ''
+description: 'P2 items from JINN_LANGUAGE_REVIEW_2026_06: disambiguate sigil overloading
+  (@); document comptime; codegen consolidation/dead-path audit; verifier coverage
+  for RuntimeOp resource read/write sets; store indexes; configurable worker cap;
+  assess LSP depth; publish cross-language benchmarks; porting-from-Rust/Go/Swift
+  guide.'

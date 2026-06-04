@@ -16,7 +16,7 @@ pub fn fold_program(prog: &mut hir::Program) {
         .fns
         .iter()
         .filter(|f| is_pure_fn(f))
-        .map(|f| (f.name.clone(), f.clone()))
+        .map(|f| (f.name, f.clone()))
         .collect();
 
     for f in &mut prog.fns {

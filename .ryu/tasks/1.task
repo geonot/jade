@@ -1,0 +1,13 @@
+title: 'P0: Must-fix before alpha'
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-04T04:26:56'
+updated_at: '2026-06-04T04:26:56'
+result: ''
+description: 'P0 remediation items from JINN_LANGUAGE_REVIEW_2026_06. These are load-bearing
+  design decisions hardest to add later and must land before alpha. Subitems: bounded
+  polymorphism (traits/protocols), String/Unicode semantics, single source of truth
+  for builtin method surfaces, store shared-file race model, store artifact gitignore/relocate,
+  clippy in CI.'

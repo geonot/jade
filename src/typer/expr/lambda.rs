@@ -57,7 +57,7 @@ impl Typer {
             );
             hparams.push(hir::Param {
                 def_id: pid,
-                name: p.name.clone(),
+                name: p.name,
                 ty,
                 ownership,
                 default: None,
@@ -77,11 +77,10 @@ impl Typer {
         let hbody = self.lower_block_no_scope_with_tail(body, &ret_ty, Some(&ret_ty))?;
         self.pop_scope();
 
-        if let Some(hir::Stmt::Expr(e)) = hbody.last() {
-            if e.ty != Type::Void {
+        if let Some(hir::Stmt::Expr(e)) = hbody.last()
+            && e.ty != Type::Void {
                 let _ = self.infer_ctx.unify(&ret_ty, &e.ty);
             }
-        }
 
         let final_ret = if ret.is_some() || expected_ret.is_some() {
             ret_ty

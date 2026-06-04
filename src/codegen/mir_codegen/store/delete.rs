@@ -13,9 +13,7 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("unknown store '{store_name}'"))?
             .clone();
         let is_simple = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Simple);
+            .decorators.contains(&crate::ast::StoreDecorator::Simple);
 
         if is_simple || sd.fields.iter().all(|f| f.name != "deleted") {
             return self.emit_store_hard_delete(encoded_name, args);
@@ -29,11 +27,10 @@ impl<'ctx> Compiler<'ctx> {
         self.store_lock(fp)?;
 
         for dec in &sd.decorators {
-            if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec {
-                if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
+            if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
                     b!(self.bld.build_call(hook_fn, &[], ""));
                 }
-            }
         }
 
         let i64t = self.ctx.i64_type();
@@ -140,11 +137,10 @@ impl<'ctx> Compiler<'ctx> {
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
 
         for dec in &sd.decorators {
-            if let crate::ast::StoreDecorator::AfterDelete(fname) = dec {
-                if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
+            if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
                     b!(self.bld.build_call(hook_fn, &[], ""));
                 }
-            }
         }
 
         b!(self.bld.build_call(
@@ -193,11 +189,10 @@ impl<'ctx> Compiler<'ctx> {
         self.store_lock(fp)?;
 
         for dec in &sd.decorators {
-            if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec {
-                if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
+            if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
                     b!(self.bld.build_call(hook_fn, &[], ""));
                 }
-            }
         }
 
         let i64t = self.ctx.i64_type();
@@ -345,11 +340,10 @@ impl<'ctx> Compiler<'ctx> {
 
         self.wal_write_delete(store_name, rec_ptr, rec_size)?;
         for dec in &sd.decorators {
-            if let crate::ast::StoreDecorator::AfterDelete(fname) = dec {
-                if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
+            if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
                     b!(self.bld.build_call(hook_fn, &[], ""));
                 }
-            }
         }
         b!(self.bld.build_unconditional_branch(skip_bb));
 

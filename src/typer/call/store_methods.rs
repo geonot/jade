@@ -11,12 +11,12 @@ impl Typer {
         args: &[ast::Expr],
         span: crate::ast::Span,
     ) -> Result<Option<hir::Expr>, String> {
-        if let ast::Expr::Ident(name, _) = obj {
-            if self.store_schemas.contains_key(&name.as_str()) {
+        if let ast::Expr::Ident(name, _) = obj
+            && self.store_schemas.contains_key(&name.as_str()) {
                 let is_kv = self
                     .store_decorators
                     .get(&name.as_str())
-                    .map(|decs| decs.iter().any(|d| *d == crate::ast::StoreDecorator::Kv))
+                    .map(|decs| decs.contains(&crate::ast::StoreDecorator::Kv))
                     .unwrap_or(false);
                 if is_kv {
                     match method {
@@ -29,7 +29,7 @@ impl Typer {
                             let val_expr = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::KvSet(
-                                    name.clone(),
+                                    *name,
                                     Box::new(key_expr),
                                     Box::new(val_expr),
                                 ),
@@ -44,7 +44,7 @@ impl Typer {
                             let key_expr =
                                 self.lower_expr_expected(&args[0], Some(&Type::String))?;
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::KvGet(name.clone(), Box::new(key_expr)),
+                                kind: hir::ExprKind::KvGet(*name, Box::new(key_expr)),
                                 ty: Type::I64,
                                 span,
                             }));
@@ -56,14 +56,14 @@ impl Typer {
                             let key_expr =
                                 self.lower_expr_expected(&args[0], Some(&Type::String))?;
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::KvHas(name.clone(), Box::new(key_expr)),
+                                kind: hir::ExprKind::KvHas(*name, Box::new(key_expr)),
                                 ty: Type::Bool,
                                 span,
                             }));
                         }
                         "count" => {
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::KvCount(name.clone()),
+                                kind: hir::ExprKind::KvCount(*name),
                                 ty: Type::I64,
                                 span,
                             }));
@@ -75,7 +75,7 @@ impl Typer {
                             let key_expr =
                                 self.lower_expr_expected(&args[0], Some(&Type::String))?;
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::KvDel(name.clone(), Box::new(key_expr)),
+                                kind: hir::ExprKind::KvDel(*name, Box::new(key_expr)),
                                 ty: Type::Void,
                                 span,
                             }));
@@ -100,7 +100,7 @@ impl Typer {
                             };
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::KvIncr(
-                                    name.clone(),
+                                    *name,
                                     Box::new(key_expr),
                                     Box::new(delta_expr),
                                 ),
@@ -109,7 +109,7 @@ impl Typer {
                             }));
                         }
                         "decr" => {
-                            let key_expr = if args.len() >= 1 {
+                            let key_expr = if !args.is_empty() {
                                 self.lower_expr_expected(&args[0], Some(&Type::String))?
                             } else {
                                 return Err(
@@ -140,7 +140,7 @@ impl Typer {
                             };
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::KvIncr(
-                                    name.clone(),
+                                    *name,
                                     Box::new(key_expr),
                                     Box::new(delta_expr),
                                 ),
@@ -159,7 +159,7 @@ impl Typer {
                 let is_graph = self
                     .store_decorators
                     .get(&name.as_str())
-                    .map(|decs| decs.iter().any(|d| *d == crate::ast::StoreDecorator::Graph))
+                    .map(|decs| decs.contains(&crate::ast::StoreDecorator::Graph))
                     .unwrap_or(false);
                 if is_graph {
                     match method {
@@ -188,7 +188,7 @@ impl Typer {
                                 .unwrap_or(Type::I64);
                             let node_expr = self.lower_expr_expected(&args[0], Some(&first_ty))?;
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::GraphFrom(name.clone(), Box::new(node_expr)),
+                                kind: hir::ExprKind::GraphFrom(*name, Box::new(node_expr)),
                                 ty: Type::I64,
                                 span,
                             }));
@@ -218,7 +218,7 @@ impl Typer {
                                 .unwrap_or(Type::I64);
                             let node_expr = self.lower_expr_expected(&args[0], Some(&second_ty))?;
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::GraphTo(name.clone(), Box::new(node_expr)),
+                                kind: hir::ExprKind::GraphTo(*name, Box::new(node_expr)),
                                 ty: Type::I64,
                                 span,
                             }));
@@ -235,21 +235,17 @@ impl Typer {
                             .any(|d| matches!(d, crate::ast::StoreDecorator::TimeSeries(_)))
                     })
                     .unwrap_or(false);
-                if is_ts {
-                    match method {
-                        "latest" => {
-                            if !args.is_empty() {
-                                return Err("timeseries.latest() takes no arguments".into());
-                            }
-                            return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::TsLatest(name.clone()),
-                                ty: Type::I64,
-                                span,
-                            }));
+                if is_ts
+                    && method == "latest" {
+                        if !args.is_empty() {
+                            return Err("timeseries.latest() takes no arguments".into());
                         }
-                        _ => {}
+                        return Ok(Some(hir::Expr {
+                            kind: hir::ExprKind::TsLatest(*name),
+                            ty: Type::I64,
+                            span,
+                        }));
                     }
-                }
 
                 let vec_dims = self.store_decorators.get(&name.as_str()).and_then(|decs| {
                     decs.iter().find_map(|d| match d {
@@ -269,7 +265,7 @@ impl Typer {
                             let k_expr = self.lower_expr(&args[1])?;
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::VecNearest(
-                                    name.clone(),
+                                    *name,
                                     Box::new(query_expr),
                                     Box::new(k_expr),
                                 ),
@@ -285,7 +281,7 @@ impl Typer {
                             }
                             let vec_expr = self.lower_expr(&args[0])?;
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::VecInsert(name.clone(), Box::new(vec_expr)),
+                                kind: hir::ExprKind::VecInsert(*name, Box::new(vec_expr)),
                                 ty: Type::I64,
                                 span,
                             }));
@@ -295,7 +291,7 @@ impl Typer {
                                 return Err("vector.count() takes no arguments".into());
                             }
                             return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::VecCount(name.clone()),
+                                kind: hir::ExprKind::VecCount(*name),
                                 ty: Type::I64,
                                 span,
                             }));
@@ -309,12 +305,12 @@ impl Typer {
                         return Err("maybe() requires 2 arguments (field_name, value)".into());
                     }
                     let field = match &args[0] {
-                        ast::Expr::Ident(f, _) => f.clone(),
+                        ast::Expr::Ident(f, _) => *f,
                         _ => return Err("maybe() first argument must be a field name".into()),
                     };
                     let val_expr = self.lower_expr(&args[1])?;
                     return Ok(Some(hir::Expr {
-                        kind: hir::ExprKind::BloomTest(name.clone(), field, Box::new(val_expr)),
+                        kind: hir::ExprKind::BloomTest(*name, field, Box::new(val_expr)),
                         ty: Type::Bool,
                         span,
                     }));
@@ -325,12 +321,12 @@ impl Typer {
                         return Err("search() requires 2 arguments (field_name, query)".into());
                     }
                     let field = match &args[0] {
-                        ast::Expr::Ident(f, _) => f.clone(),
+                        ast::Expr::Ident(f, _) => *f,
                         _ => return Err("search() first argument must be a field name".into()),
                     };
                     let query_expr = self.lower_expr(&args[1])?;
                     return Ok(Some(hir::Expr {
-                        kind: hir::ExprKind::FtsSearch(name.clone(), field, Box::new(query_expr)),
+                        kind: hir::ExprKind::FtsSearch(*name, field, Box::new(query_expr)),
                         ty: Type::I64,
                         span,
                     }));
@@ -340,11 +336,11 @@ impl Typer {
                         return Err("search_count() requires 1 argument (field_name)".into());
                     }
                     let field = match &args[0] {
-                        ast::Expr::Ident(f, _) => f.clone(),
+                        ast::Expr::Ident(f, _) => *f,
                         _ => return Err("search_count() argument must be a field name".into()),
                     };
                     return Ok(Some(hir::Expr {
-                        kind: hir::ExprKind::FtsCount(name.clone(), field),
+                        kind: hir::ExprKind::FtsCount(*name, field),
                         ty: Type::I64,
                         span,
                     }));
@@ -356,14 +352,14 @@ impl Typer {
                             return Err(format!("{method}() requires exactly 1 field argument"));
                         }
                         let field = match &args[0] {
-                            ast::Expr::Ident(f, _) => f.clone(),
+                            ast::Expr::Ident(f, _) => *f,
                             _ => return Err(format!("{method}() argument must be a field name")),
                         };
                         let kind = match method {
-                            "sum" => hir::ExprKind::StoreSum(name.clone(), field.clone()),
-                            "avg" => hir::ExprKind::StoreAvg(name.clone(), field.clone()),
-                            "min" => hir::ExprKind::StoreMin(name.clone(), field.clone()),
-                            "max" => hir::ExprKind::StoreMax(name.clone(), field.clone()),
+                            "sum" => hir::ExprKind::StoreSum(*name, field),
+                            "avg" => hir::ExprKind::StoreAvg(*name, field),
+                            "min" => hir::ExprKind::StoreMin(*name, field),
+                            "max" => hir::ExprKind::StoreMax(*name, field),
                             _ => unreachable!(),
                         };
                         let field_ty = self.store_schemas.get(&name.as_str()).and_then(|schema| {
@@ -391,18 +387,18 @@ impl Typer {
                             return Err("distinct() requires exactly 1 field argument".into());
                         }
                         let field = match &args[0] {
-                            ast::Expr::Ident(f, _) => f.clone(),
+                            ast::Expr::Ident(f, _) => *f,
                             _ => return Err("distinct() argument must be a field name".into()),
                         };
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::StoreDistinct(name.clone(), field),
+                            kind: hir::ExprKind::StoreDistinct(*name, field),
                             ty: Type::I64,
                             span,
                         }));
                     }
                     "count" => {
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::StoreCount(name.clone()),
+                            kind: hir::ExprKind::StoreCount(*name),
                             ty: Type::I64,
                             span,
                         }));
@@ -414,7 +410,7 @@ impl Typer {
                         let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreVersionCount(
-                                name.clone(),
+                                *name,
                                 Box::new(sid_expr),
                             ),
                             ty: Type::I64,
@@ -427,7 +423,7 @@ impl Typer {
                         }
                         let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::StoreHistory(name.clone(), Box::new(sid_expr)),
+                            kind: hir::ExprKind::StoreHistory(*name, Box::new(sid_expr)),
                             ty: Type::I64,
                             span,
                         }));
@@ -440,7 +436,7 @@ impl Typer {
                         let ver_expr = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreAtVersion(
-                                name.clone(),
+                                *name,
                                 Box::new(sid_expr),
                                 Box::new(ver_expr),
                             ),
@@ -451,7 +447,6 @@ impl Typer {
                     _ => {}
                 }
             }
-        }
 
         Ok(None)
     }

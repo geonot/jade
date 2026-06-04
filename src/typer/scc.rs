@@ -6,7 +6,7 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<Symbol>) {
     match expr {
         ast::Expr::Call(callee, args, _) => {
             if let ast::Expr::Ident(name, _) = callee.as_ref() {
-                calls.insert(name.clone());
+                calls.insert(*name);
             }
             collect_calls_expr(callee, calls);
             for a in args {
@@ -109,11 +109,8 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<Symbol>) {
         ast::Stmt::TupleBind(_, e, _) => collect_calls_expr(e, calls),
         ast::Stmt::Assign(_, e, _) => collect_calls_expr(e, calls),
         ast::Stmt::Expr(e) => collect_calls_expr(e, calls),
-        ast::Stmt::Ret(v, _) => {
-            if let Some(e) = v {
-                collect_calls_expr(e, calls);
-            }
-        }
+        ast::Stmt::Ret(Some(e), _) => collect_calls_expr(e, calls),
+        ast::Stmt::Ret(None, _) => {}
         ast::Stmt::If(i) => {
             collect_calls_expr(&i.cond, calls);
             collect_calls_block(&i.then, calls);
@@ -140,11 +137,8 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<Symbol>) {
             collect_calls_block(&f.body, calls);
         }
         ast::Stmt::Loop(l) => collect_calls_block(&l.body, calls),
-        ast::Stmt::Break(v, _) => {
-            if let Some(e) = v {
-                collect_calls_expr(e, calls);
-            }
-        }
+        ast::Stmt::Break(Some(e), _) => collect_calls_expr(e, calls),
+        ast::Stmt::Break(None, _) => {}
         ast::Stmt::Match(m) => {
             collect_calls_expr(&m.subject, calls);
             for arm in &m.arms {

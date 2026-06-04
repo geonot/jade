@@ -34,8 +34,7 @@ impl<'ctx> Compiler<'ctx> {
         let mut wrapper_params: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
         wrapper_params.extend(
             original_params
-                .iter()
-                .map(|t| BasicMetadataTypeEnum::from(*t)),
+                .iter().copied(),
         );
         let wrapper_ft = match original_type.get_return_type() {
             Some(ret) => ret.fn_type(&wrapper_params, false),

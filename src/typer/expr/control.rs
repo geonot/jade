@@ -30,14 +30,13 @@ impl Typer {
                     }
                     _ => Type::Void,
                 };
-                if let Some(ref els) = hi.els {
-                    if let Some(hir::Stmt::Expr(e)) = els.last() {
+                if let Some(ref els) = hi.els
+                    && let Some(hir::Stmt::Expr(e)) = els.last() {
                         let r =
                             self.infer_ctx
                                 .unify_at(&ty, &e.ty, i.span, "if-expression branches");
                         self.collect_unify_error(r);
                     }
-                }
                 for (_, branch) in &hi.elifs {
                     if let Some(hir::Stmt::Expr(e)) = branch.last() {
                         let r = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");
@@ -163,6 +162,7 @@ impl Typer {
         }
     }
 
+    #[allow(clippy::if_same_then_else)]
     pub(in crate::typer) fn lower_expr_query(
         &mut self,
         expr: &ast::Expr,
@@ -172,7 +172,7 @@ impl Typer {
         match expr {
             ast::Expr::Query(source, clauses, span) => {
                 let store_name = match source.as_ref() {
-                    ast::Expr::Ident(name, _) => name.clone(),
+                    ast::Expr::Ident(name, _) => *name,
                     _ => return Err("query block source must be a store name".into()),
                 };
                 let schema = self
@@ -193,7 +193,7 @@ impl Typer {
                             has_delete = true;
                         }
                         ast::QueryClause::Set(field, val, _) => {
-                            sets.push((field.clone(), val.clone()));
+                            sets.push((*field, val.clone()));
                         }
                         ast::QueryClause::Sort(_, _, _) => {
                             return Err("query 'sort' clause is not yet implemented".into());

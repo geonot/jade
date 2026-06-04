@@ -57,11 +57,10 @@ fn init_tracing(cli: &Cli) {
     if cli.debug_perceus {
         filter = filter.add_directive("jinnc::perceus=trace".parse().unwrap());
     }
-    if let Ok(env) = std::env::var("JINN_LOG") {
-        if let Ok(extra) = EnvFilter::try_new(env) {
+    if let Ok(env) = std::env::var("JINN_LOG")
+        && let Ok(extra) = EnvFilter::try_new(env) {
             filter = extra;
         }
-    }
 
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -243,7 +242,7 @@ pub fn run() {
                                     if name != "target" && name != ".git" {
                                         collect_jinn_files(&path, out);
                                     }
-                                } else if path.extension().map_or(false, |e| e == "jn") {
+                                } else if path.extension().is_some_and(|e| e == "jn") {
                                     out.push(path);
                                 }
                             }
@@ -460,22 +459,19 @@ pub fn run() {
     if cli.strict_types {
         use crate::mir::{InstKind, Terminator};
         let _fn_names: std::collections::HashSet<Symbol> =
-            mir_prog.functions.iter().map(|f| f.name.clone()).collect();
+            mir_prog.functions.iter().map(|f| f.name).collect();
         for func in &mir_prog.functions {
             for bb in &func.blocks {
                 for inst in &bb.insts {
-                    if let InstKind::FnRef(ref name) = inst.kind {
-                        if let Some(dest) = inst.dest {
-                            if func.name == "main" {
-                                if matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest)
+                    if let InstKind::FnRef(ref name) = inst.kind
+                        && let Some(dest) = inst.dest
+                            && func.name == "main"
+                                && matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest)
                                 {
                                     die(&format!(
                                         "codegen: bare function reference `{name}` has unresolved return type in main"
                                     ));
                                 }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -642,10 +638,10 @@ pub fn run() {
     }
 
     if let Some(ref triple) = comp.target_triple {
-        cc.arg(&format!("--target={triple}"));
+        cc.arg(format!("--target={triple}"));
         if triple.contains("wasm") {
             cc = Command::new("clang");
-            cc.arg(&format!("--target={triple}"));
+            cc.arg(format!("--target={triple}"));
             cc.arg(&obj).arg("-o").arg(&cli.output);
             if !comp.standalone {
                 cc.arg("-lc");

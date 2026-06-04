@@ -236,9 +236,7 @@ impl<'ctx> Compiler<'ctx> {
             .clone();
 
         let is_column = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Column);
+            .decorators.contains(&crate::ast::StoreDecorator::Column);
         if is_column && (op == "sum" || op == "min" || op == "max") {
             let field_ty = sd
                 .fields
@@ -425,8 +423,8 @@ impl<'ctx> Compiler<'ctx> {
                         .bld
                         .build_select::<inkwell::values::IntValue, inkwell::values::IntValue>(
                             lt,
-                            field_val.into(),
-                            cur_acc.into(),
+                            field_val,
+                            cur_acc,
                             "agg.min"
                         ))
                     .into_int_value()
@@ -442,8 +440,8 @@ impl<'ctx> Compiler<'ctx> {
                         .bld
                         .build_select::<inkwell::values::IntValue, inkwell::values::IntValue>(
                             gt,
-                            field_val.into(),
-                            cur_acc.into(),
+                            field_val,
+                            cur_acc,
                             "agg.max"
                         ))
                     .into_int_value()

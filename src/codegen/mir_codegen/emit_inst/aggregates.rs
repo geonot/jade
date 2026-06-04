@@ -182,7 +182,7 @@ impl<'ctx> Compiler<'ctx> {
                         };
                         b!(self.bld.build_store(ptr, *v));
                     }
-                    Ok(b!(self.bld.build_load(arr_ty, alloca, "arr.val")).into())
+                    Ok(b!(self.bld.build_load(arr_ty, alloca, "arr.val")))
                 }
 
                 mir::InstKind::FieldGet(obj, field) => {
@@ -205,8 +205,8 @@ impl<'ctx> Compiler<'ctx> {
                                     _ => None,
                                 })
                         });
-                        if let Some(name) = &struct_name {
-                            if let Some(st) = self.module.get_struct_type(name) {
+                        if let Some(name) = &struct_name
+                            && let Some(st) = self.module.get_struct_type(name) {
                                 let field_idx = self.field_index(name, &field.as_str());
                                 let gep = b!(self.bld.build_struct_gep(
                                     st,
@@ -216,7 +216,6 @@ impl<'ctx> Compiler<'ctx> {
                                 ));
                                 b!(self.bld.build_store(gep, v));
                             }
-                        }
 
                         return Ok(Some(obj_val));
                     } else if obj_val.is_struct_value() {
@@ -240,8 +239,8 @@ impl<'ctx> Compiler<'ctx> {
                     let v = self.val(*val);
                     if let Some((alloca, ty)) = self.var_allocs.get(var_name).cloned() {
                         let struct_name = self.struct_name_from_type(&ty);
-                        if let Some(name) = &struct_name {
-                            if let Some(st) = self.module.get_struct_type(name) {
+                        if let Some(name) = &struct_name
+                            && let Some(st) = self.module.get_struct_type(name) {
                                 let field_idx = self.field_index(name, &field.as_str());
                                 let gep = b!(self.bld.build_struct_gep(
                                     st,
@@ -251,7 +250,6 @@ impl<'ctx> Compiler<'ctx> {
                                 ));
                                 b!(self.bld.build_store(gep, v));
                             }
-                        }
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }

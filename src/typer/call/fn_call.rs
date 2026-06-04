@@ -42,8 +42,7 @@ impl Typer {
 
             if let Some((ref quantified, ref scheme_params, ref scheme_ret)) =
                 self.fn_schemes.get(name).cloned()
-            {
-                if !quantified.is_empty() {
+                && !quantified.is_empty() {
                     let scheme = crate::types::Scheme {
                         quantified: quantified.clone(),
                         ty: Type::Fn(scheme_params.clone(), Box::new(scheme_ret.clone())),
@@ -86,10 +85,9 @@ impl Typer {
                     let type_map = self.build_type_map(&name.as_str(), &normalized, &arg_tys);
                     return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, true);
                 }
-            }
 
             if let Some(gf) = self.generic_fns.get(name).cloned() {
-                let has_poly_scheme = self.fn_schemes.get(name).map_or(false, |s| !s.0.is_empty());
+                let has_poly_scheme = self.fn_schemes.get(name).is_some_and(|s| !s.0.is_empty());
                 let is_inferable = self.inferable_fns.contains_key(name);
                 let is_inferable_without_scheme =
                     is_inferable && !self.fn_schemes.contains_key(name);
@@ -107,11 +105,10 @@ impl Typer {
                 }
             }
 
-            if let Some(inf_fn) = self.inferable_fns.get(name).cloned() {
-                if !self.fn_schemes.get(name).map_or(false, |s| !s.0.is_empty())
+            if let Some(inf_fn) = self.inferable_fns.get(name).cloned()
+                && self.fn_schemes.get(name).is_none_or(|s| s.0.is_empty())
                     && self.fn_schemes.contains_key(name)
-                {
-                    if let Some((_, param_tys, _)) = self.fns.get(name).cloned() {
+                    && let Some((_, param_tys, _)) = self.fns.get(name).cloned() {
                         let hargs: Vec<hir::Expr> = args
                             .iter()
                             .map(|e| self.lower_expr(e))
@@ -143,8 +140,6 @@ impl Typer {
                             );
                         }
                     }
-                }
-            }
 
             if let Some((id, param_tys, ret)) = self.fns.get(name).cloned() {
                 let mut hargs: Vec<hir::Expr> = Vec::new();
@@ -153,8 +148,8 @@ impl Typer {
                     hargs.push(self.lower_expr_expected(arg, expected)?);
                 }
 
-                if hargs.len() < param_tys.len() {
-                    if let Some(defaults) = self.fn_defaults.get(name).cloned() {
+                if hargs.len() < param_tys.len()
+                    && let Some(defaults) = self.fn_defaults.get(name).cloned() {
                         for i in hargs.len()..param_tys.len() {
                             if let Some(Some(def_expr)) = defaults.get(i) {
                                 let expected = param_tys.get(i);
@@ -162,7 +157,6 @@ impl Typer {
                             }
                         }
                     }
-                }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
                         let _ = self
@@ -184,16 +178,16 @@ impl Typer {
                     }
                 }
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::Call(id, name.clone(), hargs),
+                    kind: hir::ExprKind::Call(id, *name, hargs),
                     ty: ret,
                     span,
                 });
             }
 
             if let Some(v) = self.find_var(&name.as_str()).cloned() {
-                if let Some(scheme) = &v.scheme {
-                    if scheme.is_poly() {
-                        if let Some((lparams, lret, lbody, lspan)) =
+                if let Some(scheme) = &v.scheme
+                    && scheme.is_poly()
+                        && let Some((lparams, lret, lbody, lspan)) =
                             self.poly_lambda_asts.get(name).cloned()
                         {
                             let inst = self.infer_ctx.instantiate(scheme);
@@ -263,7 +257,7 @@ impl Typer {
                                 );
                                 fn_params.push(hir::Param {
                                     def_id: pid,
-                                    name: p.name.clone(),
+                                    name: p.name,
                                     ty,
                                     ownership,
                                     default: None,
@@ -312,15 +306,13 @@ impl Typer {
                                 span,
                             });
                         }
-                    }
-                }
 
                 let resolved_ty = self.infer_ctx.shallow_resolve(&v.ty);
                 if let Type::Fn(ptys, ret) = &resolved_ty {
                     let ret = *ret.clone();
                     let ptys = ptys.clone();
                     let fn_expr = hir::Expr {
-                        kind: hir::ExprKind::Var(v.def_id, name.clone()),
+                        kind: hir::ExprKind::Var(v.def_id, *name),
                         ty: resolved_ty.clone(),
                         span,
                     };
@@ -354,7 +346,7 @@ impl Typer {
                         .infer_ctx
                         .unify_at(&v.ty, &fn_ty, span, "higher-order call");
                     let fn_expr = hir::Expr {
-                        kind: hir::ExprKind::Var(v.def_id, name.clone()),
+                        kind: hir::ExprKind::Var(v.def_id, *name),
                         ty: fn_ty,
                         span,
                     };
@@ -379,7 +371,7 @@ impl Typer {
                     }
                 }
                 return Ok(hir::Expr {
-                    kind: hir::ExprKind::Call(id, name.clone(), hargs),
+                    kind: hir::ExprKind::Call(id, *name, hargs),
                     ty: ret,
                     span,
                 });

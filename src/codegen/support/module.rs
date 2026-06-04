@@ -83,11 +83,10 @@ impl<'ctx> Compiler<'ctx> {
 
             for bb in &func.blocks {
                 for inst in &bb.insts {
-                    if let (Some(dest), mir::InstKind::VecNew(elems)) = (&inst.dest, &inst.kind) {
-                        if elems.is_empty() {
+                    if let (Some(dest), mir::InstKind::VecNew(elems)) = (&inst.dest, &inst.kind)
+                        && elems.is_empty() {
                             empty_vec_push_counts.push(*pushes_by_vec.get(dest).unwrap_or(&0));
                         }
-                    }
                 }
             }
         }
@@ -250,7 +249,7 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(ref trait_name) = ti.trait_name {
                 let order = self
                     .trait_method_order
-                    .entry(trait_name.clone())
+                    .entry(*trait_name)
                     .or_default();
                 for m in &ti.methods {
                     let base_name = m

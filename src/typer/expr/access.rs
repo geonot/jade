@@ -13,13 +13,13 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Call(callee, args, span) => {
-                if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref() {
-                    if let ast::Expr::Ident(ctor_name, _) = inner.as_ref() {
+                if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref()
+                    && let ast::Expr::Ident(ctor_name, _) = inner.as_ref() {
                         let is_struct_ctor = self.generic_types.contains_key(ctor_name)
                             || self.structs.contains_key(ctor_name);
                         let is_variant_ctor = self.variant_tags.contains_key(ctor_name);
-                        if is_struct_ctor || is_variant_ctor {
-                            if let Some(tys) = self.expr_to_type_args(type_arg_expr) {
+                        if (is_struct_ctor || is_variant_ctor)
+                            && let Some(tys) = self.expr_to_type_args(type_arg_expr) {
                                 let inits: Vec<ast::FieldInit> = args
                                     .iter()
                                     .map(|a| ast::FieldInit {
@@ -38,9 +38,7 @@ impl Typer {
                                 }
                                 return Ok(result);
                             }
-                        }
                     }
-                }
 
                 if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
                     let is_struct = self.generic_types.contains_key(ctor_name)
@@ -117,8 +115,7 @@ impl Typer {
                         if !self.fns.contains_key(&qualified_name)
                             && !self.inferable_fns.contains_key(&qualified_name)
                             && !self.generic_fns.contains_key(&qualified_name)
-                        {
-                            if let Some((id, ptys, ret)) = self.externs.get(method).cloned() {
+                            && let Some((id, ptys, ret)) = self.externs.get(method).cloned() {
                                 let mut hargs = Vec::new();
                                 for (i, arg) in args.iter().enumerate() {
                                     let expected_ty = ptys.get(i);
@@ -135,12 +132,11 @@ impl Typer {
                                     }
                                 }
                                 return Ok(hir::Expr {
-                                    kind: hir::ExprKind::Call(id, method.clone(), hargs),
+                                    kind: hir::ExprKind::Call(id, *method, hargs),
                                     ty: ret,
                                     span: *span,
                                 });
                             }
-                        }
                         let callee = ast::Expr::Ident(qualified_name, *span);
                         let result = self.lower_call(&callee, args, *span)?;
                         if let Some(exp) = expected {
@@ -163,13 +159,13 @@ impl Typer {
                                 }
                             }
                             return Ok(hir::Expr {
-                                kind: hir::ExprKind::Call(id, method.clone(), hargs),
+                                kind: hir::ExprKind::Call(id, *method, hargs),
                                 ty: ret,
                                 span: *span,
                             });
                         }
 
-                        let callee = ast::Expr::Ident(method.clone(), *span);
+                        let callee = ast::Expr::Ident(*method, *span);
                         let result = self.lower_call(&callee, args, *span)?;
                         if let Some(exp) = expected {
                             self.unify_call_result(exp, &result.ty, *span, "call result");
@@ -187,6 +183,7 @@ impl Typer {
         }
     }
 
+    #[allow(clippy::type_complexity, clippy::if_same_then_else)]
     pub(in crate::typer) fn lower_expr_field(
         &mut self,
         expr: &ast::Expr,
@@ -195,19 +192,18 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Field(obj, field, span) => {
-                if let ast::Expr::Ident(ref name, _) = **obj {
-                    if self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
+                if let ast::Expr::Ident(ref name, _) = **obj
+                    && self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
                         let qualified_name = Symbol::intern(&format!("{}_{}", name, field));
                         let callee = ast::Expr::Ident(qualified_name, *span);
                         return self.lower_expr_expected(&callee, expected);
                     }
-                }
                 let hobj = self.lower_expr(obj)?;
 
-                if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind {
-                    if self.suppress_moved_field_check == 0 {
-                        if let Some(moved) = self.moved_fields.get(parent_id) {
-                            if moved.contains(field) {
+                if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind
+                    && self.suppress_moved_field_check == 0
+                        && let Some(moved) = self.moved_fields.get(parent_id)
+                            && moved.contains(field) {
                                 return Err(format!(
                                     "{}: field `{}` of `{}` was moved out by an earlier `take`; \
                                      reassign `{}.{}` before reading it",
@@ -218,28 +214,23 @@ impl Typer {
                                     field,
                                 ));
                             }
-                        }
-                    }
-                }
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
-                if let Type::ActorRef(actor_name) = &resolved_ty {
-                    if let Some((_, _, handlers)) = self.actors.get(actor_name) {
-                        if handlers.iter().any(|(n, _, _)| n == field) {
+                if let Type::ActorRef(actor_name) = &resolved_ty
+                    && let Some((_, _, handlers)) = self.actors.get(actor_name)
+                        && handlers.iter().any(|(n, _, _)| n == field) {
                             let call_expr =
-                                ast::Expr::Method(obj.clone(), field.clone(), Vec::new(), *span);
+                                ast::Expr::Method(obj.clone(), *field, Vec::new(), *span);
                             return self.lower_expr_expected(&call_expr, expected);
                         }
-                    }
-                }
 
                 let peeled_ty = resolved_ty.clone();
                 let struct_name = match &peeled_ty {
-                    Type::Struct(name, _) => Some(name.clone()),
+                    Type::Struct(name, _) => Some(*name),
 
                     Type::Row(store) => Some(Symbol::intern(&format!("__store_{store}"))),
                     Type::Ptr(inner) => match inner.as_ref() {
-                        Type::Struct(name, _) => Some(name.clone()),
+                        Type::Struct(name, _) => Some(*name),
                         _ => None,
                     },
                     _ => None,
@@ -313,7 +304,7 @@ impl Typer {
                     self.field_constraints
                         .entry(var_id)
                         .or_default()
-                        .push((field.clone(), fty_placeholder.clone()));
+                        .push((*field, fty_placeholder.clone()));
 
                     let all_required_fields: Vec<(Symbol, Type)> = self
                         .field_constraints
@@ -372,7 +363,7 @@ impl Typer {
                     } else {
                         self.deferred_fields.push(super::DeferredField {
                             receiver_ty: resolved_ty.clone(),
-                            field_name: field.clone(),
+                            field_name: *field,
                             field_ty: fty_placeholder.clone(),
                             span: *span,
                         });
@@ -382,7 +373,7 @@ impl Typer {
                     (self.infer_ctx.fresh_var(), 0)
                 };
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::Field(Box::new(hobj), field.clone(), idx),
+                    kind: hir::ExprKind::Field(Box::new(hobj), *field, idx),
                     ty,
                     span: *span,
                 })

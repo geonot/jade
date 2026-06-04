@@ -166,7 +166,7 @@ impl Lowerer {
                 let mut all_vals = vec![filter_val];
                 all_vals.extend(extra_vals);
 
-                let field_names: Vec<Symbol> = fields.iter().map(|(n, _)| n.clone()).collect();
+                let field_names: Vec<Symbol> = fields.iter().map(|(n, _)| *n).collect();
                 all_vals.extend(fields.iter().map(|(_, e)| self.lower_expr(e)));
 
                 let mut encoded = format!("__store_set_{store_name}__{}__{op_str}", filter.field);

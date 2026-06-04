@@ -74,7 +74,7 @@ impl Lowerer {
                                 arm.elem_ty.clone(),
                                 span,
                             );
-                            self.write_var(bind_name.clone(), self.current_block, recv_val);
+                            self.write_var(*bind_name, self.current_block, recv_val);
                         }
                         self.lower_block_stmts(&arm.body);
                         self.set_terminator(Terminator::Goto(merge_bb));

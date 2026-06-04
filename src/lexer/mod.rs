@@ -342,8 +342,8 @@ impl<'s> Lexer<'s> {
             return self.lex_ident();
         }
 
-        if self.pos + 3 < self.src.len() {
-            if let (b'>', b'>', b'>', b'=') = (
+        if self.pos + 3 < self.src.len()
+            && let (b'>', b'>', b'>', b'=') = (
                 ch,
                 self.src[self.pos + 1],
                 self.src[self.pos + 2],
@@ -358,7 +358,6 @@ impl<'s> Lexer<'s> {
                     span: Span::new(start, self.pos, self.line, sc),
                 });
             }
-        }
 
         if self.pos + 2 < self.src.len() {
             let three = match (ch, self.src[self.pos + 1], self.src[self.pos + 2]) {

@@ -10,10 +10,10 @@ pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
                 if f.name.contains_str("_") && f.name.as_str().starts_with(char::is_uppercase) {
                     continue;
                 }
-                rename_map.insert(f.name.clone(), format!("{}_{}", module, f.name));
+                rename_map.insert(f.name, format!("{}_{}", module, f.name));
             }
             Decl::Const(name, _, _) => {
-                rename_map.insert(name.clone(), format!("{}_{}", module, name));
+                rename_map.insert(*name, format!("{}_{}", module, name));
             }
             _ => {}
         }

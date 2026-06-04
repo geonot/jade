@@ -70,14 +70,13 @@ impl HirValidator {
         if id == DefId::BUILTIN {
             return;
         }
-        if let Some(prev) = self.fn_defs.insert(id.0, span) {
-            if prev.line != span.line {
+        if let Some(prev) = self.fn_defs.insert(id.0, span)
+            && prev.line != span.line {
                 self.errors.push(format!(
                     "duplicate DefId({}) for '{}' at line {} (previously at line {})",
                     id.0, name, span.line, prev.line
                 ));
             }
-        }
     }
 
     fn validate_fn(&mut self, f: &hir::Fn) {
@@ -261,8 +260,8 @@ impl HirValidator {
                 for a in args {
                     self.validate_expr(a);
                 }
-                if let Some((_, max_params, min_params)) = self.fn_sigs.get(&id.0) {
-                    if args.len() < *min_params || args.len() > *max_params {
+                if let Some((_, max_params, min_params)) = self.fn_sigs.get(&id.0)
+                    && (args.len() < *min_params || args.len() > *max_params) {
                         self.errors.push(format!(
                             "call to `{}` at line {}: expected {}{} args, got {}",
                             name,
@@ -276,7 +275,6 @@ impl HirValidator {
                             args.len()
                         ));
                     }
-                }
             }
             hir::ExprKind::IndirectCall(callee, args) => {
                 self.validate_expr(callee);

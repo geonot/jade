@@ -18,7 +18,7 @@ impl EntityIndex {
                     let path = entry.path();
                     if path.is_dir() {
                         collect(&path, files);
-                    } else if path.extension().map_or(false, |e| e == "jn") {
+                    } else if path.extension().is_some_and(|e| e == "jn") {
                         files.push(path);
                     }
                 }
@@ -45,8 +45,8 @@ impl EntityIndex {
     ) -> Self {
         let mut idx = Self::new();
 
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(exe_dir) = exe.parent() {
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(exe_dir) = exe.parent() {
                 let std_dir = exe_dir.join("std");
                 if std_dir.is_dir() {
                     idx.scan_dir(&std_dir);
@@ -65,7 +65,6 @@ impl EntityIndex {
                     }
                 }
             }
-        }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
             let std_dir = PathBuf::from(manifest).join("std");
             if std_dir.is_dir() {
@@ -89,7 +88,7 @@ impl EntityIndex {
             idx.scan_dir(base_dir);
         }
 
-        for (_, pkg_path) in packages {
+        for pkg_path in packages.values() {
             let source = pkg_path.join("source");
             if source.is_dir() {
                 idx.scan_dir(&source);

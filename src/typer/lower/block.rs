@@ -4,6 +4,7 @@ use crate::hir;
 use crate::types::Type;
 
 impl Typer {
+    #[allow(clippy::only_used_in_recursion)]
     pub(in crate::typer) fn hir_tail_type(&self, body: &[hir::Stmt]) -> Option<Type> {
         let last = body
             .iter()
@@ -52,7 +53,7 @@ impl Typer {
     }
 
     pub(in crate::typer) fn finalize_block_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
-        let ends_with_jump = stmts.last().map_or(false, |s| {
+        let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
                 s,
                 hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
@@ -87,7 +88,7 @@ impl Typer {
         stmts: &mut Vec<hir::Stmt>,
         extra: &std::collections::HashSet<crate::hir::DefId>,
     ) {
-        let ends_with_jump = stmts.last().map_or(false, |s| {
+        let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
                 s,
                 hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
@@ -117,7 +118,7 @@ impl Typer {
     /// returned value; all owned locals are dropped (except those referenced
     /// by a trailing jump).
     pub(in crate::typer) fn finalize_loop_body_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
-        let ends_with_jump = stmts.last().map_or(false, |s| {
+        let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
                 s,
                 hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
@@ -171,19 +172,17 @@ impl Typer {
 
                 hir::Stmt::Assign(_target, value, _) => {
                     let resolved = self.infer_ctx.resolve(&value.ty);
-                    if Self::expr_type_needs_drop(&resolved) {
-                        if let hir::ExprKind::Var(id, _) = &value.kind {
+                    if Self::expr_type_needs_drop(&resolved)
+                        && let hir::ExprKind::Var(id, _) = &value.kind {
                             out.insert(*id);
                         }
-                    }
                 }
                 hir::Stmt::Bind(b) => {
                     let resolved = self.infer_ctx.resolve(&b.value.ty);
-                    if Self::expr_type_needs_drop(&resolved) {
-                        if let hir::ExprKind::Var(id, _) = &b.value.kind {
+                    if Self::expr_type_needs_drop(&resolved)
+                        && let hir::ExprKind::Var(id, _) = &b.value.kind {
                             out.insert(*id);
                         }
-                    }
                 }
                 _ => {}
             }
@@ -216,11 +215,9 @@ impl Typer {
                         let resolved = self.infer_ctx.resolve(&a.ty);
                         if Self::expr_type_needs_drop(&resolved)
                             && matches!(a.kind, hir::ExprKind::Var(_, _))
-                        {
-                            if let hir::ExprKind::Var(id, _) = &a.kind {
+                            && let hir::ExprKind::Var(id, _) = &a.kind {
                                 out.insert(*id);
                             }
-                        }
                     }
                 }
             }
@@ -399,7 +396,7 @@ impl Typer {
     ) {
         let scope_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo)> =
             match self.scopes.last() {
-                Some(s) => s.iter().map(|(n, v)| (n.clone(), v.clone())).collect(),
+                Some(s) => s.iter().map(|(n, v)| (*n, v.clone())).collect(),
                 None => return,
             };
 
@@ -431,7 +428,7 @@ impl Typer {
         for (name, info, resolved) in drops {
             stmts.push(hir::Stmt::Drop(
                 info.def_id,
-                name.clone(),
+                name,
                 resolved,
                 crate::ast::Span::dummy(),
             ));
@@ -614,7 +611,7 @@ impl Typer {
                 {
                     return true;
                 }
-                if !visiting.insert(name.clone()) {
+                if !visiting.insert(*name) {
                     return false;
                 }
 
@@ -626,7 +623,7 @@ impl Typer {
                 result
             }
             Type::Enum(name) => {
-                if !visiting.insert(name.clone()) {
+                if !visiting.insert(*name) {
                     return false;
                 }
                 let result = if let Some(variants) = self.enums.get(name) {
@@ -661,7 +658,7 @@ impl Typer {
                     let subs: std::collections::HashMap<crate::intern::Symbol, Type> = params
                         .iter()
                         .zip(args.iter())
-                        .map(|(p, t)| (p.clone(), t.clone()))
+                        .map(|(p, t)| (*p, t.clone()))
                         .collect();
                     return fields
                         .iter()
@@ -693,14 +690,14 @@ impl Typer {
             }
             Type::Array(elem, n) => Type::Array(Box::new(Self::subst_type(elem, subs)), *n),
             Type::Struct(name, ts) => Type::Struct(
-                name.clone(),
+                *name,
                 ts.iter().map(|t| Self::subst_type(t, subs)).collect(),
             ),
             Type::Alias(name, inner) => {
-                Type::Alias(name.clone(), Box::new(Self::subst_type(inner, subs)))
+                Type::Alias(*name, Box::new(Self::subst_type(inner, subs)))
             }
             Type::Newtype(name, inner) => {
-                Type::Newtype(name.clone(), Box::new(Self::subst_type(inner, subs)))
+                Type::Newtype(*name, Box::new(Self::subst_type(inner, subs)))
             }
             _ => ty.clone(),
         }

@@ -109,7 +109,7 @@ impl Lowerer {
 
             ExprKind::IterNext(iter_var, type_name, method_name) => {
                 if let Some(vty) = self.var_types.get(iter_var).cloned() {
-                    let v = self.read_var(iter_var.clone(), self.current_block, vty, span);
+                    let v = self.read_var(*iter_var, self.current_block, vty, span);
                     self.emit(
                         InstKind::MethodCall(
                             v,

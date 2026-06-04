@@ -33,7 +33,7 @@ impl Typer {
                         })
                 });
                 hir::Field {
-                    name: f.name.clone(),
+                    name: f.name,
                     ty,
                     default,
                     access_mod: f.access_mod,
@@ -97,7 +97,7 @@ impl Typer {
                 );
                 params.push(hir::Param {
                     def_id: pid,
-                    name: p.name.clone(),
+                    name: p.name,
                     ty,
                     ownership,
                     default: None,
@@ -116,7 +116,7 @@ impl Typer {
             let body = self.lower_block(&h.body, &Type::Void)?;
             self.pop_scope();
             hir_handlers.push(hir::HandlerDef {
-                name: h.name.clone(),
+                name: h.name,
                 params,
                 is_loop: h.is_loop,
                 loop_sleep_ms,
@@ -128,7 +128,7 @@ impl Typer {
 
         Ok(hir::ActorDef {
             def_id: id,
-            name: ad.name.clone(),
+            name: ad.name,
             fields,
             field_def_ids,
             handlers: hir_handlers,
@@ -142,9 +142,7 @@ impl Typer {
     ) -> Result<hir::StoreDef, String> {
         let id = self.fresh_id();
         let is_simple = sd
-            .decorators
-            .iter()
-            .any(|d| *d == ast::StoreDecorator::Simple);
+            .decorators.contains(&ast::StoreDecorator::Simple);
         let dummy_span = ast::Span::dummy();
 
         let mut fields: Vec<hir::StoreField> = Vec::new();
@@ -168,9 +166,7 @@ impl Typer {
         }
 
         let is_versioned = sd
-            .decorators
-            .iter()
-            .any(|d| *d == ast::StoreDecorator::Versioned);
+            .decorators.contains(&ast::StoreDecorator::Versioned);
         if is_versioned {
             fields.push(hir::StoreField {
                 name: "__version".into(),
@@ -184,7 +180,7 @@ impl Typer {
         }
         for f in &sd.fields {
             fields.push(hir::StoreField {
-                name: f.name.clone(),
+                name: f.name,
                 ty: f.ty.clone().unwrap_or(Type::I64),
                 default: None,
                 decorators: f.decorators.clone(),
@@ -200,7 +196,7 @@ impl Typer {
         }
         Ok(hir::StoreDef {
             def_id: id,
-            name: sd.name.clone(),
+            name: sd.name,
             decorators: sd.decorators.clone(),
             fields,
             methods: hir_methods,
@@ -218,9 +214,9 @@ impl Typer {
             hir_methods.push(hm);
         }
         Ok(hir::TraitImpl {
-            trait_name: ib.trait_name.clone(),
+            trait_name: ib.trait_name,
             trait_type_args: ib.trait_type_args.clone(),
-            type_name: ib.type_name.clone(),
+            type_name: ib.type_name,
             methods: hir_methods,
             span: ib.span,
         })
@@ -305,7 +301,7 @@ impl Typer {
             };
             params.push(hir::Param {
                 def_id: pid,
-                name: p.name.clone(),
+                name: p.name,
                 ty,
                 ownership,
                 default: hir_default,
@@ -321,7 +317,7 @@ impl Typer {
         let mut declared_err_names: Vec<Symbol> = Vec::new();
         for et in &f.error_types {
             let name = match et {
-                Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => Some(n.clone()),
+                Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => Some(*n),
                 _ => None,
             };
             match name {
@@ -353,7 +349,7 @@ impl Typer {
             .into_iter()
             .chain(self.current_fn_error_types.iter().cloned())
         {
-            if seen.insert(n.clone()) {
+            if seen.insert(n) {
                 error_types.push(Type::Enum(n));
             }
         }
@@ -378,12 +374,12 @@ impl Typer {
             let body_span = f.span;
             let captures: Vec<(Symbol, Type)> = params
                 .iter()
-                .map(|p| (p.name.clone(), p.ty.clone()))
+                .map(|p| (p.name, p.ty.clone()))
                 .collect();
             let gen_expr = hir::Expr {
                 kind: hir::ExprKind::GeneratorCreate(
                     id,
-                    f.name.clone(),
+                    f.name,
                     std::mem::take(&mut body),
                     captures,
                 ),
@@ -397,7 +393,7 @@ impl Typer {
 
         Ok(hir::Fn {
             def_id: id,
-            name: f.name.clone(),
+            name: f.name,
             params,
             ret: ret.clone(),
             error_types,
@@ -512,7 +508,7 @@ impl Typer {
                     lowered
                 });
                 hir::Field {
-                    name: f.name.clone(),
+                    name: f.name,
                     ty,
                     default,
                     access_mod: f.access_mod,
@@ -532,7 +528,7 @@ impl Typer {
 
         Ok(hir::TypeDef {
             def_id: id,
-            name: td.name.clone(),
+            name: td.name,
             fields,
             methods: hir_methods,
             layout: td.layout.clone(),
@@ -609,7 +605,7 @@ impl Typer {
             );
             params.push(hir::Param {
                 def_id: pid,
-                name: p.name.clone(),
+                name: p.name,
                 ty,
                 ownership,
                 default: None,
@@ -657,12 +653,12 @@ impl Typer {
             .iter()
             .enumerate()
             .map(|(tag, v)| hir::Variant {
-                name: v.name.clone(),
+                name: v.name,
                 fields: v
                     .fields
                     .iter()
                     .map(|f| hir::VField {
-                        name: f.name.clone(),
+                        name: f.name,
                         ty: f.ty.clone(),
                     })
                     .collect(),
@@ -673,7 +669,7 @@ impl Typer {
             .collect();
         hir::EnumDef {
             def_id: id,
-            name: ed.name.clone(),
+            name: ed.name,
             variants,
             span: ed.span,
         }
@@ -687,7 +683,7 @@ impl Typer {
             .unwrap_or_else(|| (DefId::BUILTIN, vec![], Type::Void));
         hir::ExternFn {
             def_id: id,
-            name: ef.name.clone(),
+            name: ef.name,
             params: ef.params.clone(),
             ret: ef.ret.clone(),
             variadic: ef.variadic,
@@ -702,7 +698,7 @@ impl Typer {
             .iter()
             .enumerate()
             .map(|(tag, v)| hir::ErrVariant {
-                name: v.name.clone(),
+                name: v.name,
                 fields: v.fields.clone(),
                 tag: tag as u32,
                 span: v.span,
@@ -710,7 +706,7 @@ impl Typer {
             .collect();
         hir::ErrDef {
             def_id: id,
-            name: ed.name.clone(),
+            name: ed.name,
             variants,
             span: ed.span,
         }

@@ -93,13 +93,11 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(free, &[data_ptr2.into()], ""));
                 b!(self.bld.build_call(free, &[header_ptr.into()], ""));
             }
-        } else {
-            if free_storage {
-                let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
-                let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf"));
-                b!(self.bld.build_call(free, &[data_ptr.into()], ""));
-                b!(self.bld.build_call(free, &[header_ptr.into()], ""));
-            }
+        } else if free_storage {
+            let data_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 0, "dvd.d"));
+            let data_ptr = b!(self.bld.build_load(ptr_ty, data_gep, "dvd.buf"));
+            b!(self.bld.build_call(free, &[data_ptr.into()], ""));
+            b!(self.bld.build_call(free, &[header_ptr.into()], ""));
         }
 
         b!(self.bld.build_unconditional_branch(done_bb));

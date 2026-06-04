@@ -1,4 +1,3 @@
-#![cfg(test)]
 
 use super::*;
 use crate::lexer::Lexer;
@@ -151,11 +150,10 @@ fn c_style_loop_paren_less_desugars() {
             panic!("expected bind");
         };
         if let Stmt::While(w) = &f.body[1] {
-            if let Expr::BinOp(l, _, _, _) = &w.cond {
-                if let Expr::Ident(n, _) = l.as_ref() {
+            if let Expr::BinOp(l, _, _, _) = &w.cond
+                && let Expr::Ident(n, _) = l.as_ref() {
                     assert_eq!(n.as_str(), ph);
                 }
-            }
             assert_eq!(w.body.len(), 2);
             assert!(matches!(w.body[1], Stmt::Assign(..)));
         } else {
@@ -230,22 +228,21 @@ fn unary_ops() {
 #[test]
 fn exponentiation() {
     let p = parse("*main()\n    x is 2 pow 3\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::BinOp(_, op, _, _) = &b.value {
                 assert_eq!(*op, BinOp::Exp);
             } else {
                 panic!("expected binop");
             }
         }
-    }
 }
 
 #[test]
 fn exp_right_assoc() {
     let p = parse("*main()\n    x is 2 pow 3 pow 4\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::BinOp(l, BinOp::Exp, r, _) = &b.value {
                 assert!(matches!(l.as_ref(), Expr::Int(2, _)));
                 assert!(matches!(r.as_ref(), Expr::BinOp(_, BinOp::Exp, _, _)));
@@ -253,7 +250,6 @@ fn exp_right_assoc() {
                 panic!("expected exp");
             }
         }
-    }
 }
 
 #[test]
@@ -271,32 +267,29 @@ fn as_cast() {
 #[test]
 fn array_literal() {
     let p = parse("*main()\n    x is [1, 2, 3]\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
-            if let Expr::Call(callee, args, _) = &b.value {
-                if let Expr::Ident(name, _) = callee.as_ref() {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0] {
+            if let Expr::Call(callee, args, _) = &b.value
+                && let Expr::Ident(name, _) = callee.as_ref() {
                     assert_eq!(name, "vector");
                     assert_eq!(args.len(), 3);
                     return;
                 }
-            }
             panic!("expected vector(...) call, got {:?}", b.value);
         }
-    }
 }
 
 #[test]
 fn tuple_literal() {
     let p = parse("*main()\n    x is (1, 2, 3)\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Tuple(elems, _) = &b.value {
                 assert_eq!(elems.len(), 3);
             } else {
                 panic!("expected tuple");
             }
         }
-    }
 }
 
 #[test]
@@ -333,11 +326,10 @@ fn multiple_fns() {
 #[test]
 fn continue_stmt() {
     let p = parse("*main()\n    while true\n        continue\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::While(w) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::While(w) = &f.body[0] {
             assert!(matches!(w.body[0], Stmt::Continue(_)));
         }
-    }
 }
 
 #[test]
@@ -403,30 +395,28 @@ fn pipeline_chain() {
     let p = parse(
         "*a(x as i64) returns i64\n    x\n\n*b(x as i64) returns i64\n    x\n\n*main()\n    x is 1 ~ a ~ b\n",
     );
-    if let Decl::Fn(f) = &p.decls[2] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[2]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Pipe(left, _, _, _) = &b.value {
                 assert!(matches!(left.as_ref(), Expr::Pipe(_, _, _, _)));
             } else {
                 panic!("expected chained pipe");
             }
         }
-    }
 }
 
 #[test]
 fn pipeline_with_call() {
     let p =
         parse("*add(a as i64, b as i64) returns i64\n    a + b\n\n*main()\n    x is 10 ~ add(5)\n");
-    if let Decl::Fn(f) = &p.decls[1] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[1]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Pipe(_, right, _, _) = &b.value {
                 assert!(matches!(right.as_ref(), Expr::Call(_, _, _)));
             } else {
                 panic!("expected pipe with call");
             }
         }
-    }
 }
 
 #[test]
@@ -434,24 +424,22 @@ fn placeholder_in_call() {
     let p = parse(
         "*mul(a as i64, b as i64) returns i64\n    a * b\n\n*main()\n    x is 10 ~ mul($, 3)\n",
     );
-    if let Decl::Fn(f) = &p.decls[1] {
-        if let Stmt::Bind(b) = &f.body[0] {
-            if let Expr::Pipe(_, right, _, _) = &b.value {
+    if let Decl::Fn(f) = &p.decls[1]
+        && let Stmt::Bind(b) = &f.body[0]
+            && let Expr::Pipe(_, right, _, _) = &b.value {
                 if let Expr::Call(_, args, _) = right.as_ref() {
                     assert!(matches!(args[0], Expr::Placeholder(_)));
                 } else {
                     panic!("expected call with placeholder");
                 }
             }
-        }
-    }
 }
 
 #[test]
 fn lambda_expr() {
     let p = parse("*main()\n    f is |x as i64| returns i64 x * 2\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Lambda(params, ret, _, _) = &b.value {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].name, "x");
@@ -460,21 +448,19 @@ fn lambda_expr() {
                 panic!("expected lambda");
             }
         }
-    }
 }
 
 #[test]
 fn lambda_multi_param() {
     let p = parse("*main()\n    f is |a as i64, b as i64| returns i64 a + b\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0] {
             if let Expr::Lambda(params, _, _, _) = &b.value {
                 assert_eq!(params.len(), 2);
             } else {
                 panic!("expected lambda");
             }
         }
-    }
 }
 
 #[test]
@@ -578,9 +564,9 @@ fn query_block() {
 #[test]
 fn query_sort_clause() {
     let p = parse("*main()\n    x is Items query\n        sort name desc\n");
-    if let Decl::Fn(f) = &p.decls[0] {
-        if let Stmt::Bind(b) = &f.body[0] {
-            if let Expr::Query(_, clauses, _) = &b.value {
+    if let Decl::Fn(f) = &p.decls[0]
+        && let Stmt::Bind(b) = &f.body[0]
+            && let Expr::Query(_, clauses, _) = &b.value {
                 if let QueryClause::Sort(field, asc, _) = &clauses[0] {
                     assert_eq!(field, "name");
                     assert!(!asc);
@@ -588,6 +574,4 @@ fn query_sort_clause() {
                     panic!("expected sort clause");
                 }
             }
-        }
-    }
 }

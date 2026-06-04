@@ -168,7 +168,7 @@ impl Typer {
                                 let narrowed: Vec<(Symbol, Vec<Type>, Type)> = candidates
                                     .iter()
                                     .filter(|(type_name, _, _)| {
-                                        self.trait_impls.get(type_name).map_or(false, |impls| {
+                                        self.trait_impls.get(type_name).is_some_and(|impls| {
                                             required_traits.iter().all(|rt| impls.contains(rt))
                                         })
                                     })
@@ -191,7 +191,7 @@ impl Typer {
                                 let narrowed: Vec<(Symbol, Vec<Type>, Type)> = candidates
                                     .iter()
                                     .filter(|(type_name, _, _)| {
-                                        self.trait_impls.get(type_name).map_or(false, |impls| {
+                                        self.trait_impls.get(type_name).is_some_and(|impls| {
                                             impls.iter().any(|i| {
                                                 defining_traits.iter().any(|dt| **dt == i.as_str())
                                             })
@@ -237,7 +237,7 @@ impl Typer {
                             }
                             let _ = self.infer_ctx.unify_at(
                                 &dm.ret_ty,
-                                &ret,
+                                ret,
                                 dm.span,
                                 "deferred method return",
                             );
@@ -267,8 +267,8 @@ impl Typer {
         for df in resolved_concrete {
             let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
             if let Type::Struct(ref name, _) = recv_ty {
-                if let Some(fields) = self.structs.get(name) {
-                    if let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name) {
+                if let Some(fields) = self.structs.get(name)
+                    && let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name) {
                         let fty = fty.clone();
                         let _ = self.infer_ctx.unify_at(
                             &df.field_ty,
@@ -277,7 +277,6 @@ impl Typer {
                             "deferred field access",
                         );
                     }
-                }
             } else if matches!(recv_ty, Type::String) && df.field_name == "length" {
                 let _ = self.infer_ctx.unify_at(
                     &df.field_ty,
@@ -311,7 +310,7 @@ impl Typer {
                             .iter()
                             .all(|(req, _)| struct_fields.iter().any(|(n, _)| n == req))
                 })
-                .map(|(name, _)| name.clone())
+                .map(|(name, _)| *name)
                 .collect();
             candidates.sort();
 
@@ -383,7 +382,7 @@ impl Typer {
                         candidates.join(", ")
                     ));
                 } else if candidates.len() == 1 {
-                    let ty = match &*candidates[0].as_str() {
+                    let ty = match candidates[0].as_str() {
                         "i8" => Type::I8,
                         "i16" => Type::I16,
                         "i32" => Type::I32,

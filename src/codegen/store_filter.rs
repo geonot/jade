@@ -186,6 +186,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(jinn_st, jinn_ptr, "jinn.result")))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn eval_store_filter(
         &mut self,
         rec_ptr: PointerValue<'ctx>,

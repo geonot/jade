@@ -21,12 +21,11 @@ impl Lowerer {
 
         let mut capture_info: Vec<(Symbol, ValueId, Type)> = Vec::new();
         for name in &refs {
-            if !param_names.contains(name) {
-                if let Some(cap_ty) = self.var_types.get(name).cloned() {
+            if !param_names.contains(name)
+                && let Some(cap_ty) = self.var_types.get(name).cloned() {
                     let val = self.read_var(*name, self.current_block, cap_ty.clone(), span);
                     capture_info.push((*name, val, cap_ty));
                 }
-            }
         }
         let capture_vals: Vec<ValueId> = capture_info.iter().map(|(_, v, _)| *v).collect();
 

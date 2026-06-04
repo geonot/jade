@@ -1,0 +1,21 @@
+title: Design + implement bounded polymorphism (traits/protocols)
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-04T04:27:12'
+updated_at: '2026-06-04T04:34:22'
+result: ''
+description: 'ASSESSMENT (verified by compile tests 2026-06-04): trait system is ~80%
+  done. WORKS: `trait X` / `impl X for T` parse to AST/HIR; direct method dispatch
+  `p.display()` works; generic bounds `*f of T: Printable(t as T)` parse, are enforced
+  (good call-site diagnostic: "type `Bare` does not satisfy trait bound `Printable`"),
+  and monomorphized dispatch through a bound param works end-to-end. CONFIRMED GAPS
+  to fix for P0: (1) DEFAULT TRAIT METHOD BODIES do not dispatch — a trait `*hello(self)
+  <body>` default that an impl omits fails with "unknown method hello". Need: during
+  impl lowering, synthesize missing methods from trait defaults (in src/typer/lower/decl.rs
+  lower_impl_block + the fns pre-pass). (2) Add conformance suite tests/traits.rs
+  pinning: direct dispatch, bound enforcement error, multi-bound (T: A + B), generic-through-bound
+  dispatch, default methods, default method overridden by impl. (3) Verify multi-bound
+  `+` syntax works. Idiomatic: keep `of T: Trait` and natural-language. Definition
+  of done: default methods work; conformance suite added & green; zero build warnings.'

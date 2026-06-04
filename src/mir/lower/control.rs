@@ -221,12 +221,12 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(name.clone(), self.current_block, field);
+                                    self.write_var(*name, self.current_block, field);
                                 }
                             }
                         }
                         if let Pat::Bind(_, name, _ty, _) = &arm.pat {
-                            self.write_var(name.clone(), self.current_block, subj);
+                            self.write_var(*name, self.current_block, subj);
                         }
 
                         if let Pat::Tuple(sub_pats, _) = &arm.pat {
@@ -237,7 +237,7 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(name.clone(), self.current_block, field);
+                                    self.write_var(*name, self.current_block, field);
                                 }
                             }
                         }
@@ -252,7 +252,7 @@ impl Lowerer {
                                     );
                                     let elem =
                                         self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
-                                    self.write_var(name.clone(), self.current_block, elem);
+                                    self.write_var(*name, self.current_block, elem);
                                 }
                             }
                         }
@@ -285,7 +285,7 @@ impl Lowerer {
                                 self.set_terminator(Terminator::Goto(arm_bb));
                             }
                             Pat::Bind(_, name, _ty, _) => {
-                                self.write_var(name.clone(), self.current_block, subj);
+                                self.write_var(*name, self.current_block, subj);
                                 self.set_terminator(Terminator::Goto(arm_bb));
                             }
                             Pat::Lit(lit_expr) => {
@@ -392,7 +392,7 @@ impl Lowerer {
                                             self.set_terminator(Terminator::Goto(arm_bb));
                                         }
                                         Pat::Bind(_, name, _ty, _) => {
-                                            self.write_var(name.clone(), self.current_block, subj);
+                                            self.write_var(*name, self.current_block, subj);
                                             self.set_terminator(Terminator::Goto(arm_bb));
                                         }
                                         Pat::Range(lo, hi, _) => {
@@ -462,7 +462,7 @@ impl Lowerer {
                         // guard and body read it from this block's `current_def`
                         // (the dispatch test wrote it into the predecessor's).
                         if let Pat::Bind(_, name, _ty, _) = &arm.pat {
-                            self.write_var(name.clone(), self.current_block, subj);
+                            self.write_var(*name, self.current_block, subj);
                         }
 
                         if let Pat::Ctor(_, _, sub_pats, _) = &arm.pat {
@@ -473,7 +473,7 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(name.clone(), self.current_block, field);
+                                    self.write_var(*name, self.current_block, field);
                                 }
                             }
                         }
@@ -486,7 +486,7 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(name.clone(), self.current_block, field);
+                                    self.write_var(*name, self.current_block, field);
                                 }
                             }
                         }
@@ -501,7 +501,7 @@ impl Lowerer {
                                     );
                                     let elem =
                                         self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
-                                    self.write_var(name.clone(), self.current_block, elem);
+                                    self.write_var(*name, self.current_block, elem);
                                 }
                             }
                         }
@@ -585,8 +585,8 @@ impl Lowerer {
             }
             hir::Stmt::Break(val, span) => {
                 let mut handled_label = false;
-                if let Some(v) = val {
-                    if let hir::ExprKind::Str(s) = &v.kind {
+                if let Some(v) = val
+                    && let hir::ExprKind::Str(s) = &v.kind {
                         if let Some(name) = s.strip_prefix("__break_label__") {
                             let want = crate::intern::Symbol::intern(name);
                             if let Some((_, _, exit)) = self
@@ -613,15 +613,13 @@ impl Lowerer {
                             }
                         }
                     }
-                }
-                if !handled_label {
-                    if let Some((_, exit)) = self.loop_stack.last().copied() {
+                if !handled_label
+                    && let Some((_, exit)) = self.loop_stack.last().copied() {
                         if let Some(v) = val {
                             let _ = self.lower_expr(v);
                         }
                         self.set_terminator(Terminator::Goto(exit));
                     }
-                }
                 let dead = self.new_block("after.break");
                 self.switch_to(dead);
                 self.mark_dead_block(dead);

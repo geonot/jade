@@ -1,0 +1,5 @@
+{
+  "description": "Jinn: a value-semantics-first, GC-free systems language with indentation-based prose-like syntax, HM-style inference, Perceus refcounting memory model, actor/channel concurrency, and first-class compile-time-checked persistent stores. Compiler (jinnc) is ~62k LOC Rust: lexer -> parser -> typed HIR -> SSA MIR -> Perceus -> LLVM (inkwell llvm21-1) -> native + ~6.4k LOC C runtime. Stdlib in libjn/ + std/ (.jn).",
+  "conventions": "Design must be idiomatic Jinn: implicitness, inference, clean natural-language syntax, intelligent compiler does heavy lifting, programmer focuses on intent not syntax. is=binding, as=annotation, *name=fn. MIR optimization only for things LLVM cannot do. Built-in method surfaces should be single source of truth shared by typer+codegen. No code comments in source edits. Tests pin documented semantics via compile-and-run conformance suites.",
+  "build_test": "cargo build --release (zero warnings expected). cargo test (1626+ tests). Conformance: tests/access_semantics.rs, tests/concurrency_shutdown.rs, tests/std_stable_subset.rs. Snippets in snippets/, apps in apps/, benchmarks in benchmarks/."
+}

@@ -21,7 +21,7 @@ impl Typer {
                         .unwrap_or(false);
                     if is_unit {
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::VariantRef(enum_name.clone(), name.clone(), tag),
+                            kind: hir::ExprKind::VariantRef(enum_name, *name, tag),
                             ty: Type::Enum(enum_name),
                             span: *span,
                         });
@@ -33,24 +33,22 @@ impl Typer {
                             .variant_tags
                             .get(name)
                             .cloned()
-                            .unwrap_or((enum_name.clone(), tag));
+                            .unwrap_or((enum_name, tag));
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::VariantRef(en2.clone(), name.clone(), tag2),
+                            kind: hir::ExprKind::VariantRef(en2, *name, tag2),
                             ty: Type::Enum(en2),
                             span: *span,
                         });
                     }
                 } else if let Ok(Some(mangled)) =
                     self.try_monomorphize_generic_variant(&name.as_str(), None)
-                {
-                    if let Some((_, tag)) = self.variant_tags.get(name).cloned() {
+                    && let Some((_, tag)) = self.variant_tags.get(name).cloned() {
                         return Ok(hir::Expr {
                             kind: hir::ExprKind::VariantRef(mangled, *name, tag),
                             ty: Type::Enum(mangled),
                             span: *span,
                         });
                     }
-                }
                 if let Some(v) = self.find_var(&name.as_str()) {
                     let def_id = v.def_id;
                     let mono_ty = v.ty.clone();
@@ -74,7 +72,7 @@ impl Typer {
                         _ => mono_ty,
                     };
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::Var(def_id, name.clone()),
+                        kind: hir::ExprKind::Var(def_id, *name),
                         ty,
                         span: *span,
                     });
@@ -86,7 +84,7 @@ impl Typer {
                     let init_expr = self.lower_expr(&_expr)?;
                     let ty = init_expr.ty.clone();
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::GlobalLoad(name.clone()),
+                        kind: hir::ExprKind::GlobalLoad(*name),
                         ty,
                         span: *span,
                     });
@@ -107,14 +105,14 @@ impl Typer {
                             Type::Fn(ptys, Box::new(ret))
                         };
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::FnRef(id, name.clone()),
+                        kind: hir::ExprKind::FnRef(id, *name),
                         ty: fn_ty,
                         span: *span,
                     });
                 }
                 if self.generic_fns.contains_key(name) {
                     return Ok(hir::Expr {
-                        kind: hir::ExprKind::Var(DefId::BUILTIN, name.clone()),
+                        kind: hir::ExprKind::Var(DefId::BUILTIN, *name),
                         ty: self.infer_ctx.fresh_var(),
                         span: *span,
                     });
@@ -128,12 +126,12 @@ impl Typer {
                         .unwrap_or(false);
                     if is_field {
                         let self_expr = ast::Expr::Ident("self".into(), *span);
-                        let field_expr = ast::Expr::Field(Box::new(self_expr), name.clone(), *span);
+                        let field_expr = ast::Expr::Field(Box::new(self_expr), *name, *span);
                         return self.lower_expr(&field_expr);
                     }
                 }
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::Var(DefId::BUILTIN, name.clone()),
+                    kind: hir::ExprKind::Var(DefId::BUILTIN, *name),
                     ty: self.infer_ctx.fresh_var(),
                     span: *span,
                 })
@@ -158,11 +156,11 @@ impl Typer {
                     {
                         return Ok(hir::Expr {
                             kind: hir::ExprKind::VariantRef(
-                                type_name.clone(),
-                                variant_name.clone(),
+                                *type_name,
+                                *variant_name,
                                 tag as u32,
                             ),
-                            ty: Type::Enum(type_name.clone()),
+                            ty: Type::Enum(*type_name),
                             span: *span,
                         });
                     }

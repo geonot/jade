@@ -103,7 +103,7 @@ fn lsp_completion_includes_workspace_symbols_and_keywords() {
     assert!(!arr.is_empty(), "expected non-empty completion list");
     let labels: Vec<&str> = arr.iter().filter_map(|i| i["label"].as_str()).collect();
     assert!(
-        labels.iter().any(|l| *l == "greet"),
+        labels.contains(&"greet"),
         "expected `greet` in completions; got {:?}",
         labels
     );

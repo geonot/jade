@@ -1,0 +1,12 @@
+title: Store artifact hygiene + clippy CI guarantee
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-04T04:27:12'
+updated_at: '2026-06-04T04:27:12'
+result: ''
+description: 'Quick wins. (1) Ensure *.store/*.wal are git-ignored (verify already
+  done) and remove any tracked artifacts from the tree. (2) Guarantee clippy actually
+  runs in CI (ci/ + .github/). Definition of done: no store/wal artifacts tracked;
+  clippy job present and passing in CI config.'

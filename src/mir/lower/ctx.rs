@@ -180,14 +180,14 @@ impl Lowerer {
             obj_ty = self.field_state_ty();
             let st = obj_ty.clone();
             self.emit_void_typed(
-                InstKind::FieldSet(obj_val, Symbol::intern(&field.to_string()), val),
+                InstKind::FieldSet(obj_val, Symbol::intern(field), val),
                 st,
                 span,
             );
             return;
         }
         let updated = self.emit(
-            InstKind::FieldSet(obj_val, Symbol::intern(&field.to_string()), val),
+            InstKind::FieldSet(obj_val, Symbol::intern(field), val),
             obj_ty.clone(),
             span,
         );
@@ -197,7 +197,7 @@ impl Lowerer {
         }
         match &obj.kind {
             ExprKind::Var(_, name) => {
-                self.write_var(name.clone(), self.current_block, updated);
+                self.write_var(*name, self.current_block, updated);
             }
             ExprKind::Field(parent, parent_field, _) => {
                 self.lower_field_assign(parent, &parent_field.as_str(), updated, span);

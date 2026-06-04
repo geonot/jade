@@ -61,7 +61,7 @@ pub(super) fn eval_block(
                 env.insert(b.def_id, val);
             }
             Stmt::Ret(Some(e), _, _) => {
-                return Some(eval_expr(e, env, pure_fns, depth)?);
+                return eval_expr(e, env, pure_fns, depth);
             }
             Stmt::Ret(None, _, _) => return Some(ConstVal::Void),
             Stmt::If(i) => {
@@ -73,17 +73,15 @@ pub(super) fn eval_block(
                 } else {
                     for (ec, eb) in &i.elifs {
                         let ec_val = eval_expr(ec, env, pure_fns, depth)?;
-                        if let ConstVal::Bool(true) = ec_val {
-                            if let Some(v) = eval_block(eb, env, pure_fns, depth) {
+                        if let ConstVal::Bool(true) = ec_val
+                            && let Some(v) = eval_block(eb, env, pure_fns, depth) {
                                 return Some(v);
                             }
-                        }
                     }
-                    if let Some(els) = &i.els {
-                        if let Some(v) = eval_block(els, env, pure_fns, depth) {
+                    if let Some(els) = &i.els
+                        && let Some(v) = eval_block(els, env, pure_fns, depth) {
                             return Some(v);
                         }
-                    }
                 }
             }
             Stmt::Expr(e) => {

@@ -67,7 +67,7 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
         subst_term(&mut bb.terminator, &replacements);
 
         bb.insts
-            .retain(|inst| !inst.dest.map_or(false, |d| dead_loads.contains(&d)));
+            .retain(|inst| !inst.dest.is_some_and(|d| dead_loads.contains(&d)));
     }
     true
 }

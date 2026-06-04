@@ -32,7 +32,6 @@ impl<'ctx> Compiler<'ctx> {
                         .get_type()
                         .get_param_types()
                         .into_iter()
-                        .map(|t| t.into())
                         .collect();
                     let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
                     let csv = b!(self
@@ -200,7 +199,6 @@ impl<'ctx> Compiler<'ctx> {
                         .get_type()
                         .get_param_types()
                         .into_iter()
-                        .map(|t| t.into())
                         .collect();
                     let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
                     let csv = b!(self.bld.build_call(fv, &coerced, "cmp.call"));
@@ -399,8 +397,8 @@ impl<'ctx> Compiler<'ctx> {
                         return Ok(val.into());
                     }
 
-                    if let Some(idx_str) = field.strip_prefix('_') {
-                        if let Ok(idx) = idx_str.parse::<usize>() {
+                    if let Some(idx_str) = field.strip_prefix('_')
+                        && let Ok(idx) = idx_str.parse::<usize>() {
                             let st = sv.get_type();
                             let alloca = self.entry_alloca(st.into(), "enum.tmp");
                             b!(self.bld.build_store(alloca, sv));
@@ -434,7 +432,6 @@ impl<'ctx> Compiler<'ctx> {
                             let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
                             return Ok(val);
                         }
-                    }
                 }
                 let idx = self.field_index(name, field);
                 let val = b!(self.bld.build_extract_value(sv, idx, field));
@@ -445,8 +442,8 @@ impl<'ctx> Compiler<'ctx> {
                 "FieldGet on unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_pointer_value() {
-            if matches!(field, "length") {
-                if matches!(&obj_ty, Some(Type::Vec(_))) {
+            if matches!(field, "length")
+                && matches!(&obj_ty, Some(Type::Vec(_))) {
                     let header_ptr = obj_val.into_pointer_value();
                     let header_ty = self.vec_header_type();
                     let i64t = self.ctx.i64_type();
@@ -456,7 +453,6 @@ impl<'ctx> Compiler<'ctx> {
                     let len = b!(self.bld.build_load(i64t, len_gep, "vl.len"));
                     return Ok(len);
                 }
-            }
 
             let ptr = obj_val.into_pointer_value();
             let res_llvm = self.llvm_ty(result_ty);
@@ -466,14 +462,14 @@ impl<'ctx> Compiler<'ctx> {
                 .values()
                 .find(|(p, _)| *p == ptr)
                 .and_then(|(_, ty)| match ty {
-                    Type::Struct(name, _) => Some(name.clone()),
+                    Type::Struct(name, _) => Some(*name),
                     _ => None,
                 })
                 .or_else(|| {
                     self.vars.values().find_map(|(p, ty)| {
                         if *p == ptr {
                             match ty {
-                                Type::Struct(name, _) => Some(name.clone()),
+                                Type::Struct(name, _) => Some(*name),
                                 _ => None,
                             }
                         } else {
@@ -487,15 +483,15 @@ impl<'ctx> Compiler<'ctx> {
                         .or_else(|| self.value_types.get(&obj))
                         .and_then(|ty| match ty {
                             Type::Ptr(inner) => match inner.as_ref() {
-                                Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
+                                Type::Struct(name, _) | Type::Enum(name) => Some(*name),
                                 _ => None,
                             },
-                            Type::Struct(name, _) | Type::Enum(name) => Some(name.clone()),
+                            Type::Struct(name, _) | Type::Enum(name) => Some(*name),
                             _ => None,
                         })
                 });
-            if let Some(name) = &struct_name {
-                if let Some(st) = self.module.get_struct_type(&name.as_str()) {
+            if let Some(name) = &struct_name
+                && let Some(st) = self.module.get_struct_type(&name.as_str()) {
                     if self.enums.contains_key(name) {
                         if field == "__tag" {
                             let tag_gep = b!(self.bld.build_struct_gep(st, ptr, 0, "tag"));
@@ -509,8 +505,8 @@ impl<'ctx> Compiler<'ctx> {
                             ));
                             return Ok(val.into());
                         }
-                        if let Some(idx_str) = field.strip_prefix('_') {
-                            if let Ok(idx) = idx_str.parse::<usize>() {
+                        if let Some(idx_str) = field.strip_prefix('_')
+                            && let Ok(idx) = idx_str.parse::<usize>() {
                                 let payload_gep =
                                     b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
                                 let byte_offset =
@@ -543,27 +539,24 @@ impl<'ctx> Compiler<'ctx> {
                                 let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
                                 return Ok(val);
                             }
-                        }
                     }
                     let field_idx = self.field_index(&name.as_str(), field);
                     let gep = b!(self.bld.build_struct_gep(st, ptr, field_idx, field));
                     return Ok(b!(self.bld.build_load(res_llvm, gep, field)));
                 }
-            }
 
             Err(format!(
                 "FieldGet on pointer to unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_array_value() {
-            if let Some(idx_str) = field.strip_prefix('_') {
-                if let Ok(idx) = idx_str.parse::<u32>() {
+            if let Some(idx_str) = field.strip_prefix('_')
+                && let Ok(idx) = idx_str.parse::<u32>() {
                     let val =
                         b!(self
                             .bld
                             .build_extract_value(obj_val.into_array_value(), idx, field));
                     return Ok(val);
                 }
-            }
             Ok(obj_val)
         } else {
             Ok(obj_val)
@@ -587,8 +580,8 @@ impl<'ctx> Compiler<'ctx> {
 
         let header_size = i64t.const_int(24, false);
 
-        if elems.is_empty() {
-            if let Some(reused) = self.try_consume_vec_slot() {
+        if elems.is_empty()
+            && let Some(reused) = self.try_consume_vec_slot() {
                 let is_null = b!(self.bld.build_is_null(reused, "vec.reuse.null"));
                 let fv = self.current_fn();
                 let malloc_bb = self.ctx.append_basic_block(fv, "vec.reuse.malloc");
@@ -628,7 +621,6 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
                 return Ok(header_ptr.into());
             }
-        }
 
         let header_ptr = b!(self
             .bld

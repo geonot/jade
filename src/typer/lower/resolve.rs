@@ -84,7 +84,7 @@ impl Typer {
 
     pub(in crate::typer) fn reclassify_method_call(&mut self, expr: &mut hir::Expr) {
         let (recv_ty, method) = match &expr.kind {
-            hir::ExprKind::DeferredMethod(recv, m, _) => (recv.ty.clone(), m.clone()),
+            hir::ExprKind::DeferredMethod(recv, m, _) => (recv.ty.clone(), *m),
             _ => return,
         };
         match &recv_ty {
@@ -104,25 +104,23 @@ impl Typer {
             }
             Type::Struct(type_name, _) => {
                 let method_name = format!("{}_{}", type_name, method);
-                if self.fns.contains_key(&method_name) {
-                    if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                if self.fns.contains_key(&method_name)
+                    && let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
                         expr.kind = hir::ExprKind::Method(recv, method_name.into(), method, args);
                     }
-                }
             }
             Type::Ptr(inner) => {
                 if let Type::Struct(type_name, _) = inner.as_ref() {
                     let method_name = format!("{}_{}", type_name, method);
-                    if self.fns.contains_key(&method_name) {
-                        if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                    if self.fns.contains_key(&method_name)
+                        && let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                             std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                         {
                             expr.kind =
                                 hir::ExprKind::Method(recv, method_name.into(), method, args);
                         }
-                    }
                 }
             }
             Type::Coroutine(_) if method == "next" => {
@@ -168,8 +166,8 @@ impl Typer {
                     "is_finite",
                     "to_int",
                 ];
-                if float_methods.iter().any(|m| method == *m) {
-                    if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                if float_methods.iter().any(|m| method == *m)
+                    && let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
                         let mut all_args = vec![*recv];
@@ -183,7 +181,6 @@ impl Typer {
                         expr.kind =
                             hir::ExprKind::Builtin(hir::BuiltinFn::FloatMethod(method), all_args);
                     }
-                }
             }
             Type::Channel(_) if method == "send" || method == "recv" || method == "close" => {
                 if let hir::ExprKind::DeferredMethod(recv, method, args) =
@@ -201,8 +198,8 @@ impl Typer {
             | Type::U16
             | Type::U8 => {
                 let int_methods = ["abs", "to_float", "to_str", "min", "max", "clamp"];
-                if int_methods.iter().any(|m| method == *m) {
-                    if let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
+                if int_methods.iter().any(|m| method == *m)
+                    && let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                     {
                         let mut all_args = vec![*recv];
@@ -210,7 +207,6 @@ impl Typer {
                         expr.kind =
                             hir::ExprKind::Builtin(hir::BuiltinFn::CharMethod(method), all_args);
                     }
-                }
             }
             Type::String => {
                 if let hir::ExprKind::DeferredMethod(recv, method, args) =
@@ -460,24 +456,21 @@ impl Typer {
                     let has_poly_scheme = self
                         .fn_schemes
                         .get(&*name)
-                        .map_or(false, |s| !s.0.is_empty());
-                    if has_poly_scheme {
-                        if let Type::Fn(ref param_tys, _) = expr.ty {
+                        .is_some_and(|s| !s.0.is_empty());
+                    if has_poly_scheme
+                        && let Type::Fn(ref param_tys, _) = expr.ty {
                             if expr.ty.has_type_var() {
                             } else if let Some(inf_fn) = self.inferable_fns.get(&*name).cloned() {
                                 let normalized = Self::normalize_inferable_fn(&inf_fn);
                                 let type_map =
                                     self.build_type_map(&name.as_str(), &normalized, param_tys);
                                 if let Ok(mangled) = self.monomorphize_fn(&name.as_str(), &type_map)
-                                {
-                                    if let Some((mid, _, _)) = self.fns.get(&mangled).cloned() {
+                                    && let Some((mid, _, _)) = self.fns.get(&mangled).cloned() {
                                         *id = mid;
-                                        *name = mangled.into();
+                                        *name = mangled;
                                     }
-                                }
                             }
                         }
-                    }
                 }
             }
             hir::ExprKind::BinOp(l, _, r) => {
@@ -535,15 +528,13 @@ impl Typer {
                 self.resolve_expr(e);
                 if let hir::ExprKind::Field(ref inner, ref fname, ref mut field_idx) = expr.kind {
                     let recv_ty = &inner.ty;
-                    if let Type::Struct(name, _) = recv_ty {
-                        if let Some(fields) = self.structs.get(name) {
-                            if let Some((i, _)) =
+                    if let Type::Struct(name, _) = recv_ty
+                        && let Some(fields) = self.structs.get(name)
+                            && let Some((i, _)) =
                                 fields.iter().enumerate().find(|(_, (n, _))| n == fname)
                             {
                                 *field_idx = i;
                             }
-                        }
-                    }
                 }
             }
             hir::ExprKind::Index(arr, idx) => {

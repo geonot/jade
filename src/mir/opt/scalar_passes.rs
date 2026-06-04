@@ -66,7 +66,7 @@ pub fn dead_code_elimination(func: &mut Function) -> bool {
         let before = bb.insts.len();
         bb.insts.retain(|inst| {
             inst.dest
-                .map_or(true, |d| used.contains(&d) || !is_pure(&inst.kind))
+                .is_none_or(|d| used.contains(&d) || !is_pure(&inst.kind))
         });
         if bb.insts.len() != before {
             changed = true;

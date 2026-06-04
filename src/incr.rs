@@ -134,6 +134,12 @@ pub struct ArtifactCache {
     cache_dir: PathBuf,
 }
 
+impl Default for ArtifactCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArtifactCache {
     pub fn new() -> Self {
         let cache_dir = cache_root().join("jinn").join("artifacts");
@@ -213,14 +219,14 @@ pub fn compute_dirty_set(
 ) -> (Vec<usize>, HashMap<Symbol, u64>) {
     let mut signatures: HashMap<Symbol, u64> = HashMap::new();
     for f in &program.fns {
-        signatures.insert(f.name.clone(), function_signature(f));
+        signatures.insert(f.name, function_signature(f));
     }
 
     let mut dirty = Vec::new();
     let mut keys: HashMap<Symbol, u64> = HashMap::new();
     for (i, f) in program.fns.iter().enumerate() {
         let key = function_cache_key(f, &signatures);
-        keys.insert(f.name.clone(), key);
+        keys.insert(f.name, key);
         if cache.lookup(&f.name.as_str(), key).is_none() {
             dirty.push(i);
         }

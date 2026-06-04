@@ -21,7 +21,7 @@ impl Typer {
             if let Some(fields) = self.structs.get(type_name).cloned() {
                 let method_name: Symbol = format!("{type_name}_display").into();
                 let self_id = self.fresh_id();
-                let self_ty = Type::Struct(type_name.clone(), vec![]);
+                let self_ty = Type::Struct(*type_name, vec![]);
                 let span = crate::ast::Span::dummy();
 
                 let mk_str = |s: String| hir::Expr {
@@ -52,7 +52,7 @@ impl Typer {
                                 ty: self_ty.clone(),
                                 span,
                             }),
-                            fname.clone(),
+                            *fname,
                             i,
                         ),
                         ty: fty.clone(),
@@ -158,7 +158,7 @@ impl Typer {
             hir::ExprKind::Builtin(hir::BuiltinFn::Log, args) => {
                 for a in args {
                     if let Type::Struct(name, _) = &a.ty {
-                        needs.insert(name.clone());
+                        needs.insert(*name);
                     }
                     Self::collect_display_usage_expr(a, needs);
                 }
@@ -166,7 +166,7 @@ impl Typer {
             hir::ExprKind::Builtin(hir::BuiltinFn::ToString, args) => {
                 for a in args {
                     if let Type::Struct(name, _) = &a.ty {
-                        needs.insert(name.clone());
+                        needs.insert(*name);
                     }
                     Self::collect_display_usage_expr(a, needs);
                 }

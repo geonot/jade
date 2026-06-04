@@ -27,7 +27,7 @@ pub(in crate::driver) fn should_import_decl(d: &Decl, imports: &Option<Vec<Symbo
         None => true,
         Some(names) => {
             if let Some(name) = decl_name(d) {
-                names.iter().any(|n| name == *n)
+                names.contains(&name)
             } else {
                 false
             }
@@ -68,8 +68,8 @@ pub(in crate::driver) fn resolve_modules(
             candidates.push(project_root.join("source").join(format!("{file_path}.jn")));
         }
 
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(exe_dir) = exe.parent() {
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(exe_dir) = exe.parent() {
                 candidates.push(exe_dir.join("std").join(format!("{name}.jn")));
 
                 if let Some(parent) = exe_dir.parent() {
@@ -79,7 +79,6 @@ pub(in crate::driver) fn resolve_modules(
                     }
                 }
             }
-        }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
             candidates.push(
                 PathBuf::from(manifest)
@@ -120,8 +119,8 @@ pub(in crate::driver) fn resolve_modules(
                 (Some(sm), Some(im)) => im.modified().ok() >= sm.modified().ok(),
                 _ => false,
             };
-            if use_cache {
-                if let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path) {
+            if use_cache
+                && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path) {
                     let importable: Vec<Decl> = iface
                         .to_decls()
                         .into_iter()
@@ -132,7 +131,6 @@ pub(in crate::driver) fn resolve_modules(
                     }
                     continue;
                 }
-            }
         }
 
         let src = fs::read_to_string(&candidate)
@@ -175,11 +173,11 @@ pub(in crate::driver) fn resolve_modules(
                 continue;
             }
 
-            if let Decl::Fn(ref f) = d {
-                if f.name == "main" && f.params.is_empty() {
+            if let Decl::Fn(ref f) = d
+                && f.name == "main" && f.params.is_empty() {
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
-                            let cd = Decl::Const(b.name.clone(), b.value.clone(), b.span);
+                            let cd = Decl::Const(b.name, b.value.clone(), b.span);
                             if should_import_decl(&cd, &imports) {
                                 own_importable.push(cd);
                             }
@@ -187,7 +185,6 @@ pub(in crate::driver) fn resolve_modules(
                     }
                     continue;
                 }
-            }
             if should_import_decl(&d, &imports) {
                 own_importable.push(d);
             }
@@ -235,7 +232,7 @@ pub(in crate::driver) fn collect_jinn_files(dir: &std::path::Path, files: &mut V
             let path = entry.path();
             if path.is_dir() {
                 collect_jinn_files(&path, files);
-            } else if path.extension().map_or(false, |e| e == "jn") {
+            } else if path.extension().is_some_and(|e| e == "jn") {
                 files.push(path);
             }
         }
@@ -299,16 +296,15 @@ pub(in crate::driver) fn merge_source_files(
                 continue;
             }
 
-            if let Decl::Fn(ref f) = d {
-                if f.name == "main" {
+            if let Decl::Fn(ref f) = d
+                && f.name == "main" {
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
-                            importable.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
+                            importable.push(Decl::Const(b.name, b.value.clone(), b.span));
                         }
                     }
                     continue;
                 }
-            }
             importable.push(d);
         }
         for pd in prefix_module(importable, &mod_name) {

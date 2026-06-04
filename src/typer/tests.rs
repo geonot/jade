@@ -1,4 +1,3 @@
-#![cfg(test)]
 
 use super::*;
 use crate::lexer::Lexer;
@@ -1131,15 +1130,14 @@ fn test_lambda_standalone_unannotated_param_float() {
     let mut typer = Typer::new();
     let hir = typer.lower_program(&prog).unwrap();
     let main = &hir.fns[0];
-    if let hir::Stmt::Bind(b) = &main.body[0] {
-        if let Type::Fn(ptys, _) = &b.ty {
+    if let hir::Stmt::Bind(b) = &main.body[0]
+        && let Type::Fn(ptys, _) = &b.ty {
             assert!(
                 ptys[0].is_float(),
                 "lambda param should be float: {:?}",
                 ptys[0]
             );
         }
-    }
 }
 
 #[test]
@@ -1363,15 +1361,14 @@ fn test_vec_push_constrains_element_type() {
     let hir = type_check(src);
     let main = &hir.fns[0];
     for stmt in &main.body {
-        if let hir::Stmt::Bind(b) = stmt {
-            if b.name == "v" {
+        if let hir::Stmt::Bind(b) = stmt
+            && b.name == "v" {
                 assert!(
                     !b.ty.has_type_var(),
                     "vec should have resolved element type: {:?}",
                     b.ty
                 );
             }
-        }
     }
 }
 

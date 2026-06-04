@@ -1,0 +1,15 @@
+title: Single source of truth for builtin method surfaces
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-04T04:27:12'
+updated_at: '2026-06-04T04:27:12'
+result: ''
+description: 'The Vec/Map/String builtin method tables consulted by the typer and
+  codegen must be the same table, so typer/codegen drift (the shift/first/last bug)
+  becomes impossible. Introduce a shared enum BuiltinMethod (or shared descriptor
+  table) that both passes match on exhaustively, or make codegen-completeness a compile-time-checked
+  exhaustiveness over the typer''s set. Definition of done: a single shared registry
+  of builtin methods (name, receiver type, signature) referenced by both typer and
+  codegen; adding a method in one place forces the other; tests still green.'

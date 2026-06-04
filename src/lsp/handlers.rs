@@ -18,6 +18,12 @@ pub struct WorkspaceSymbol {
     pub span: ast::Span,
 }
 
+impl Default for ServerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ServerState {
     pub fn new() -> Self {
         Self {
@@ -203,7 +209,7 @@ pub fn handle_document_symbols(state: &ServerState, params: Value) -> Value {
         Some(a) => a,
         None => return Value::Array(vec![]),
     };
-    let syms: Vec<DocumentSymbol> = analysis.symbols.iter().map(|s| symbol_to_lsp(s)).collect();
+    let syms: Vec<DocumentSymbol> = analysis.symbols.iter().map(symbol_to_lsp).collect();
     serde_json::to_value(syms).expect("ICE: LSP serialization")
 }
 
@@ -490,6 +496,6 @@ fn symbol_to_lsp(sym: &analysis::Symbol) -> DocumentSymbol {
         },
         range: range.clone(),
         selection_range: range,
-        children: sym.children.iter().map(|c| symbol_to_lsp(c)).collect(),
+        children: sym.children.iter().map(symbol_to_lsp).collect(),
     }
 }

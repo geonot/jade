@@ -16,9 +16,9 @@
 //!   6. Phi incoming `(pred, _)` edges reference an actual predecessor of the
 //!      containing block.
 //!   7. Function return type matches the value type at every
-//!      `Terminator::Return`:
-//!        - `Return(Some(v))` ⇒ `value_ty(v) == fn.ret_ty`
-//!        - `Return(None)`    ⇒ `fn.ret_ty == Type::Void`
+//!      `Terminator::Return`: `Return(Some(v))` requires
+//!      `value_ty(v) == fn.ret_ty`, and `Return(None)` requires
+//!      `fn.ret_ty == Type::Void`.
 //!      (This is the invariant that catches generator-shape bugs like the
 //!      P0-3 regression: function declared `-> Generator<i64>` but body
 //!      emitting `Return(i64)`.)

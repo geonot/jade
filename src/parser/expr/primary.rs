@@ -256,7 +256,7 @@ impl Parser {
             "bool" => Type::Bool,
             "void" => Type::Void,
             "str" | "String" | "string" => Type::String,
-            s if s.len() == 1 && s.chars().next().map_or(false, |c| c.is_uppercase()) => {
+            s if s.len() == 1 && s.chars().next().is_some_and(|c| c.is_uppercase()) => {
                 Type::Param(s.into())
             }
             _ => Type::Struct(n.into(), vec![]),

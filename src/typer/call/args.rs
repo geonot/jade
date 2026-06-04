@@ -114,13 +114,13 @@ impl Typer {
             return Some(expanded);
         }
 
-        if args.len() == 1 && !has_spread {
-            if let Some(expected) = expected_param_count {
-                if expected > 1 {
+        if args.len() == 1 && !has_spread
+            && let Some(expected) = expected_param_count
+                && expected > 1 {
                     let inner_lowered = self.lower_expr(&args[0]).ok()?;
                     let resolved_ty = self.infer_ctx.resolve(&inner_lowered.ty);
-                    if let Type::Array(_, len) = &resolved_ty {
-                        if *len == expected {
+                    if let Type::Array(_, len) = &resolved_ty
+                        && *len == expected {
                             let sp = args[0].span();
                             let mut expanded = Vec::new();
                             for i in 0..*len {
@@ -132,10 +132,7 @@ impl Typer {
                             }
                             return Some(expanded);
                         }
-                    }
                 }
-            }
-        }
 
         None
     }

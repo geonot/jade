@@ -231,7 +231,7 @@ impl Type {
             Type::Map(k, v) => Type::Map(Box::new(k.canonical()), Box::new(v.canonical())),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| t.canonical()).collect()),
             Type::Struct(n, args) => {
-                Type::Struct(n.clone(), args.iter().map(|t| t.canonical()).collect())
+                Type::Struct(*n, args.iter().map(|t| t.canonical()).collect())
             }
             Type::Fn(ps, r) => Type::Fn(
                 ps.iter().map(|t| t.canonical()).collect(),
@@ -241,7 +241,7 @@ impl Type {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(inner.canonical())),
             Type::Channel(inner) => Type::Channel(Box::new(inner.canonical())),
             Type::Generator(inner) => Type::Generator(Box::new(inner.canonical())),
-            Type::Newtype(n, inner) => Type::Newtype(n.clone(), Box::new(inner.canonical())),
+            Type::Newtype(n, inner) => Type::Newtype(*n, Box::new(inner.canonical())),
             other => other.clone(),
         }
     }

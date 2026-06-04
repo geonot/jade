@@ -1,7 +1,7 @@
 use crate::ast::*;
 
 pub(super) fn body_contains_yield(body: &[Stmt]) -> bool {
-    body.iter().any(|s| stmt_has_yield(s))
+    body.iter().any(stmt_has_yield)
 }
 
 pub(super) fn stmt_has_yield(s: &Stmt) -> bool {

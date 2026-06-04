@@ -21,14 +21,13 @@ impl<'ctx> Compiler<'ctx> {
             return self.emit_coro_create(gen_name, args).map(Some);
         }
 
-        if name == "__coro_next" || name == "__gen_next" {
-            if let Some(&gen_val) = args.first() {
+        if (name == "__coro_next" || name == "__gen_next")
+            && let Some(&gen_val) = args.first() {
                 return self.emit_coro_next(gen_val).map(Some);
             }
-        }
 
-        if name == "__gen_resume" {
-            if let Some(&gen_val) = args.first() {
+        if name == "__gen_resume"
+            && let Some(&gen_val) = args.first() {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
                 let gen_resume = self
                     .module
@@ -37,10 +36,9 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
                 return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
             }
-        }
 
-        if name == "__gen_done" {
-            if let Some(&gen_val) = args.first() {
+        if name == "__gen_done"
+            && let Some(&gen_val) = args.first() {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
                 let i8t = self.ctx.i8_type();
                 let done_ptr =
@@ -54,10 +52,9 @@ impl<'ctx> Compiler<'ctx> {
                 ));
                 return Ok(Some(done_bool.into()));
             }
-        }
 
-        if name == "__gen_next_val" {
-            if let Some(&gen_val) = args.first() {
+        if name == "__gen_next_val"
+            && let Some(&gen_val) = args.first() {
                 let gen_ptr = self.val(gen_val).into_pointer_value();
                 let i8t = self.ctx.i8_type();
                 let i64t = self.ctx.i64_type();
@@ -70,30 +67,26 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
                 return Ok(Some(result));
             }
-        }
 
-        if name == "__yield" {
-            if let Some(&val) = args.first() {
+        if name == "__yield"
+            && let Some(&val) = args.first() {
                 return self.emit_coro_yield(val).map(Some);
             }
-        }
 
-        if name == "__select_recv" {
-            if args.len() >= 2 {
+        if name == "__select_recv"
+            && args.len() >= 2 {
                 let select_vid = args[0];
                 let idx_val = self.val(args[1]).into_int_value();
                 let idx = idx_val.get_zero_extended_constant().unwrap_or(0) as usize;
-                if let Some(bufs) = self.select_data_bufs.get(&select_vid) {
-                    if let Some(&buf_ptr) = bufs.get(idx) {
+                if let Some(bufs) = self.select_data_bufs.get(&select_vid)
+                    && let Some(&buf_ptr) = bufs.get(idx) {
                         let i64t = self.ctx.i64_type();
                         let val = b!(self.bld.build_load(i64t, buf_ptr, "recv.val"));
                         return Ok(Some(val));
                     }
-                }
 
                 return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
             }
-        }
 
         if let Some(rest) = name.strip_prefix("__send_") {
             return self.emit_actor_send(rest, args).map(Some);
@@ -221,8 +214,8 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
 
-        if name == "__chan_close" {
-            if let Some(&ch_val) = args.first() {
+        if name == "__chan_close"
+            && let Some(&ch_val) = args.first() {
                 let ch_ptr = self.val(ch_val).into_pointer_value();
                 let chan_close = self
                     .module
@@ -231,10 +224,9 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
-        }
 
-        if name == "__stop" {
-            if let Some(&actor_val) = args.first() {
+        if name == "__stop"
+            && let Some(&actor_val) = args.first() {
                 let actor_ptr = self.val(actor_val).into_pointer_value();
                 let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
                 let ch_ptr =
@@ -246,10 +238,9 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
-        }
 
-        if name == "__atomic_load" {
-            if let Some(&ptr_val) = args.first() {
+        if name == "__atomic_load"
+            && let Some(&ptr_val) = args.first() {
                 let ptr = self.val(ptr_val).into_pointer_value();
                 let i64t = self.ctx.i64_type();
                 let load = b!(self.bld.build_load(i64t, ptr, "atomic.load"));
@@ -259,9 +250,8 @@ impl<'ctx> Compiler<'ctx> {
                     .map_err(|_| "failed to set atomic ordering")?;
                 return Ok(Some(load));
             }
-        }
-        if name == "__atomic_store" {
-            if args.len() >= 2 {
+        if name == "__atomic_store"
+            && args.len() >= 2 {
                 let ptr = self.val(args[0]).into_pointer_value();
                 let val = self.val(args[1]);
                 let store = b!(self.bld.build_store(ptr, val));
@@ -270,9 +260,8 @@ impl<'ctx> Compiler<'ctx> {
                     .map_err(|_| "failed to set atomic ordering")?;
                 return Ok(Some(self.ctx.i64_type().const_zero().into()));
             }
-        }
-        if name == "__atomic_add" {
-            if args.len() >= 2 {
+        if name == "__atomic_add"
+            && args.len() >= 2 {
                 let ptr = self.val(args[0]).into_pointer_value();
                 let val = self.val(args[1]).into_int_value();
                 let old = b!(self.bld.build_atomicrmw(
@@ -283,9 +272,8 @@ impl<'ctx> Compiler<'ctx> {
                 ));
                 return Ok(Some(old.into()));
             }
-        }
-        if name == "__atomic_sub" {
-            if args.len() >= 2 {
+        if name == "__atomic_sub"
+            && args.len() >= 2 {
                 let ptr = self.val(args[0]).into_pointer_value();
                 let val = self.val(args[1]).into_int_value();
                 let old = b!(self.bld.build_atomicrmw(
@@ -296,9 +284,8 @@ impl<'ctx> Compiler<'ctx> {
                 ));
                 return Ok(Some(old.into()));
             }
-        }
-        if name == "__atomic_cas" {
-            if args.len() >= 3 {
+        if name == "__atomic_cas"
+            && args.len() >= 3 {
                 let ptr = self.val(args[0]).into_pointer_value();
                 let expected = self.val(args[1]).into_int_value();
                 let new_val = self.val(args[2]).into_int_value();
@@ -312,7 +299,6 @@ impl<'ctx> Compiler<'ctx> {
                 let old = b!(self.bld.build_extract_value(cas, 0, "cas.old"));
                 return Ok(Some(old));
             }
-        }
 
         Ok(None)
     }
@@ -485,18 +471,17 @@ impl<'ctx> Compiler<'ctx> {
         let (actor_name, tag, handler_params) = {
             let mut found = None;
             for (aname, ad) in &self.actor_defs {
-                if let Some(hint) = actor_hint {
-                    if aname.as_str() != hint {
+                if let Some(hint) = actor_hint
+                    && aname.as_str() != hint {
                         continue;
                     }
-                }
                 for h in &ad.handlers {
                     if h.is_loop {
                         continue;
                     }
                     if h.name == handler_name {
                         let param_tys: Vec<Type> = h.params.iter().map(|p| p.ty.clone()).collect();
-                        found = Some((aname.clone(), h.tag, param_tys));
+                        found = Some((*aname, h.tag, param_tys));
                         break;
                     }
                 }
@@ -548,7 +533,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_gep(
                     self.ctx.i8_type(),
                     payload_ptr,
-                    &[offset_val.into()],
+                    &[offset_val],
                     "arg_ptr"
                 ))
             };

@@ -1,4 +1,3 @@
-#![cfg(test)]
 
 use super::*;
 fn lex(s: &str) -> Vec<Token> {
@@ -45,8 +44,8 @@ fn bases() {
 
 #[test]
 fn floats() {
-    let t = lex("3.14 1e-3 2.5e10");
-    assert_eq!(t[0], Token::Float(3.14));
+    let t = lex("3.5 1e-3 2.5e10");
+    assert_eq!(t[0], Token::Float(3.5));
     assert_eq!(t[1], Token::Float(1e-3));
     assert_eq!(t[2], Token::Float(2.5e10));
 }

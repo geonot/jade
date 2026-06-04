@@ -101,7 +101,7 @@ impl Parser {
     }
 
     pub(in crate::parser) fn ensure_implicit_self(params: &mut Vec<Param>, span: Span) {
-        if params.first().map_or(true, |p| p.name.as_str() != "self") {
+        if params.first().is_none_or(|p| p.name.as_str() != "self") {
             params.insert(
                 0,
                 Param {

@@ -92,14 +92,14 @@ impl<'ctx> Compiler<'ctx> {
             let defaults: indexmap::IndexMap<Symbol, hir::Expr> = td
                 .fields
                 .iter()
-                .filter_map(|f| f.default.as_ref().map(|d| (f.name.clone(), d.clone())))
+                .filter_map(|f| f.default.as_ref().map(|d| (f.name, d.clone())))
                 .collect();
             if !defaults.is_empty() {
-                self.struct_defaults.insert(td.name.clone(), defaults);
+                self.struct_defaults.insert(td.name, defaults);
             }
 
             self.struct_layouts
-                .insert(td.name.clone(), td.layout.clone());
+                .insert(td.name, td.layout.clone());
         }
 
         for ed in &hir_prog.enums {
@@ -237,7 +237,7 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_actor_runtime();
             for ad in &hir_prog.actors {
                 self.declare_actor(ad)?;
-                self.actor_defs.insert(ad.name.clone(), ad.clone());
+                self.actor_defs.insert(ad.name, ad.clone());
             }
         }
 
@@ -245,7 +245,7 @@ impl<'ctx> Compiler<'ctx> {
             self.declare_store_runtime();
             for sd in &hir_prog.stores {
                 self.declare_store(sd)?;
-                self.store_defs.insert(sd.name.clone(), sd.clone());
+                self.store_defs.insert(sd.name, sd.clone());
             }
         }
 
@@ -768,17 +768,14 @@ impl<'ctx> Compiler<'ctx> {
             );
         });
 
-        if let Some(alloca_ptr) = self.self_allocs.get(&id).copied() {
-            if v.is_pointer_value() && v.into_pointer_value() == alloca_ptr {
-                if let Some(orig_ty) = self.self_alloc_types.get(&id).copied() {
+        if let Some(alloca_ptr) = self.self_allocs.get(&id).copied()
+            && v.is_pointer_value() && v.into_pointer_value() == alloca_ptr
+                && let Some(orig_ty) = self.self_alloc_types.get(&id).copied() {
                     return self
                         .bld
                         .build_load(orig_ty, alloca_ptr, "self.reload")
-                        .unwrap()
-                        .into();
+                        .unwrap();
                 }
-            }
-        }
         v
     }
 }

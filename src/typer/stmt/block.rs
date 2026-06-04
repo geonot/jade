@@ -24,15 +24,14 @@ impl Typer {
         let mut stmts = Vec::new();
         let block_len = block.len();
         for (idx, s) in block.iter().enumerate() {
-            if idx == block_len - 1 {
-                if let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s) {
+            if idx == block_len - 1
+                && let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s) {
                     let he = self.lower_expr_expected(e, Some(expected))?;
                     let stmt = hir::Stmt::Expr(he);
                     self.record_take_moves_in_stmt(&stmt);
                     stmts.push(stmt);
                     continue;
                 }
-            }
             let stmt = self.lower_stmt(s, ret_ty)?;
             self.record_take_moves_in_stmt(&stmt);
             stmts.push(stmt);
@@ -114,7 +113,7 @@ impl Typer {
         for stmt in block {
             if let hir::Stmt::Bind(b) = stmt {
                 binds
-                    .entry(b.name.clone())
+                    .entry(b.name)
                     .or_insert((b.def_id, b.ty.clone(), b.ownership));
             }
         }
@@ -195,7 +194,7 @@ impl Typer {
             ast::Pat::Wild(span) => Ok(hir::Pat::Wild(*span)),
             ast::Pat::Ident(name, span) => {
                 if let Some((en, tag)) = self.variant_tags.get(name).cloned() {
-                    let enum_ty = Type::Enum(en.clone());
+                    let enum_ty = Type::Enum(en);
                     let _ = self.infer_ctx.unify_at(
                         expected_ty,
                         &enum_ty,
@@ -215,7 +214,7 @@ impl Typer {
                         scheme: None,
                     },
                 );
-                Ok(hir::Pat::Bind(id, name.clone(), ty, *span))
+                Ok(hir::Pat::Bind(id, *name, ty, *span))
             }
             ast::Pat::Lit(e) => {
                 let he = self.lower_expr(e)?;
@@ -224,10 +223,10 @@ impl Typer {
             ast::Pat::Ctor(name, sub_pats, span) => {
                 let tag = self.variant_tags.get(name).map(|(_, t)| *t).unwrap_or(0);
 
-                let enum_name = self.variant_tags.get(name).map(|(en, _)| en.clone());
+                let enum_name = self.variant_tags.get(name).map(|(en, _)| *en);
 
                 if let Some(ref en) = enum_name {
-                    let enum_ty = Type::Enum(en.clone());
+                    let enum_ty = Type::Enum(*en);
                     let _ = self.infer_ctx.unify_at(
                         expected_ty,
                         &enum_ty,

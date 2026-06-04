@@ -43,6 +43,7 @@ pub(crate) struct MoveState {
     pub(crate) vars: std::collections::HashSet<DefId>,
 }
 
+#[allow(clippy::type_complexity)]
 pub struct Typer {
     pub(crate) next_id: u32,
     pub(crate) scopes: Vec<HashMap<Symbol, VarInfo>>,
@@ -123,6 +124,12 @@ pub(crate) struct TraitMethodSig {
     pub(crate) _params: Vec<(String, Option<Type>)>,
     pub(crate) _ret: Option<Type>,
     pub(crate) has_default: bool,
+}
+
+impl Default for Typer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Typer {
@@ -258,8 +265,8 @@ impl Typer {
     fn update_var(&mut self, name: &str, info: VarInfo) {
         let sym: Symbol = name.into();
         for scope in self.scopes.iter_mut().rev() {
-            if scope.contains_key(&sym) {
-                scope.insert(sym, info);
+            if let std::collections::hash_map::Entry::Occupied(mut e) = scope.entry(sym) {
+                e.insert(info);
                 return;
             }
         }
@@ -270,7 +277,7 @@ impl Typer {
 
     fn resolve_ty(&self, ty: Type) -> Type {
         match &ty {
-            Type::Struct(n, _) if self.enums.contains_key(n) => Type::Enum(n.clone()),
+            Type::Struct(n, _) if self.enums.contains_key(n) => Type::Enum(*n),
             _ => ty,
         }
     }
@@ -399,11 +406,10 @@ impl Typer {
         ty: &Type,
         access_mod: Option<crate::ast::AccessMod>,
     ) -> Result<Ownership, String> {
-        if access_mod.is_none() {
-            if self.type_param_default_borrows(ty) {
+        if access_mod.is_none()
+            && self.type_param_default_borrows(ty) {
                 return Ok(Ownership::Borrowed);
             }
-        }
         self.ownership_with_mod(ty, access_mod)
     }
 

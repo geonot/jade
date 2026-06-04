@@ -124,12 +124,12 @@ pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
         ),
         Expr::Method(obj, m, args, sp) => Expr::Method(
             Box::new(replace_placeholder(obj, name)),
-            m.clone(),
+            *m,
             args.iter().map(|a| replace_placeholder(a, name)).collect(),
             *sp,
         ),
         Expr::Field(e, f, sp) => {
-            Expr::Field(Box::new(replace_placeholder(e, name)), f.clone(), *sp)
+            Expr::Field(Box::new(replace_placeholder(e, name)), *f, *sp)
         }
         Expr::Index(a, b, sp) => Expr::Index(
             Box::new(replace_placeholder(a, name)),
@@ -164,7 +164,7 @@ pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
 }
 
 pub(in crate::parser) fn contains_placeholder_in_block(block: &[Stmt]) -> bool {
-    block.iter().any(|s| contains_placeholder_in_stmt(s))
+    block.iter().any(contains_placeholder_in_stmt)
 }
 
 pub(in crate::parser) fn contains_placeholder_in_stmt(stmt: &Stmt) -> bool {
@@ -174,31 +174,31 @@ pub(in crate::parser) fn contains_placeholder_in_stmt(stmt: &Stmt) -> bool {
         Stmt::Assign(lhs, rhs, _) => contains_placeholder(lhs) || contains_placeholder(rhs),
         Stmt::If(i) => {
             contains_placeholder(&i.cond)
-                || i.then.iter().any(|s| contains_placeholder_in_stmt(s))
+                || i.then.iter().any(contains_placeholder_in_stmt)
                 || i.elifs.iter().any(|(c, b)| {
-                    contains_placeholder(c) || b.iter().any(|s| contains_placeholder_in_stmt(s))
+                    contains_placeholder(c) || b.iter().any(contains_placeholder_in_stmt)
                 })
                 || i.els
                     .as_ref()
-                    .map_or(false, |b| b.iter().any(|s| contains_placeholder_in_stmt(s)))
+                    .is_some_and(|b| b.iter().any(contains_placeholder_in_stmt))
         }
         Stmt::While(w) => {
-            contains_placeholder(&w.cond) || w.body.iter().any(|s| contains_placeholder_in_stmt(s))
+            contains_placeholder(&w.cond) || w.body.iter().any(contains_placeholder_in_stmt)
         }
         Stmt::For(f) => {
-            contains_placeholder(&f.iter) || f.body.iter().any(|s| contains_placeholder_in_stmt(s))
+            contains_placeholder(&f.iter) || f.body.iter().any(contains_placeholder_in_stmt)
         }
         Stmt::SimFor(f, _) => {
-            contains_placeholder(&f.iter) || f.body.iter().any(|s| contains_placeholder_in_stmt(s))
+            contains_placeholder(&f.iter) || f.body.iter().any(contains_placeholder_in_stmt)
         }
-        Stmt::Loop(l) => l.body.iter().any(|s| contains_placeholder_in_stmt(s)),
+        Stmt::Loop(l) => l.body.iter().any(contains_placeholder_in_stmt),
         Stmt::Ret(Some(e), _) => contains_placeholder(e),
         Stmt::Break(Some(e), _) => contains_placeholder(e),
         Stmt::Match(m) => {
             contains_placeholder(&m.subject)
                 || m.arms
                     .iter()
-                    .any(|a| a.body.iter().any(|s| contains_placeholder_in_stmt(s)))
+                    .any(|a| a.body.iter().any(contains_placeholder_in_stmt))
         }
         _ => false,
     }
@@ -215,7 +215,7 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
     match stmt {
         Stmt::Expr(e) => Stmt::Expr(replace_placeholder(e, name)),
         Stmt::Bind(b) => Stmt::Bind(Bind {
-            name: b.name.clone(),
+            name: b.name,
             value: replace_placeholder(&b.value, name),
             ty: b.ty.clone(),
             atomic: b.atomic,
@@ -252,9 +252,9 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
             span: w.span,
         }),
         Stmt::For(f) => Stmt::For(For {
-            label: f.label.clone(),
-            bind: f.bind.clone(),
-            bind2: f.bind2.clone(),
+            label: f.label,
+            bind: f.bind,
+            bind2: f.bind2,
             iter: replace_placeholder(&f.iter, name),
             end: f.end.as_ref().map(|e| replace_placeholder(e, name)),
             step: f.step.as_ref().map(|e| replace_placeholder(e, name)),
@@ -337,14 +337,14 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
         ),
         Expr::Method(obj, m, args, sp) => Expr::Method(
             Box::new(replace_index_placeholder(obj, name)),
-            m.clone(),
+            *m,
             args.iter()
                 .map(|a| replace_index_placeholder(a, name))
                 .collect(),
             *sp,
         ),
         Expr::Field(e, f, sp) => {
-            Expr::Field(Box::new(replace_index_placeholder(e, name)), f.clone(), *sp)
+            Expr::Field(Box::new(replace_index_placeholder(e, name)), *f, *sp)
         }
         Expr::Index(a, b, sp) => Expr::Index(
             Box::new(replace_index_placeholder(a, name)),
@@ -390,7 +390,7 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
 }
 
 pub(in crate::parser) fn contains_index_placeholder_in_block(block: &[Stmt]) -> bool {
-    block.iter().any(|s| contains_index_placeholder_in_stmt(s))
+    block.iter().any(contains_index_placeholder_in_stmt)
 }
 
 pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool {
@@ -402,35 +402,35 @@ pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool
         }
         Stmt::If(i) => {
             contains_index_placeholder(&i.cond)
-                || i.then.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                || i.then.iter().any(contains_index_placeholder_in_stmt)
                 || i.elifs.iter().any(|(c, b)| {
                     contains_index_placeholder(c)
-                        || b.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                        || b.iter().any(contains_index_placeholder_in_stmt)
                 })
-                || i.els.as_ref().map_or(false, |b| {
-                    b.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                || i.els.as_ref().is_some_and(|b| {
+                    b.iter().any(contains_index_placeholder_in_stmt)
                 })
         }
         Stmt::While(w) => {
             contains_index_placeholder(&w.cond)
-                || w.body.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                || w.body.iter().any(contains_index_placeholder_in_stmt)
         }
         Stmt::For(f) => {
             contains_index_placeholder(&f.iter)
-                || f.body.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                || f.body.iter().any(contains_index_placeholder_in_stmt)
         }
         Stmt::SimFor(f, _) => {
             contains_index_placeholder(&f.iter)
-                || f.body.iter().any(|s| contains_index_placeholder_in_stmt(s))
+                || f.body.iter().any(contains_index_placeholder_in_stmt)
         }
-        Stmt::Loop(l) => l.body.iter().any(|s| contains_index_placeholder_in_stmt(s)),
+        Stmt::Loop(l) => l.body.iter().any(contains_index_placeholder_in_stmt),
         Stmt::Ret(Some(e), _) => contains_index_placeholder(e),
         Stmt::Break(Some(e), _) => contains_index_placeholder(e),
         Stmt::Match(m) => {
             contains_index_placeholder(&m.subject)
                 || m.arms
                     .iter()
-                    .any(|a| a.body.iter().any(|s| contains_index_placeholder_in_stmt(s)))
+                    .any(|a| a.body.iter().any(contains_index_placeholder_in_stmt))
         }
         _ => false,
     }
@@ -450,7 +450,7 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
     match stmt {
         Stmt::Expr(e) => Stmt::Expr(replace_index_placeholder(e, name)),
         Stmt::Bind(b) => Stmt::Bind(Bind {
-            name: b.name.clone(),
+            name: b.name,
             value: replace_index_placeholder(&b.value, name),
             ty: b.ty.clone(),
             atomic: b.atomic,
@@ -487,9 +487,9 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
             span: w.span,
         }),
         Stmt::For(f) => Stmt::For(For {
-            label: f.label.clone(),
-            bind: f.bind.clone(),
-            bind2: f.bind2.clone(),
+            label: f.label,
+            bind: f.bind,
+            bind2: f.bind2,
             iter: replace_index_placeholder(&f.iter, name),
             end: f.end.as_ref().map(|e| replace_index_placeholder(e, name)),
             step: f.step.as_ref().map(|e| replace_index_placeholder(e, name)),

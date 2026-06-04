@@ -42,7 +42,7 @@ impl Typer {
                     if is_field {
                         let self_expr = ast::Expr::Ident("self".into(), b.span);
                         let field_expr =
-                            ast::Expr::Field(Box::new(self_expr), b.name.clone(), b.span);
+                            ast::Expr::Field(Box::new(self_expr), b.name, b.span);
                         let ht = self.lower_expr(&field_expr)?;
                         let hv = self.lower_expr_expected(&b.value, Some(&ht.ty))?;
                         let r = self
@@ -54,14 +54,13 @@ impl Typer {
                     }
                 }
 
-                if self.find_var(&b.name.as_str()).is_none() {
-                    if let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned() {
+                if self.find_var(&b.name.as_str()).is_none()
+                    && let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned() {
                         let init_hir = self.lower_expr(&_gexpr)?;
                         let global_ty = init_hir.ty.clone();
                         let hv = self.lower_expr_expected(&b.value, Some(&global_ty))?;
-                        return Ok(hir::Stmt::GlobalStore(b.name.clone(), hv, b.span));
+                        return Ok(hir::Stmt::GlobalStore(b.name, hv, b.span));
                     }
-                }
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?
@@ -103,7 +102,7 @@ impl Typer {
                         && let hir::ExprKind::Field(parent, field, _) = &value.kind
                         && let hir::ExprKind::Var(parent_id, _) = &parent.kind
                     {
-                        Some((*parent_id, field.clone()))
+                        Some((*parent_id, *field))
                     } else {
                         None
                     };
@@ -135,7 +134,7 @@ impl Typer {
                     }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
-                        name: b.name.clone(),
+                        name: b.name,
                         value,
                         ty: existing_ty,
                         ownership,
@@ -155,7 +154,7 @@ impl Typer {
                             .extend(scheme.quantified.iter().copied());
                         if let ast::Expr::Lambda(params, ret, body, lspan) = &b.value {
                             self.poly_lambda_asts.insert(
-                                b.name.clone(),
+                                b.name,
                                 (params.clone(), ret.clone(), body.clone(), *lspan),
                             );
                         }
@@ -178,7 +177,7 @@ impl Typer {
                     }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
-                        name: b.name.clone(),
+                        name: b.name,
                         value,
                         ty,
                         ownership,
@@ -223,12 +222,12 @@ impl Typer {
             }
 
             ast::Stmt::Assign(target, value, span) => {
-                if let ast::Expr::Field(obj, field, fspan) = target {
-                    if let ast::Expr::Ident(row_name, _) = obj.as_ref() {
+                if let ast::Expr::Field(obj, field, fspan) = target
+                    && let ast::Expr::Ident(row_name, _) = obj.as_ref() {
                         let probe = self.lower_expr(obj.as_ref())?;
                         let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
                         if let Type::Row(store) = &probe_ty {
-                            let store = store.clone();
+                            let store = *store;
                             let schema = self
                                 .store_schemas
                                 .get(&store)
@@ -278,7 +277,6 @@ impl Typer {
                             ));
                         }
                     }
-                }
 
                 self.suppress_moved_field_check += 1;
                 let ht = self.lower_expr(target)?;
@@ -288,18 +286,17 @@ impl Typer {
                 self.collect_unify_error(r);
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
 
-                if let hir::ExprKind::Field(parent, field, _) = &ht.kind {
-                    if let hir::ExprKind::Var(parent_id, _) = &parent.kind {
+                if let hir::ExprKind::Field(parent, field, _) = &ht.kind
+                    && let hir::ExprKind::Var(parent_id, _) = &parent.kind {
                         self.clear_field_moved(*parent_id, field);
                     }
-                }
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
 
             ast::Stmt::Expr(e) => {
                 if let ast::Expr::Query(source, clauses, span) = e {
                     let store_name = match source.as_ref() {
-                        ast::Expr::Ident(name, _) => name.clone(),
+                        ast::Expr::Ident(name, _) => *name,
                         _ => return Err("query block source must be a store name".into()),
                     };
                     let schema = self
@@ -320,7 +317,7 @@ impl Typer {
                                 has_delete = true;
                             }
                             ast::QueryClause::Set(field, val, _) => {
-                                sets.push((field.clone(), val.clone()));
+                                sets.push((*field, val.clone()));
                             }
                             ast::QueryClause::Sort(_, _, _) => {
                                 return Err("query 'sort' clause is not yet implemented".into());
@@ -452,8 +449,8 @@ impl Typer {
                         Type::String => Type::I64,
                         _ => {
                             let iter_ty = iter.ty.clone();
-                            if let Type::Struct(tn, _) = iter_ty {
-                                if self.type_implements_trait(&tn.as_str(), "Iter") {
+                            if let Type::Struct(tn, _) = iter_ty
+                                && self.type_implements_trait(&tn.as_str(), "Iter") {
                                     let elem_ty = self.iter_element_type(&tn.as_str());
                                     return self.desugar_for_iter(
                                         f,
@@ -463,7 +460,6 @@ impl Typer {
                                         ret_ty,
                                     );
                                 }
-                            }
                             self.infer_ctx.fresh_var()
                         }
                     }
@@ -498,7 +494,7 @@ impl Typer {
                             scheme: None,
                         },
                     );
-                    (Some(id2), Some(b2.clone()), Some(Type::I64))
+                    (Some(id2), Some(*b2), Some(Type::I64))
                 } else {
                     (None, None, None)
                 };
@@ -510,7 +506,7 @@ impl Typer {
                 self.restore_moved_fields(pre_loop);
                 Ok(hir::Stmt::For(hir::For {
                     bind_id,
-                    bind: f.bind.clone(),
+                    bind: f.bind,
                     bind_ty,
                     bind2_id,
                     bind2,
@@ -519,7 +515,7 @@ impl Typer {
                     end,
                     step,
                     body,
-                    label: f.label.clone(),
+                    label: f.label,
                     access_mod: f.access_mod,
                     span: f.span,
                 }))
@@ -578,8 +574,8 @@ impl Typer {
 
                 let resolved = self.infer_ctx.resolve(&he.ty);
                 let enum_name: Option<Symbol> = match &resolved {
-                    Type::Enum(n) if self.err_enum_names.contains(n) => Some(n.clone()),
-                    Type::Struct(n, _) if self.err_enum_names.contains(n) => Some(n.clone()),
+                    Type::Enum(n) if self.err_enum_names.contains(n) => Some(*n),
+                    Type::Struct(n, _) if self.err_enum_names.contains(n) => Some(*n),
                     _ => None,
                 };
                 if let Some(en) = &enum_name {
@@ -591,20 +587,20 @@ impl Typer {
                             en, span
                         ));
                     }
-                    self.current_fn_error_types.insert(en.clone());
+                    self.current_fn_error_types.insert(*en);
                 }
 
                 let resolved_ret = self.infer_ctx.resolve(ret_ty);
                 let normalized_ret = match &resolved_ret {
                     Type::Struct(n, args) if args.is_empty() && self.enums.contains_key(n) => {
-                        Type::Enum(n.clone())
+                        Type::Enum(*n)
                     }
                     _ => resolved_ret.clone(),
                 };
                 let resolved_val = self.infer_ctx.resolve(&he.ty);
                 let normalized_val = match &resolved_val {
                     Type::Struct(n, args) if args.is_empty() && self.enums.contains_key(n) => {
-                        Type::Enum(n.clone())
+                        Type::Enum(*n)
                     }
                     _ => resolved_val.clone(),
                 };
@@ -614,14 +610,13 @@ impl Typer {
                     *span,
                     "early-return value (`!`)",
                 );
-                if let Err(_) = &unify_res {
-                    if let Some(en) = &enum_name {
+                if unify_res.is_err()
+                    && let Some(en) = &enum_name {
                         return Err(format!(
                             "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jinn, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
                             en, span, resolved_ret
                         ));
                     }
-                }
                 self.collect_unify_error(unify_res);
 
                 let he = self.maybe_coerce_to(he, ret_ty);
@@ -683,14 +678,14 @@ impl Typer {
                         if !user_schema.iter().any(|(sn, _)| sn == n) {
                             return Err(format!("store '{store}' has no field '{n}'"));
                         }
-                        if !seen.insert(n.clone()) {
+                        if !seen.insert(*n) {
                             return Err(format!(
                                 "store '{store}' insert: field '{n}' \
                                  specified twice"
                             ));
                         }
                     }
-                    return Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span));
+                    return Ok(hir::Stmt::StoreInsert(*store, hvalues, *span));
                 }
 
                 if values.len() != user_schema.len() {
@@ -704,7 +699,7 @@ impl Typer {
                 for (fi, (_fname, fty)) in values.iter().zip(user_schema.iter()) {
                     hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
                 }
-                Ok(hir::Stmt::StoreInsert(store.clone(), hvalues, *span))
+                Ok(hir::Stmt::StoreInsert(*store, hvalues, *span))
             }
 
             ast::Stmt::StoreDelete(store, filter, span) => {
@@ -715,7 +710,7 @@ impl Typer {
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Stmt::StoreDelete(
-                    store.clone(),
+                    *store,
                     Box::new(hfilter),
                     *span,
                 ))
@@ -729,7 +724,7 @@ impl Typer {
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Stmt::StoreDestroy(
-                    store.clone(),
+                    *store,
                     Box::new(hfilter),
                     *span,
                 ))
@@ -743,7 +738,7 @@ impl Typer {
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Stmt::StoreRestore(
-                    store.clone(),
+                    *store,
                     Box::new(hfilter),
                     *span,
                 ))
@@ -753,7 +748,7 @@ impl Typer {
                 if !self.store_schemas.contains_key(store) {
                     return Err(format!("unknown store '{store}'"));
                 }
-                Ok(hir::Stmt::StoreSave(store.clone(), *span))
+                Ok(hir::Stmt::StoreSave(*store, *span))
             }
 
             ast::Stmt::StoreSet(store, assignments, filter, span) => {
@@ -772,7 +767,7 @@ impl Typer {
                     }
                 }
                 Ok(hir::Stmt::StoreSet(
-                    store.clone(),
+                    *store,
                     hassigns,
                     Box::new(hfilter),
                     *span,
@@ -839,7 +834,7 @@ impl Typer {
                 Ok(hir::Stmt::SimFor(
                     hir::For {
                         bind_id,
-                        bind: f.bind.clone(),
+                        bind: f.bind,
                         bind_ty,
                         bind2_id: None,
                         bind2: None,
@@ -848,7 +843,7 @@ impl Typer {
                         end,
                         step,
                         body,
-                        label: f.label.clone(),
+                        label: f.label,
                         access_mod: None,
                         span: f.span,
                     },
@@ -862,7 +857,7 @@ impl Typer {
             ast::Stmt::UseLocal(u) => Ok(hir::Stmt::UseLocal(
                 u.path.clone(),
                 u.imports.clone(),
-                u.alias.clone(),
+                u.alias,
                 u.span,
             )),
         }

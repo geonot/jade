@@ -48,40 +48,38 @@ impl<'ctx> Compiler<'ctx> {
                         let md = self.coerce_call_args(&arg_vals, args, &ptypes);
                         let csv = b!(self.bld.build_call(fv, &md, "call"));
                         Ok(self.call_result(csv))
+                    } else if let Some(fv) = self.module.get_function(&name.as_str()) {
+                        let ptypes = fv.get_type().get_param_types();
+                        let md = self.coerce_call_args(&arg_vals, args, &ptypes);
+                        let csv = b!(self.bld.build_call(fv, &md, "call"));
+                        Ok(self.call_result(csv))
                     } else {
-                        if let Some(fv) = self.module.get_function(&name.as_str()) {
-                            let ptypes = fv.get_type().get_param_types();
-                            let md = self.coerce_call_args(&arg_vals, args, &ptypes);
-                            let csv = b!(self.bld.build_call(fv, &md, "call"));
-                            Ok(self.call_result(csv))
-                        } else {
-                            const LIBM_UNARY_F64: &[&str] = &[
-                                "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos",
-                                "tan", "asin", "acos", "atan", "log", "log10", "log2", "exp",
-                                "exp2",
-                            ];
-                            const LIBM_BINARY_F64: &[&str] = &["pow", "atan2", "fmod", "copysign"];
-                            let name_str = name.as_str();
-                            let f64t = self.ctx.f64_type();
-                            if LIBM_UNARY_F64.contains(&&*name_str) && arg_vals.len() == 1 {
-                                let sig = f64t.fn_type(&[f64t.into()], false);
-                                let fv = self.module.add_function(&name_str, sig, None);
-                                let csv =
-                                    b!(self.bld.build_call(fv, &[arg_vals[0].into()], "libm"));
-                                return Ok(Some(self.call_result(csv)));
-                            }
-                            if LIBM_BINARY_F64.contains(&&*name_str) && arg_vals.len() == 2 {
-                                let sig = f64t.fn_type(&[f64t.into(), f64t.into()], false);
-                                let fv = self.module.add_function(&name_str, sig, None);
-                                let csv = b!(self.bld.build_call(
-                                    fv,
-                                    &[arg_vals[0].into(), arg_vals[1].into()],
-                                    "libm"
-                                ));
-                                return Ok(Some(self.call_result(csv)));
-                            }
-                            Err(format!("unknown function `{name}`"))
+                        const LIBM_UNARY_F64: &[&str] = &[
+                            "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos",
+                            "tan", "asin", "acos", "atan", "log", "log10", "log2", "exp",
+                            "exp2",
+                        ];
+                        const LIBM_BINARY_F64: &[&str] = &["pow", "atan2", "fmod", "copysign"];
+                        let name_str = name.as_str();
+                        let f64t = self.ctx.f64_type();
+                        if LIBM_UNARY_F64.contains(&&*name_str) && arg_vals.len() == 1 {
+                            let sig = f64t.fn_type(&[f64t.into()], false);
+                            let fv = self.module.add_function(&name_str, sig, None);
+                            let csv =
+                                b!(self.bld.build_call(fv, &[arg_vals[0].into()], "libm"));
+                            return Ok(Some(self.call_result(csv)));
                         }
+                        if LIBM_BINARY_F64.contains(&&*name_str) && arg_vals.len() == 2 {
+                            let sig = f64t.fn_type(&[f64t.into(), f64t.into()], false);
+                            let fv = self.module.add_function(&name_str, sig, None);
+                            let csv = b!(self.bld.build_call(
+                                fv,
+                                &[arg_vals[0].into(), arg_vals[1].into()],
+                                "libm"
+                            ));
+                            return Ok(Some(self.call_result(csv)));
+                        }
+                        Err(format!("unknown function `{name}`"))
                     }
                 }
                 mir::InstKind::MethodCall(recv, method, args, borrow) => {
@@ -187,16 +185,12 @@ impl<'ctx> Compiler<'ctx> {
                             _ => Type::I64,
                         };
 
-                        if let Some(Type::Array(_, arr_len)) = recv_ty {
-                            match &*method.as_str() {
-                                "len" => {
-                                    return Ok(Some(
-                                        self.ctx.i64_type().const_int(arr_len as u64, false).into(),
-                                    ));
-                                }
-                                _ => {}
+                        if let Some(Type::Array(_, arr_len)) = recv_ty
+                            && &*method.as_str() == "len" {
+                                return Ok(Some(
+                                    self.ctx.i64_type().const_int(arr_len as u64, false).into(),
+                                ));
                             }
-                        }
                         let header_ptr = if recv_val.is_pointer_value() {
                             recv_val.into_pointer_value()
                         } else {
@@ -512,7 +506,7 @@ impl<'ctx> Compiler<'ctx> {
                                         .expect("ICE: builder has no insert block");
                                     let recv_in_entry =
                                         if let Some(inst) = recv_val.as_instruction_value() {
-                                            inst.get_parent().map_or(false, |bb| bb == entry_bb)
+                                            inst.get_parent() == Some(entry_bb)
                                         } else {
                                             true
                                         };
@@ -539,7 +533,7 @@ impl<'ctx> Compiler<'ctx> {
                             args.iter().map(|a| self.val(*a)).collect();
                         let ptypes_full = fv.get_type().get_param_types();
                         let ptypes_rest: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
-                            ptypes_full.iter().skip(1).map(|t| (*t).into()).collect();
+                            ptypes_full.iter().skip(1).copied().collect();
                         let coerced = self.coerce_call_args(&arg_vals, args, &ptypes_rest);
                         let mut all_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =
                             vec![self_arg.into()];
@@ -609,25 +603,22 @@ impl<'ctx> Compiler<'ctx> {
                             self.set_tbaa(inst_v, tbaa_name);
                         }
 
-                        if matches!(ty, Type::Struct(_, _) | Type::Tuple(_)) {
-                            if let Some(dest) = inst.dest {
+                        if matches!(ty, Type::Struct(_, _) | Type::Tuple(_))
+                            && let Some(dest) = inst.dest {
                                 self.self_allocs.insert(dest, ptr);
                                 self.self_alloc_types.insert(dest, lt);
                             }
+                        Ok(val)
+                    } else if let Some((ptr, ty)) = self.find_var(&name.as_str()).cloned() {
+                        let lt = self.llvm_ty(&ty);
+                        let val = b!(self.bld.build_load(lt, ptr, &name.as_str()));
+                        if let Some(inst) = val.as_instruction_value() {
+                            let tbaa_name = Compiler::tbaa_type_name(&ty);
+                            self.set_tbaa(inst, tbaa_name);
                         }
                         Ok(val)
                     } else {
-                        if let Some((ptr, ty)) = self.find_var(&name.as_str()).cloned() {
-                            let lt = self.llvm_ty(&ty);
-                            let val = b!(self.bld.build_load(lt, ptr, &name.as_str()));
-                            if let Some(inst) = val.as_instruction_value() {
-                                let tbaa_name = Compiler::tbaa_type_name(&ty);
-                                self.set_tbaa(inst, tbaa_name);
-                            }
-                            Ok(val)
-                        } else {
-                            Err(format!("Load of undefined variable `{name}`"))
-                        }
+                        Err(format!("Load of undefined variable `{name}`"))
                     }
                 }
                 mir::InstKind::Store(name, val) => {
@@ -714,11 +705,10 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 if v.is_struct_value() {
-                    if let Some(arg_id) = args.get(i) {
-                        if let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
+                    if let Some(arg_id) = args.get(i)
+                        && let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
                             return src_ptr.into();
                         }
-                    }
 
                     let alloca = self.entry_alloca(v.get_type(), "struct.arg");
                     let _ = self.bld.build_store(alloca, *v);
@@ -726,11 +716,10 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 if v.is_pointer_value() {
-                    if let Some(arg_id) = args.get(i) {
-                        if let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
+                    if let Some(arg_id) = args.get(i)
+                        && let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
                             return src_ptr.into();
                         }
-                    }
                     return (*v).into();
                 }
                 (*v).into()

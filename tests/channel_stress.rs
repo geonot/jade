@@ -5,14 +5,13 @@
 //! and a large-capacity ("never blocks") regime, and asserts the channel's
 //! core concurrency contract:
 //!
-//!   * **No loss**     — every message sent is received.
-//!   * **No duplication** — every message is received exactly once.
-//!   * **No corruption**  — received payloads are byte-identical to what was
-//!                          sent (verified by reconstructing the full (producer,
-//!                          seq) grid from the union of all consumers).
-//!   * **Clean shutdown** — after every producer has finished and the channel
-//!                          is closed, all consumers drain the buffer and exit
-//!                          (no consumer hangs).
+//! * **No loss**     — every message sent is received.
+//! * **No duplication** — every message is received exactly once.
+//! * **No corruption**  — received payloads are byte-identical to what was
+//!   sent (verified by reconstructing the full (producer, seq) grid from the
+//!   union of all consumers).
+//! * **Clean shutdown** — after every producer has finished and the channel
+//!   is closed, all consumers drain the buffer and exit (no consumer hangs).
 //!
 //! It also **measures end-to-end tail latency** (send→recv) and prints the
 //! p50/p90/p99/p999/max percentiles. Latency is reported, not hard-asserted,
@@ -91,7 +90,6 @@ fn run_stress(producers: u32, consumers: u32, per_producer: u32, capacity: usize
     // ── Producers ────────────────────────────────────────────────────
     let mut prod_handles = Vec::new();
     for p in 0..producers {
-        let ch = ch;
         prod_handles.push(thread::spawn(move || {
             for s in 0..per_producer {
                 let msg = Msg {
@@ -111,7 +109,6 @@ fn run_stress(producers: u32, consumers: u32, per_producer: u32, capacity: usize
     // the (producer, seq) pairs it saw plus the latencies it measured.
     let mut cons_handles = Vec::new();
     for _ in 0..consumers {
-        let ch = ch;
         cons_handles.push(thread::spawn(move || {
             let mut seen: Vec<(u32, u32)> = Vec::new();
             let mut lats: Vec<u64> = Vec::new();

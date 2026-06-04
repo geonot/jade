@@ -22,8 +22,8 @@ impl Typer {
 
                 let _struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreQuery(store.clone(), Box::new(hfilter)),
-                    ty: Type::Row(store.clone()),
+                    kind: hir::ExprKind::StoreQuery(*store, Box::new(hfilter)),
+                    ty: Type::Row(*store),
                     span: *span,
                 })
             }
@@ -47,13 +47,13 @@ impl Typer {
                 if let Some(filter) = filter {
                     let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                     Ok(hir::Expr {
-                        kind: hir::ExprKind::ViewCount(store.clone(), Box::new(hfilter)),
+                        kind: hir::ExprKind::ViewCount(*store, Box::new(hfilter)),
                         ty: Type::I64,
                         span: *span,
                     })
                 } else {
                     Ok(hir::Expr {
-                        kind: hir::ExprKind::StoreCount(store.clone()),
+                        kind: hir::ExprKind::StoreCount(*store),
                         ty: Type::I64,
                         span: *span,
                     })
@@ -76,7 +76,7 @@ impl Typer {
                 }
                 let struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreAll(store.clone()),
+                    kind: hir::ExprKind::StoreAll(*store),
                     ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
                     span: *span,
                 })
@@ -100,8 +100,8 @@ impl Typer {
 
                 let _struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreGet(store.clone(), Box::new(hkey)),
-                    ty: Type::Row(store.clone()),
+                    kind: hir::ExprKind::StoreGet(*store, Box::new(hkey)),
+                    ty: Type::Row(*store),
                     span: *span,
                 })
             }
@@ -126,8 +126,8 @@ impl Typer {
 
                 let _struct_name = Symbol::intern(&format!("__store_{store}"));
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreFirst(store.clone(), Box::new(hfilter)),
-                    ty: Type::Row(store.clone()),
+                    kind: hir::ExprKind::StoreFirst(*store, Box::new(hfilter)),
+                    ty: Type::Row(*store),
                     span: *span,
                 })
             }
@@ -150,7 +150,7 @@ impl Typer {
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreExists(store.clone(), Box::new(hfilter)),
+                    kind: hir::ExprKind::StoreExists(*store, Box::new(hfilter)),
                     ty: Type::Bool,
                     span: *span,
                 })
@@ -171,7 +171,7 @@ impl Typer {
                     return Err(format!("unknown store '{store}'"));
                 }
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::StoreDistinct(store.clone(), field.clone()),
+                    kind: hir::ExprKind::StoreDistinct(*store, *field),
                     ty: Type::Vec(Box::new(Type::String)),
                     span: *span,
                 })

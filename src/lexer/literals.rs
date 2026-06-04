@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(clippy::if_same_then_else)]
 fn push_utf8_at(val: &mut String, src: &[u8], pos: &mut usize, col: &mut u32) {
     let b = src[*pos];
     let n = if b < 0x80 {

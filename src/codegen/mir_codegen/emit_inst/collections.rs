@@ -10,8 +10,8 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::Drop(val, ty) => {
                     let v = self.val(*val);
 
-                    if let Type::Vec(elem) = ty {
-                        if v.is_pointer_value()
+                    if let Type::Vec(elem) = ty
+                        && v.is_pointer_value()
                             && self
                                 .current_perceus_meta
                                 .reuse_save
@@ -23,7 +23,6 @@ impl<'ctx> Compiler<'ctx> {
                             self.try_save_vec_slot(*val, v.into_pointer_value());
                             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
                         }
-                    }
                     self.drop_value(v, ty)?;
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
@@ -42,7 +41,7 @@ impl<'ctx> Compiler<'ctx> {
                     if !Self::is_value_clonable(ty) || ty.is_trivially_droppable() {
                         Ok(v)
                     } else {
-                        self.clone_value(v, ty).map(|c| c)
+                        self.clone_value(v, ty)
                     }
                 }
 

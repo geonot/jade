@@ -20,7 +20,6 @@ pub(in crate::driver) fn resolve_implicit_imports(
             if let Decl::Use(u) = d {
                 Some(
                     u.alias
-                        .clone()
                         .unwrap_or_else(|| u.path.last().cloned().unwrap_or_default()),
                 )
             } else {
@@ -96,16 +95,15 @@ pub(in crate::driver) fn resolve_implicit_imports(
             if matches!(d, Decl::Use(_)) {
                 continue;
             }
-            if let Decl::Fn(ref f) = d {
-                if f.name == "main" && f.params.is_empty() {
+            if let Decl::Fn(ref f) = d
+                && f.name == "main" && f.params.is_empty() {
                     for stmt in &f.body {
                         if let Stmt::Bind(b) = stmt {
-                            importable.push(Decl::Const(b.name.clone(), b.value.clone(), b.span));
+                            importable.push(Decl::Const(b.name, b.value.clone(), b.span));
                         }
                     }
                     continue;
                 }
-            }
             importable.push(d);
         }
         for pd in prefix_module(importable, &mod_name) {
@@ -136,7 +134,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Expr::Method(obj, _, args, _) => {
                 if let Expr::Ident(name, _) = obj.as_ref() {
                     if !defs.contains(name) {
-                        modules.insert(name.clone());
+                        modules.insert(*name);
                     }
                 } else {
                     walk_expr(obj, modules, defs);
@@ -148,7 +146,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Expr::Field(obj, _, _) => {
                 if let Expr::Ident(name, _) = obj.as_ref() {
                     if !defs.contains(name) {
-                        modules.insert(name.clone());
+                        modules.insert(*name);
                     }
                 } else {
                     walk_expr(obj, modules, defs);
@@ -198,7 +196,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Expr::Lambda(params, _, body, _) => {
                 let mut local_defs = defs.clone();
                 for param in params {
-                    local_defs.insert(param.name.clone());
+                    local_defs.insert(param.name);
                 }
                 walk_block(body, modules, &mut local_defs);
             }
@@ -317,7 +315,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             | Expr::Embed(_, _) => {}
             Expr::Spawn(name, inits, _) => {
                 if !defs.contains(name) {
-                    modules.insert(name.clone());
+                    modules.insert(*name);
                 }
                 for (_, v) in inits {
                     walk_expr(v, modules, defs);
@@ -357,7 +355,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Stmt::Expr(e) => walk_expr(e, modules, defs),
             Stmt::Bind(b) => {
                 walk_expr(&b.value, modules, defs);
-                defs.insert(b.name.clone());
+                defs.insert(b.name);
             }
             Stmt::Assign(l, r, _) => {
                 walk_expr(l, modules, defs);
@@ -390,9 +388,9 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                     walk_expr(step, modules, defs);
                 }
                 let mut local_defs = defs.clone();
-                local_defs.insert(f.bind.clone());
+                local_defs.insert(f.bind);
                 if let Some(bind2) = &f.bind2 {
-                    local_defs.insert(bind2.clone());
+                    local_defs.insert(*bind2);
                 }
                 walk_block(&f.body, modules, &mut local_defs);
             }
@@ -409,7 +407,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Stmt::TupleBind(names, e, _) => {
                 walk_expr(e, modules, defs);
                 for name in names {
-                    defs.insert(name.clone());
+                    defs.insert(*name);
                 }
             }
             Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => walk_expr(e, modules, defs),
@@ -430,7 +428,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Stmt::SimFor(f, _) => {
                 walk_expr(&f.iter, modules, defs);
                 let mut local_defs = defs.clone();
-                local_defs.insert(f.bind.clone());
+                local_defs.insert(f.bind);
                 walk_block(&f.body, modules, &mut local_defs);
             }
             Stmt::Ret(None, _)
@@ -451,7 +449,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Decl::Fn(f) => {
                 let mut local_defs = defined.clone();
                 for param in &f.params {
-                    local_defs.insert(param.name.clone());
+                    local_defs.insert(param.name);
                 }
                 walk_block(&f.body, &mut modules, &mut local_defs);
             }
@@ -459,7 +457,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 for method in &td.methods {
                     let mut local_defs = defined.clone();
                     for param in &method.params {
-                        local_defs.insert(param.name.clone());
+                        local_defs.insert(param.name);
                     }
                     walk_block(&method.body, &mut modules, &mut local_defs);
                 }
@@ -468,7 +466,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 for method in &ib.methods {
                     let mut local_defs = defined.clone();
                     for param in &method.params {
-                        local_defs.insert(param.name.clone());
+                        local_defs.insert(param.name);
                     }
                     walk_block(&method.body, &mut modules, &mut local_defs);
                 }
@@ -477,7 +475,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 for handler in &ad.handlers {
                     let mut local_defs = defined.clone();
                     for param in &handler.params {
-                        local_defs.insert(param.name.clone());
+                        local_defs.insert(param.name);
                     }
                     if let Some(sleep_ms) = &handler.loop_sleep_ms {
                         walk_expr(sleep_ms, &mut modules, &mut local_defs);

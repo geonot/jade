@@ -126,7 +126,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         if let Some(loop_h) = loop_handler {
-            let loop_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), loop_h);
+            let loop_fn_name = crate::mir::actor_handler_fn_name(ad.name, loop_h);
             let loop_fv = self.module.get_function(&loop_fn_name).unwrap_or_else(|| {
                 panic!("ICE: actor loop handler fn not lowered: {loop_fn_name}")
             });
@@ -136,7 +136,7 @@ impl<'ctx> Compiler<'ctx> {
             if loop_h.loop_sleep_ms.is_some() {
                 let i64t = self.ctx.i64_type();
 
-                let sleep_fn_name = crate::mir::actor_sleep_fn_name(ad.name.clone());
+                let sleep_fn_name = crate::mir::actor_sleep_fn_name(ad.name);
                 let sleep_fv = self
                     .module
                     .get_function(&sleep_fn_name)
@@ -283,7 +283,7 @@ impl<'ctx> Compiler<'ctx> {
                         b!(self.bld.build_gep(
                             self.ctx.i8_type(),
                             payload_ptr,
-                            &[offset_val.into()],
+                            &[offset_val],
                             &format!("param_{}_ptr", p.name)
                         ))
                     };
@@ -297,7 +297,7 @@ impl<'ctx> Compiler<'ctx> {
                     param_offset += psize;
                 }
 
-                let handler_fn_name = crate::mir::actor_handler_fn_name(ad.name.clone(), h);
+                let handler_fn_name = crate::mir::actor_handler_fn_name(ad.name, h);
                 let handler_fv = self
                     .module
                     .get_function(&handler_fn_name)
@@ -398,7 +398,7 @@ impl<'ctx> Compiler<'ctx> {
                     .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
                 let init_fn = self
                     .module
-                    .get_function(&crate::mir::actor_init_fn_name(ad.name.clone()))
+                    .get_function(&crate::mir::actor_init_fn_name(ad.name))
                     .unwrap_or_else(|| panic!("ICE: actor init fn not lowered: {actor_name}"));
                 b!(self.bld.build_call(init_fn, &[state_ptr.into()], ""));
 
@@ -531,7 +531,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
             let init_fn = self
                 .module
-                .get_function(&crate::mir::actor_init_fn_name(ad.name.clone()))
+                .get_function(&crate::mir::actor_init_fn_name(ad.name))
                 .unwrap_or_else(|| panic!("ICE: actor init fn not lowered: {actor_name}"));
             b!(self.bld.build_call(init_fn, &[state_ptr.into()], ""));
         }

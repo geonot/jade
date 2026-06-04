@@ -54,11 +54,11 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         .types
         .iter()
         .map(|td| TypeDef {
-            name: td.name.clone(),
+            name: td.name,
             fields: td
                 .fields
                 .iter()
-                .map(|f| (f.name.clone(), f.ty.clone()))
+                .map(|f| (f.name, f.ty.clone()))
                 .collect(),
         })
         .collect();
@@ -66,7 +66,7 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         .externs
         .iter()
         .map(|ef| ExternDecl {
-            name: ef.name.clone(),
+            name: ef.name,
             params: ef.params.iter().map(|p| p.1.clone()).collect(),
             ret: ef.ret.clone(),
         })
@@ -75,7 +75,7 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         .globals
         .iter()
         .map(|g| GlobalDef {
-            name: g.name.clone(),
+            name: g.name,
             ty: g.ty.clone(),
         })
         .collect();
@@ -96,10 +96,10 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
         let val = lowerer.new_value();
         lowerer.func.params.push(Param {
             value: val,
-            name: p.name.clone(),
+            name: p.name,
             ty: p.ty.clone(),
         });
-        lowerer.var_types.insert(p.name.clone(), p.ty.clone());
+        lowerer.var_types.insert(p.name, p.ty.clone());
         // Seed Braun's per-block definition map so `read_var` at the entry
         // block resolves the parameter directly.
         let entry = lowerer.func.entry;
@@ -107,7 +107,7 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
             .current_def
             .entry(entry)
             .or_default()
-            .insert(p.name.clone(), val);
+            .insert(p.name, val);
     }
 
     // `copy` parameters receive an independent deep copy: clone the incoming
@@ -136,7 +136,7 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
                 .current_def
                 .entry(entry)
                 .or_default()
-                .insert(p.name.clone(), cloned);
+                .insert(p.name, cloned);
         }
     }
 
@@ -266,12 +266,12 @@ fn finish_body(
 /// `DefId`s, or `self.field` for the explicit-self form) are redirected to
 /// load/store through the state struct via the `field_ctx`.
 fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Function> {
-    let fn_name = actor_handler_fn_name(actor.name.clone(), handler);
+    let fn_name = actor_handler_fn_name(actor.name, handler);
     let mut lowerer = Lowerer::new(&fn_name, actor.def_id, handler.span);
     lowerer.func.ret_ty = Type::Void;
 
     let state_struct_name = Symbol::intern(&format!("{}_state", actor.name));
-    let state_ptr_ty = Type::Ptr(Box::new(Type::Struct(state_struct_name.clone(), vec![])));
+    let state_ptr_ty = Type::Ptr(Box::new(Type::Struct(state_struct_name, vec![])));
 
     // Detect the explicit-self form (`@handler self, ...`): the leading param
     // named `self` IS the state pointer rather than a message argument.
@@ -283,20 +283,20 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
     // First parameter: the state pointer. Use the explicit `self` name when
     // present so `self.field` reads resolve to it; otherwise a synthetic name.
     let self_name = if has_explicit_self {
-        handler.params[0].name.clone()
+        handler.params[0].name
     } else {
         Symbol::intern("__self_state")
     };
     let self_val = lowerer.new_value();
     lowerer.func.params.push(Param {
         value: self_val,
-        name: self_name.clone(),
+        name: self_name,
         ty: state_ptr_ty.clone(),
     });
     let entry = lowerer.func.entry;
     lowerer
         .var_types
-        .insert(self_name.clone(), state_ptr_ty.clone());
+        .insert(self_name, state_ptr_ty.clone());
     lowerer
         .current_def
         .entry(entry)
@@ -313,22 +313,22 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         let val = lowerer.new_value();
         lowerer.func.params.push(Param {
             value: val,
-            name: p.name.clone(),
+            name: p.name,
             ty: p.ty.clone(),
         });
-        lowerer.var_types.insert(p.name.clone(), p.ty.clone());
+        lowerer.var_types.insert(p.name, p.ty.clone());
         lowerer
             .current_def
             .entry(entry)
             .or_default()
-            .insert(p.name.clone(), val);
+            .insert(p.name, val);
     }
 
     // Field context: map each field's canonical DefId to (name, type) so bare
     // field references in the body redirect to the state struct.
     let mut map = std::collections::HashMap::new();
     for (f, &fid) in actor.fields.iter().zip(actor.field_def_ids.iter()) {
-        map.insert(fid, (f.name.clone(), f.ty.clone()));
+        map.insert(fid, (f.name, f.ty.clone()));
     }
     lowerer.field_ctx = Some(ctx::FieldCtx {
         self_state: self_val,
@@ -351,18 +351,18 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
     let mut lowerer = Lowerer::new(fn_name, actor.def_id, actor.span);
 
     let state_struct_name = Symbol::intern(&format!("{}_state", actor.name));
-    let state_ptr_ty = Type::Ptr(Box::new(Type::Struct(state_struct_name.clone(), vec![])));
+    let state_ptr_ty = Type::Ptr(Box::new(Type::Struct(state_struct_name, vec![])));
 
     let self_name = Symbol::intern("__self_state");
     let self_val = lowerer.new_value();
     lowerer.func.params.push(Param {
         value: self_val,
-        name: self_name.clone(),
+        name: self_name,
         ty: state_ptr_ty,
     });
     let entry = lowerer.func.entry;
     let self_ty = lowerer.func.params.last().unwrap().ty.clone();
-    lowerer.var_types.insert(self_name.clone(), self_ty);
+    lowerer.var_types.insert(self_name, self_ty);
     lowerer
         .current_def
         .entry(entry)
@@ -371,7 +371,7 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
 
     let mut map = std::collections::HashMap::new();
     for (f, &fid) in actor.fields.iter().zip(actor.field_def_ids.iter()) {
-        map.insert(fid, (f.name.clone(), f.ty.clone()));
+        map.insert(fid, (f.name, f.ty.clone()));
     }
     lowerer.field_ctx = Some(ctx::FieldCtx {
         self_state: self_val,
@@ -389,7 +389,7 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
 /// `Vec`/`Map` get an empty container; scalar fields without a default are left
 /// zero-initialized by the factory's `memset` and so are skipped here.
 fn lower_actor_init(actor: &hir::ActorDef) -> Vec<Function> {
-    let fn_name = actor_init_fn_name(actor.name.clone());
+    let fn_name = actor_init_fn_name(actor.name);
     let mut lowerer = actor_state_lowerer(actor, &fn_name);
     lowerer.func.ret_ty = Type::Void;
 
@@ -416,7 +416,7 @@ fn lower_actor_init(actor: &hir::ActorDef) -> Vec<Function> {
             }
         };
         let target = hir::Expr {
-            kind: ExprKind::Var(fid, f.name.clone()),
+            kind: ExprKind::Var(fid, f.name),
             ty: f.ty.clone(),
             span: f.span,
         };
@@ -439,7 +439,7 @@ fn lower_actor_sleep(actor: &hir::ActorDef) -> Option<Vec<Function>> {
     let loop_h = actor.handlers.iter().find(|h| h.is_loop)?;
     let sleep_expr = loop_h.loop_sleep_ms.as_ref()?;
 
-    let fn_name = actor_sleep_fn_name(actor.name.clone());
+    let fn_name = actor_sleep_fn_name(actor.name);
     let mut lowerer = actor_state_lowerer(actor, &fn_name);
     lowerer.func.ret_ty = Type::I64;
 

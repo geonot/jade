@@ -22,7 +22,7 @@ impl Lowerer {
                     let self_state = self.field_self();
                     return self.emit(InstKind::FieldGet(self_state, field_sym), field_ty, span);
                 }
-                self.read_var(name.clone(), self.current_block, ty, span)
+                self.read_var(*name, self.current_block, ty, span)
             }
 
             ExprKind::BinOp(lhs, op, rhs) => {
@@ -65,7 +65,7 @@ impl Lowerer {
             ExprKind::Call(_, name, args) => {
                 let arg_vals: Vec<ValueId> =
                     args.iter().map(|a| self.lower_expr_owned(a)).collect();
-                self.emit(InstKind::Call(name.clone(), arg_vals), ty, span)
+                self.emit(InstKind::Call(*name, arg_vals), ty, span)
             }
             ExprKind::IndirectCall(callee, args) => {
                 let f = self.lower_expr(callee);
@@ -79,14 +79,14 @@ impl Lowerer {
                 let arg_vals: Vec<ValueId> =
                     args.iter().map(|a| self.lower_expr_owned(a)).collect();
                 self.emit(
-                    InstKind::MethodCall(obj_val, mangled_name.clone(), arg_vals, false),
+                    InstKind::MethodCall(obj_val, *mangled_name, arg_vals, false),
                     ty,
                     span,
                 )
             }
             ExprKind::Field(obj, field, _idx) => {
                 let obj_val = self.lower_expr(obj);
-                self.emit(InstKind::FieldGet(obj_val, field.clone()), ty, span)
+                self.emit(InstKind::FieldGet(obj_val, *field), ty, span)
             }
             ExprKind::Index(arr, idx) => {
                 let a = self.lower_expr(arr);
@@ -217,7 +217,7 @@ impl Lowerer {
                     span,
                 )
             }
-            ExprKind::GlobalLoad(name) => self.emit(InstKind::GlobalLoad(name.clone()), ty, span),
+            ExprKind::GlobalLoad(name) => self.emit(InstKind::GlobalLoad(*name), ty, span),
             ExprKind::Unreachable => {
                 self.set_terminator(Terminator::Unreachable);
                 let dead = self.new_block("after.unreachable");

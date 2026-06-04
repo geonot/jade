@@ -204,9 +204,7 @@ impl<'ctx> Compiler<'ctx> {
         let is_null = b!(self.bld.build_is_null(fp.into_pointer_value(), "is_null"));
 
         let is_transient = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Transient);
+            .decorators.contains(&crate::ast::StoreDecorator::Transient);
         if is_transient {
             b!(self.bld.build_conditional_branch(is_null, init_bb, done_bb));
         } else {

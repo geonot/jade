@@ -40,7 +40,7 @@ impl Lowerer {
             hir::Stmt::GlobalStore(name, value, _span) => {
                 let val = self.lower_expr(value);
                 self.emit(
-                    InstKind::GlobalStore(name.clone(), val),
+                    InstKind::GlobalStore(*name, val),
                     Type::Void,
                     Span::dummy(),
                 )

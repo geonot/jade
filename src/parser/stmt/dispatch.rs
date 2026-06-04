@@ -207,7 +207,7 @@ impl Parser {
                     let mut body_r = replace_placeholder_in_block(&body, &ph_name);
                     let step_sp = step_r.span();
                     body_r.push(Stmt::Assign(
-                        Expr::Ident(ph_sym.clone(), step_sp),
+                        Expr::Ident(ph_sym, step_sp),
                         step_r,
                         step_sp,
                     ));
@@ -293,13 +293,12 @@ impl Parser {
                 let sp = self.span();
                 self.advance();
 
-                if let Token::Ident(sym) = self.peek().clone() {
-                    if self.label_stack.iter().any(|l| *l == sym) {
+                if let Token::Ident(sym) = self.peek().clone()
+                    && self.label_stack.contains(&sym) {
                         self.advance();
                         let marker = format!("__break_label__{}", sym.as_str());
                         return Ok(Stmt::Break(Some(Expr::Str(marker, sp)), sp));
                     }
-                }
                 let v = if !self.check(Token::Newline)
                     && !self.check(Token::If)
                     && !self.check(Token::Dedent)
@@ -314,14 +313,13 @@ impl Parser {
             Token::Continue => {
                 let sp = self.span();
                 self.advance();
-                if let Token::Ident(sym) = self.peek().clone() {
-                    if self.label_stack.iter().any(|l| *l == sym) {
+                if let Token::Ident(sym) = self.peek().clone()
+                    && self.label_stack.contains(&sym) {
                         self.advance();
 
                         let marker = format!("__continue_label__{}", sym.as_str());
                         return Ok(Stmt::Break(Some(Expr::Str(marker, sp)), sp));
                     }
-                }
                 Ok(Stmt::Continue(sp))
             }
             Token::Nop => {
@@ -383,7 +381,7 @@ impl Parser {
                     let rhs = self.parse_expr()?;
                     let rsp = rhs.span();
                     return Ok(Stmt::Bind(Bind {
-                        name: name.clone(),
+                        name,
                         value: Expr::BinOp(Box::new(Expr::Ident(name, sp)), op, Box::new(rhs), rsp),
                         ty: None,
                         atomic: true,
@@ -404,7 +402,7 @@ impl Parser {
             }
             _ => {
                 if let Token::Ident(kw) = self.peek() {
-                    let kw = kw.clone();
+                    let kw = *kw;
                     match &*kw.as_str() {
                         "destroy" => return self.parse_destroy_stmt(),
                         "restore" => return self.parse_restore_stmt(),

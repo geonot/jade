@@ -301,15 +301,14 @@ pub fn find_references(src: &str, name: &str) -> Vec<IdentRef> {
     };
     let mut refs = Vec::new();
     for sp in &tokens {
-        if let Token::Ident(id) = &sp.token {
-            if id == name {
+        if let Token::Ident(id) = &sp.token
+            && id == name {
                 refs.push(IdentRef {
                     line: sp.span.line,
                     col: sp.span.col,
                     len: id.len() as u32,
                 });
             }
-        }
     }
     refs
 }

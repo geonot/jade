@@ -151,9 +151,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn store_is_versioned(sd: &hir::StoreDef) -> bool {
-        sd.decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Versioned)
+        sd.decorators.contains(&crate::ast::StoreDecorator::Versioned)
     }
 
     pub(crate) fn load_store_ver(

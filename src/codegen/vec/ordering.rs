@@ -202,15 +202,13 @@ impl<'ctx> Compiler<'ctx> {
                 aj.into_float_value(),
                 key.into_float_value(),
                 "sort.gt"
-            ))
-            .into(),
+            )),
             _ => b!(self.bld.build_int_compare(
                 IntPredicate::SGT,
                 aj.into_int_value(),
                 key.into_int_value(),
                 "sort.gt"
-            ))
-            .into(),
+            )),
         };
         let shift_bb = self.ctx.append_basic_block(fv, "sort.shift");
         b!(self.bld.build_conditional_branch(gt, shift_bb, inner_done));
@@ -283,8 +281,7 @@ impl<'ctx> Compiler<'ctx> {
                 elem.into_float_value(),
                 needle.into_float_value(),
                 "vc.eq"
-            ))
-            .into(),
+            )),
             Type::String => self.string_eq(elem, needle, false)?.into_int_value(),
             _ => b!(self.bld.build_int_compare(
                 IntPredicate::EQ,

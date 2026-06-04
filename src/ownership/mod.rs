@@ -37,6 +37,12 @@ pub struct OwnershipVerifier {
     fn_ret_types: HashMap<Symbol, Type>,
 }
 
+impl Default for OwnershipVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OwnershipVerifier {
     pub fn new() -> Self {
         Self {
@@ -48,7 +54,7 @@ impl OwnershipVerifier {
 
     pub fn verify(&mut self, prog: &Program) -> Vec<OwnershipDiag> {
         for f in &prog.fns {
-            self.fn_ret_types.insert(f.name.clone(), f.ret.clone());
+            self.fn_ret_types.insert(f.name, f.ret.clone());
         }
 
         for f in &prog.fns {
@@ -126,8 +132,8 @@ impl OwnershipVerifier {
         if id == DefId::BUILTIN {
             return;
         }
-        if let Some(state) = self.lookup(id).cloned() {
-            if state.moved && state.ownership == Ownership::Owned {
+        if let Some(state) = self.lookup(id).cloned()
+            && state.moved && state.ownership == Ownership::Owned {
                 self.diagnostics.push(OwnershipDiag {
                     kind: DiagKind::UseAfterMove,
                     span,
@@ -137,7 +143,6 @@ impl OwnershipVerifier {
                     ),
                 });
             }
-        }
     }
 
     fn record_borrow(&mut self, id: DefId, mutable: bool, span: crate::ast::Span) {
@@ -181,23 +186,20 @@ impl OwnershipVerifier {
         if id == DefId::BUILTIN {
             return;
         }
-        if let Some(state) = self.lookup(id).cloned() {
-            if (state.ownership == Ownership::Owned || state.ownership == Ownership::BorrowMut)
+        if let Some(state) = self.lookup(id).cloned()
+            && (state.ownership == Ownership::Owned || state.ownership == Ownership::BorrowMut)
                 && !state.ty.is_trivially_droppable()
-            {
-                if let Some(s) = self.lookup_mut(id) {
+                && let Some(s) = self.lookup_mut(id) {
                     s.moved = true;
                     s.move_span = Some(span);
                 }
-            }
-        }
     }
 
     fn check_return_borrows(&mut self, expr: &Expr, span: crate::ast::Span) {
-        if let ExprKind::Ref(inner) = &expr.kind {
-            if let Some((def_id, name)) = Self::extract_root_var(inner) {
-                if let Some(state) = self.lookup(def_id) {
-                    if state.ownership == Ownership::Owned {
+        if let ExprKind::Ref(inner) = &expr.kind
+            && let Some((def_id, name)) = Self::extract_root_var(inner)
+                && let Some(state) = self.lookup(def_id)
+                    && state.ownership == Ownership::Owned {
                         self.diagnostics.push(OwnershipDiag {
                             kind: DiagKind::ReturnOfBorrowed,
                             span,
@@ -207,9 +209,6 @@ impl OwnershipVerifier {
                             ),
                         });
                     }
-                }
-            }
-        }
     }
 
     fn extract_root_var(expr: &Expr) -> Option<(DefId, String)> {

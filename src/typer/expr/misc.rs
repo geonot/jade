@@ -136,10 +136,10 @@ impl Typer {
                     }
                 }
 
-                if let ast::Expr::Ident(name, _) = func.as_ref() {
-                    if name == "type" {
-                        if let ast::Expr::Ident(vname, _) = arg.as_ref() {
-                            if let Some(ty) = self.find_var(&vname.as_str()).map(|i| i.ty.clone()) {
+                if let ast::Expr::Ident(name, _) = func.as_ref()
+                    && name == "type" {
+                        if let ast::Expr::Ident(vname, _) = arg.as_ref()
+                            && let Some(ty) = self.find_var(&vname.as_str()).map(|i| i.ty.clone()) {
                                 let resolved = self.infer_ctx.resolve(&ty);
                                 let ty_str = format!("{}", resolved);
                                 return Ok(hir::Expr {
@@ -148,7 +148,6 @@ impl Typer {
                                     span: *span,
                                 });
                             }
-                        }
                         let harg = self.lower_expr(arg)?;
                         let resolved = self.infer_ctx.resolve(&harg.ty);
                         let ty_str = format!("{}", resolved);
@@ -158,7 +157,6 @@ impl Typer {
                             span: *span,
                         });
                     }
-                }
 
                 let hfunc = self.lower_expr(func)?;
                 let harg = self.lower_expr(arg)?;

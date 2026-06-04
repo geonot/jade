@@ -261,6 +261,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub(in crate::codegen) fn parse_encoded_filter(
         encoded: &str,
     ) -> Result<

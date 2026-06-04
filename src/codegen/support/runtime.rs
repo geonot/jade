@@ -72,7 +72,7 @@ impl<'ctx> Compiler<'ctx> {
         expr: &hir::Expr,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         match &expr.kind {
-            hir::ExprKind::Int(n) => Ok(self.int_const(*n, &expr.ty).into()),
+            hir::ExprKind::Int(n) => Ok(self.int_const(*n, &expr.ty)),
             hir::ExprKind::Float(f) => Ok(self.ctx.f64_type().const_float(*f).into()),
             hir::ExprKind::Bool(b) => Ok(self.ctx.bool_type().const_int(*b as u64, false).into()),
             hir::ExprKind::Str(s) => {
@@ -119,7 +119,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn no_term(&self) -> bool {
         self.bld
             .get_insert_block()
-            .map_or(true, |bb| bb.get_terminator().is_none())
+            .is_none_or(|bb| bb.get_terminator().is_none())
     }
 
     pub(crate) fn mk_fn_type(
@@ -278,20 +278,17 @@ impl<'ctx> Compiler<'ctx> {
             let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
             self.bld.position_at_end(free_bb);
 
-            if self.current_perceus_meta.vec_slots.contains(&slot) {
-                if let Ok(data_gep) =
+            if self.current_perceus_meta.vec_slots.contains(&slot)
+                && let Ok(data_gep) =
                     self.bld
                         .build_struct_gep(header_ty, cur, 0, "perceus.drain.dgep")
-                {
-                    if let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "perceus.drain.d") {
+                    && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "perceus.drain.d") {
                         let _ = self.bld.build_call(
                             free_fn,
                             &[data_v.into_pointer_value().into()],
                             "perceus.drain.free.buf",
                         );
                     }
-                }
-            }
             let _ = self
                 .bld
                 .build_call(free_fn, &[cur.into()], "perceus.drain.free");
@@ -328,15 +325,13 @@ impl<'ctx> Compiler<'ctx> {
                 if let Ok(data_gep) =
                     self.bld
                         .build_struct_gep(header_ty, prev_ptr, 0, "vec.save.dgep")
-                {
-                    if let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "vec.save.d") {
+                    && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "vec.save.d") {
                         let _ = self.bld.build_call(
                             free_fn,
                             &[data_v.into_pointer_value().into()],
                             "vec.save.free.buf",
                         );
                     }
-                }
                 let _ = self
                     .bld
                     .build_call(free_fn, &[prev_ptr.into()], "vec.save.free.hdr");
@@ -411,24 +406,24 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn uses_concurrency(prog: &hir::Program) -> bool {
         use crate::hir::{ExprKind, Stmt};
         fn scan_expr(e: &hir::Expr) -> bool {
-            match &e.kind {
+            matches!(
+                &e.kind,
                 ExprKind::ChannelCreate(_, _)
-                | ExprKind::ChannelSend(_, _)
-                | ExprKind::ChannelRecv(_)
-                | ExprKind::Select(_, _)
-                | ExprKind::CoroutineCreate(_, _)
-                | ExprKind::Yield(_) => true,
-                _ => false,
-            }
+                    | ExprKind::ChannelSend(_, _)
+                    | ExprKind::ChannelRecv(_)
+                    | ExprKind::Select(_, _)
+                    | ExprKind::CoroutineCreate(_, _)
+                    | ExprKind::Yield(_)
+            )
         }
         fn scan_stmt(s: &hir::Stmt) -> bool {
-            match s {
+            matches!(
+                s,
                 Stmt::ChannelClose(_, _)
-                | Stmt::Stop(_, _)
-                | Stmt::SimFor(_, _)
-                | Stmt::SimBlock(_, _) => true,
-                _ => false,
-            }
+                    | Stmt::Stop(_, _)
+                    | Stmt::SimFor(_, _)
+                    | Stmt::SimBlock(_, _)
+            )
         }
         fn scan_block(block: &[hir::Stmt]) -> bool {
             block.iter().any(|s| {
@@ -441,7 +436,7 @@ impl<'ctx> Compiler<'ctx> {
                     Stmt::If(i) => {
                         scan_block(&i.then)
                             || i.elifs.iter().any(|(c, b)| scan_expr(c) || scan_block(b))
-                            || i.els.as_ref().map_or(false, |b| scan_block(b))
+                            || i.els.as_ref().is_some_and(|b| scan_block(b))
                     }
                     Stmt::While(w) => scan_expr(&w.cond) || scan_block(&w.body),
                     Stmt::For(f) => scan_expr(&f.iter) || scan_block(&f.body),
@@ -457,15 +452,15 @@ impl<'ctx> Compiler<'ctx> {
         fn scan_fn(f: &hir::Fn) -> bool {
             scan_block(&f.body)
         }
-        prog.fns.iter().any(|f| scan_fn(f))
+        prog.fns.iter().any(scan_fn)
             || prog
                 .types
                 .iter()
-                .any(|td| td.methods.iter().any(|m| scan_fn(m)))
+                .any(|td| td.methods.iter().any(scan_fn))
             || prog
                 .trait_impls
                 .iter()
-                .any(|ti| ti.methods.iter().any(|m| scan_fn(m)))
+                .any(|ti| ti.methods.iter().any(scan_fn))
     }
 
     pub(crate) fn uses_pool(_prog: &hir::Program) -> bool {

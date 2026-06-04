@@ -10,7 +10,9 @@ impl DefId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Ownership {
+    #[default]
     Owned,
 
     Borrowed,
@@ -20,11 +22,6 @@ pub enum Ownership {
     Raw,
 }
 
-impl Default for Ownership {
-    fn default() -> Self {
-        Ownership::Owned
-    }
-}
 
 impl Ownership {
     pub fn is_borrow(self) -> bool {

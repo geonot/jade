@@ -12,11 +12,10 @@ pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
         if header.is_empty() {
             break;
         }
-        if let Some(val) = header.strip_prefix("Content-Length:") {
-            if let Ok(len) = val.trim().parse::<usize>() {
+        if let Some(val) = header.strip_prefix("Content-Length:")
+            && let Ok(len) = val.trim().parse::<usize>() {
                 content_length = Some(len);
             }
-        }
     }
     let len = match content_length {
         Some(l) => l,

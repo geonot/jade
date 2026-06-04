@@ -33,14 +33,14 @@ impl Typer {
             hextra.push((
                 *lop,
                 hir::StoreFilterCond {
-                    field: cond.field.clone(),
+                    field: cond.field,
                     op: cond.op,
                     value: hv,
                 },
             ));
         }
         Ok(hir::StoreFilter {
-            field: filter.field.clone(),
+            field: filter.field,
             op: filter.op,
             value: hvalue,
             span: filter.span,
@@ -138,7 +138,7 @@ impl Typer {
             ));
             filter
                 .extra
-                .extend(additional.extra.into_iter().map(|(lop, c)| (lop, c)));
+                .extend(additional.extra.into_iter());
         }
         Ok(filter)
     }

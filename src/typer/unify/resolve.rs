@@ -323,6 +323,7 @@ impl InferCtx {
         self.substitute(&scheme.ty, &subst)
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     pub(in crate::typer) fn substitute(&self, ty: &Type, subst: &HashMap<u32, Type>) -> Type {
         match ty {
             Type::TypeVar(v) => {

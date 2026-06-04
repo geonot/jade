@@ -26,7 +26,7 @@ impl Typer {
                         || self.externs.contains_key(name))
                 {
                     let args: Vec<ast::Expr> = inits.iter().map(|fi| fi.value.clone()).collect();
-                    let callee = ast::Expr::Ident(name.clone(), *span);
+                    let callee = ast::Expr::Ident(*name, *span);
                     return self.lower_call(&callee, &args, *span);
                 }
                 self.lower_struct_or_variant(&name.as_str(), inits, *span)
@@ -77,7 +77,7 @@ impl Typer {
             }
             let mut type_map = std::collections::HashMap::new();
             for (tp, ta) in gtd.type_params.iter().zip(type_args.iter()) {
-                type_map.insert(tp.clone(), ta.clone());
+                type_map.insert(*tp, ta.clone());
             }
 
             let concrete_fields: Vec<(Symbol, Type)> = gtd
@@ -204,7 +204,7 @@ impl Typer {
                 .map(|(i, fi)| {
                     let expected = variant_fields.get(i);
                     Ok(hir::FieldInit {
-                        name: fi.name.clone(),
+                        name: fi.name,
                         value: self.lower_expr_expected(&fi.value, expected)?,
                     })
                 })
@@ -218,13 +218,13 @@ impl Typer {
 
         let struct_fields = self.structs.get(name).cloned();
 
-        if struct_fields.is_none() {
-            if let Some(gtd) = self.generic_types.get(name).cloned() {
+        if struct_fields.is_none()
+            && let Some(gtd) = self.generic_types.get(name).cloned() {
                 let mut hinits_g: Vec<hir::FieldInit> = inits
                     .iter()
                     .map(|fi| {
                         Ok(hir::FieldInit {
-                            name: fi.name.clone(),
+                            name: fi.name,
                             value: self.lower_expr(&fi.value)?,
                         })
                     })
@@ -237,15 +237,14 @@ impl Typer {
                     } else {
                         gtd.fields.get(i)
                     };
-                    if let Some(field_def) = field_def {
-                        if let Some(ref declared_ty) = field_def.ty {
+                    if let Some(field_def) = field_def
+                        && let Some(ref declared_ty) = field_def.ty {
                             Self::collect_type_mapping(declared_ty, &fi.value.ty, &mut type_map);
                         }
-                    }
                 }
 
                 for tp in &gtd.type_params {
-                    type_map.entry(tp.clone()).or_insert(Type::I64);
+                    type_map.entry(*tp).or_insert(Type::I64);
                 }
 
                 let concrete_fields: Vec<(Symbol, Type)> = gtd
@@ -335,7 +334,6 @@ impl Typer {
                     span,
                 });
             }
-        }
 
         let mut hinits: Vec<hir::FieldInit> = inits
             .iter()
@@ -352,7 +350,7 @@ impl Typer {
                     }
                 });
                 Ok(hir::FieldInit {
-                    name: fi.name.clone(),
+                    name: fi.name,
                     value: self.lower_expr_expected(&fi.value, expected.as_ref())?,
                 })
             })

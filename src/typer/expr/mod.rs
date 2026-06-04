@@ -297,7 +297,7 @@ impl Typer {
             ast::Expr::AsFormat(inner, fmt, span) => {
                 let hinner = self.lower_expr(inner)?;
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::AsFormat(Box::new(hinner), fmt.clone()),
+                    kind: hir::ExprKind::AsFormat(Box::new(hinner), *fmt),
                     ty: Type::String,
                     span: *span,
                 })
@@ -387,14 +387,13 @@ impl Typer {
             return Self::make_coerce(expr, CoercionKind::BoolToInt, tt);
         }
 
-        if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&et, &tt) {
-            if **arr_elem == **vec_elem {
+        if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&et, &tt)
+            && **arr_elem == **vec_elem {
                 let elem_ty = (**arr_elem).clone();
                 let len = *len as u64;
                 expr.ty = et.clone();
                 return Self::make_coerce(expr, CoercionKind::ArrayToVec { elem_ty, len }, tt);
             }
-        }
         expr
     }
 }

@@ -25,7 +25,7 @@ impl Lowerer {
     /// sites can recover it without a separate value table.
     pub(super) fn write_var(&mut self, name: Symbol, block: BlockId, val: ValueId) {
         let ty = self.value_type(val);
-        self.var_types.insert(name.clone(), ty);
+        self.var_types.insert(name, ty);
         self.current_def
             .entry(block)
             .or_default()
@@ -52,7 +52,7 @@ impl Lowerer {
         }
 
         // Braun recursive case.
-        let v = self.read_var_recursive(name.clone(), block, ty.clone(), span);
+        let v = self.read_var_recursive(name, block, ty.clone(), span);
         let v = self.resolve(v);
         self.current_def
             .entry(block)
@@ -137,7 +137,7 @@ impl Lowerer {
                 self.current_def
                     .entry(block)
                     .or_default()
-                    .insert(name.clone(), phi_dest);
+                    .insert(name, phi_dest);
                 self.add_phi_operands(name, block, phi_dest, ty, span);
                 let r = self.try_remove_trivial_phi(block, phi_dest).unwrap_or(phi_dest);
                 self.resolve(r)
@@ -156,7 +156,7 @@ impl Lowerer {
         let preds = self.preds.get(&block).cloned().unwrap_or_default();
         let mut incoming = Vec::with_capacity(preds.len());
         for pred in preds {
-            let v = self.read_var(name.clone(), pred, ty.clone(), span);
+            let v = self.read_var(name, pred, ty.clone(), span);
             incoming.push((pred, v));
         }
         // Find the phi we created and install the operands.
@@ -266,16 +266,15 @@ impl Lowerer {
 
         let incomplete = self.incomplete_phis.remove(&block).unwrap_or_default();
         for (name, phi_dest, ty) in incomplete {
-            self.add_phi_operands(name.clone(), block, phi_dest, ty, Span::dummy());
+            self.add_phi_operands(name, block, phi_dest, ty, Span::dummy());
             if let Some(replacement) = self.try_remove_trivial_phi(block, phi_dest) {
                 // Phi collapsed — update the cached def to point at the
                 // replacement (canonicalized: a cascade may have moved it on).
                 let replacement = self.resolve(replacement);
-                if let Some(m) = self.current_def.get_mut(&block) {
-                    if m.get(&name) == Some(&phi_dest) {
+                if let Some(m) = self.current_def.get_mut(&block)
+                    && m.get(&name) == Some(&phi_dest) {
                         m.insert(name, replacement);
                     }
-                }
             }
         }
     }

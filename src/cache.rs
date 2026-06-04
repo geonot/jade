@@ -31,6 +31,12 @@ pub struct Cache {
     root: PathBuf,
 }
 
+impl Default for Cache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Cache {
     pub fn new() -> Self {
         let root = dirs_cache().join("jinn").join("cache");
@@ -166,8 +172,8 @@ impl Cache {
             return Err(format!("circular dependency: {}", dep.name));
         }
         let commit = if let Some(lock) = existing_lock {
-            if let Some(entry) = lock.find(&dep.name) {
-                if entry.version == dep.version {
+            if let Some(entry) = lock.find(&dep.name)
+                && entry.version == dep.version {
                     let dir = self.package_path(dep);
                     if !self.is_cached(dep) {
                         self.fetch_pinned_commit(dep, &entry.commit)?;
@@ -180,7 +186,6 @@ impl Cache {
                     resolving.remove(&Symbol::intern(&dep.name));
                     return Ok(entry.clone());
                 }
-            }
             self.fetch(dep)?
         } else {
             self.fetch(dep)?

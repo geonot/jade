@@ -33,11 +33,11 @@ impl Typer {
                         .unify_at(&field_ty, &hv.ty, *span, "spawn init field");
 
                     self.enforce_cross_thread_safe(&hv.ty, *span, "actor spawn init")?;
-                    hir_inits.push((fname.clone(), hv));
+                    hir_inits.push((*fname, hv));
                 }
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::Spawn(name.clone(), hir_inits),
-                    ty: Type::ActorRef(name.clone()),
+                    kind: hir::ExprKind::Spawn(*name, hir_inits),
+                    ty: Type::ActorRef(*name),
                     span: *span,
                 })
             }
@@ -86,13 +86,12 @@ impl Typer {
                 let hi = self.lower_expr(inner)?;
                 let ty = hi.ty.clone();
 
-                if let Some(ref ret) = self.current_fn_ret_ty {
-                    if let Type::Generator(inner_ty) = ret {
+                if let Some(ref ret) = self.current_fn_ret_ty
+                    && let Type::Generator(inner_ty) = ret {
                         let _ =
                             self.infer_ctx
                                 .unify_at(inner_ty, &ty, *span, "yield expression type");
                     }
-                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Yield(Box::new(hi)),
                     ty,
@@ -128,7 +127,7 @@ impl Typer {
                     );
                 }
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::CoroutineCreate(name.clone(), hbody),
+                    kind: hir::ExprKind::CoroutineCreate(*name, hbody),
                     ty: coro_ty,
                     span: *span,
                 })
@@ -298,7 +297,7 @@ impl Typer {
                         is_send: arm.is_send,
                         chan: hch,
                         value: hval,
-                        binding: arm.binding.clone(),
+                        binding: arm.binding,
                         bind_id,
                         elem_ty,
                         body: hbody,

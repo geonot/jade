@@ -24,11 +24,10 @@ impl<'ctx> Compiler<'ctx> {
         self.store_lock(fp)?;
 
         for dec in &sd.decorators {
-            if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec {
-                if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
+            if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
                     b!(self.bld.build_call(hook_fn, &[], ""));
                 }
-            }
         }
 
         let i64t = self.ctx.i64_type();
@@ -101,9 +100,7 @@ impl<'ctx> Compiler<'ctx> {
             "__version",
         ];
         let is_simple = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Simple);
+            .decorators.contains(&crate::ast::StoreDecorator::Simple);
         let mut user_val_idx = 0usize;
         for (i, field_def) in sd.fields.iter().enumerate() {
             let gep =
@@ -134,19 +131,17 @@ impl<'ctx> Compiler<'ctx> {
                     }
                     _ => {}
                 }
-            } else {
-                if user_val_idx < args.len() {
-                    let val = self.val(args[user_val_idx]);
-                    match &field_def.ty {
-                        Type::String => {
-                            self.copy_string_to_fixed_buf(val, gep)?;
-                        }
-                        _ => {
-                            b!(self.bld.build_store(gep, val));
-                        }
+            } else if user_val_idx < args.len() {
+                let val = self.val(args[user_val_idx]);
+                match &field_def.ty {
+                    Type::String => {
+                        self.copy_string_to_fixed_buf(val, gep)?;
                     }
-                    user_val_idx += 1;
+                    _ => {
+                        b!(self.bld.build_store(gep, val));
+                    }
                 }
+                user_val_idx += 1;
             }
         }
 
@@ -189,7 +184,7 @@ impl<'ctx> Compiler<'ctx> {
 
                     self.bld.position_at_end(ok_bb);
                 }
-                if !(!is_simple && builtin_names.contains(&&*field_def.name.as_str())) {
+                if is_simple || !builtin_names.contains(&&*field_def.name.as_str()) {
                     user_idx += 1;
                 }
             }
@@ -329,16 +324,14 @@ impl<'ctx> Compiler<'ctx> {
                         ""
                     ));
                 }
-                if !(!is_simple && builtin_names.contains(&&*field_def.name.as_str())) {
+                if is_simple || !builtin_names.contains(&&*field_def.name.as_str()) {
                     user_idx += 1;
                 }
             }
         }
 
         let is_column = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Column);
+            .decorators.contains(&crate::ast::StoreDecorator::Column);
         if is_column {
             let i64t = self.ctx.i64_type();
             let col_append_fn = crate::codegen::fn_or_die(&self.module, "jinn_col_append");
@@ -347,8 +340,8 @@ impl<'ctx> Compiler<'ctx> {
                 if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
                     continue;
                 }
-                if col_user_idx < args.len() {
-                    if field_def.ty == Type::I64 || field_def.ty == Type::F64 {
+                if col_user_idx < args.len()
+                    && (field_def.ty == Type::I64 || field_def.ty == Type::F64) {
                         let col_handle =
                             self.load_col_handle(store_name, &field_def.name.as_str(), 8)?;
                         let val = self.val(args[col_user_idx]);
@@ -360,7 +353,6 @@ impl<'ctx> Compiler<'ctx> {
                             ""
                         ));
                     }
-                }
                 col_user_idx += 1;
             }
         }
@@ -372,9 +364,7 @@ impl<'ctx> Compiler<'ctx> {
                     continue;
                 }
                 let has_bloom = field_def
-                    .decorators
-                    .iter()
-                    .any(|d| *d == crate::ast::FieldDecorator::Bloom);
+                    .decorators.contains(&crate::ast::FieldDecorator::Bloom);
                 if has_bloom && bloom_user_idx < args.len() {
                     let bloom =
                         self.load_bloom_handle(store_name, &field_def.name.as_str(), 10000)?;
@@ -395,9 +385,7 @@ impl<'ctx> Compiler<'ctx> {
                     continue;
                 }
                 let has_search = field_def
-                    .decorators
-                    .iter()
-                    .any(|d| *d == crate::ast::FieldDecorator::Search);
+                    .decorators.contains(&crate::ast::FieldDecorator::Search);
                 if has_search && fts_user_idx < args.len() && field_def.ty == Type::String {
                     let fts = self.load_fts_handle(store_name, &field_def.name.as_str())?;
                     let val = self.val(args[fts_user_idx]);
@@ -418,11 +406,10 @@ impl<'ctx> Compiler<'ctx> {
         self.wal_write_insert(store_name, rec_ptr, rec_size)?;
 
         for dec in &sd.decorators {
-            if let crate::ast::StoreDecorator::AfterInsert(fname) = dec {
-                if let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
+            if let crate::ast::StoreDecorator::AfterInsert(fname) = dec
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
                     b!(self.bld.build_call(hook_fn, &[], ""));
                 }
-            }
         }
 
         self.store_unlock(fp)?;

@@ -466,9 +466,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let is_versioned = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Versioned);
+            .decorators.contains(&crate::ast::StoreDecorator::Versioned);
         if is_versioned {
             let ver_global =
                 self.module
@@ -478,9 +476,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let is_kv = sd
-            .decorators
-            .iter()
-            .any(|d| *d == crate::ast::StoreDecorator::Kv);
+            .decorators.contains(&crate::ast::StoreDecorator::Kv);
         if is_kv {
             let kv_global =
                 self.module

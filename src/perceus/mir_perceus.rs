@@ -295,17 +295,14 @@ fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u
 
         for (i, inst) in orig.into_iter().enumerate() {
             let mut deferred_this_drop = false;
-            if let InstKind::Drop(v, _) = &inst.kind {
-                if let Some(info) = uses.get(v) {
-                    if let Some((lu_bi, lu_ii)) = info.last_use {
-                        if lu_bi == bi && lu_ii > i && lu_ii < usize::MAX {
+            if let InstKind::Drop(v, _) = &inst.kind
+                && let Some(info) = uses.get(v)
+                    && let Some((lu_bi, lu_ii)) = info.last_use
+                        && lu_bi == bi && lu_ii > i && lu_ii < usize::MAX {
                             deferred.push((lu_ii, inst.clone()));
                             deferred_this_drop = true;
                             sunk += 1;
                         }
-                    }
-                }
-            }
             if !deferred_this_drop {
                 new_insts.push(inst);
             }
@@ -397,7 +394,7 @@ fn collect_loop_bodies(func: &mir::Function) -> Vec<Vec<usize>> {
         }
         let mut body: Vec<usize> = (0..n).filter(|&b| fwd[b] && bwd[b]).collect();
         body.sort_unstable();
-        if body.len() >= 1 && seen.insert(body.clone()) {
+        if !body.is_empty() && seen.insert(body.clone()) {
             bodies.push(body);
         }
     }
@@ -469,15 +466,14 @@ fn vec_reuse_pairing(
                     });
                 }
                 InstKind::VecNew(elems) if elems.is_empty() => {
-                    if let (Some(dest), Type::Vec(elem)) = (inst.dest, &inst.ty) {
-                        if !func.perceus.reuse_consume.contains_key(&dest) {
+                    if let (Some(dest), Type::Vec(elem)) = (inst.dest, &inst.ty)
+                        && !func.perceus.reuse_consume.contains_key(&dest) {
                             allocs.push(AllocSite {
                                 inst_idx: ii,
                                 dest,
                                 elem_ty: (**elem).clone(),
                             });
                         }
-                    }
                 }
                 InstKind::Call(_, _)
                 | InstKind::IndirectCall(_, _)
@@ -584,11 +580,10 @@ fn vec_reuse_pairing(
                         drops.push((*v, (**elem).clone()));
                     }
                     InstKind::VecNew(elems) if elems.is_empty() => {
-                        if let (Some(dest), Type::Vec(elem)) = (inst.dest, &inst.ty) {
-                            if !func.perceus.reuse_consume.contains_key(&dest) {
+                        if let (Some(dest), Type::Vec(elem)) = (inst.dest, &inst.ty)
+                            && !func.perceus.reuse_consume.contains_key(&dest) {
                                 allocs.push((dest, (**elem).clone()));
                             }
-                        }
                     }
                     _ => {}
                 }

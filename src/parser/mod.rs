@@ -274,7 +274,7 @@ impl Parser {
     fn ident(&mut self) -> Result<Symbol, ParseError> {
         if self.pos < self.tok.len() {
             if let Token::Ident(n) = &self.tok[self.pos].token {
-                let name = n.clone();
+                let name = *n;
                 self.advance();
                 return Ok(name);
             }
@@ -457,8 +457,8 @@ fn desugar_multi_clause_fns(prog: &mut Program) {
             if let Some(&group_idx) = seen.get(&f.name) {
                 name_indices[group_idx].1.push(i);
             } else {
-                seen.insert(f.name.clone(), name_indices.len());
-                name_indices.push((f.name.clone(), vec![i]));
+                seen.insert(f.name, name_indices.len());
+                name_indices.push((f.name, vec![i]));
             }
         }
     }
@@ -526,7 +526,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
             .find_map(|c| {
                 c.params.get(pi).and_then(|p| {
                     if p.literal.is_none() {
-                        Some(p.name.clone())
+                        Some(p.name)
                     } else {
                         None
                     }
@@ -562,7 +562,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         let mut conds: Vec<Expr> = Vec::new();
         for (pi, p) in clause.params.iter().enumerate() {
             if let Some(ref lit) = p.literal {
-                let arg_ref = Expr::Ident(unified_params[pi].name.clone(), sp);
+                let arg_ref = Expr::Ident(unified_params[pi].name, sp);
                 conds.push(Expr::BinOp(
                     Box::new(arg_ref),
                     BinOp::Eq,
@@ -582,8 +582,8 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         for (pi, p) in clause.params.iter().enumerate() {
             if p.literal.is_none() && p.name != unified_params[pi].name {
                 body.push(Stmt::Bind(crate::ast::Bind {
-                    name: p.name.clone(),
-                    value: Expr::Ident(unified_params[pi].name.clone(), sp),
+                    name: p.name,
+                    value: Expr::Ident(unified_params[pi].name, sp),
                     ty: None,
                     atomic: false,
                     access_mod: None,
@@ -605,7 +605,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         for g in &guarded[1..] {
             elifs.push((build_cond(g), build_body(g)));
         }
-        let els = catchall.map(|c| build_body(c));
+        let els = catchall.map(build_body);
 
         vec![Stmt::Expr(Expr::IfExpr(Box::new(If {
             cond: then_cond,
@@ -617,7 +617,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
     };
 
     Fn {
-        name: first.name.clone(),
+        name: first.name,
         type_params: first.type_params.clone(),
         type_bounds: first.type_bounds.clone(),
         params: unified_params,
