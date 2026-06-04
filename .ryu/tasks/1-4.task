@@ -1,11 +1,40 @@
 title: Design + implement bounded polymorphism (traits/protocols)
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by: []
 created_at: '2026-06-04T04:27:12'
-updated_at: '2026-06-04T04:34:22'
-result: ''
+updated_at: '2026-06-04T04:56:41'
+result: 'Completed bounded polymorphism (traits) P0 remediation.
+
+
+  Gap fixed: DEFAULT TRAIT METHOD BODIES now dispatch. Implementation:
+
+  - Added Typer.trait_defs (full ast::TraitDef storage) and trait_default_methods
+  map keyed by (type_name, trait_name) in src/typer/mod.rs.
+
+  - declare_trait_def now stores the full TraitDef.
+
+  - declare_impl_block synthesizes ast::Fn methods from trait defaults the impl omits
+  (new synthesize_default_methods + subst_self_ty helpers in src/typer/resolve.rs),
+  registers them in self.methods and via declare_method_sig_by_ptr so they get fns/fn_schemes
+  entries and method DefIds.
+
+  - lower_impl_block (src/typer/lower/decl.rs) lowers the synthesized methods alongside
+  explicit ones.
+
+
+  Default methods can call other trait methods on self (e.g. self.name()), can be
+  overridden by an explicit impl method, and dispatch through a generic trait bound.
+
+
+  Conformance suite tests/traits.rs added (7 tests, all green): direct dispatch, generic
+  dispatch through bound, bound enforcement diagnostic, multi-bound (T: A + B), default
+  method body, default overridden by impl, default through bound.
+
+
+  Verified: zero build + clippy warnings; full cargo test suite passes with no regressions
+  (912 + 423 + 224 + others, 0 failures).'
 description: 'ASSESSMENT (verified by compile tests 2026-06-04): trait system is ~80%
   done. WORKS: `trait X` / `impl X for T` parse to AST/HIR; direct method dispatch
   `p.display()` works; generic bounds `*f of T: Printable(t as T)` parse, are enforced
