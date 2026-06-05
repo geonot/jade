@@ -26,6 +26,21 @@ impl Typer {
         for (idx, s) in block.iter().enumerate() {
             if idx == block_len - 1
                 && let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s) {
+                    let resolved_expected = self.infer_ctx.resolve(expected);
+                    if let Some(result_enum) = self.result_enum_of(&resolved_expected) {
+                        let ok_inner = self.ok_inner_ty_pub(result_enum);
+                        let he = self.lower_expr_expected(e, Some(&ok_inner))?;
+                        let val_ty = self.infer_ctx.resolve(&he.ty);
+                        let he = if self.result_enum_of(&val_ty).is_some() {
+                            he
+                        } else {
+                            self.auto_wrap_ok(he, result_enum)
+                        };
+                        let stmt = hir::Stmt::Expr(he);
+                        self.record_take_moves_in_stmt(&stmt);
+                        stmts.push(stmt);
+                        continue;
+                    }
                     let he = self.lower_expr_expected(e, Some(expected))?;
                     let stmt = hir::Stmt::Expr(he);
                     self.record_take_moves_in_stmt(&stmt);

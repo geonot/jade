@@ -891,6 +891,35 @@ impl Typer {
         }
     }
 
+    pub(crate) fn is_result_enum(&self, name: Symbol) -> bool {
+        let s = name.as_str();
+        s == "Result" || s.starts_with("Result_")
+    }
+
+    pub(crate) fn result_enum_of(&self, ty: &Type) -> Option<Symbol> {
+        match ty {
+            Type::Enum(n) if self.is_result_enum(*n) => Some(*n),
+            Type::Struct(n, _) if n.as_str() == "Result" => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn ok_inner_ty_pub(&self, enum_name: Symbol) -> Type {
+        self.ok_inner_ty(enum_name)
+    }
+
+    pub(crate) fn auto_wrap_ok(&mut self, value: hir::Expr, result_enum: Symbol) -> hir::Expr {
+        let span = value.span;
+        self.variant_ctor(result_enum, "Ok", Some(value), span)
+    }
+
+    pub(crate) fn auto_unwrap_result(&self, recv: hir::Expr, result_enum: Symbol) -> hir::Expr {
+        let span = recv.span;
+        let ok_tag = self.variant_tag_in(result_enum, "Ok");
+        let inner = self.ok_inner_ty(result_enum);
+        self.enum_unwrap(&recv, result_enum, ok_tag, inner, span)
+    }
+
     fn mono_option(&mut self, t: &Type) -> Result<Symbol, String> {
         let mut m = std::collections::HashMap::new();
         m.insert(Symbol::intern("T"), t.clone());

@@ -1,0 +1,12 @@
+title: 'Parser: quaternary `e ? ok ! nothing !! err`'
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-4-2
+created_at: '2026-06-05T08:04:17'
+updated_at: '2026-06-05T08:04:17'
+result: ''
+description: 'Extend the ternary pratt parse to an optional `!!` err-arm, producing
+  a Quaternary AST node (or extend Ternary). Inline + multiline arm forms. `$` and
+  `err` parse as expressions. Done: quaternary parses, ternary still works.'

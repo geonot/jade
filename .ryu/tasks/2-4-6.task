@@ -1,0 +1,12 @@
+title: 'Codegen: quaternary + raise + auto wrap/unwrap'
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-4-5
+created_at: '2026-06-05T08:04:17'
+updated_at: '2026-06-05T08:04:17'
+result: ''
+description: 'MIR/LLVM lowering for quaternary arms, err-raise Err-return, auto-wrap
+  Ok on tail, auto-unwrap on propagation, $ and err projections. defer runs on propagated-err
+  exits. Done: compiled binaries produce correct outputs.'

@@ -78,6 +78,29 @@ impl Typer {
         });
     }
 
+    pub(crate) fn desugar_bang_ret(ret: &Type, error_types: &[Type]) -> Type {
+        if error_types.len() != 1 {
+            return ret.clone();
+        }
+        let err_name = match &error_types[0] {
+            Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => *n,
+            _ => return ret.clone(),
+        };
+        let already_result = matches!(
+            ret,
+            Type::Enum(n) | Type::Struct(n, _) if n.as_str() == "Result"
+        );
+        if already_result {
+            return ret.clone();
+        }
+        let ok_ty = if matches!(ret, Type::Void) {
+            Type::Void
+        } else {
+            ret.clone()
+        };
+        Type::Struct("Result".into(), vec![ok_ty, Type::Enum(err_name)])
+    }
+
     pub(crate) fn declare_fn_sig(&mut self, f: &ast::Fn) {
         let ptys: Vec<Type> = f
             .params
@@ -97,6 +120,7 @@ impl Typer {
         } else {
             ret
         };
+        let ret = Self::desugar_bang_ret(&ret, &f.error_types);
         let id = self.fresh_id();
         if self.debug_types {
             tracing::debug!(

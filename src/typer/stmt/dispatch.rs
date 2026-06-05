@@ -63,6 +63,10 @@ impl Typer {
                     ty: err_payload.clone(),
                     span,
                 }
+            } else if self.err_enum_names.contains(&src) && self.err_enum_names.contains(&tgt) {
+                return Err(format!(
+                    "no conversion `{src} -> {tgt}` at {span:?}: `?>`/`!` here propagates an err `{src}`, but this function's error type is `{tgt}` and there is no `impl From of {src} for {tgt}`. Add `impl From of {src} for {tgt}` with `*from(e as {src}) returns {tgt}`, or add `| {src}` to the function's error union."
+                ));
             } else {
                 return Ok(None);
             }

@@ -1,0 +1,14 @@
+title: 'Typer: raise/propagation/quaternary lowering + fallibility inference'
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-4-3
+created_at: '2026-06-05T08:04:17'
+updated_at: '2026-06-05T08:04:17'
+result: ''
+description: 'Lower `err X` raise to Err-return (From-convert to enclosing err type).
+  Lower quaternary: typer decides ok/nothing/err arms by subject type (Result/Option).
+  Bind `$` (success) and `err` (error value). Implicit propagation for unhandled fallible
+  exprs (desugar to `? $ !! err`). Infer fallibility => fn error set. `! E` signature
+  => Result of R,E. Done: typer lowers new constructs.'

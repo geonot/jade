@@ -1,0 +1,14 @@
+title: Migrate corpus + write conformance tests
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-4-6
+created_at: '2026-06-05T08:04:17'
+updated_at: '2026-06-05T08:04:17'
+result: ''
+description: 'Migrate the ~10 legacy sentinel tests in tests/integration.rs and any
+  snippets/apps using prefix-! raise or `! sentinel` ints or `?>` to the new model.
+  Rewrite tests/error_effects.rs to pin: quaternary happy/err/nothing, implicit propagation,
+  From cross-layer, declared-vs-inferred soundness error, missing-conversion error,
+  inferred signatures. Done: cargo test green, zero warnings.'

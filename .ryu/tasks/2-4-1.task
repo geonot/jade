@@ -1,0 +1,17 @@
+title: Rewrite error-effects spec for new model
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-05T08:04:17'
+updated_at: '2026-06-05T08:05:12'
+result: 'Rewrote docs/error-effects.md to the locked model: `err X` raise, quaternary
+  `e ? ok ! nothing !! err` extending ternary, `$` success value, `err` error value
+  with `!! err` propagation, implicit propagation + inferred fallibility, `! E` =>
+  Result of R,E, R1-R6 checking, From graph C1-C4, SCC fixpoint. Removed all `?>`
+  references.'
+description: 'Update docs/error-effects.md to the LOCKED model: `err X` raise, quaternary
+  `e ? ok ! nothing !! err` extending ternary, `$` success value, `err` error value
+  (`!! err` propagates), implicit propagation + inferred fallibility, `! E` signature
+  annotation => Result of R,E, R1-R6 checking, From graph, SCC fixpoint. Remove ?>
+  references. Done: doc reflects implemented semantics.'

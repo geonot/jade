@@ -162,3 +162,35 @@ fn result_ok_and_err_projections() {
         "5\n8\n1\n1",
     );
 }
+
+#[test]
+fn propagate_missing_conversion_is_error() {
+    let out = compile_fails(
+        "err FileError\n    NotFound\n\nerr NetError\n    Timeout\n\n*read(ok as bool) returns Result of i64, FileError\n    if ok\n        Ok(1)\n    else\n        Err(NotFound)\n\n*load(ok as bool) returns Result of i64, NetError\n    raw is read(ok)?>\n    Ok(raw)\n\n*main()\n    log(0)\n",
+    );
+    assert!(
+        out.contains("no conversion `FileError -> NetError`")
+            && out.contains("impl From of FileError for NetError"),
+        "expected precise missing-conversion diagnostic, got:\n{out}"
+    );
+}
+
+#[test]
+fn bang_undeclared_error_is_error() {
+    let out = compile_fails(
+        "err FileError\n    NotFound\n\nerr NetError\n    Timeout\n\n*load(ok as bool) returns Result of i64, NetError\n    if ok\n        Ok(1)\n    else\n        ! NotFound\n\n*main()\n    log(0)\n",
+    );
+    assert!(
+        out.contains("no conversion `FileError -> NetError`")
+            || out.contains("FileError"),
+        "expected undeclared-error/soundness diagnostic, got:\n{out}"
+    );
+}
+
+#[test]
+fn propagate_reflexive_conversion_needs_no_impl() {
+    expect(
+        "err FileError\n    NotFound\n\n*read(ok as bool) returns Result of i64, FileError\n    if ok\n        Ok(7)\n    else\n        Err(NotFound)\n\n*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok)?>\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n",
+        "8\n-1",
+    );
+}
