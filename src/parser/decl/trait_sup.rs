@@ -153,7 +153,13 @@ impl Parser {
                 match item {
                     Either::Field(binding) => assoc_type_bindings.push(binding),
                     Either::Method(mut m) => {
-                        Self::ensure_implicit_self(&mut m.params, m.span);
+                        let is_from_static = trait_name
+                            .map(|t| t.as_str() == "From")
+                            .unwrap_or(false)
+                            && m.name.as_str() == "from";
+                        if !is_from_static {
+                            Self::ensure_implicit_self(&mut m.params, m.span);
+                        }
                         methods.push(m);
                     }
                 }

@@ -67,6 +67,15 @@ impl Typer {
                 has_default: false,
             }]
         });
+
+        self.traits.entry("From".into()).or_insert_with(|| {
+            vec![super::TraitMethodSig {
+                name: "from".into(),
+                _params: vec![("s".into(), Some(Type::Param("S".into())))],
+                _ret: None,
+                has_default: false,
+            }]
+        });
     }
 
     pub(crate) fn declare_fn_sig(&mut self, f: &ast::Fn) {
@@ -118,6 +127,42 @@ impl Typer {
 
     pub(crate) fn declare_method_sig_by_ptr(&mut self, type_name: &str, m: &ast::Fn) {
         self.declare_method_sig_impl(type_name, m, true);
+    }
+
+    pub(crate) fn from_method_name(type_name: &str, m: &ast::Fn) -> String {
+        let src = m
+            .params
+            .first()
+            .and_then(|p| p.ty.as_ref())
+            .map(Self::type_name_str)
+            .unwrap_or_default();
+        format!("{type_name}_from_{src}")
+    }
+
+    fn type_name_str(t: &Type) -> String {
+        match t {
+            Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => n.as_str(),
+            other => format!("{other}"),
+        }
+    }
+
+    pub(crate) fn declare_static_method_sig(&mut self, type_name: &str, m: &ast::Fn) {
+        let method_name: Symbol = Self::from_method_name(type_name, m).into();
+        let ptys: Vec<Type> = m
+            .params
+            .iter()
+            .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
+            .collect();
+        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
+        let id = self.fresh_id();
+        self.fns.insert(method_name, (id, ptys, ret));
+        let accs: Vec<Option<ast::AccessMod>> =
+            m.params.iter().map(|p| p.access_mod).collect();
+        self.fn_param_access.insert(method_name, accs);
+        self.fn_param_names.insert(
+            method_name,
+            m.params.iter().map(|p| p.name.as_str()).collect(),
+        );
     }
 
     fn declare_method_sig_impl(&mut self, type_name: &str, m: &ast::Fn, by_ptr: bool) {
@@ -267,7 +312,10 @@ impl Typer {
     }
 
     pub(crate) fn declare_impl_block(&mut self, ib: &ast::ImplBlock) -> Result<(), String> {
-        if !self.structs.contains_key(&ib.type_name) {
+        if !self.structs.contains_key(&ib.type_name)
+            && !self.enums.contains_key(&ib.type_name)
+            && !self.err_enum_names.contains(&ib.type_name)
+        {
             return Err(format!(
                 "line {}: impl references unknown type '{}'",
                 ib.span.line, ib.type_name
@@ -343,12 +391,21 @@ impl Typer {
             }
         } 
 
+        let is_static_trait = ib
+            .trait_name
+            .map(|t| t.as_str() == "From")
+            .unwrap_or(false);
         for m in &ib.methods {
             self.methods
                 .entry(ib.type_name)
                 .or_default()
                 .push(m.clone());
-            self.declare_method_sig_by_ptr(&ib.type_name.as_str(), m);
+            let takes_self = m.params.first().map(|p| p.name == "self").unwrap_or(false);
+            if is_static_trait && !takes_self {
+                self.declare_static_method_sig(&ib.type_name.as_str(), m);
+            } else {
+                self.declare_method_sig_by_ptr(&ib.type_name.as_str(), m);
+            }
         }
 
         if let Some(trait_name) = ib.trait_name

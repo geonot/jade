@@ -247,6 +247,9 @@ impl<'ctx> Compiler<'ctx> {
 
         for ti in trait_impls {
             if let Some(ref trait_name) = ti.trait_name {
+                if trait_name.as_str() == "From" {
+                    continue;
+                }
                 let order = self
                     .trait_method_order
                     .entry(*trait_name)
@@ -265,6 +268,9 @@ impl<'ctx> Compiler<'ctx> {
 
         for ti in trait_impls {
             if let Some(ref trait_name) = ti.trait_name {
+                if trait_name.as_str() == "From" {
+                    continue;
+                }
                 let method_order = self
                     .trait_method_order
                     .get(trait_name)

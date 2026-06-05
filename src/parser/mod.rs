@@ -23,6 +23,14 @@ pub struct Parser {
 
     label_stack: Vec<crate::intern::Symbol>,
     allow_multi_type_args: bool,
+    pending_propagates: Vec<PendingPropagate>,
+}
+
+pub(crate) struct PendingPropagate {
+    pub subject: Expr,
+    pub val_name: crate::intern::Symbol,
+    pub err_name: crate::intern::Symbol,
+    pub span: Span,
 }
 
 macro_rules! binop {
@@ -56,6 +64,7 @@ impl Parser {
             depth: 0,
             label_stack: Vec::new(),
             allow_multi_type_args: false,
+            pending_propagates: Vec::new(),
         }
     }
 

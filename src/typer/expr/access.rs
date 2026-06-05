@@ -10,7 +10,6 @@ impl Typer {
         expr: &ast::Expr,
         expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
-        let _ = expected;
         match expr {
             ast::Expr::Call(callee, args, span) => {
                 if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref()
@@ -56,6 +55,19 @@ impl Typer {
                                 value: a.clone(),
                             })
                             .collect();
+                        if is_variant
+                            && let Some(r) = self.try_lower_variant_with_expected(
+                                &ctor_name.as_str(),
+                                &inits,
+                                *span,
+                                expected,
+                            )?
+                        {
+                            if let Some(exp) = expected {
+                                self.unify_call_result(exp, &r.ty, *span, "call result");
+                            }
+                            return Ok(r);
+                        }
                         let result =
                             self.lower_struct_or_variant(&ctor_name.as_str(), &inits, *span)?;
                         if let Some(exp) = expected {

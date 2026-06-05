@@ -67,6 +67,7 @@ fn is_useless_top_expr(e: &Expr) -> bool {
         | Expr::ChannelRecv(..)
         | Expr::Select(..)
         | Expr::Unreachable(..)
+        | Expr::Propagate(..)
         | Expr::OfCall(..) => false,
     }
 }

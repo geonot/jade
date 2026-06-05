@@ -6,6 +6,97 @@ use crate::types::{Scheme, Type};
 use super::super::{Typer, VarInfo};
 
 impl Typer {
+    pub(in crate::typer) fn try_wrap_err_return(
+        &mut self,
+        e: &ast::Expr,
+        result_enum: Symbol,
+        result_ty: &Type,
+        span: ast::Span,
+    ) -> Result<Option<hir::Stmt>, String> {
+        let err_payload = self
+            .enums
+            .get(&result_enum)
+            .and_then(|vs| vs.iter().find(|(n, _)| n.as_str() == "Err"))
+            .and_then(|(_, f)| f.first().cloned());
+        let err_tag = self
+            .enums
+            .get(&result_enum)
+            .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Err"))
+            .map(|i| i as u32)
+            .unwrap_or(1);
+        let Some(err_payload) = err_payload else {
+            return Ok(None);
+        };
+
+        let hv = self.lower_expr(e)?;
+        let val_ty = self.infer_ctx.resolve(&hv.ty);
+
+        if val_ty == *result_ty {
+            return Ok(Some(hir::Stmt::ErrReturn(hv, result_ty.clone(), span)));
+        }
+
+        let norm = |t: &Type| -> Option<Symbol> {
+            match t {
+                Type::Enum(n) => Some(*n),
+                Type::Struct(n, _) => Some(*n),
+                _ => None,
+            }
+        };
+        let target_err_enum = norm(&err_payload);
+        let src_enum = norm(&val_ty);
+
+        let same_err = matches!((src_enum, target_err_enum), (Some(a), Some(b)) if a == b);
+        let wrapped_val = if val_ty == err_payload || same_err {
+            hv
+        } else if let (Some(tgt), Some(src)) = (target_err_enum, src_enum) {
+            let from_name: Symbol = format!("{tgt}_from_{src}").into();
+            if let Some((id, _ptys, fret)) = self.fns.get(&from_name).cloned() {
+                let ur = self.infer_ctx.unify_at(
+                    &fret,
+                    &err_payload,
+                    span,
+                    "From conversion result",
+                );
+                self.collect_unify_error(ur);
+                hir::Expr {
+                    kind: hir::ExprKind::Call(id, from_name, vec![hv]),
+                    ty: err_payload.clone(),
+                    span,
+                }
+            } else {
+                return Ok(None);
+            }
+        } else {
+            return Ok(None);
+        };
+
+        if let Some(en) = &target_err_enum
+            && self.err_enum_names.contains(en)
+        {
+            self.current_fn_error_types.insert(*en);
+        }
+        if let Some(en) = &src_enum
+            && self.err_enum_names.contains(en)
+        {
+            self.current_fn_error_types.insert(*en);
+        }
+
+        let err_ctor = hir::Expr {
+            kind: hir::ExprKind::VariantCtor(
+                result_enum,
+                "Err".into(),
+                err_tag,
+                vec![hir::FieldInit {
+                    name: None,
+                    value: wrapped_val,
+                }],
+            ),
+            ty: result_ty.clone(),
+            span,
+        };
+        Ok(Some(hir::Stmt::ErrReturn(err_ctor, result_ty.clone(), span)))
+    }
+
     pub(in crate::typer) fn is_aliased_read_of_heap(expr: &hir::Expr) -> bool {
         let needs_drop = matches!(
             expr.ty,
@@ -570,6 +661,53 @@ impl Typer {
             }
 
             ast::Stmt::ErrReturn(e, span) => {
+                let resolved_ret_ty = self.infer_ctx.resolve(ret_ty);
+                if let ast::Expr::Ident(n, _) = e
+                    && n.as_str().contains("__prop_e_")
+                {
+                    let is_result_ret = match &resolved_ret_ty {
+                        Type::Enum(rn) => {
+                            let s = rn.as_str();
+                            s.starts_with("Result_") || s == "Result" || s.starts_with("Option_") || s == "Option"
+                        }
+                        Type::Struct(rn, _) => rn.as_str() == "Result" || rn.as_str() == "Option",
+                        _ => false,
+                    };
+                    if !is_result_ret {
+                        return Err(format!(
+                            "`?>` at {span:?} is only valid inside a function whose result type is a `Result`/`Option`. Declare the enclosing function's error union with `! E` (e.g. `returns T ! E`)."
+                        ));
+                    }
+                }
+                let result_enum_name: Option<Symbol> = match &resolved_ret_ty {
+                    Type::Enum(rn)
+                        if rn.as_str().starts_with("Result_") || rn.as_str() == "Result" =>
+                    {
+                        Some(*rn)
+                    }
+                    Type::Struct(rn, args)
+                        if rn.as_str() == "Result" && self.generic_enums.contains_key(rn) =>
+                    {
+                        let ge = self.generic_enums.get(rn).cloned().unwrap();
+                        if args.len() == ge.type_params.len() {
+                            let mut tm = std::collections::HashMap::new();
+                            for (tp, ta) in ge.type_params.iter().zip(args.iter()) {
+                                tm.insert(*tp, ta.clone());
+                            }
+                            self.monomorphize_enum(&rn.as_str(), &tm).ok()
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(rn) = result_enum_name {
+                    let mono_ret = Type::Enum(rn);
+                    if let Some(wrapped) = self.try_wrap_err_return(e, rn, &mono_ret, *span)? {
+                        return Ok(wrapped);
+                    }
+                }
+
                 let he = self.lower_expr_expected(e, Some(ret_ty))?;
 
                 let resolved = self.infer_ctx.resolve(&he.ty);

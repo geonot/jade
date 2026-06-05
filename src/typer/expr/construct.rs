@@ -10,7 +10,6 @@ impl Typer {
         expr: &ast::Expr,
         expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
-        let _ = expected;
         match expr {
             ast::Expr::Struct(name, inits, span) => {
                 let known_struct = self.structs.contains_key(name)
@@ -28,6 +27,12 @@ impl Typer {
                     let args: Vec<ast::Expr> = inits.iter().map(|fi| fi.value.clone()).collect();
                     let callee = ast::Expr::Ident(*name, *span);
                     return self.lower_call(&callee, &args, *span);
+                }
+                if self.variant_tags.contains_key(name)
+                    && let Some(r) =
+                        self.try_lower_variant_with_expected(&name.as_str(), inits, *span, expected)?
+                {
+                    return Ok(r);
                 }
                 self.lower_struct_or_variant(&name.as_str(), inits, *span)
             }
@@ -59,6 +64,56 @@ impl Typer {
 }
 
 impl Typer {
+    pub(crate) fn try_lower_variant_with_expected(
+        &mut self,
+        name: &str,
+        inits: &[ast::FieldInit],
+        span: Span,
+        expected: Option<&Type>,
+    ) -> Result<Option<hir::Expr>, String> {
+        let resolved = expected.map(|t| self.infer_ctx.resolve(t));
+        let enum_name = match resolved {
+            Some(Type::Enum(n)) => n,
+            Some(Type::Struct(n, args)) if self.generic_enums.contains_key(&n) => {
+                let ge = self.generic_enums.get(&n).cloned().unwrap();
+                if args.len() != ge.type_params.len() {
+                    return Ok(None);
+                }
+                let mut type_map = std::collections::HashMap::new();
+                for (tp, ta) in ge.type_params.iter().zip(args.iter()) {
+                    type_map.insert(*tp, ta.clone());
+                }
+                self.monomorphize_enum(&n.as_str(), &type_map)?
+            }
+            _ => return Ok(None),
+        };
+        let variants = match self.enums.get(&enum_name) {
+            Some(v) => v.clone(),
+            None => return Ok(None),
+        };
+        let Some(tag) = variants.iter().position(|(n, _)| n.as_str() == name) else {
+            return Ok(None);
+        };
+        let payload_tys = variants[tag].1.clone();
+        let tag = tag as u32;
+        let hinits: Vec<hir::FieldInit> = inits
+            .iter()
+            .enumerate()
+            .map(|(i, fi)| {
+                let exp = payload_tys.get(i);
+                Ok(hir::FieldInit {
+                    name: fi.name,
+                    value: self.lower_expr_expected(&fi.value, exp)?,
+                })
+            })
+            .collect::<Result<_, String>>()?;
+        Ok(Some(hir::Expr {
+            kind: hir::ExprKind::VariantCtor(enum_name, name.into(), tag, hinits),
+            ty: Type::Enum(enum_name),
+            span,
+        }))
+    }
+
     pub(crate) fn lower_struct_or_variant_with_typeargs(
         &mut self,
         name: &str,

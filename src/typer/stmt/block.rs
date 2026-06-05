@@ -32,6 +32,22 @@ impl Typer {
                     stmts.push(stmt);
                     continue;
                 }
+            if idx == block_len - 1
+                && let (Some(expected), crate::ast::Stmt::If(i)) = (tail_expected, s) {
+                    let hi = self.lower_if_with_tail(i, ret_ty, Some(expected))?;
+                    let stmt = hir::Stmt::If(hi);
+                    self.record_take_moves_in_stmt(&stmt);
+                    stmts.push(stmt);
+                    continue;
+                }
+            if idx == block_len - 1
+                && let (Some(expected), crate::ast::Stmt::Match(m)) = (tail_expected, s) {
+                    let hm = self.lower_match_with_tail(m, ret_ty, Some(expected))?;
+                    let stmt = hir::Stmt::Match(hm);
+                    self.record_take_moves_in_stmt(&stmt);
+                    stmts.push(stmt);
+                    continue;
+                }
             let stmt = self.lower_stmt(s, ret_ty)?;
             self.record_take_moves_in_stmt(&stmt);
             stmts.push(stmt);
@@ -47,26 +63,43 @@ impl Typer {
     }
 
     pub(crate) fn lower_if(&mut self, i: &ast::If, ret_ty: &Type) -> Result<hir::If, String> {
+        self.lower_if_with_tail(i, ret_ty, None)
+    }
+
+    fn lower_branch_with_tail(
+        &mut self,
+        b: &ast::Block,
+        ret_ty: &Type,
+        tail_expected: Option<&Type>,
+    ) -> Result<hir::Block, String> {
+        self.lower_block_with_tail(b, ret_ty, tail_expected)
+    }
+
+    pub(crate) fn lower_if_with_tail(
+        &mut self,
+        i: &ast::If,
+        ret_ty: &Type,
+        tail_expected: Option<&Type>,
+    ) -> Result<hir::If, String> {
         let cond = self.lower_expr_expected(&i.cond, Some(&Type::Bool))?;
 
         let pre_if = self.snapshot_moved_fields();
-        let then = self.lower_block(&i.then, ret_ty)?;
+        let then = self.lower_branch_with_tail(&i.then, ret_ty, tail_expected)?;
         let then_end = self.snapshot_moved_fields();
         let mut branch_ends: Vec<_> = vec![then_end];
         self.restore_moved_fields(pre_if.clone());
         let mut elifs = Vec::new();
         for (ec, eb) in &i.elifs {
             let hc = self.lower_expr_expected(ec, Some(&Type::Bool))?;
-            let hb = self.lower_block(eb, ret_ty)?;
+            let hb = self.lower_branch_with_tail(eb, ret_ty, tail_expected)?;
             branch_ends.push(self.snapshot_moved_fields());
             self.restore_moved_fields(pre_if.clone());
             elifs.push((hc, hb));
         }
-        let els = i
-            .els
-            .as_ref()
-            .map(|b| self.lower_block(b, ret_ty))
-            .transpose()?;
+        let els = match &i.els {
+            Some(b) => Some(self.lower_branch_with_tail(b, ret_ty, tail_expected)?),
+            None => None,
+        };
         if els.is_some() {
             branch_ends.push(self.snapshot_moved_fields());
         }
@@ -125,8 +158,60 @@ impl Typer {
         m: &ast::Match,
         ret_ty: &Type,
     ) -> Result<hir::Match, String> {
+        self.lower_match_with_tail(m, ret_ty, None)
+    }
+
+    fn adapt_propagate_match(&mut self, m: &ast::Match, subj_ty: &Type) -> ast::Match {
+        let resolved = self.infer_ctx.resolve(subj_ty);
+        let is_option = match &resolved {
+            Type::Enum(n) => {
+                let s = n.as_str();
+                s.starts_with("Option_") || s == "Option"
+            }
+            Type::Struct(n, _) => n.as_str() == "Option",
+            _ => false,
+        };
+        if !is_option {
+            return m.clone();
+        }
+        let is_prop = m.arms.iter().any(|a| {
+            matches!(&a.pat, ast::Pat::Ctor(n, ps, _)
+                if n.as_str() == "Ok"
+                    && matches!(ps.first(), Some(ast::Pat::Ident(b, _)) if b.as_str().contains("__prop_v_")))
+        });
+        if !is_prop {
+            return m.clone();
+        }
+        let mut m2 = m.clone();
+        for a in &mut m2.arms {
+            if let ast::Pat::Ctor(n, ps, sp) = &a.pat {
+                if n.as_str() == "Ok" {
+                    a.pat = ast::Pat::Ctor("Some".into(), ps.clone(), *sp);
+                } else if n.as_str() == "Err" {
+                    let bsp = *sp;
+                    a.pat = ast::Pat::Ctor("Nothing".into(), vec![], bsp);
+                    a.body = vec![ast::Stmt::ErrReturn(
+                        ast::Expr::Ident("Nothing".into(), bsp),
+                        bsp,
+                    )];
+                }
+            }
+        }
+        m2
+    }
+
+    pub(crate) fn lower_match_with_tail(
+        &mut self,
+        m: &ast::Match,
+        ret_ty: &Type,
+        tail_expected: Option<&Type>,
+    ) -> Result<hir::Match, String> {
         let subject = self.lower_expr(&m.subject)?;
         let subj_ty = subject.ty.clone();
+
+        let m = self.adapt_propagate_match(m, &subj_ty);
+        let m = &m;
+
         let mut arms = Vec::new();
         let mut first_arm_ty: Option<Type> = None;
 
@@ -143,17 +228,18 @@ impl Typer {
                 .as_ref()
                 .map(|g| self.lower_expr_expected(g, Some(&Type::Bool)))
                 .transpose()?;
-            let mut body = self.lower_block_no_scope(&a.body, ret_ty)?;
-            if let Some(hir::Stmt::Expr(tail_expr)) = body.last() {
+            let arm_expected = first_arm_ty.as_ref().or(tail_expected);
+            let mut body = self.lower_block_no_scope_with_tail(&a.body, ret_ty, arm_expected)?;
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
                 if let Some(ref first_ty) = first_arm_ty {
                     let _ = self.infer_ctx.unify_at(
                         first_ty,
-                        &tail_expr.ty,
+                        &tail_ty,
                         a.span,
                         "match arm result type",
                     );
                 } else {
-                    first_arm_ty = Some(tail_expr.ty.clone());
+                    first_arm_ty = Some(tail_ty);
                 }
             }
             self.finalize_block_drops_excluding(&mut body, &pat_binds);
@@ -223,7 +309,33 @@ impl Typer {
             ast::Pat::Ctor(name, sub_pats, span) => {
                 let tag = self.variant_tags.get(name).map(|(_, t)| *t).unwrap_or(0);
 
-                let enum_name = self.variant_tags.get(name).map(|(en, _)| *en);
+                let resolved_expected = self.infer_ctx.resolve(expected_ty);
+                let expected_enum = match &resolved_expected {
+                    Type::Enum(n)
+                        if self
+                            .enums
+                            .get(n)
+                            .map(|vs| vs.iter().any(|(vn, _)| vn == name))
+                            .unwrap_or(false) =>
+                    {
+                        Some(*n)
+                    }
+                    Type::Struct(n, args) if self.generic_enums.contains_key(n) => {
+                        let ge = self.generic_enums.get(n).cloned().unwrap();
+                        if args.len() == ge.type_params.len() {
+                            let mut tm = std::collections::HashMap::new();
+                            for (tp, ta) in ge.type_params.iter().zip(args.iter()) {
+                                tm.insert(*tp, ta.clone());
+                            }
+                            self.monomorphize_enum(&n.as_str(), &tm).ok()
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                let enum_name = expected_enum.or_else(|| self.variant_tags.get(name).map(|(en, _)| *en));
 
                 if let Some(ref en) = enum_name {
                     let enum_ty = Type::Enum(*en);

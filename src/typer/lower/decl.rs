@@ -208,9 +208,18 @@ impl Typer {
         &mut self,
         ib: &ast::ImplBlock,
     ) -> Result<hir::TraitImpl, String> {
+        let is_static_trait = ib
+            .trait_name
+            .map(|t| t.as_str() == "From")
+            .unwrap_or(false);
         let mut hir_methods = Vec::new();
         for m in &ib.methods {
-            let hm = self.lower_method_by_ptr(&ib.type_name.as_str(), m)?;
+            let takes_self = m.params.first().map(|p| p.name == "self").unwrap_or(false);
+            let hm = if is_static_trait && !takes_self {
+                self.lower_static_method(&ib.type_name.as_str(), m)?
+            } else {
+                self.lower_method_by_ptr(&ib.type_name.as_str(), m)?
+            };
             hir_methods.push(hm);
         }
         if let Some(trait_name) = ib.trait_name
@@ -553,6 +562,75 @@ impl Typer {
         m: &ast::Fn,
     ) -> Result<hir::Fn, String> {
         self.lower_method_impl(type_name, m, true)
+    }
+
+    pub(in crate::typer) fn lower_static_method(
+        &mut self,
+        type_name: &str,
+        m: &ast::Fn,
+    ) -> Result<hir::Fn, String> {
+        let method_name = Self::from_method_name(type_name, m);
+        let (id, ptys, ret) = self
+            .fns
+            .get(&method_name)
+            .ok_or_else(|| format!("undeclared method: {method_name}"))?
+            .clone();
+
+        let prev_method_type = self.current_method_type.take();
+        self.current_method_type = Some(type_name.to_string());
+        self.push_scope();
+        let mut params = Vec::new();
+        for (i, p) in m.params.iter().enumerate() {
+            let pid = self.fresh_id();
+            let ty = ptys[i].clone();
+            let ownership = self
+                .param_ownership_with_mod(&ty, p.access_mod)
+                .map_err(|e| format!("{}: {e}", p.span.loc()))?;
+            self.define_var(
+                &p.name.as_str(),
+                VarInfo {
+                    def_id: pid,
+                    ty: ty.clone(),
+                    ownership,
+                    scheme: None,
+                },
+            );
+            params.push(hir::Param {
+                def_id: pid,
+                name: p.name,
+                ty,
+                ownership,
+                default: None,
+                access_mod: p.access_mod,
+                span: p.span,
+            });
+        }
+
+        let body = self.lower_block_with_tail(&m.body, &ret, Some(&ret))?;
+        self.pop_scope();
+        self.current_method_type = prev_method_type;
+
+        if m.ret.is_none() {
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
+                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "static method tail");
+                self.collect_unify_error(r);
+            } else {
+                let _ = self.infer_ctx.unify(&ret, &Type::Void);
+            }
+        }
+
+        Ok(hir::Fn {
+            def_id: id,
+            name: method_name.into(),
+            params,
+            ret,
+            error_types: Vec::new(),
+            body,
+            span: m.span,
+            generic_origin: None,
+            is_generator: false,
+            attrs: m.attrs.clone(),
+        })
     }
 
     pub(in crate::typer) fn lower_method_impl(
