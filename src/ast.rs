@@ -212,6 +212,13 @@ pub enum Expr {
     Field(Box<Expr>, Symbol, Span),
     Index(Box<Expr>, Box<Expr>, Span),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>, Span),
+    Quaternary(
+        Box<Expr>,
+        Option<Box<Expr>>,
+        Option<Box<Expr>>,
+        Option<Box<Expr>>,
+        Span,
+    ),
     As(Box<Expr>, Type, Span),
     Array(Vec<Expr>, Span),
     Tuple(Vec<Expr>, Span),
@@ -281,6 +288,7 @@ impl Expr {
             | Self::Field(_, _, s)
             | Self::Index(_, _, s)
             | Self::Ternary(_, _, _, s)
+            | Self::Quaternary(_, _, _, _, s)
             | Self::As(_, _, s)
             | Self::Array(_, s)
             | Self::Tuple(_, s)

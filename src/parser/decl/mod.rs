@@ -22,6 +22,7 @@ fn is_useless_top_expr(e: &Expr) -> bool {
         | Expr::Field(..)
         | Expr::Index(..)
         | Expr::Ternary(..)
+        | Expr::Quaternary(..)
         | Expr::As(..)
         | Expr::Array(..)
         | Expr::Tuple(..)

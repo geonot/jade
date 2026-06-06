@@ -154,6 +154,11 @@ impl Typer {
                 })
             }
 
+            ast::Expr::Quaternary(_, _, _, _, span) => Err(format!(
+                "{:?}: quaternary lowering not yet implemented (task 2-4-4)",
+                span
+            )),
+
             ast::Expr::As(inner, target_ty, span) => {
                 let hi = self.lower_expr(inner)?;
                 let ty = target_ty.clone();

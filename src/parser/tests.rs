@@ -88,6 +88,80 @@ fn ternary() {
     }
 }
 
+fn first_expr(p: &Program) -> &Expr {
+    if let Decl::Fn(f) = &p.decls[0] {
+        if let Stmt::Expr(e) = &f.body[0] {
+            return e;
+        }
+    }
+    panic!("expected fn body expr statement");
+}
+
+#[test]
+fn quaternary_inline_full() {
+    let p = parse("*main()\n    log(foo() ? $ ! none() !! err)\n");
+    let e = first_expr(&p);
+    if let Expr::Call(_, args, _) = e {
+        assert!(
+            matches!(&args[0], Expr::Quaternary(_, Some(_), Some(_), Some(_), _)),
+            "expected full quaternary, got {:?}",
+            args[0]
+        );
+    } else {
+        panic!("expected call");
+    }
+}
+
+#[test]
+fn quaternary_err_arm_only() {
+    let p = parse("*main()\n    log(foo() !! 0)\n");
+    let e = first_expr(&p);
+    if let Expr::Call(_, args, _) = e {
+        assert!(matches!(
+            &args[0],
+            Expr::Quaternary(_, None, None, Some(_), _)
+        ));
+    } else {
+        panic!("expected call");
+    }
+}
+
+#[test]
+fn quaternary_ok_and_err_arm() {
+    let p = parse("*main()\n    log(foo() ? consume($) !! log(err))\n");
+    let e = first_expr(&p);
+    if let Expr::Call(_, args, _) = e {
+        assert!(matches!(
+            &args[0],
+            Expr::Quaternary(_, Some(_), None, Some(_), _)
+        ));
+    } else {
+        panic!("expected call");
+    }
+}
+
+#[test]
+fn quaternary_multiline() {
+    let p = parse("*main()\n    foo()\n        ? consume($)\n        !! log(err)\n");
+    let e = first_expr(&p);
+    assert!(
+        matches!(e, Expr::Quaternary(_, Some(_), None, Some(_), _)),
+        "expected multiline quaternary, got {:?}",
+        e
+    );
+}
+
+#[test]
+fn quaternary_without_err_arm_is_ternary() {
+    let p = parse("*main()\n    log(c ? 1 ! 2)\n");
+    let e = first_expr(&p);
+    if let Expr::Call(_, args, _) = e {
+        assert!(matches!(&args[0], Expr::Ternary(_, _, _, _)));
+    } else {
+        panic!("expected call");
+    }
+}
+
 #[test]
 fn while_stmt() {
     let p = parse("*main()\n    while true\n        log(1)\n");

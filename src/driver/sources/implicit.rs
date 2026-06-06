@@ -224,6 +224,18 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 walk_expr(t, modules, defs);
                 walk_expr(f, modules, defs);
             }
+            Expr::Quaternary(subj, ok, nothing, err, _) => {
+                walk_expr(subj, modules, defs);
+                if let Some(ok) = ok {
+                    walk_expr(ok, modules, defs);
+                }
+                if let Some(nothing) = nothing {
+                    walk_expr(nothing, modules, defs);
+                }
+                if let Some(err) = err {
+                    walk_expr(err, modules, defs);
+                }
+            }
             Expr::ListComp(body, var, iter, filter, map, _) => {
                 walk_expr(iter, modules, defs);
                 let mut local_defs = defs.clone();

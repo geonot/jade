@@ -501,6 +501,19 @@ fn format_expr(e: &Expr) -> String {
                 format_expr(f)
             )
         }
+        Expr::Quaternary(subj, ok, nothing, err, _) => {
+            let mut s = format_expr(subj);
+            if let Some(ok) = ok {
+                s.push_str(&format!(" ? {}", format_expr(ok)));
+            }
+            if let Some(nothing) = nothing {
+                s.push_str(&format!(" ! {}", format_expr(nothing)));
+            }
+            if let Some(err) = err {
+                s.push_str(&format!(" !! {}", format_expr(err)));
+            }
+            s
+        }
         Expr::As(e, ty, _) => format!("{} as {}", format_expr(e), format_type(ty)),
         Expr::Array(elems, _) => {
             let es: Vec<String> = elems.iter().map(format_expr).collect();

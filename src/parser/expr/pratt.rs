@@ -6,50 +6,108 @@ use crate::lexer::Token;
 impl Parser {
     pub(in crate::parser) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
         let e = self.parse_pipeline()?;
-        if self.check(Token::Question) {
-            let sp = self.span();
-            self.advance();
+        self.parse_inline_handler_arms(e)
+    }
 
-            if self.check(Token::Bang) {
-                self.advance();
-                let f = self.parse_pipeline()?;
-                Ok(Expr::Ternary(
-                    Box::new(e),
-                    Box::new(Expr::Void(sp)),
-                    Box::new(f),
-                    sp,
-                ))
-            } else {
-                let t = self.parse_pipeline()?;
-                if self.check(Token::Bang) {
+    pub(in crate::parser) fn at_multiline_arms(&self) -> bool {
+        matches!(self.peek(), Token::Newline)
+            && matches!(self.peek_at(1), Token::Indent)
+            && matches!(self.peek_at(2), Token::Question | Token::BangBang)
+    }
+
+    fn parse_inline_handler_arms(&mut self, subject: Expr) -> Result<Expr, ParseError> {
+        if !matches!(self.peek(), Token::Question | Token::BangBang)
+            && !(matches!(self.peek(), Token::Bang) && !self.suppress_bang_else)
+        {
+            return Ok(subject);
+        }
+        self.collect_handler_arms(subject, false)
+    }
+
+    pub(in crate::parser) fn parse_multiline_handler_arms(
+        &mut self,
+        subject: Expr,
+    ) -> Result<Expr, ParseError> {
+        self.advance();
+        self.advance();
+        self.collect_handler_arms(subject, true)
+    }
+
+    fn collect_handler_arms(
+        &mut self,
+        subject: Expr,
+        multiline: bool,
+    ) -> Result<Expr, ParseError> {
+        let sp = self.span();
+        let mut ok_arm: Option<Expr> = None;
+        let mut nothing_arm: Option<Expr> = None;
+        let mut err_arm: Option<Expr> = None;
+
+        loop {
+            match self.peek() {
+                Token::Question if ok_arm.is_none() => {
                     self.advance();
-                    Ok(Expr::Ternary(
-                        Box::new(e),
-                        Box::new(t),
-                        Box::new(self.parse_expr()?),
-                        sp,
-                    ))
+                    ok_arm = Some(self.parse_pipeline()?);
+                }
+                Token::Bang if nothing_arm.is_none() => {
+                    self.advance();
+                    nothing_arm = Some(self.parse_pipeline()?);
+                }
+                Token::BangBang if err_arm.is_none() => {
+                    self.advance();
+                    err_arm = Some(self.parse_pipeline()?);
+                }
+                _ => break,
+            }
+            if multiline {
+                if matches!(self.peek(), Token::Newline)
+                    && matches!(
+                        self.peek_at(1),
+                        Token::Question | Token::Bang | Token::BangBang
+                    )
+                {
+                    self.advance();
                 } else {
-                    Ok(Expr::Ternary(
-                        Box::new(e),
-                        Box::new(t),
-                        Box::new(Expr::Void(sp)),
-                        sp,
-                    ))
+                    break;
                 }
             }
-        } else if self.check(Token::Bang) && !self.suppress_bang_else {
-            let sp = self.span();
-            self.advance();
-            let f = self.parse_pipeline()?;
-            Ok(Expr::Ternary(
-                Box::new(e),
+        }
+
+        if multiline {
+            self.expect(Token::Newline)?;
+            self.expect(Token::Dedent)?;
+        }
+
+        if err_arm.is_some() {
+            return Ok(Expr::Quaternary(
+                Box::new(subject),
+                ok_arm.map(Box::new),
+                nothing_arm.map(Box::new),
+                err_arm.map(Box::new),
+                sp,
+            ));
+        }
+
+        match (ok_arm, nothing_arm) {
+            (Some(t), Some(f)) => Ok(Expr::Ternary(
+                Box::new(subject),
+                Box::new(t),
+                Box::new(f),
+                sp,
+            )),
+            (Some(t), None) => Ok(Expr::Ternary(
+                Box::new(subject),
+                Box::new(t),
+                Box::new(Expr::Void(sp)),
+                sp,
+            )),
+            (None, Some(f)) => Ok(Expr::Ternary(
+                Box::new(subject),
                 Box::new(Expr::Void(sp)),
                 Box::new(f),
                 sp,
-            ))
-        } else {
-            Ok(e)
+            )),
+            (None, None) => Ok(subject),
         }
     }
 

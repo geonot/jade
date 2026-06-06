@@ -189,6 +189,18 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
             rewrite_expr(b, renames);
             rewrite_expr(c, renames);
         }
+        Expr::Quaternary(subj, ok, nothing, err, _) => {
+            rewrite_expr(subj, renames);
+            if let Some(ok) = ok {
+                rewrite_expr(ok, renames);
+            }
+            if let Some(nothing) = nothing {
+                rewrite_expr(nothing, renames);
+            }
+            if let Some(err) = err {
+                rewrite_expr(err, renames);
+            }
+        }
         Expr::As(e, _, _)
         | Expr::Ref(e, _)
         | Expr::Deref(e, _)

@@ -51,6 +51,18 @@ fn collect_calls_expr(expr: &ast::Expr, calls: &mut HashSet<Symbol>) {
             collect_calls_expr(t, calls);
             collect_calls_expr(f, calls);
         }
+        ast::Expr::Quaternary(subj, ok, nothing, err, _) => {
+            collect_calls_expr(subj, calls);
+            if let Some(ok) = ok {
+                collect_calls_expr(ok, calls);
+            }
+            if let Some(nothing) = nothing {
+                collect_calls_expr(nothing, calls);
+            }
+            if let Some(err) = err {
+                collect_calls_expr(err, calls);
+            }
+        }
         ast::Expr::Array(elems, _) | ast::Expr::Tuple(elems, _) | ast::Expr::Syscall(elems, _) => {
             for e in elems {
                 collect_calls_expr(e, calls);

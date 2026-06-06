@@ -422,6 +422,10 @@ impl Parser {
                     self.parse_bind()
                 } else {
                     let head = self.parse_pipeline()?;
+                    if self.at_multiline_arms() {
+                        let q = self.parse_multiline_handler_arms(head)?;
+                        return Ok(Stmt::Expr(q));
+                    }
                     if self.check(Token::Question) && matches!(head, Expr::Call(..)) {
                         return self.finish_bare_handler_chain(head);
                     }
