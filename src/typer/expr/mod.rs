@@ -6,6 +6,7 @@ mod ident;
 mod lambda;
 mod misc;
 mod op;
+mod quaternary;
 mod store;
 mod typeargs;
 
@@ -132,6 +133,11 @@ impl Typer {
             ast::Expr::Field(..) => self.lower_expr_field(expr, expected),
             ast::Expr::Index(..) => self.lower_expr_index(expr, expected),
             ast::Expr::Ternary(cond, then, els, span) => {
+                if let Some(reinterpreted) =
+                    self.try_ternary_as_quaternary(cond, then, els, *span, expected)?
+                {
+                    return Ok(reinterpreted);
+                }
                 let hc = self.lower_expr(cond)?;
                 let ht = self.lower_expr_expected(then, expected)?;
                 let he = self.lower_expr_expected(els, expected)?;
@@ -154,10 +160,14 @@ impl Typer {
                 })
             }
 
-            ast::Expr::Quaternary(_, _, _, _, span) => Err(format!(
-                "{:?}: quaternary lowering not yet implemented (task 2-4-4)",
-                span
-            )),
+            ast::Expr::Quaternary(subject, ok, nothing, err, span) => self.lower_quaternary(
+                subject,
+                ok.as_deref(),
+                nothing.as_deref(),
+                err.as_deref(),
+                *span,
+                expected,
+            ),
 
             ast::Expr::As(inner, target_ty, span) => {
                 let hi = self.lower_expr(inner)?;
@@ -189,13 +199,22 @@ impl Typer {
             ast::Expr::Pipe(..) => self.lower_expr_pipe(expr, expected),
             ast::Expr::Block(..) => self.lower_expr_block(expr, expected),
             ast::Expr::Lambda(..) => self.lower_expr_lambda(expr, expected),
-            ast::Expr::Placeholder(span) => Ok(hir::Expr {
-                kind: hir::ExprKind::Void,
-                ty: expected
-                    .cloned()
-                    .unwrap_or_else(|| self.infer_ctx.fresh_var()),
-                span: *span,
-            }),
+            ast::Expr::Placeholder(span) => {
+                if let Some((def_id, ty)) = self.dollar_stack.last().cloned() {
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Var(def_id, "$".into()),
+                        ty,
+                        span: *span,
+                    });
+                }
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Void,
+                    ty: expected
+                        .cloned()
+                        .unwrap_or_else(|| self.infer_ctx.fresh_var()),
+                    span: *span,
+                })
+            }
 
             ast::Expr::IndexPlaceholder(span) => Ok(hir::Expr {
                 kind: hir::ExprKind::Void,

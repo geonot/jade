@@ -1,6 +1,9 @@
 # Checked error-effect system
 
-Status: design (P1, JINN_LANGUAGE_REVIEW_2026_06 §4.5)
+Status: §2 prelude, §3 `err`-raise, §4 quaternary, §5 propagation/inference,
+§6 `From`-conversion implemented (tasks 2-2, 2-4-1..2-4-4). Codegen (2-4-5),
+corpus migration off the deprecated prefix-`!` raise (2-4-7), and full SCC
+fixpoint over error sets remain. (P1, JINN_LANGUAGE_REVIEW_2026_06 §4.5)
 
 This document specifies Jinn's error model: a canonical `Option`/`Result`
 prelude, error declarations and raising with `err`, a *quaternary* expression

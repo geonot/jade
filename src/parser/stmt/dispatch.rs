@@ -426,11 +426,11 @@ impl Parser {
                         let q = self.parse_multiline_handler_arms(head)?;
                         return Ok(Stmt::Expr(q));
                     }
-                    if self.check(Token::Question) && matches!(head, Expr::Call(..)) {
-                        return self.finish_bare_handler_chain(head);
-                    }
-                    if self.check(Token::BangBang) {
-                        return self.finish_bare_bangbang(head);
+                    if (self.check(Token::Question) && matches!(head, Expr::Call(..)))
+                        || self.check(Token::BangBang)
+                    {
+                        let q = self.parse_stmt_handler_arms(head)?;
+                        return Ok(Stmt::Expr(q));
                     }
                     let head_sp = head.span();
                     let expr = self.complete_expr_after_pipeline(head)?;

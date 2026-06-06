@@ -101,6 +101,119 @@ impl Typer {
         Ok(Some(hir::Stmt::ErrReturn(err_ctor, result_ty.clone(), span)))
     }
 
+    pub(in crate::typer) fn propagate_err_value(
+        &mut self,
+        err_val: hir::Expr,
+        span: ast::Span,
+    ) -> Result<hir::Stmt, String> {
+        let ret_ty = self
+            .current_fn_ret_ty
+            .clone()
+            .unwrap_or(Type::Void);
+        let resolved_ret = self.infer_ctx.resolve(&ret_ty);
+        let result_enum: Option<Symbol> = match &resolved_ret {
+            Type::Enum(rn) if self.is_result_enum(*rn) => Some(*rn),
+            Type::Struct(rn, args)
+                if rn.as_str() == "Result" && self.generic_enums.contains_key(rn) =>
+            {
+                let ge = self.generic_enums.get(rn).cloned().unwrap();
+                if args.len() == ge.type_params.len() {
+                    let mut tm = std::collections::HashMap::new();
+                    for (tp, ta) in ge.type_params.iter().zip(args.iter()) {
+                        tm.insert(*tp, ta.clone());
+                    }
+                    self.monomorphize_enum(&rn.as_str(), &tm).ok()
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        let Some(result_enum) = result_enum else {
+            return Ok(hir::Stmt::ErrReturn(err_val, resolved_ret, span));
+        };
+
+        let mono_ret = Type::Enum(result_enum);
+        let err_payload = self
+            .enums
+            .get(&result_enum)
+            .and_then(|vs| vs.iter().find(|(n, _)| n.as_str() == "Err"))
+            .and_then(|(_, f)| f.first().cloned());
+        let err_tag = self
+            .enums
+            .get(&result_enum)
+            .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Err"))
+            .map(|i| i as u32)
+            .unwrap_or(1);
+        let Some(err_payload) = err_payload else {
+            return Ok(hir::Stmt::ErrReturn(err_val, mono_ret, span));
+        };
+
+        let val_ty = self.infer_ctx.resolve(&err_val.ty);
+        let norm = |t: &Type| -> Option<Symbol> {
+            match t {
+                Type::Enum(n) => Some(*n),
+                Type::Struct(n, _) => Some(*n),
+                _ => None,
+            }
+        };
+        let target_err_enum = norm(&err_payload);
+        let src_enum = norm(&val_ty);
+        let same_err = matches!((src_enum, target_err_enum), (Some(a), Some(b)) if a == b);
+
+        let wrapped_val = if val_ty == err_payload || same_err {
+            err_val
+        } else if let (Some(tgt), Some(src)) = (target_err_enum, src_enum) {
+            let from_name: Symbol = format!("{tgt}_from_{src}").into();
+            if let Some((id, _ptys, fret)) = self.fns.get(&from_name).cloned() {
+                let ur = self
+                    .infer_ctx
+                    .unify_at(&fret, &err_payload, span, "From conversion result");
+                self.collect_unify_error(ur);
+                hir::Expr {
+                    kind: hir::ExprKind::Call(id, from_name, vec![err_val]),
+                    ty: err_payload.clone(),
+                    span,
+                }
+            } else if self.err_enum_names.contains(&src) && self.err_enum_names.contains(&tgt) {
+                return Err(format!(
+                    "no conversion `{src} -> {tgt}` at {span:?}: propagation here yields an err `{src}`, but this function's error type is `{tgt}` and there is no `impl From of {src} for {tgt}`. Add `impl From of {src} for {tgt}` with `*from(e as {src}) returns {tgt}`, or add `| {src}` to the function's error union."
+                ));
+            } else {
+                err_val
+            }
+        } else {
+            err_val
+        };
+
+        if let Some(en) = &target_err_enum
+            && self.err_enum_names.contains(en)
+        {
+            self.current_fn_error_types.insert(*en);
+        }
+        if let Some(en) = &src_enum
+            && self.err_enum_names.contains(en)
+        {
+            self.current_fn_error_types.insert(*en);
+        }
+
+        let err_ctor = hir::Expr {
+            kind: hir::ExprKind::VariantCtor(
+                result_enum,
+                "Err".into(),
+                err_tag,
+                vec![hir::FieldInit {
+                    name: None,
+                    value: wrapped_val,
+                }],
+            ),
+            ty: mono_ret.clone(),
+            span,
+        };
+        Ok(hir::Stmt::ErrReturn(err_ctor, mono_ret, span))
+    }
+
     pub(in crate::typer) fn is_aliased_read_of_heap(expr: &hir::Expr) -> bool {
         let needs_drop = matches!(
             expr.ty,
@@ -163,6 +276,18 @@ impl Typer {
                     self.lower_expr_expected(&b.value, Some(&existing.ty.clone()))?
                 } else {
                     self.lower_expr(&b.value)?
+                };
+                let value = if b.ty.is_none()
+                    && !matches!(
+                        &b.value,
+                        ast::Expr::Quaternary(..) | ast::Expr::Ternary(..)
+                    ) {
+                    match self.implicit_propagate(value.clone())? {
+                        Some(v) => v,
+                        None => value,
+                    }
+                } else {
+                    value
                 };
                 let ty = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());

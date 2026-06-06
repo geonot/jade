@@ -77,7 +77,8 @@ impl Typer {
                     }
                 }
 
-                let has_placeholder = args.iter().any(|a| matches!(a, ast::Expr::Placeholder(_)));
+                let has_placeholder = self.dollar_stack.is_empty()
+                    && args.iter().any(|a| matches!(a, ast::Expr::Placeholder(_)));
                 if has_placeholder {
                     let param = ast::Param {
                         name: "__ph".into(),

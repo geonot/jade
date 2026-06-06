@@ -1,0 +1,20 @@
+title: Fix Ok/Err ctor monomorphization collision for Result of same T, different
+  E
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-06T00:23:44'
+updated_at: '2026-06-06T00:23:44'
+result: ''
+description: 'Pre-existing bug (discovered during 2-4-4): when two `Result of T, E`
+  instantiations share the same success type T but differ in E (e.g. `Result of i64,
+  NetError` and `Result of i64, FileError`), the `Ok(x)`/`Err(x)` variant constructor
+  inside a function resolves to the WRONG monomorphized Result enum. Repro: define
+  `fetch returns Result of i64, NetError` with `Ok(7)` and `save returns Result of
+  i64, FileError` with `Ok(1)`; `fetch`''s MIR wraps `Ok(7)` as `Result__G_i64_FileError`
+  (wrong), causing `Function return type does not match operand` LLVM verify failure.
+  Root cause likely in variant_tags / Ok-wrap resolution keyed only by success type
+  T (or variant name) ignoring E. The From-conversion propagation path (2-4-4) is
+  correct; this is independent. Affects auto-wrap-Ok and tail-wrap. Done: each function''s
+  Ok/Err ctor binds the Result monomorphization matching its declared return type.'

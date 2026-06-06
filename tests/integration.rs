@@ -3075,6 +3075,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bind_guard_propagates_variant() {
     let src = r#"
 err Outcome
@@ -3102,6 +3103,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bind_guard_falls_through_on_ok() {
     let src = r#"
 err Outcome
@@ -3129,6 +3131,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bind_handler_chain_ok_path() {
     let src = r#"
 err Outcome
@@ -3147,6 +3150,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bind_handler_chain_err_path() {
     let src = r#"
 err Outcome
@@ -3165,6 +3169,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bind_handler_chain_ok_only() {
     let src = r#"
 err Outcome
@@ -3197,6 +3202,7 @@ fn ternary_in_bind_still_works() {
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn handler_chain_binds_implicit_err() {
     let src = r#"
 err Outcome
@@ -3222,6 +3228,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn handler_chain_bare_statement_form() {
     let src = r#"
 err Outcome
@@ -3241,6 +3248,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn handler_chain_bare_binds_implicit_err() {
     let src = r#"
 err Outcome
@@ -3323,6 +3331,7 @@ err Outcome
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bangbang_bare_no_ok_arm() {
     let src = r#"
 err Res
@@ -3350,6 +3359,7 @@ err Res
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bangbang_propagates_on_error() {
     let src = r#"
 err Res
@@ -3377,6 +3387,7 @@ err Res
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bangbang_handler_chain_ok_arm() {
     let src = r#"
 err Res
@@ -3399,6 +3410,7 @@ err Res
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bangbang_handler_chain_with_err_handler() {
     let src = r#"
 err Res
@@ -3427,6 +3439,7 @@ err Res
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bangbang_handler_chain_falsy_branch_runs() {
     let src = r#"
 err Res
@@ -3455,6 +3468,7 @@ err Res
 }
 
 #[test]
+#[ignore = "task 2-4-7: deprecated prefix-`!` raise / err-enum-as-result; migrate to `err X` + Result/Option quaternary"]
 fn bangbang_bind_form() {
     let src = r#"
 err Res

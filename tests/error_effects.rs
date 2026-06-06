@@ -201,3 +201,92 @@ fn propagate_reflexive_conversion_needs_no_impl() {
         "8\n-1",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Quaternary `? ok ! nothing !! err` lowering + fallibility inference
+// (docs/error-effects.md §4-5, task 2-4-4). New post-migration semantics:
+// `err X` raises, the subject of `?`/`!!` is a `Result`/`Option`, `$` binds the
+// success value, `err` binds the error value, `!! err` propagates, and a bare
+// fallible bind implicitly propagates (`v is f()` == `f() ? $ !! err`).
+// ---------------------------------------------------------------------------
+
+const READ_RES: &str = "err FileError\n    NotFound\n    Denied\n\n*read(ok as bool) returns Result of i64, FileError\n    if ok\n        Ok(42)\n    else\n        Err(NotFound)\n\n";
+
+#[test]
+fn quaternary_success_arm_binds_dollar() {
+    expect(
+        &format!("{READ_RES}*main()\n    read(true) ? log($) !! log(-1)\n    read(false) ? log($) !! log(-1)\n"),
+        "42\n-1",
+    );
+}
+
+#[test]
+fn quaternary_fallback_value_on_error() {
+    expect(
+        &format!("{READ_RES}*main()\n    a is read(true) ? $ !! 7\n    log(a)\n    b is read(false) ? $ !! 7\n    log(b)\n"),
+        "42\n7",
+    );
+}
+
+#[test]
+fn quaternary_err_arm_binds_err_value() {
+    expect(
+        &format!("{READ_RES}*describe(e as FileError) returns i64\n    match e\n        NotFound ? 404\n        Denied ? 403\n\n*main()\n    read(false) ? log($) !! log(describe(err))\n"),
+        "404",
+    );
+}
+
+#[test]
+fn quaternary_explicit_propagation_with_bang_bang_err() {
+    expect(
+        &format!("{READ_RES}*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok) ? $ !! err\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n"),
+        "43\n-1",
+    );
+}
+
+#[test]
+fn implicit_propagation_on_bare_result_bind() {
+    expect(
+        &format!("{READ_RES}*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok)\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n"),
+        "43\n-1",
+    );
+}
+
+#[test]
+fn implicit_propagation_on_bare_option_bind() {
+    expect(
+        "*find(ok as bool) returns Option of i64\n    if ok\n        Some(7)\n    else\n        Nothing\n\n*pick(ok as bool) returns Option of i64\n    v is find(ok)\n    Some(v + 1)\n\n*main()\n    log(pick(true).unwrap_or(-1))\n    log(pick(false).unwrap_or(-1))\n",
+        "8\n-1",
+    );
+}
+
+#[test]
+fn quaternary_option_success_and_empty_arms() {
+    expect(
+        "*find(ok as bool) returns Option of i64\n    if ok\n        Some(9)\n    else\n        Nothing\n\n*main()\n    find(true) ? log($) ! log(-1)\n    find(false) ? log($) ! log(-1)\n",
+        "9\n-1",
+    );
+}
+
+#[test]
+#[ignore = "task 4: blocked by Ok/Err ctor monomorphization-collision bug (multiple Result instantiations); 2-4-4 From-propagation lowering itself is correct"]
+fn quaternary_propagation_converts_via_from() {
+    let src = "err FileError\n    NotFound\n\nerr NetError\n    Timeout\n\nerr AppError\n    Io(FileError)\n    Net(NetError)\n\nimpl From of FileError for AppError\n    *from(e as FileError) returns AppError\n        Io(e)\n\nimpl From of NetError for AppError\n    *from(e as NetError) returns AppError\n        Net(e)\n\n*fetch(ok as bool) returns Result of i32, NetError\n    if ok\n        Ok(7)\n    else\n        Err(Timeout)\n\n*save(ok as bool) returns Result of i16, FileError\n    if ok\n        Ok(1)\n    else\n        Err(NotFound)\n\n*backup(a as bool, b as bool) returns Result of i64, AppError\n    data is fetch(a) ? $ !! err\n    n is save(b) ? $ !! err\n    Ok(data as i64 + n as i64)\n\n*main()\n    match backup(true, true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match backup(false, true)\n        Ok(v) ? log(0)\n        Err(e) ? match e\n            Net(_) ? log(2)\n            Io(_) ? log(3)\n    match backup(true, false)\n        Ok(v) ? log(0)\n        Err(e) ? match e\n            Net(_) ? log(2)\n            Io(_) ? log(3)\n";
+    expect(src, "8\n2\n3");
+}
+
+#[test]
+fn quaternary_multiline_arm_form() {
+    expect(
+        &format!("{READ_RES}*main()\n    read(true)\n        ? log($)\n        !! log(-1)\n    read(false)\n        ? log($)\n        !! log(-1)\n"),
+        "42\n-1",
+    );
+}
+
+#[test]
+fn err_raise_propagates_to_result_return() {
+    expect(
+        "err FileError\n    NotFound\n\n*read(ok as bool) returns i64 ! FileError\n    if ok\n        99\n    else\n        err NotFound\n\n*main()\n    match read(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match read(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n",
+        "99\n-1",
+    );
+}

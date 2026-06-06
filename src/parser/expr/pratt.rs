@@ -15,6 +15,13 @@ impl Parser {
             && matches!(self.peek_at(2), Token::Question | Token::BangBang)
     }
 
+    pub(in crate::parser) fn parse_stmt_handler_arms(
+        &mut self,
+        subject: Expr,
+    ) -> Result<Expr, ParseError> {
+        self.collect_handler_arms(subject, false)
+    }
+
     fn parse_inline_handler_arms(&mut self, subject: Expr) -> Result<Expr, ParseError> {
         if !matches!(self.peek(), Token::Question | Token::BangBang)
             && !(matches!(self.peek(), Token::Bang) && !self.suppress_bang_else)
@@ -51,7 +58,12 @@ impl Parser {
                 }
                 Token::Bang if nothing_arm.is_none() => {
                     self.advance();
-                    nothing_arm = Some(self.parse_pipeline()?);
+                    let arm = self.parse_pipeline()?;
+                    if !multiline && matches!(self.peek(), Token::Question) {
+                        nothing_arm = Some(self.collect_handler_arms(arm, false)?);
+                    } else {
+                        nothing_arm = Some(arm);
+                    }
                 }
                 Token::BangBang if err_arm.is_none() => {
                     self.advance();

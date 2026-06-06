@@ -118,6 +118,8 @@ pub struct Typer {
     pub(crate) current_fn_declared_errors: Vec<Symbol>,
 
     pub(crate) escape_tiers: std::collections::HashMap<DefId, crate::escape::Tier>,
+
+    pub(crate) dollar_stack: Vec<(DefId, Type)>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +198,7 @@ impl Typer {
             current_fn_error_types: std::collections::BTreeSet::new(),
             current_fn_declared_errors: Vec::new(),
             escape_tiers: std::collections::HashMap::new(),
+            dollar_stack: Vec::new(),
         }
     }
 
