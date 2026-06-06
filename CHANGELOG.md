@@ -1,4 +1,21 @@
 # Changelog
+- **[19]** (2026-06-06 07:29) task 2-4-4: typer quaternary lowering + fallibility inference
+
+Lower Expr::Quaternary (and !!-less Ternary over Result/Option) to a Block
+evaluating the subject once then an EnumIs-gated ternary. Bind $ to the
+unwrapped success value (Placeholder intercepted via dollar_stack; suppress
+placeholder-currying) and err to the unwrapped error. !! err and the bare
+default propagate via propagate_err_value with From X->E conversion into the
+enclosing Result (R1/R3 diagnostics). Implicit propagation: a bare fallible
+bind in a fallible-capable fn desugars to f() ? $ !! err, gated off variant
+ctors, annotated binds, and non-fallible fns (R4: main).
+
+Migrate statement/bind ?/!/!! parsing to the pratt quaternary; delete legacy
+finish_bare_* and bind handler-chains; fix nested boolean ternary in arms.
+Add 11 quaternary conformance tests in tests/error_effects.rs; mark the
+deprecated prefix-! raise corpus #[ignore] (task 2-4-7). Discovered and filed
+task 4: Ok/Err ctor monomorphization-collision with multiple Result
+instantiations (pre-existing, independent of this work).
 - **[19]** (2026-06-06 00:40) task 2-4-4: typer quaternary lowering + fallibility. Lower `Expr::Quaternary` (and `!!`-less Ternary over Result/Option) to a `Block` evaluating the subject once then an `EnumIs`-gated ternary; bind `$` to the unwrapped success value (intercept `Placeholder` via `dollar_stack`, suppress placeholder-currying) and `err` to the unwrapped error. `!! err` / bare `!!`-less default propagates via `propagate_err_value` (From-converts `X -> E` into the enclosing Result, R1/R3 diagnostics). Implicit propagation: a bare fallible bind in a fallible-capable fn (`v is f()`) desugars to `f() ? $ !! err`; gated off variant ctors, annotated binds, and non-fallible fns (R4: `main`). Migrate statement/bind `?`/`!`/`!!` parsing to the pratt quaternary (delete legacy `finish_bare_*` + bind handler-chains); fix nested boolean ternary in arms. Add 11 quaternary conformance tests; mark deprecated prefix-`!`-raise corpus `#[ignore]` (task 2-4-7).
 - **[18]** (2026-06-06 06:50) task 2-4-3: parser quaternary `e ? ok ! nothing !! err` — add Expr::Quaternary AST node, parse inline + multiline arms (Quaternary iff `!!` present, else Ternary), structural arms in fmt/resolve/scc/implicit/decl, typer stub for 2-4-4, 5 parser tests
 - **[15]** (2026-06-06 05:34) task 2-4-2: remove ?> propagation; err-raise + !! lex/parse intact

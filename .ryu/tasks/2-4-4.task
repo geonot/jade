@@ -1,12 +1,43 @@
 title: 'Typer: raise/propagation/quaternary lowering + fallibility inference'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-4-3
 created_at: '2026-06-05T08:04:17'
-updated_at: '2026-06-05T08:04:17'
-result: ''
+updated_at: '2026-06-06T00:29:34'
+result: 'Implemented quaternary lowering + fallibility inference per docs/error-effects.md
+  §4-5.
+
+
+  Lowering (src/typer/expr/quaternary.rs): Expr::Quaternary and !!-less Ternary over
+  Result/Option lower to a Block that binds the subject once then an EnumIs-gated
+  ternary. `$` binds the unwrapped success value via a new Typer.dollar_stack (Placeholder
+  intercepted in lower_expr; placeholder-currying in access.rs suppressed while active);
+  `err` binds the unwrapped error as a scope var. `!! err` and the missing-err-arm
+  default propagate via propagate_err_value() (src/typer/stmt/dispatch.rs), From-converting
+  X->E into the enclosing Result with R1/R3 diagnostics. Implicit propagation: bare
+  fallible binds (v is f()) desugar to f() ? $ !! err, gated to fallible-capable fns
+  (R4: main excluded), real calls only (not variant ctors), unannotated binds.
+
+
+  Parser: statement + bind `?`/`!`/`!!` now route through the pratt quaternary (parse_stmt_handler_arms);
+  deleted legacy finish_bare_handler_chain/finish_bare_bangbang and the bind handler-chain/guard
+  desugarings; fixed nested boolean ternary inside arms.
+
+
+  Tests: tests/error_effects.rs +11 conformance tests (success/$ binding, fallback
+  value, err-value binding, explicit !! err propagation, implicit Result/Option propagation,
+  Option success/empty arms, From-conversion, err-raise to Result, multiline arms).
+  Deprecated prefix-!-raise corpus marked #[ignore=task 2-4-7]. All conformance suites
+  pass; zero build warnings; no regressions (8 lib + 10 integration failures are pre-existing
+  on base).
+
+
+  Filed task 4: pre-existing Ok/Err ctor monomorphization-collision bug (multiple
+  Result instantiations resolve to the wrong mono enum), which blocks the multi-layer
+  From test (ignored under task 4) but is independent of 2-4-4 — the propagation lowering
+  itself is verified correct via MIR.'
 description: 'Lower `err X` raise to Err-return (From-convert to enclosing err type).
   Lower quaternary: typer decides ok/nothing/err arms by subject type (Result/Option).
   Bind `$` (success) and `err` (error value). Implicit propagation for unhandled fallible
