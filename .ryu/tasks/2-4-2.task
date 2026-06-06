@@ -1,12 +1,22 @@
 title: 'Lexer + parser: err-raise and `!!` token'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-4-1
 created_at: '2026-06-05T08:04:17'
-updated_at: '2026-06-05T08:04:17'
-result: ''
+updated_at: '2026-06-05T22:34:25'
+result: 'Lexer already tokenizes `!!`(BangBang) distinct from `!`(Bang). `err <expr>`
+  raise parses to Stmt::ErrReturn (parser/stmt/dispatch.rs). Removed the entire `?>`
+  propagation mechanism: Token::QuestionGt + its lexing, Expr::Propagate AST node
+  and all consumers (typer, resolve, driver/sources/implicit, parser/decl is_value),
+  the PendingPropagate struct + pending_propagates field + desugar_propagate + wrap_propagates
+  + QuestionGt postfix parsing, and simplified parse_block_items. Updated 2 diagnostic
+  strings that mentioned `?>`. Reverted a broken prior-session quaternary WIP in bind.rs
+  to the committed baseline so the tree compiles with zero warnings. Pre-marked 7
+  `?>`-pinning tests in tests/error_effects.rs #[ignore] with a pointer to task 2-4-7
+  for migration. Ternary parsing unaffected. The remaining suite failures are baseline-confirmed
+  pre-existing (incomplete `! E`/auto-wrap work) and tracked for 2-4-7.'
 description: 'Lexer: tokenize `!!` distinct from `!`. Parser: parse `err <Variant>`
   as a raise statement (distinct from `err <Enum>`+block declaration). Remove `?>`
   (Propagate) parsing + PendingPropagate machinery. Done: err-raise and !! lex/parse

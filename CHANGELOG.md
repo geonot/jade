@@ -1,4 +1,5 @@
 # Changelog
+- **[15]** (2026-06-06 05:34) task 2-4-2: remove ?> propagation; err-raise + !! lex/parse intact
 - **[11]** (2026-06-04 12:45) Implement Option/Result prelude combinator surfaces (task 2-2)
 
 Add full combinator method surfaces shared by typer+codegen for the canonical
