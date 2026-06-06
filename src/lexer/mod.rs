@@ -422,14 +422,7 @@ impl<'s> Lexer<'s> {
             }
             b'<' => Token::Lt,
             b'>' => Token::Gt,
-            b'?' => {
-                if self.pos + 1 < self.src.len() && self.src[self.pos + 1] == b'>' {
-                    self.advance();
-                    Token::QuestionGt
-                } else {
-                    Token::Question
-                }
-            }
+            b'?' => Token::Question,
             b'!' => {
                 if self.pos + 1 < self.src.len() && self.src[self.pos + 1] == b'!' {
                     self.advance();

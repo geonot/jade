@@ -345,6 +345,12 @@ impl Parser {
                 let target = self.parse_expr()?;
                 Ok(Stmt::Stop(target, sp))
             }
+            Token::Err => {
+                let sp = self.span();
+                self.advance();
+                let val = self.parse_pipeline()?;
+                Ok(Stmt::ErrReturn(val, sp))
+            }
             Token::Bang => {
                 let sp = self.span();
                 self.advance();

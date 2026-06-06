@@ -1,22 +1,9 @@
 use super::placeholder::{contains_placeholder, replace_placeholder};
 use super::{ParseError, Parser};
 use crate::ast::*;
-use crate::intern::Symbol;
 use crate::lexer::Token;
 
 impl Parser {
-    fn desugar_propagate(&mut self, inner: Expr, sp: Span) -> Expr {
-        let val_name: Symbol = self.gensym("__prop_v").into();
-        let err_name: Symbol = self.gensym("__prop_e").into();
-        self.pending_propagates.push(super::super::PendingPropagate {
-            subject: inner,
-            val_name,
-            err_name,
-            span: sp,
-        });
-        Expr::Ident(val_name, sp)
-    }
-
     pub(in crate::parser) fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
         let e = self.parse_pipeline()?;
         if self.check(Token::Question) {
@@ -309,11 +296,6 @@ impl Parser {
                     } else {
                         break;
                     }
-                }
-                Token::QuestionGt => {
-                    let sp = self.span();
-                    self.advance();
-                    e = self.desugar_propagate(e, sp);
                 }
                 Token::Of if matches!(e, Expr::Ident(_, _) | Expr::Lambda(..)) => {
                     let sp = self.span();

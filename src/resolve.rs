@@ -277,7 +277,6 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
             rewrite_expr(a, renames);
             rewrite_expr(b, renames);
         }
-        Expr::Propagate(e, _) => rewrite_expr(e, renames),
         Expr::NamedArg(_, e, _) => rewrite_expr(e, renames),
         Expr::AsFormat(e, _, _) => rewrite_expr(e, renames),
         Expr::Einsum(_, es, _) => {

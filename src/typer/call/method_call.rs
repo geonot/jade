@@ -913,6 +913,7 @@ impl Typer {
         self.variant_ctor(result_enum, "Ok", Some(value), span)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn auto_unwrap_result(&self, recv: hir::Expr, result_enum: Symbol) -> hir::Expr {
         let span = recv.span;
         let ok_tag = self.variant_tag_in(result_enum, "Ok");

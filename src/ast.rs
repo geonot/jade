@@ -262,7 +262,6 @@ pub enum Expr {
     Builder(Symbol, Vec<BuilderField>, Span),
     OfCall(Box<Expr>, Box<Expr>, Span),
     QualifiedIdent(Symbol, Symbol, Span),
-    Propagate(Box<Expr>, Span),
 }
 
 impl Expr {
@@ -324,8 +323,7 @@ impl Expr {
             | Self::Einsum(_, _, s)
             | Self::Builder(_, _, s)
             | Self::OfCall(_, _, s)
-            | Self::QualifiedIdent(_, _, s)
-            | Self::Propagate(_, s) => *s,
+            | Self::QualifiedIdent(_, _, s) => *s,
         }
     }
 }

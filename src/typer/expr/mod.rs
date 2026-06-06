@@ -123,12 +123,6 @@ impl Typer {
                 span: *span,
             }),
 
-            ast::Expr::Propagate(inner, span) => {
-                let _ = (inner, span);
-                Err(format!(
-                    "ICE: `?>` at {span:?} should have been desugared by the parser"
-                ))
-            }
             ast::Expr::Ident(..) => self.lower_expr_ident(expr, expected),
             ast::Expr::QualifiedIdent(..) => self.lower_expr_qualified_ident(expr, expected),
             ast::Expr::BinOp(..) => self.lower_expr_bin_op(expr, expected),

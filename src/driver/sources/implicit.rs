@@ -253,7 +253,6 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                     walk_expr(arg, modules, defs);
                 }
             }
-            Expr::Propagate(e, _) => walk_expr(e, modules, defs),
             Expr::OfCall(a, b, _) => {
                 walk_expr(a, modules, defs);
                 walk_expr(b, modules, defs);

@@ -1,0 +1,23 @@
+TASK 2-4: whole-hog rewrite of Jinn's error model. LOCKED design is in memory key 'error_model_design' and docs/error-effects.md (task 2-4-1 DONE, v14).
+
+MODEL: `err FileError`+indent = declare error enum (existing). `err NotFound` = RAISE (variant of err enum). QUATERNARY extends ternary `cond ? a ! b`: `e ? ok_arm ! nothing_arm !! err_arm`. `$`=unwrapped success value bound in `?` arm. `err`(keyword)=error value bound in `!!` arm; `!! err` propagates. DEFAULTS: bare `foo()` == `foo() ? $ !! err` (implicit propagate); `foo() !! 0` == `foo() ? $ !! 0`. `! E` signature annotation => Result of R,E (desugar_bang_ret added). Signatures fully inferred; returns/!E optional. Fallibility INFERRED. main unhandled err => nonzero exit + printed err. HARD MIGRATE off prefix-! raise and `! sentinel` ints. REMOVE `?>` operator.
+
+SUBTASKS (under 2-4, all high priority): 2-4-1 spec DONE. 2-4-2 lexer+parser err-raise/!! (lexer ALREADY tokenizes !!,?,!,$,?>). 2-4-3 quaternary parse. 2-4-4 typer lowering ($/err binding, propagation, fallibility infer). 2-4-5 checked R1-R6 + SCC fixpoint (src/typer/scc.rs) + From graph. 2-4-6 codegen. 2-4-7 migrate corpus + conformance tests/error_effects.rs. See task_notes on 2-4-4 for detailed gap analysis.
+
+EXISTING PARTIAL MACHINERY (prior sessions):
+- Lexer src/lexer/mod.rs:425-440: !! ? ! $ ?> all tokenized. token.rs has BangBang/Bang/Question/Dollar/QuestionGt.
+- Parser: parse_primary.rs:9 `err`->Expr::Ident("err"); :478 `$`->Expr::Placeholder. bind.rs:83-318 quaternary in bind path (only supports `!! VARIANT` propagate form). bind.rs:357 finish_bare_bangbang, :394 finish_bare_handler_chain (only `!! VARIANT`). dispatch.rs:348-359 Bang/BangBang stmt=ErrReturn; :418-424 bare-call handler-chain dispatch.
+- Typer: resolve.rs desugar_bang_ret (! E=>Result of R,E) + declare_fn_sig calls it. stmt/dispatch.rs try_wrap_err_return (From conv + missing-conversion diag "no conversion X->E"). call/method_call.rs: auto_wrap_ok, auto_unwrap_result, result_enum_of, ok_inner_ty_pub, mono_result, variant_ctor, enum_unwrap, variant_tag_in. stmt/block.rs tail auto-wrap Ok.
+- resolve.rs:158 rewrite_expr(expr, renames HashMap<Symbol,String>) for substituting idents. parser/mod.rs:71 gensym(prefix).
+
+GAPS TO IMPLEMENT (2-4-4 core):
+1. `!!` arm must accept arbitrary expr binding `err` to Err payload (not just `!! VARIANT`). Current only reads a variant ident. Redesign: parse `?`/`!`/`!!` arms as expressions/blocks; desugar to match Ok($v)=>rewrite $->$v in ok body, Err($e)=>rewrite err->$e in err body (bare `err` => propagate i.e. ErrReturn). Option: Some/Nothing.
+2. `$` and `err` rewriting to fresh bound names via rewrite_expr.
+3. Implicit propagation: bare unhandled fallible expr.
+CONFIRMED whole-hog, hard-migrate, remove ?>.
+
+CURRENT WORKING-TREE CHANGES (uncommitted, mine+prior, on top of HEAD 97ba0c1 task 2-3): resolve.rs(desugar_bang_ret), call/method_call.rs(helpers), stmt/block.rs(tail-wrap), stmt/dispatch.rs(missing-conv diag), tests/error_effects.rs(2 prior tests). A large UNRELATED refactor is in git stash@{0} — leave it.
+
+Test snippet /tmp/new1.jn: `read(true) ? log($) !! log(err)` currently fails 'Load of undefined variable err' — confirms parser quaternary parses but typer doesn't bind err/$.
+
+NEXT STEP: implement 2-4-2/2-4-3/2-4-4 — rewrite the quaternary parser desugaring in src/parser/stmt/bind.rs + dispatch.rs to produce match arms binding $ (ok payload) and err (err payload), supporting arbitrary arm expressions, with bare `err` in !! arm meaning propagate. Build: cargo build --release (zero warnings). Test: cargo test. Conformance: tests/error_effects.rs.
