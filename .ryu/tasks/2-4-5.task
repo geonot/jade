@@ -1,12 +1,16 @@
 title: 'Typer: checked R1-R6 + SCC error-set fixpoint + From graph'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-4-4
 created_at: '2026-06-05T08:04:17'
-updated_at: '2026-06-05T08:04:17'
-result: ''
+updated_at: '2026-06-07T20:04:17'
+result: 'Typer checked R1-R6 + From graph live: errset.rs has SCC-seeded fallibility
+  inference (fixed infinite-loop bug where explicit Result returns were re-wrapped
+  each iteration), check_error_soundness (R1/ambiguity), has_from_conversion/converts_into_union
+  (From graph w/ reflexivity). R3 implicit-propagation-in-non-fallible-fn now errors
+  (added current_fn_is_main flag; main exempt per R4). 27/27 error_effects tests green.'
 description: 'Implement R1 soundness (inferred subset-converts-to declared), R2 no-widening,
   R3 propagation well-formedness, R6 `!`/`err` consistency via From graph. SCC least-fixpoint
   error-set inference reusing src/typer/scc.rs over the call graph. From conversion

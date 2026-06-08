@@ -982,7 +982,7 @@ fn err_def_parse() {
 #[test]
 fn bang_return_basic() {
     expect(
-        "*check(x as i64) returns i64\n    if x < 0\n        ! -1\n    x * 2\n\n*main() returns i32\n    log(check(5))\n    log(check(-3))\n    0\n",
+        "*check(x as i64) returns i64\n    if x < 0\n        return -1\n    x * 2\n\n*main() returns i32\n    log(check(5))\n    log(check(-3))\n    0\n",
         "10\n-1",
     );
 }
@@ -2877,14 +2877,16 @@ err NetworkError
     defer
         log("cleanup")
     log("before")
-    ! -1
+    err Timeout
     log("after")
     0
 
 *main()
     do_it()
+        ? log($)
+        !! log("handled")
 "#;
-    expect(src, "before\ncleanup");
+    expect(src, "before\ncleanup\nhandled");
 }
 
 #[test]
@@ -2896,18 +2898,31 @@ err Net
 err Disk
     NotFound
 
-*op(x as i64) returns i64 ! Net ! Disk
+err Both
+    N(Net)
+    D(Disk)
+
+impl From of Net for Both
+    *from(e as Net) returns Both
+        N(e)
+
+impl From of Disk for Both
+    *from(e as Disk) returns Both
+        D(e)
+
+*op(x as i64) returns i64 ! Both
     if x is 1
-        ! -1
+        err Timeout
     if x is 2
-        ! -2
+        err NotFound
     x
 
 *main()
     op(0)
-    log(99)
+        ? log($)
+        !! log(-1)
 "#;
-    expect(src, "99");
+    expect(src, "0");
 }
 
 #[test]
@@ -2940,7 +2955,7 @@ fn defer_block_with_multiple_stmts() {
 #[test]
 fn try_option_some() {
     expect(
-        "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    42\n\n*main()\n    log(do_thing())\n",
+        "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    42\n\n*main()\n    do_thing() ? log($) !! log(-1)\n",
         "42",
     );
 }
@@ -2948,7 +2963,7 @@ fn try_option_some() {
 #[test]
 fn try_option_nothing() {
     expect(
-        "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    ! -1\n    0\n\n*main()\n    log(do_thing())\n",
+        "err Fail\n    Bad\n\n*do_thing() returns i64 ! Fail\n    err Bad\n    0\n\n*main()\n    do_thing() ? log($) !! log(-1)\n",
         "-1",
     );
 }
@@ -2956,7 +2971,7 @@ fn try_option_nothing() {
 #[test]
 fn try_result_ok() {
     expect(
-        "err E\n    Boom\n\n*do_thing() returns i64 ! E\n    20\n\n*main()\n    log(do_thing())\n",
+        "err E\n    Boom\n\n*do_thing() returns i64 ! E\n    20\n\n*main()\n    do_thing() ? log($) !! log(-1)\n",
         "20",
     );
 }
@@ -2964,7 +2979,7 @@ fn try_result_ok() {
 #[test]
 fn try_result_err() {
     expect(
-        "err E\n    Boom\n\n*do_thing() returns i64 ! E\n    ! 99\n    0\n\n*main()\n    log(do_thing())\n",
+        "err E\n    Boom\n\n*do_thing() returns i64 ! E\n    err Boom\n    0\n\n*main()\n    do_thing() ? log($) !! log(99)\n",
         "99",
     );
 }
@@ -2972,21 +2987,20 @@ fn try_result_err() {
 #[test]
 fn err_enum_as_return_type_ok_branch() {
     let src = r#"
-err Outcome
-    Ok(i64)
+err Compute
     Bad
 
-*compute(x as i64) returns Outcome
+*compute(x as i64) returns i64 ! Compute
     if x is 0
-        ! Bad
-    Ok(x + 1)
+        err Bad
+    x + 1
 
 *main()
     r is compute(41)
     match r
         Ok(v) ?
             log(v)
-        Bad ?
+        Err(e) ?
             log(-1)
 "#;
     expect(src, "42");
@@ -2995,21 +3009,20 @@ err Outcome
 #[test]
 fn err_enum_as_return_type_err_branch() {
     let src = r#"
-err Outcome
-    Ok(i64)
+err Compute
     Bad
 
-*compute(x as i64) returns Outcome
+*compute(x as i64) returns i64 ! Compute
     if x is 0
-        ! Bad
-    Ok(x + 1)
+        err Bad
+    x + 1
 
 *main()
     r is compute(0)
     match r
         Ok(v) ?
             log(v)
-        Bad ?
+        Err(e) ?
             log(-1)
 "#;
     expect(src, "-1");
@@ -3021,8 +3034,11 @@ fn err_return_to_incompatible_t_rejected() {
 err Fail
     Bad
 
+err Other
+    Nope
+
 *do_thing() returns i64 ! Fail
-    ! Bad
+    err Nope
     0
 
 *main()
@@ -3052,23 +3068,22 @@ fn defer_in_nested_block_runs_at_function_exit() {
 #[test]
 fn defer_runs_on_err_branch_of_err_enum_return() {
     let src = r#"
-err Outcome
-    Ok(i64)
+err Compute
     Bad
 
-*compute(x as i64) returns Outcome
+*compute(x as i64) returns i64 ! Compute
     defer
         log("cleanup")
     if x is 0
-        ! Bad
-    Ok(x)
+        err Bad
+    x
 
 *main()
     r is compute(0)
     match r
         Ok(v) ?
             log(v)
-        Bad ?
+        Err(e) ?
             log(-1)
 "#;
     expect(src, "cleanup\n-1");
@@ -3084,7 +3099,7 @@ err Outcome
 
 *compute(x as i64) returns Outcome
     if x is 0
-        ! Bad
+        err Bad
     Ok(x + 1)
 
 *caller(x as i64) returns Outcome
@@ -3112,7 +3127,7 @@ err Outcome
 
 *compute(x as i64) returns Outcome
     if x is 0
-        ! Bad
+        err Bad
     Ok(x + 1)
 
 *caller(x as i64) returns Outcome
@@ -3140,7 +3155,7 @@ err Outcome
 
 *compute(x as i64) returns Outcome
     if x is 0
-        ! Bad
+        err Bad
     Ok(x + 1)
 
 *main()
@@ -3159,7 +3174,7 @@ err Outcome
 
 *compute(x as i64) returns Outcome
     if x is 0
-        ! Bad
+        err Bad
     Ok(x + 1)
 
 *main()
@@ -3178,7 +3193,7 @@ err Outcome
 
 *compute(x as i64) returns Outcome
     if x is 0
-        ! Bad
+        err Bad
     Ok(x + 1)
 
 *main()
@@ -3237,7 +3252,7 @@ err Outcome
 
 *compute(x as i64) returns Outcome
     if x is 0
-        ! Bad
+        err Bad
     Ok(x + 1)
 
 *main()
@@ -3294,7 +3309,7 @@ err E2
     Bad2
 
 *do_thing() returns i64 ! E1
-    ! Bad2
+    err Bad2
     0
 
 *main()
@@ -3310,14 +3325,13 @@ err E2
 #[test]
 fn err_annotation_can_list_used_variant() {
     let src = r#"
-err Outcome
-    Ok(i64)
-    Bad
+err Bad
+    Oops
 
-*do_thing(x as i64) returns Outcome ! Outcome
+*do_thing(x as i64) returns i64 ! Bad
     if x is 0
-        ! Bad
-    Ok(x + 1)
+        err Oops
+    x + 1
 
 *main()
     r is do_thing(5)
@@ -3629,7 +3643,9 @@ err Fail
     a + b
 
 *main()
-    log(run())
+    run()
+        ? log($)
+        !! log(-1)
 "#,
         "30",
     );
@@ -3643,7 +3659,7 @@ err Fail
     Bad
 
 *fail() returns i64 ! Fail
-    ! -1
+    err Bad
     0
 
 *should_not_run() returns i64 ! Fail
@@ -3652,13 +3668,13 @@ err Fail
 
 *run() returns i64 ! Fail
     a is fail()
-    if a equals -1
-        ! -1
     b is should_not_run()
     a + b
 
 *main()
-    log(run())
+    run()
+        ? log($)
+        !! log(-1)
 "#,
         "-1",
     );
@@ -3673,7 +3689,7 @@ err Fail
 
 *level_c(x as i64) returns i64 ! Fail
     if x < 0
-        ! -1
+        err Bad
     x * 2
 
 *level_b(x as i64) returns i64 ! Fail
@@ -3685,10 +3701,14 @@ err Fail
     v + 1
 
 *main()
-    log(level_a(5))
-    log(level_a(-1))
+    level_a(5)
+        ? log($)
+        !! log(-1)
+    level_a(-1)
+        ? log($)
+        !! log(-1)
 "#,
-        "111\n100",
+        "111\n-1",
     );
 }
 
@@ -3699,7 +3719,7 @@ fn bang_return_in_loop() {
 *find_first(n as i64) returns i64
     for i in n
         if i equals 3
-            ! i
+            return i
     -1
 
 *main()
@@ -3716,7 +3736,7 @@ fn bang_return_nested_calls() {
         r#"
 *check(x as i64) returns i64
     if x > 10
-        ! x
+        return x
     0
 
 *main()

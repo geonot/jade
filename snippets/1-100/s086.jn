@@ -1,6 +1,6 @@
-*lookup k as String
+*lookup k as String returns i64
     if k equals 'missing'
-        ! -1
+        return -1
     42
 
 *main

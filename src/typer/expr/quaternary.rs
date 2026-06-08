@@ -14,7 +14,7 @@ impl Typer {
         expected: Option<&Type>,
     ) -> Result<Option<hir::Expr>, String> {
         let snapshot = self.lower_expr(cond)?;
-        let ty = self.infer_ctx.resolve(&snapshot.ty);
+        let ty = self.infer_ctx.shallow_resolve(&snapshot.ty);
         let (is_option, is_result) = match &ty {
             Type::Enum(n) => {
                 let s = n.as_str();
@@ -55,10 +55,7 @@ impl Typer {
         &mut self,
         value: hir::Expr,
     ) -> Result<Option<hir::Expr>, String> {
-        if !self.enclosing_fn_is_fallible() {
-            return Ok(None);
-        }
-        let ty = self.infer_ctx.resolve(&value.ty);
+        let ty = self.infer_ctx.shallow_resolve(&value.ty);
         let is_fallible = match &ty {
             Type::Enum(n) => {
                 let s = n.as_str();
@@ -79,6 +76,15 @@ impl Typer {
         ) {
             return Ok(None);
         }
+        if !self.enclosing_fn_is_fallible() {
+            if self.current_fn_is_main {
+                return Ok(None);
+            }
+            return Err(format!(
+                "error propagation at {:?} is only valid inside a function whose result type is a `Result`/`Option`: the value here is fallible (`{}`) and bare use propagates its error, but the enclosing function is not fallible. Declare its error union with `! E` (e.g. `returns T ! E`), or handle the value with `? $ !! ...`.",
+                value.span, ty
+            ));
+        }
         let span = value.span;
         let r = self.build_quaternary(value, None, None, None, span, None)?;
         Ok(Some(r))
@@ -88,7 +94,7 @@ impl Typer {
         let Some(ret) = self.current_fn_ret_ty.clone() else {
             return false;
         };
-        let resolved = self.infer_ctx.resolve(&ret);
+        let resolved = self.infer_ctx.shallow_resolve(&ret);
         match &resolved {
             Type::Enum(n) => {
                 let s = n.as_str();
@@ -124,7 +130,7 @@ impl Typer {
         span: ast::Span,
         expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
-        let subj_ty = self.infer_ctx.resolve(&hsubj.ty);
+        let subj_ty = self.infer_ctx.shallow_resolve(&hsubj.ty);
 
         let enum_name = match &subj_ty {
             Type::Enum(n) => Some(*n),
@@ -409,7 +415,7 @@ impl Typer {
         span: ast::Span,
     ) -> Result<hir::Expr, String> {
         let ret_ty = self.current_fn_ret_ty.clone().unwrap_or(Type::Void);
-        let resolved = self.infer_ctx.resolve(&ret_ty);
+        let resolved = self.infer_ctx.shallow_resolve(&ret_ty);
         let opt_enum = match &resolved {
             Type::Enum(n) if n.as_str().starts_with("Option_") || n.as_str() == "Option" => {
                 Some(*n)

@@ -33,6 +33,7 @@ pub(crate) struct DeferredField {
     pub(crate) span: Span,
 }
 
+mod errset;
 mod mono;
 mod resolve;
 pub(crate) mod unify;
@@ -112,10 +113,13 @@ pub struct Typer {
     pub(crate) externs: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
 
     pub(crate) current_fn_ret_ty: Option<Type>,
+    pub(crate) current_fn_is_main: bool,
 
     pub(crate) current_fn_error_types: std::collections::BTreeSet<Symbol>,
 
     pub(crate) current_fn_declared_errors: Vec<Symbol>,
+
+    pub(crate) last_inferred_errors: std::collections::BTreeSet<Symbol>,
 
     pub(crate) escape_tiers: std::collections::HashMap<DefId, crate::escape::Tier>,
 
@@ -195,8 +199,10 @@ impl Typer {
             modules: std::collections::HashSet::new(),
             externs: IndexMap::new(),
             current_fn_ret_ty: None,
+            current_fn_is_main: false,
             current_fn_error_types: std::collections::BTreeSet::new(),
             current_fn_declared_errors: Vec::new(),
+            last_inferred_errors: std::collections::BTreeSet::new(),
             escape_tiers: std::collections::HashMap::new(),
             dollar_stack: Vec::new(),
         }

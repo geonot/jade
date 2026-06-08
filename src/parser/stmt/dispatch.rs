@@ -351,12 +351,9 @@ impl Parser {
                 let val = self.parse_pipeline()?;
                 Ok(Stmt::ErrReturn(val, sp))
             }
-            Token::Bang => {
-                let sp = self.span();
-                self.advance();
-                let val = self.parse_expr()?;
-                Ok(Stmt::ErrReturn(val, sp))
-            }
+            Token::Bang => Err(self.error(
+                "prefix `!` raise has been removed; raise an error with `err <Variant>` (docs/error-effects.md §3)",
+            )),
             Token::BangBang => {
                 let sp = self.span();
                 self.advance();

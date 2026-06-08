@@ -14,6 +14,19 @@ impl Typer {
         self.lower_block_no_scope_with_tail(block, ret_ty, None)
     }
 
+    fn is_result_variant_expr(e: &ast::Expr) -> bool {
+        let name = match e {
+            ast::Expr::Call(callee, _, _) => match callee.as_ref() {
+                ast::Expr::Ident(n, _) => n.as_str(),
+                _ => return false,
+            },
+            ast::Expr::Struct(n, _, _) => n.as_str(),
+            ast::Expr::Ident(n, _) => n.as_str(),
+            _ => return false,
+        };
+        matches!(name.as_str(), "Ok" | "Err" | "Some" | "Nothing")
+    }
+
     pub(crate) fn lower_block_no_scope_with_tail(
         &mut self,
         block: &ast::Block,
@@ -26,10 +39,15 @@ impl Typer {
         for (idx, s) in block.iter().enumerate() {
             if idx == block_len - 1
                 && let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s) {
-                    let resolved_expected = self.infer_ctx.resolve(expected);
+                    let resolved_expected = self.infer_ctx.shallow_resolve(expected);
                     if let Some(result_enum) = self.result_enum_of(&resolved_expected) {
-                        let ok_inner = self.ok_inner_ty_pub(result_enum);
-                        let he = self.lower_expr_expected(e, Some(&ok_inner))?;
+                        let result_ty = Type::Enum(result_enum);
+                        let he = if Self::is_result_variant_expr(e) {
+                            self.lower_expr_expected(e, Some(&result_ty))?
+                        } else {
+                            let ok_inner = self.ok_inner_ty_pub(result_enum);
+                            self.lower_expr_expected(e, Some(&ok_inner))?
+                        };
                         let val_ty = self.infer_ctx.resolve(&he.ty);
                         let he = if self.result_enum_of(&val_ty).is_some() {
                             he

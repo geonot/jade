@@ -1336,14 +1336,14 @@ fn b_err_def() {
 #[test]
 fn b_bang_return() {
     expect(
-        "*check(x as i64) returns i64\n    if x < 0\n        ! -1\n    x * 2\n\n*main() returns i32\n    log(check(5))\n    log(check(-3))\n    0\n",
+        "*check(x as i64) returns i64\n    if x < 0\n        return -1\n    x * 2\n\n*main() returns i32\n    log(check(5))\n    log(check(-3))\n    0\n",
         "10\n-1",
     );
 }
 #[test]
 fn b_err_safe_div() {
     expect(
-        "err MathError\n    DivZero\n    Overflow\n\n*safe_div(a as i64, b as i64) returns i64\n    if b equals 0\n        ! 0\n    a / b\n\n*main()\n    log(safe_div(10, 2))\n",
+        "err MathError\n    DivZero\n    Overflow\n\n*safe_div(a as i64, b as i64) returns i64 ! MathError\n    if b equals 0\n        err DivZero\n    a / b\n\n*main()\n    safe_div(10, 2) ? log($) !! log(-1)\n",
         "5",
     );
 }

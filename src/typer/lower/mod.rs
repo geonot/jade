@@ -302,6 +302,8 @@ impl Typer {
         let fn_lookup: std::collections::HashMap<Symbol, &ast::Fn> =
             non_generic_fns.iter().map(|f| (f.name, *f)).collect();
 
+        self.seed_inferred_fallibility(&non_generic_fns);
+
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {
             if scc.len() > 1 {

@@ -330,6 +330,8 @@ impl Typer {
             });
         }
         let prev_fn_ret = self.current_fn_ret_ty.replace(ret.clone());
+        let prev_is_main = self.current_fn_is_main;
+        self.current_fn_is_main = f.name.as_str() == "main";
 
         let prev_inferred = std::mem::take(&mut self.current_fn_error_types);
         let prev_declared = std::mem::take(&mut self.current_fn_declared_errors);
@@ -363,18 +365,32 @@ impl Typer {
         let mut body = self.lower_block_no_scope_with_tail(&f.body, &ret, Some(&ret))?;
         self.finalize_block_drops(&mut body);
 
+        let inferred_err: Vec<Symbol> = self.current_fn_error_types.iter().cloned().collect();
+        self.last_inferred_errors = self.current_fn_error_types.clone();
+        if !declared_err_names.is_empty() {
+            self.check_error_soundness(
+                f.name,
+                &inferred_err,
+                &declared_err_names,
+                f.span,
+            )?;
+        }
+
         let mut error_types: Vec<Type> = Vec::new();
         let mut seen: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
-        for n in declared_err_names
-            .into_iter()
-            .chain(self.current_fn_error_types.iter().cloned())
-        {
+        let visible: Vec<Symbol> = if declared_err_names.is_empty() {
+            inferred_err.clone()
+        } else {
+            declared_err_names.clone()
+        };
+        for n in visible {
             if seen.insert(n) {
                 error_types.push(Type::Enum(n));
             }
         }
 
         self.current_fn_ret_ty = prev_fn_ret;
+        self.current_fn_is_main = prev_is_main;
         self.current_fn_error_types = prev_inferred;
         self.current_fn_declared_errors = prev_declared;
         self.pop_scope();
