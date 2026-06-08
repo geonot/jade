@@ -113,6 +113,55 @@ fn channel_receive_drains_buffer() {
     );
 }
 
+/// `send` is an expression yielding a `bool`: `true` when the value was
+/// delivered, `false` when the channel was closed and the value dropped. A
+/// send to an open channel reports `true`; after `close`, every send reports
+/// `false` (and drops the value, so a subsequent drain sees nothing new).
+#[test]
+fn send_after_close_is_observable() {
+    expect(
+        "\
+*main
+    ch is channel of i64(8)
+    before is send ch, 1
+    close ch
+    after is send ch, 2
+    if before
+        log(\"open:delivered\")
+    else
+        log(\"open:dropped\")
+    if after
+        log(\"closed:delivered\")
+    else
+        log(\"closed:dropped\")
+    drained is 0
+    for i in 0 to 4
+        v is receive ch
+        drained is drained + v
+    log(drained)
+",
+        "open:delivered\nclosed:dropped\n1",
+    );
+}
+
+/// A bare `send` statement remains fire-and-forget: its boolean result may be
+/// ignored without ceremony, including after the channel is closed.
+#[test]
+fn bare_send_ignores_result() {
+    expect(
+        "\
+*main
+    ch is channel of i64(4)
+    send ch, 7
+    close ch
+    send ch, 99
+    v is receive ch
+    log(v)
+",
+        "7",
+    );
+}
+
 // ── Actor shutdown ──────────────────────────────────────────────────────
 
 /// A message actor: `*main` enqueues messages, then `stop`s the actor (closes

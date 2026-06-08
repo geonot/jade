@@ -1,11 +1,16 @@
 title: Implement observable send-after-close behavior
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
-result: ''
+updated_at: '2026-06-07T20:12:32'
+result: 'Made send-after-close observable. jinn_chan_send now returns int (1=delivered,
+  0=closed/dropped); codegen exposes it as a bool. `send ch, v` / `ch.send(v)` now
+  type as bool: bind it (`ok is send ch, v`) to observe delivery, ignore it for fire-and-forget
+  (actor async-sends unchanged). Docs (concurrency.md) updated: ops table, closed-channel
+  semantics, sharp-edge #4, testing table. Added conformance tests send_after_close_is_observable
+  + bare_send_ignores_result. Full suite green, zero warnings.'
 description: Make sends after channel close produce a defined, observable error/result
   rather than silent loss or panic. Depends on concurrency model. Done when behavior
   is documented and tested.

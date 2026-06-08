@@ -84,17 +84,22 @@ close ch                    # mark the channel closed
 
 | Operation        | Runtime symbol        | Blocking behaviour                                              |
 | ---------------- | --------------------- | -------------------------------------------------------------- |
-| `send ch, v`     | `jinn_chan_send`      | Parks while full. **Silently drops `v` if the channel is closed.** |
+| `send ch, v`     | `jinn_chan_send`      | Parks while full. **Yields `false` and drops `v` if the channel is closed; `true` once delivered.** |
 | `receive ch`     | `jinn_chan_recv`      | Parks while empty. Drains buffered values even after close.     |
 | `close ch`       | `jinn_chan_close`     | Idempotent; sets the closed flag and wakes all parked waiters.  |
 
 The two closed-channel behaviours are deliberate and load-bearing for
 clean shutdown:
 
-1. **Send after close is a silent no-op.** Once a channel is closed,
-   `jinn_chan_send` returns without enqueuing. No panic, no error — the
-   value is dropped. Producers therefore do not need to coordinate with
-   the close; they simply stop having effect.
+1. **Send after close is observable, never fatal.** `send` is an
+   expression that yields a `bool`: `true` when the value was enqueued,
+   `false` when the channel was already closed and the value was dropped.
+   There is no panic and no lost-value ambiguity — a producer can branch
+   on the result to learn that the consumer is gone. Used as a bare
+   statement (`send ch, v`), the boolean is simply ignored, so
+   fire-and-forget producers — including actor async-sends — need no
+   ceremony and keep their old, never-throws behaviour. Once a channel is
+   closed, every `send` reports `false` and has no effect.
 2. **Receive drains, then signals end-of-stream.** `jinn_chan_recv`
    keeps returning buffered values until the buffer is empty, and only
    *then* — when the channel is both empty and closed — does it report
@@ -201,9 +206,13 @@ but they are the things that bite.
    producers/consumers), `active_coros` never decrements and `*main`
    hangs at `jinn_sched_run`. Close channels you are done with, and make
    sure some non-daemon coroutine can always make progress.
-4. **Send after close is silent.** Sending to a closed channel (or a
-   stopped actor) drops the value with no diagnostic. Treat `close`/`stop`
-   as a one-way valve: once shut, producers have no effect.
+4. **Send after close drops the value — but tells you.** Sending to a
+   closed channel (or a stopped actor) drops the value and the `send`
+   expression yields `false`. Treat `close`/`stop` as a one-way valve:
+   once shut, producers have no effect. Fire-and-forget sends (bare
+   `send` statements, actor async-sends) ignore the result and never
+   fail; if you need to know whether your value landed, bind the result
+   (`delivered is send ch, v`) and branch on it.
 
 ## Testing
 
@@ -216,6 +225,8 @@ real Jinn program through `jinnc`, in
 | `channel_fifo_roundtrip`            | `send`/`receive` preserve FIFO order and lose nothing.                  |
 | `channel_capacity_one_interleaved`  | A capacity-1 channel forces strict ping-pong without loss.              |
 | `channel_receive_drains_buffer`     | Every value enqueued before `close` is still delivered by `receive`.    |
+| `send_after_close_is_observable`    | `send` yields `true` on an open channel and `false` after `close`.      |
+| `bare_send_ignores_result`          | A bare `send` statement stays fire-and-forget, even after `close`.      |
 | `actor_processes_then_stops`        | After `stop`, the program joins its workers and exits 0 — no hang.      |
 | `actor_without_stop_still_exits`    | A daemon actor parked on `receive` does not block program exit.         |
 

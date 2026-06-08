@@ -165,9 +165,19 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(fv) = self.module.get_function("jinn_chan_send") {
             let alloca = self.entry_alloca(v.get_type(), "send.tmp");
             b!(self.bld.build_store(alloca, v));
-            b!(self.bld.build_call(fv, &[ch_val.into(), alloca.into()], ""));
+            let csv = b!(self
+                .bld
+                .build_call(fv, &[ch_val.into(), alloca.into()], "send.res"));
+            let res = self.call_result(csv).into_int_value();
+            let delivered = b!(self.bld.build_int_truncate(
+                res,
+                self.ctx.bool_type(),
+                "send.delivered"
+            ));
+            Ok(delivered.into())
+        } else {
+            Ok(self.ctx.bool_type().const_int(1, false).into())
         }
-        Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
     pub(in crate::codegen) fn emit_chan_recv(

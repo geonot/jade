@@ -133,14 +133,14 @@ void jinn_chan_close(jinn_chan_t *ch) {
     /* Wake non-coroutine thread waiters */
 }
 
-void jinn_chan_send(jinn_chan_t *ch, const void *data) {
+int jinn_chan_send(jinn_chan_t *ch, const void *data) {
     for (;;) {
         chan_lock(ch);
 
         /* Check for close */
         if (atomic_load(&ch->closed)) {
             chan_unlock(ch);
-            return;
+            return 0;
         }
 
         uint64_t head = atomic_load_explicit(&ch->head, memory_order_acquire);
@@ -162,7 +162,7 @@ void jinn_chan_send(jinn_chan_t *ch, const void *data) {
             } else {
                 chan_unlock(ch);
             }
-            return;
+            return 1;
         }
 
         /* Buffer full — park this coroutine */

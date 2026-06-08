@@ -205,7 +205,7 @@ struct jinn_chan {
 };
 
 jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity);
-void        jinn_chan_send(jinn_chan_t *ch, const void *data);
+int         jinn_chan_send(jinn_chan_t *ch, const void *data);
 int         jinn_chan_recv(jinn_chan_t *ch, void *data_out);
 int         jinn_chan_try_recv(jinn_chan_t *ch, void *data_out);
 void        jinn_chan_close(jinn_chan_t *ch);

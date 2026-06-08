@@ -109,7 +109,7 @@ impl Typer {
                     self.enforce_cross_thread_safe(&resolved_elem, span, "channel .send()")?;
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::ChannelSend(Box::new(hobj), Box::new(hval)),
-                        ty: Type::Void,
+                        ty: Type::Bool,
                         span,
                     });
                 }

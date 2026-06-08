@@ -507,7 +507,7 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jinn_chan_destroy", void.fn_type(&[ptr.into()], false));
         decl!(
             "jinn_chan_send",
-            void.fn_type(&[ptr.into(), ptr.into()], false)
+            i32t.fn_type(&[ptr.into(), ptr.into()], false)
         );
         decl!(
             "jinn_chan_recv",
