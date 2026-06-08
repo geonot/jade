@@ -1,4 +1,5 @@
 # Changelog
+- **[22]** (2026-06-08 03:04) Complete checked error model: err-raise/quaternary/propagation end-to-end; fix fallibility-inference infinite loop, Ok/Err mono collision (task 4), R3 non-fallible propagation; migrate corpus off prefix-! and ?>
 - **[19]** (2026-06-06 07:29) task 2-4-4: typer quaternary lowering + fallibility inference
 
 Lower Expr::Quaternary (and !!-less Ternary over Result/Option) to a Block
