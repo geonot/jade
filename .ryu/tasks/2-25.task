@@ -1,11 +1,13 @@
 title: 'Fix generator IR: return type mismatch (P0-3: invalid LLVM IR)'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T03:27:28'
-updated_at: '2026-06-10T03:27:28'
-result: ''
+updated_at: '2026-06-10T03:46:32'
+result: 'P0-3 verified fixed: generator probe (p31) compiles with no LLVM verifier
+  error and yields 0..4 correctly. Pinned via alpha_audit_generator_compiles_and_runs
+  asserting exact stdout ''0\n1\n2\n3\n4\n''.'
 description: 'The compiler emits LLVM IR that fails LLVM''s own verifier for generator/yield
   lowering. The generator function declares `ptr` return type but emits `ret i64 0`.
   Reproducer: `review/probes2/p31_generator.jn`. Root cause: inconsistent return type
