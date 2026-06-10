@@ -1,12 +1,17 @@
 title: Add MIR internal verifier (P0-7)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-25
 created_at: '2026-06-10T03:27:36'
-updated_at: '2026-06-10T03:27:36'
-result: ''
+updated_at: '2026-06-10T03:47:05'
+result: 'P0-7 verified implemented: src/mir/verify.rs enforces block/terminator/dominance/operand/ret-type/phi
+  invariants; wired into driver/mod.rs and driver/pipeline.rs post-lowering and post-Perceus.
+  Added 11 hand-crafted broken-MIR unit tests (undefined value, ret-type mismatch,
+  return-void from non-void, missing block, duplicate blocks, bad entry, multiply-defined
+  value, phi from non-predecessor, non-truthy branch cond, fn-name in program errors,
+  well-formed accept). All pass.'
 description: 'Add a MIR verifier that runs after lowering and after each Perceus pass.
   Invariants to enforce: every block has a terminator; every used value has a dominating
   definition; operand types match operator signature (no pointer operand to integer
