@@ -1,0 +1,1 @@
+{"ts": "2026-06-10T10:35:31+00:00", "note": "Review P0-2 RE-VERIFIED 2026-06-10: fixed. `v is [10,20]; log(v[5])` -> rc=134 'runtime error: vec index out of bounds' (clean diagnostic, no SIGSEGV). Existing test expect_runtime_fail(\"runtime_bounds_fail.jn\") only asserts non-zero exit, not the message. Remediation = strengthen to assert diagnostic text on stderr."}

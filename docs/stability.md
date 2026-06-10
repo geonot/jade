@@ -45,8 +45,8 @@ An **experimental** surface may change or be removed without notice. It is not
 covered by the compatibility guarantees above.
 
 - **Language:** features that are partially implemented or behind active design
-  (for example, `try`/`rescue` exception handling, which currently has no
-  lexer/parser/HIR support).
+  (for example, actor-supervision error propagation, which is specified in
+  `docs/error-effects.md` §8 but depends on the structured-concurrency design).
 - **Standard library:** any module **not** in the alpha-stable subset. These are
   tracked in the `EXPERIMENTAL` list in
   [`tests/std_stable_subset.rs`](../tests/std_stable_subset.rs) with a written

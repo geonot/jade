@@ -1,0 +1,16 @@
+title: Keywords shadow method names after Dot (P0-10)
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T03:27:57'
+updated_at: '2026-06-10T03:27:57'
+result: ''
+description: 'Method calls like `.send()`, `.close()`, `.count()`, `.query()`, `.set()`,
+  `.insert()`, `.delete()` fail to parse because the lexer promotes those keywords
+  unconditionally even after a `.`. Fix: in the lexer/parser, do not emit keyword
+  tokens after a Dot — treat them as identifiers in that position. Audit all affected
+  identifiers: send, close, count, query, view, set, insert, delete, and any others
+  that appear as builtin method names. Add conformance tests: `ch.send(v)`, `ch.close()`,
+  `store.query(...)` etc. must all parse. (review/14_findings.md P0-10, review/15_roadmap.md
+  A.5)'

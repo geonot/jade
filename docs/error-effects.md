@@ -1,11 +1,22 @@
 # Checked error-effect system
 
-Status: implemented end-to-end (tasks 2-2, 2-4-1..2-4-7). §2 prelude, §3
-`err`-raise, §4 quaternary, §5 propagation/inference with checked declarations
-(R1-R6), §6 `From`-conversion, codegen, and SCC error-set fixpoint are live.
-The deprecated prefix-`!` raise and `?>` operator have been removed and the
-corpus migrated to `err <Variant>` raises and implicit propagation /
-quaternary handling. (P1, JINN_LANGUAGE_REVIEW_2026_06 §4.5)
+**Status: fully implemented and conformance-tested (2026-06).**
+All subsystems are live end-to-end:
+- §2 canonical `Option`/`Result` prelude with combinator surfaces
+- §3 `err` declaration + raise
+- §4 quaternary `e ? ok ! nothing !! err` with `$` / `err` bindings
+- §5 implicit propagation, inferred fallibility (SCC least-fixpoint), checked R1-R6
+- §6 `From` conversion graph (C1-C4)
+- Codegen: quaternary lowering, err-raise early-return, auto-wrap/unwrap, defer on error exits
+
+The deprecated prefix-`!` raise and `?>` operator are removed; the full corpus
+is migrated to `err <Variant>` + implicit propagation / quaternary.
+27/27 `tests/error_effects.rs` conformance tests pass; full cargo test suite green.
+
+Actor-supervision integration (§8, error propagation to supervision boundary)
+depends on structured concurrency (task 2-5) and is not yet implemented.
+
+*(Tracked: P1 item in JINN_LANGUAGE_REVIEW_2026_06 §4.5, resolved 2026-06)*
 
 This document specifies Jinn's error model: a canonical `Option`/`Result`
 prelude, error declarations and raising with `err`, a *quaternary* expression

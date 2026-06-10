@@ -64,10 +64,11 @@ delivers Rust-like determinism without lifetime syntax, and a test suite of
 example applications.
 
 What holds it back is not sloppiness — it is **incompleteness in exactly the
-places that are hardest to add later**: bounded polymorphism, a real error-effect
-system, structured concurrency, and string/Unicode semantics. These are
-load-bearing design decisions, not bug fixes, and they should be settled before
-1.0 freezes the surface.
+places that are hardest to add later**: bounded polymorphism, structured
+concurrency, and string/Unicode semantics. These are load-bearing design
+decisions, not bug fixes, and they should be settled before 1.0 freezes the
+surface. *(The error-effect system, previously the most glaring gap, is now
+fully implemented — see §4.5.)*
 
 | Dimension | Grade | One-line justification |
 |---|---|---|
@@ -75,7 +76,7 @@ load-bearing design decisions, not bug fixes, and they should be settled before
 | Type system core | **B+** | Solid HM inference; **no traits/bounds** is a structural hole |
 | Memory model | **A−** | Novel, principled, well-documented; needs more adversarial testing |
 | Concurrency model | **B+** | Honest, tested contract; lacks structured concurrency / actor join |
-| Error handling | **C+** | Values-as-errors is fine; the effect system is declared but shallow |
+| Error handling | **B+** | Canonical prelude, quaternary, checked R1-R6 + From graph fully implemented |
 | Persistent stores | **A−** (concept) / **B−** (maturity) | A real differentiator; query language is narrow |
 | Compiler implementation | **A−** | Disciplined IR, SSA, Perceus; codegen is large and recently churned |
 | Runtime | **B+** | Compact, TSan-tested scheduler; sharp edges documented honestly |
@@ -403,42 +404,64 @@ structured concurrency and the silent-drop footgun.
 
 ### 4.5 Error handling
 
-**The model.** Errors are ordinary values — no exceptions. You model errors with
-an enum, return them, and `match` at the call site. Sugar exists: `err E`
-declares an enum as an error type (documentation of intent, no semantic teeth);
-`!` is shorthand for early-return of an error; and a function may *declare* its
-error enums with a trailing `! E` (`*read(path) returns i64 ! FileError`).
+**Status: fully implemented (tasks 2-2, 2-4-1 through 2-4-7, 2026-06).**
 
-**Assessment.** Values-as-errors is the right modern default (Rust, Go, Zig all
-chose it; exceptions have fallen out of favour for systems work). But Jinn's
-implementation is **shallow where it counts**:
+**The model.** Errors are ordinary values — no exceptions, no unwinding. The
+system is end-to-end: canonical prelude types, structured error declarations,
+a quaternary expression that is the single recovery construct, implicit
+propagation with inferred fallibility, checked effect annotations, and
+trait-driven cross-layer conversion.
 
-1. **No `?`-style propagation operator with type-directed conversion.** Rust's
-   `?` (with `From` for error conversion) and Zig's `try` are the reason
-   values-as-errors is *ergonomic* rather than *tedious*. Jinn has `!` for early
-   return but, lacking a trait system (§4.2), it cannot do automatic error-type
-   conversion across layers. Every boundary must hand-convert. This will produce
-   verbose, match-heavy code in any non-trivial program.
-2. **The declared error set (`! FileError`) is not a checked effect.** Declaring
-   which errors a function returns is only valuable if the compiler *enforces*
-   that it returns no others and that callers handle them. The stability doc
-   confirms the related `try`/`rescue` machinery is **experimental with no
-   lexer/parser/HIR support** — i.e., the effect system is announced but not
-   yet real. Swift (typed `throws`), Zig (error unions in the type), and Rust
-   (`Result<T, E>` in the type) all make the error set part of the type and
-   check it. Jinn's `! E` is currently closer to a doc comment.
-3. **No built-in `Option`/`Result`.** Every program re-declares its own (the
-   tour shows a hand-rolled `enum Result`). Without a canonical, library-blessed
-   `Option`/`Result` and the combinators to go with them (`map`, `and_then`,
-   `unwrap_or`), the ecosystem will fragment into N incompatible result types.
+**What is live:**
 
-**Recommendations:** ship a canonical `Option of T` / `Result of T, E` in the
-prelude; add a propagation operator that *is* checked against the declared `! E`
-set; and turn `! E` into a real, enforced effect once the trait/conversion story
-lands (the two are coupled — conversion needs bounded polymorphism).
+1. **Canonical `Option of T` / `Result of T, E` in the prelude** with full
+   combinator surfaces (`map`, `and_then`, `unwrap_or`, `ok_or`, etc.) shared
+   as a single source of truth between the typer and codegen. No hand-rolling.
+2. **`err <Enum>` declaration + `err <Variant>` raise.** An enum is marked as
+   an error type, then raised by naming a variant after `err`. The two roles
+   are grammatically distinct (declaration has an indented block; raise does
+   not). `From` conversion is inserted automatically.
+3. **The quaternary: `e ? ok_arm ! nothing_arm !! err_arm`.** An extension of
+   the ternary with an error arm for fallible subjects. `$` binds the unwrapped
+   success value; `err` names the error value inside `!!`. Arms are optional:
+   a missing error arm defaults to propagation; a bare bind `x is f()` is
+   exactly `f() ? $ !! err`. Multiline form works unchanged.
+4. **Implicit propagation with inferred fallibility.** An unhandled fallible
+   expression propagates its error upward automatically — zero syntax for the
+   happy path. Fallibility is inferred by SCC least-fixpoint over the call
+   graph; `main` is exempt (per R4, an escaped error causes nonzero exit).
+5. **Checked `! E` annotations.** `*f(...) ! FileError` is now a real,
+   compiler-enforced effect. Rules R1–R6 are live: R1 soundness (every
+   produced error must convert into the declared set), R2 no widening, R3
+   propagation well-formedness at the site, R4 main exemption, R5 exhaustive
+   match, R6 `err`-raise consistency. Violations are errors with fix-it
+   suggestions.
+6. **`From` conversion graph (C1–C4).** Cross-layer propagation
+   (`FileError → AppError`) is automatic when an `impl From of X for E`
+   exists. Reflexivity is free; ambiguity is flagged. Orphan rule (C4) is
+   enforced.
+7. **Codegen.** Quaternary lowering, `err`-raise early-return, auto-wrap of
+   tail values into `Ok`, auto-unwrap on implicit propagation, `$` and `err`
+   projections all codegen. `defer` runs on propagated-error exit paths;
+   Perceus inserts drops on early-return paths.
 
-**Verdict: C+.** The philosophy is right; the machinery is the least finished
-major subsystem and is entangled with the missing trait system.
+**Remaining surface questions** (design, not implementation gaps):
+
+- The `From` graph is one-step (C2) and non-transitive by design. Multi-hop
+  chains require explicit intermediate impls — a deliberate tradeoff favouring
+  readability of conversion chains over convenience. This may be revisited if
+  real programs prove it too verbose.
+- Error handling inside generators is specified (raises propagate out of the
+  generator frame) but the generator IR bug (P0-3, review §21) means the full
+  path is untested until that fix lands.
+- Actors: a fallible handler propagating to the supervision boundary is
+  specified (§8, `docs/error-effects.md`) but depends on the structured
+  concurrency design (task 2-5).
+
+**Verdict: B+.** The full error-effect machinery is implemented and conformance-
+tested (27/27 `error_effects` tests, full corpus migrated). The remaining gap
+is the actor-supervision integration, which is gated on structured concurrency
+(§4.4) — not on the error system itself.
 
 ### 4.6 Generics & polymorphism
 
@@ -637,7 +660,7 @@ as targets? Our assessment, axis by axis:
 | No GC | ✅ | ✅ | ❌ | ⚠️ ARC | ✅ | **✅** |
 | Annotation burden | high (lifetimes) | high | low | low | medium | **very low** ✅ |
 | Bounded polymorphism | ✅ traits | ✅ concepts | ✅ interfaces | ✅ protocols | ⚠️ comptime | **❌ none** |
-| Error handling ergonomics | ✅ `?`+Result | ⚠️ exceptions | ✅ values | ✅ typed throws | ✅ error unions | **⚠️ values, no checked propagation** |
+| Error handling ergonomics | ✅ `?`+Result | ⚠️ exceptions | ✅ values | ✅ typed throws | ✅ error unions | **✅ quaternary + implicit propagation + checked `! E` + From graph** |
 | Concurrency model | threads+async | threads | goroutines+channels | structured async | threads | **actors+channels, no structured conc.** |
 | Compile-time metaprogramming | ✅ macros/const | ✅ templates | ❌ | ⚠️ macros | ✅✅ comptime | **⚠️ present, under-surfaced** |
 | Distinctive feature | safety w/o GC | zero-cost+legacy | simplicity | UI/ARC | comptime+C interop | **typed persistent stores** ✅ unique |
@@ -661,8 +684,9 @@ as targets? Our assessment, axis by axis:
 
 - **Abstraction power.** No traits = below *every* language in the table on
   generic abstraction. This is the biggest single gap.
-- **Error ergonomics.** Without checked propagation/conversion, non-trivial
-  programs will be more verbose than Rust/Swift/Zig.
+- ~~**Error ergonomics.**~~ **Resolved (2026-06).** Checked `! E`, quaternary,
+  implicit propagation, and `From` conversion graph match or beat Rust/Swift/Zig
+  on this axis. Actor-supervision integration is pending structured concurrency.
 - **Structured concurrency.** Below Swift and Go.
 - **Ecosystem.** No package manager, single implementation, v0.0.0. This is an
   adoption blocker independent of language quality.
@@ -670,10 +694,10 @@ as targets? Our assessment, axis by axis:
 **Fair summary:** Jinn today is a **strong mid-tier contender** — it credibly
 competes with Go and Swift on ergonomics and readability, beats them on GC-free
 determinism, and has a unique persistence feature — but it is **not yet in the
-Rust/C++ tier** because it lacks bounded polymorphism and a mature error/effect
-system, and it is **not yet adoptable at scale** because it has no ecosystem.
-None of these are fatal; all are addressable; but they are *design* work, not
-polish.
+Rust/C++ tier** because it lacks bounded polymorphism, and it is **not yet
+adoptable at scale** because it has no ecosystem. The error-effect system,
+previously a gap, closed in 2026-06. None of the remaining gaps are fatal; all
+are addressable; but they are *design* work, not polish.
 
 ---
 
@@ -685,9 +709,12 @@ Ranked by how much they threaten Jinn's stated ambition.
    Caps abstraction power below every incumbent, produces poor generic error
    messages, couples to the (missing) error-conversion story. **Must be designed
    before 1.0.**
-2. **Error-effect system is announced but unimplemented (§4.5).** *Severity:
-   high.* `! E` is currently a doc comment; `try`/`rescue` has no
-   lexer/parser/HIR support. Non-trivial error handling will be verbose.
+2. ~~**Error-effect system is announced but unimplemented (§4.5).**~~ **Resolved
+   (2026-06, tasks 2-2 + 2-4).** The full error model is live: canonical
+   `Option`/`Result` prelude, `err`-raise, quaternary recovery expression,
+   implicit propagation with inferred fallibility, checked R1–R6 with SCC
+   fixpoint, `From` conversion graph. 27/27 conformance tests pass; full corpus
+   migrated. Remaining: actor-supervision integration (gated on task 2-5).
 3. **Soundness of the memory model is under-tested at the adversarial boundary
    (§4.3).** *Severity: high.* The whole safety story rests on escape analysis +
    Perceus + tombstone dataflow being correct; a bug here is a silent UAF with no
@@ -749,11 +776,10 @@ Organized by category and tagged with priority: **[P0]** must-fix before alpha,
 - **[P0] Pin `String` semantics:** declare UTF-8, define whether `len`/indexing
   are bytes/scalars/graphemes, and provide a byte vs char API. Cannot change
   post-1.0.
-- **[P1] Real error-effect system:** make `! E` a checked effect (function may
-  return only declared errors; callers must handle them); add a propagation
-  operator (`?`-equivalent) with trait-driven conversion; ship canonical
-  `Option of T` / `Result of T, E` + combinators in the prelude. Coupled to the
-  trait work.
+- ~~**[P1] Real error-effect system.**~~ **Done (2026-06, tasks 2-2 + 2-4-1..2-4-7).** Canonical `Option`/`Result` prelude, `err`-raise, quaternary
+  `e ? ok ! nothing !! err`, implicit propagation, checked `! E` (R1–R6), `From`
+  conversion graph (C1–C4), SCC least-fixpoint inference. Actor-supervision
+  integration deferred to task 2-5 (structured concurrency).
 - **[P1] Structured concurrency:** a scoped `spawn` block that joins child tasks
   on exit; first-class `stop`-and-drain for actors; make send-after-close
   observable (return a status / recoverable error) instead of silently dropping.
@@ -868,7 +894,8 @@ still open:
 1. **Bounded polymorphism (traits/protocols).** Unblocks abstraction, error
    conversion, and good generic diagnostics. *Nothing else matters as much.*
 2. **String/Unicode semantics.** Unfixable later; settle now.
-3. **A real, checked error-effect system** built on (1).
+3. ~~**A real, checked error-effect system.**~~ **Done (2026-06).** See §4.5.
+   Actor-supervision integration pending task 2-5.
 4. **Adversarial soundness testing** for the memory model — turn the elegant
    design into a *trusted* one.
 5. **Structured concurrency + observable channel close.**
@@ -878,9 +905,10 @@ still open:
 
 If those land, Jinn has a real claim to the **Go/Swift tier on ergonomics, the
 Rust tier on determinism, and a category of its own on typed persistence.** If
-they don't — if the surface freezes at 1.0 without traits and without a real
-error system — Jinn will be a beautiful language that can't scale to large
-programs, and the giants will remain giants.
+they don't — if the surface freezes at 1.0 without traits and without structured
+concurrency — Jinn will be a capable language that can't scale to large programs,
+and the giants will remain giants. The error-effect story is now closed;
+the remaining critical path is bounded polymorphism and concurrency hardening.
 
 The talent and discipline evident in this codebase are more than sufficient to
 close the gap. The work that remains is *design courage*, not *more code*: settle

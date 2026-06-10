@@ -1,0 +1,14 @@
+title: Fix `take` keyword in argument position (P0-5)
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T03:27:43'
+updated_at: '2026-06-10T03:27:43'
+result: ''
+description: 'The `take` keyword does not parse when used in function-call argument
+  position: `consume(take v)` → "expected comma, got v". Fix: add `take EXPR` to the
+  expression precedence ladder at the unary tier in `src/parser/expr.rs` (same level
+  as `not`). Without this, the ownership story is unreachable from normal user code.
+  Add conformance test: `consume(take v)` must compile and the value must be moved
+  (not copyable after). (review/14_findings.md P0-5, review/15_roadmap.md A.5)'

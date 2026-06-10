@@ -1,0 +1,16 @@
+title: 'Fix generator IR: return type mismatch (P0-3: invalid LLVM IR)'
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T03:27:28'
+updated_at: '2026-06-10T03:27:28'
+result: ''
+description: 'The compiler emits LLVM IR that fails LLVM''s own verifier for generator/yield
+  lowering. The generator function declares `ptr` return type but emits `ret i64 0`.
+  Reproducer: `review/probes2/p31_generator.jn`. Root cause: inconsistent return type
+  in `src/codegen/coroutines.rs` or `src/mir/lower/` generator splitting. Fix: align
+  the declared LLVM function return type with the actual return value on all paths.
+  Add an assertion in the MIR verifier (task 2-26) that catches this at MIR construction.
+  Add a test that compiles and runs p31_generator.jn. (review/14_findings.md P0-3,
+  review/15_roadmap.md A.3c)'

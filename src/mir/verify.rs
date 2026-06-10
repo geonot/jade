@@ -373,3 +373,219 @@ fn inst_tag(k: &InstKind) -> &'static str {
         GlobalStore(..) => "GlobalStore",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{FnAttrs, Span};
+    use crate::hir::DefId;
+    use crate::intern::Symbol;
+    use crate::mir::{BasicBlock, Function, Instruction, Param, PerceusMeta, Phi};
+
+    fn func(blocks: Vec<BasicBlock>, ret_ty: Type) -> Function {
+        Function {
+            name: Symbol::intern("test_fn"),
+            def_id: DefId(0),
+            params: vec![Param {
+                value: ValueId(0),
+                name: Symbol::intern("p"),
+                ty: Type::I64,
+            }],
+            ret_ty,
+            blocks,
+            entry: BlockId(0),
+            span: Span::new(0, 0, 1, 1),
+            next_value: 100,
+            next_block: 100,
+            attrs: FnAttrs::default(),
+            is_coroutine: false,
+            perceus: PerceusMeta::default(),
+        }
+    }
+
+    fn block(id: u32, insts: Vec<Instruction>, term: Terminator) -> BasicBlock {
+        BasicBlock {
+            id: BlockId(id),
+            label: Symbol::intern("bb"),
+            phis: vec![],
+            insts,
+            terminator: term,
+        }
+    }
+
+    fn inst(dest: u32, kind: InstKind, ty: Type) -> Instruction {
+        Instruction {
+            dest: Some(ValueId(dest)),
+            kind,
+            ty,
+            span: Span::new(0, 0, 1, 1),
+            def_id: None,
+        }
+    }
+
+    #[test]
+    fn accepts_well_formed_function() {
+        let f = func(
+            vec![block(
+                0,
+                vec![inst(1, InstKind::IntConst(42), Type::I64)],
+                Terminator::Return(Some(ValueId(1))),
+            )],
+            Type::I64,
+        );
+        assert!(verify_function(&f).is_ok());
+    }
+
+    #[test]
+    fn rejects_use_of_undefined_value() {
+        let f = func(
+            vec![block(
+                0,
+                vec![inst(
+                    1,
+                    InstKind::BinOp(BinOp::Add, ValueId(0), ValueId(99)),
+                    Type::I64,
+                )],
+                Terminator::Return(Some(ValueId(1))),
+            )],
+            Type::I64,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("undefined value")));
+    }
+
+    #[test]
+    fn rejects_return_type_mismatch() {
+        let f = func(
+            vec![block(
+                0,
+                vec![inst(1, InstKind::StringConst("x".into()), Type::String)],
+                Terminator::Return(Some(ValueId(1))),
+            )],
+            Type::I64,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("ret_ty")));
+    }
+
+    #[test]
+    fn rejects_return_void_from_nonvoid_function() {
+        let f = func(
+            vec![block(0, vec![], Terminator::Return(None))],
+            Type::I64,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("return-void")));
+    }
+
+    #[test]
+    fn rejects_goto_to_missing_block() {
+        let f = func(
+            vec![block(0, vec![], Terminator::Goto(BlockId(7)))],
+            Type::Void,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("undefined block")));
+    }
+
+    #[test]
+    fn rejects_duplicate_block_ids() {
+        let f = func(
+            vec![
+                block(0, vec![], Terminator::Return(None)),
+                block(0, vec![], Terminator::Return(None)),
+            ],
+            Type::Void,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("duplicate block")));
+    }
+
+    #[test]
+    fn rejects_missing_entry_block() {
+        let mut f = func(
+            vec![block(0, vec![], Terminator::Return(None))],
+            Type::Void,
+        );
+        f.entry = BlockId(3);
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("entry block")));
+    }
+
+    #[test]
+    fn rejects_multiply_defined_value() {
+        let f = func(
+            vec![block(
+                0,
+                vec![
+                    inst(1, InstKind::IntConst(1), Type::I64),
+                    inst(1, InstKind::IntConst(2), Type::I64),
+                ],
+                Terminator::Return(Some(ValueId(1))),
+            )],
+            Type::I64,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("multiply defined")));
+    }
+
+    #[test]
+    fn rejects_phi_incoming_from_non_predecessor() {
+        let mut entry = block(
+            0,
+            vec![inst(1, InstKind::IntConst(1), Type::I64)],
+            Terminator::Goto(BlockId(1)),
+        );
+        entry.phis = vec![];
+        let mut join = block(1, vec![], Terminator::Return(Some(ValueId(2))));
+        join.phis = vec![Phi {
+            dest: ValueId(2),
+            ty: Type::I64,
+            incoming: vec![(BlockId(2), ValueId(1))],
+        }];
+        let f = func(
+            vec![
+                entry,
+                join,
+                block(2, vec![], Terminator::Return(None)),
+            ],
+            Type::I64,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("not a predecessor")));
+    }
+
+    #[test]
+    fn rejects_branch_on_non_truthy_type() {
+        let f = func(
+            vec![
+                block(
+                    0,
+                    vec![inst(1, InstKind::FloatConst(1.0), Type::F64)],
+                    Terminator::Branch(ValueId(1), BlockId(1), BlockId(2)),
+                ),
+                block(1, vec![], Terminator::Return(None)),
+                block(2, vec![], Terminator::Return(None)),
+            ],
+            Type::Void,
+        );
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("truthy")));
+    }
+
+    #[test]
+    fn program_errors_carry_function_name() {
+        let f = func(
+            vec![block(0, vec![], Terminator::Return(None))],
+            Type::I64,
+        );
+        let prog = Program {
+            functions: vec![f],
+            types: vec![],
+            externs: vec![],
+            globals: vec![],
+        };
+        let errs = verify_program(&prog).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("[fn test_fn]")));
+    }
+}

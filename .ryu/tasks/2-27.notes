@@ -1,0 +1,1 @@
+{"ts": "2026-06-10T10:35:31+00:00", "note": "Review P0-5 RE-VERIFIED 2026-06-10: fixed. `consume(take v)` parses, compiles, runs (tested with [i64] arg). tests/access_semantics.rs has `take` in param-annotation position; no test pins take-in-call-argument position. Remediation = add conformance test for `f(take x)`."}

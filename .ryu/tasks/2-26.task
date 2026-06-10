@@ -1,0 +1,17 @@
+title: Add MIR internal verifier (P0-7)
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-25
+created_at: '2026-06-10T03:27:36'
+updated_at: '2026-06-10T03:27:36'
+result: ''
+description: 'Add a MIR verifier that runs after lowering and after each Perceus pass.
+  Invariants to enforce: every block has a terminator; every used value has a dominating
+  definition; operand types match operator signature (no pointer operand to integer
+  arithmetic); declared function return type matches every Return terminator''s operand
+  type. Under debug_assertions: panic with high-detail message. In release: tracing::error!
+  + abort. Create `src/mir/verify.rs` and call it from the pipeline. Add `tests/mir_verifier.rs`
+  with hand-crafted broken MIRs. This blocks P0-3 fix verification and prevents future
+  IR corruption. (review/14_findings.md P0-7, review/15_roadmap.md A.1)'

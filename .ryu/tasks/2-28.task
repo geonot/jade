@@ -1,0 +1,15 @@
+title: Stack overflow diagnostic instead of silent SIGSEGV (P0-6)
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-10T03:27:51'
+updated_at: '2026-06-10T03:27:51'
+result: ''
+description: 'Stack overflow from infinite recursion produces a silent SIGSEGV with
+  no output instead of a diagnostic. Fix: in `runtime/sched.c` startup, install a
+  `sigaction(SIGSEGV)` handler that checks `siginfo->si_addr` against the current
+  coroutine''s guard region. If inside the guard region: print "coroutine stack overflow
+  at FILE:LINE (stack size 64KB; consider increasing JINN_STACK_SIZE or refactoring
+  recursion)", restore default SIGSEGV, re-raise. Also review/probes2/p40_inf_recur.jn
+  must produce the diagnostic. (review/14_findings.md P0-6, review/15_roadmap.md A.6)'

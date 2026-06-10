@@ -1,0 +1,15 @@
+title: 'Fix integer division/mod by zero (P0-1: UB → trap)'
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T03:27:12'
+updated_at: '2026-06-10T03:27:12'
+result: ''
+description: 'Integer division/mod by zero produces uninitialized stack garbage instead
+  of trapping. `checked_divmod` exists in `src/codegen/arith.rs:249-281` but is only
+  called by the dead HIR-direct path. Fix: lift `checked_divmod` to a shared helper
+  and call it from `src/codegen/mir_codegen/helpers/values.rs` for all int div/mod/rem
+  ops. Also handle INT_MIN / -1 signed overflow. Reproducer: `a is 10; b is 0; log(a
+  / b)` must trap, not print garbage. Add a conformance test. (review/14_findings.md
+  P0-1, review/15_roadmap.md A.3a)'

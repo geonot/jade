@@ -290,3 +290,202 @@ fn alpha_audit_native_stack_overflow_diagnostic() {
     );
 }
 
+
+fn run_expect_trap(src: &str, needle: &str) {
+    let (dir, out) = compile_source(src, &[]);
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let aborted = output.status.code() == Some(134) || {
+        use std::os::unix::process::ExitStatusExt;
+        output.status.signal() == Some(6)
+    };
+    assert!(
+        aborted,
+        "expected abort (exit 134 / SIGABRT); status: {:?}\nstdout: {}\nstderr: {stderr}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr.contains(needle),
+        "expected trap diagnostic containing `{needle}`; stderr:\n{stderr}"
+    );
+}
+
+/// P0-1: integer division and remainder by zero must trap with a clean
+/// diagnostic, never produce uninitialized values or UB.
+#[test]
+fn alpha_audit_div_by_zero_traps() {
+    run_expect_trap(
+        "*main\n    a is 10\n    b is 0\n    log(a / b)\n",
+        "integer division by zero",
+    );
+    run_expect_trap(
+        "*main\n    a is 10\n    b is 0\n    log(a % b)\n",
+        "integer remainder by zero",
+    );
+    run_expect_trap(
+        "*main\n    a is 10 as u64\n    b is 0 as u64\n    log(a / b)\n",
+        "integer division by zero",
+    );
+}
+
+/// P0-1 (second UB case): INT_MIN / -1 overflows signed division and must
+/// trap with a specific diagnostic.
+#[test]
+fn alpha_audit_int_min_div_neg_one_traps() {
+    run_expect_trap(
+        "*main\n    a is -9223372036854775808\n    b is -1\n    log(a / b)\n",
+        "signed integer overflow in division",
+    );
+}
+
+/// P0-2: vec out-of-bounds access traps with a diagnostic instead of
+/// SIGSEGV-ing. Strengthens `alpha_audit_runtime_bounds_case` by pinning
+/// the exit code and message.
+#[test]
+fn alpha_audit_vec_oob_diagnostic() {
+    run_expect_trap(
+        "*main\n    v is [10, 20]\n    log(v[5])\n",
+        "vec index out of bounds",
+    );
+}
+
+/// P0-3: generator (`yield`) lowering produces valid LLVM IR; the probe
+/// compiles, runs, and yields the full sequence.
+#[test]
+fn alpha_audit_generator_compiles_and_runs() {
+    let src = "*counts(n as i64)\n    \
+        for i from 0 to n\n        \
+        yield i\n\n\
+        *main\n    \
+        for v in counts(5)\n        \
+        log(v)\n";
+    let (dir, out) = compile_source(src, &[]);
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "generator program failed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "0\n1\n2\n3\n4\n",
+        "generator must yield 0..5"
+    );
+}
+
+/// P0-5: `take` parses in function-call argument position and transfers
+/// ownership.
+#[test]
+fn alpha_audit_take_in_argument_position() {
+    let src = "*consume(v as [i64])\n    \
+        log(v[0])\n\n\
+        *main\n    \
+        v is [7, 8, 9]\n    \
+        consume(take v)\n";
+    let (dir, out) = compile_source(src, &[]);
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        "take-in-arg program failed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n");
+}
+
+/// P0-8: a bare top-level expression is rejected with a specific
+/// diagnostic instead of silently compiling to that exit code.
+#[test]
+fn alpha_audit_bare_toplevel_expression_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("test.jn");
+    std::fs::write(&jinn, "42\n").unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(dir.path().join("test_bin"))
+        .output()
+        .expect("jinnc failed to start");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("bare expression at top level"),
+        "expected top-level-expression diagnostic; stderr:\n{stderr}"
+    );
+}
+
+/// P0-9: a program with no `*main` fails before linking with a clear
+/// compiler diagnostic, not an `ld` error.
+#[test]
+fn alpha_audit_missing_main_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("test.jn");
+    std::fs::write(&jinn, "*helper\n    log(1)\n").unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(dir.path().join("test_bin"))
+        .output()
+        .expect("jinnc failed to start");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("program has no `*main` function"),
+        "expected missing-main diagnostic; stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("undefined reference"),
+        "missing main must not surface as a linker error; stderr:\n{stderr}"
+    );
+}
+
+/// P0-10: keywords are contextual after `.` — `.send()` works as a channel
+/// method, and `.close()` gets a targeted redirect to the `close {ch}`
+/// statement rather than a generic parse error.
+#[test]
+fn alpha_audit_keyword_method_names_after_dot() {
+    let src = "*main\n    \
+        ch is channel of i64\n    \
+        ok is ch.send(1)\n    \
+        log(ok)\n";
+    let (dir, out) = compile_source(src, &[]);
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(
+        output.status.success(),
+        ".send() program failed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
+
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("test.jn");
+    std::fs::write(
+        &jinn,
+        "*main\n    ch is channel of i64\n    ch.close()\n",
+    )
+    .unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(dir.path().join("test_bin"))
+        .output()
+        .expect("jinnc failed to start");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("close {ch}"),
+        "expected targeted close-statement redirect; stderr:\n{stderr}"
+    );
+}

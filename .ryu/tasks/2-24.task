@@ -1,0 +1,17 @@
+title: Fix Vec out-of-bounds from SIGSEGV to diagnostic (P0-2)
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T03:27:20'
+updated_at: '2026-06-10T03:27:20'
+result: ''
+description: 'Vec/array out-of-bounds access causes a raw SIGSEGV instead of a diagnostic.
+  `emit_vec_bounds_check` exists in `src/codegen/vec/core.rs:543` but (a) is not called
+  from every access path in `src/codegen/mir_codegen/emit_inst/aggregates.rs`, and
+  (b) the fail branch calls `llvm.trap` rather than `__jinn_trap("array index N out
+  of bounds (len M) at FILE:LINE")`. Fix: audit every aggregate access in aggregates.rs
+  for bounds-check coverage; replace the `llvm.trap` fail branch with a `__jinn_trap`
+  call including file:line context. Reproducer: `v is [10, 20]; log(v[5])` must print
+  a diagnostic, not SIGSEGV. Add conformance test. (review/14_findings.md P0-2, review/15_roadmap.md
+  A.3b)'
