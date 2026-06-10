@@ -1,11 +1,14 @@
 title: Stack overflow diagnostic instead of silent SIGSEGV (P0-6)
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-10T03:27:51'
-updated_at: '2026-06-10T03:27:51'
-result: ''
+updated_at: '2026-06-10T03:47:06'
+result: 'P0-6 verified fixed: runtime/signals.c installs SIGSEGV/SIGBUS handler distinguishing
+  coroutine guard-page hits vs native-thread overflow; deep recursion prints ''jinn
+  runtime: stack overflow (native thread)'' + remediation, exits 134. Already pinned
+  by alpha_audit_native_stack_overflow_diagnostic.'
 description: 'Stack overflow from infinite recursion produces a silent SIGSEGV with
   no output instead of a diagnostic. Fix: in `runtime/sched.c` startup, install a
   `sigaction(SIGSEGV)` handler that checks `siginfo->si_addr` against the current
