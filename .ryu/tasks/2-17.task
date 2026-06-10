@@ -4,8 +4,14 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:53:53'
 result: ''
-description: Create tests that simulate crashes at various points to verify the store
-  recovers to a consistent state. Done when crash-injection tests pass and cover key
-  write/commit paths.
+description: 'Store crash-consistency tests (review P1-14). Current state: GOOD baseline
+  already exists — tests/wal_crash.rs has 3 tests (wal_basic_durability_and_replay,
+  wal_group_commit_durability, wal_survives_kill_9) and tests/wal_property.rs (225
+  LOC) runs proptest with randomized op sequences (insert/update/delete/destroy) and
+  randomized crash points. Remaining gap per review: torn-write simulation (truncate
+  WAL at random byte offsets mid-record, not just op boundaries), multi-store crash
+  interleavings, and recovery idempotence (recover twice == recover once). Definition
+  of done: extend tests/wal_property.rs with torn-tail truncation strategy + double-recovery
+  invariant; keep total CI runtime bounded (~5 min cap per review B.9).'

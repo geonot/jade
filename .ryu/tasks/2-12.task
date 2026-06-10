@@ -2,10 +2,15 @@ title: Implement safe/unsafe boundary enforcement for raw pointers
 status: pending
 atomic: true
 priority: medium
-blocked_by: []
+blocked_by:
+- 2-11
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:54:25'
 result: ''
-description: Enforce the unsafe boundary in the compiler so raw-pointer operations
-  require unsafe context. Depends on safe/unsafe boundary spec. Done when violations
-  error and valid unsafe blocks compile, with tests.
+description: 'Implement safe/unsafe boundary enforcement for raw pointers per spec
+  from 2-11 (blocked on 2-11). Expected shape: typer rejects Ptr deref/arithmetic/cast
+  outside an unsafe context (surface per spec — possibly `trust` block for Jinn idiom);
+  FFI bindings (src/bind.rs) are the sanctioned creation site; diagnostics name the
+  operation and point at the spec. Definition of done: negative compile tests for
+  each forbidden op, positive tests inside the sanctioned context, escape/Perceus
+  interaction tested (no double-free or leak when Ptr crosses the boundary).'

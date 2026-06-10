@@ -4,8 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:51:23'
 result: ''
-description: Add cooperative preemption points and yield injection so long-running
-  tasks yield to the scheduler. Depends on concurrency runtime. Done when yield points
-  are inserted and fairness is demonstrated by tests.
+description: 'Implement cooperative preemption / yield injection (review 12_safety:
+  a handler that never yields starves the scheduler — documented hazard in docs/concurrency.md
+  line ~202 ''Every long-running handler must yield''; pthread_join hangs otherwise).
+  Current state: grep shows zero preemption machinery in src/ or runtime/. Deliverable:
+  compiler-inserted yield points (MIR pass inserting jinn_yield() calls at loop back-edges
+  in coroutine/actor contexts — MIR optimization justified because LLVM cannot do
+  this) with opt-out attribute, OR runtime timer-driven preemption; pick per design
+  discussion. Definition of done: a tight-loop actor no longer starves sibling actors;
+  test in tests/concurrency_shutdown.rs with two actors where one spins; docs updated
+  to remove the must-yield footgun.'

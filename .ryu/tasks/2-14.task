@@ -4,8 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:54:25'
 result: ''
-description: Implement a fuzzer that generates adversarial programs to probe memory-model
-  soundness and detect violations. Done when fuzzer runs, reports reproducible failures,
-  and integrates into CI.
+description: 'Adversarial memory-model soundness fuzzer (review P0-11 second half
+  + 11_codegen_runtime). Current state: fuzz/ has lexer/parser/typer cargo-fuzz targets
+  (front-end only); no end-to-end soundness fuzzing; no sanitizer CI (ci/sanitize.sh
+  absent). Deliverable: (1) program-generator fuzzer emitting well-typed Jinn programs
+  stressing Perceus (aliasing, take/borrow mixes, drop ordering, reuse pairs, vec/map
+  churn, closures capturing refcounted values, actor channel handoff) and asserting:
+  exit 0, no leaks (ASan), refcount invariants; (2) ci/sanitize.sh building runtime
+  with -fsanitize=address,undefined and thread, running the conformance suites. Definition
+  of done: fuzz target in fuzz/Cargo.toml runs 30 min clean (Phase A exit criterion);
+  sanitize script wired into CI.'

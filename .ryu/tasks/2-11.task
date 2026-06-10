@@ -4,7 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:54:25'
 result: ''
-description: Define the safe/unsafe boundary, what invariants unsafe code must uphold,
-  and how raw pointers cross the boundary. Done when a reviewed spec document is published.
+description: 'Write safe/unsafe boundary specification for raw pointers (review 12_safety;
+  P2-9 ABI adjacent). Current state: Type::Ptr exists in src/types.rs; NO unsafe keyword/marker
+  in lexer/parser; no docs mention raw pointers or unsafe (grep across docs/ finds
+  nothing). Raw pointers currently flow through user code with no boundary at all.
+  Deliverable: docs/unsafe.md specifying (idiomatic Jinn, prose-style): where Ptr<T>
+  may be created (FFI/bind surface only?), what operations require an unsafe context,
+  what the compiler guarantees inside vs outside, interaction with Perceus refcounting
+  (a Ptr must not alias a refcounted box without an escape hatch), and the FFI story
+  via src/bind.rs / runtime_ffi.rs. Definition of done: spec covers creation/deref/arithmetic/cast/FFI-handoff,
+  reviewed against existing bind/FFI code paths. Blocks 2-12.'

@@ -2,10 +2,14 @@ title: Implement structured concurrency scopes and lifetimes
 status: pending
 atomic: true
 priority: medium
-blocked_by: []
+blocked_by:
+- 2-5
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:51:23'
 result: ''
-description: Build the runtime/compiler support for nested task scopes that join children
-  on exit. Depends on concurrency model design. Done when scopes spawn, await, and
-  clean up children with tests.
+description: 'Implement structured concurrency scopes per the design from task 2-5
+  (blocked on 2-5). Parser: scope block syntax. Typer: children inherit scope, error-set
+  propagation from child to scope owner. Codegen/runtime: scope tracks spawned actors/coroutines;
+  on scope exit, join all children (or cancel-and-join on error path). Definition
+  of done: conformance tests in tests/concurrency_shutdown.rs covering normal join,
+  error-path cancellation, and nested scopes; docs/concurrency.md updated.'

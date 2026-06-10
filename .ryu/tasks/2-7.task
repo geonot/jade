@@ -4,8 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:51:23'
 result: ''
-description: Add stop-and-drain semantics so pending work is processed before shutdown
-  completes. Depends on structured concurrency scopes. Done when drain ordering is
-  verified by tests.
+description: 'Implement stop-and-drain shutdown (review 12_safety; builds on task
+  2-8''s observable send-after-close). Current state: `close {ch}` exists; receive
+  drains buffer after close (pinned by channel_receive_drains_buffer in tests/concurrency_shutdown.rs);
+  send-after-close returns false (pinned by send_after_close_is_observable). Missing:
+  a scope/actor-level ''stop then drain remaining messages then exit'' primitive so
+  an actor can be told to finish queued work before terminating, distinct from hard
+  stop. Deliverable: `stop {actor} after drain` (or design-approved surface) lowering
+  through src/codegen/mir_codegen/magic.rs + runtime/sched.c support. Definition of
+  done: tests in tests/concurrency_shutdown.rs proving no message loss on graceful
+  shutdown and bounded termination on hard stop.'

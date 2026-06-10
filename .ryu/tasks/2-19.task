@@ -4,8 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:53:53'
 result: ''
-description: Build the package manager for dependency resolution, fetching, and lockfiles.
-  Depends on real version numbers being defined. Done when packages can be added,
-  resolved, and built with tests.
+description: 'Package manager (review 12_tooling). Current state: SUBSTANTIALLY SHIPPED
+  — src/pkg.rs (246 LOC manifest/version parsing incl. project.jn manifests), src/driver/cmd_pkg.rs
+  implements fetch/update/publish (git-based), CLI exposes init/fetch/update/build/package/publish/run/test/check.
+  Driver detects project.jn manifests (driver/mod.rs:283-319, addresses P1-17). Remaining
+  gaps to assess: lockfile semantics (src/lock.rs exists — verify), transitive dependency
+  resolution, version conflict handling, registry story (currently git-remote based),
+  and docs. Deliverable: audit end-to-end flow (init -> add dep -> fetch -> build
+  -> publish), fix holes, write docs/packages.md, add an integration test that builds
+  a two-package workspace. Definition of done: documented two-package build passes
+  in CI.'

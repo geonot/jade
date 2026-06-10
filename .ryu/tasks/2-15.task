@@ -4,8 +4,16 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:54:25'
 result: ''
-description: Enhance compiler error messages for failed/ambiguous generic instantiation
-  with context, suggestions, and source spans. Done when before/after diagnostics
-  are reviewed and snapshot tests pass.
+description: 'Improve generic instantiation diagnostics (review 07_type_system; P1-19
+  adjacent pretty-printing). Current state: monomorphization in src/typer/mono.rs;
+  diagnostics exist but review flags poor UX on instantiation failure: no instantiation
+  chain (''required by X instantiated at Y''), raw internal type names can leak (P1-19:
+  ''I64'' vs ''i64'' — verify current state of Type pretty-printing in user diagnostics).
+  Deliverable: (1) audit Type rendering at every user-facing diagnostic site — single
+  pretty-printer, lowercase surface names; (2) on generic unification failure inside
+  an instantiation, attach the instantiation backtrace (call site span chain); (3)
+  error on unsatisfiable generic with the concrete types named. Definition of done:
+  snapshot tests pinning improved messages for: wrong arg to generic fn, recursive
+  generic blowup, trait/row constraint miss.'

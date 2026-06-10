@@ -4,7 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:55:43'
 result: ''
-description: Document every sigil/operator with meaning, examples, and edge cases.
-  Done when reference doc is complete, reviewed, and published.
+description: 'Write sigil reference documentation (review C.1/P3-4: docs scattered,
+  sigils undocumented as a surface). Current state: sigils in the language include
+  `*name` (function decl), `$` (closure/lambda placeholder, src/parser/expr/placeholder.rs
+  incl. IndexPlaceholder), `#` (comment), `{x}` (close/stop argument braces), `?`
+  (match arms / quaternary per locked error model docs/error-effects.md), plus is/as/take
+  word-operators. No single reference exists — jinn.md and scattered root .md files
+  partially cover. Deliverable: docs/sigils.md — one table per sigil: glyph, name,
+  contexts where legal, semantics, examples, common-mistake diagnostics. Cross-link
+  from jinn.md. Definition of done: every sigil the lexer recognizes appears in the
+  doc; examples compile (add to a doc-test corpus if cheap).'

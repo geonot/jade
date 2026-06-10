@@ -4,8 +4,16 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:54:25'
 result: ''
-description: Create property-based tests covering numeric coercion rules across integer/float
-  types for correctness and roundtripping. Done when property tests run in CI and
-  cover documented coercion cases.
+description: 'Property tests for numeric coercion (review 07_type_system; relates
+  to deleted auto-widen patch + MIR verifier). Current state: tests/proptest_smoke.rs
+  only fuzzes lexer/parser never-panics; no numeric-coercion properties. The typer
+  inserts explicit Cast nodes for mixed-width arithmetic (per A.2); MIR verifier (src/mir/verify.rs)
+  enforces operand-type match. Deliverable: proptest suite generating random (value,
+  src_type, dst_type, op) over i8..u64/f32/f64 asserting (1) compile-and-run result
+  equals reference semantics computed in Rust (wrap/trap behavior per documented Jinn
+  rules), (2) no UB/garbage on extremes (MIN/MAX, -1, 0), (3) cast round-trip laws
+  where applicable. Definition of done: tests/numeric_coercion_property.rs in CI,
+  documented coercion rules referenced (docs needed if rules undocumented — note in
+  docs/ if missing).'

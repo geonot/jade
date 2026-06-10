@@ -4,8 +4,14 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:51:23'
 result: ''
-description: Add a primitive to join/await actor completion and collect results or
-  errors. Depends on structured concurrency scopes. Done when join blocks until actor
-  exit and surfaces outcome, with tests.
+description: 'Implement actor join primitive (review 12_safety; P1-16 area). Current
+  state: *main epilogue joins workers implicitly (actor_processes_then_stops test);
+  there is NO user-facing join — grep shows no `join` keyword in lexer/parser. Programs
+  cannot wait for a specific actor to finish mid-program. Deliverable: `join {actor}`
+  (or design-approved prose surface) that parks the caller coroutine until the target
+  actor''s mailbox is closed and handler loop exits; must compose with stop/close
+  semantics in docs/concurrency.md. Definition of done: parser+typer+codegen+runtime
+  support; conformance tests incl. join-after-stop, join-twice, join-self-deadlock
+  diagnostic if detectable.'

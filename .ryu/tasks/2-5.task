@@ -4,8 +4,15 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:51:23'
 result: ''
-description: Specify scopes, child-task lifetimes, cancellation, and the stop-and-drain
-  semantics. Done when a reviewed design doc defines the concurrency primitives and
-  their guarantees.
+description: 'Design the structured concurrency model for Jinn (review 12_safety,
+  P1-16 adjacent). Current state: docs/concurrency.md is the canonical shutdown contract
+  (scheduler runtime/sched.c, channels runtime/channel.c, actor lowering src/codegen/actors.rs)
+  and is test-backed by tests/concurrency_shutdown.rs. Missing: no scope/nursery construct
+  — actors/coroutines are not bound to a lexical scope that joins children on exit.
+  Deliverable: a design doc (docs/structured-concurrency.md) defining scope syntax
+  (idiomatic Jinn prose-style), child lifetime rules, cancellation propagation, error
+  propagation from children (interacts with locked error model in docs/error-effects.md),
+  and how `stop`/`close` compose with scopes. Definition of done: doc reviewed and
+  consistent with existing shutdown semantics + error model.'

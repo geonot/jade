@@ -4,8 +4,13 @@ atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-04T05:31:38'
+updated_at: '2026-06-10T03:53:53'
 result: ''
-description: Build the `jinn fmt` command that formats source to a canonical style,
-  idempotently. Done when fmt runs on the codebase, is idempotent, and has formatting
-  tests.
+description: 'jinn fmt code formatter (review P2-12 adjacent). Current state: ALREADY
+  SHIPPED — src/fmt.rs (632 LOC), `jinnc fmt FILE` works (smoke-tested: rewrites `log(
+  1+2 )` -> `log 1 + 2`). Remaining gaps: (1) no formatter conformance test suite
+  (P2-12) — no tests/*.rs covers fmt; (2) idempotence unverified (fmt(fmt(x)) == fmt(x));
+  (3) round-trip safety unverified (parse(fmt(x)) == parse(x) semantically). Deliverable:
+  tests/fmt_conformance.rs running fmt over the snippets/ + tests/programs/ corpus
+  asserting idempotence + reparse-equivalence; fix any formatter bugs surfaced. Definition
+  of done: corpus-wide green, fmt documented.'
