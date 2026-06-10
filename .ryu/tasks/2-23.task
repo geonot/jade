@@ -1,11 +1,14 @@
 title: 'Fix integer division/mod by zero (P0-1: UB → trap)'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T03:27:12'
-updated_at: '2026-06-10T03:27:12'
-result: ''
+updated_at: '2026-06-10T03:46:32'
+result: 'P0-1 verified fixed in tree: div/mod by zero traps with ''runtime error:
+  integer division/remainder by zero''; INT_MIN/-1 traps with ''signed integer overflow
+  in division''. Pinned via alpha_audit_div_by_zero_traps + alpha_audit_int_min_div_neg_one_traps
+  (signed, unsigned, mod cases) in tests/alpha_release_audit.rs.'
 description: 'Integer division/mod by zero produces uninitialized stack garbage instead
   of trapping. `checked_divmod` exists in `src/codegen/arith.rs:249-281` but is only
   called by the dead HIR-direct path. Fix: lift `checked_divmod` to a shared helper
