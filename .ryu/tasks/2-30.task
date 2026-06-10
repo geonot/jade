@@ -1,0 +1,31 @@
+title: Fix soundness bugs pinned by tests/crash_safety.rs ignored tests
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-10T04:35:01'
+updated_at: '2026-06-10T04:35:01'
+result: ''
+description: 'Five bugs discovered while building the crash-safety suite; each has
+  an #[ignore]d test in tests/crash_safety.rs documenting desired behavior — un-ignore
+  as fixed:
+
+  1. `take` inside a loop body compiles and double-frees at runtime (free(): invalid
+  pointer, exit 134). Should be a compile error: take_inside_loop_is_compile_error.
+
+  2. Binding a Result to a variable then matching ICEs: `unresolved type parameter
+  ''E'' reached codegen` (src/codegen/types.rs:45 monomorphization bug): bound_result_match_does_not_ice.
+  Also blocks .unwrap()/.to_int() method resolution on bound Result values (''unknown
+  method unwrap'').
+
+  3. s.slice(start, end) with end > len reads OOB heap memory (src/codegen/string_ops.rs
+  string_slice has no bounds check): string_slice_oob_is_checked.
+
+  4. s.char_at(idx) past length reads OOB memory (string_char_at, no bounds check):
+  string_char_at_oob_is_checked.
+
+  5. Shift count >= bit width produces LLVM poison (1 << 70 returns garbage): oversized_shift_is_defined.
+  Trap or mask per documented semantics.
+
+  Definition of done: all 5 tests un-ignored and passing, zero warnings, full cargo
+  test green.'
