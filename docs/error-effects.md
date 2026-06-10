@@ -14,7 +14,9 @@ is migrated to `err <Variant>` + implicit propagation / quaternary.
 27/27 `tests/error_effects.rs` conformance tests pass; full cargo test suite green.
 
 Actor-supervision integration (§8, error propagation to supervision boundary)
-depends on structured concurrency (task 2-5) and is not yet implemented.
+depends on structured concurrency — now designed in
+[docs/structured-concurrency.md](structured-concurrency.md) (§5 E5) — and is
+not yet implemented.
 
 *(Tracked: P1 item in JINN_LANGUAGE_REVIEW_2026_06 §4.5, resolved 2026-06)*
 
@@ -241,7 +243,7 @@ During HIR lowering of a function body (extends `current_fn_error_types`):
 - **Generators** may be fallible; `err`-raise / propagation returns from the
   generator.
 - **Actors/channels**: a fallible handler propagates to the supervision
-  boundary (structured-concurrency design, task 2-5).
+  boundary (designed: [docs/structured-concurrency.md](structured-concurrency.md) §5 E5).
 - **Value semantics:** `Option`/`Result` are by-value enums; no GC implications.
 
 ---

@@ -182,6 +182,14 @@ the worker observes the flag and exits, abandoning the parked actor
 (process teardown reclaims it). This is correct and intended: a parked
 actor blocked on `receive` does **not** prevent the program from exiting.
 
+## Structured concurrency
+
+The rules in this document describe the unscoped base layer. A lexical
+scope construct (`together`) that joins children on exit, propagates child
+errors, and gives `stop` a cancellation meaning is designed in
+[docs/structured-concurrency.md](structured-concurrency.md); it layers on
+top of this contract without changing anything specified here.
+
 ## Sharp edges (read this before shipping a concurrent program)
 
 These follow directly from the rules above. They are sharp, not bugs —

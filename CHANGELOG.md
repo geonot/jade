@@ -1,4 +1,5 @@
 # Changelog
+- **[36]** (2026-06-10 10:56) Document all remaining P1 tasks (2-5..2-22) against review findings with verified current-state probes, gap analysis, and definitions of done; complete P0 sweep tasks 2-23..2-29
 - **[28]** (2026-06-10 10:45) Pin P0 safety-floor conformance (tasks 2-23..2-29): div/mod-by-zero + INT_MIN/-1 traps, vec OOB diagnostic, generator IR, take-in-arg, bare-toplevel/missing-main rejection, contextual keywords after Dot; add 11 hand-crafted broken-MIR unit tests to mir::verify
 - **[27]** (2026-06-08 03:12) Task 2-8: observable send-after-close (send yields bool; docs+tests)
 - **[22]** (2026-06-08 03:04) Complete checked error model: err-raise/quaternary/propagation end-to-end; fix fallibility-inference infinite loop, Ok/Err mono collision (task 4), R3 non-fallible propagation; migrate corpus off prefix-! and ?>

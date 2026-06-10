@@ -1,11 +1,15 @@
 title: Design structured concurrency model
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:51:23'
-result: ''
+updated_at: '2026-06-10T04:03:19'
+result: 'Wrote docs/structured-concurrency.md: `together` scope design — child registration/join-on-exit,
+  scope-owned actors with auto stop+drain, cooperative cancellation (stop scope),
+  first-error-wins propagation via existing error model (quaternary/From/SCC inference),
+  stop/close composition table, runtime+lowering sketch, conformance test plan. Cross-linked
+  from docs/concurrency.md and docs/error-effects.md §8.'
 description: 'Design the structured concurrency model for Jinn (review 12_safety,
   P1-16 adjacent). Current state: docs/concurrency.md is the canonical shutdown contract
   (scheduler runtime/sched.c, channels runtime/channel.c, actor lowering src/codegen/actors.rs)
