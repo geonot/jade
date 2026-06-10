@@ -1,11 +1,13 @@
 title: Fix Vec out-of-bounds from SIGSEGV to diagnostic (P0-2)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T03:27:20'
-updated_at: '2026-06-10T03:27:20'
-result: ''
+updated_at: '2026-06-10T03:46:32'
+result: 'P0-2 verified fixed: v[5] on len-2 vec aborts with ''runtime error: vec index
+  out of bounds'' diagnostic (no SIGSEGV). Pinned via alpha_audit_vec_oob_diagnostic
+  asserting abort status + message text.'
 description: 'Vec/array out-of-bounds access causes a raw SIGSEGV instead of a diagnostic.
   `emit_vec_bounds_check` exists in `src/codegen/vec/core.rs:543` but (a) is not called
   from every access path in `src/codegen/mir_codegen/emit_inst/aggregates.rs`, and
