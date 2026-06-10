@@ -1,11 +1,16 @@
 title: Keywords shadow method names after Dot (P0-10)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T03:27:57'
-updated_at: '2026-06-10T03:27:57'
-result: ''
+updated_at: '2026-06-10T03:47:05'
+result: 'P0-10 verified fixed: keywords are contextual after Dot — ch.send(1) parses
+  and runs (returns bool per task 2-8); ch.close() yields targeted redirect diagnostic
+  ''use `close {ch}`'' by design. Pinned via alpha_audit_keyword_method_names_after_dot;
+  soft keywords already pinned by alpha_audit_soft_keyword_idents/_nouns. Also pinned
+  related parser-hole P0s: bare top-level expr rejection (P0-8) and missing-main diagnostic
+  (P0-9).'
 description: 'Method calls like `.send()`, `.close()`, `.count()`, `.query()`, `.set()`,
   `.insert()`, `.delete()` fail to parse because the lexer promotes those keywords
   unconditionally even after a `.`. Fix: in the lexer/parser, do not emit keyword
