@@ -1,11 +1,13 @@
 title: Fix `take` keyword in argument position (P0-5)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T03:27:43'
-updated_at: '2026-06-10T03:27:43'
-result: ''
+updated_at: '2026-06-10T03:47:05'
+result: 'P0-5 verified fixed: `consume(take v)` parses, compiles, runs with ownership
+  transfer. Pinned via alpha_audit_take_in_argument_position. Param-position take
+  already covered by tests/access_semantics.rs.'
 description: 'The `take` keyword does not parse when used in function-call argument
   position: `consume(take v)` → "expected comma, got v". Fix: add `take EXPR` to the
   expression precedence ladder at the unary tier in `src/parser/expr.rs` (same level
