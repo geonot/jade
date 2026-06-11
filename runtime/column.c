@@ -78,8 +78,18 @@ void jinn_col_close(JinnCol *c) {
 
 /* ── Append / Count ───────────────────────────────────────── */
 
+static void col_txn_rollback(void *arg) {
+    JinnCol *c = (JinnCol *)arg;
+    if (!c || !c->fp) return;
+    int64_t v = 0;
+    if (fseek(c->fp, 8, SEEK_SET) == 0 && fread(&v, 8, 1, c->fp) == 1) {
+        c->count = v;
+    }
+}
+
 void jinn_col_append(JinnCol *c, const void *data) {
     if (!c || !c->fp) return;
+    if (jinn_txn_active()) jinn_txn_track_aux(c->fp, col_txn_rollback, c);
     /* seek to end of data */
     if (fseek(c->fp, COL_HEADER_SIZE + c->count * c->elem_size, SEEK_SET) != 0) {
         fprintf(stderr, "jinn: column: fseek to data region failed\n");

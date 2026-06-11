@@ -1,0 +1,11 @@
+title: 'StoreError: surface @unique/@required violations via error model'
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T05:18:42'
+updated_at: '2026-06-10T05:18:42'
+result: ''
+description: Item 3. Built-in err StoreError (Duplicate, Missing, Constraint, Io);
+  insert/set become fallible expressions participating in quaternary/else handling.
+  No silent constraint failures. Tests pin behavior.

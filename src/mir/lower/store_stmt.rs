@@ -202,7 +202,9 @@ impl Lowerer {
                     Type::Void,
                     *span,
                 );
+                self.txn_stack.push(self.loop_stack.len());
                 self.lower_block_stmts(body);
+                self.txn_stack.pop();
                 self.emit(
                     InstKind::Call("__txn_commit".into(), vec![]),
                     Type::Void,

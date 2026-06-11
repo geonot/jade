@@ -563,9 +563,11 @@ impl Lowerer {
             hir::Stmt::Ret(val, _ret_ty, span) => {
                 if let Some(v) = val {
                     let rv = self.lower_expr_owned(v);
+                    self.emit_txn_unwind("__txn_commit", *span);
                     self.lower_deferred_in_reverse();
                     self.set_terminator(Terminator::Return(Some(rv)));
                 } else {
+                    self.emit_txn_unwind("__txn_commit", *span);
                     self.lower_deferred_in_reverse();
                     self.set_terminator(Terminator::Return(None));
                 }
@@ -576,6 +578,7 @@ impl Lowerer {
             }
             hir::Stmt::ErrReturn(expr, _ty, span) => {
                 let v = self.lower_expr_owned(expr);
+                self.emit_txn_unwind("__txn_rollback", *span);
                 self.lower_deferred_in_reverse();
                 self.set_terminator(Terminator::Return(Some(v)));
                 let dead = self.new_block("after.err_return");
@@ -584,6 +587,7 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, *span)
             }
             hir::Stmt::Break(val, span) => {
+                self.emit_txn_loop_escape(*span);
                 let mut handled_label = false;
                 if let Some(v) = val
                     && let hir::ExprKind::Str(s) = &v.kind {
@@ -626,6 +630,7 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, *span)
             }
             hir::Stmt::Continue(span) => {
+                self.emit_txn_loop_escape(*span);
                 if let Some((cont, _)) = self.loop_stack.last().copied() {
                     self.set_terminator(Terminator::Goto(cont));
                 }

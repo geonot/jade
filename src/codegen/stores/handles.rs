@@ -426,6 +426,46 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
+    pub(crate) fn txn_track_store(
+        &mut self,
+        store_name: &str,
+        fp: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        let wal = self.load_store_wal(store_name)?;
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let f = self.module.get_function("jinn_txn_track").unwrap_or_else(|| {
+            let ft = self
+                .ctx
+                .void_type()
+                .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+            self.module
+                .add_function("jinn_txn_track", ft, Some(Linkage::External))
+        });
+        b!(self.bld.build_call(f, &[fp.into(), wal.into()], ""));
+        Ok(())
+    }
+
+    pub(crate) fn txn_swap_fp(
+        &mut self,
+        old_fp: PointerValue<'ctx>,
+        new_fp: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let f = self
+            .module
+            .get_function("jinn_txn_swap_fp")
+            .unwrap_or_else(|| {
+                let ft = self
+                    .ctx
+                    .void_type()
+                    .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+                self.module
+                    .add_function("jinn_txn_swap_fp", ft, Some(Linkage::External))
+            });
+        b!(self.bld.build_call(f, &[old_fp.into(), new_fp.into()], ""));
+        Ok(())
+    }
+
     pub(crate) fn wal_checkpoint(&mut self, store_name: &str) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
         let wal_cp_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_checkpoint");

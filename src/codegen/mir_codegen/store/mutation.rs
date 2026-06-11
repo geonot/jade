@@ -23,6 +23,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
         self.store_lock(fp)?;
+        self.txn_track_store(store_name, fp)?;
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
 

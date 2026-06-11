@@ -1,4 +1,5 @@
 # Changelog
+- **[39]** (2026-06-10 11:35) Add tests/crash_safety.rs: crash/trap/invalid-access/overwrite/unsafe-edge-case conformance suite (32 passing tests + 5 ignored tests pinning soundness bugs filed as task 2-30)
 - **[38]** (2026-06-10 11:03) Design structured concurrency: docs/structured-concurrency.md (together scopes, scope-owned actors, cancellation, error propagation) + cross-links (task 2-5)
 - **[36]** (2026-06-10 10:56) Document all remaining P1 tasks (2-5..2-22) against review findings with verified current-state probes, gap analysis, and definitions of done; complete P0 sweep tasks 2-23..2-29
 - **[28]** (2026-06-10 10:45) Pin P0 safety-floor conformance (tasks 2-23..2-29): div/mod-by-zero + INT_MIN/-1 traps, vec OOB diagnostic, generator IR, take-in-arg, bare-toplevel/missing-main rejection, contextual keywords after Dot; add 11 hand-crafted broken-MIR unit tests to mir::verify

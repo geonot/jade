@@ -862,6 +862,15 @@ transaction
     delete users where age > 50
 ```
 
+A `transaction` block is atomic with respect to escaping errors: if an error
+propagates out of the block (`err`, a failed `?` propagation), if `return`
+leaves mid-block, the writes are handled as a unit. Normal completion and
+`return` commit the batch durably (one group fsync instead of one per record);
+an escaping error or a runtime trap rolls every store touched inside the block
+back to its pre-transaction state — data files, WAL, and indexes alike.
+Nested `transaction` blocks join the outermost one: only the outermost commit
+makes the batch durable, and any rollback aborts the whole nest.
+
 Field types are `i64`, `f64`, `bool`, and `String`. Query operators are
 `equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with `and` / `or`. Data is
 stored in a `<name>.store` file in the working directory.

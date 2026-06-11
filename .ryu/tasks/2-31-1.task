@@ -1,0 +1,23 @@
+title: 'Real transactions: begin/commit/rollback over WAL'
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-10T05:18:42'
+updated_at: '2026-06-11T05:05:26'
+result: 'Real WAL-backed transactions implemented. runtime/wal.c: jinn_txn_begin/commit/rollback/active/track/track_aux/swap_fp
+  — first-touch snapshot of each store data file + WAL offset, group-commit mode while
+  active (jinn_wal_force defers fsync), commit = group fsync per tracked WAL + fdatasync
+  data files, rollback = restore snapshots + truncate WALs + aux callbacks reload
+  index/column/fts in-memory headers. Codegen: txn_track_store called from insert/mutation/delete/lifecycle
+  paths; __jinn_trap calls jinn_txn_rollback before abort so traps roll back on-disk
+  state. MIR lowering: txn_stack in Lowerer; Ret commits, ErrReturn rolls back, break/continue
+  commit transactions opened inside the loop. Nested begins counted; outermost commit
+  applies, any rollback aborts the nest. jinn.md documents semantics. tests/store_transactions.rs:
+  9 conformance tests (commit, error rollback of inserts/sets/deletes/indexes, return-mid-block
+  commit, nesting, trap rollback across processes, restart durability, retry).'
+description: 'Item 1. Replace no-op __txn_begin/__txn_commit in src/codegen/mir_codegen/magic.rs
+  with real WAL-backed transactions: begin records WAL offset + buffers mutations
+  (group-commit mode), commit applies + jinn_wal_commit_group(), escaping error/panic
+  truncates WAL to saved offset and discards in-memory effects. Transaction becomes
+  an error-model effect boundary. Tests for partial-failure rollback.'

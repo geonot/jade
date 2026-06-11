@@ -62,6 +62,13 @@ static int jinn_wal_get_policy(void) {
 
 static void jinn_wal_force(FILE *wal, int policy) {
     if (!wal) return;
+    /* Inside an open transaction every store runs in group-commit mode:
+     * per-record syncs are deferred until jinn_txn_commit() issues the
+     * group barrier (or rollback truncates the records away). */
+    if (jinn_txn_active()) {
+        fflush(wal);
+        return;
+    }
     /* Push libc buffers to the kernel first. */
     fflush(wal);
     int fd = fileno(wal);
@@ -223,6 +230,176 @@ void jinn_wal_checkpoint(FILE *wal) {
 /* Close WAL file. */
 void jinn_wal_close(FILE *wal) {
     if (wal) fclose(wal);
+}
+
+/* ── Transactions ──────────────────────────────────────────────────
+ *
+ * A `transaction` block makes the stores it touches atomic with respect
+ * to escaping errors: `jinn_txn_begin()` opens the scope; every store
+ * mutation that runs inside it registers its data file and WAL via
+ * jinn_txn_track(), which snapshots the data file and records the WAL
+ * offset on first contact. While a transaction is active, WAL writes
+ * run in group-commit mode (no per-record fsync).
+ *
+ *   commit   — group-syncs each tracked WAL and fsyncs each data file;
+ *              the batch becomes durable as a unit.
+ *   rollback — restores each data file from its snapshot, truncates
+ *              each WAL back to the recorded offset, and invokes any
+ *              auxiliary rollback callback (e.g. index header reload)
+ *              so in-memory handle state is discarded too.
+ *
+ * Nested begins are counted; only the outermost commit applies. A
+ * rollback aborts the whole nest. Single-threaded by design: stores
+ * are flock-guarded per process and transactions are lexical scopes.
+ */
+
+typedef struct JinnTxnFile {
+    FILE *fp;
+    FILE *wal;
+    long  wal_off;
+    unsigned char *snap;
+    long  snap_len;
+    void (*on_rollback)(void *);
+    void *rb_arg;
+    struct JinnTxnFile *next;
+} JinnTxnFile;
+
+static int          jinn_txn_depth = 0;
+static JinnTxnFile *jinn_txn_files = NULL;
+
+int jinn_txn_active(void) {
+    return jinn_txn_depth > 0;
+}
+
+void jinn_txn_begin(void) {
+    jinn_txn_depth++;
+}
+
+static JinnTxnFile *jinn_txn_find(FILE *fp) {
+    for (JinnTxnFile *t = jinn_txn_files; t; t = t->next) {
+        if (t->fp == fp) return t;
+    }
+    return NULL;
+}
+
+static void jinn_txn_free_files(void) {
+    JinnTxnFile *t = jinn_txn_files;
+    while (t) {
+        JinnTxnFile *n = t->next;
+        free(t->snap);
+        free(t);
+        t = n;
+    }
+    jinn_txn_files = NULL;
+}
+
+static void jinn_txn_track_impl(FILE *fp, FILE *wal,
+                                void (*cb)(void *), void *arg) {
+    if (jinn_txn_depth <= 0 || !fp) return;
+    if (jinn_txn_find(fp)) return;
+    JinnTxnFile *t = (JinnTxnFile *)calloc(1, sizeof *t);
+    if (!t) return;
+    t->fp = fp;
+    t->wal = wal;
+    t->on_rollback = cb;
+    t->rb_arg = arg;
+    if (wal) {
+        fflush(wal);
+        fseek(wal, 0, SEEK_END);
+        t->wal_off = ftell(wal);
+    }
+    fflush(fp);
+    long cur = ftell(fp);
+    fseek(fp, 0, SEEK_END);
+    t->snap_len = ftell(fp);
+    if (t->snap_len < 0) t->snap_len = 0;
+    t->snap = (unsigned char *)malloc(t->snap_len > 0 ? (size_t)t->snap_len : 1);
+    if (!t->snap) {
+        free(t);
+        fseek(fp, cur, SEEK_SET);
+        return;
+    }
+    if (t->snap_len > 0) {
+        fseek(fp, 0, SEEK_SET);
+        if (fread(t->snap, 1, (size_t)t->snap_len, fp) != (size_t)t->snap_len) {
+            fprintf(stderr, "jinn: txn: snapshot read failed\n");
+            free(t->snap);
+            free(t);
+            fseek(fp, cur, SEEK_SET);
+            return;
+        }
+    }
+    fseek(fp, cur, SEEK_SET);
+    t->next = jinn_txn_files;
+    jinn_txn_files = t;
+}
+
+void jinn_txn_track(FILE *fp, FILE *wal) {
+    jinn_txn_track_impl(fp, wal, NULL, NULL);
+}
+
+void jinn_txn_track_aux(FILE *fp, void (*cb)(void *), void *arg) {
+    jinn_txn_track_impl(fp, NULL, cb, arg);
+}
+
+void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp) {
+    JinnTxnFile *t = jinn_txn_find(oldfp);
+    if (t) t->fp = newfp;
+}
+
+void jinn_txn_commit(void) {
+    if (jinn_txn_depth <= 0) return;
+    if (--jinn_txn_depth > 0) return;
+    for (JinnTxnFile *t = jinn_txn_files; t; t = t->next) {
+        if (t->fp) {
+            fflush(t->fp);
+            int fd = fileno(t->fp);
+            if (fd >= 0 && jinn_wal_get_policy() != JINN_WAL_SYNC_NONE) {
+#if defined(__linux__)
+                if (fdatasync(fd) != 0)
+#endif
+                    (void)fsync(fd);
+            }
+        }
+        if (t->wal && jinn_wal_get_policy() != JINN_WAL_SYNC_NONE) {
+            jinn_wal_commit_group(t->wal);
+        } else if (t->wal) {
+            fflush(t->wal);
+        }
+    }
+    jinn_txn_free_files();
+}
+
+void jinn_txn_rollback(void) {
+    if (jinn_txn_depth <= 0) return;
+    jinn_txn_depth = 0;
+    for (JinnTxnFile *t = jinn_txn_files; t; t = t->next) {
+        if (t->fp) {
+            fseek(t->fp, 0, SEEK_SET);
+            if (t->snap_len > 0) {
+                if (fwrite(t->snap, 1, (size_t)t->snap_len, t->fp)
+                        != (size_t)t->snap_len) {
+                    fprintf(stderr, "jinn: txn: rollback restore failed\n");
+                }
+            }
+            fflush(t->fp);
+            int fd = fileno(t->fp);
+            if (fd >= 0 && ftruncate(fd, (off_t)t->snap_len) != 0) {
+                fprintf(stderr, "jinn: txn: rollback truncate failed\n");
+            }
+            fseek(t->fp, 0, SEEK_END);
+        }
+        if (t->wal) {
+            fflush(t->wal);
+            int wfd = fileno(t->wal);
+            if (wfd >= 0 && ftruncate(wfd, (off_t)t->wal_off) != 0) {
+                fprintf(stderr, "jinn: txn: WAL truncate failed\n");
+            }
+            fseek(t->wal, t->wal_off, SEEK_SET);
+        }
+        if (t->on_rollback) t->on_rollback(t->rb_arg);
+    }
+    jinn_txn_free_files();
 }
 
 /* Get WAL size (number of bytes of entries after magic). Returns 0 if empty. */

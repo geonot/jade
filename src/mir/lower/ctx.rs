@@ -34,6 +34,7 @@ pub(super) struct Lowerer {
     pub(super) label_stack: Vec<(Symbol, BlockId, BlockId)>,
     pub(super) lambda_fns: Vec<Function>,
     pub(super) function_defers: Vec<crate::hir::Block>,
+    pub(super) txn_stack: Vec<usize>,
     // Braun et al. SSA construction state:
     // Per-block, per-variable definitions written during lowering.
     pub(super) current_def: HashMap<BlockId, HashMap<Symbol, ValueId>>,
@@ -93,6 +94,7 @@ impl Lowerer {
             label_stack: Vec::new(),
             lambda_fns: Vec::new(),
             function_defers: Vec::new(),
+            txn_stack: Vec::new(),
             current_def: {
                 let mut m = HashMap::new();
                 m.insert(entry, HashMap::new());
@@ -141,6 +143,32 @@ impl Lowerer {
             .expect("field_state_ty called outside handler context")
             .state_ty
             .clone()
+    }
+
+    pub(super) fn emit_txn_unwind(&mut self, op: &str, span: Span) {
+        for _ in 0..self.txn_stack.len() {
+            self.emit(
+                crate::mir::InstKind::Call(crate::intern::Symbol::intern(op), vec![]),
+                Type::Void,
+                span,
+            );
+        }
+    }
+
+    pub(super) fn emit_txn_loop_escape(&mut self, span: Span) {
+        let loop_len = self.loop_stack.len();
+        let n = self
+            .txn_stack
+            .iter()
+            .filter(|&&begin_loop_len| begin_loop_len >= loop_len)
+            .count();
+        for _ in 0..n {
+            self.emit(
+                crate::mir::InstKind::Call(crate::intern::Symbol::intern("__txn_commit"), vec![]),
+                Type::Void,
+                span,
+            );
+        }
     }
 
     pub(super) fn lower_deferred_in_reverse(&mut self) {

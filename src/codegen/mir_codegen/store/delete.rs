@@ -25,6 +25,7 @@ impl<'ctx> Compiler<'ctx> {
         }
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
         self.store_lock(fp)?;
+        self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
@@ -187,6 +188,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
         self.store_lock(fp)?;
+        self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
@@ -232,6 +234,7 @@ impl<'ctx> Compiler<'ctx> {
         let global_name = format!("__store_{store_name}_fp");
         let global = self.module.get_global(&global_name).unwrap();
         b!(self.bld.build_store(global.as_pointer_value(), new_fp));
+        self.txn_swap_fp(fp, new_fp)?;
 
         let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "del.magic"));

@@ -210,7 +210,17 @@ impl<'ctx> Compiler<'ctx> {
             return self.emit_fts_count(rest).map(Some);
         }
 
-        if name == "__txn_begin" || name == "__txn_commit" {
+        if name == "__txn_begin" || name == "__txn_commit" || name == "__txn_rollback" {
+            let rt_name = match name {
+                "__txn_begin" => "jinn_txn_begin",
+                "__txn_commit" => "jinn_txn_commit",
+                _ => "jinn_txn_rollback",
+            };
+            let f = self.module.get_function(rt_name).unwrap_or_else(|| {
+                let ft = self.ctx.void_type().fn_type(&[], false);
+                self.module.add_function(rt_name, ft, Some(Linkage::External))
+            });
+            b!(self.bld.build_call(f, &[], ""));
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
 

@@ -126,6 +126,17 @@ impl<'ctx> Compiler<'ctx> {
                 "",
             )
             .expect("call fprintf");
+        let txn_rb_fn = self
+            .module
+            .get_function("jinn_txn_rollback")
+            .unwrap_or_else(|| {
+                let ftr = self.ctx.void_type().fn_type(&[], false);
+                self.module
+                    .add_function("jinn_txn_rollback", ftr, Some(Linkage::External))
+            });
+        self.bld
+            .build_call(txn_rb_fn, &[], "")
+            .expect("call txn rollback");
         let abort_fn = self.module.get_function("abort").unwrap_or_else(|| {
             let ft3 = self.ctx.void_type().fn_type(&[], false);
             self.module

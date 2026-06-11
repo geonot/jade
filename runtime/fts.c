@@ -73,8 +73,18 @@ static int next_token(const char *text, int pos, char *tok, int max_tok) {
 
 /* ── Index a document ─────────────────────────────────────── */
 
+static void fts_txn_rollback(void *arg) {
+    JinnFts *f = (JinnFts *)arg;
+    if (!f || !f->fp) return;
+    int64_t v = 0;
+    if (fseek(f->fp, 8, SEEK_SET) == 0 && fread(&v, 8, 1, f->fp) == 1) {
+        f->posting_count = v;
+    }
+}
+
 void jinn_fts_add(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len) {
     if (!f || !f->fp || !text) return;
+    if (jinn_txn_active()) jinn_txn_track_aux(f->fp, fts_txn_rollback, f);
 
     char tok[128];
     int pos = 0;

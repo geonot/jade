@@ -22,6 +22,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let fp = self.load_store_fp(store_name)?;
         self.store_lock(fp)?;
+        self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec

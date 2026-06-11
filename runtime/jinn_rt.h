@@ -444,6 +444,13 @@ int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version, void *out_buf, int64_
 int64_t jinn_ver_history(FILE *f, int64_t sid, void *out_buf, int64_t rec_size, int64_t max_versions);
 void jinn_ver_compact(FILE *f, int64_t rec_size, int64_t keep_n);
 /* runtime/wal.c */
+void jinn_txn_begin(void);
+void jinn_txn_commit(void);
+void jinn_txn_rollback(void);
+int  jinn_txn_active(void);
+void jinn_txn_track(FILE *fp, FILE *wal);
+void jinn_txn_track_aux(FILE *fp, void (*cb)(void *), void *arg);
+void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp);
 void jinn_wal_commit_group(FILE *wal);
 FILE *jinn_wal_open(const char *path);
 void jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);

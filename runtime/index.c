@@ -187,8 +187,20 @@ static void grow(JinnIndex *idx) {
 
 /* ── Insert into index ──────────────────────────────────────────── */
 
+static void idx_txn_rollback(void *arg) {
+    JinnIndex *idx = (JinnIndex *)arg;
+    if (idx && idx->fp) (void)read_header(idx);
+}
+
+static void idx_txn_guard(JinnIndex *idx) {
+    if (idx && idx->fp && jinn_txn_active()) {
+        jinn_txn_track_aux(idx->fp, idx_txn_rollback, idx);
+    }
+}
+
 void jinn_idx_insert(JinnIndex *idx, uint64_t hash, int64_t record_offset) {
     if (!idx) return;
+    idx_txn_guard(idx);
     /* Check load factor */
     if (idx->count * 10 >= idx->capacity * 7) {
         grow(idx);
@@ -232,6 +244,7 @@ int jinn_idx_contains(JinnIndex *idx, uint64_t hash) {
 
 void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
     if (!idx) return;
+    idx_txn_guard(idx);
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
     for (;;) {
         uint64_t sh; int64_t so, ss;
