@@ -425,6 +425,7 @@ impl OwnershipVerifier {
             | ExprKind::ViewCount(_, _)
             | ExprKind::ViewAll(_, _)
             | ExprKind::StoreDistinct(_, _)
+            | ExprKind::StoreGroup(_, _, _, _)
             | ExprKind::StoreSum(_, _)
             | ExprKind::StoreAvg(_, _)
             | ExprKind::StoreMin(_, _)

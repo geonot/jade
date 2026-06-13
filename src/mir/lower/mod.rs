@@ -556,6 +556,7 @@ impl Lowerer {
             | ExprKind::StoreFirst(..)
             | ExprKind::StoreExists(..)
             | ExprKind::StoreDistinct(..)
+            | ExprKind::StoreGroup(..)
             | ExprKind::StoreSum(..)
             | ExprKind::StoreAvg(..)
             | ExprKind::StoreMin(..)

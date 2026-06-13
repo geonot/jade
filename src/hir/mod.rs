@@ -5,6 +5,27 @@ use crate::types::Type;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DefId(pub u32);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupAgg {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+}
+
+impl GroupAgg {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GroupAgg::Count => "count",
+            GroupAgg::Sum => "sum",
+            GroupAgg::Avg => "avg",
+            GroupAgg::Min => "min",
+            GroupAgg::Max => "max",
+        }
+    }
+}
+
 impl DefId {
     pub const BUILTIN: DefId = DefId(0);
 }
@@ -418,6 +439,7 @@ pub enum ExprKind {
     StoreFirst(Symbol, Box<StoreFilter>),
     StoreExists(Symbol, Box<StoreFilter>),
     StoreDistinct(Symbol, Symbol),
+    StoreGroup(Symbol, Symbol, GroupAgg, Option<Symbol>),
     StoreSum(Symbol, Symbol),
     StoreAvg(Symbol, Symbol),
     StoreMin(Symbol, Symbol),

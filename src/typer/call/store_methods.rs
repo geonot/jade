@@ -117,6 +117,10 @@ impl Typer {
         args: &[ast::Expr],
         span: crate::ast::Span,
     ) -> Result<Option<hir::Expr>, String> {
+        if let Some(e) = self.try_store_group(obj, method, args, span)? {
+            return Ok(Some(e));
+        }
+
         if let ast::Expr::Ident(name, _) = obj
             && self.store_schemas.contains_key(&name.as_str()) {
                 let is_kv = self
@@ -596,5 +600,90 @@ impl Typer {
             }
 
         Ok(None)
+    }
+
+    fn try_store_group(
+        &mut self,
+        obj: &ast::Expr,
+        method: &str,
+        args: &[ast::Expr],
+        span: crate::ast::Span,
+    ) -> Result<Option<hir::Expr>, String> {
+        let agg = match method {
+            "count" => hir::GroupAgg::Count,
+            "sum" => hir::GroupAgg::Sum,
+            "avg" => hir::GroupAgg::Avg,
+            "min" => hir::GroupAgg::Min,
+            "max" => hir::GroupAgg::Max,
+            _ => return Ok(None),
+        };
+
+        let ast::Expr::Method(inner, inner_method, group_args, _) = obj else {
+            return Ok(None);
+        };
+        if &*inner_method.as_str() != "group" {
+            return Ok(None);
+        }
+        let ast::Expr::Ident(store, _) = &**inner else {
+            return Ok(None);
+        };
+        if !self.store_schemas.contains_key(&store.as_str()) {
+            return Ok(None);
+        }
+
+        if group_args.len() != 1 {
+            return Err("group() requires exactly 1 field argument".into());
+        }
+        let key_field = match &group_args[0] {
+            ast::Expr::Ident(f, _) => *f,
+            _ => return Err("group() argument must be a field name".into()),
+        };
+
+        let schema = self
+            .store_schemas
+            .get(&store.as_str())
+            .cloned()
+            .ok_or_else(|| format!("unknown store '{store}'"))?;
+        let field_ty = |fld: &crate::intern::Symbol| {
+            schema
+                .iter()
+                .find(|(n, _)| n == fld)
+                .map(|(_, t)| t.clone())
+        };
+        let key_ty = field_ty(&key_field)
+            .ok_or_else(|| format!("group(): unknown field '{key_field}' in store '{store}'"))?;
+
+        let (val_field, val_ty) = if agg == hir::GroupAgg::Count {
+            if !args.is_empty() {
+                return Err("count() after group() takes no arguments".into());
+            }
+            (None, Type::I64)
+        } else {
+            if args.len() != 1 {
+                return Err(format!("{method}() after group() requires 1 field argument"));
+            }
+            let vf = match &args[0] {
+                ast::Expr::Ident(f, _) => *f,
+                _ => return Err(format!("{method}() argument must be a field name")),
+            };
+            let vty = field_ty(&vf).ok_or_else(|| {
+                format!("{method}(): unknown field '{vf}' in store '{store}'")
+            })?;
+            let ret = if agg == hir::GroupAgg::Avg {
+                Type::F64
+            } else {
+                match vty {
+                    Type::F64 | Type::F32 => Type::F64,
+                    _ => Type::I64,
+                }
+            };
+            (Some(vf), ret)
+        };
+
+        Ok(Some(hir::Expr {
+            kind: hir::ExprKind::StoreGroup(*store, key_field, agg, val_field),
+            ty: Type::Vec(Box::new(Type::Tuple(vec![key_ty, val_ty]))),
+            span,
+        }))
     }
 }

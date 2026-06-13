@@ -386,6 +386,7 @@ impl HirValidator {
             hir::ExprKind::StoreFirst(_, _) => {}
             hir::ExprKind::StoreExists(_, _) => {}
             hir::ExprKind::StoreDistinct(_, _)
+            | hir::ExprKind::StoreGroup(_, _, _, _)
             | hir::ExprKind::StoreSum(_, _)
             | hir::ExprKind::StoreAvg(_, _)
             | hir::ExprKind::StoreMin(_, _)

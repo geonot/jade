@@ -207,6 +207,21 @@ impl Lowerer {
                 span,
             ),
 
+            ExprKind::StoreGroup(store_name, key_field, agg, val_field) => {
+                let val = val_field.map(|v| v.to_string()).unwrap_or_default();
+                self.emit(
+                    InstKind::Call(
+                        Symbol::intern(&format!(
+                            "__store_group_{store_name}__{key_field}__{}__{val}",
+                            agg.as_str()
+                        )),
+                        vec![],
+                    ),
+                    ty,
+                    span,
+                )
+            }
+
             ExprKind::StoreSum(store_name, field) => self.emit(
                 InstKind::Call(
                     Symbol::intern(&format!("__store_sum_{store_name}__{field}")),

@@ -1,11 +1,16 @@
 title: group-by clause + aggregates in query blocks
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-10T05:18:42'
-updated_at: '2026-06-10T05:18:42'
-result: ''
+updated_at: '2026-06-13T10:16:33'
+result: 'Added group-by aggregates via chained method surface: store.group(keyField).agg(valField)
+  with agg in {count,sum,avg,min,max}, returning Vec<Tuple([KeyTy,ValTy])> accessed
+  as row[0]/row[1]. Implemented across AST/typer (try_store_group), HIR (StoreGroup
+  + GroupAgg enum), MIR lowering, and a single-pass open-addressing hashtable codegen
+  in store_ext/analytics.rs (emit_store_group) supporting int/string keys and int/float
+  values. 6 new integration tests pass; full suite green with zero warnings.'
 description: 'Item 5. Add ''group <field>'' query clause with aggregate exprs in select:
   select city, avg(age), count. Leverage runtime/column.c for @column stores. Tests
   for grouped aggregation results.'

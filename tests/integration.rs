@@ -2362,6 +2362,54 @@ fn store_distinct_typed_strings() {
 }
 
 #[test]
+fn store_group_count() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as I64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'la', 20\n    insert sales 'nyc', 30\n    insert sales 'la', 40\n    insert sales 'nyc', 5\n    g is sales.group(city).count()\n    log g.length\n    total is 0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n5",
+    );
+}
+
+#[test]
+fn store_group_sum() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as I64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'la', 20\n    insert sales 'nyc', 30\n    insert sales 'la', 40\n    g is sales.group(city).sum(amt)\n    log g.length\n    total is 0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n100",
+    );
+}
+
+#[test]
+fn store_group_avg() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as I64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'nyc', 30\n    insert sales 'la', 20\n    g is sales.group(city).avg(amt)\n    log g.length\n    total is 0.0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n40.000000",
+    );
+}
+
+#[test]
+fn store_group_max() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as I64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'nyc', 30\n    insert sales 'la', 20\n    insert sales 'la', 5\n    g is sales.group(city).max(amt)\n    log g.length\n    total is 0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n50",
+    );
+}
+
+#[test]
+fn store_group_min() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as I64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'nyc', 30\n    insert sales 'la', 20\n    insert sales 'la', 5\n    g is sales.group(city).min(amt)\n    log g.length\n    total is 0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n15",
+    );
+}
+
+#[test]
+fn store_group_int_key() {
+    expect_store(
+        "store events @simple\n    kind as I64\n    n as I64\n\n*main\n    insert events 1, 100\n    insert events 2, 200\n    insert events 1, 50\n    g is events.group(kind).sum(n)\n    log g.length\n    total is 0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n350",
+    );
+}
+
+#[test]
 fn store_migration_fresh_install() {
     expect_store(
         "store items @simple\n    name as String\n    price as I64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as I64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n",

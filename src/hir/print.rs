@@ -634,6 +634,11 @@ impl PrettyPrinter {
             ExprKind::StoreFirst(name, _) => format!("store_first {name} ..."),
             ExprKind::StoreExists(name, _) => format!("store_exists {name} ..."),
             ExprKind::StoreDistinct(name, field) => format!("store_distinct {name}.{field}"),
+            ExprKind::StoreGroup(name, key, agg, val) => format!(
+                "store_group {name}.{key} {}({})",
+                agg.as_str(),
+                val.map(|v| v.to_string()).unwrap_or_default()
+            ),
             ExprKind::StoreSum(name, field) => format!("store_sum {name}.{field}"),
             ExprKind::StoreAvg(name, field) => format!("store_avg {name}.{field}"),
             ExprKind::StoreMin(name, field) => format!("store_min {name}.{field}"),

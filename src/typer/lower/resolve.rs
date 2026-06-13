@@ -622,6 +622,7 @@ impl Typer {
             hir::ExprKind::StoreExists(_, filter) => self.resolve_filter(filter),
             hir::ExprKind::StoreGet(_, key) => self.resolve_expr(key),
             hir::ExprKind::StoreDistinct(_, _)
+            | hir::ExprKind::StoreGroup(_, _, _, _)
             | hir::ExprKind::StoreSum(_, _)
             | hir::ExprKind::StoreAvg(_, _)
             | hir::ExprKind::StoreMin(_, _)

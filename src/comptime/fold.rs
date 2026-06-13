@@ -389,6 +389,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
         | ExprKind::StoreFirst(_, _)
         | ExprKind::StoreExists(_, _)
         | ExprKind::StoreDistinct(_, _)
+        | ExprKind::StoreGroup(_, _, _, _)
         | ExprKind::StoreSum(_, _)
         | ExprKind::StoreAvg(_, _)
         | ExprKind::StoreMin(_, _)

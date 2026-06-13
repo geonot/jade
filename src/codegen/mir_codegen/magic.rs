@@ -143,6 +143,9 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(rest) = name.strip_prefix("__store_distinct_") {
             return self.emit_store_distinct(rest).map(Some);
         }
+        if let Some(rest) = name.strip_prefix("__store_group_") {
+            return self.emit_store_group(rest).map(Some);
+        }
         if let Some(rest) = name.strip_prefix("__store_sum_") {
             return self.emit_store_agg(rest, "sum").map(Some);
         }

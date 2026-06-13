@@ -251,6 +251,461 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result_vec.into())
     }
 
+    pub(in crate::codegen) fn emit_store_group(
+        &mut self,
+        rest: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let parts: Vec<&str> = rest.splitn(4, "__").collect();
+        if parts.len() < 4 {
+            return Err(format!("malformed store group name: {rest}"));
+        }
+        let store_name = parts[0];
+        let key_name = parts[1];
+        let agg = parts[2];
+        let val_name = parts[3];
+
+        let sd = self
+            .store_defs
+            .get(store_name)
+            .ok_or_else(|| format!("unknown store '{store_name}'"))?
+            .clone();
+
+        let ensure_fn_name = format!("__store_ensure_{store_name}");
+        if let Some(ensure_fn) = self.module.get_function(&ensure_fn_name) {
+            b!(self.bld.build_call(ensure_fn, &[], ""));
+        } else {
+            let ensure_fn = self.gen_store_ensure_open(&sd)?;
+            b!(self.bld.build_call(ensure_fn, &[], ""));
+        }
+
+        let fp = self.load_store_fp(store_name)?;
+        let i64t = self.ctx.i64_type();
+        let f64t = self.ctx.f64_type();
+        let i8t = self.ctx.i8_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+
+        let rec_name = format!("__store_{store_name}_rec");
+        let st = self
+            .module
+            .get_struct_type(&rec_name)
+            .expect("ICE: struct type not declared");
+        let rec_size = self.store_record_size(&sd);
+
+        let (key_idx, key_ty) = sd
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == key_name)
+            .map(|(i, f)| (i, f.ty.clone()))
+            .ok_or_else(|| format!("no field '{key_name}' in store '{store_name}'"))?;
+        let key_norm = crate::codegen::store_filter::normalize_store_field_type(&key_ty);
+
+        let is_count = agg == "count";
+        let (val_idx, val_is_float) = if is_count {
+            (0usize, false)
+        } else {
+            sd.fields
+                .iter()
+                .enumerate()
+                .find(|(_, f)| f.name == val_name)
+                .map(|(i, f)| {
+                    let norm = crate::codegen::store_filter::normalize_store_field_type(&f.ty);
+                    (i, matches!(norm, crate::types::Type::F64 | crate::types::Type::F32))
+                })
+                .ok_or_else(|| format!("no field '{val_name}' in store '{store_name}'"))?
+        };
+        let result_float = !is_count && (val_is_float || agg == "avg");
+
+        let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
+
+        let total_count = self.store_read_count(fp)?;
+        let buf = self.store_load_records(fp, total_count, rec_size)?;
+
+        let calloc_fn = self.ensure_calloc();
+        let cap = b!(self.bld.build_int_add(
+            b!(self
+                .bld
+                .build_int_mul(total_count, i64t.const_int(4, false), "grp.cap.mul")),
+            i64t.const_int(16, false),
+            "grp.cap"
+        ));
+        let hash_tbl = self
+            .call_result(b!(self.bld.build_call(
+                calloc_fn,
+                &[cap.into(), i64t.const_int(8, false).into()],
+                "grp.tbl"
+            )))
+            .into_pointer_value();
+        let rec_of = self
+            .call_result(b!(self.bld.build_call(
+                calloc_fn,
+                &[cap.into(), i64t.const_int(8, false).into()],
+                "grp.recof"
+            )))
+            .into_pointer_value();
+        let acc_arr = self
+            .call_result(b!(self.bld.build_call(
+                calloc_fn,
+                &[cap.into(), i64t.const_int(8, false).into()],
+                "grp.acc"
+            )))
+            .into_pointer_value();
+        let cnt_arr = self
+            .call_result(b!(self.bld.build_call(
+                calloc_fn,
+                &[cap.into(), i64t.const_int(8, false).into()],
+                "grp.cnt"
+            )))
+            .into_pointer_value();
+
+        let fv = self.cur_fn.expect("ICE: cur_fn not set");
+        let idx_ptr = self.entry_alloca(i64t.into(), "grp.idx");
+        let ngrp_ptr = self.entry_alloca(i64t.into(), "grp.n");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        b!(self.bld.build_store(ngrp_ptr, i64t.const_int(0, false)));
+
+        let loop_bb = self.ctx.append_basic_block(fv, "grp.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "grp.body");
+        let live_bb = self.ctx.append_basic_block(fv, "grp.live");
+        let next_bb = self.ctx.append_basic_block(fv, "grp.next");
+        let done_bb = self.ctx.append_basic_block(fv, "grp.done");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "grp.i")).into_int_value();
+        let cmp = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            idx,
+            total_count,
+            "grp.cmp"
+        ));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let offset = b!(self
+            .bld
+            .build_int_mul(idx, i64t.const_int(rec_size, false), "grp.off"));
+        let rec_ptr = unsafe { b!(self.bld.build_gep(i8t, buf, &[offset], "grp.rec")) };
+
+        if let Some(del_idx) = deleted_idx {
+            let del_gep = b!(self
+                .bld
+                .build_struct_gep(st, rec_ptr, del_idx as u32, "grp.del"));
+            let del_val = b!(self.bld.build_load(i64t, del_gep, "grp.del.val")).into_int_value();
+            let is_live = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                del_val,
+                i64t.const_int(0, false),
+                "grp.islive"
+            ));
+            b!(self.bld.build_conditional_branch(is_live, live_bb, next_bb));
+        } else {
+            b!(self.bld.build_unconditional_branch(live_bb));
+        }
+
+        self.bld.position_at_end(live_bb);
+        let key_gep = b!(self
+            .bld
+            .build_struct_gep(st, rec_ptr, key_idx as u32, "grp.key"));
+        let hash = self.hash_store_field_from_gep(key_gep, &key_ty)?;
+        let marked_h = b!(self
+            .bld
+            .build_or(hash, i64t.const_int(1, false), "grp.marked"));
+
+        let slot_ptr = self.entry_alloca(i64t.into(), "grp.slot");
+        let init_slot = b!(self.bld.build_int_unsigned_rem(marked_h, cap, "grp.islot"));
+        b!(self.bld.build_store(slot_ptr, init_slot));
+
+        let probe_bb = self.ctx.append_basic_block(fv, "grp.probe");
+        let newgrp_bb = self.ctx.append_basic_block(fv, "grp.new");
+        let accum_bb = self.ctx.append_basic_block(fv, "grp.accum");
+        b!(self.bld.build_unconditional_branch(probe_bb));
+
+        self.bld.position_at_end(probe_bb);
+        let slot = b!(self.bld.build_load(i64t, slot_ptr, "grp.s")).into_int_value();
+        let entry_ptr = unsafe { b!(self.bld.build_gep(i64t, hash_tbl, &[slot], "grp.ep")) };
+        let entry_val = b!(self.bld.build_load(i64t, entry_ptr, "grp.ev")).into_int_value();
+        let is_empty = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            entry_val,
+            i64t.const_int(0, false),
+            "grp.empty"
+        ));
+        let probe_match_bb = self.ctx.append_basic_block(fv, "grp.pmatch");
+        b!(self
+            .bld
+            .build_conditional_branch(is_empty, newgrp_bb, probe_match_bb));
+
+        self.bld.position_at_end(probe_match_bb);
+        let is_match = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            entry_val,
+            marked_h,
+            "grp.hmatch"
+        ));
+        let advance_bb = self.ctx.append_basic_block(fv, "grp.advance");
+        b!(self
+            .bld
+            .build_conditional_branch(is_match, accum_bb, advance_bb));
+
+        self.bld.position_at_end(advance_bb);
+        let next_slot = b!(self
+            .bld
+            .build_int_add(slot, i64t.const_int(1, false), "grp.ns"));
+        let wrapped = b!(self.bld.build_int_unsigned_rem(next_slot, cap, "grp.wrap"));
+        b!(self.bld.build_store(slot_ptr, wrapped));
+        b!(self.bld.build_unconditional_branch(probe_bb));
+
+        self.bld.position_at_end(newgrp_bb);
+        b!(self.bld.build_store(entry_ptr, marked_h));
+        let recof_slot = unsafe { b!(self.bld.build_gep(i64t, rec_of, &[slot], "grp.rofs")) };
+        b!(self.bld.build_store(recof_slot, idx));
+        let acc_init_slot = unsafe { b!(self.bld.build_gep(i64t, acc_arr, &[slot], "grp.ais")) };
+        if result_float {
+            let zero = f64t.const_float(0.0);
+            let bits = b!(self.bld.build_bit_cast(zero, i64t, "grp.zbits"));
+            b!(self.bld.build_store(acc_init_slot, bits));
+        } else {
+            b!(self.bld.build_store(acc_init_slot, i64t.const_int(0, false)));
+        }
+        let ng = b!(self.bld.build_load(i64t, ngrp_ptr, "grp.ngl")).into_int_value();
+        let ng1 = b!(self
+            .bld
+            .build_int_add(ng, i64t.const_int(1, false), "grp.ng1"));
+        b!(self.bld.build_store(ngrp_ptr, ng1));
+        b!(self.bld.build_unconditional_branch(accum_bb));
+
+        self.bld.position_at_end(accum_bb);
+        let acc_slot = unsafe { b!(self.bld.build_gep(i64t, acc_arr, &[slot], "grp.acs")) };
+        let cnt_slot = unsafe { b!(self.bld.build_gep(i64t, cnt_arr, &[slot], "grp.cns")) };
+        let cur_cnt = b!(self.bld.build_load(i64t, cnt_slot, "grp.ccnt")).into_int_value();
+        let new_cnt = b!(self
+            .bld
+            .build_int_add(cur_cnt, i64t.const_int(1, false), "grp.cntinc"));
+        b!(self.bld.build_store(cnt_slot, new_cnt));
+
+        if !is_count {
+            let val_gep = b!(self
+                .bld
+                .build_struct_gep(st, rec_ptr, val_idx as u32, "grp.vgep"));
+            if result_float {
+                let v = if val_is_float {
+                    b!(self.bld.build_load(f64t, val_gep, "grp.vf")).into_float_value()
+                } else {
+                    let iv = b!(self.bld.build_load(i64t, val_gep, "grp.vi")).into_int_value();
+                    b!(self.bld.build_signed_int_to_float(iv, f64t, "grp.vi2f"))
+                };
+                let cur_bits = b!(self.bld.build_load(i64t, acc_slot, "grp.acb")).into_int_value();
+                let cur = b!(self.bld.build_bit_cast(cur_bits, f64t, "grp.acf")).into_float_value();
+                let is_first = b!(self.bld.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    cur_cnt,
+                    i64t.const_int(0, false),
+                    "grp.first"
+                ));
+                let combined = match agg {
+                    "min" => {
+                        let lt = b!(self.bld.build_float_compare(
+                            inkwell::FloatPredicate::OLT,
+                            v,
+                            cur,
+                            "grp.fmin"
+                        ));
+                        b!(self.bld.build_select(lt, v, cur, "grp.fminsel")).into_float_value()
+                    }
+                    "max" => {
+                        let gt = b!(self.bld.build_float_compare(
+                            inkwell::FloatPredicate::OGT,
+                            v,
+                            cur,
+                            "grp.fmax"
+                        ));
+                        b!(self.bld.build_select(gt, v, cur, "grp.fmaxsel")).into_float_value()
+                    }
+                    _ => b!(self.bld.build_float_add(cur, v, "grp.fadd")),
+                };
+                let result = if matches!(agg, "min" | "max") {
+                    b!(self.bld.build_select(is_first, v, combined, "grp.firstsel"))
+                        .into_float_value()
+                } else {
+                    combined
+                };
+                let rbits = b!(self.bld.build_bit_cast(result, i64t, "grp.rbits"));
+                b!(self.bld.build_store(acc_slot, rbits));
+            } else {
+                let v = b!(self.bld.build_load(i64t, val_gep, "grp.vi")).into_int_value();
+                let cur = b!(self.bld.build_load(i64t, acc_slot, "grp.aci")).into_int_value();
+                let is_first = b!(self.bld.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    cur_cnt,
+                    i64t.const_int(0, false),
+                    "grp.ifirst"
+                ));
+                let combined = match agg {
+                    "min" => {
+                        let lt = b!(self.bld.build_int_compare(
+                            inkwell::IntPredicate::SLT,
+                            v,
+                            cur,
+                            "grp.imin"
+                        ));
+                        b!(self.bld.build_select(lt, v, cur, "grp.iminsel")).into_int_value()
+                    }
+                    "max" => {
+                        let gt = b!(self.bld.build_int_compare(
+                            inkwell::IntPredicate::SGT,
+                            v,
+                            cur,
+                            "grp.imax"
+                        ));
+                        b!(self.bld.build_select(gt, v, cur, "grp.imaxsel")).into_int_value()
+                    }
+                    _ => b!(self.bld.build_int_add(cur, v, "grp.iadd")),
+                };
+                let result = if matches!(agg, "min" | "max") {
+                    b!(self.bld.build_select(is_first, v, combined, "grp.ifirstsel"))
+                        .into_int_value()
+                } else {
+                    combined
+                };
+                b!(self.bld.build_store(acc_slot, result));
+            }
+        }
+        b!(self.bld.build_unconditional_branch(next_bb));
+
+        self.bld.position_at_end(next_bb);
+        let next_idx = b!(self
+            .bld
+            .build_int_add(idx, i64t.const_int(1, false), "grp.ni"));
+        b!(self.bld.build_store(idx_ptr, next_idx));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+
+        let key_lty = self.llvm_ty(&key_norm);
+        let val_lty: inkwell::types::BasicTypeEnum<'ctx> =
+            if result_float { f64t.into() } else { i64t.into() };
+        let tuple_ty = self.ctx.struct_type(&[key_lty, val_lty], false);
+        let tuple_size = self.type_store_size(tuple_ty.into());
+
+        let header_ty = self.vec_header_type();
+        let malloc_fn = self.ensure_malloc();
+        let result_vec = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(24, false).into()],
+                "grp.vec"
+            )))
+            .into_pointer_value();
+        let v_dgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 0, "grp.vec.d"));
+        b!(self.bld.build_store(v_dgep, ptr_ty.const_null()));
+        let v_lgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 1, "grp.vec.l"));
+        b!(self.bld.build_store(v_lgep, i64t.const_int(0, false)));
+        let v_cgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 2, "grp.vec.c"));
+        b!(self.bld.build_store(v_cgep, i64t.const_int(0, false)));
+
+        let sidx_ptr = self.entry_alloca(i64t.into(), "grp.sidx");
+        b!(self.bld.build_store(sidx_ptr, i64t.const_int(0, false)));
+
+        let oloop_bb = self.ctx.append_basic_block(fv, "grp.oloop");
+        let obody_bb = self.ctx.append_basic_block(fv, "grp.obody");
+        let oused_bb = self.ctx.append_basic_block(fv, "grp.oused");
+        let onext_bb = self.ctx.append_basic_block(fv, "grp.onext");
+        let odone_bb = self.ctx.append_basic_block(fv, "grp.odone");
+
+        b!(self.bld.build_unconditional_branch(oloop_bb));
+
+        self.bld.position_at_end(oloop_bb);
+        let sidx = b!(self.bld.build_load(i64t, sidx_ptr, "grp.osi")).into_int_value();
+        let ocmp = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::ULT,
+            sidx,
+            cap,
+            "grp.ocmp"
+        ));
+        b!(self.bld.build_conditional_branch(ocmp, obody_bb, odone_bb));
+
+        self.bld.position_at_end(obody_bb);
+        let oentry_ptr = unsafe { b!(self.bld.build_gep(i64t, hash_tbl, &[sidx], "grp.oep")) };
+        let oentry = b!(self.bld.build_load(i64t, oentry_ptr, "grp.oev")).into_int_value();
+        let oused = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::NE,
+            oentry,
+            i64t.const_int(0, false),
+            "grp.oused"
+        ));
+        b!(self.bld.build_conditional_branch(oused, oused_bb, onext_bb));
+
+        self.bld.position_at_end(oused_bb);
+        let recof_ld = unsafe { b!(self.bld.build_gep(i64t, rec_of, &[sidx], "grp.orof")) };
+        let rec_i = b!(self.bld.build_load(i64t, recof_ld, "grp.oreci")).into_int_value();
+        let roffset = b!(self
+            .bld
+            .build_int_mul(rec_i, i64t.const_int(rec_size, false), "grp.ooff"));
+        let orec_ptr = unsafe { b!(self.bld.build_gep(i8t, buf, &[roffset], "grp.orec")) };
+        let okey_gep = b!(self
+            .bld
+            .build_struct_gep(st, orec_ptr, key_idx as u32, "grp.okey"));
+        let key_val = match key_norm {
+            crate::types::Type::String => self.read_string_from_fixed_buf(okey_gep)?,
+            ref nty => {
+                let lty = self.llvm_ty(nty);
+                b!(self.bld.build_load(lty, okey_gep, "grp.okv"))
+            }
+        };
+
+        let acc_ld = unsafe { b!(self.bld.build_gep(i64t, acc_arr, &[sidx], "grp.oacc")) };
+        let cnt_ld = unsafe { b!(self.bld.build_gep(i64t, cnt_arr, &[sidx], "grp.ocnt")) };
+        let cnt_val = b!(self.bld.build_load(i64t, cnt_ld, "grp.ocntv")).into_int_value();
+        let out_val: BasicValueEnum<'ctx> = if is_count {
+            cnt_val.into()
+        } else if result_float {
+            let abits = b!(self.bld.build_load(i64t, acc_ld, "grp.oab")).into_int_value();
+            let af = b!(self.bld.build_bit_cast(abits, f64t, "grp.oaf")).into_float_value();
+            if agg == "avg" {
+                let cntf = b!(self.bld.build_signed_int_to_float(cnt_val, f64t, "grp.cntf"));
+                b!(self.bld.build_float_div(af, cntf, "grp.avg")).into()
+            } else {
+                af.into()
+            }
+        } else {
+            let av = b!(self.bld.build_load(i64t, acc_ld, "grp.oai")).into_int_value();
+            av.into()
+        };
+
+        let undef = tuple_ty.get_undef();
+        let with0 = b!(self.bld.build_insert_value(undef, key_val, 0, "grp.ins0"))
+            .into_struct_value();
+        let tuple_val = b!(self.bld.build_insert_value(with0, out_val, 1, "grp.ins1"))
+            .into_struct_value();
+        self.vec_push_raw(result_vec, tuple_val.into(), tuple_ty.into(), tuple_size)?;
+        b!(self.bld.build_unconditional_branch(onext_bb));
+
+        self.bld.position_at_end(onext_bb);
+        let osnext = b!(self
+            .bld
+            .build_int_add(sidx, i64t.const_int(1, false), "grp.osn"));
+        b!(self.bld.build_store(sidx_ptr, osnext));
+        b!(self.bld.build_unconditional_branch(oloop_bb));
+
+        self.bld.position_at_end(odone_bb);
+        let free_fn = self.ensure_free();
+        b!(self.bld.build_call(free_fn, &[buf.into()], ""));
+        b!(self.bld.build_call(free_fn, &[hash_tbl.into()], ""));
+        b!(self.bld.build_call(free_fn, &[rec_of.into()], ""));
+        b!(self.bld.build_call(free_fn, &[acc_arr.into()], ""));
+        b!(self.bld.build_call(free_fn, &[cnt_arr.into()], ""));
+
+        Ok(result_vec.into())
+    }
+
     pub(in crate::codegen) fn emit_store_agg(
         &mut self,
         rest: &str,
