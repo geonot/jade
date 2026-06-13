@@ -192,9 +192,13 @@ static void *jinn_worker_loop(void *arg) {
         c->state = JINN_CORO_RUNNING;
         w->current = c;
         w->held_chan_lock = NULL;
+        /* Restore this coroutine's structured-concurrency scope so that any
+         * dispatch/spawn it performs registers with the correct scope. */
+        jinn_scope_set_current((jinn_scope_t *)c->scope);
         jinn_context_swap(&w->sched_ctx, &c->ctx);
         /* Coroutine yielded or completed — back in scheduler */
         w->current = NULL;
+        jinn_scope_set_current(NULL);
 
         /*
          * Release any channel lock held across the context swap.
@@ -208,6 +212,10 @@ static void *jinn_worker_loop(void *arg) {
         }
 
         if (w->last_action == SCHED_ACTION_DESTROY) {
+            /* Notify the owning structured-concurrency scope, if any. */
+            if (c->scope) {
+                jinn_scope_child_done((jinn_scope_t *)c->scope);
+            }
             if (!c->daemon) {
                 int64_t remaining = atomic_fetch_sub(&g_sched.active_coros, 1) - 1;
                 if (remaining <= 0) {

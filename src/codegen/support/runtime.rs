@@ -524,6 +524,19 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jinn_join_signal", void.fn_type(&[ptr.into()], false));
         decl!("jinn_actor_join", void.fn_type(&[ptr.into()], false));
 
+        decl!("jinn_scope_create", ptr.fn_type(&[], false));
+        decl!("jinn_scope_current", ptr.fn_type(&[], false));
+        decl!("jinn_scope_register_child", void.fn_type(&[ptr.into()], false));
+        decl!(
+            "jinn_scope_add_actor",
+            void.fn_type(&[ptr.into(), ptr.into()], false)
+        );
+        decl!("jinn_scope_child_done", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_scope_cancel", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_scope_check_cancelled", i32t.fn_type(&[], false));
+        decl!("jinn_scope_stop_actors", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_scope_join", void.fn_type(&[ptr.into()], false));
+
         decl!(
             "jinn_select",
             i32t.fn_type(&[ptr.into(), i32t.into(), bool_t.into()], false)

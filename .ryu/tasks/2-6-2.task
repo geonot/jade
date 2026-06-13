@@ -1,12 +1,24 @@
 title: Runtime jinn_scope_t + scope-aware spawn/dispatch registration + join
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-6-1
 created_at: '2026-06-13T14:45:18'
-updated_at: '2026-06-13T14:45:18'
-result: ''
+updated_at: '2026-06-13T15:00:37'
+result: 'Runtime scope layer implemented. jinn_coro_t gained `scope` ptr + atomic
+  `cancelled` (jinn_rt.h, init in coro.c). NEW runtime/scope.c (added to build.rs):
+  jinn_scope_t {live_children, cancelled, lock, parent coro, prev (nesting stack),
+  children[], actors[]}. Thread-local tl_scope. Functions: jinn_scope_create (push),
+  jinn_scope_current/set_current, jinn_scope_register_child (child->scope=cur, live++,
+  inherit cancel), jinn_scope_add_actor, jinn_scope_child_done (live--, wake parent
+  at 0), jinn_scope_cancel (idempotent, mark children cancelled + close owned actor
+  mailboxes), jinn_scope_check_cancelled, jinn_scope_stop_actors (graceful close),
+  jinn_scope_join (park parent until live==0, then pop+free). sched.c worker loop:
+  sets tl_scope=coro->scope before running (so nested dispatches register), clears
+  after; DESTROY path calls jinn_scope_child_done(coro->scope). All 9 scope fns declared
+  in codegen support/runtime.rs. Inert until scopes created (2-6-3). Build clean (cc
+  -Wall -Wextra), 11 concurrency tests pass.'
 description: 'Runtime: add jinn_scope_t { atomic live_children, atomic cancelled,
   first_error slot, parked-parent coro, owned-actor list }. jinn_coro_t gains `scope`
   ptr (inherited at spawn) + `cancelled` flag. New runtime fns: jinn_scope_create,

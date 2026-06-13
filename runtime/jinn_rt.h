@@ -98,6 +98,8 @@ struct jinn_coro {
     uint8_t            daemon;        /* 1 = daemon coro (actor), doesn't block sched_run */
     void             (*on_exit_cb)(void *);  /* called when coro returns (before destroy) */
     void              *on_exit_arg;
+    void              *scope;         /* owning jinn_scope_t, or NULL — structured concurrency */
+    _Atomic(int32_t)   cancelled;     /* set when the owning scope is cancelled */
 };
 
 #define JINN_STACK_SIZE  (64 * 1024)   /* 64KB per coroutine */
@@ -247,6 +249,33 @@ jinn_join_t *jinn_join_create(void);
 jinn_join_t *jinn_join_get(void *join_slot_ptr);
 void         jinn_join_signal(void *join_slot_ptr);
 void         jinn_actor_join(void *join_slot_ptr);
+
+/* ── Structured concurrency: `together` scopes ───────────────────── */
+
+typedef struct jinn_scope jinn_scope_t;
+
+/* Open a scope, push it as the current scope for this thread, return it. */
+jinn_scope_t *jinn_scope_create(void);
+/* Current thread-local scope (NULL outside any `together` block). */
+jinn_scope_t *jinn_scope_current(void);
+/* Register a freshly-created child coroutine with the current scope (if any):
+ * sets child->scope and increments the scope's live-child count. No-op when
+ * there is no current scope (preserves daemon/fire-and-forget spawn). */
+void jinn_scope_register_child(jinn_coro_t *child);
+/* Track a scope-owned actor mailbox so the scope can stop it on exit. */
+void jinn_scope_add_actor(jinn_scope_t *s, void *mailbox_ptr);
+/* A child completed; decrement live count and wake the parent at zero. */
+void jinn_scope_child_done(jinn_scope_t *s);
+/* Mark the scope (and its live children) cancelled and wake them. */
+void jinn_scope_cancel(jinn_scope_t *s);
+/* True if the calling coroutine has been cancelled by its scope. */
+int  jinn_scope_check_cancelled(void);
+/* Close every scope-owned actor mailbox (graceful stop-and-drain). */
+void jinn_scope_stop_actors(jinn_scope_t *s);
+/* Block the parent until all children complete, pop the scope, then free it. */
+void jinn_scope_join(jinn_scope_t *s);
+/* Set the thread-local current scope (used by the worker loop on resume). */
+void jinn_scope_set_current(jinn_scope_t *s);
 
 /* ── Supervisor (OTP-style) ──────────────────────────────────────── */
 

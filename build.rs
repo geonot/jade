@@ -16,6 +16,7 @@ fn main() {
         .file("runtime/sched.c")
         .file("runtime/channel.c")
         .file("runtime/actor.c")
+        .file("runtime/scope.c")
         .file("runtime/sup.c")
         .file("runtime/select.c")
         .file("runtime/timer.c")

@@ -102,6 +102,8 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     c->daemon      = 0;
     c->on_exit_cb  = NULL;
     c->on_exit_arg = NULL;
+    c->scope       = NULL;
+    atomic_store(&c->cancelled, 0);
 
     /*
      * Set up the initial stack so that jinn_context_swap's `ret`
