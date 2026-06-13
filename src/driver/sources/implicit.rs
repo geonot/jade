@@ -445,7 +445,10 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 }
                 walk_store_filter(filter, modules, defs);
             }
-            Stmt::Transaction(body, _) | Stmt::SimBlock(body, _) | Stmt::Defer(body, _) => {
+            Stmt::Together(_, body, _)
+            | Stmt::Transaction(body, _)
+            | Stmt::SimBlock(body, _)
+            | Stmt::Defer(body, _) => {
                 walk_block(body, modules, defs)
             }
             Stmt::SimFor(f, _) => {

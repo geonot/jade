@@ -415,6 +415,9 @@ impl Typer {
             hir::Stmt::Transaction(block, _) => {
                 self.resolve_block(block);
             }
+            hir::Stmt::Together(_, block, _) => {
+                self.resolve_block(block);
+            }
             hir::Stmt::ChannelClose(e, _) => self.resolve_expr(e),
             hir::Stmt::Stop(e, _) => self.resolve_expr(e),
             hir::Stmt::Join(e, _) => self.resolve_expr(e),

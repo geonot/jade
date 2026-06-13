@@ -641,6 +641,7 @@ impl Lowerer {
             hir::Stmt::ChannelClose(..)
             | hir::Stmt::Stop(..)
             | hir::Stmt::Join(..)
+            | hir::Stmt::Together(..)
             | hir::Stmt::Asm(..)
             | hir::Stmt::SimBlock(..)
             | hir::Stmt::UseLocal(..)

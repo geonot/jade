@@ -1,4 +1,5 @@
 # Changelog
+- **[70]** (2026-06-13 21:44) tasks 2-9/2-7/2-10: join primitive, stop-and-drain semantics, cooperative preemption yield injection
 - **[65]** (2026-06-13 21:03) store: declarative decorator table shared by parser/typer/docs (task 2-31-12)
 - **[65]** (2026-06-13 14:01) store: declarative decorator table (src/store_decorators.rs) shared by parser/typer/docs; rejects nonsensical combos (@kv+@vector, @mem+@versioned, @unique on f64, @increment on non-numeric) with precise diagnostics (task 2-31-12)
 - **[64]** (2026-06-13 18:27) store: compact statement + @compact(threshold) auto-policy for tombstone reclamation (task 2-31-10)

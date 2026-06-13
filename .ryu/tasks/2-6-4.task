@@ -1,0 +1,18 @@
+title: 'Cancellation: stop scope + cooperative unwind at suspension points'
+status: pending
+atomic: true
+priority: medium
+blocked_by:
+- 2-6-3
+created_at: '2026-06-13T14:45:40'
+updated_at: '2026-06-13T14:45:40'
+result: ''
+description: 'Implement cooperative cancellation. `stop <scope>` and failing child
+  mark scope.cancelled + wake all children. Park loops (channel send/recv, sched yield,
+  sleep) check coro->cancelled and return a distinct unwind status; the injected yields
+  (task 2-10) and channel parks become cancellation points. Unwind reuses early-return
+  path: run defers + Perceus drops, return. Cancelled actors skip drain (close + cancel
+  flag -> exit at next receive). DoD: stop_scope_cancels_without_drain, defer_runs_on_cancellation
+  tests pass. If full unwind-codegen integration with Perceus proves too invasive,
+  implement the runtime+park-point flagging and a bounded best-effort unwind, and
+  document precisely what is deferred.'

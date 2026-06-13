@@ -333,6 +333,7 @@ impl Parser {
             Token::Delete => self.parse_delete_stmt(),
             Token::Set => self.parse_set_stmt(),
             Token::Transaction => self.parse_transaction(),
+            Token::Together => self.parse_together(),
             Token::Close => {
                 let sp = self.span();
                 self.advance();

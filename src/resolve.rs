@@ -127,6 +127,7 @@ pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
             }
         }
         Stmt::Transaction(block, _) | Stmt::SimBlock(block, _) => rewrite_block(block, renames),
+        Stmt::Together(_, block, _) => rewrite_block(block, renames),
         Stmt::SimFor(f, _) => {
             rewrite_expr(&mut f.iter, renames);
             rewrite_block(&mut f.body, renames);

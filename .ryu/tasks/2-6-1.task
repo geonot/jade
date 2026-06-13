@@ -1,0 +1,22 @@
+title: 'together scope: lexer + parser + AST/HIR surface'
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-13T14:45:18'
+updated_at: '2026-06-13T14:54:20'
+result: 'together scope surface implemented. Token::Together keyword (lexer, no stdlib
+  collision). parse_together (parser/stmt/store.rs): `together [name] NEWLINE INDENT
+  block DEDENT` -> ast::Stmt::Together(Option<Symbol>, Block, Span). Wired through
+  hir::Stmt::Together and ALL exhaustive Stmt matches (comptime/fold x2, escape x2,
+  fmt, hir/print, ownership/verify, typer/lower/resolve, typer/scc, typer/stmt/dispatch
+  lower, resolve, driver/implicit, hir_validate x2, mir/lower dispatch+effects+closures).
+  Currently lowers as inline block (no scope semantics yet — added in 2-6-3). Parses
+  + runs both named and unnamed forms; 11 concurrency tests pass; zero warnings.'
+description: 'Add `together` keyword (Token::Together). Parse `together [name] NEWLINE
+  INDENT block DEDENT` into ast::Stmt::Together{name:Option<Symbol>, body:Block, span}.
+  Extend `stop` to accept a scope name (already Stmt::Stop(Expr) — scope name is an
+  Ident expr; runtime distinguishes). Thread Together through HIR (hir::Stmt::Together),
+  and all exhaustive Stmt matches (comptime/fold, escape, fmt, ownership/verify, driver/implicit,
+  resolve, scc, hir_validate, hir/print, mir/lower dispatch, closures). DoD: parses
+  and round-trips; cargo build clean.'

@@ -1,0 +1,17 @@
+title: Runtime jinn_scope_t + scope-aware spawn/dispatch registration + join
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-6-1
+created_at: '2026-06-13T14:45:18'
+updated_at: '2026-06-13T14:45:18'
+result: ''
+description: 'Runtime: add jinn_scope_t { atomic live_children, atomic cancelled,
+  first_error slot, parked-parent coro, owned-actor list }. jinn_coro_t gains `scope`
+  ptr (inherited at spawn) + `cancelled` flag. New runtime fns: jinn_scope_create,
+  jinn_scope_register_child (live_children++ + set child.scope), jinn_scope_child_done
+  (decrement, wake parent at zero), jinn_scope_join (park parent until live_children==0),
+  jinn_scope_add_actor, jinn_scope_stop_actors (close owned mailboxes). tl_worker
+  current coro carries scope; spawn/dispatch read it. DoD: runtime compiles; scope_create/register/join
+  callable.'

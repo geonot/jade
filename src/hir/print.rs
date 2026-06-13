@@ -370,6 +370,15 @@ impl PrettyPrinter {
                 self.block(blk);
                 self.pop();
             }
+            Stmt::Together(name, blk, _) => {
+                match name {
+                    Some(n) => self.line(&format!("together {n}:")),
+                    None => self.line("together:"),
+                }
+                self.push();
+                self.block(blk);
+                self.pop();
+            }
             Stmt::ChannelClose(e, _) => {
                 self.line(&format!("close {}", self.expr_str(e)));
             }

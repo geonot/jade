@@ -117,6 +117,19 @@ impl Parser {
         Ok(Stmt::Transaction(body, sp))
     }
 
+    pub(in crate::parser) fn parse_together(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.expect(Token::Together)?;
+        let name = if let Token::Ident(_) = self.peek() {
+            Some(self.ident()?)
+        } else {
+            None
+        };
+        self.expect(Token::Newline)?;
+        let body = self.parse_block()?;
+        Ok(Stmt::Together(name, body, sp))
+    }
+
     pub(in crate::parser) fn parse_store_filter(&mut self) -> Result<StoreFilter, ParseError> {
         let sp = self.span();
         let kw = self.ident()?;

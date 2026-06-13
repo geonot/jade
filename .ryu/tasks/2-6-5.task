@@ -1,0 +1,19 @@
+title: Error propagation from children + scope error-union + escape check + docs
+status: pending
+atomic: true
+priority: medium
+blocked_by:
+- 2-6-4
+created_at: '2026-06-13T14:45:52'
+updated_at: '2026-06-13T14:45:52'
+result: ''
+description: 'E1-E6: failing child cancels siblings and re-raises at scope (first-error-wins
+  via CAS slot). Scope is a fallible expression: error union = union of child body
+  error unions (SCC fixpoint, reuse function inference machinery). Multiline quaternary
+  `!!` arm on together block binds first error. Implicit propagation + From conversion
+  at scope site (R1/R3). L3 escape: returning a scope-bound dispatch is a compile
+  error. E5: scope-owned actor handler errors propagate to scope; daemon actor fallible
+  handler keeps current behavior + warning. Flip docs/structured-concurrency.md status
+  to implemented; update docs/concurrency.md cross-refs + test table. DoD: failing_child_cancels_siblings,
+  scope_error_propagates_with_from, coroutine_escape_is_compile_error tests pass.
+  Defer pieces (e.g. full SCC union) cleanly if needed with diagnostics.'

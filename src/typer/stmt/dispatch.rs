@@ -989,6 +989,11 @@ impl Typer {
                 Ok(hir::Stmt::Transaction(hbody, *span))
             }
 
+            ast::Stmt::Together(name, body, span) => {
+                let hbody = self.lower_block(body, ret_ty)?;
+                Ok(hir::Stmt::Together(*name, hbody, *span))
+            }
+
             ast::Stmt::ChannelClose(ch, span) => {
                 let hch = self.lower_expr(ch)?;
                 let resolved = self.infer_ctx.shallow_resolve(&hch.ty);

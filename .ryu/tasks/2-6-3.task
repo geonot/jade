@@ -1,0 +1,18 @@
+title: 'MIR + codegen lowering for together (happy path: join all children)'
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-6-2
+created_at: '2026-06-13T14:45:40'
+updated_at: '2026-06-13T14:45:40'
+result: ''
+description: 'Lower hir::Stmt::Together to MIR: emit __scope_create -> scope ptr bound
+  in a scope-local var; set current coro''s scope for the body''s dynamic extent (push/pop
+  via runtime tl or by passing scope to spawns lexically). Children: dispatch/spawn
+  inside body register with the scope. Block end: __scope_stop_actors then __scope_join.
+  codegen magic.rs handles __scope_create/__scope_join/__scope_stop_actors/__scope_register.
+  Scope name binds to scope ptr; `stop <scopevar>` lowers to scope cancel (distinguish
+  ActorRef vs Scope by type). DoD: scope_joins_all_dispatches + scope_owned_actor_drains_on_exit
+  + daemon_spawn_outside_scope_unchanged tests pass; all 11 existing concurrency tests
+  still pass.'
