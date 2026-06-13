@@ -229,6 +229,57 @@ impl Typer {
                             }
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
+                if let Type::Row(store) = &resolved_ty
+                    && let Some(rels) = self.store_relations.get(store)
+                    && let Some((_, target, is_has_many)) =
+                        rels.iter().find(|(n, _, _)| n == field).copied()
+                {
+                    if is_has_many {
+                        return Err(format!(
+                            "{}: `{}.{}` is a has-many relation and is not directly \
+                             traversable — query the related store instead, e.g. \
+                             `all {} where <foreign-key> eq {}.sid`",
+                            span.loc(),
+                            store,
+                            field,
+                            target,
+                            store,
+                        ));
+                    }
+                    if !self.store_schemas.contains_key(&target) {
+                        return Err(format!(
+                            "{}: relation `{}.{}` targets unknown store `{}`",
+                            span.loc(),
+                            store,
+                            field,
+                            target,
+                        ));
+                    }
+                    let struct_name = Symbol::intern(&format!("__store_{store}"));
+                    let idx = self
+                        .structs
+                        .get(&struct_name)
+                        .and_then(|fs| fs.iter().position(|(n, _)| n == field))
+                        .ok_or_else(|| {
+                            format!(
+                                "{}: relation column `{}.{}` missing from schema",
+                                span.loc(),
+                                store,
+                                field,
+                            )
+                        })?;
+                    let key = hir::Expr {
+                        kind: hir::ExprKind::Field(Box::new(hobj.clone()), *field, idx),
+                        ty: Type::I64,
+                        span: *span,
+                    };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::StoreGet(target, Box::new(key)),
+                        ty: Type::Row(target),
+                        span: *span,
+                    });
+                }
+
                 if let Type::ActorRef(actor_name) = &resolved_ty
                     && let Some((_, _, handlers)) = self.actors.get(actor_name)
                         && handlers.iter().any(|(n, _, _)| n == field) {

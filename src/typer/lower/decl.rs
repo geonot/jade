@@ -179,9 +179,17 @@ impl Typer {
             });
         }
         for f in &sd.fields {
+            if f.is_relation && f.is_has_many {
+                continue;
+            }
+            let ty = if f.is_relation {
+                Type::I64
+            } else {
+                f.ty.clone().unwrap_or(Type::I64)
+            };
             fields.push(hir::StoreField {
                 name: f.name,
-                ty: f.ty.clone().unwrap_or(Type::I64),
+                ty,
                 default: None,
                 decorators: f.decorators.clone(),
                 is_relation: f.is_relation,

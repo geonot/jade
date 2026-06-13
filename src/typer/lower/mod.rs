@@ -113,8 +113,22 @@ impl Typer {
                         fields.push(("updated".into(), Type::I64));
                         fields.push(("deleted".into(), Type::I64));
                     }
+                    let mut relations: Vec<(Symbol, Symbol, bool)> = Vec::new();
                     for f in &sd.fields {
-                        if !f.is_relation {
+                        if f.is_relation {
+                            let target = match &f.ty {
+                                Some(Type::Struct(n, _)) => *n,
+                                Some(Type::Row(n)) => *n,
+                                Some(Type::Enum(n)) => *n,
+                                Some(Type::Param(n)) => *n,
+                                Some(Type::Alias(n, _)) => *n,
+                                _ => f.name,
+                            };
+                            relations.push((f.name, target, f.is_has_many));
+                            if !f.is_has_many {
+                                fields.push((f.name, Type::I64));
+                            }
+                        } else {
                             fields.push((f.name, f.ty.clone().unwrap_or(Type::I64)));
                         }
                     }
@@ -123,6 +137,7 @@ impl Typer {
                         fields.clone(),
                     );
                     self.store_schemas.insert(sd.name, fields);
+                    self.store_relations.insert(sd.name, relations);
                     self.store_decorators
                         .insert(sd.name, sd.decorators.clone());
                 }
