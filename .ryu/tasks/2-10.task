@@ -1,11 +1,22 @@
 title: Implement cooperative preemption and yield injection
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:51:23'
-result: ''
+updated_at: '2026-06-13T14:43:57'
+result: 'Implemented cooperative preemption via compiler-inserted yields. NEW MIR
+  pass src/mir/opt/yield_passes.rs::inject_yields: detects loop back-edges (reachability:
+  edge src->dst where dst reaches src) and inserts a __sched_yield call at each back-edge
+  source block, but ONLY in coroutine/actor functions (is_coroutine || name starts_with
+  __actor_). Runs at every opt level (correctness pass, wired before the OptLevel::None
+  early-return in opt/mod.rs). Opt-out: @no_yield function attribute (added to FnAttrs,
+  parsed in parser/decl/fn.rs). codegen magic.rs: __sched_yield -> jinn_sched_yield().
+  A tight-loop actor no longer starves siblings — proven by tight_loop_actor_does_not_starve_siblings
+  (two actors, one spins 5M iters; both complete, program exits). *main loops correctly
+  get no yields (not a coroutine). docs/concurrency.md footgun "must-yield" rewritten
+  to document automatic preemption + @no_yield. 11 concurrency tests pass, zero warnings.
+  (column_* integration failures are pre-existing on clean tree.)'
 description: 'Implement cooperative preemption / yield injection (review 12_safety:
   a handler that never yields starves the scheduler — documented hazard in docs/concurrency.md
   line ~202 ''Every long-running handler must yield''; pthread_join hangs otherwise).

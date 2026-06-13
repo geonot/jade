@@ -228,6 +228,30 @@
       "ts_created": "2026-06-13T21:10:16+00:00",
       "ts_accessed": "2026-06-13T21:10:16+00:00",
       "access_count": 0
+    },
+    "task_2-10_impl": {
+      "key": "task_2-10_impl",
+      "value": "Task 2-10 DONE. Cooperative preemption / yield injection. NEW src/mir/opt/yield_passes.rs: inject_yields(func) \u2014 back-edge detection via reachability (edge src->dst where dst can reach src = cycle), inserts InstKind::Call(\"__sched_yield\",[]) at end of each back-edge SOURCE block's insts. Runs ONLY in coroutine/actor context: func.is_coroutine || func.name starts_with \"__actor_\". Opt-out: @no_yield FnAttrs (added to ast FnAttrs + parser/decl/fn.rs). Wired in src/mir/opt/mod.rs optimize(): runs at EVERY opt level incl None (correctness pass, before early return). codegen magic.rs: __sched_yield -> jinn_sched_yield() void call. *main NOT a coroutine so its loops get no yields (correct). Conformance: tight_loop_actor_does_not_starve_siblings in tests/concurrency_shutdown.rs (11 tests pass). Docs/concurrency.md footgun #2 rewritten. NOTE: column_max/min/sum integration tests are PRE-EXISTING failures (fail on clean tree), unrelated.",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T21:43:37+00:00",
+      "ts_accessed": "2026-06-13T21:43:37+00:00",
+      "access_count": 0
+    },
+    "join_keyword_contextual": {
+      "key": "join_keyword_contextual",
+      "value": "`join` is NOT a hard lexer keyword \u2014 std/fmt.jn, std/path.jn define *join(...) functions. Making it Token::Join broke them. SOLUTION: parse `join` contextually in parser/stmt/dispatch.rs `_ => Token::Ident(kw)` arm (alongside destroy/restore/save/compact): `\"join\" if !matches!(peek_at(1), LParen|Dot)` -> Stmt::Join. So `join w` = join statement, `join(a,b)`/`join.x` = expression. Stmt::Join(Expr,Span) exists in ast+hir wired everywhere (typer requires ActorRef, MIR __join, magic.rs GEPs mailbox field 3). Lesson: new statement keywords that collide with stdlib identifiers must be contextual, not reserved.",
+      "kind": "pitfall",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T21:43:47+00:00",
+      "ts_accessed": "2026-06-13T21:43:47+00:00",
+      "access_count": 0
     }
   }
 }

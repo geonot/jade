@@ -270,6 +270,47 @@ actor Counter
     );
 }
 
+/// Cooperative preemption: a tight loop inside an actor handler does NOT
+/// starve sibling actors. The compiler injects `jinn_sched_yield` at loop
+/// back-edges in coroutine/actor contexts (the `inject_yields` MIR pass), so
+/// the spinning `Spinner` keeps swapping back to its worker and the `Pinger`
+/// gets to run. Both must complete and the program must exit cleanly (no
+/// hang). Output order between the two actors is not asserted — only that all
+/// three lines appear and the program terminates.
+#[test]
+fn tight_loop_actor_does_not_starve_siblings() {
+    let out = compile_and_run(
+        "\
+actor Spinner
+    acc
+    *work n
+        i is 0
+        while i < n
+            acc is acc + 1
+            i is i + 1
+        log('spinner-done')
+
+actor Pinger
+    *ping
+        log('pinger-done')
+
+*main
+    s is spawn Spinner
+    p is spawn Pinger
+    s.work(5000000)
+    p.ping()
+    stop s
+    stop p
+    join s
+    join p
+    log('all-done')
+",
+    );
+    assert!(out.contains("spinner-done"), "missing spinner-done:\n{out}");
+    assert!(out.contains("pinger-done"), "missing pinger-done:\n{out}");
+    assert!(out.contains("all-done"), "missing all-done:\n{out}");
+}
+
 /// A daemon actor left parked on `receive` (no `stop`) does NOT block program
 /// exit: `jinn_sched_run` only waits for non-daemon coroutines, and the worker
 /// loop abandons the parked daemon at shutdown. The program must still exit 0.

@@ -19,6 +19,8 @@ impl Parser {
                 attrs.cold = true;
             } else if attr == "hot" {
                 attrs.hot = true;
+            } else if attr == "no_yield" {
+                attrs.no_yield = true;
             } else {
                 return Err(self.error(&format!("unknown function attribute: @{attr}")));
             }

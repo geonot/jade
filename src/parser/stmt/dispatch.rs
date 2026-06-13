@@ -345,12 +345,7 @@ impl Parser {
                 let target = self.parse_expr()?;
                 Ok(Stmt::Stop(target, sp))
             }
-            Token::Join => {
-                let sp = self.span();
-                self.advance();
-                let target = self.parse_expr()?;
-                Ok(Stmt::Join(target, sp))
-            }
+
             Token::Err => {
                 let sp = self.span();
                 self.advance();
@@ -417,6 +412,12 @@ impl Parser {
                         "restore" => return self.parse_restore_stmt(),
                         "save" => return self.parse_save_stmt(),
                         "compact" => return self.parse_compact_stmt(),
+                        "join" if !matches!(self.peek_at(1), Token::LParen | Token::Dot) => {
+                            let sp = self.span();
+                            self.advance();
+                            let target = self.parse_expr()?;
+                            return Ok(Stmt::Join(target, sp));
+                        }
                         _ => {}
                     }
                 }

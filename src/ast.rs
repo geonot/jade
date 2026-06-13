@@ -370,6 +370,7 @@ pub struct FnAttrs {
     pub noinline: bool,
     pub cold: bool,
     pub hot: bool,
+    pub no_yield: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

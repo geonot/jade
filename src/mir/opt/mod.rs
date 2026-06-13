@@ -5,10 +5,12 @@ mod memory_passes;
 mod scalar_passes;
 pub(crate) mod subst;
 mod uses;
+mod yield_passes;
 
 pub use cfg_passes::{merge_linear_blocks, remove_unreachable_blocks};
 pub use memory_passes::store_load_forwarding;
 pub use scalar_passes::{dead_code_elimination, simplify_phis};
+pub use yield_passes::inject_yields;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptLevel {
@@ -25,6 +27,12 @@ pub enum OptLevel {
 /// requires. Scalar opts (constant folding, GVN, LICM, strength reduction,
 /// jump threading, DSE, copy propagation, etc.) are LLVM's job.
 pub fn optimize(func: &mut Function, level: OptLevel) {
+    // Cooperative-preemption yield injection is a correctness pass, not an
+    // optimization: a tight loop in a coroutine/actor context must yield at its
+    // back-edges or it starves sibling coroutines on its worker. It therefore
+    // runs at every opt level, including `None`. Opt-out via `@no_yield`.
+    inject_yields(func);
+
     if level == OptLevel::None {
         return;
     }

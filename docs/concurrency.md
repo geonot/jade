@@ -238,11 +238,28 @@ but they are the things that bite.
    the mailbox (`stop`) and giving the daemon a chance to drain before
    `*main` returns. Sprinkling `usleep` to "let the actor catch up" (as
    several example apps do) is a smell, not a contract.
-2. **A non-yielding handler wedges its worker.** A coroutine only yields
-   control at a yield/park point. A handler (or `*loop` body) that spins
-   forever without yielding never swaps back to the worker, so the worker
-   never observes the shutdown flag, so `jinn_sched_shutdown`'s
-   `pthread_join` hangs. Every long-running handler must yield.
+2. **Long loops yield automatically (cooperative preemption).** A
+   coroutine swaps back to its worker only at a yield/park point. To stop
+   a tight loop from monopolising a worker and starving sibling
+   coroutines, the compiler inserts a `jinn_sched_yield` at every loop
+   **back-edge** inside coroutine/actor contexts — the `inject_yields`
+   MIR pass ([src/mir/opt/yield_passes.rs](src/mir/opt/yield_passes.rs)).
+   This is a *correctness* pass (it runs at every opt level, including
+   `None`) and is justified at the MIR level because LLVM has no notion of
+   our scheduler. A handler with a long counting loop therefore no longer
+   wedges its worker; siblings make progress and shutdown is bounded.
+
+   The injection only adds a yield at back-edges — it cannot rescue a
+   genuinely *infinite* loop (`while true` with no exit). A truly endless
+   handler still never returns to dispatch the next message; that is a
+   logic bug, not a scheduler footgun. Opt out of injection for a
+   function whose hot loop must run uninterrupted with `@no_yield`:
+
+   ```jinn
+   @no_yield
+   *crunch xs
+       # tight numeric kernel; no scheduler yields inserted
+   ```
 3. **The all-parked deadlock.** `jinn_sched_run` only returns when
    `active_coros` reaches zero. If every *non-daemon* coroutine parks on a
    channel that will never receive a value (e.g. mutually waiting
@@ -271,6 +288,10 @@ real Jinn program through `jinnc`, in
 | `send_after_close_is_observable`    | `send` yields `true` on an open channel and `false` after `close`.      |
 | `bare_send_ignores_result`          | A bare `send` statement stays fire-and-forget, even after `close`.      |
 | `actor_processes_then_stops`        | After `stop`, the program joins its workers and exits 0 — no hang.      |
+| `loop_actor_stop_drains_all_messages` | `stop` is stop-and-drain for a loop actor: every queued message runs.  |
+| `join_after_stop_completes`         | `join` parks the caller until the actor's loop has fully exited.        |
+| `join_twice_is_idempotent`          | A second `join` on a finished actor returns immediately (no deadlock).  |
+| `tight_loop_actor_does_not_starve_siblings` | Injected back-edge yields keep a spinning actor from starving siblings. |
 | `actor_without_stop_still_exits`    | A daemon actor parked on `receive` does not block program exit.         |
 
 The multithreaded MPMC stress, crash-consistency, and tail-latency

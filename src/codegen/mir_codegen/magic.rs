@@ -73,6 +73,16 @@ impl<'ctx> Compiler<'ctx> {
                 return self.emit_coro_yield(val).map(Some);
             }
 
+        if name == "__sched_yield" {
+            let f = self.module.get_function("jinn_sched_yield").unwrap_or_else(|| {
+                let ft = self.ctx.void_type().fn_type(&[], false);
+                self.module
+                    .add_function("jinn_sched_yield", ft, Some(Linkage::External))
+            });
+            b!(self.bld.build_call(f, &[], ""));
+            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+        }
+
         if name == "__select_recv"
             && args.len() >= 2 {
                 let select_vid = args[0];
