@@ -1,11 +1,20 @@
 title: Persistent secondary indexes (.idx files, WAL-replayed)
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-10T05:18:42'
-updated_at: '2026-06-10T05:18:42'
-result: ''
+updated_at: '2026-06-13T11:06:17'
+result: Persistent secondary indexes implemented. The .idx files now carry the store's
+  schema fingerprint in an extended 32B header (magic bumped to "JINNIDX1"). New runtime
+  jinn_idx_open_checked validates magic, fingerprint, and header invariants (power-of-2
+  capacity, sane count, sufficient file size); a clean match is an O(1) open with
+  no rescan, while a missing/corrupt/schema-mismatched index is recreated and the
+  caller signaled to rebuild. Codegen (load_store_idx) passes the compile-time fingerprint
+  and emits a rebuild loop (gen_idx_rebuild) that scans store records, skips soft-deletes,
+  and re-inserts hashes via the shared hash_store_field_from_gep surface. 5 new conformance
+  tests in tests/store_index_persist.rs (string/int persist+reopen, missing-rebuild,
+  corrupt-rebuild, soft-delete skip) all pass; full suite green with zero warnings.
 description: Item 10. Persist @index/@sorted/@bloom structures alongside store file
   (name.store.idx), updated through WAL entries so crash recovery replays index mutations.
   Validate against schema fingerprint; rebuild only on corruption. O(1) opens.

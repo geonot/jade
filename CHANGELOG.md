@@ -1,4 +1,5 @@
 # Changelog
+- **[61]** (2026-06-13 18:06) store: persistent secondary indexes with fingerprint validation + rebuild-on-corruption (task 2-31-9)
 - **[59]** (2026-06-13 17:44) Task 2-31-8: richer store where filters (in, between, contains/starts_with/ends_with, grouping)
 - **[58]** (2026-06-13 17:16) store: add group-by aggregates (store.group(key).agg(val)) returning Vec<(key,val)> tuples; single-pass hashtable codegen, 6 tests (task 2-31-7)
 - **[55]** (2026-06-13 16:58) 2-31-6: @kv schema-driven key/value types with optional get
