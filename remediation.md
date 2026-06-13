@@ -21,13 +21,13 @@ Legend: ✅ done · ◻ remaining · ⊘ blocked.
 |---|---:|---:|---:|
 | P0 — must-fix before alpha (task 1) | 4 | 0 | 0 |
 | Audit P0 soundness bugs (tasks 2-23..2-29) | 7 | 0 | 0 |
-| Crash-safety soundness bugs (task 2-30) | 0 | 5 | 0 |
+| Crash-safety soundness bugs (task 2-30) | 5 | 0 | 0 |
 | Error model (tasks 2-1..2-4) | 11 | 0 | 0 |
 | Concurrency (tasks 2-5..2-10) | 3 | 3 | 0 |
 | Memory / unsafe boundary (tasks 2-11..2-14) | 0 | 3 | 1 |
 | Diagnostics / tooling (tasks 2-15, 2-18..2-22) | 0 | 5 | 1 |
 | Store query language (tasks 2-16, 2-17) | 0 | 2 | 0 |
-| Store improvements (task 2-31, 12 items) | 1 | 10 | 1 |
+| Store improvements (task 2-31, 12 items) | 2 | 9 | 1 |
 | Result ctor monomorphization (task 4) | 1 | 0 | 0 |
 
 ---
@@ -71,7 +71,19 @@ These shipped and are pinned by tests. Do not reopen.
 
 ### 2.6 Stores / misc
 - ✅ **2-31-1** Real transactions: begin/commit/rollback over WAL.
+- ✅ **2-31-2** StoreError: `@unique`/`@required` violations via error model
+  (builtin `err StoreError`, quaternary `?`/`!!` handling, precise trap
+  diagnostics for bare insert/set; 12-test `tests/store_errors.rs`).
 - ✅ **4** Result Ok/Err ctor monomorphization collision for same T, different E.
+
+### 2.7 Crash-safety soundness bugs (task 2-30, all 5)
+- ✅ `take` inside a loop body is now a compile error (`check_loop_body_moves`).
+- ✅ Bound `Result` match no longer ICEs (`Param`→`Enum` annotation resolution +
+  `Param`/`TypeVar` payload sizing in `declare_tagged_union`).
+- ✅ `String.slice` out-of-bounds traps.
+- ✅ `String.char_at` out-of-bounds traps.
+- ✅ Oversized shift (count ≥ bit width) traps.
+  All un-ignored; `tests/crash_safety.rs` 37/37 green.
 
 ---
 
@@ -79,25 +91,8 @@ These shipped and are pinned by tests. Do not reopen.
 
 ### Tier A — Soundness (correctness first)
 
-#### A1. task 2-30 — Crash-safety soundness bugs (5)
-Source: audit; pinned by `#[ignore]`d tests in `tests/crash_safety.rs`. Un-ignore each as fixed.
-
-1. **2-30.1** `take` inside a loop body compiles and double-frees at runtime
-   (`free(): invalid pointer`, exit 134). Must be a compile error.
-   Test: `take_inside_loop_is_compile_error`.
-2. **2-30.2** Binding a `Result` then matching ICEs:
-   `unresolved type parameter 'E' reached codegen` (`src/codegen/types.rs:45`
-   monomorphization). Also blocks `.unwrap()`/`.to_int()` on bound `Result`
-   ('unknown method unwrap'). Test: `bound_result_match_does_not_ice`.
-3. **2-30.3** `s.slice(start, end)` with `end > len` reads OOB heap
-   (`src/codegen/string_ops.rs` `string_slice`, no bounds check). Clamp or trap.
-   Test: `string_slice_oob_is_checked`.
-4. **2-30.4** `s.char_at(idx)` past length reads OOB memory (`string_char_at`,
-   no bounds check). Trap. Test: `string_char_at_oob_is_checked`.
-5. **2-30.5** Shift count ≥ bit width → LLVM poison (`1 << 70` returns garbage).
-   Trap or mask per documented semantics. Test: `oversized_shift_is_defined`.
-
-DoD: all 5 tests un-ignored and passing, zero warnings, full `cargo test` green.
+#### A1. task 2-30 — Crash-safety soundness bugs (5) — ✅ DONE (v42)
+All 5 fixed and un-ignored; see §2.7.
 
 #### A2. task 2-14 — Adversarial memory-model soundness fuzzer
 Generate random ownership-stressing programs (nested `take`, field moves in loops,
@@ -145,8 +140,7 @@ Torn writes, power-loss simulation, WAL replay (mirror channel suite).
 
 ### Tier E — Store improvements (store-improvement.md, task 2-31)
 
-Remaining items (1 = done):
-- ◻ **2-31-2** StoreError: surface `@unique`/`@required` via error model.
+Remaining items (2-31-1, 2-31-2 = done):
 - ◻ **2-31-3** Schema fingerprint in store header + migration enforcement.
 - ◻ **2-31-4** Typed result sets for history/search/nearest/graph/distinct.
 - ◻ **2-31-5** Relation traversal in queries + result rows (+`@cascade`).
