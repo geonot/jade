@@ -1,11 +1,15 @@
 title: Build property tests for numeric coercion
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:54:25'
-result: ''
+updated_at: '2026-06-13T07:48:19'
+result: 'Added tests/coercion_property.rs: 6 proptest properties (64 cases each) covering
+  int-var->f64-param (the historically-dropped case), int-literal->f64-param, int
+  identity, int->f64 division, narrow-int->wider-int width coercion, and chained float
+  coercion. Each compiles at both -O0 and -O3 and asserts equality with a Rust reference,
+  catching -O-level mismatches and dropped coercions.'
 description: 'Property tests for numeric coercion (review 07_type_system; relates
   to deleted auto-widen patch + MIR verifier). Current state: tests/proptest_smoke.rs
   only fuzzes lexer/parser never-panics; no numeric-coercion properties. The typer
