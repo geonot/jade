@@ -374,6 +374,8 @@ uint64_t jinn_idx_hash_i64(int64_t val);
 uint64_t jinn_idx_hash_str(const char *buf, int64_t len);
 uint64_t jinn_idx_hash_f64(double val);
 JinnIndex *jinn_idx_open(const char *path);
+JinnIndex *jinn_idx_open_checked(const char *path, int64_t fingerprint,
+                                 int *needs_rebuild);
 void jinn_idx_close(JinnIndex *idx);
 void jinn_idx_insert(JinnIndex *idx, uint64_t hash, int64_t record_offset);
 int64_t jinn_idx_lookup(JinnIndex *idx, uint64_t hash);

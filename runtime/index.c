@@ -1,15 +1,25 @@
 /* runtime/index.c – Hash-index and B-tree-stub helpers for Jinn stores.
  *
  * Hash index file layout:
- *   [8B  magic   "JINNIDX\0"]
+ *   [8B  magic   "JINNIDX1"]
  *   [8B  capacity (power-of-2 slot count)]
  *   [8B  count   (number of occupied slots)]
+ *   [8B  fingerprint (schema fingerprint of the indexed store)]
  *   [capacity × 24B slots ...]
  *
  * Each slot: [8B hash][8B record_offset][8B status]
  *   status: 0 = empty, 1 = occupied, 2 = tombstone
  *
  * Open-addressing with linear probing.  Grows (2×) when load > 0.7.
+ *
+ * Persistence & recovery:
+ *   The index lives beside the store data file and survives across runs,
+ *   giving O(1) opens.  The header carries the store's compile-time schema
+ *   fingerprint.  jinn_idx_open_checked() validates the magic, fingerprint,
+ *   and header invariants; on any mismatch or corruption it recreates a
+ *   fresh index stamped with the expected fingerprint and signals the
+ *   caller to rebuild it from the store records.  A clean, matching index
+ *   is reused as-is with no scan.
  */
 
 #include <stdio.h>
@@ -18,9 +28,9 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
-#define IDX_MAGIC     "JINNIDX\0"
+#define IDX_MAGIC     "JINNIDX1"
 #define IDX_MAGIC_LEN 8
-#define IDX_HEADER    24          /* magic + capacity + count */
+#define IDX_HEADER    32          /* magic + capacity + count + fingerprint */
 #define SLOT_SIZE     24          /* hash + offset + status */
 #define INITIAL_CAP   256
 #define STATUS_EMPTY     0
@@ -46,6 +56,7 @@ struct JinnIndex {
     FILE   *fp;
     int64_t capacity;
     int64_t count;
+    int64_t fingerprint;
 };
 
 /* Read header from an open index file */
@@ -56,6 +67,7 @@ static int read_header(JinnIndex *idx) {
     if (memcmp(mag, IDX_MAGIC, IDX_MAGIC_LEN) != 0) return -1;
     if (fread(&idx->capacity, 8, 1, idx->fp) != 1) return -1;
     if (fread(&idx->count, 8, 1, idx->fp) != 1) return -1;
+    if (fread(&idx->fingerprint, 8, 1, idx->fp) != 1) return -1;
     return 0;
 }
 
@@ -64,7 +76,8 @@ static int write_header(JinnIndex *idx) {
     if (fseek(idx->fp, 0, SEEK_SET) != 0 ||
         fwrite(IDX_MAGIC, 1, IDX_MAGIC_LEN, idx->fp) != IDX_MAGIC_LEN ||
         fwrite(&idx->capacity, 8, 1, idx->fp) != 1 ||
-        fwrite(&idx->count, 8, 1, idx->fp) != 1) {
+        fwrite(&idx->count, 8, 1, idx->fp) != 1 ||
+        fwrite(&idx->fingerprint, 8, 1, idx->fp) != 1) {
         fprintf(stderr, "jinn: index: write_header failed\n");
         return -1;
     }
@@ -77,27 +90,56 @@ static void init_file(JinnIndex *idx) {
     idx->count = 0;
     write_header(idx);
     /* Zero-fill slots */
-    uint8_t zero[SLOT_SIZE];
-    memset(zero, 0, SLOT_SIZE);
+    uint8_t zero0[SLOT_SIZE];
+    memset(zero0, 0, SLOT_SIZE);
     for (int64_t i = 0; i < INITIAL_CAP; i++) {
-        fwrite(zero, 1, SLOT_SIZE, idx->fp);
+        fwrite(zero0, 1, SLOT_SIZE, idx->fp);
     }
     fflush(idx->fp);
 }
 
-/* Open (or create) an index file.  Returns opaque pointer. */
-JinnIndex *jinn_idx_open(const char *path) {
+/* Header invariants: power-of-2 capacity, sane count, file big enough to
+ * hold every slot.  A violation means the index is corrupt or truncated. */
+static int header_is_sane(JinnIndex *idx) {
+    int64_t cap = idx->capacity;
+    if (cap < INITIAL_CAP) return 0;
+    if (cap > ((int64_t)1 << 60)) return 0;
+    if ((cap & (cap - 1)) != 0) return 0;
+    if (idx->count < 0 || idx->count > cap) return 0;
+    if (fseek(idx->fp, 0, SEEK_END) != 0) return 0;
+    long end = ftell(idx->fp);
+    if (end < (long)(IDX_HEADER + cap * SLOT_SIZE)) return 0;
+    return 1;
+}
+
+/* Open or create an index, validating it against the store schema
+ * fingerprint.  On a clean, matching index this is O(1): the persisted
+ * header is reused with no scan.  On a missing file, bad magic, fingerprint
+ * mismatch, or any header corruption, a fresh index is created stamped with
+ * `fingerprint` and *needs_rebuild is set so the caller repopulates it from
+ * the store records. */
+JinnIndex *jinn_idx_open_checked(const char *path, int64_t fingerprint,
+                                 int *needs_rebuild) {
     JinnIndex *idx = (JinnIndex *)calloc(1, sizeof(JinnIndex));
+    if (!idx) { if (needs_rebuild) *needs_rebuild = 0; return NULL; }
     idx->fp = fopen(path, "r+b");
-    if (idx->fp && read_header(idx) == 0) {
+    if (idx->fp && read_header(idx) == 0 &&
+        idx->fingerprint == fingerprint && header_is_sane(idx)) {
+        if (needs_rebuild) *needs_rebuild = 0;
         return idx;
     }
-    /* Create */
     if (idx->fp) fclose(idx->fp);
     idx->fp = fopen(path, "w+b");
-    if (!idx->fp) { free(idx); return NULL; }
+    if (!idx->fp) { free(idx); if (needs_rebuild) *needs_rebuild = 0; return NULL; }
+    idx->fingerprint = fingerprint;
     init_file(idx);
+    if (needs_rebuild) *needs_rebuild = 1;
     return idx;
+}
+
+/* Back-compat: open without fingerprint validation. */
+JinnIndex *jinn_idx_open(const char *path) {
+    return jinn_idx_open_checked(path, 0, NULL);
 }
 
 void jinn_idx_close(JinnIndex *idx) {

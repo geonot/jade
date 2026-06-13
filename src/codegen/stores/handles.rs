@@ -658,17 +658,46 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(is_null, open_bb, cont_bb));
 
         self.bld.position_at_end(open_bb);
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let sd = self
+            .store_defs
+            .get(store_name)
+            .ok_or_else(|| format!("no store def for '{store_name}'"))?
+            .clone();
+        let fingerprint = super::store_schema_fingerprint(&sd);
         let idx_path = format!("{store_name}.{field_name}.idx\0");
         let idx_str = b!(self.bld.build_global_string_ptr(&idx_path, "idx.path"));
-        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_open");
+        let rebuild_flag = self.entry_alloca(i32t.into(), "idx.rebuild");
+        b!(self.bld.build_store(rebuild_flag, i32t.const_int(0, false)));
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_open_checked");
         let opened = self
             .call_result(b!(self.bld.build_call(
                 open_fn,
-                &[idx_str.as_pointer_value().into()],
+                &[
+                    idx_str.as_pointer_value().into(),
+                    i64t.const_int(fingerprint as u64, false).into(),
+                    rebuild_flag.into(),
+                ],
                 "idx.new"
             )))
             .into_pointer_value();
         b!(self.bld.build_store(global.as_pointer_value(), opened));
+
+        let need = b!(self.bld.build_load(i32t, rebuild_flag, "idx.need")).into_int_value();
+        let need_b = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::NE,
+            need,
+            i32t.const_int(0, false),
+            "idx.need.b"
+        ));
+        let rebuild_bb = self.ctx.append_basic_block(fv, "idx.rebuild.go");
+        b!(self
+            .bld
+            .build_conditional_branch(need_b, rebuild_bb, cont_bb));
+
+        self.bld.position_at_end(rebuild_bb);
+        self.gen_idx_rebuild(&sd, store_name, field_name, opened)?;
         b!(self.bld.build_unconditional_branch(cont_bb));
 
         self.bld.position_at_end(cont_bb);
@@ -677,5 +706,146 @@ impl<'ctx> Compiler<'ctx> {
             .build_load(ptr_ty, global.as_pointer_value(), "idx.fp2"))
         .into_pointer_value();
         Ok(result)
+    }
+
+    fn gen_idx_rebuild(
+        &mut self,
+        sd: &hir::StoreDef,
+        store_name: &str,
+        field_name: &str,
+        idx_ptr: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let fv = self.current_fn();
+        let rec_name = format!("__store_{store_name}_rec");
+        let st = self
+            .module
+            .get_struct_type(&rec_name)
+            .ok_or_else(|| format!("no record struct for '{store_name}'"))?;
+        let rec_size = self.store_record_size(sd);
+        let header_size = crate::codegen::stores::HEADER_SIZE;
+
+        let (field_idx, field_ty) = sd
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == field_name)
+            .map(|(i, f)| (i as u32, f.ty.clone()))
+            .ok_or_else(|| format!("unknown field '{field_name}' in '{store_name}'"))?;
+        let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
+
+        let fp = self.load_store_fp(store_name)?;
+
+        let count_buf = self.entry_alloca(i64t.into(), "rb.count");
+        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[
+                fp.into(),
+                i64t.const_int(8, false).into(),
+                i32t.const_int(0, false).into()
+            ],
+            ""
+        ));
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
+        b!(self.bld.build_call(
+            fread_fn,
+            &[
+                count_buf.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                fp.into(),
+            ],
+            ""
+        ));
+        let total = b!(self.bld.build_load(i64t, count_buf, "rb.n")).into_int_value();
+
+        let i_ptr = self.entry_alloca(i64t.into(), "rb.i");
+        b!(self.bld.build_store(i_ptr, i64t.const_int(0, false)));
+        let rec_ptr = self.entry_alloca(st.into(), "rb.rec");
+
+        let cond_bb = self.ctx.append_basic_block(fv, "rb.cond");
+        let body_bb = self.ctx.append_basic_block(fv, "rb.body");
+        let next_bb = self.ctx.append_basic_block(fv, "rb.next");
+        let end_bb = self.ctx.append_basic_block(fv, "rb.end");
+
+        b!(self.bld.build_unconditional_branch(cond_bb));
+        self.bld.position_at_end(cond_bb);
+        let i_cur = b!(self.bld.build_load(i64t, i_ptr, "rb.icur")).into_int_value();
+        let more = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::SLT,
+            i_cur,
+            total,
+            "rb.more"
+        ));
+        b!(self.bld.build_conditional_branch(more, body_bb, end_bb));
+
+        self.bld.position_at_end(body_bb);
+        let rec_off = b!(self
+            .bld
+            .build_int_mul(i_cur, i64t.const_int(rec_size, false), "rb.mul"));
+        let rec_off = b!(self.bld.build_int_add(
+            rec_off,
+            i64t.const_int(header_size, false),
+            "rb.off"
+        ));
+        b!(self.bld.build_call(
+            fseek_fn,
+            &[fp.into(), rec_off.into(), i32t.const_int(0, false).into()],
+            ""
+        ));
+        b!(self.bld.build_call(
+            fread_fn,
+            &[
+                rec_ptr.into(),
+                i64t.const_int(rec_size, false).into(),
+                i64t.const_int(1, false).into(),
+                fp.into(),
+            ],
+            ""
+        ));
+
+        let live_bb = self.ctx.append_basic_block(fv, "rb.live");
+        if let Some(del_idx) = deleted_idx {
+            let del_gep =
+                b!(self
+                    .bld
+                    .build_struct_gep(st, rec_ptr, del_idx as u32, "rb.del"));
+            let del_val = b!(self.bld.build_load(i64t, del_gep, "rb.delv")).into_int_value();
+            let is_del = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::NE,
+                del_val,
+                i64t.const_int(0, false),
+                "rb.isdel"
+            ));
+            b!(self.bld.build_conditional_branch(is_del, next_bb, live_bb));
+        } else {
+            b!(self.bld.build_unconditional_branch(live_bb));
+        }
+
+        self.bld.position_at_end(live_bb);
+        let field_gep = b!(self
+            .bld
+            .build_struct_gep(st, rec_ptr, field_idx, "rb.field"));
+        let hash = self.hash_store_field_from_gep(field_gep, &field_ty)?;
+        let insert_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_insert");
+        b!(self.bld.build_call(
+            insert_fn,
+            &[idx_ptr.into(), hash.into(), rec_off.into()],
+            ""
+        ));
+        b!(self.bld.build_unconditional_branch(next_bb));
+
+        self.bld.position_at_end(next_bb);
+        let i_next = b!(self
+            .bld
+            .build_int_add(i_cur, i64t.const_int(1, false), "rb.inc"));
+        b!(self.bld.build_store(i_ptr, i_next));
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(end_bb);
+        Ok(())
     }
 }
